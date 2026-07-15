@@ -14,7 +14,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/name: {{ include "security.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
-{{- define "security.image" -}}{{ if .root.Values.devMode.enabled }}{{ .root.Values.devMode.image.repository }}:{{ .root.Values.devMode.image.tag }}{{ else }}{{ .component.image.repository }}:{{ default .root.Values.image.tag .component.image.tag }}{{ end }}{{- end }}
+{{- define "security.image" -}}{{ if .root.Values.devMode.enabled }}{{ .root.Values.devMode.image.repository }}:{{ .root.Values.devMode.image.tag }}{{ else }}{{ .component.image.repository }}:{{ default .root.Chart.AppVersion (default .root.Values.image.tag .component.image.tag) }}{{ end }}{{- end }}
 {{- define "security.imagePullPolicy" -}}{{ if .root.Values.devMode.enabled }}{{ .root.Values.devMode.image.pullPolicy }}{{ else }}{{ default .root.Values.image.pullPolicy .component.image.pullPolicy }}{{ end }}{{- end }}
 {{- define "security.devEnv" -}}
 {{- if .Values.devMode.enabled }}

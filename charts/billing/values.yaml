@@ -1,9 +1,10 @@
 image:
-  repository: ai-gateway-billing
-  tag: dev
+  repository: ghcr.io/neodjazz/ai-gateway-billing
+  # Defaults to Chart.appVersion when empty.
+  tag: ""
   pullPolicy: IfNotPresent
 devMode:
-  enabled: true
+  enabled: false
   sourceHostPath: /mnt/c/tmp/ai-gateway
   image:
     repository: golang

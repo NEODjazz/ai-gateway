@@ -29,7 +29,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "auth.image" -}}
-{{- if .Values.devMode.enabled }}{{ .Values.devMode.image.repository }}:{{ .Values.devMode.image.tag }}{{ else }}{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ end -}}
+{{- if .Values.devMode.enabled }}{{ .Values.devMode.image.repository }}:{{ .Values.devMode.image.tag }}{{ else }}{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}{{ end -}}
 {{- end -}}
 
 {{- define "auth.imagePullPolicy" -}}

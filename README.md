@@ -66,7 +66,7 @@ The release names in this example match the module URLs in `charts/ai-gateway/va
 
 When migrating from the previous combined release, upgrade `ai-gateway` first so Helm can remove the old module Deployments and Services, then install the new service releases. Otherwise, Helm cannot adopt existing resources owned by another release.
 
-`devMode` is enabled by default. Services run directly from the current project directory using the `golang:1.22-alpine` image, so no local Docker image build is required. This is convenient for quickly testing the microservices in Rancher Desktop.
+Production mode is enabled by default and uses the published service images from `ghcr.io/neodjazz`. To run services directly from the current project directory using `golang:1.22-alpine`, enable `devMode` explicitly with `--set devMode.enabled=true` for each application chart.
 
 ### Ollama provider
 
@@ -357,10 +357,7 @@ Install a published chart with its matching service image:
 helm upgrade --install ai-gateway oci://ghcr.io/<owner>/charts/ai-gateway `
   --version 0.2.0 `
   --namespace ai-gateway `
-  --create-namespace `
-  --set devMode.enabled=false `
-  --set image.repository=ghcr.io/<owner>/ai-gateway-gateway `
-  --set image.tag=0.2.0
+  --create-namespace
 ```
 
 The workflows use the built-in `GITHUB_TOKEN`; no additional registry secret is required. In the repository settings, keep Actions workflow permissions enabled and allow the workflow to write packages and repository contents.

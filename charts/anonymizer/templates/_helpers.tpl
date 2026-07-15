@@ -16,7 +16,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/name: {{ include "anonymizer.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
-{{- define "anonymizer.image" -}}{{ if .Values.devMode.enabled }}{{ .Values.devMode.image.repository }}:{{ .Values.devMode.image.tag }}{{ else }}{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ end }}{{- end }}
+{{- define "anonymizer.image" -}}{{ if .Values.devMode.enabled }}{{ .Values.devMode.image.repository }}:{{ .Values.devMode.image.tag }}{{ else }}{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}{{ end }}{{- end }}
 {{- define "anonymizer.imagePullPolicy" -}}{{ if .Values.devMode.enabled }}{{ .Values.devMode.image.pullPolicy }}{{ else }}{{ .Values.image.pullPolicy }}{{ end }}{{- end }}
 {{- define "anonymizer.configName" -}}{{ include "anonymizer.fullname" . }}-rules{{- end }}
 {{- define "anonymizer.devCommand" -}}

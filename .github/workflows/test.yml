@@ -95,8 +95,24 @@ jobs:
       - name: Render chart
         run: helm template "${{ matrix.chart }}" "charts/${{ matrix.chart }}" --namespace ai-gateway > /dev/null
 
-      - name: Render production configuration
-        run: helm template "${{ matrix.chart }}" "charts/${{ matrix.chart }}" --namespace ai-gateway --set devMode.enabled=false > /dev/null
+      - name: Verify published image defaults
+        shell: bash
+        run: |
+          values="charts/${{ matrix.chart }}/values.yaml"
+          if grep -q '^devMode:' "$values"; then
+            rendered="$(helm template "${{ matrix.chart }}" "charts/${{ matrix.chart }}" --namespace ai-gateway)"
+            if grep -q 'image: "golang:' <<< "$rendered"; then
+              echo "Published charts must not enable devMode by default"
+              exit 1
+            fi
+            if ! grep -q 'image: "ghcr.io/' <<< "$rendered"; then
+              echo "Published application images must come from GHCR"
+              exit 1
+            fi
+          fi
+
+      - name: Render development configuration
+        run: helm template "${{ matrix.chart }}" "charts/${{ matrix.chart }}" --namespace ai-gateway --set devMode.enabled=true > /dev/null
 
   images:
     name: Image / ${{ matrix.service }}

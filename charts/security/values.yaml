@@ -1,8 +1,9 @@
 image:
-  tag: dev
+  # Used by both security services and defaults to Chart.appVersion when empty.
+  tag: ""
   pullPolicy: IfNotPresent
 devMode:
-  enabled: true
+  enabled: false
   sourceHostPath: /mnt/c/tmp/ai-gateway
   image:
     repository: golang
@@ -12,7 +13,7 @@ devMode:
 dlp:
   enabled: true
   image:
-    repository: ai-gateway-dlp
+    repository: ghcr.io/neodjazz/ai-gateway-dlp
   replicaCount: 1
   port: 8084
   icap:
@@ -23,7 +24,7 @@ dlp:
 av:
   enabled: true
   image:
-    repository: ai-gateway-av
+    repository: ghcr.io/neodjazz/ai-gateway-av
   replicaCount: 1
   port: 8085
   icap:

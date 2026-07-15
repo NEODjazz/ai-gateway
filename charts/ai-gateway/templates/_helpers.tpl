@@ -32,7 +32,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if .Values.devMode.enabled -}}
 {{ .Values.devMode.image.repository }}:{{ .Values.devMode.image.tag }}
 {{- else -}}
-{{ .Values.image.repository }}:{{ .Values.image.tag }}
+{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}
 {{- end -}}
 {{- end -}}
 

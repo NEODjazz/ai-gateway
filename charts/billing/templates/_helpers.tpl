@@ -14,7 +14,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/name: {{ include "billing.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
-{{- define "billing.image" -}}{{ if .Values.devMode.enabled }}{{ .Values.devMode.image.repository }}:{{ .Values.devMode.image.tag }}{{ else }}{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ end }}{{- end }}
+{{- define "billing.image" -}}{{ if .Values.devMode.enabled }}{{ .Values.devMode.image.repository }}:{{ .Values.devMode.image.tag }}{{ else }}{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}{{ end }}{{- end }}
 {{- define "billing.imagePullPolicy" -}}{{ if .Values.devMode.enabled }}{{ .Values.devMode.image.pullPolicy }}{{ else }}{{ .Values.image.pullPolicy }}{{ end }}{{- end }}
 {{- define "billing.secretName" -}}{{ if .Values.billing.secrets.name }}{{ .Values.billing.secrets.name }}{{ else }}{{ include "billing.fullname" . }}-secrets{{ end }}{{- end }}
 {{- define "billing.devCommand" -}}
