@@ -1,0 +1,174 @@
+package modules
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"ai-gateway-gateway/internal/openai"
+)
+
+func TestAnonymizerMasksSensitiveData(t *testing.T) {
+	module := NewAnonymizerModule(true, "all")
+	req := RequestContext{
+		Request: openai.ChatCompletionRequest{
+			Model: "demo",
+			Messages: []openai.Message{
+				{
+					Role: "user",
+					Content: strings.Join([]string{
+						"Иванов Иван Иванович",
+						"user@example.com",
+						"+7 999 123-45-67",
+						"г. Москва ул. Ленина д. 1 кв. 2",
+						"4510 123456",
+						"7707083893",
+						"4111 1111 1111 1111",
+						"192.168.1.10",
+						"api_key=sk-test-1234567890abcdef",
+						"password=qwerty123",
+						"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.signature123",
+					}, "\n"),
+				},
+			},
+		},
+	}
+
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+
+	content := openai.ContentText(req.Request.Messages[0].Content)
+	expected := []string{
+		"{{PERSON_RU_1}}",
+		"{{EMAIL_1}}",
+		"{{PHONE_1}}",
+		"{{ADDRESS_RU_1}}",
+		"{{PASSPORT_RU_1}}",
+		"{{INN_1}}",
+		"{{BANK_CARD_1}}",
+		"{{IP_1}}",
+		"{{API_KEY_1}}",
+		"{{SECRET_1}}",
+		"{{JWT_1}}",
+	}
+
+	for _, placeholder := range expected {
+		if !strings.Contains(content, placeholder) {
+			t.Fatalf("expected %s in anonymized content:\n%s", placeholder, content)
+		}
+	}
+}
+
+func TestAnonymizerRulesCanBeLimited(t *testing.T) {
+	module := NewAnonymizerModule(true, RuleEmail)
+	req := RequestContext{
+		Request: openai.ChatCompletionRequest{
+			Messages: []openai.Message{
+				{Role: "user", Content: "user@example.com +7 999 123-45-67"},
+			},
+		},
+	}
+
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+
+	content := openai.ContentText(req.Request.Messages[0].Content)
+	if !strings.Contains(content, "{{EMAIL_1}}") {
+		t.Fatalf("expected email to be masked: %s", content)
+	}
+	if strings.Contains(content, "{{PHONE_1}}") {
+		t.Fatalf("expected phone to stay visible when phone rule is disabled: %s", content)
+	}
+}
+
+func TestAnonymizerRulesCanBeDisabled(t *testing.T) {
+	module := NewAnonymizerModule(true, parseAnonymizerRules("none")...)
+	req := RequestContext{
+		Request: openai.ChatCompletionRequest{
+			Messages: []openai.Message{
+				{Role: "user", Content: "user@example.com"},
+			},
+		},
+	}
+
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+
+	content := openai.ContentText(req.Request.Messages[0].Content)
+	if strings.Contains(content, "{{EMAIL_1}}") {
+		t.Fatalf("expected anonymizer rules to be disabled: %s", content)
+	}
+}
+
+func TestDeanonymizeResponseRestoresOriginalValues(t *testing.T) {
+	module := NewAnonymizerModule(true, RuleEmail, RulePhone)
+	req := RequestContext{
+		Request: openai.ChatCompletionRequest{
+			Messages: []openai.Message{
+				{Role: "user", Content: "write to user@example.com or call +7 999 123-45-67"},
+			},
+		},
+	}
+
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+
+	response := openai.ChatCompletionResponse{
+		Choices: []openai.Choice{
+			{
+				Message: openai.Message{
+					Role:    "assistant",
+					Content: "I will use {{EMAIL_1}} and {{PHONE_1}}.",
+				},
+			},
+		},
+	}
+
+	DeanonymizeResponse(&req, &response)
+
+	content := openai.ContentText(response.Choices[0].Message.Content)
+	if !strings.Contains(content, "user@example.com") {
+		t.Fatalf("expected email to be restored: %s", content)
+	}
+	if !strings.Contains(content, "+7 999 123-45-67") {
+		t.Fatalf("expected phone to be restored: %s", content)
+	}
+}
+
+func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
+	module := NewAnonymizerModule(true, RuleEmail)
+	req := RequestContext{
+		ResponseRequest: &openai.ResponseRequest{
+			Model: "demo",
+			Input: "send to user@example.com",
+		},
+	}
+
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+
+	response := openai.ResponseResponse{
+		OutputText: "Email: {{EMAIL_1}}",
+		Output: []openai.ResponseOutputItem{
+			{
+				Type: "message",
+				Content: []openai.ResponseOutputContent{
+					{Type: "output_text", Text: "Email: {{EMAIL_1}}"},
+				},
+			},
+		},
+	}
+
+	DeanonymizeResponsesResponse(&req, &response)
+	if !strings.Contains(response.OutputText, "user@example.com") {
+		t.Fatalf("expected output_text to be restored: %s", response.OutputText)
+	}
+	if !strings.Contains(response.Output[0].Content[0].Text, "user@example.com") {
+		t.Fatalf("expected output content to be restored: %s", response.Output[0].Content[0].Text)
+	}
+}

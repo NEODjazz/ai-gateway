@@ -1,0 +1,74 @@
+package modules
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+
+	"ai-gateway-billing/internal/openai"
+)
+
+type RequestContext struct {
+	APIKey              string                         `json:"api_key,omitempty"`
+	UserID              string                         `json:"user_id,omitempty"`
+	Roles               []string                       `json:"roles,omitempty"`
+	Request             openai.ChatCompletionRequest   `json:"request"`
+	ResponseRequest     *openai.ResponseRequest        `json:"response_request,omitempty"`
+	Response            *openai.ChatCompletionResponse `json:"response,omitempty"`
+	ResponsesResponse   *openai.ResponseResponse       `json:"responses_response,omitempty"`
+	Usage               *openai.Usage                  `json:"usage,omitempty"`
+	BillingEvent        *BillingEvent                  `json:"billing_event,omitempty"`
+	Metadata            map[string]string              `json:"metadata,omitempty"`
+	AnonymizationValues map[string]string              `json:"anonymization_values,omitempty"`
+}
+
+type BillingEvent struct {
+	RequestID             string   `json:"request_id,omitempty"`
+	UserID                string   `json:"user_id,omitempty"`
+	Roles                 []string `json:"roles,omitempty"`
+	APIKeyFingerprint     string   `json:"api_key_fingerprint,omitempty"`
+	Provider              string   `json:"provider,omitempty"`
+	ProviderEndpointName  string   `json:"provider_endpoint_name,omitempty"`
+	ProviderEndpointType  string   `json:"provider_endpoint_type,omitempty"`
+	Model                 string   `json:"model,omitempty"`
+	APIType               string   `json:"api_type,omitempty"`
+	Status                string   `json:"status,omitempty"`
+	Error                 string   `json:"error,omitempty"`
+	LatencyMS             int      `json:"latency_ms,omitempty"`
+	PromptTokensEstimated int      `json:"prompt_tokens_estimated"`
+	InputTokens           int      `json:"input_tokens"`
+	OutputTokens          int      `json:"output_tokens"`
+	TotalTokens           int      `json:"total_tokens"`
+	Cost                  float64  `json:"cost"`
+	Currency              string   `json:"currency,omitempty"`
+	Timestamp             string   `json:"timestamp"`
+}
+
+type Module interface {
+	Name() string
+	Required() bool
+	Handle(ctx context.Context, req *RequestContext) error
+}
+
+type Pipeline struct {
+	modules []Module
+}
+
+func NewPipeline(modules []Module) Pipeline {
+	return Pipeline{modules: modules}
+}
+
+func (p Pipeline) Run(ctx context.Context, req *RequestContext) error {
+	for _, module := range p.modules {
+		if err := module.Handle(ctx, req); err != nil {
+			if module.Required() {
+				return fmt.Errorf("%s module failed: %w", module.Name(), err)
+			}
+			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
+		}
+	}
+	return nil
+}
+
+var ErrUnauthorized = errors.New("unauthorized")
