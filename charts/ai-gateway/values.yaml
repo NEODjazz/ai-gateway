@@ -1,0 +1,102 @@
+image:
+  repository: ai-gateway-gateway
+  tag: dev
+  pullPolicy: IfNotPresent
+
+devMode:
+  enabled: true
+  sourceHostPath: /mnt/c/tmp/ai-gateway
+  image:
+    repository: golang
+    tag: 1.22-alpine
+    pullPolicy: IfNotPresent
+
+gateway:
+  replicaCount: 1
+  port: 8080
+  provider:
+    default: azure-open-ai
+    testModel: gpt-5.3
+  providers:
+    - name: ollama-local
+      type: ollama
+      base_url: http://host.docker.internal:11434
+      stream: true
+      dlp_enabled: false
+      av_enabled: false
+      models:
+        - gemma4:e4b
+      priority: 10
+      enabled: true
+    - name: azure-open-ai
+      type: openai
+      base_url: $PROVIDER_BASE_URL_AZURE_OPEN_AI
+      stream: true
+      dlp_enabled: false
+      av_enabled: false
+      models:
+        - gpt-5.3
+      priority: 10
+      enabled: true      
+    - name: anthropic
+      type: anthropic
+      base_url: https://api.anthropic.com
+      stream: true
+      dlp_enabled: false
+      av_enabled: false
+      models:
+        - claude-sonnet-4-5
+      priority: 20
+      enabled: false
+    - name: demo
+      type: demo
+      dlp_enabled: false
+      av_enabled: false
+      models:
+        - fallback-demo-model
+      priority: 1000
+      enabled: true
+  providerSecrets:
+    create: true
+    name: ""
+  providerApiKeys:
+    azure-open-ai: $PROVIDER_API_KEY_AZURE_OPEN_AI
+    anthropic: ""
+  service:
+    type: LoadBalancer
+  modules:
+    auth:
+      required: true
+      remote: true
+      url: http://ai-gateway-auth:8082
+    anonymizer:
+      required: true
+      remote: true
+      url: http://ai-gateway-anonymizer:8081
+      rules: all
+    billing:
+      required: true
+      remote: true
+      url: http://ai-gateway-billing:8083
+    dlp:
+      required: true
+      remote: true
+      url: http://ai-gateway-security-dlp:8084
+    av:
+      required: true
+      remote: true
+      url: http://ai-gateway-security-av:8085
+
+resources: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 100
+  runAsGroup: 101
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL

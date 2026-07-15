@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "auth.fullname" . }}
+  labels:
+    {{- include "auth.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.auth.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "auth.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "auth.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: auth
+          image: {{ include "auth.image" . | quote }}
+          imagePullPolicy: {{ include "auth.imagePullPolicy" . }}
+          {{- include "auth.devCommand" . | nindent 10 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.auth.port }}
+          env:
+            {{- include "auth.devEnv" . | nindent 12 }}
+            - name: AI_GATEWAY_SERVICE
+              value: auth
+            - name: AUTH_JWT_SECRET
+              value: {{ .Values.auth.jwt.secret | quote }}
+            - name: AUTH_JWT_ISSUER
+              value: {{ .Values.auth.jwt.issuer | quote }}
+            - name: AUTH_JWT_AUDIENCE
+              value: {{ .Values.auth.jwt.audience | quote }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.devMode.enabled }}
+          volumeMounts:
+            - name: source
+              mountPath: /workspace
+          {{- end }}
+      {{- if .Values.devMode.enabled }}
+      volumes:
+        - name: source
+          hostPath:
+            path: {{ .Values.devMode.sourceHostPath | quote }}
+            type: Directory
+      {{- end }}

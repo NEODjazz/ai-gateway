@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "billing.fullname" . }}
+  labels:
+    {{- include "billing.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.billing.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "billing.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "billing.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: billing
+          image: {{ include "billing.image" . | quote }}
+          imagePullPolicy: {{ include "billing.imagePullPolicy" . }}
+          {{- include "billing.devCommand" . | nindent 10 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.billing.port }}
+          env:
+            {{- include "billing.devEnv" . | nindent 12 }}
+            - {name: AI_GATEWAY_SERVICE, value: billing}
+            - name: BILLING_USAGE_EVENTS_ENABLED
+              value: {{ .Values.billing.usageEvents.enabled | quote }}
+            - name: CLICKHOUSE_URL
+              value: {{ .Values.billing.clickhouse.url | quote }}
+            - name: CLICKHOUSE_DATABASE
+              value: {{ .Values.billing.clickhouse.database | quote }}
+            - name: CLICKHOUSE_USAGE_EVENTS_TABLE
+              value: {{ .Values.billing.clickhouse.usageEventsTable | quote }}
+            - name: CLICKHOUSE_USERNAME
+              valueFrom: {secretKeyRef: {name: {{ include "billing.secretName" . }}, key: clickhouse-username}}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ include "billing.secretName" . }}, key: clickhouse-password}}
+            - name: POSTGRES_DSN
+              valueFrom: {secretKeyRef: {name: {{ include "billing.secretName" . }}, key: postgres-dsn}}
+            - name: BILLING_TARIFFS_ENABLED
+              value: {{ .Values.billing.features.tariffs | quote }}
+            - name: BILLING_LIMITS_ENABLED
+              value: {{ .Values.billing.features.limits | quote }}
+            - name: BILLING_QUOTAS_ENABLED
+              value: {{ .Values.billing.features.quotas | quote }}
+            - name: BILLING_FINANCIAL_TRANSACTIONS_ENABLED
+              value: {{ .Values.billing.features.financialTransactions | quote }}
+            - name: BILLING_INPUT_PRICE_PER_1K
+              value: {{ .Values.billing.pricing.inputPricePer1K | quote }}
+            - name: BILLING_OUTPUT_PRICE_PER_1K
+              value: {{ .Values.billing.pricing.outputPricePer1K | quote }}
+            - name: BILLING_CURRENCY
+              value: {{ .Values.billing.pricing.currency | quote }}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.devMode.enabled }}
+          volumeMounts:
+            - {name: source, mountPath: /workspace}
+          {{- end }}
+      {{- if .Values.devMode.enabled }}
+      volumes:
+        - name: source
+          hostPath: {path: {{ .Values.devMode.sourceHostPath | quote }}, type: Directory}
+      {{- end }}

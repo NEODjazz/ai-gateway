@@ -1,0 +1,276 @@
+# Архитектура AI Gateway
+
+Документ описывает текущее состояние реализации в `repos/*` и развертывания в `charts/*`. Целевая функциональность, для которой инфраструктура уже подготовлена, но интеграция еще не реализована, помечена явно.
+
+Исходники тех же схем в формате LikeC4 находятся в [`docs/likec4`](likec4/README.md).
+
+## Обзор системы
+
+AI Gateway — набор Go-сервисов с единой OpenAI-compatible точкой входа. Gateway аутентифицирует запрос, выбирает совместимые provider endpoints, выполняет отдельный provider-level pipeline для каждой попытки и возвращает обычный JSON или SSE stream.
+
+```mermaid
+flowchart LR
+    Client["Client / OpenAI SDK"]
+
+    subgraph Platform["AI Gateway platform"]
+        Gateway["Gateway :8080<br/>API, routing, failover"]
+        Auth["Auth :8082<br/>API keys / JWT / roles"]
+        DLP["DLP :8084<br/>HTTP-to-ICAP adapter"]
+        AV["AV :8085<br/>HTTP-to-ICAP adapter"]
+        Anonymizer["Anonymizer :8081<br/>request-local masking"]
+        Billing["Billing :8083<br/>usage and cost events"]
+    end
+
+    subgraph Providers["AI providers"]
+        OpenAI["OpenAI-compatible / Azure / OpenRouter"]
+        Anthropic["Anthropic"]
+        Ollama["Ollama"]
+        Demo["Demo fallback"]
+    end
+
+    DlpIcap["DLP ICAP server"]
+    AvIcap["Antivirus ICAP server"]
+    ClickHouse[("ClickHouse<br/>usage_events")]
+    Redis[("Redis<br/>reserved for anonymizer vault")]
+    Postgres[("PostgreSQL<br/>reserved for financial core")]
+
+    Client -->|"OpenAI-compatible HTTP/SSE"| Gateway
+    Gateway -->|"POST /authorize"| Auth
+    Gateway -->|"POST /scan, per enabled endpoint"| DLP
+    Gateway -->|"POST /scan, per enabled endpoint"| AV
+    Gateway -->|"POST /anonymize"| Anonymizer
+    Gateway -->|"POST /usage, before and after provider"| Billing
+    Gateway --> OpenAI
+    Gateway --> Anthropic
+    Gateway --> Ollama
+    Gateway --> Demo
+    DLP -->|"ICAP REQMOD"| DlpIcap
+    AV -->|"ICAP REQMOD"| AvIcap
+    Billing -->|"JSONEachRow over HTTP"| ClickHouse
+    Anonymizer -. "not implemented" .-> Redis
+    Billing -. "policy store not implemented" .-> Postgres
+```
+
+## Сервисы и ответственность
+
+| Сервис | HTTP API | Текущая ответственность |
+| --- | --- | --- |
+| Gateway | `GET /healthz`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/responses` | OpenAI-compatible API, auth pipeline, provider routing, failover, SSE, orchestration provider-level modules, deanonymization |
+| Auth | `GET /healthz`, `POST /authorize` | Demo API keys и HS256 JWT; заполняет `UserID` и `Roles` |
+| DLP | `GET /healthz`, `POST /scan` | Извлекает текст запроса и отправляет его в настроенный ICAP-сервис через `REQMOD` |
+| AV | `GET /healthz`, `POST /scan` | Аналогичный HTTP-to-ICAP адаптер для антивирусной проверки |
+| Anonymizer | `GET /healthz`, `POST /anonymize` | Маскирует значения по настраиваемым RE2-правилам и возвращает placeholder map в `RequestContext` |
+| Billing | `GET /healthz`, `POST /usage` | Оценивает/собирает tokens и cost, создает billing event, после ответа пишет usage event в ClickHouse |
+
+Сервисы обмениваются целиком сериализованным `RequestContext`. В нем находятся исходный Chat Completions request или Responses request, identity, metadata выбранного endpoint, usage, ответы и request-local `AnonymizationValues`.
+
+## Обработка запроса
+
+### Нестрируемый запрос
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant G as Gateway
+    participant A as Auth
+    participant D as DLP
+    participant V as AV
+    participant N as Anonymizer
+    participant B as Billing
+    participant P as AI provider endpoint
+    participant CH as ClickHouse
+
+    C->>G: /v1/chat/completions or /v1/responses
+    G->>A: POST /authorize (RequestContext)
+    A-->>G: identity + roles
+    loop each compatible endpoint by priority
+        opt dlp_enabled
+            G->>D: POST /scan
+            D-->>G: accepted context or 451/error
+        end
+        opt av_enabled
+            G->>V: POST /scan
+            V-->>G: accepted context or 451/error
+        end
+        G->>N: POST /anonymize
+        N-->>G: masked request + placeholder map
+        G->>B: POST /usage (pre-response)
+        B-->>G: prompt estimate / policy result
+        G->>P: provider-specific request
+        alt provider succeeded
+            P-->>G: response + optional usage
+            G->>B: POST /usage (post-response)
+            B->>CH: insert usage event
+            B-->>G: enriched context
+            G->>G: deanonymize response
+            G-->>C: OpenAI-compatible response
+        else modules/provider/post-billing failed
+            G->>G: try next compatible endpoint
+        end
+    end
+```
+
+Порядок provider pipeline задан в `repos/gateway/cmd/gateway/main.go`:
+
+1. `dlp` — только если у endpoint установлен `dlp_enabled`.
+2. `av` — только если у endpoint установлен `av_enabled`.
+3. `anonymizer` — для каждой попытки создается новая placeholder map.
+4. `billing` pre-response — оценивает prompt/input tokens и выполняет policy check.
+5. Вызов выбранного provider endpoint.
+6. `billing` post-response — использует provider usage, если он есть, и сохраняет событие.
+7. Gateway восстанавливает placeholders в успешном ответе.
+
+Неуспешная попытка, включая ошибку обязательного модуля или content rejection, добавляется в агрегированную ошибку router, после чего router может перейти к следующему совместимому endpoint. Если кандидаты закончились, клиент получает `502 provider_failed`.
+
+### Required и optional
+
+Каждый модуль реализует базовый контракт:
+
+```go
+type Module interface {
+    Name() string
+    Required() bool
+    Handle(ctx context.Context, req *RequestContext) error
+}
+```
+
+Billing дополнительно реализует `PostResponseModule`. Ошибка `required`-модуля завершает текущую provider attempt; ошибка optional-модуля логируется, и pipeline продолжается. `ErrContentRejected` всегда завершает текущую попытку независимо от `required`.
+
+Auth находится в gateway-level pipeline и выполняется один раз до маршрутизации. Остальные модули находятся в provider-level pipeline и получают независимый контекст на каждую попытку failover.
+
+### Remote и in-process
+
+- `auth`, `anonymizer` и `billing` используют удаленный HTTP-сервис, если задан соответствующий `*_URL`; без URL gateway создает локальную реализацию.
+- `dlp` и `av` реализованы только как удаленные адаптеры. Они пропускаются, когда выключены для endpoint; включенный endpoint без URL дает ошибку модуля.
+- HTTP timeout удаленного модуля в gateway — 2 секунды. Timeout ICAP-клиента DLP/AV настраивается отдельно и по умолчанию равен 5 секундам.
+
+## Маршрутизация и failover
+
+Endpoints загружаются из `PROVIDERS_JSON`, выключенные endpoints отбрасываются, неизвестные типы игнорируются, остальные стабильно сортируются по возрастанию `priority`.
+
+```mermaid
+flowchart TD
+    Request["provider + model"] --> Mode{"Как задан запрос?"}
+    Mode -->|"provider = endpoint name or type"| ByProvider["Filter by provider and model"]
+    Mode -->|"provider = auto"| ByModel["Filter by model"]
+    Mode -->|"provider empty, model set"| ByModel
+    Mode -->|"provider and model empty"| Default["Filter by DEFAULT_PROVIDER"]
+    ByProvider --> Sorted["Candidates already sorted by priority"]
+    ByModel --> Sorted
+    Default --> Sorted
+    Sorted --> Attempt["New provider-attempt context and module pipeline"]
+    Attempt --> Success{"Attempt succeeded?"}
+    Success -->|yes| Return["Return response"]
+    Success -->|no| More{"More candidates?"}
+    More -->|yes| Attempt
+    More -->|no| Error["502 provider_failed with joined errors"]
+```
+
+Поддерживаемые provider clients:
+
+- `ollama`;
+- `openai`, `openai-compatible`, `openrouter`;
+- `anthropic`;
+- `demo`.
+
+Если после конфигурации не осталось ни одного endpoint, gateway создает `demo`. `GET /v1/models` возвращает уникальные модели из настроенных endpoints и также защищен auth pipeline.
+
+### Streaming
+
+Для endpoints с `stream: true` gateway пытается проксировать provider SSE. Если client не поддерживает streaming, gateway может выполнить обычный запрос и синтезировать SSE-ответ. После начала настоящего provider stream ошибка уже возвращается в этот stream, без failover на следующий endpoint.
+
+Текущее ограничение: запрос перед streaming-вызовом анонимизируется, но provider chunks передаются клиенту напрямую; request-local deanonymization применяется только к собранному финальному response object и не преобразует уже отправленные chunks.
+
+## Безопасность контента
+
+DLP и AV получают текстовую проекцию запроса и вызывают внешний ICAP endpoint методом `REQMOD`. Ответ считается блокирующим при специальных infection/blocking headers либо при наличии `res-hdr` в `Encapsulated`. Адаптер преобразует блокировку в HTTP `451`, а gateway — в `ErrContentRejected`.
+
+Включение проверок задается на каждом provider endpoint через `dlp_enabled` и `av_enabled`. Это означает, что failover endpoint должен иметь эквивалентную security policy, если обход проверки недопустим.
+
+## Данные и хранилища
+
+### Anonymization state
+
+Placeholder map сейчас живет только в копии `RequestContext` конкретной provider attempt. Она очищается перед каждой следующей попыткой и используется gateway для восстановления успешного нестрируемого ответа.
+
+Helm chart передает anonymizer переменную `REDIS_ADDR` и отдельно разворачивает Redis, однако текущий Go-код anonymizer не подключается к Redis. Redis-backed vault является подготовленной, но не реализованной частью архитектуры.
+
+### Billing state
+
+- ClickHouse используется как append-only хранилище `usage_events` через HTTP insert в `JSONEachRow`, когда `BILLING_USAGE_EVENTS_ENABLED=true`.
+- Если provider вернул usage, billing использует его; иначе оценивает input по тексту и считает output равным нулю.
+- PostgreSQL и миграция financial core подготовлены для tariffs, limits, quotas и financial transactions.
+- PostgreSQL policy checker пока не реализован. Включение любой из этих функций приводит к отказу billing request, даже если `POSTGRES_DSN` задан.
+
+Локальный `docker-compose.yml` поднимает Redis, ClickHouse и PostgreSQL, но не микросервисы.
+
+## Kubernetes deployment
+
+Каждый компонент устанавливается отдельным Helm release в namespace `ai-gateway`. `charts/security` создает два Deployment/Service — DLP и AV.
+
+```mermaid
+flowchart TB
+    User["Client"] -->|"LoadBalancer / port-forward"| GwSvc
+
+    subgraph K8s["Kubernetes"]
+        subgraph NS["namespace: ai-gateway"]
+            GwSvc["Service ai-gateway-gateway :8080"] --> Gw["Deployment gateway"]
+            AuthSvc["Service ai-gateway-auth :8082"] --> Auth["Deployment auth"]
+            AnonSvc["Service ai-gateway-anonymizer :8081"] --> Anon["Deployment anonymizer"]
+            BillingSvc["Service ai-gateway-billing :8083"] --> Billing["Deployment billing"]
+            DlpSvc["Service ai-gateway-security-dlp :8084"] --> DLP["Deployment dlp"]
+            AvSvc["Service ai-gateway-security-av :8085"] --> AV["Deployment av"]
+            RedisSvc["Service ai-gateway-redis :6379"] --> Redis[("Redis")]
+            ChSvc["Service ai-gateway-clickhouse :8123/:9000"] --> CH[("ClickHouse + PVC")]
+            PgSvc["Service ai-gateway-postgres :5432"] --> PG[("PostgreSQL + PVC")]
+        end
+    end
+
+    Gw --> AuthSvc
+    Gw --> AnonSvc
+    Gw --> BillingSvc
+    Gw --> DlpSvc
+    Gw --> AvSvc
+    Billing --> ChSvc
+    Anon -. "REDIS_ADDR only; client not implemented" .-> RedisSvc
+    Billing -. "reserved; policy client not implemented" .-> PgSvc
+    DLP --> DlpIcap["External DLP ICAP"]
+    AV --> AvIcap["External AV ICAP"]
+    Gw --> Providers["External / host AI providers"]
+```
+
+В `devMode` workloads запускаются из примонтированного исходного дерева образом `golang:1.22-alpine`. Для production следует отключить `devMode`, использовать собранные images и вынести credentials из values в управляемые Secrets.
+
+## Основная конфигурация
+
+```text
+HTTP_ADDR=:8080
+DEFAULT_PROVIDER=azure-open-ai
+PROVIDERS_JSON=[...]
+
+AUTH_REQUIRED=true
+AUTH_URL=http://ai-gateway-auth:8082
+
+DLP_REQUIRED=true
+DLP_URL=http://ai-gateway-security-dlp:8084
+AV_REQUIRED=true
+AV_URL=http://ai-gateway-security-av:8085
+
+ANONYMIZER_REQUIRED=true
+ANONYMIZER_URL=http://ai-gateway-anonymizer:8081
+ANONYMIZER_RULES=all
+
+BILLING_REQUIRED=true
+BILLING_URL=http://ai-gateway-billing:8083
+```
+
+Provider API keys не хранятся в `PROVIDERS_JSON`: chart создает Secret, а gateway подставляет ключ по переменной `PROVIDER_API_KEY_<NORMALIZED_ENDPOINT_NAME>`.
+
+## Известные границы текущей реализации
+
+- Нет Redis-backed anonymization vault; placeholder map request-local.
+- Нет реализации PostgreSQL policy/financial store, несмотря на schema и deployment.
+- Deanonymization не применяется к уже отправленным streaming chunks.
+- DLP/AV сканируют текстовую проекцию запроса, а не произвольные бинарные вложения.
+- Content rejection завершает attempt, но router может попробовать следующий endpoint; одинаковая security policy на всех fallback endpoints — ответственность конфигурации.
+- Метрики, tracing, rate limiting и distributed request IDs в текущем коде отсутствуют.

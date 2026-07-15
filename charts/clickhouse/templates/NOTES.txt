@@ -1,0 +1,5 @@
+ClickHouse is available inside the cluster at:
+  http://{{ include "clickhouse.fullname" . }}:{{ .Values.service.httpPort }}
+
+Native protocol:
+  {{ include "clickhouse.fullname" . }}:{{ .Values.service.nativePort }}

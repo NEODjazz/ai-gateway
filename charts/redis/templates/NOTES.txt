@@ -1,0 +1,5 @@
+Redis is available inside the cluster at:
+  {{ include "redis.fullname" . }}:{{ .Values.service.port }}
+
+Use this value in ai-gateway:
+  externalRedis.addr={{ include "redis.fullname" . }}:{{ .Values.service.port }}

@@ -1,0 +1,88 @@
+{{- range $component := list "dlp" "av" }}
+{{- $config := index $.Values $component }}
+{{- if $config.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "security.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "security.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  replicas: {{ $config.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "security.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $component }}
+  template:
+    metadata:
+      labels:
+        {{- include "security.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ $component }}
+    spec:
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ $component }}
+          image: {{ include "security.image" (dict "root" $ "component" $config) | quote }}
+          imagePullPolicy: {{ include "security.imagePullPolicy" (dict "root" $ "component" $config) }}
+          {{- if $.Values.devMode.enabled }}
+          command: [go]
+          args: [run, ./cmd/{{ $component }}]
+          workingDir: /workspace/repos/{{ $component }}
+          {{- end }}
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ $config.port }}
+          env:
+            {{- include "security.devEnv" $ | nindent 12 }}
+            - name: AI_GATEWAY_SERVICE
+              value: {{ $component }}
+            - name: HTTP_ADDR
+              value: ":{{ $config.port }}"
+            - name: {{ upper $component }}_ICAP_HOST
+              value: {{ $config.icap.host | quote }}
+            - name: {{ upper $component }}_ICAP_PORT
+              value: {{ $config.icap.port | quote }}
+            - name: {{ upper $component }}_ICAP_SERVICE
+              value: {{ $config.icap.service | quote }}
+            - name: {{ upper $component }}_ICAP_TIMEOUT
+              value: {{ $config.icap.timeout | quote }}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+          {{- if $.Values.devMode.enabled }}
+          volumeMounts:
+            - {name: source, mountPath: /workspace}
+          {{- end }}
+      {{- if $.Values.devMode.enabled }}
+      volumes:
+        - name: source
+          hostPath:
+            path: {{ $.Values.devMode.sourceHostPath | quote }}
+            type: Directory
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "security.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "security.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  selector:
+    {{- include "security.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+  ports:
+    - name: http
+      port: {{ $config.port }}
+      targetPort: http
+---
+{{- end }}
+{{- end }}

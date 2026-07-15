@@ -1,0 +1,28 @@
+replicaCount: 1
+
+image:
+  repository: postgres
+  tag: 16-alpine
+  pullPolicy: IfNotPresent
+
+service:
+  type: LoadBalancer
+  port: 5432
+
+database: ai_gateway
+username: ai_gateway
+password: ai_gateway
+
+persistence:
+  enabled: true
+  size: 2Gi
+  accessModes:
+    - ReadWriteOnce
+
+migrations:
+  enabled: true
+
+resources: {}
+
+nameOverride: ""
+fullnameOverride: ""

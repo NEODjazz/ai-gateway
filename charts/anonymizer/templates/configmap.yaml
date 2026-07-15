@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "anonymizer.configName" . }}
+  labels:
+    {{- include "anonymizer.labels" . | nindent 4 }}
+data:
+  rules.json: |
+    {{ dict "rules" .Values.anonymizer.ruleDefinitions | toPrettyJson | nindent 4 }}

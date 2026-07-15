@@ -1,0 +1,38 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "clickhouse.fullname" . }}-migrate
+  labels:
+    {{- include "clickhouse.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clickhouse.fullname" . }}
+                  key: password
+          command:
+            - sh
+            - -c
+            - |
+              until wget -qO- http://{{ include "clickhouse.fullname" . }}:{{ .Values.service.httpPort }}/ping; do sleep 2; done
+              clickhouse-client --host {{ include "clickhouse.fullname" . }} --user {{ .Values.username }} --password "$CLICKHOUSE_PASSWORD" --multiquery < /migrations/001_usage_events.sql
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      volumes:
+        - name: migrations
+          configMap:
+            name: {{ include "clickhouse.fullname" . }}-migrations
+{{- end }}

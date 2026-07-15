@@ -1,0 +1,47 @@
+image:
+  repository: ai-gateway-billing
+  tag: dev
+  pullPolicy: IfNotPresent
+devMode:
+  enabled: true
+  sourceHostPath: /mnt/c/tmp/ai-gateway
+  image:
+    repository: golang
+    tag: 1.22-alpine
+    pullPolicy: IfNotPresent
+
+billing:
+  replicaCount: 1
+  port: 8083
+  usageEvents:
+    enabled: true
+  clickhouse:
+    url: http://ai-gateway-clickhouse:8123
+    database: ai_gateway
+    usageEventsTable: usage_events
+  secrets:
+    create: true
+    name: ""
+    clickhouseUsername: ai_gateway
+    clickhousePassword: ai_gateway
+    postgresDsn: postgres://ai_gateway:ai_gateway@ai-gateway-postgres:5432/ai_gateway?sslmode=disable
+  features:
+    tariffs: false
+    limits: false
+    quotas: false
+    financialTransactions: false
+  pricing:
+    inputPricePer1K: "0"
+    outputPricePer1K: "0"
+    currency: USD
+
+resources: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 100
+  runAsGroup: 101
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: [ALL]

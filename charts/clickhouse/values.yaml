@@ -1,0 +1,29 @@
+replicaCount: 1
+
+image:
+  repository: clickhouse/clickhouse-server
+  tag: 24.8-alpine
+  pullPolicy: IfNotPresent
+
+service:
+  type: LoadBalancer
+  httpPort: 8123
+  nativePort: 9000
+
+database: ai_gateway
+username: ai_gateway
+password: ai_gateway
+
+persistence:
+  enabled: true
+  size: 2Gi
+  accessModes:
+    - ReadWriteOnce
+
+migrations:
+  enabled: true
+
+resources: {}
+
+nameOverride: ""
+fullnameOverride: ""

@@ -1,0 +1,21 @@
+replicaCount: 1
+
+image:
+  repository: redis
+  tag: 7-alpine
+  pullPolicy: IfNotPresent
+
+service:
+  type: LoadBalancer
+  port: 6379
+
+persistence:
+  enabled: false
+  size: 1Gi
+  accessModes:
+    - ReadWriteOnce
+
+resources: {}
+
+nameOverride: ""
+fullnameOverride: ""

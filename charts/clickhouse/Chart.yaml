@@ -1,0 +1,6 @@
+apiVersion: v2
+name: clickhouse
+description: ClickHouse storage for AI Gateway usage events
+type: application
+version: 0.1.0
+appVersion: "24.8"

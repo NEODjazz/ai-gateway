@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "anonymizer.fullname" . }}
+  labels:
+    {{- include "anonymizer.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "anonymizer.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.anonymizer.port }}
+      targetPort: http

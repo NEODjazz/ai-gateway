@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ai-gateway.fullname" . }}-gateway
+  labels:
+    {{- include "ai-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: {{ .Values.gateway.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ai-gateway.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      annotations:
+        checksum/provider-config: {{ include (print $.Template.BasePath "/provider-configmap.yaml") . | sha256sum }}
+        checksum/provider-secret: {{ include (print $.Template.BasePath "/provider-secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "ai-gateway.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: gateway
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: gateway
+          image: {{ include "ai-gateway.image" . | quote }}
+          imagePullPolicy: {{ include "ai-gateway.imagePullPolicy" . }}
+          {{- include "ai-gateway.devCommand" (dict "root" . "service" "gateway") | nindent 10 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            {{- include "ai-gateway.devEnv" . | nindent 12 }}
+            - name: AI_GATEWAY_SERVICE
+              value: gateway
+            - name: HTTP_ADDR
+              value: ":8080"
+            - name: PROVIDER_TYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ai-gateway.providerConfigName" . }}
+                  key: default_provider
+            - name: DEFAULT_PROVIDER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ai-gateway.providerConfigName" . }}
+                  key: default_provider
+            - name: PROVIDERS_JSON
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ai-gateway.providerConfigName" . }}
+                  key: providers.json
+            {{- range .Values.gateway.providers }}
+            - name: {{ include "ai-gateway.providerApiKeyEnvName" . }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gateway.providerSecretName" $ }}
+                  key: {{ include "ai-gateway.providerApiKeyEnvName" . }}
+                  optional: true
+            {{- end }}
+            - name: AUTH_REQUIRED
+              value: {{ .Values.gateway.modules.auth.required | quote }}
+            - name: AUTH_URL
+              value: {{ ternary .Values.gateway.modules.auth.url "" .Values.gateway.modules.auth.remote | quote }}
+            - name: ANONYMIZER_REQUIRED
+              value: {{ .Values.gateway.modules.anonymizer.required | quote }}
+            - name: ANONYMIZER_RULES
+              value: {{ .Values.gateway.modules.anonymizer.rules | quote }}
+            - name: ANONYMIZER_URL
+              value: {{ ternary .Values.gateway.modules.anonymizer.url "" .Values.gateway.modules.anonymizer.remote | quote }}
+            - name: BILLING_REQUIRED
+              value: {{ .Values.gateway.modules.billing.required | quote }}
+            - name: BILLING_URL
+              value: {{ ternary .Values.gateway.modules.billing.url "" .Values.gateway.modules.billing.remote | quote }}
+            - name: DLP_REQUIRED
+              value: {{ .Values.gateway.modules.dlp.required | quote }}
+            - name: DLP_URL
+              value: {{ ternary .Values.gateway.modules.dlp.url "" .Values.gateway.modules.dlp.remote | quote }}
+            - name: AV_REQUIRED
+              value: {{ .Values.gateway.modules.av.required | quote }}
+            - name: AV_URL
+              value: {{ ternary .Values.gateway.modules.av.url "" .Values.gateway.modules.av.remote | quote }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- include "ai-gateway.devVolumeMounts" . | nindent 10 }}
+      {{- include "ai-gateway.devVolumes" . | nindent 6 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ai-gateway.fullname" . }}-gateway
+  labels:
+    {{- include "ai-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  type: {{ .Values.gateway.service.type }}
+  selector:
+    {{- include "ai-gateway.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+  ports:
+    - name: http
+      port: {{ .Values.gateway.port }}
+      targetPort: http

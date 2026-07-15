@@ -1,0 +1,5 @@
+PostgreSQL is available inside the cluster at:
+  {{ include "postgres.fullname" . }}:{{ .Values.service.port }}
+
+DSN example:
+  postgres://{{ .Values.username }}:<password>@{{ include "postgres.fullname" . }}:{{ .Values.service.port }}/{{ .Values.database }}?sslmode=disable

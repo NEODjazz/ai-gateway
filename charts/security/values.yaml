@@ -1,0 +1,44 @@
+image:
+  tag: dev
+  pullPolicy: IfNotPresent
+devMode:
+  enabled: true
+  sourceHostPath: /mnt/c/tmp/ai-gateway
+  image:
+    repository: golang
+    tag: 1.22-alpine
+    pullPolicy: IfNotPresent
+
+dlp:
+  enabled: true
+  image:
+    repository: ai-gateway-dlp
+  replicaCount: 1
+  port: 8084
+  icap:
+    host: ""
+    port: ""
+    service: /dlp
+    timeout: 5s
+av:
+  enabled: true
+  image:
+    repository: ai-gateway-av
+  replicaCount: 1
+  port: 8085
+  icap:
+    host: ""
+    port: ""
+    service: /av
+    timeout: 5s
+
+resources: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 100
+  runAsGroup: 101
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: [ALL]

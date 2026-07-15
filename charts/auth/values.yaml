@@ -1,0 +1,34 @@
+image:
+  repository: ai-gateway-auth
+  tag: dev
+  pullPolicy: IfNotPresent
+
+devMode:
+  enabled: true
+  sourceHostPath: /mnt/c/tmp/ai-gateway
+  image:
+    repository: golang
+    tag: 1.22-alpine
+    pullPolicy: IfNotPresent
+
+auth:
+  replicaCount: 1
+  port: 8082
+  jwt:
+    secret: dev-jwt-secret
+    issuer: ai-gateway
+    audience: ai-gateway
+
+resources: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 100
+  runAsGroup: 101
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL

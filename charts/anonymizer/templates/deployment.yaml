@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "anonymizer.fullname" . }}
+  labels:
+    {{- include "anonymizer.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.anonymizer.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "anonymizer.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/rules: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "anonymizer.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: anonymizer
+          image: {{ include "anonymizer.image" . | quote }}
+          imagePullPolicy: {{ include "anonymizer.imagePullPolicy" . }}
+          {{- include "anonymizer.devCommand" . | nindent 10 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.anonymizer.port }}
+          env:
+            {{- include "anonymizer.devEnv" . | nindent 12 }}
+            - name: AI_GATEWAY_SERVICE
+              value: anonymizer
+            - name: ANONYMIZER_RULES
+              value: {{ .Values.anonymizer.rules | quote }}
+            - name: ANONYMIZER_RULES_CONFIG_PATH
+              value: /etc/ai-gateway/anonymizer/rules.json
+            - name: REDIS_ADDR
+              value: {{ .Values.externalRedis.addr | quote }}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: rules
+              mountPath: /etc/ai-gateway/anonymizer
+              readOnly: true
+            {{- if .Values.devMode.enabled }}
+            - name: source
+              mountPath: /workspace
+            {{- end }}
+      volumes:
+        - name: rules
+          configMap:
+            name: {{ include "anonymizer.configName" . }}
+        {{- if .Values.devMode.enabled }}
+        - name: source
+          hostPath:
+            path: {{ .Values.devMode.sourceHostPath | quote }}
+            type: Directory
+        {{- end }}

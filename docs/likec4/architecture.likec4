@@ -1,0 +1,238 @@
+specification {
+  element actor {
+    style {
+      shape person
+      color gray
+    }
+  }
+
+  element system {
+    style {
+      shape rectangle
+      color blue
+    }
+  }
+
+  element service {
+    style {
+      shape rectangle
+      color sky
+    }
+  }
+
+  element externalSystem {
+    style {
+      shape rectangle
+      color gray
+    }
+  }
+
+  element datastore {
+    style {
+      shape storage
+      color green
+    }
+  }
+
+  relationship planned {
+    line dashed
+    color gray
+  }
+
+  deploymentNode environment
+  deploymentNode kubernetes {
+    style {
+      color blue
+    }
+  }
+  deploymentNode namespace
+  deploymentNode workload {
+    style {
+      color sky
+    }
+  }
+  deploymentNode dataWorkload {
+    style {
+      color green
+    }
+  }
+}
+
+model {
+  client = actor 'Client / OpenAI SDK'
+
+  platform = system 'AI Gateway platform' {
+    gateway = service 'Gateway' {
+      technology 'Go, HTTP, SSE :8080'
+      description 'OpenAI-compatible API, auth orchestration, routing, failover and deanonymization'
+    }
+    auth = service 'Auth' {
+      technology 'Go, HTTP :8082'
+      description 'Demo API keys, HS256 JWT, users and roles'
+    }
+    dlp = service 'DLP adapter' {
+      technology 'Go, HTTP :8084, ICAP'
+    }
+    av = service 'AV adapter' {
+      technology 'Go, HTTP :8085, ICAP'
+    }
+    anonymizer = service 'Anonymizer' {
+      technology 'Go, HTTP :8081, RE2 rules'
+      description 'Request-local masking and placeholder map'
+    }
+    billing = service 'Billing' {
+      technology 'Go, HTTP :8083'
+      description 'Usage estimation, cost calculation and usage events'
+    }
+  }
+
+  providers = system 'AI providers' {
+    openai = externalSystem 'OpenAI-compatible / Azure / OpenRouter'
+    anthropic = externalSystem 'Anthropic'
+    ollama = externalSystem 'Ollama'
+    demo = externalSystem 'Demo provider'
+  }
+
+  security = system 'Content security' {
+    dlpIcap = externalSystem 'DLP ICAP server'
+    avIcap = externalSystem 'Antivirus ICAP server'
+  }
+
+  stores = system 'Data stores' {
+    clickhouse = datastore 'ClickHouse usage_events' {
+      technology 'ClickHouse HTTP :8123'
+    }
+    redis = datastore 'Redis anonymization vault' {
+      technology 'Redis :6379'
+      description 'Deployed and configured, client integration is not implemented'
+    }
+    postgres = datastore 'PostgreSQL financial core' {
+      technology 'PostgreSQL :5432'
+      description 'Schema and deployment exist, policy-store client is not implemented'
+    }
+  }
+
+  client -> platform.gateway 'OpenAI-compatible HTTP / SSE'
+  platform.gateway -> platform.auth 'POST /authorize once per request'
+  platform.gateway -> platform.dlp 'POST /scan when endpoint.dlp_enabled'
+  platform.gateway -> platform.av 'POST /scan when endpoint.av_enabled'
+  platform.gateway -> platform.anonymizer 'POST /anonymize per provider attempt'
+  platform.gateway -> platform.billing 'POST /usage before and after provider'
+  platform.gateway -> providers.openai 'OpenAI-compatible API'
+  platform.gateway -> providers.anthropic 'Anthropic Messages API'
+  platform.gateway -> providers.ollama 'Ollama API'
+  platform.gateway -> providers.demo 'in-process demo call'
+  platform.dlp -> security.dlpIcap 'ICAP REQMOD'
+  platform.av -> security.avIcap 'ICAP REQMOD'
+  platform.billing -> stores.clickhouse 'append usage event via JSONEachRow'
+  platform.anonymizer -[planned]-> stores.redis 'planned vault integration'
+  platform.billing -[planned]-> stores.postgres 'planned policy / financial integration'
+}
+
+deployment {
+  environment current 'Current deployment' {
+    kubernetes cluster 'Kubernetes cluster' {
+      namespace ai_gateway 'namespace: ai-gateway' {
+        workload gateway_release 'ai-gateway release' {
+          gateway = instanceOf platform.gateway
+        }
+        workload auth_release 'auth release' {
+          auth = instanceOf platform.auth
+        }
+        workload anonymizer_release 'anonymizer release' {
+          anonymizer = instanceOf platform.anonymizer
+        }
+        workload billing_release 'billing release' {
+          billing = instanceOf platform.billing
+        }
+        workload security_release 'security release' {
+          dlp = instanceOf platform.dlp
+          av = instanceOf platform.av
+        }
+        dataWorkload clickhouse_release 'clickhouse release + PVC' {
+          clickhouse = instanceOf stores.clickhouse
+        }
+        dataWorkload redis_release 'redis release' {
+          redis = instanceOf stores.redis
+        }
+        dataWorkload postgres_release 'postgres release + PVC' {
+          postgres = instanceOf stores.postgres
+        }
+      }
+    }
+  }
+}
+
+views {
+  view index {
+    title 'AI Gateway / System context'
+    description 'Current logical boundaries and external dependencies'
+    include client, platform, providers, security, stores
+    include * -> *
+    autoLayout LeftRight
+  }
+
+  view services {
+    title 'AI Gateway / Services and data flow'
+    description 'Gateway-level auth, provider-level modules, providers and stores'
+    include client
+    include platform.*
+    include providers.*
+    include security.*
+    include stores.*
+    include * -> *
+    autoLayout LeftRight
+  }
+
+  dynamic view request_flow {
+    title 'AI Gateway / Successful non-streaming request'
+    variant sequence
+
+    client -> platform.gateway 'POST /v1/chat/completions or /v1/responses'
+    platform.gateway -> platform.auth 'authorize RequestContext'
+    platform.auth -> platform.gateway 'identity and roles'
+    platform.gateway -> platform.dlp 'scan if enabled for endpoint'
+    platform.dlp -> security.dlpIcap 'ICAP REQMOD'
+    security.dlpIcap -> platform.dlp 'accepted'
+    platform.dlp -> platform.gateway 'accepted context'
+    platform.gateway -> platform.av 'scan if enabled for endpoint'
+    platform.av -> security.avIcap 'ICAP REQMOD'
+    security.avIcap -> platform.av 'accepted'
+    platform.av -> platform.gateway 'accepted context'
+    platform.gateway -> platform.anonymizer 'anonymize request'
+    platform.anonymizer -> platform.gateway 'masked request and placeholder map'
+    platform.gateway -> platform.billing 'pre-response usage / policy check'
+    platform.billing -> platform.gateway 'estimated input usage'
+    platform.gateway -> providers.openai 'provider-specific request'
+    providers.openai -> platform.gateway 'response and optional usage'
+    platform.gateway -> platform.billing 'post-response usage'
+    platform.billing -> stores.clickhouse 'append usage event'
+    platform.billing -> platform.gateway 'enriched context'
+    platform.gateway -> platform.gateway 'deanonymize response'
+    platform.gateway -> client 'OpenAI-compatible response'
+  }
+
+  dynamic view failover {
+    title 'AI Gateway / Provider failover'
+    variant sequence
+
+    client -> platform.gateway 'authenticated request'
+    platform.gateway -> platform.dlp 'attempt 1: provider modules'
+    platform.dlp -> platform.gateway 'error or content rejection'
+    platform.gateway -> platform.av 'attempt 2: fresh context and modules'
+    platform.av -> platform.gateway 'accepted'
+    platform.gateway -> platform.anonymizer 'new placeholder map'
+    platform.anonymizer -> platform.gateway 'masked attempt 2 request'
+    platform.gateway -> providers.ollama 'attempt 2 provider call'
+    providers.ollama -> platform.gateway 'successful response'
+    platform.gateway -> client 'deanonymized response'
+  }
+
+  deployment view kubernetes {
+    title 'AI Gateway / Kubernetes deployment'
+    description 'Separate Helm releases in namespace ai-gateway'
+    includeAncestors: true
+    include current.**
+    autoLayout LeftRight
+  }
+}
