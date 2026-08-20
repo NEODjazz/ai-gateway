@@ -5,82 +5,48 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
 
-type RemoteModule struct {
-	name         string
-	required     bool
-	endpoint     string
-	postResponse bool
-	client       *http.Client
+const maxRemoteResponseBytes = 8 << 20
+
+func newRemoteHTTPClient() *http.Client {
+	return &http.Client{Timeout: 2 * time.Second}
 }
 
-func NewRemoteModule(name string, required bool, endpoint string) RemoteModule {
-	return RemoteModule{
-		name:     name,
-		required: required,
-		endpoint: endpoint,
-		client: &http.Client{
-			Timeout: 2 * time.Second,
-		},
-	}
-}
-
-func NewRemotePostResponseModule(name string, required bool, endpoint string) RemoteModule {
-	module := NewRemoteModule(name, required, endpoint)
-	module.postResponse = true
-	return module
-}
-
-func (m RemoteModule) Name() string {
-	return m.name
-}
-
-func (m RemoteModule) Required() bool {
-	return m.required
-}
-
-func (m RemoteModule) PostResponseEnabled() bool {
-	return m.postResponse
-}
-
-func (m RemoteModule) Handle(ctx context.Context, req *RequestContext) error {
-	return m.call(ctx, req)
-}
-
-func (m RemoteModule) HandlePostResponse(ctx context.Context, req *RequestContext) error {
-	return m.call(ctx, req)
-}
-
-func (m RemoteModule) call(ctx context.Context, req *RequestContext) error {
-	body, err := json.Marshal(req)
+func callRemote[Request any, Response any](ctx context.Context, client *http.Client, endpoint string, request Request) (Response, error) {
+	var result Response
+	body, err := json.Marshal(request)
 	if err != nil {
-		return err
+		return result, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, m.endpoint, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return result, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := m.client.Do(httpReq)
+	resp, err := client.Do(httpReq)
 	if err != nil {
-		return err
+		return result, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return ErrUnauthorized
+		return result, ErrUnauthorized
 	}
 	if resp.StatusCode == http.StatusUnavailableForLegalReasons {
-		return ErrContentRejected
+		return result, ErrContentRejected
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("remote %s returned %s", m.name, resp.Status)
+		return result, fmt.Errorf("remote endpoint returned %s", resp.Status)
 	}
 
-	return json.NewDecoder(resp.Body).Decode(req)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxRemoteResponseBytes)).Decode(&result); err != nil {
+		return result, err
+	}
+	return result, nil
 }

@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,21 +16,47 @@ import (
 )
 
 type Handler struct {
-	pipeline modules.Pipeline
-	provider provider.Provider
+	pipeline   modules.Pipeline
+	provider   provider.Provider
+	rateLimits RateLimitStore
+	metrics    *Metrics
+	ready      func(context.Context) error
 }
 
 func NewHandler(pipeline modules.Pipeline, llmProvider provider.Provider) Handler {
-	return Handler{pipeline: pipeline, provider: llmProvider}
+	return NewHandlerWithRateLimitStore(pipeline, llmProvider, NewMemoryRateLimitStore())
+
+}
+
+func NewHandlerWithRateLimitStore(pipeline modules.Pipeline, llmProvider provider.Provider, rateLimits RateLimitStore) Handler {
+	return NewHandlerWithReadiness(pipeline, llmProvider, rateLimits, nil)
+}
+
+func NewHandlerWithReadiness(pipeline modules.Pipeline, llmProvider provider.Provider, rateLimits RateLimitStore, ready func(context.Context) error) Handler {
+	if rateLimits == nil {
+		rateLimits = NewMemoryRateLimitStore()
+	}
+	return Handler{pipeline: pipeline, provider: llmProvider, rateLimits: rateLimits, metrics: NewMetrics(), ready: ready}
 }
 
 func (h Handler) Health(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h Handler) Ready(w http.ResponseWriter, r *http.Request) {
+	if h.ready != nil {
+		if err := h.ready(r.Context()); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "dependency_unavailable", "required storage is unavailable")
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h Handler) Models(w http.ResponseWriter, r *http.Request) {
 	reqCtx := modules.RequestContext{
-		APIKey: bearerToken(r.Header.Get("Authorization")),
+		APIKey:    bearerToken(r.Header.Get("Authorization")),
+		RequestID: requestID(r),
 	}
 	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
 		if errors.Is(err, modules.ErrUnauthorized) {
@@ -38,10 +66,11 @@ func (h Handler) Models(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
 		return
 	}
+	reqCtx.APIKey = ""
 
 	writeJSON(w, http.StatusOK, openai.ModelsResponse{
 		Object: "list",
-		Data:   h.provider.Models(),
+		Data:   filterModels(h.provider.Models(), reqCtx.AllowedModels),
 	})
 }
 
@@ -54,8 +83,9 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	stream := request.Stream
 	reqCtx := modules.RequestContext{
-		APIKey:  bearerToken(r.Header.Get("Authorization")),
-		Request: request,
+		APIKey:    bearerToken(r.Header.Get("Authorization")),
+		RequestID: requestID(r),
+		Request:   request,
 	}
 
 	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
@@ -66,7 +96,10 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
 		return
 	}
-
+	reqCtx.APIKey = ""
+	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateChatTokens(request)) {
+		return
+	}
 	if stream {
 		streamStarted := false
 		writeStreamPayload := func(payload string) error {
@@ -120,6 +153,7 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 
 	reqCtx := modules.RequestContext{
 		APIKey:          bearerToken(r.Header.Get("Authorization")),
+		RequestID:       requestID(r),
 		ResponseRequest: &request,
 		Request: openai.ChatCompletionRequest{
 			Provider: request.Provider,
@@ -136,7 +170,10 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
 		return
 	}
-
+	reqCtx.APIKey = ""
+	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateResponseTokens(request)) {
+		return
+	}
 	if request.Stream {
 		streamStarted := false
 		writeStreamEvent := func(event string, payload string) error {
@@ -172,7 +209,6 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
 		return
 	}
-
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -182,6 +218,17 @@ func bearerToken(header string) string {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
+}
+
+func requestID(r *http.Request) string {
+	if value := strings.TrimSpace(r.Header.Get("X-Request-ID")); value != "" && len(value) <= 128 {
+		return value
+	}
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return fmt.Sprintf("req-%d", time.Now().UTC().UnixNano())
+	}
+	return fmt.Sprintf("%x", value[:])
 }
 
 func responseMessages(request openai.ResponseRequest) []openai.Message {

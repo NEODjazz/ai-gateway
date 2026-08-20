@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -13,12 +14,13 @@ import (
 )
 
 type AuthModule struct {
-	required  bool
-	jwtConfig JWTAuthConfig
+	required    bool
+	jwtConfig   JWTAuthConfig
+	virtualKeys map[string]VirtualKey
 }
 
 func NewAuthModule(required bool) AuthModule {
-	return AuthModule{required: required, jwtConfig: JWTAuthConfigFromEnv()}
+	return AuthModule{required: required, jwtConfig: JWTAuthConfigFromEnv(), virtualKeys: VirtualKeysFromEnv()}
 }
 
 func NewAuthModuleWithJWT(required bool, cfg JWTAuthConfig) AuthModule {
@@ -29,6 +31,41 @@ type JWTAuthConfig struct {
 	Secret   string
 	Issuer   string
 	Audience string
+}
+
+type VirtualKey struct {
+	Token         string   `json:"token"`
+	UserID        string   `json:"user_id"`
+	TeamID        string   `json:"team_id,omitempty"`
+	Roles         []string `json:"roles,omitempty"`
+	AllowedModels []string `json:"allowed_models,omitempty"`
+	RateLimitRPM  int      `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM  int      `json:"rate_limit_tpm,omitempty"`
+}
+
+func NewAuthModuleWithVirtualKeys(required bool, keys []VirtualKey) AuthModule {
+	return AuthModule{required: required, jwtConfig: JWTAuthConfigFromEnv(), virtualKeys: indexVirtualKeys(keys)}
+}
+
+func VirtualKeysFromEnv() map[string]VirtualKey {
+	var keys []VirtualKey
+	if err := json.Unmarshal([]byte(os.Getenv("AUTH_VIRTUAL_KEYS_JSON")), &keys); err != nil {
+		return nil
+	}
+	return indexVirtualKeys(keys)
+}
+
+func indexVirtualKeys(keys []VirtualKey) map[string]VirtualKey {
+	indexed := make(map[string]VirtualKey, len(keys))
+	for _, key := range keys {
+		if key.Token == "" || key.UserID == "" {
+			continue
+		}
+		fingerprint := credentialFingerprint(key.Token)
+		key.Token = ""
+		indexed[fingerprint] = key
+	}
+	return indexed
 }
 
 type jwtHeader struct {
@@ -63,18 +100,34 @@ func (m AuthModule) Required() bool {
 }
 
 func (m AuthModule) Handle(_ context.Context, req *RequestContext) error {
+	if key, ok := m.virtualKeys[credentialFingerprint(req.APIKey)]; ok {
+		req.UserID = key.UserID
+		req.TeamID = key.TeamID
+		req.Roles = append([]string(nil), key.Roles...)
+		req.AllowedModels = append([]string(nil), key.AllowedModels...)
+		req.RateLimitRPM = key.RateLimitRPM
+		req.RateLimitTPM = key.RateLimitTPM
+		req.CredentialID = credentialFingerprint(req.APIKey)
+		req.APIKey = ""
+		return nil
+	}
 	switch req.APIKey {
 	case "demo-admin-key":
 		req.UserID = "demo-admin"
 		req.Roles = []string{"admin", "developer"}
+		req.CredentialID = credentialFingerprint(req.APIKey)
+		req.APIKey = ""
 		return nil
 	case "demo-user-key":
 		req.UserID = "demo-user"
 		req.Roles = []string{"developer"}
+		req.CredentialID = credentialFingerprint(req.APIKey)
+		req.APIKey = ""
 		return nil
 	}
 
 	if err := m.authorizeJWT(req); err == nil {
+		req.APIKey = ""
 		return nil
 	}
 
@@ -93,12 +146,21 @@ func (m AuthModule) authorizeJWT(req *RequestContext) error {
 
 	req.UserID = claims.Subject
 	req.Roles = normalizeRoles(claims)
+	req.CredentialID = credentialFingerprint(req.APIKey)
 	if req.Metadata == nil {
 		req.Metadata = map[string]string{}
 	}
 	req.Metadata["auth.method"] = "jwt"
 	req.Metadata["auth.issuer"] = claims.Issuer
 	return nil
+}
+
+func credentialFingerprint(value string) string {
+	if value == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])[:16]
 }
 
 func verifyJWT(token string, cfg JWTAuthConfig, now time.Time) (jwtClaims, error) {

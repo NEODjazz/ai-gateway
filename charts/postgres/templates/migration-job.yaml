@@ -27,7 +27,9 @@ spec:
             - -c
             - |
               until pg_isready -h {{ include "postgres.fullname" . }} -U {{ .Values.username }}; do sleep 2; done
-              psql -h {{ include "postgres.fullname" . }} -U {{ .Values.username }} -d {{ .Values.database }} -f /migrations/001_financial_core.sql
+              for migration in /migrations/*.sql; do
+                psql -v ON_ERROR_STOP=1 -h {{ include "postgres.fullname" . }} -U {{ .Values.username }} -d {{ .Values.database }} -f "$migration"
+              done
           volumeMounts:
             - name: migrations
               mountPath: /migrations

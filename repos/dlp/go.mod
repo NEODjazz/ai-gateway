@@ -1,3 +1,3 @@
 module ai-gateway-dlp
 
-go 1.22
+go 1.25

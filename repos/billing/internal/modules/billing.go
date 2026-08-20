@@ -2,8 +2,7 @@ package modules
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -12,10 +11,13 @@ import (
 )
 
 type BillingModule struct {
-	required bool
-	pricing  PricingConfig
-	writer   UsageEventWriter
-	policy   PolicyChecker
+	required  bool
+	pricing   PricingConfig
+	writer    UsageEventWriter
+	policy    PolicyChecker
+	lifecycle *LifecycleStore
+	durable   DurableEventRepository
+	initErr   error
 }
 
 type PricingConfig struct {
@@ -31,20 +33,30 @@ func NewBillingModule(required bool) BillingModule {
 
 func NewBillingModuleWithPricing(required bool, pricing PricingConfig) BillingModule {
 	return BillingModule{
-		required: required,
-		pricing:  pricing,
-		writer:   NoopUsageEventWriter{},
-		policy:   NoopPolicyChecker{},
+		required:  required,
+		pricing:   pricing,
+		writer:    NoopUsageEventWriter{},
+		policy:    NoopPolicyChecker{},
+		lifecycle: NewLifecycleStore(),
 	}
 }
 
 func NewBillingModuleWithSettings(required bool, settings Settings) BillingModule {
-	return BillingModule{
-		required: required,
-		pricing:  settings.Pricing,
-		writer:   NewUsageEventWriter(settings),
-		policy:   NewPolicyChecker(settings),
+	module := BillingModule{
+		required:  required,
+		pricing:   settings.Pricing,
+		writer:    NewUsageEventWriter(settings),
+		policy:    NewPolicyChecker(settings),
+		lifecycle: NewLifecycleStore(),
 	}
+	if settings.DurableOutboxEnabled {
+		writer := UsageEventWriter(NoopUsageEventWriter{})
+		if settings.UsageEventsEnabled {
+			writer = NewClickHouseUsageEventWriter(settings)
+		}
+		module.durable, module.initErr = NewPostgresOutboxRepository(settings.PostgresDSN, writer, settings.OutboxPollInterval)
+	}
+	return module
 }
 
 func PricingConfigFromEnv() PricingConfig {
@@ -63,6 +75,16 @@ func (m BillingModule) Required() bool {
 	return m.required
 }
 
+func (m BillingModule) Ready(ctx context.Context) error {
+	if m.initErr != nil {
+		return m.initErr
+	}
+	if m.durable != nil {
+		return m.durable.Ready(ctx)
+	}
+	return nil
+}
+
 func (m BillingModule) PostResponseEnabled() bool {
 	return true
 }
@@ -72,6 +94,9 @@ func (m BillingModule) HandlePostResponse(ctx context.Context, req *RequestConte
 }
 
 func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
+	if m.initErr != nil {
+		return m.initErr
+	}
 	promptTokens := estimatePromptTokens(req)
 	inputTokens, outputTokens, totalTokens := usageTokens(req, promptTokens)
 
@@ -91,13 +116,72 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 
 	event := m.event(req, promptTokens, inputTokens, outputTokens, totalTokens)
 	req.BillingEvent = &event
-	if err := m.policy.Check(ctx, event); err != nil {
-		return err
+	phase := req.BillingPhase
+	if phase == "" {
+		if req.PostResponse || req.Response != nil || req.ResponsesResponse != nil {
+			phase = "commit"
+		} else {
+			phase = "reserve"
+		}
 	}
-	if req.Response == nil && req.ResponsesResponse == nil {
+	event.Phase = phase
+	key := ""
+	if event.RequestID != "" {
+		key = event.RequestID + ":" + phase
+	}
+	event.EventID = key
+	if m.durable != nil {
+		if phase == "reserve" {
+			if err := m.policy.Check(ctx, event); err != nil {
+				return err
+			}
+			created, err := m.durable.Reserve(ctx, event)
+			if err != nil {
+				return err
+			}
+			if !created {
+				req.Metadata["billing.idempotent_replay"] = "true"
+			}
+			return nil
+		}
+		if phase != "commit" && phase != "cancel" {
+			return errors.New("invalid billing phase: " + phase)
+		}
+		if phase == "cancel" {
+			event.InputTokens, event.OutputTokens, event.TotalTokens, event.Cost = 0, 0, 0, 0
+		}
+		created, err := m.durable.Enqueue(ctx, event)
+		if err != nil {
+			return err
+		}
+		if !created {
+			req.Metadata["billing.idempotent_replay"] = "true"
+		}
 		return nil
 	}
+	if !m.lifecycle.Begin(key) {
+		req.Metadata["billing.idempotent_replay"] = "true"
+		return nil
+	}
+	if phase == "reserve" {
+		if err := m.policy.Check(ctx, event); err != nil {
+			m.lifecycle.Release(key)
+			return err
+		}
+		return nil
+	}
+	if phase != "commit" && phase != "cancel" {
+		m.lifecycle.Release(key)
+		return errors.New("invalid billing phase: " + phase)
+	}
+	if phase == "cancel" {
+		event.InputTokens = 0
+		event.OutputTokens = 0
+		event.TotalTokens = 0
+		event.Cost = 0
+	}
 	if err := m.writer.WriteUsageEvent(ctx, event); err != nil {
+		m.lifecycle.Release(key)
 		return err
 	}
 	return nil
@@ -120,18 +204,20 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 	}
 
 	return BillingEvent{
-		RequestID:             metadata(req, "request.id"),
+		RequestID:             requestID(req),
 		UserID:                req.UserID,
 		Roles:                 append([]string(nil), req.Roles...),
-		APIKeyFingerprint:     fingerprint(req.APIKey),
+		APIKeyFingerprint:     req.CredentialID,
 		Provider:              providerName,
 		ProviderEndpointName:  metadata(req, "provider.endpoint.name"),
 		ProviderEndpointType:  metadata(req, "provider.endpoint.type"),
 		Model:                 model,
 		APIType:               apiType,
+		Phase:                 req.BillingPhase,
 		Status:                metadataDefault(req, "provider.status", "ok"),
 		Error:                 metadata(req, "provider.error"),
 		LatencyMS:             metadataInt(req, "provider.latency_ms"),
+		CacheStatus:           metadata(req, "provider.cache.status"),
 		PromptTokensEstimated: promptTokens,
 		InputTokens:           inputTokens,
 		OutputTokens:          outputTokens,
@@ -142,11 +228,21 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 	}
 }
 
+func requestID(req *RequestContext) string {
+	if req.RequestID != "" {
+		return req.RequestID
+	}
+	return metadata(req, "request.id")
+}
+
 func (m BillingModule) cost(inputTokens int, outputTokens int) float64 {
 	return (float64(inputTokens)/1000)*m.pricing.InputPricePer1K + (float64(outputTokens)/1000)*m.pricing.OutputPricePer1K
 }
 
 func estimatePromptTokens(req *RequestContext) int {
+	if req.PromptTokensEstimated > 0 {
+		return req.PromptTokensEstimated
+	}
 	promptTokens := 0
 	for _, message := range req.Request.Messages {
 		promptTokens += estimateTokens(openai.ContentText(message.Content))
@@ -159,6 +255,12 @@ func estimatePromptTokens(req *RequestContext) int {
 }
 
 func usageTokens(req *RequestContext, fallbackPromptTokens int) (int, int, int) {
+	if metadata(req, "provider.cache.status") == "hit" {
+		return 0, 0, 0
+	}
+	if req.Usage != nil && req.Usage.TotalTokens > 0 {
+		return req.Usage.PromptTokens, req.Usage.CompletionTokens, req.Usage.TotalTokens
+	}
 	if req.Response != nil && req.Response.Usage.TotalTokens > 0 {
 		return req.Response.Usage.PromptTokens, req.Response.Usage.CompletionTokens, req.Response.Usage.TotalTokens
 	}
@@ -195,14 +297,6 @@ func estimateTokens(value string) int {
 		return 0
 	}
 	return len(words)
-}
-
-func fingerprint(value string) string {
-	if value == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])[:16]
 }
 
 func metadata(req *RequestContext, key string) string {

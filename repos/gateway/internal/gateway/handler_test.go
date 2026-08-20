@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,24 @@ import (
 )
 
 type modelsProvider struct{}
+
+type accessPolicyModule struct {
+	models []string
+	rpm    int
+	tpm    int
+}
+
+func (m accessPolicyModule) Name() string   { return "access-policy" }
+func (m accessPolicyModule) Required() bool { return true }
+func (m accessPolicyModule) Handle(_ context.Context, req *modules.RequestContext) error {
+	req.UserID = "user-1"
+	req.TeamID = "team-1"
+	req.CredentialID = "credential-1"
+	req.AllowedModels = append([]string(nil), m.models...)
+	req.RateLimitRPM = m.rpm
+	req.RateLimitTPM = m.tpm
+	return nil
+}
 
 func (modelsProvider) ChatCompletions(context.Context, modules.RequestContext) (openai.ChatCompletionResponse, error) {
 	return openai.ChatCompletionResponse{}, nil
@@ -180,6 +199,100 @@ func TestModelsReturnsOpenAICompatibleList(t *testing.T) {
 	}
 	if response.Object != "list" || len(response.Data) != 1 || response.Data[0].ID != "test-model" {
 		t.Fatalf("unexpected models response: %+v", response)
+	}
+}
+
+func TestRoutesExposePrometheusMetricsAndRequestID(t *testing.T) {
+	handler := Routes(NewHandler(modules.NewPipeline(nil), modelsProvider{}))
+	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent || recorder.Header().Get("X-Request-ID") == "" {
+		t.Fatalf("missing request observability headers: status=%d headers=%v", recorder.Code, recorder.Header())
+	}
+
+	metricsRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(metricsRecorder, metricsRequest)
+	body := metricsRecorder.Body.String()
+	if !strings.Contains(body, `ai_gateway_http_requests_total{method="GET",path="/healthz",status="204"} 1`) {
+		t.Fatalf("unexpected metrics output: %s", body)
+	}
+	if strings.Contains(body, `path="/metrics"`) {
+		t.Fatalf("metrics endpoint must not observe itself: %s", body)
+	}
+}
+
+func TestReadinessFailsWithoutLeakingDependencyError(t *testing.T) {
+	handler := Routes(NewHandlerWithReadiness(modules.NewPipeline(nil), modelsProvider{}, nil, func(context.Context) error {
+		return errors.New("redis password=super-secret")
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected unavailable readiness, got %d", recorder.Code)
+	}
+	if strings.Contains(recorder.Body.String(), "super-secret") {
+		t.Fatalf("readiness response leaked dependency error: %s", recorder.Body.String())
+	}
+}
+
+func TestModelGrantRejectsRequestBeforeProvider(t *testing.T) {
+	provider := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{
+		accessPolicyModule{models: []string{"allowed-model"}},
+	}), provider))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"blocked-model","messages":[{"role":"user","content":"hello"}]}`))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden || provider.request.Request.Model != "" {
+		t.Fatalf("expected grant rejection before provider, status=%d provider_request=%+v", recorder.Code, provider.request)
+	}
+}
+
+func TestRateLimitRejectsSecondRequest(t *testing.T) {
+	provider := &chatProvider{}
+	handler := Routes(NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{
+		accessPolicyModule{models: []string{"test-model"}, rpm: 1},
+	}), provider, NewMemoryRateLimitStore()))
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`))
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if attempt == 1 && recorder.Code != http.StatusOK {
+			t.Fatalf("first request failed: %d %s", recorder.Code, recorder.Body.String())
+		}
+		if attempt == 2 && (recorder.Code != http.StatusTooManyRequests || recorder.Header().Get("Retry-After") == "") {
+			t.Fatalf("second request should be rate-limited: %d %s", recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
+func TestBearerTokenIsClearedBeforeProviderPipeline(t *testing.T) {
+	provider := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{
+		modules.NewAuthModule(true),
+	}), provider))
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model": "test-model",
+		"messages": [{"role": "user", "content": "hello"}]
+	}`))
+	request.Header.Set("Authorization", "Bearer demo-admin-key")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected ok, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if provider.request.APIKey != "" {
+		t.Fatal("provider pipeline received client bearer token")
+	}
+	if provider.request.CredentialID == "" {
+		t.Fatal("provider pipeline did not receive safe credential fingerprint")
 	}
 }
 

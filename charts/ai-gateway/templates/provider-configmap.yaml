@@ -12,3 +12,4 @@ data:
   {{- $providers = append $providers (omit . "api_key") }}
   {{- end }}
   providers.json: {{ $providers | toJson | quote }}
+  guardrail-policies.json: {{ .Values.gateway.guardrailPolicies | toJson | quote }}

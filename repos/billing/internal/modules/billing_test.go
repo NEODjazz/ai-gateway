@@ -2,12 +2,50 @@ package modules
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
 	"time"
 
 	"ai-gateway-billing/internal/openai"
 )
+
+type recordingUsageWriter struct {
+	events []BillingEvent
+	err    error
+}
+
+type fakeDurableRepository struct {
+	seen   map[string]bool
+	events []BillingEvent
+}
+
+func (r *fakeDurableRepository) Ready(context.Context) error { return nil }
+
+func (r *fakeDurableRepository) Reserve(_ context.Context, event BillingEvent) (bool, error) {
+	if r.seen[event.EventID] {
+		return false, nil
+	}
+	r.seen[event.EventID] = true
+	return true, nil
+}
+
+func (r *fakeDurableRepository) Enqueue(_ context.Context, event BillingEvent) (bool, error) {
+	if r.seen[event.EventID] {
+		return false, nil
+	}
+	r.seen[event.EventID] = true
+	r.events = append(r.events, event)
+	return true, nil
+}
+
+func (w *recordingUsageWriter) WriteUsageEvent(_ context.Context, event BillingEvent) error {
+	if w.err != nil {
+		return w.err
+	}
+	w.events = append(w.events, event)
+	return nil
+}
 
 func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 	module := NewBillingModuleWithPricing(true, PricingConfig{
@@ -16,9 +54,9 @@ func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 		Currency:         "USD",
 	})
 	req := RequestContext{
-		APIKey: "secret-api-key",
-		UserID: "user-1",
-		Roles:  []string{"developer"},
+		CredentialID: "safe-fingerprint",
+		UserID:       "user-1",
+		Roles:        []string{"developer"},
 		Request: openai.ChatCompletionRequest{
 			Provider: "ollama",
 			Model:    "test-model",
@@ -63,7 +101,7 @@ func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 	if math.Abs(event.Cost-0.0028) > 0.0000001 {
 		t.Fatalf("unexpected cost: %.4f", event.Cost)
 	}
-	if event.APIKeyFingerprint == "" || event.APIKeyFingerprint == "secret-api-key" {
+	if event.APIKeyFingerprint != "safe-fingerprint" {
 		t.Fatalf("unexpected api key fingerprint: %s", event.APIKeyFingerprint)
 	}
 	if _, err := time.Parse(time.RFC3339, event.Timestamp); err != nil {
@@ -143,5 +181,99 @@ func TestBillingEstimatesMultipartMessageContent(t *testing.T) {
 	}
 	if req.Usage == nil || req.Usage.PromptTokens != 2 {
 		t.Fatalf("expected two prompt tokens from text part, got %+v", req.Usage)
+	}
+}
+
+func TestBillingLifecycleIsIdempotentPerRequestAndPhase(t *testing.T) {
+	writer := &recordingUsageWriter{}
+	module := BillingModule{required: true, pricing: PricingConfig{Currency: "USD"}, writer: writer, policy: NoopPolicyChecker{}, lifecycle: NewLifecycleStore()}
+	req := RequestContext{
+		RequestID: "req-idempotent", BillingPhase: "commit", PostResponse: true,
+		Request: openai.ChatCompletionRequest{Model: "model"},
+		Usage:   &openai.Usage{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5},
+	}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if len(writer.events) != 1 || req.Metadata["billing.idempotent_replay"] != "true" {
+		t.Fatalf("expected one committed event, got events=%d metadata=%+v", len(writer.events), req.Metadata)
+	}
+}
+
+func TestBillingFailedWriteCanBeRetried(t *testing.T) {
+	writer := &recordingUsageWriter{err: errors.New("temporary failure")}
+	module := BillingModule{required: true, pricing: PricingConfig{}, writer: writer, policy: NoopPolicyChecker{}, lifecycle: NewLifecycleStore()}
+	req := RequestContext{RequestID: "req-retry", BillingPhase: "commit", PostResponse: true}
+	if err := module.Handle(context.Background(), &req); err == nil {
+		t.Fatal("expected first write to fail")
+	}
+	writer.err = nil
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatalf("released idempotency key should allow retry: %v", err)
+	}
+	if len(writer.events) != 1 {
+		t.Fatalf("expected one successful event, got %d", len(writer.events))
+	}
+}
+
+func TestBillingCancelHasNoUsageOrCost(t *testing.T) {
+	writer := &recordingUsageWriter{}
+	module := BillingModule{required: true, pricing: PricingConfig{InputPricePer1K: 1, OutputPricePer1K: 1}, writer: writer, policy: NoopPolicyChecker{}, lifecycle: NewLifecycleStore()}
+	req := RequestContext{RequestID: "req-cancel", BillingPhase: "cancel", Usage: &openai.Usage{PromptTokens: 10, TotalTokens: 10}}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if len(writer.events) != 1 || writer.events[0].Phase != "cancel" || writer.events[0].TotalTokens != 0 || writer.events[0].Cost != 0 {
+		t.Fatalf("unexpected cancel event: %+v", writer.events)
+	}
+}
+
+func TestBillingCacheHitDoesNotChargeProviderTokens(t *testing.T) {
+	writer := &recordingUsageWriter{}
+	module := BillingModule{required: true, pricing: PricingConfig{InputPricePer1K: 1}, writer: writer, policy: NoopPolicyChecker{}, lifecycle: NewLifecycleStore()}
+	req := RequestContext{
+		RequestID: "req-cache-hit", BillingPhase: "commit", PostResponse: true,
+		Request:  openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "cached prompt"}}},
+		Metadata: map[string]string{"provider.cache.status": "hit"},
+	}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if len(writer.events) != 1 || writer.events[0].CacheStatus != "hit" || writer.events[0].TotalTokens != 0 || writer.events[0].Cost != 0 {
+		t.Fatalf("cache hit must not charge provider usage: %+v", writer.events)
+	}
+}
+
+func TestBillingUsesDurableRepositoryForIdempotentCommit(t *testing.T) {
+	repository := &fakeDurableRepository{seen: map[string]bool{}}
+	module := BillingModule{
+		required: true, pricing: PricingConfig{}, policy: NoopPolicyChecker{},
+		lifecycle: NewLifecycleStore(), durable: repository,
+	}
+	req := RequestContext{RequestID: "req-durable", BillingPhase: "commit", PostResponse: true}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if len(repository.events) != 1 || repository.events[0].EventID != "req-durable:commit" {
+		t.Fatalf("unexpected durable events: %+v", repository.events)
+	}
+	if req.Metadata["billing.idempotent_replay"] != "true" {
+		t.Fatalf("duplicate durable event was not identified: %+v", req.Metadata)
+	}
+}
+
+func TestDurableBillingFailsClosedWithoutPostgresDSN(t *testing.T) {
+	module := NewBillingModuleWithSettings(true, Settings{DurableOutboxEnabled: true})
+	if err := module.Ready(context.Background()); err == nil {
+		t.Fatal("durable billing must not report ready without PostgreSQL")
+	}
+	if err := module.Handle(context.Background(), &RequestContext{RequestID: "req"}); err == nil {
+		t.Fatal("durable billing must fail closed without PostgreSQL")
 	}
 }

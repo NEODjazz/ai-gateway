@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -136,7 +135,7 @@ func (p Anthropic) doMessages(ctx context.Context, request anthropicRequest, tar
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("anthropic provider returned %s", resp.Status)
+		return statusError("anthropic", resp.StatusCode)
 	}
 	return json.NewDecoder(resp.Body).Decode(target)
 }
@@ -159,7 +158,7 @@ func (p Anthropic) doMessagesStream(ctx context.Context, request anthropicReques
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
-		return nil, fmt.Errorf("anthropic provider returned %s", resp.Status)
+		return nil, statusError("anthropic", resp.StatusCode)
 	}
 	return resp, nil
 }

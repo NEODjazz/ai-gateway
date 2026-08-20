@@ -10,7 +10,13 @@ import (
 )
 
 type RequestContext struct {
-	APIKey              string                         `json:"api_key,omitempty"`
+	APIKey              string                         `json:"-"`
+	RequestID           string                         `json:"request_id,omitempty"`
+	CredentialID        string                         `json:"credential_id,omitempty"`
+	TeamID              string                         `json:"team_id,omitempty"`
+	AllowedModels       []string                       `json:"allowed_models,omitempty"`
+	RateLimitRPM        int                            `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM        int                            `json:"rate_limit_tpm,omitempty"`
 	UserID              string                         `json:"user_id,omitempty"`
 	Roles               []string                       `json:"roles,omitempty"`
 	Request             openai.ChatCompletionRequest   `json:"request"`
@@ -32,6 +38,11 @@ type PostResponseModule interface {
 	Module
 	PostResponseEnabled() bool
 	HandlePostResponse(ctx context.Context, req *RequestContext) error
+}
+
+type FailureModule interface {
+	Module
+	HandleFailure(ctx context.Context, req *RequestContext, cause error) error
 }
 
 type Pipeline struct {
@@ -68,6 +79,18 @@ func (p Pipeline) RunPostResponse(ctx context.Context, req *RequestContext) erro
 		}
 	}
 	return nil
+}
+
+func (p Pipeline) RunFailure(ctx context.Context, req *RequestContext, cause error) {
+	for _, module := range p.modules {
+		failureModule, ok := module.(FailureModule)
+		if !ok {
+			continue
+		}
+		if err := failureModule.HandleFailure(ctx, req, cause); err != nil {
+			log.Printf("failure hook %s skipped after error: %v", module.Name(), err)
+		}
+	}
 }
 
 var ErrUnauthorized = errors.New("unauthorized")

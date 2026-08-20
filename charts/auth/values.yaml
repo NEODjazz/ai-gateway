@@ -9,7 +9,7 @@ devMode:
   sourceHostPath: /mnt/c/tmp/ai-gateway
   image:
     repository: golang
-    tag: 1.22-alpine
+    tag: 1.26.7-alpine
     pullPolicy: IfNotPresent
 
 auth:
@@ -19,6 +19,15 @@ auth:
     secret: dev-jwt-secret
     issuer: ai-gateway
     audience: ai-gateway
+  # Production values should be supplied from an encrypted values source.
+  virtualKeys: []
+  # - token: replace-me
+  #   user_id: user-1
+  #   team_id: team-1
+  #   roles: [developer]
+  #   allowed_models: ["gpt-5.*"]
+  #   rate_limit_rpm: 60
+  #   rate_limit_tpm: 100000
 
 resources: {}
 

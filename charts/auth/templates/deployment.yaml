@@ -31,11 +31,19 @@ spec:
             - name: AI_GATEWAY_SERVICE
               value: auth
             - name: AUTH_JWT_SECRET
-              value: {{ .Values.auth.jwt.secret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "auth.fullname" . }}
+                  key: jwt-secret
             - name: AUTH_JWT_ISSUER
               value: {{ .Values.auth.jwt.issuer | quote }}
             - name: AUTH_JWT_AUDIENCE
               value: {{ .Values.auth.jwt.audience | quote }}
+            - name: AUTH_VIRTUAL_KEYS_JSON
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "auth.fullname" . }}
+                  key: virtual-keys.json
           readinessProbe:
             httpGet:
               path: /healthz

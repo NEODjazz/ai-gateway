@@ -11,6 +11,11 @@ import (
 
 type RequestContext struct {
 	APIKey              string                         `json:"api_key,omitempty"`
+	CredentialID        string                         `json:"credential_id,omitempty"`
+	TeamID              string                         `json:"team_id,omitempty"`
+	AllowedModels       []string                       `json:"allowed_models,omitempty"`
+	RateLimitRPM        int                            `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM        int                            `json:"rate_limit_tpm,omitempty"`
 	UserID              string                         `json:"user_id,omitempty"`
 	Roles               []string                       `json:"roles,omitempty"`
 	Request             openai.ChatCompletionRequest   `json:"request"`

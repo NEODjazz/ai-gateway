@@ -13,6 +13,9 @@ go run ./cmd/dlp
 - `GET /healthz`
 - `POST /scan`
 
+`POST /scan` accepts only `request_id` and a text projection in `content`; it
+does not receive bearer credentials, identity, or the complete gateway context.
+
 ## Configuration
 
 ```text

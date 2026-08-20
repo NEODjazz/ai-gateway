@@ -4,14 +4,29 @@ import (
 	"encoding/json"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 )
 
 type Config struct {
 	HTTP     HTTPConfig
+	Cache    CacheConfig
+	Redis    RedisConfig
 	Modules  ModuleConfig
 	Provider ProviderConfig
+}
+
+type CacheConfig struct {
+	TTLSeconds int
+	MaxBytes   int
+}
+
+type RedisConfig struct {
+	Addr     string
+	Password string
+	DB       int
+	Prefix   string
 }
 
 type HTTPConfig struct {
@@ -32,21 +47,34 @@ type FeatureConfig struct {
 }
 
 type ProviderConfig struct {
-	Default   string
-	Endpoints []ProviderEndpointConfig
+	Default           string
+	Endpoints         []ProviderEndpointConfig
+	GuardrailPolicies map[string]GuardrailPolicyConfig
+}
+
+type GuardrailPolicyConfig struct {
+	DLP bool `json:"dlp"`
+	AV  bool `json:"av"`
 }
 
 type ProviderEndpointConfig struct {
-	Name       string   `json:"name"`
-	Type       string   `json:"type"`
-	BaseURL    string   `json:"base_url"`
-	APIKey     string   `json:"api_key,omitempty"`
-	Models     []string `json:"models,omitempty"`
-	Enabled    *bool    `json:"enabled,omitempty"`
-	Priority   int      `json:"priority,omitempty"`
-	Stream     bool     `json:"stream,omitempty"`
-	DLPEnabled bool     `json:"dlp_enabled,omitempty"`
-	AVEnabled  bool     `json:"av_enabled,omitempty"`
+	Name                  string            `json:"name"`
+	Type                  string            `json:"type"`
+	BaseURL               string            `json:"base_url"`
+	APIKey                string            `json:"api_key,omitempty"`
+	Models                []string          `json:"models,omitempty"`
+	Enabled               *bool             `json:"enabled,omitempty"`
+	Priority              int               `json:"priority,omitempty"`
+	Stream                bool              `json:"stream,omitempty"`
+	DLPEnabled            bool              `json:"dlp_enabled,omitempty"`
+	AVEnabled             bool              `json:"av_enabled,omitempty"`
+	MaxRetries            int               `json:"max_retries,omitempty"`
+	CooldownAfterFailures int               `json:"cooldown_after_failures,omitempty"`
+	CooldownSeconds       int               `json:"cooldown_seconds,omitempty"`
+	GuardrailPolicy       string            `json:"guardrail_policy,omitempty"`
+	ModelAliases          map[string]string `json:"model_aliases,omitempty"`
+	Weight                int               `json:"weight,omitempty"`
+	Capabilities          []string          `json:"capabilities,omitempty"`
 }
 
 func Load() Config {
@@ -54,9 +82,18 @@ func Load() Config {
 		HTTP: HTTPConfig{
 			Addr: env("HTTP_ADDR", ":8080"),
 		},
+		Cache: CacheConfig{
+			TTLSeconds: envInt("EXACT_CACHE_TTL_SECONDS", 0),
+			MaxBytes:   envInt("EXACT_CACHE_MAX_BYTES", 1_048_576),
+		},
+		Redis: RedisConfig{
+			Addr: env("REDIS_ADDR", ""), Password: os.Getenv("REDIS_PASSWORD"),
+			DB: envInt("REDIS_DB", 0), Prefix: env("REDIS_PREFIX", "ai-gateway"),
+		},
 		Provider: ProviderConfig{
-			Default:   env("DEFAULT_PROVIDER", env("PROVIDER_TYPE", "demo")),
-			Endpoints: loadProviderEndpoints(),
+			Default:           env("DEFAULT_PROVIDER", env("PROVIDER_TYPE", "demo")),
+			Endpoints:         loadProviderEndpoints(),
+			GuardrailPolicies: loadGuardrailPolicies(),
 		},
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
@@ -81,6 +118,18 @@ func Load() Config {
 			},
 		},
 	}
+}
+
+func loadGuardrailPolicies() map[string]GuardrailPolicyConfig {
+	policies := map[string]GuardrailPolicyConfig{}
+	raw := strings.TrimSpace(os.Getenv("GUARDRAIL_POLICIES_JSON"))
+	if raw == "" {
+		return policies
+	}
+	if err := json.Unmarshal([]byte(raw), &policies); err != nil {
+		return map[string]GuardrailPolicyConfig{}
+	}
+	return policies
 }
 
 func loadProviderEndpoints() []ProviderEndpointConfig {
@@ -166,4 +215,16 @@ func envBool(key string, fallback bool) bool {
 		return fallback
 	}
 	return value == "true" || value == "1" || value == "yes"
+}
+
+func envInt(key string, fallback int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

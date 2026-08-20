@@ -25,19 +25,18 @@ func main() {
 	})
 
 	http.HandleFunc("/scan", func(w http.ResponseWriter, r *http.Request) {
-		var req modules.RequestContext
+		var req scanRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		payload := modules.ScanPayload(&req)
-		if strings.TrimSpace(payload) == "" {
-			_ = json.NewEncoder(w).Encode(req)
+		if strings.TrimSpace(req.Content) == "" {
+			_ = json.NewEncoder(w).Encode(scanResponse{Allowed: true})
 			return
 		}
 
-		if _, err := client.Scan(r.Context(), "dlp", []byte(payload)); err != nil {
+		if _, err := client.Scan(r.Context(), "dlp", []byte(req.Content)); err != nil {
 			if errors.Is(err, modules.ErrContentRejected) {
 				http.Error(w, err.Error(), http.StatusUnavailableForLegalReasons)
 				return
@@ -45,12 +44,21 @@ func main() {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(req)
+		_ = json.NewEncoder(w).Encode(scanResponse{Allowed: true})
 	})
 
 	addr := env("HTTP_ADDR", ":8084")
 	log.Printf("dlp listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, nil))
+}
+
+type scanRequest struct {
+	RequestID string `json:"request_id,omitempty"`
+	Content   string `json:"content"`
+}
+
+type scanResponse struct {
+	Allowed bool `json:"allowed"`
 }
 
 func env(key, fallback string) string {

@@ -4,21 +4,21 @@ import "strings"
 
 func Auth(required bool, url string) Module {
 	if url != "" {
-		return NewRemoteModule("auth", required, endpoint(url, "/authorize"))
+		return NewRemoteAuthModule(required, endpoint(url, "/authorize"))
 	}
 	return NewAuthModule(required)
 }
 
 func Anonymizer(required bool, url string) Module {
 	if url != "" {
-		return NewRemoteModule("anonymizer", required, endpoint(url, "/anonymize"))
+		return NewRemoteAnonymizerModule(required, endpoint(url, "/anonymize"))
 	}
 	return NewAnonymizerModule(required, AnonymizerRulesFromEnv()...)
 }
 
 func Billing(required bool, url string) Module {
 	if url != "" {
-		return NewRemotePostResponseModule("billing", required, endpoint(url, "/usage"))
+		return NewRemoteBillingModule(required, endpoint(url, "/usage"))
 	}
 	return NewBillingModule(required)
 }

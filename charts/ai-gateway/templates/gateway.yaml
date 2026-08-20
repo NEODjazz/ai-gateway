@@ -53,6 +53,27 @@ spec:
                 configMapKeyRef:
                   name: {{ include "ai-gateway.providerConfigName" . }}
                   key: providers.json
+            - name: GUARDRAIL_POLICIES_JSON
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ai-gateway.providerConfigName" . }}
+                  key: guardrail-policies.json
+            - name: EXACT_CACHE_TTL_SECONDS
+              value: {{ .Values.gateway.exactCache.ttlSeconds | quote }}
+            - name: EXACT_CACHE_MAX_BYTES
+              value: {{ printf "%.0f" (float64 .Values.gateway.exactCache.maxBytes) | quote }}
+            - name: REDIS_ADDR
+              value: {{ .Values.gateway.redis.addr | quote }}
+            - name: REDIS_DB
+              value: {{ .Values.gateway.redis.db | quote }}
+            - name: REDIS_PREFIX
+              value: {{ .Values.gateway.redis.prefix | quote }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gateway.providerSecretName" . }}
+                  key: REDIS_PASSWORD
+                  optional: true
             {{- range .Values.gateway.providers }}
             - name: {{ include "ai-gateway.providerApiKeyEnvName" . }}
               valueFrom:
@@ -85,7 +106,7 @@ spec:
               value: {{ ternary .Values.gateway.modules.av.url "" .Values.gateway.modules.av.remote | quote }}
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: http
           livenessProbe:
             httpGet:

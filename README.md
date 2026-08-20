@@ -17,7 +17,7 @@ The current processing levels are:
 ## Microservices
 
 - `gateway` — the central request entry point, OpenAI-compatible API, routing, and function pipeline.
-- `anonymizer` — replaces sensitive information and caches mappings in Redis.
+- `anonymizer` — replaces sensitive information with request-scoped placeholders.
 - `auth` — authorization, API keys, JWTs, roles, and permissions.
 - `billing` — tracks usage, tokens, and costs by user, key, model, and provider.
 - `dlp` — scans content for data leaks through ICAP.
@@ -136,6 +136,39 @@ gateway:
 ```
 
 The gateway tries endpoints in `priority` order. If an endpoint returns an error or is unavailable, the router automatically tries the next compatible endpoint.
+
+Retries and cooldown are configured per endpoint with `max_retries`,
+`cooldown_after_failures`, and `cooldown_seconds`. Only transient failures are
+retried on the same endpoint; invalid requests and content-policy rejections are
+terminal, and post-response failures never trigger a second model generation.
+
+The auth service supports virtual keys through `AUTH_VIRTUAL_KEYS_JSON` (Helm:
+`auth.virtualKeys`). Each key may define `team_id`, `roles`, `allowed_models`,
+`rate_limit_rpm`, and `rate_limit_tpm`. The gateway receives only the key
+fingerprint and policy, filters `/v1/models`, enforces model grants before the
+provider call, and applies the rate-limit policy through a replaceable atomic
+store interface. If `REDIS_ADDR` is configured, RPM/TPM admission is performed
+atomically in Redis; otherwise the gateway uses the process-local implementation.
+
+`GET /metrics` exposes Prometheus-format HTTP counters and duration sums. Every
+response carries `X-Request-ID`, and the gateway emits one JSON request log with
+the same ID, status, path, and duration. Named guardrail profiles are configured
+with `GUARDRAIL_POLICIES_JSON` (Helm: `gateway.guardrailPolicies`) and selected
+per endpoint with `guardrail_policy`; an endpoint referencing an unknown profile
+is skipped instead of running without the intended DLP/AV controls.
+
+Model groups use endpoint-specific `model_aliases`, for example
+`{"fast":"deployment-gpt-5-mini"}`. Endpoints at the same priority can set
+`weight`; routing uses weighted round-robin and preserves the remaining members
+as failover candidates. `capabilities` can restrict an endpoint to `chat`,
+`responses`, and/or `stream`.
+
+Exact caching is disabled by default and enabled with
+`EXACT_CACHE_TTL_SECONDS` (Helm: `gateway.exactCache.ttlSeconds`). It runs inside
+the provider pipeline: DLP/AV still execute, cached payloads are stored after
+anonymization, cache keys include the team or credential, and billing receives a
+cache-hit event with zero provider tokens. With `REDIS_ADDR`, cache entries are
+shared by gateway replicas; without it the cache is process-local.
 
 Request with an explicit provider:
 
@@ -338,7 +371,7 @@ cd repos/gateway
 go test ./...
 ```
 
-The shared contract (`RequestContext` and OpenAI-compatible DTOs) is currently duplicated across the services. The next step is to move it into a separate versioned module or repository, such as `ai-gateway-contracts`, so the DTOs do not need to be synchronized manually.
+OpenAI-compatible DTOs and the service-specific HTTP contracts are currently duplicated across the services. The next step is to move them into a separate versioned module or repository, such as `ai-gateway-contracts`, so the DTOs do not need to be synchronized manually. The internal gateway `RequestContext` is deliberately not a network contract: bearer credentials are sent only to auth, and every other service receives a minimal typed request.
 
 ## GitHub Actions and releases
 

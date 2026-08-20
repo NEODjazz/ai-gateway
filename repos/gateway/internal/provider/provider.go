@@ -2,10 +2,15 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
+	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
@@ -39,25 +44,40 @@ type StreamingResponseClient interface {
 var ErrStreamingUnsupported = errors.New("streaming unsupported")
 
 type Config struct {
-	Default   string
-	Endpoints []config.ProviderEndpointConfig
-	Modules   modules.Pipeline
+	Default           string
+	Endpoints         []config.ProviderEndpointConfig
+	GuardrailPolicies map[string]config.GuardrailPolicyConfig
+	Modules           modules.Pipeline
+	CacheTTL          time.Duration
+	CacheMaxBytes     int
+	CacheStore        ExactCacheStore
 }
 
 type Endpoint struct {
-	Name       string
-	Type       string
-	Models     []string
-	Priority   int
-	DLPEnabled bool
-	AVEnabled  bool
-	Provider   Client
+	Name                  string
+	Type                  string
+	Models                []string
+	Priority              int
+	DLPEnabled            bool
+	AVEnabled             bool
+	MaxRetries            int
+	CooldownAfterFailures int
+	Cooldown              time.Duration
+	GuardrailPolicy       string
+	GuardrailPolicyValid  bool
+	ModelAliases          map[string]string
+	Weight                int
+	Capabilities          []string
+	Provider              Client
 }
 
 type Router struct {
 	defaultProvider string
 	endpoints       []Endpoint
 	modules         modules.Pipeline
+	health          *endpointHealthTracker
+	routeCounter    *atomic.Uint64
+	cache           responseCache
 }
 
 func New(cfg Config) Provider {
@@ -72,14 +92,33 @@ func New(cfg Config) Provider {
 			continue
 		}
 
+		dlpEnabled := endpoint.DLPEnabled
+		avEnabled := endpoint.AVEnabled
+		policyValid := true
+		if endpoint.GuardrailPolicy != "" {
+			policy, found := cfg.GuardrailPolicies[endpoint.GuardrailPolicy]
+			policyValid = found
+			if found {
+				dlpEnabled = policy.DLP
+				avEnabled = policy.AV
+			}
+		}
 		endpoints = append(endpoints, Endpoint{
-			Name:       endpoint.Name,
-			Type:       endpoint.Type,
-			Models:     endpoint.Models,
-			Priority:   endpoint.Priority,
-			DLPEnabled: endpoint.DLPEnabled,
-			AVEnabled:  endpoint.AVEnabled,
-			Provider:   provider,
+			Name:                  endpoint.Name,
+			Type:                  endpoint.Type,
+			Models:                endpoint.Models,
+			Priority:              endpoint.Priority,
+			DLPEnabled:            dlpEnabled,
+			AVEnabled:             avEnabled,
+			MaxRetries:            endpoint.MaxRetries,
+			CooldownAfterFailures: endpoint.CooldownAfterFailures,
+			Cooldown:              time.Duration(endpoint.CooldownSeconds) * time.Second,
+			GuardrailPolicy:       endpoint.GuardrailPolicy,
+			GuardrailPolicyValid:  policyValid,
+			ModelAliases:          endpoint.ModelAliases,
+			Weight:                endpoint.Weight,
+			Capabilities:          endpoint.Capabilities,
+			Provider:              provider,
 		})
 	}
 
@@ -95,45 +134,92 @@ func New(cfg Config) Provider {
 		defaultProvider: cfg.Default,
 		endpoints:       endpoints,
 		modules:         cfg.Modules,
+		health:          newEndpointHealthTracker(),
+		routeCounter:    &atomic.Uint64{},
+		cache:           newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
 	}
 }
 
 func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
 	request := req.Request
-	candidates := r.candidates(request)
+	candidates := r.candidates(request, "chat")
 	if len(candidates) == 0 {
 		return openai.ChatCompletionResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 
 	var errs []error
+	var lastAttempt *modules.RequestContext
 	for _, endpoint := range candidates {
 		attemptCtx := providerAttemptContext(req, endpoint)
+		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
+			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
+			continue
+		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
+			if errors.Is(err, modules.ErrContentRejected) || ctx.Err() != nil {
+				return openai.ChatCompletionResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			}
 			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
 			continue
 		}
 
-		response, err := endpoint.Provider.ChatCompletions(ctx, attemptCtx.Request)
+		started := time.Now()
+		lastAttempt = &attemptCtx
+		cacheKey := providerCacheKey("chat", attemptCtx)
+		if payload, found, cacheErr := r.cacheGet(ctx, cacheKey); found {
+			if response, ok := decodeCached[openai.ChatCompletionResponse](payload); ok {
+				attemptCtx.Metadata["provider.cache.status"] = "hit"
+				attemptCtx.Metadata["provider.status"] = "ok"
+				attemptCtx.Metadata["provider.latency_ms"] = "0"
+				response.Usage = openai.Usage{}
+				attemptCtx.Response = &response
+				if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
+					return openai.ChatCompletionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+				}
+				modules.DeanonymizeResponse(&attemptCtx, &response)
+				return response, nil
+			}
+		} else if cacheErr != nil {
+			attemptCtx.Metadata["provider.cache.status"] = "error"
+			log.Printf("provider cache get failed: %v", cacheErr)
+		}
+		response, err := r.callChat(ctx, endpoint, attemptCtx.Request)
+		setAttemptMetadata(&attemptCtx, started, err)
 		if err == nil {
+			attemptCtx.Metadata["provider.cache.status"] = "miss"
+			if payload, marshalErr := json.Marshal(response); marshalErr == nil {
+				if cacheErr := r.cacheSet(ctx, cacheKey, payload); cacheErr != nil {
+					attemptCtx.Metadata["provider.cache.status"] = "error"
+					log.Printf("provider cache set failed: %v", cacheErr)
+				}
+			}
 			mergeChatUsage(&response, attemptCtx.Usage)
 			attemptCtx.Response = &response
 			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
-				errs = append(errs, fmt.Errorf("%s/%s post-response modules failed: %w", endpoint.Type, endpoint.Name, err))
-				continue
+				return openai.ChatCompletionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 			}
 			modules.DeanonymizeResponse(&attemptCtx, &response)
 			return response, nil
 		}
 		errs = append(errs, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err))
+		if ctx.Err() != nil || !tryNextEndpoint(err) {
+			joined := errors.Join(errs...)
+			r.modules.RunFailure(ctx, lastAttempt, joined)
+			return openai.ChatCompletionResponse{}, joined
+		}
 	}
 
-	return openai.ChatCompletionResponse{}, errors.Join(errs...)
+	joined := errors.Join(errs...)
+	if lastAttempt != nil {
+		r.modules.RunFailure(ctx, lastAttempt, joined)
+	}
+	return openai.ChatCompletionResponse{}, joined
 }
 
 func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestContext, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, bool, error) {
 	request := req.Request
 	request.Stream = true
-	candidates := r.candidates(request)
+	candidates := r.candidates(request, "chat", "stream")
 	if len(candidates) == 0 {
 		return openai.ChatCompletionResponse{}, false, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -146,24 +232,36 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		}
 
 		attemptCtx := providerAttemptContext(req, endpoint)
+		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
+			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
+			continue
+		}
 		attemptCtx.Request.Stream = true
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
+			if errors.Is(err, modules.ErrContentRejected) || ctx.Err() != nil {
+				return openai.ChatCompletionResponse{}, false, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			}
 			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
 			continue
 		}
 
+		started := time.Now()
 		response, err := streamingProvider.StreamChatCompletions(ctx, attemptCtx.Request, write)
+		setAttemptMetadata(&attemptCtx, started, err)
 		if errors.Is(err, ErrStreamingUnsupported) {
 			continue
 		}
 		if err != nil {
+			r.health.failure(endpoint, err)
+			r.modules.RunFailure(ctx, &attemptCtx, err)
 			return openai.ChatCompletionResponse{}, true, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err)
 		}
+		r.health.success(endpoint)
 
 		mergeChatUsage(&response, attemptCtx.Usage)
 		attemptCtx.Response = &response
 		if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
-			return openai.ChatCompletionResponse{}, true, fmt.Errorf("%s/%s post-response modules failed: %w", endpoint.Type, endpoint.Name, err)
+			return openai.ChatCompletionResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 		}
 		modules.DeanonymizeResponse(&attemptCtx, &response)
 		return response, true, nil
@@ -180,34 +278,78 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		return openai.ResponseResponse{}, errors.New("missing response request")
 	}
 	request := *req.ResponseRequest
-	candidates := r.responseCandidates(request)
+	candidates := r.responseCandidates(request, "responses")
 	if len(candidates) == 0 {
 		return openai.ResponseResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 
 	var errs []error
+	var lastAttempt *modules.RequestContext
 	for _, endpoint := range candidates {
 		attemptCtx := providerAttemptContext(req, endpoint)
+		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
+			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
+			continue
+		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
+			if errors.Is(err, modules.ErrContentRejected) || ctx.Err() != nil {
+				return openai.ResponseResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			}
 			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
 			continue
 		}
 
-		response, err := endpoint.Provider.Responses(ctx, *attemptCtx.ResponseRequest)
+		started := time.Now()
+		lastAttempt = &attemptCtx
+		cacheKey := providerCacheKey("responses", attemptCtx)
+		if payload, found, cacheErr := r.cacheGet(ctx, cacheKey); found {
+			if response, ok := decodeCached[openai.ResponseResponse](payload); ok {
+				attemptCtx.Metadata["provider.cache.status"] = "hit"
+				attemptCtx.Metadata["provider.status"] = "ok"
+				attemptCtx.Metadata["provider.latency_ms"] = "0"
+				response.Usage = openai.ResponseUsage{}
+				attemptCtx.ResponsesResponse = &response
+				if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
+					return openai.ResponseResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+				}
+				modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
+				return response, nil
+			}
+		} else if cacheErr != nil {
+			attemptCtx.Metadata["provider.cache.status"] = "error"
+			log.Printf("provider cache get failed: %v", cacheErr)
+		}
+		response, err := r.callResponses(ctx, endpoint, *attemptCtx.ResponseRequest)
+		setAttemptMetadata(&attemptCtx, started, err)
 		if err == nil {
+			attemptCtx.Metadata["provider.cache.status"] = "miss"
+			if payload, marshalErr := json.Marshal(response); marshalErr == nil {
+				if cacheErr := r.cacheSet(ctx, cacheKey, payload); cacheErr != nil {
+					attemptCtx.Metadata["provider.cache.status"] = "error"
+					log.Printf("provider cache set failed: %v", cacheErr)
+				}
+			}
 			mergeResponseUsage(&response, attemptCtx.Usage)
 			attemptCtx.ResponsesResponse = &response
 			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
-				errs = append(errs, fmt.Errorf("%s/%s post-response modules failed: %w", endpoint.Type, endpoint.Name, err))
-				continue
+				return openai.ResponseResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 			}
 			modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
 			return response, nil
 		}
 		errs = append(errs, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err))
+		if ctx.Err() != nil || !tryNextEndpoint(err) {
+			joined := errors.Join(errs...)
+			r.modules.RunFailure(ctx, lastAttempt, joined)
+			return openai.ResponseResponse{}, joined
+		}
 	}
 
-	return openai.ResponseResponse{}, errors.Join(errs...)
+	joined := errors.Join(errs...)
+	if lastAttempt != nil {
+		r.modules.RunFailure(ctx, lastAttempt, joined)
+	}
+	return openai.ResponseResponse{}, joined
 }
 
 func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext, write ResponseStreamWriter) (openai.ResponseResponse, bool, error) {
@@ -216,7 +358,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 	}
 	request := *req.ResponseRequest
 	request.Stream = true
-	candidates := r.responseCandidates(request)
+	candidates := r.responseCandidates(request, "responses", "stream")
 	if len(candidates) == 0 {
 		return openai.ResponseResponse{}, false, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -229,24 +371,36 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		}
 
 		attemptCtx := providerAttemptContext(req, endpoint)
+		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
+			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
+			continue
+		}
 		attemptCtx.ResponseRequest.Stream = true
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
+			if errors.Is(err, modules.ErrContentRejected) || ctx.Err() != nil {
+				return openai.ResponseResponse{}, false, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			}
 			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
 			continue
 		}
 
+		started := time.Now()
 		response, err := streamingProvider.StreamResponses(ctx, *attemptCtx.ResponseRequest, write)
+		setAttemptMetadata(&attemptCtx, started, err)
 		if errors.Is(err, ErrStreamingUnsupported) {
 			continue
 		}
 		if err != nil {
+			r.health.failure(endpoint, err)
+			r.modules.RunFailure(ctx, &attemptCtx, err)
 			return openai.ResponseResponse{}, true, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err)
 		}
+		r.health.success(endpoint)
 
 		mergeResponseUsage(&response, attemptCtx.Usage)
 		attemptCtx.ResponsesResponse = &response
 		if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
-			return openai.ResponseResponse{}, true, fmt.Errorf("%s/%s post-response modules failed: %w", endpoint.Type, endpoint.Name, err)
+			return openai.ResponseResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 		}
 		modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
 		return response, true, nil
@@ -262,7 +416,10 @@ func (r Router) Models() []openai.Model {
 	seen := map[string]bool{}
 	models := make([]openai.Model, 0)
 	for _, endpoint := range r.endpoints {
-		modelIDs := endpoint.Models
+		modelIDs := append([]string(nil), endpoint.Models...)
+		for alias := range endpoint.ModelAliases {
+			modelIDs = append(modelIDs, alias)
+		}
 		if len(modelIDs) == 0 {
 			modelIDs = []string{endpoint.Name}
 		}
@@ -299,6 +456,15 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 	for key, value := range providerMetadata(endpoint) {
 		attemptCtx.Metadata[key] = value
 	}
+	requestedModel := attemptCtx.Request.Model
+	if upstreamModel, found := endpoint.ModelAliases[requestedModel]; found {
+		attemptCtx.Request.Model = upstreamModel
+		if attemptCtx.ResponseRequest != nil {
+			attemptCtx.ResponseRequest.Model = upstreamModel
+		}
+		attemptCtx.Metadata["provider.requested_model"] = requestedModel
+		attemptCtx.Metadata["provider.upstream_model"] = upstreamModel
+	}
 	return attemptCtx
 }
 
@@ -316,6 +482,8 @@ func providerMetadata(endpoint Endpoint) map[string]string {
 		"provider.endpoint.type":       endpoint.Type,
 		"provider.modules.dlp.enabled": boolString(endpoint.DLPEnabled),
 		"provider.modules.av.enabled":  boolString(endpoint.AVEnabled),
+		"provider.guardrail.policy":    endpoint.GuardrailPolicy,
+		"provider.guardrail.valid":     boolString(endpoint.GuardrailPolicy == "" || endpoint.GuardrailPolicyValid),
 	}
 }
 
@@ -324,6 +492,56 @@ func boolString(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	var response openai.ChatCompletionResponse
+	var err error
+	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
+		response, err = endpoint.Provider.ChatCompletions(ctx, request)
+		if err == nil {
+			r.health.success(endpoint)
+			return response, nil
+		}
+		if ctx.Err() != nil || attempt == endpoint.MaxRetries || !retrySameEndpoint(err) {
+			break
+		}
+	}
+	r.health.failure(endpoint, err)
+	return openai.ChatCompletionResponse{}, err
+}
+
+func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request openai.ResponseRequest) (openai.ResponseResponse, error) {
+	var response openai.ResponseResponse
+	var err error
+	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
+		response, err = endpoint.Provider.Responses(ctx, request)
+		if err == nil {
+			r.health.success(endpoint)
+			return response, nil
+		}
+		if ctx.Err() != nil || attempt == endpoint.MaxRetries || !retrySameEndpoint(err) {
+			break
+		}
+	}
+	r.health.failure(endpoint, err)
+	return openai.ResponseResponse{}, err
+}
+
+func setAttemptMetadata(req *modules.RequestContext, started time.Time, err error) {
+	if req.Metadata == nil {
+		req.Metadata = map[string]string{}
+	}
+	req.Metadata["provider.latency_ms"] = strconv.FormatInt(time.Since(started).Milliseconds(), 10)
+	if err == nil {
+		req.Metadata["provider.status"] = "ok"
+		delete(req.Metadata, "provider.error")
+		delete(req.Metadata, "provider.failure_class")
+		return
+	}
+	req.Metadata["provider.status"] = "error"
+	req.Metadata["provider.error"] = err.Error()
+	req.Metadata["provider.failure_class"] = string(failureClass(err))
 }
 
 func mergeChatUsage(response *openai.ChatCompletionResponse, usage *openai.Usage) {
@@ -342,7 +560,7 @@ func mergeResponseUsage(response *openai.ResponseResponse, usage *openai.Usage) 
 	response.Usage.TotalTokens += usage.PromptTokens
 }
 
-func (r Router) candidates(request openai.ChatCompletionRequest) []Endpoint {
+func (r Router) candidates(request openai.ChatCompletionRequest, capabilities ...string) []Endpoint {
 	requestedProvider := strings.TrimSpace(request.Provider)
 	filterByProvider := requestedProvider != ""
 	if requestedProvider == "" && strings.TrimSpace(request.Model) == "" {
@@ -352,27 +570,36 @@ func (r Router) candidates(request openai.ChatCompletionRequest) []Endpoint {
 
 	var candidates []Endpoint
 	for _, endpoint := range r.endpoints {
+		if !r.health.available(endpoint) {
+			continue
+		}
 		if filterByProvider && requestedProvider != "auto" && requestedProvider != endpoint.Name && requestedProvider != endpoint.Type {
 			continue
 		}
 		if !endpoint.supportsModel(request.Model) {
 			continue
 		}
+		if !endpoint.supportsCapabilities(capabilities...) {
+			continue
+		}
 		candidates = append(candidates, endpoint)
 	}
 
-	return candidates
+	return r.weightedOrder(candidates)
 }
 
-func (r Router) responseCandidates(request openai.ResponseRequest) []Endpoint {
+func (r Router) responseCandidates(request openai.ResponseRequest, capabilities ...string) []Endpoint {
 	chatRequest := openai.ChatCompletionRequest{
 		Provider: request.Provider,
 		Model:    request.Model,
 	}
-	return r.candidates(chatRequest)
+	return r.candidates(chatRequest, capabilities...)
 }
 
 func (e Endpoint) supportsModel(model string) bool {
+	if _, found := e.ModelAliases[model]; found {
+		return true
+	}
 	if len(e.Models) == 0 {
 		return true
 	}
@@ -382,6 +609,62 @@ func (e Endpoint) supportsModel(model string) bool {
 		}
 	}
 	return false
+}
+
+func (e Endpoint) supportsCapabilities(required ...string) bool {
+	if len(e.Capabilities) == 0 {
+		return true
+	}
+	available := map[string]bool{}
+	for _, capability := range e.Capabilities {
+		available[capability] = true
+	}
+	for _, capability := range required {
+		if !available[capability] {
+			return false
+		}
+	}
+	return true
+}
+
+func (r Router) weightedOrder(candidates []Endpoint) []Endpoint {
+	if len(candidates) < 2 || r.routeCounter == nil {
+		return candidates
+	}
+	ordered := make([]Endpoint, 0, len(candidates))
+	for start := 0; start < len(candidates); {
+		end := start + 1
+		for end < len(candidates) && candidates[end].Priority == candidates[start].Priority {
+			end++
+		}
+		group := candidates[start:end]
+		total := 0
+		for _, endpoint := range group {
+			weight := endpoint.Weight
+			if weight <= 0 {
+				weight = 1
+			}
+			total += weight
+		}
+		slot := int((r.routeCounter.Add(1) - 1) % uint64(total))
+		selected := 0
+		for index, endpoint := range group {
+			weight := endpoint.Weight
+			if weight <= 0 {
+				weight = 1
+			}
+			if slot < weight {
+				selected = index
+				break
+			}
+			slot -= weight
+		}
+		ordered = append(ordered, group[selected])
+		ordered = append(ordered, group[:selected]...)
+		ordered = append(ordered, group[selected+1:]...)
+		start = end
+	}
+	return ordered
 }
 
 func providerFor(endpoint config.ProviderEndpointConfig) Client {

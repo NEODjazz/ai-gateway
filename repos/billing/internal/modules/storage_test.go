@@ -3,11 +3,27 @@ package modules
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+type retryWriter struct {
+	attempts int
+	done     chan BillingEvent
+}
+
+func (w *retryWriter) WriteUsageEvent(_ context.Context, event BillingEvent) error {
+	w.attempts++
+	if w.attempts == 1 {
+		return errors.New("temporary")
+	}
+	w.done <- event
+	return nil
+}
 
 func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 	var receivedQuery string
@@ -49,6 +65,23 @@ func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 	}
 	if receivedEvent.Timestamp != "2026-06-25T10:30:00Z" {
 		t.Fatalf("unexpected timestamp: %+v", receivedEvent)
+	}
+}
+
+func TestAsyncUsageOutboxRetriesDelivery(t *testing.T) {
+	writer := &retryWriter{done: make(chan BillingEvent, 1)}
+	outbox := NewAsyncUsageOutbox(writer, 1, 2)
+	event := BillingEvent{RequestID: "req-async", Phase: "commit"}
+	if err := outbox.WriteUsageEvent(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case delivered := <-writer.done:
+		if delivered.RequestID != event.RequestID || writer.attempts != 2 {
+			t.Fatalf("unexpected delivery: %+v attempts=%d", delivered, writer.attempts)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for async retry")
 	}
 }
 

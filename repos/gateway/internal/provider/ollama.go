@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -71,7 +70,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ChatCompletionResponse{}, fmt.Errorf("ollama returned %s", resp.Status)
+		return openai.ChatCompletionResponse{}, statusError("ollama", resp.StatusCode)
 	}
 
 	var ollamaResp ollamaChatResponse
@@ -130,7 +129,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ChatCompletionResponse{}, fmt.Errorf("ollama returned %s", resp.Status)
+		return openai.ChatCompletionResponse{}, statusError("ollama", resp.StatusCode)
 	}
 
 	response := openai.ChatCompletionResponse{
@@ -223,7 +222,7 @@ func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ResponseResponse{}, fmt.Errorf("ollama responses returned %s", resp.Status)
+		return openai.ResponseResponse{}, statusError("ollama", resp.StatusCode)
 	}
 
 	var response openai.ResponseResponse
@@ -263,7 +262,7 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ResponseResponse{}, fmt.Errorf("ollama responses returned %s", resp.Status)
+		return openai.ResponseResponse{}, statusError("ollama", resp.StatusCode)
 	}
 
 	return streamResponseData(resp.Body, request.Model, write)

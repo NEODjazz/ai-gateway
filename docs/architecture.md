@@ -31,8 +31,8 @@ flowchart LR
     DlpIcap["DLP ICAP server"]
     AvIcap["Antivirus ICAP server"]
     ClickHouse[("ClickHouse<br/>usage_events")]
-    Redis[("Redis<br/>reserved for anonymizer vault")]
-    Postgres[("PostgreSQL<br/>reserved for financial core")]
+    Redis[("Redis<br/>gateway limits + exact cache")]
+    Postgres[("PostgreSQL<br/>billing ledger + durable outbox")]
 
     Client -->|"OpenAI-compatible HTTP/SSE"| Gateway
     Gateway -->|"POST /authorize"| Auth
@@ -47,8 +47,8 @@ flowchart LR
     DLP -->|"ICAP REQMOD"| DlpIcap
     AV -->|"ICAP REQMOD"| AvIcap
     Billing -->|"JSONEachRow over HTTP"| ClickHouse
-    Anonymizer -. "not implemented" .-> Redis
-    Billing -. "policy store not implemented" .-> Postgres
+    Gateway -->|"atomic limits + cache"| Redis
+    Billing -->|"ledger + outbox"| Postgres
 ```
 
 ## Сервисы и ответственность
@@ -59,10 +59,10 @@ flowchart LR
 | Auth | `GET /healthz`, `POST /authorize` | Demo API keys и HS256 JWT; заполняет `UserID` и `Roles` |
 | DLP | `GET /healthz`, `POST /scan` | Извлекает текст запроса и отправляет его в настроенный ICAP-сервис через `REQMOD` |
 | AV | `GET /healthz`, `POST /scan` | Аналогичный HTTP-to-ICAP адаптер для антивирусной проверки |
-| Anonymizer | `GET /healthz`, `POST /anonymize` | Маскирует значения по настраиваемым RE2-правилам и возвращает placeholder map в `RequestContext` |
+| Anonymizer | `GET /healthz`, `POST /anonymize` | Маскирует значения по настраиваемым RE2-правилам и возвращает преобразованный контент с placeholder map |
 | Billing | `GET /healthz`, `POST /usage` | Оценивает/собирает tokens и cost, создает billing event, после ответа пишет usage event в ClickHouse |
 
-Сервисы обмениваются целиком сериализованным `RequestContext`. В нем находятся исходный Chat Completions request или Responses request, identity, metadata выбранного endpoint, usage, ответы и request-local `AnonymizationValues`.
+`RequestContext` существует только внутри gateway. Между сервисами используются отдельные минимальные DTO: исходный bearer token получает только auth, DLP/AV получают текстовую проекцию, anonymizer — маскируемые поля, а billing — identity fingerprint, provider metadata и счетчики tokens без prompt/response content. Ответ каждого сервиса применяется к локальному контексту по явному allowlist полей.
 
 ## Обработка запроса
 
@@ -81,25 +81,25 @@ sequenceDiagram
     participant CH as ClickHouse
 
     C->>G: /v1/chat/completions or /v1/responses
-    G->>A: POST /authorize (RequestContext)
+    G->>A: POST /authorize (token only)
     A-->>G: identity + roles
     loop each compatible endpoint by priority
         opt dlp_enabled
-            G->>D: POST /scan
+            G->>D: POST /scan (text projection)
             D-->>G: accepted context or 451/error
         end
         opt av_enabled
-            G->>V: POST /scan
+            G->>V: POST /scan (text projection)
             V-->>G: accepted context or 451/error
         end
-        G->>N: POST /anonymize
+        G->>N: POST /anonymize (maskable content only)
         N-->>G: masked request + placeholder map
-        G->>B: POST /usage (pre-response)
+        G->>B: POST /usage (identity fingerprint + counters)
         B-->>G: prompt estimate / policy result
         G->>P: provider-specific request
         alt provider succeeded
             P-->>G: response + optional usage
-            G->>B: POST /usage (post-response)
+            G->>B: POST /usage (usage counters, no content)
             B->>CH: insert usage event
             B-->>G: enriched context
             G->>G: deanonymize response
@@ -143,6 +143,15 @@ Auth находится в gateway-level pipeline и выполняется од
 - `auth`, `anonymizer` и `billing` используют удаленный HTTP-сервис, если задан соответствующий `*_URL`; без URL gateway создает локальную реализацию.
 - `dlp` и `av` реализованы только как удаленные адаптеры. Они пропускаются, когда выключены для endpoint; включенный endpoint без URL дает ошибку модуля.
 - HTTP timeout удаленного модуля в gateway — 2 секунды. Timeout ICAP-клиента DLP/AV настраивается отдельно и по умолчанию равен 5 секундам.
+
+### Межсервисные границы данных
+
+- `auth`: получает `{token}` и возвращает `user_id`, `roles`, `credential_id`; после auth gateway очищает bearer из request context.
+- `dlp` / `av`: получают только `request_id` и текстовую проекцию запроса.
+- `anonymizer`: получает только messages/input/instructions и возвращает преобразованные поля с placeholder map.
+- `billing`: получает identity, необратимый `credential_id`, provider/model metadata и token counters; prompt и provider response не передаются.
+
+HTTP-ответы модулей декодируются в типизированные DTO, поэтому удаленный сервис не может перезаписать identity, routing metadata или исходный запрос целиком.
 
 ## Маршрутизация и failover
 
@@ -198,6 +207,7 @@ Helm chart передает anonymizer переменную `REDIS_ADDR` и от
 ### Billing state
 
 - ClickHouse используется как append-only хранилище `usage_events` через HTTP insert в `JSONEachRow`, когда `BILLING_USAGE_EVENTS_ENABLED=true`.
+- Billing использует lifecycle `reserve -> commit/cancel`. При `BILLING_DURABLE_OUTBOX_ENABLED=true` ledger и outbox транзакционно сохраняются в PostgreSQL. Worker использует `SKIP LOCKED`, stale-lock recovery и backoff; `event_id=request_id:phase` дедуплицирует enqueue между репликами и рестартами. Доставка в ClickHouse имеет семантику at-least-once, поэтому точный финансовый расчет должен дедуплицировать события по `event_id`.
 - Если provider вернул usage, billing использует его; иначе оценивает input по тексту и считает output равным нулю.
 - PostgreSQL и миграция financial core подготовлены для tariffs, limits, quotas и financial transactions.
 - PostgreSQL policy checker пока не реализован. Включение любой из этих функций приводит к отказу billing request, даже если `POSTGRES_DSN` задан.
@@ -232,8 +242,9 @@ flowchart TB
     Gw --> DlpSvc
     Gw --> AvSvc
     Billing --> ChSvc
-    Anon -. "REDIS_ADDR only; client not implemented" .-> RedisSvc
-    Billing -. "reserved; policy client not implemented" .-> PgSvc
+    Gw -->|"rate limits + exact cache"| RedisSvc
+    Billing -->|"durable outbox"| PgSvc
+    Anon -. "vault client not implemented" .-> RedisSvc
     DLP --> DlpIcap["External DLP ICAP"]
     AV --> AvIcap["External AV ICAP"]
     Gw --> Providers["External / host AI providers"]
@@ -269,8 +280,8 @@ Provider API keys не хранятся в `PROVIDERS_JSON`: chart создае�
 ## Известные границы текущей реализации
 
 - Нет Redis-backed anonymization vault; placeholder map request-local.
-- Нет реализации PostgreSQL policy/financial store, несмотря на schema и deployment.
+- PostgreSQL policy/financial checker для tariffs/quotas пока не реализован; durable billing outbox уже используется.
 - Deanonymization не применяется к уже отправленным streaming chunks.
 - DLP/AV сканируют текстовую проекцию запроса, а не произвольные бинарные вложения.
-- Content rejection завершает attempt, но router может попробовать следующий endpoint; одинаковая security policy на всех fallback endpoints — ответственность конфигурации.
-- Метрики, tracing, rate limiting и distributed request IDs в текущем коде отсутствуют.
+- Content rejection является terminal и не запускает fallback на другой endpoint.
+- Есть HTTP-метрики, JSON-логи и distributed request IDs; полноценный OpenTelemetry tracing пока не добавлен.

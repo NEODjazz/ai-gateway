@@ -7,7 +7,6 @@ import (
 )
 
 type RequestContext struct {
-	APIKey          string                       `json:"api_key,omitempty"`
 	UserID          string                       `json:"user_id,omitempty"`
 	Roles           []string                     `json:"roles,omitempty"`
 	Request         openai.ChatCompletionRequest `json:"request"`

@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"ai-gateway-anonymizer/internal/modules"
+	"ai-gateway-anonymizer/internal/openai"
 )
 
 func main() {
@@ -28,18 +29,41 @@ func main() {
 	})
 
 	http.HandleFunc("/anonymize", func(w http.ResponseWriter, r *http.Request) {
-		var ctx modules.RequestContext
-		if err := json.NewDecoder(r.Body).Decode(&ctx); err != nil {
+		var request anonymizeRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+		ctx := modules.RequestContext{Request: openai.ChatCompletionRequest{Messages: request.Messages}}
+		if request.Input != nil || request.Instructions != "" {
+			ctx.ResponseRequest = &openai.ResponseRequest{Input: request.Input, Instructions: request.Instructions}
 		}
 		if err := module.Handle(r.Context(), &ctx); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(ctx)
+		response := anonymizeResponse{Messages: ctx.Request.Messages, Replacements: ctx.AnonymizationValues}
+		if ctx.ResponseRequest != nil {
+			response.Input = ctx.ResponseRequest.Input
+			response.Instructions = ctx.ResponseRequest.Instructions
+		}
+		_ = json.NewEncoder(w).Encode(response)
 	})
 
 	log.Println("anonymizer listening on :8081")
 	log.Fatal(http.ListenAndServe(":8081", nil))
+}
+
+type anonymizeRequest struct {
+	RequestID    string           `json:"request_id,omitempty"`
+	Messages     []openai.Message `json:"messages,omitempty"`
+	Input        any              `json:"input,omitempty"`
+	Instructions string           `json:"instructions,omitempty"`
+}
+
+type anonymizeResponse struct {
+	Messages     []openai.Message  `json:"messages,omitempty"`
+	Input        any               `json:"input,omitempty"`
+	Instructions string            `json:"instructions,omitempty"`
+	Replacements map[string]string `json:"replacements,omitempty"`
 }

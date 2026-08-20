@@ -7,7 +7,7 @@ devMode:
   sourceHostPath: /mnt/c/tmp/ai-gateway
   image:
     repository: golang
-    tag: 1.22-alpine
+    tag: 1.26.7-alpine
     pullPolicy: IfNotPresent
 
 dlp:

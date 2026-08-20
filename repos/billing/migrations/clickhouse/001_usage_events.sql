@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS ai_gateway.usage_events
 (
     timestamp String,
     timestamp_unix UInt64 DEFAULT toUnixTimestamp(parseDateTimeBestEffort(timestamp)),
+    event_id String,
     request_id String,
     user_id String,
     roles Array(String),
@@ -13,6 +14,8 @@ CREATE TABLE IF NOT EXISTS ai_gateway.usage_events
     provider_endpoint_type String,
     model String,
     api_type LowCardinality(String),
+    phase LowCardinality(String),
+    cache_status LowCardinality(String),
     status LowCardinality(String),
     error String,
     latency_ms UInt32,
@@ -33,3 +36,12 @@ ALTER TABLE ai_gateway.usage_events
 
 ALTER TABLE ai_gateway.usage_events
     MODIFY COLUMN IF EXISTS timestamp_unix UInt64 DEFAULT toUnixTimestamp(parseDateTimeBestEffort(timestamp));
+
+ALTER TABLE ai_gateway.usage_events
+    ADD COLUMN IF NOT EXISTS event_id String AFTER timestamp_unix;
+
+ALTER TABLE ai_gateway.usage_events
+    ADD COLUMN IF NOT EXISTS phase LowCardinality(String) AFTER api_type;
+
+ALTER TABLE ai_gateway.usage_events
+    ADD COLUMN IF NOT EXISTS cache_status LowCardinality(String) AFTER phase;

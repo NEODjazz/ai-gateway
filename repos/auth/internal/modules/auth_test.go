@@ -70,6 +70,27 @@ func TestAuthModuleRejectsInvalidJWTSignature(t *testing.T) {
 	}
 }
 
+func TestAuthModuleAppliesVirtualKeyPolicy(t *testing.T) {
+	module := NewAuthModuleWithVirtualKeys(true, []VirtualKey{{
+		Token: "tenant-secret", UserID: "user-7", TeamID: "team-blue",
+		Roles: []string{"developer"}, AllowedModels: []string{"gpt-5.*"},
+		RateLimitRPM: 10, RateLimitTPM: 5000,
+	}})
+	req := RequestContext{APIKey: "tenant-secret"}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.UserID != "user-7" || req.TeamID != "team-blue" || req.RateLimitRPM != 10 || req.RateLimitTPM != 5000 {
+		t.Fatalf("unexpected virtual key policy: %+v", req)
+	}
+	if strings.Join(req.AllowedModels, ",") != "gpt-5.*" || req.APIKey != "" || req.CredentialID == "" {
+		t.Fatalf("virtual key was not safely applied: %+v", req)
+	}
+	if stored := module.virtualKeys[req.CredentialID]; stored.Token != "" {
+		t.Fatal("virtual key plaintext must not remain in the in-memory index")
+	}
+}
+
 func TestAuthRequestContextAcceptsMultipartMessageContent(t *testing.T) {
 	payload := []byte(`{
 		"api_key": "demo-admin-key",

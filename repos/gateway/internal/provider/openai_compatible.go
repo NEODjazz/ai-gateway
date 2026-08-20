@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -82,7 +81,7 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ChatCompletionResponse{}, fmt.Errorf("openai-compatible provider returned %s", resp.Status)
+		return openai.ChatCompletionResponse{}, statusError("openai-compatible", resp.StatusCode)
 	}
 
 	if request.Stream && p.upstreamStream {
@@ -129,7 +128,7 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ChatCompletionResponse{}, fmt.Errorf("openai-compatible provider returned %s", resp.Status)
+		return openai.ChatCompletionResponse{}, statusError("openai-compatible", resp.StatusCode)
 	}
 
 	return streamChatCompletionData(resp.Body, request.Model, write)
@@ -166,7 +165,7 @@ func (p OpenAICompatible) Responses(ctx context.Context, request openai.Response
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ResponseResponse{}, fmt.Errorf("responses provider returned %s", resp.Status)
+		return openai.ResponseResponse{}, statusError("openai-compatible", resp.StatusCode)
 	}
 
 	var response openai.ResponseResponse
@@ -212,7 +211,7 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ResponseResponse{}, fmt.Errorf("responses provider returned %s", resp.Status)
+		return openai.ResponseResponse{}, statusError("openai-compatible", resp.StatusCode)
 	}
 
 	return streamResponseData(resp.Body, request.Model, write)

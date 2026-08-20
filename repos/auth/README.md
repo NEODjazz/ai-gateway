@@ -13,6 +13,10 @@ go run ./cmd/auth
 - `GET /healthz`
 - `POST /authorize`
 
+`POST /authorize` accepts only `{ "token": "..." }` and returns `user_id`,
+`roles`, and an irreversible `credential_id`. The bearer token is never echoed
+in the response or forwarded to another module.
+
 ## JWT
 
 Supported algorithm: `HS256`.

@@ -3,6 +3,7 @@ package modules
 import (
 	"os"
 	"strconv"
+	"time"
 )
 
 type Settings struct {
@@ -18,6 +19,8 @@ type Settings struct {
 	QuotasEnabled                bool
 	FinancialTransactionsEnabled bool
 	PostgresDSN                  string
+	DurableOutboxEnabled         bool
+	OutboxPollInterval           time.Duration
 }
 
 func SettingsFromEnv() Settings {
@@ -34,7 +37,21 @@ func SettingsFromEnv() Settings {
 		QuotasEnabled:                envBool("BILLING_QUOTAS_ENABLED", false),
 		FinancialTransactionsEnabled: envBool("BILLING_FINANCIAL_TRANSACTIONS_ENABLED", false),
 		PostgresDSN:                  os.Getenv("POSTGRES_DSN"),
+		DurableOutboxEnabled:         envBool("BILLING_DURABLE_OUTBOX_ENABLED", false),
+		OutboxPollInterval:           time.Duration(envInt("BILLING_OUTBOX_POLL_MS", 500)) * time.Millisecond,
 	}
+}
+
+func envInt(key string, fallback int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func env(key string, fallback string) string {

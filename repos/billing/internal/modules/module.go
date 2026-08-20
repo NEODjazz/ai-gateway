@@ -10,20 +10,25 @@ import (
 )
 
 type RequestContext struct {
-	APIKey              string                         `json:"api_key,omitempty"`
-	UserID              string                         `json:"user_id,omitempty"`
-	Roles               []string                       `json:"roles,omitempty"`
-	Request             openai.ChatCompletionRequest   `json:"request"`
-	ResponseRequest     *openai.ResponseRequest        `json:"response_request,omitempty"`
-	Response            *openai.ChatCompletionResponse `json:"response,omitempty"`
-	ResponsesResponse   *openai.ResponseResponse       `json:"responses_response,omitempty"`
-	Usage               *openai.Usage                  `json:"usage,omitempty"`
-	BillingEvent        *BillingEvent                  `json:"billing_event,omitempty"`
-	Metadata            map[string]string              `json:"metadata,omitempty"`
-	AnonymizationValues map[string]string              `json:"anonymization_values,omitempty"`
+	CredentialID          string                         `json:"credential_id,omitempty"`
+	RequestID             string                         `json:"request_id,omitempty"`
+	PromptTokensEstimated int                            `json:"prompt_tokens_estimated,omitempty"`
+	PostResponse          bool                           `json:"post_response,omitempty"`
+	BillingPhase          string                         `json:"billing_phase,omitempty"`
+	UserID                string                         `json:"user_id,omitempty"`
+	Roles                 []string                       `json:"roles,omitempty"`
+	Request               openai.ChatCompletionRequest   `json:"request"`
+	ResponseRequest       *openai.ResponseRequest        `json:"response_request,omitempty"`
+	Response              *openai.ChatCompletionResponse `json:"response,omitempty"`
+	ResponsesResponse     *openai.ResponseResponse       `json:"responses_response,omitempty"`
+	Usage                 *openai.Usage                  `json:"usage,omitempty"`
+	BillingEvent          *BillingEvent                  `json:"billing_event,omitempty"`
+	Metadata              map[string]string              `json:"metadata,omitempty"`
+	AnonymizationValues   map[string]string              `json:"anonymization_values,omitempty"`
 }
 
 type BillingEvent struct {
+	EventID               string   `json:"event_id,omitempty"`
 	RequestID             string   `json:"request_id,omitempty"`
 	UserID                string   `json:"user_id,omitempty"`
 	Roles                 []string `json:"roles,omitempty"`
@@ -33,9 +38,11 @@ type BillingEvent struct {
 	ProviderEndpointType  string   `json:"provider_endpoint_type,omitempty"`
 	Model                 string   `json:"model,omitempty"`
 	APIType               string   `json:"api_type,omitempty"`
+	Phase                 string   `json:"phase"`
 	Status                string   `json:"status,omitempty"`
 	Error                 string   `json:"error,omitempty"`
 	LatencyMS             int      `json:"latency_ms,omitempty"`
+	CacheStatus           string   `json:"cache_status,omitempty"`
 	PromptTokensEstimated int      `json:"prompt_tokens_estimated"`
 	InputTokens           int      `json:"input_tokens"`
 	OutputTokens          int      `json:"output_tokens"`

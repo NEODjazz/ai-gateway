@@ -8,7 +8,7 @@ devMode:
   sourceHostPath: /mnt/c/tmp/ai-gateway
   image:
     repository: golang
-    tag: 1.22-alpine
+    tag: 1.26.7-alpine
     pullPolicy: IfNotPresent
 
 billing:
@@ -16,6 +16,9 @@ billing:
   port: 8083
   usageEvents:
     enabled: true
+  durableOutbox:
+    enabled: true
+    pollMilliseconds: 500
   clickhouse:
     url: http://ai-gateway-clickhouse:8123
     database: ai_gateway

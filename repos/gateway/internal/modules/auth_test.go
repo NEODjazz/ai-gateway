@@ -68,6 +68,23 @@ func TestAuthModuleRejectsInvalidJWTSignature(t *testing.T) {
 	}
 }
 
+func TestAuthModuleAppliesVirtualKeyPolicy(t *testing.T) {
+	module := NewAuthModuleWithVirtualKeys(true, []VirtualKey{{
+		Token: "tenant-secret", UserID: "user-7", TeamID: "team-blue",
+		AllowedModels: []string{"gpt-5.*"}, RateLimitRPM: 10, RateLimitTPM: 5000,
+	}})
+	req := RequestContext{APIKey: "tenant-secret"}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.UserID != "user-7" || req.TeamID != "team-blue" || req.RateLimitRPM != 10 || req.RateLimitTPM != 5000 {
+		t.Fatalf("unexpected virtual key policy: %+v", req)
+	}
+	if strings.Join(req.AllowedModels, ",") != "gpt-5.*" || req.APIKey != "" || req.CredentialID == "" {
+		t.Fatalf("virtual key was not safely applied: %+v", req)
+	}
+}
+
 func testJWT(t *testing.T, secret string, claims map[string]any) string {
 	t.Helper()
 	header := map[string]any{"alg": "HS256", "typ": "JWT"}

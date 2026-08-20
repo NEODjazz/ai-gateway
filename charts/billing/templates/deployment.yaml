@@ -33,6 +33,10 @@ spec:
             - {name: AI_GATEWAY_SERVICE, value: billing}
             - name: BILLING_USAGE_EVENTS_ENABLED
               value: {{ .Values.billing.usageEvents.enabled | quote }}
+            - name: BILLING_DURABLE_OUTBOX_ENABLED
+              value: {{ .Values.billing.durableOutbox.enabled | quote }}
+            - name: BILLING_OUTBOX_POLL_MS
+              value: {{ .Values.billing.durableOutbox.pollMilliseconds | quote }}
             - name: CLICKHOUSE_URL
               value: {{ .Values.billing.clickhouse.url | quote }}
             - name: CLICKHOUSE_DATABASE
@@ -62,7 +66,7 @@ spec:
           readinessProbe:
             httpGet: {path: /healthz, port: http}
           livenessProbe:
-            httpGet: {path: /healthz, port: http}
+            httpGet: {path: /livez, port: http}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if .Values.devMode.enabled }}

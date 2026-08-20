@@ -13,6 +13,10 @@ go run ./cmd/anonymizer
 - `GET /healthz`
 - `POST /anonymize`
 
+The endpoint accepts only maskable content (`messages`, Responses API `input`
+and `instructions`) plus `request_id`. It does not receive bearer credentials or
+user identity.
+
 ## Rules
 
 Configure with `ANONYMIZER_RULES`, for example:

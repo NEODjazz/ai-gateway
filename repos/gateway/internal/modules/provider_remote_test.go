@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -12,8 +13,9 @@ import (
 
 func TestProviderRemoteModuleSkipsDisabledProvider(t *testing.T) {
 	called := false
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		called = true
+		_ = json.NewEncoder(w).Encode(ScanResponse{Allowed: true})
 	}))
 	defer server.Close()
 
@@ -51,10 +53,40 @@ func TestRemoteModuleMapsContentRejected(t *testing.T) {
 	}))
 	defer server.Close()
 
-	module := NewRemoteModule("dlp", false, server.URL)
-	err := module.Handle(context.Background(), &RequestContext{})
+	_, err := callRemote[ScanRequest, ScanResponse](context.Background(), newRemoteHTTPClient(), server.URL, ScanRequest{})
 	if !errors.Is(err, ErrContentRejected) {
 		t.Fatalf("expected content rejected error, got %v", err)
+	}
+}
+
+func TestProviderRemoteModuleDoesNotSendBearerToken(t *testing.T) {
+	const bearer = "super-secret-bearer-token"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if _, found := body["api_key"]; found {
+			t.Fatal("provider module request must not contain api_key")
+		}
+		if _, found := body["user_id"]; found {
+			t.Fatal("scan module request must not contain identity")
+		}
+		_ = json.NewEncoder(w).Encode(ScanResponse{Allowed: true})
+	}))
+	defer server.Close()
+
+	module := NewProviderRemoteModule("dlp", true, server.URL)
+	err := module.Handle(context.Background(), &RequestContext{
+		APIKey: bearer,
+		UserID: "user-1",
+		Metadata: map[string]string{
+			"provider.modules.dlp.enabled": "true",
+		},
+		Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "hello"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -24,3 +24,7 @@ Provider-level modules:
 - `dlp`
 - `av`
 - `billing`
+
+The internal `RequestContext` is not serialized between services. Each remote
+module has a minimal typed contract; only auth receives the client bearer token,
+which gateway clears before provider-level processing.
