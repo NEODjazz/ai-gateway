@@ -172,3 +172,22 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 		t.Fatalf("expected output content to be restored: %s", response.Output[0].Content[0].Text)
 	}
 }
+
+func TestAnonymizerProtectsToolArgumentsAndRestoresToolResponse(t *testing.T) {
+	module := NewAnonymizerModule(true, RuleEmail)
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{
+		Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call-1", Type: "function", Function: openai.FunctionCall{Name: "send", Arguments: `{"email":"user@example.com"}`}}},
+	}}}}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	masked := req.Request.Messages[0].ToolCalls[0].Function.Arguments
+	if !strings.Contains(masked, "{{EMAIL_1}}") {
+		t.Fatalf("tool arguments were not anonymized: %s", masked)
+	}
+	response := openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{ToolCalls: []openai.ToolCall{{Function: openai.FunctionCall{Arguments: `{"email":"{{EMAIL_1}}"}`}}}}}}}
+	DeanonymizeResponse(&req, &response)
+	if !strings.Contains(response.Choices[0].Message.ToolCalls[0].Function.Arguments, "user@example.com") {
+		t.Fatalf("tool arguments were not restored: %+v", response)
+	}
+}

@@ -8,8 +8,23 @@ type ChatCompletionRequest struct {
 }
 
 type Message struct {
-	Role    string `json:"role"`
-	Content any    `json:"content"`
+	Role       string     `json:"role"`
+	Content    any        `json:"content"`
+	Name       string     `json:"name,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+}
+
+type ToolCall struct {
+	Index    *int         `json:"index,omitempty"`
+	ID       string       `json:"id,omitempty"`
+	Type     string       `json:"type"`
+	Function FunctionCall `json:"function"`
+}
+
+type FunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type ChatCompletionResponse struct {
@@ -92,6 +107,11 @@ func ContentText(value any) string {
 	case map[string]any:
 		if text, ok := typed["text"].(string); ok {
 			return text
+		}
+		for _, key := range []string{"arguments", "output", "content"} {
+			if part := ContentText(typed[key]); part != "" {
+				return part
+			}
 		}
 		if _, ok := typed["type"]; ok {
 			return ""

@@ -282,6 +282,7 @@ Provider API keys не хранятся в `PROVIDERS_JSON`: chart создае�
 - Нет Redis-backed anonymization vault; placeholder map request-local.
 - PostgreSQL policy/financial checker для tariffs/quotas пока не реализован; durable billing outbox уже используется.
 - Deanonymization не применяется к уже отправленным streaming chunks.
+- Tool/function arguments входят в DLP/AV text projection и anonymization pipeline; JSON Schema инструмента не изменяется.
 - DLP/AV сканируют текстовую проекцию запроса, а не произвольные бинарные вложения.
 - Content rejection является terminal и не запускает fallback на другой endpoint.
 - Есть HTTP-метрики, JSON-логи и distributed request IDs; полноценный OpenTelemetry tracing пока не добавлен.

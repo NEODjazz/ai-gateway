@@ -51,6 +51,30 @@ func TestRemoteAnonymizerDoesNotReceiveBearerOrIdentity(t *testing.T) {
 	}
 }
 
+func TestRemoteAnonymizerPreservesToolCallContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request AnonymizeRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if len(request.Messages) != 1 || len(request.Messages[0].ToolCalls) != 1 {
+			t.Fatalf("tool call was not sent to anonymizer: %+v", request)
+		}
+		request.Messages[0].ToolCalls[0].Function.Arguments = `{"email":"{{EMAIL_1}}"}`
+		_ = json.NewEncoder(w).Encode(AnonymizeResponse{Messages: request.Messages, Replacements: map[string]string{"{{EMAIL_1}}": "user@example.com"}})
+	}))
+	defer server.Close()
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{
+		Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call-1", Type: "function", Function: openai.FunctionCall{Name: "send", Arguments: `{"email":"user@example.com"}`}}},
+	}}}}
+	if err := NewRemoteAnonymizerModule(true, server.URL).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Request.Messages[0].ToolCalls[0].Function.Arguments; got != `{"email":"{{EMAIL_1}}"}` {
+		t.Fatalf("unexpected masked tool arguments: %s", got)
+	}
+}
+
 func TestRemoteBillingReceivesCredentialIDButNotBearer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any

@@ -15,23 +15,34 @@ import (
 )
 
 type openAICompatibleChatRequest struct {
-	Model       string           `json:"model"`
-	Messages    []openai.Message `json:"messages"`
-	Stream      bool             `json:"stream,omitempty"`
-	MaxTokens   *int             `json:"max_tokens,omitempty"`
-	Temperature *float64         `json:"temperature,omitempty"`
-	TopP        *float64         `json:"top_p,omitempty"`
+	Model             string                 `json:"model"`
+	Messages          []openai.Message       `json:"messages"`
+	Tools             []openai.Tool          `json:"tools,omitempty"`
+	ToolChoice        any                    `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool                  `json:"parallel_tool_calls,omitempty"`
+	ResponseFormat    *openai.ResponseFormat `json:"response_format,omitempty"`
+	Stream            bool                   `json:"stream,omitempty"`
+	MaxTokens         *int                   `json:"max_tokens,omitempty"`
+	Temperature       *float64               `json:"temperature,omitempty"`
+	TopP              *float64               `json:"top_p,omitempty"`
+	Stop              any                    `json:"stop,omitempty"`
+	Seed              *int64                 `json:"seed,omitempty"`
 }
 
 type openAICompatibleResponseRequest struct {
-	Model           string   `json:"model"`
-	Input           any      `json:"input"`
-	Instructions    string   `json:"instructions,omitempty"`
-	Stream          bool     `json:"stream,omitempty"`
-	MaxOutputTokens *int     `json:"max_output_tokens,omitempty"`
-	MaxTokens       *int     `json:"max_tokens,omitempty"`
-	Temperature     *float64 `json:"temperature,omitempty"`
-	TopP            *float64 `json:"top_p,omitempty"`
+	Model             string                `json:"model"`
+	Input             any                   `json:"input"`
+	Instructions      string                `json:"instructions,omitempty"`
+	Tools             []openai.ResponseTool `json:"tools,omitempty"`
+	ToolChoice        any                   `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool                 `json:"parallel_tool_calls,omitempty"`
+	Text              any                   `json:"text,omitempty"`
+	PreviousResponse  string                `json:"previous_response_id,omitempty"`
+	Stream            bool                  `json:"stream,omitempty"`
+	MaxOutputTokens   *int                  `json:"max_output_tokens,omitempty"`
+	MaxTokens         *int                  `json:"max_tokens,omitempty"`
+	Temperature       *float64              `json:"temperature,omitempty"`
+	TopP              *float64              `json:"top_p,omitempty"`
 }
 
 type OpenAICompatible struct {
@@ -54,12 +65,11 @@ func NewOpenAICompatible(baseURL string, apiKey string, upstreamStream bool) Ope
 
 func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	body, err := json.Marshal(openAICompatibleChatRequest{
-		Model:       request.Model,
-		Messages:    request.Messages,
-		Stream:      request.Stream && p.upstreamStream,
-		MaxTokens:   request.MaxTokens,
-		Temperature: request.Temperature,
-		TopP:        request.TopP,
+		Model: request.Model, Messages: request.Messages, Tools: request.Tools,
+		ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
+		ResponseFormat: request.ResponseFormat, Stream: request.Stream && p.upstreamStream,
+		MaxTokens: request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP,
+		Stop: request.Stop, Seed: request.Seed,
 	})
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -101,12 +111,11 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 	}
 
 	body, err := json.Marshal(openAICompatibleChatRequest{
-		Model:       request.Model,
-		Messages:    request.Messages,
-		Stream:      true,
-		MaxTokens:   request.MaxTokens,
-		Temperature: request.Temperature,
-		TopP:        request.TopP,
+		Model: request.Model, Messages: request.Messages, Tools: request.Tools,
+		ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
+		ResponseFormat: request.ResponseFormat, Stream: true,
+		MaxTokens: request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP,
+		Stop: request.Stop, Seed: request.Seed,
 	})
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -136,14 +145,11 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 
 func (p OpenAICompatible) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Model:           request.Model,
-		Input:           request.Input,
-		Instructions:    request.Instructions,
-		Stream:          false,
-		MaxOutputTokens: request.MaxOutputTokens,
-		MaxTokens:       request.MaxTokens,
-		Temperature:     request.Temperature,
-		TopP:            request.TopP,
+		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
+		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
+		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: false,
+		MaxOutputTokens: request.MaxOutputTokens, MaxTokens: request.MaxTokens,
+		Temperature: request.Temperature, TopP: request.TopP,
 	})
 	if err != nil {
 		return openai.ResponseResponse{}, err
@@ -182,14 +188,11 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 	}
 
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Model:           request.Model,
-		Input:           request.Input,
-		Instructions:    request.Instructions,
-		Stream:          true,
-		MaxOutputTokens: request.MaxOutputTokens,
-		MaxTokens:       request.MaxTokens,
-		Temperature:     request.Temperature,
-		TopP:            request.TopP,
+		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
+		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
+		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: true,
+		MaxOutputTokens: request.MaxOutputTokens, MaxTokens: request.MaxTokens,
+		Temperature: request.Temperature, TopP: request.TopP,
 	})
 	if err != nil {
 		return openai.ResponseResponse{}, err
@@ -278,8 +281,9 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			Choices []struct {
 				Index int `json:"index"`
 				Delta struct {
-					Role    string `json:"role"`
-					Content string `json:"content"`
+					Role      string            `json:"role"`
+					Content   string            `json:"content"`
+					ToolCalls []openai.ToolCall `json:"tool_calls,omitempty"`
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
@@ -305,6 +309,7 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			if choice.Delta.Content != "" {
 				current.Message.Content = openai.ContentText(current.Message.Content) + choice.Delta.Content
 			}
+			mergeToolCallDeltas(&current.Message.ToolCalls, choice.Delta.ToolCalls)
 			if choice.FinishReason != nil && *choice.FinishReason != "" {
 				current.FinishReason = *choice.FinishReason
 			}
@@ -318,6 +323,29 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 		return openai.ChatCompletionResponse{}, err
 	}
 	return response, nil
+}
+
+func mergeToolCallDeltas(target *[]openai.ToolCall, deltas []openai.ToolCall) {
+	for order, delta := range deltas {
+		index := order
+		if delta.Index != nil && *delta.Index >= 0 {
+			index = *delta.Index
+		}
+		for len(*target) <= index {
+			*target = append(*target, openai.ToolCall{Type: "function"})
+		}
+		current := &(*target)[index]
+		if delta.ID != "" {
+			current.ID = delta.ID
+		}
+		if delta.Type != "" {
+			current.Type = delta.Type
+		}
+		if delta.Function.Name != "" {
+			current.Function.Name += delta.Function.Name
+		}
+		current.Function.Arguments += delta.Function.Arguments
+	}
 }
 
 func decodeResponseStream(body io.Reader, fallbackModel string) (openai.ResponseResponse, error) {
@@ -352,9 +380,26 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			response.ID = id
 		}
 		if delta, ok := decoded["delta"].(string); ok {
-			response.OutputText += delta
-			textSlot := ensureResponseOutputTextSlot(&response)
-			textSlot.Text += delta
+			switch event {
+			case "response.function_call_arguments.delta":
+				item := ensureResponseOutputItem(&response, responseOutputIndex(decoded))
+				item.Type = "function_call"
+				item.Arguments += delta
+			default:
+				response.OutputText += delta
+				textSlot := ensureResponseOutputTextSlot(&response)
+				textSlot.Text += delta
+			}
+		}
+		if itemValue, ok := decoded["item"].(map[string]any); ok {
+			marshaled, err := json.Marshal(itemValue)
+			if err != nil {
+				return err
+			}
+			item := ensureResponseOutputItem(&response, responseOutputIndex(decoded))
+			if err := json.Unmarshal(marshaled, item); err != nil {
+				return err
+			}
 		}
 		if typed, ok := decoded["response"].(map[string]any); ok {
 			marshaled, err := json.Marshal(typed)
@@ -381,6 +426,20 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 		response.OutputText = responseText(response)
 	}
 	return response, nil
+}
+
+func responseOutputIndex(decoded map[string]any) int {
+	if value, ok := decoded["output_index"].(float64); ok && value >= 0 {
+		return int(value)
+	}
+	return 0
+}
+
+func ensureResponseOutputItem(response *openai.ResponseResponse, index int) *openai.ResponseOutputItem {
+	for len(response.Output) <= index {
+		response.Output = append(response.Output, openai.ResponseOutputItem{})
+	}
+	return &response.Output[index]
 }
 
 func sseData(body io.Reader) []string {

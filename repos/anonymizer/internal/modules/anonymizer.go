@@ -73,6 +73,9 @@ func (m AnonymizerModule) Required() bool {
 func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 	for index := range req.Request.Messages {
 		req.Request.Messages[index].Content = m.anonymizeAny(req, req.Request.Messages[index].Content)
+		for callIndex := range req.Request.Messages[index].ToolCalls {
+			req.Request.Messages[index].ToolCalls[callIndex].Function.Arguments = m.anonymize(req, req.Request.Messages[index].ToolCalls[callIndex].Function.Arguments)
+		}
 	}
 	if req.ResponseRequest != nil {
 		req.ResponseRequest.Input = m.anonymizeAny(req, req.ResponseRequest.Input)
@@ -165,6 +168,9 @@ func DeanonymizeResponse(req *RequestContext, response *openai.ChatCompletionRes
 
 	for index := range response.Choices {
 		response.Choices[index].Message.Content = DeanonymizeAny(response.Choices[index].Message.Content, req.AnonymizationValues)
+		for callIndex := range response.Choices[index].Message.ToolCalls {
+			response.Choices[index].Message.ToolCalls[callIndex].Function.Arguments = DeanonymizeText(response.Choices[index].Message.ToolCalls[callIndex].Function.Arguments, req.AnonymizationValues)
+		}
 	}
 }
 

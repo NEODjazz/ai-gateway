@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"ai-gateway-gateway/internal/openai"
@@ -31,6 +32,16 @@ func TestProviderRemoteModuleSkipsDisabledProvider(t *testing.T) {
 	}
 	if called {
 		t.Fatal("remote module should not be called for disabled provider")
+	}
+}
+
+func TestScanPayloadIncludesToolArgumentsAndResponseFunctionOutput(t *testing.T) {
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{
+		Role: "assistant", ToolCalls: []openai.ToolCall{{Function: openai.FunctionCall{Arguments: `{"email":"user@example.com"}`}}},
+	}}}, ResponseRequest: &openai.ResponseRequest{Input: []any{map[string]any{"type": "function_call_output", "output": "secret-result"}}}}
+	payload := scanPayload(&req)
+	if !strings.Contains(payload, "user@example.com") || !strings.Contains(payload, "secret-result") {
+		t.Fatalf("tool content missing from scan projection: %s", payload)
 	}
 }
 

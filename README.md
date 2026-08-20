@@ -99,7 +99,9 @@ Invoke-RestMethod -Method Post http://127.0.0.1:18080/v1/responses `
   -Body '{"provider":"ollama","model":"lfm2.5-thinking:1.2b","input":"Reply with exactly this text and nothing else: user@example.com"}'
 ```
 
-For `/v1/responses`, the gateway uses the same flow: gateway-level authentication, provider routing and failover, provider-level anonymization, DLP, antivirus, and billing, followed by response deanonymization. Basic text support is currently implemented for `input`, `instructions`, `max_output_tokens`, `output_text`, and `output[].content[].text`. Streaming and tools will be added as a separate layer.
+For `/v1/responses`, the gateway uses the same flow: gateway-level authentication, provider routing and failover, provider-level anonymization, DLP, antivirus, and billing, followed by response deanonymization. The contract supports text input/output, function tools and tool choice, structured `text.format`, `previous_response_id`, and streamed function-call argument events.
+
+`/v1/chat/completions` forwards OpenAI function tools, tool choice, parallel-tool policy, stop/seed, and JSON object or JSON Schema response formats. Anthropic tool definitions, calls, results, and forced structured outputs are translated to and from its native content blocks; Ollama receives its native `tools` and `format` fields. Tool arguments are included in the DLP/AV text projection and anonymized independently of the tool schema.
 
 ### Multiple providers and failover
 

@@ -160,9 +160,9 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	var payloads []string
 	provider := NewOpenAICompatible(server.URL, "", true)
 	response, err := provider.StreamResponses(context.Background(), openai.ResponseRequest{
-		Model:  "test-model",
-		Input:  "hello",
-		Stream: true,
+		Model: "test-model", Input: "hello", Stream: true, PreviousResponse: "resp-previous",
+		Tools: []openai.ResponseTool{{Type: "function", Name: "weather", Parameters: map[string]any{"type": "object"}}},
+		ToolChoice: "auto", Text: map[string]any{"format": map[string]any{"type": "json_object"}},
 	}, func(event string, payload string) error {
 		events = append(events, event)
 		payloads = append(payloads, payload)
@@ -174,6 +174,9 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	if !upstreamRequest.Stream {
 		t.Fatal("expected responses upstream stream to be enabled")
 	}
+	if upstreamRequest.PreviousResponse != "resp-previous" || len(upstreamRequest.Tools) != 1 || upstreamRequest.Tools[0].Name != "weather" || upstreamRequest.Text == nil {
+		t.Fatalf("responses tools/state/format were not forwarded: %+v", upstreamRequest)
+	}
 	if len(payloads) != 4 {
 		t.Fatalf("expected four streamed payloads, got %d: %v", len(payloads), payloads)
 	}
@@ -182,5 +185,57 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	}
 	if response.OutputText != "hello" {
 		t.Fatalf("expected collected output_text, got %q", response.OutputText)
+	}
+}
+
+func TestOpenAICompatibleForwardsToolsAndStructuredOutput(t *testing.T) {
+	var upstream openAICompatibleChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
+			ID: "chat-tools", Object: "chat.completion", Model: upstream.Model,
+			Choices: []openai.Choice{{Index: 0, FinishReason: "tool_calls", Message: openai.Message{
+				Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call-1", Type: "function", Function: openai.FunctionCall{Name: "weather", Arguments: `{"city":"Moscow"}`}}},
+			}}},
+		})
+	}))
+	defer server.Close()
+
+	strict := true
+	response, err := NewOpenAICompatible(server.URL, "", false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{
+		Model: "test-model", Messages: []openai.Message{{Role: "user", Content: "weather"}},
+		Tools:      []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object"}}}},
+		ToolChoice: "required", ParallelToolCalls: &strict,
+		ResponseFormat: &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "weather_result", Schema: map[string]any{"type": "object"}, Strict: &strict}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(upstream.Tools) != 1 || upstream.Tools[0].Function.Name != "weather" || upstream.ToolChoice != "required" || upstream.ResponseFormat == nil {
+		t.Fatalf("tool contract was not forwarded: %+v", upstream)
+	}
+	if len(response.Choices[0].Message.ToolCalls) != 1 || response.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"city":"Moscow"}` {
+		t.Fatalf("tool response was not preserved: %+v", response)
+	}
+}
+
+func TestOpenAICompatibleCollectsStreamingToolCallArguments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chat-tools\",\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"weather\",\"arguments\":\"{\\\"city\\\":\"}}]},\"finish_reason\":null}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chat-tools\",\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"Moscow\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	response, err := NewOpenAICompatible(server.URL, "", true).StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "test-model"}, func(string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := response.Choices[0].Message.ToolCalls[0]
+	if call.ID != "call-1" || call.Function.Name != "weather" || call.Function.Arguments != `{"city":"Moscow"}` {
+		t.Fatalf("unexpected accumulated tool call: %+v", call)
 	}
 }

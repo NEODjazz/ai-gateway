@@ -21,6 +21,8 @@ type Ollama struct {
 type ollamaChatRequest struct {
 	Model    string           `json:"model"`
 	Messages []openai.Message `json:"messages"`
+	Tools    []openai.Tool    `json:"tools,omitempty"`
+	Format   any              `json:"format,omitempty"`
 	Stream   bool             `json:"stream"`
 }
 
@@ -51,6 +53,8 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	body, err := json.Marshal(ollamaChatRequest{
 		Model:    request.Model,
 		Messages: request.Messages,
+		Tools:    request.Tools,
+		Format:   ollamaResponseFormat(request.ResponseFormat),
 		Stream:   request.Stream && p.upstreamStream,
 	})
 	if err != nil {
@@ -110,6 +114,8 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	body, err := json.Marshal(ollamaChatRequest{
 		Model:    request.Model,
 		Messages: request.Messages,
+		Tools:    request.Tools,
+		Format:   ollamaResponseFormat(request.ResponseFormat),
 		Stream:   true,
 	})
 	if err != nil {
@@ -195,6 +201,19 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		response.Choices[0].FinishReason = "stop"
 	}
 	return response, nil
+}
+
+func ollamaResponseFormat(format *openai.ResponseFormat) any {
+	if format == nil {
+		return nil
+	}
+	if format.Type == "json_object" {
+		return "json"
+	}
+	if format.Type == "json_schema" && format.JSONSchema != nil {
+		return format.JSONSchema.Schema
+	}
+	return nil
 }
 
 func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {

@@ -64,6 +64,11 @@ func scanPayload(req *RequestContext) string {
 		if text := openai.ContentText(message.Content); text != "" {
 			parts = append(parts, message.Role+": "+text)
 		}
+		for _, call := range message.ToolCalls {
+			if call.Function.Arguments != "" {
+				parts = append(parts, "tool_arguments: "+call.Function.Arguments)
+			}
+		}
 	}
 	if req.ResponseRequest != nil {
 		if req.ResponseRequest.Instructions != "" {

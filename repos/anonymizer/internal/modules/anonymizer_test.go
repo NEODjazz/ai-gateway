@@ -254,3 +254,17 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 		t.Fatalf("expected output content to be restored: %s", response.Output[0].Content[0].Text)
 	}
 }
+
+func TestAnonymizerMasksToolCallArguments(t *testing.T) {
+	module := NewAnonymizerModule(true, RuleEmail)
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{
+		Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call-1", Type: "function", Function: openai.FunctionCall{Name: "send", Arguments: `{"email":"user@example.com"}`}}},
+	}}}}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	arguments := req.Request.Messages[0].ToolCalls[0].Function.Arguments
+	if !strings.Contains(arguments, "{{EMAIL_1}}") {
+		t.Fatalf("tool arguments were not anonymized: %s", arguments)
+	}
+}

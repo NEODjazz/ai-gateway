@@ -216,3 +216,97 @@ func TestAnthropicStreamsResponses(t *testing.T) {
 		t.Fatalf("unexpected streamed output_text: %s", response.OutputText)
 	}
 }
+
+func TestAnthropicTranslatesToolCalls(t *testing.T) {
+	var upstream anthropicRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(anthropicResponse{
+			ID: "msg-tool", Model: upstream.Model, StopReason: "tool_use",
+			Content: []anthropicContent{{Type: "tool_use", ID: "toolu-1", Name: "weather", Input: map[string]any{"city": "Moscow"}}},
+		})
+	}))
+	defer server.Close()
+
+	response, err := NewAnthropic(server.URL, "key", false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{
+		Model: "claude-test", Messages: []openai.Message{{Role: "user", Content: "weather"}},
+		Tools:      []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Description: "Get weather", Parameters: map[string]any{"type": "object"}}}},
+		ToolChoice: map[string]any{"type": "function", "function": map[string]any{"name": "weather"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(upstream.Tools) != 1 || upstream.Tools[0].Name != "weather" || upstream.ToolChoice["type"] != "tool" || upstream.ToolChoice["name"] != "weather" {
+		t.Fatalf("unexpected anthropic tool request: %+v", upstream)
+	}
+	call := response.Choices[0].Message.ToolCalls[0]
+	if response.Choices[0].FinishReason != "tool_calls" || call.ID != "toolu-1" || call.Function.Arguments != `{"city":"Moscow"}` {
+		t.Fatalf("unexpected translated tool call: %+v", response)
+	}
+}
+
+func TestAnthropicEmulatesStructuredOutputWithForcedTool(t *testing.T) {
+	var upstream anthropicRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(anthropicResponse{
+			ID: "msg-json", Model: upstream.Model, StopReason: "tool_use",
+			Content: []anthropicContent{{Type: "tool_use", ID: "toolu-json", Name: "answer", Input: map[string]any{"ok": true}}},
+		})
+	}))
+	defer server.Close()
+
+	strict := true
+	response, err := NewAnthropic(server.URL, "key", false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{
+		Model: "claude-test", Messages: []openai.Message{{Role: "user", Content: "return json"}},
+		ResponseFormat: &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "answer", Schema: map[string]any{"type": "object"}, Strict: &strict}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upstream.ToolChoice["name"] != "answer" || len(upstream.Tools) != 1 {
+		t.Fatalf("structured output tool was not forced: %+v", upstream)
+	}
+	if openai.ContentText(response.Choices[0].Message.Content) != `{"ok":true}` || len(response.Choices[0].Message.ToolCalls) != 0 {
+		t.Fatalf("structured response was not normalized: %+v", response)
+	}
+}
+
+func TestAnthropicStreamsToolCallArguments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\n"))
+		_, _ = w.Write([]byte(`data: {"type":"message_start","message":{"id":"msg-tool","model":"claude-test","usage":{"input_tokens":3}}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: content_block_start\n"))
+		_, _ = w.Write([]byte(`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu-1","name":"weather","input":{}}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: content_block_delta\n"))
+		_, _ = w.Write([]byte(`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":"}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: content_block_delta\n"))
+		_, _ = w.Write([]byte(`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"Moscow\"}"}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: message_delta\n"))
+		_, _ = w.Write([]byte(`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":4}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: message_stop\n"))
+		_, _ = w.Write([]byte(`data: {"type":"message_stop"}` + "\n\n"))
+	}))
+	defer server.Close()
+
+	var payloads []string
+	response, err := NewAnthropic(server.URL, "key", true).StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "claude-test"}, func(payload string) error {
+		payloads = append(payloads, payload)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := response.Choices[0].Message.ToolCalls[0]
+	if call.ID != "toolu-1" || call.Function.Name != "weather" || call.Function.Arguments != `{"city":"Moscow"}` {
+		t.Fatalf("unexpected streamed tool call: %+v", call)
+	}
+	if len(payloads) != 4 || !strings.Contains(payloads[0], `"tool_calls"`) || !strings.Contains(payloads[3], `"finish_reason":"tool_calls"`) {
+		t.Fatalf("unexpected OpenAI tool stream: %v", payloads)
+	}
+}
