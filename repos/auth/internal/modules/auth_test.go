@@ -6,12 +6,27 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"ai-gateway-auth/internal/openai"
 )
+
+type fakeVirtualKeyStore struct {
+	key      StoredVirtualKey
+	found    bool
+	err      error
+	lastHash string
+}
+
+func (s *fakeVirtualKeyStore) Lookup(_ context.Context, hash string) (StoredVirtualKey, bool, error) {
+	s.lastHash = hash
+	return s.key, s.found, s.err
+}
+func (*fakeVirtualKeyStore) Ready(context.Context) error { return nil }
+func (*fakeVirtualKeyStore) Close()                      {}
 
 func TestAuthModuleAcceptsJWT(t *testing.T) {
 	secret := "test-secret"
@@ -88,6 +103,42 @@ func TestAuthModuleAppliesVirtualKeyPolicy(t *testing.T) {
 	}
 	if stored := module.virtualKeys[req.CredentialID]; stored.Token != "" {
 		t.Fatal("virtual key plaintext must not remain in the in-memory index")
+	}
+}
+
+func TestAuthUsesPersistentVirtualKeyPolicy(t *testing.T) {
+	store := &fakeVirtualKeyStore{found: true, key: StoredVirtualKey{
+		ID: "key-id-1", UserID: "user-1", TeamID: "team-1", Roles: []string{"developer"},
+		AllowedModels: []string{"gpt-*"}, RateLimitRPM: 10, RateLimitTPM: 1000,
+	}}
+	module := NewAuthModuleWithStore(true, store, "pepper", false)
+	req := RequestContext{APIKey: "secret-token"}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if store.lastHash == "" || store.lastHash == "secret-token" || len(store.lastHash) != 64 {
+		t.Fatalf("store received an unsafe token lookup value: %q", store.lastHash)
+	}
+	if req.CredentialID != "key-id-1" || req.UserID != "user-1" || req.TeamID != "team-1" || req.APIKey != "" || req.RateLimitRPM != 10 {
+		t.Fatalf("stored key policy was not applied: %+v", req)
+	}
+}
+
+func TestAuthPersistentStoreFailureIsFailClosed(t *testing.T) {
+	store := &fakeVirtualKeyStore{err: errors.New("database unavailable")}
+	module := NewAuthModuleWithStore(true, store, "pepper", true)
+	req := RequestContext{APIKey: "demo-admin-key"}
+	if err := module.Handle(context.Background(), &req); err == nil || errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected dependency failure, got %v", err)
+	}
+}
+
+func TestAuthCanDisableStaticKeyFallback(t *testing.T) {
+	t.Setenv("AUTH_VIRTUAL_KEYS_JSON", `[{"token":"static-token","user_id":"static-user"}]`)
+	store := &fakeVirtualKeyStore{}
+	module := NewAuthModuleWithStore(true, store, "pepper", false)
+	if err := module.Handle(context.Background(), &RequestContext{APIKey: "static-token"}); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected static key rejection, got %v", err)
 	}
 }
 

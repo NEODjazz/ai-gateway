@@ -14,17 +14,35 @@ import (
 )
 
 type AuthModule struct {
-	required    bool
-	jwtConfig   JWTAuthConfig
-	virtualKeys map[string]VirtualKey
+	required       bool
+	jwtConfig      JWTAuthConfig
+	virtualKeys    map[string]VirtualKey
+	store          VirtualKeyStore
+	keyHashSecret  string
+	staticFallback bool
+	demoKeys       bool
+	initErr        error
 }
 
 func NewAuthModule(required bool) AuthModule {
-	return AuthModule{required: required, jwtConfig: JWTAuthConfigFromEnv(), virtualKeys: VirtualKeysFromEnv()}
+	settings := SettingsFromEnv()
+	module := AuthModule{
+		required: required, jwtConfig: JWTAuthConfigFromEnv(), virtualKeys: VirtualKeysFromEnv(),
+		keyHashSecret: settings.KeyHashSecret, staticFallback: settings.StaticKeyFallback,
+		demoKeys: settings.DemoKeysEnabled,
+	}
+	if settings.PostgresKeysEnabled {
+		if settings.KeyHashSecret == "" {
+			module.initErr = errors.New("auth key hash secret is required")
+			return module
+		}
+		module.store, module.initErr = NewPostgresVirtualKeyStore(settings.PostgresDSN)
+	}
+	return module
 }
 
 func NewAuthModuleWithJWT(required bool, cfg JWTAuthConfig) AuthModule {
-	return AuthModule{required: required, jwtConfig: cfg}
+	return AuthModule{required: required, jwtConfig: cfg, staticFallback: true, demoKeys: true}
 }
 
 type JWTAuthConfig struct {
@@ -44,7 +62,14 @@ type VirtualKey struct {
 }
 
 func NewAuthModuleWithVirtualKeys(required bool, keys []VirtualKey) AuthModule {
-	return AuthModule{required: required, jwtConfig: JWTAuthConfigFromEnv(), virtualKeys: indexVirtualKeys(keys)}
+	return AuthModule{required: required, jwtConfig: JWTAuthConfigFromEnv(), virtualKeys: indexVirtualKeys(keys), staticFallback: true, demoKeys: true}
+}
+
+func NewAuthModuleWithStore(required bool, store VirtualKeyStore, hashSecret string, staticFallback bool) AuthModule {
+	return AuthModule{
+		required: required, jwtConfig: JWTAuthConfigFromEnv(), virtualKeys: VirtualKeysFromEnv(),
+		store: store, keyHashSecret: hashSecret, staticFallback: staticFallback,
+	}
 }
 
 func VirtualKeysFromEnv() map[string]VirtualKey {
@@ -99,31 +124,60 @@ func (m AuthModule) Required() bool {
 	return m.required
 }
 
-func (m AuthModule) Handle(_ context.Context, req *RequestContext) error {
-	if key, ok := m.virtualKeys[credentialFingerprint(req.APIKey)]; ok {
-		req.UserID = key.UserID
-		req.TeamID = key.TeamID
-		req.Roles = append([]string(nil), key.Roles...)
-		req.AllowedModels = append([]string(nil), key.AllowedModels...)
-		req.RateLimitRPM = key.RateLimitRPM
-		req.RateLimitTPM = key.RateLimitTPM
-		req.CredentialID = credentialFingerprint(req.APIKey)
-		req.APIKey = ""
-		return nil
+func (m AuthModule) Ready(ctx context.Context) error {
+	if m.initErr != nil {
+		return m.initErr
 	}
-	switch req.APIKey {
-	case "demo-admin-key":
-		req.UserID = "demo-admin"
-		req.Roles = []string{"admin", "developer"}
-		req.CredentialID = credentialFingerprint(req.APIKey)
-		req.APIKey = ""
-		return nil
-	case "demo-user-key":
-		req.UserID = "demo-user"
-		req.Roles = []string{"developer"}
-		req.CredentialID = credentialFingerprint(req.APIKey)
-		req.APIKey = ""
-		return nil
+	if m.store != nil {
+		return m.store.Ready(ctx)
+	}
+	return nil
+}
+
+func (m AuthModule) Close() {
+	if m.store != nil {
+		m.store.Close()
+	}
+}
+
+func (m AuthModule) Handle(ctx context.Context, req *RequestContext) error {
+	if m.initErr != nil {
+		return m.initErr
+	}
+	if strings.TrimSpace(req.APIKey) == "" {
+		return ErrUnauthorized
+	}
+	if m.store != nil {
+		key, found, err := m.store.Lookup(ctx, credentialLookupHash(req.APIKey, m.keyHashSecret))
+		if err != nil {
+			return err
+		}
+		if found {
+			applyStoredVirtualKey(req, key)
+			return nil
+		}
+	}
+	if m.staticFallback {
+		if key, ok := m.virtualKeys[credentialFingerprint(req.APIKey)]; ok {
+			applyVirtualKey(req, key)
+			return nil
+		}
+	}
+	if m.demoKeys {
+		switch req.APIKey {
+		case "demo-admin-key":
+			req.UserID = "demo-admin"
+			req.Roles = []string{"admin", "developer"}
+			req.CredentialID = credentialFingerprint(req.APIKey)
+			req.APIKey = ""
+			return nil
+		case "demo-user-key":
+			req.UserID = "demo-user"
+			req.Roles = []string{"developer"}
+			req.CredentialID = credentialFingerprint(req.APIKey)
+			req.APIKey = ""
+			return nil
+		}
 	}
 
 	if err := m.authorizeJWT(req); err == nil {
@@ -132,6 +186,28 @@ func (m AuthModule) Handle(_ context.Context, req *RequestContext) error {
 	}
 
 	return ErrUnauthorized
+}
+
+func applyVirtualKey(req *RequestContext, key VirtualKey) {
+	req.UserID = key.UserID
+	req.TeamID = key.TeamID
+	req.Roles = append([]string(nil), key.Roles...)
+	req.AllowedModels = append([]string(nil), key.AllowedModels...)
+	req.RateLimitRPM = key.RateLimitRPM
+	req.RateLimitTPM = key.RateLimitTPM
+	req.CredentialID = credentialFingerprint(req.APIKey)
+	req.APIKey = ""
+}
+
+func applyStoredVirtualKey(req *RequestContext, key StoredVirtualKey) {
+	req.UserID = key.UserID
+	req.TeamID = key.TeamID
+	req.Roles = append([]string(nil), key.Roles...)
+	req.AllowedModels = append([]string(nil), key.AllowedModels...)
+	req.RateLimitRPM = key.RateLimitRPM
+	req.RateLimitTPM = key.RateLimitTPM
+	req.CredentialID = key.ID
+	req.APIKey = ""
 }
 
 func (m AuthModule) authorizeJWT(req *RequestContext) error {
@@ -161,6 +237,12 @@ func credentialFingerprint(value string) string {
 	}
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+func credentialLookupHash(value, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(value))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func verifyJWT(token string, cfg JWTAuthConfig, now time.Time) (jwtClaims, error) {

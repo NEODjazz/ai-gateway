@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -10,8 +11,19 @@ import (
 
 func main() {
 	module := modules.NewAuthModule(true)
+	defer module.Close()
 
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	http.HandleFunc("/livez", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	http.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if err := module.Ready(r.Context()); err != nil {
+			http.Error(w, "auth dependencies are unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 
@@ -23,7 +35,11 @@ func main() {
 		}
 		ctx := modules.RequestContext{APIKey: request.Token}
 		if err := module.Handle(r.Context(), &ctx); err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+			if errors.Is(err, modules.ErrUnauthorized) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			} else {
+				http.Error(w, "authorization unavailable", http.StatusServiceUnavailable)
+			}
 			return
 		}
 		_ = json.NewEncoder(w).Encode(authResponse{

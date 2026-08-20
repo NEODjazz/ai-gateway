@@ -56,7 +56,7 @@ flowchart LR
 | Сервис | HTTP API | Текущая ответственность |
 | --- | --- | --- |
 | Gateway | `GET /healthz`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/responses` | OpenAI-compatible API, auth pipeline, provider routing, failover, SSE, orchestration provider-level modules, deanonymization |
-| Auth | `GET /healthz`, `POST /authorize` | Demo API keys и HS256 JWT; заполняет `UserID` и `Roles` |
+| Auth | `GET /healthz`, `GET /readyz`, `POST /authorize` | PostgreSQL virtual keys с expiry/revoke/rotation, переходный static fallback и HS256 JWT; заполняет identity и access policy |
 | DLP | `GET /healthz`, `POST /scan` | Извлекает текст запроса и отправляет его в настроенный ICAP-сервис через `REQMOD` |
 | AV | `GET /healthz`, `POST /scan` | Аналогичный HTTP-to-ICAP адаптер для антивирусной проверки |
 | Anonymizer | `GET /healthz`, `POST /anonymize` | Маскирует значения по настраиваемым RE2-правилам и возвращает преобразованный контент с placeholder map |
@@ -146,7 +146,7 @@ Auth находится в gateway-level pipeline и выполняется од
 
 ### Межсервисные границы данных
 
-- `auth`: получает `{token}` и возвращает `user_id`, `roles`, `credential_id`; после auth gateway очищает bearer из request context.
+- `auth`: получает `{token}`, ищет persistent key по HMAC-SHA256 и возвращает `user_id`, `team_id`, policy и непрозрачный `credential_id`; после auth gateway очищает bearer из request context.
 - `dlp` / `av`: получают только `request_id` и текстовую проекцию запроса.
 - `anonymizer`: получает только messages/input/instructions и возвращает преобразованные поля с placeholder map.
 - `billing`: получает identity, необратимый `credential_id`, provider/model metadata и token counters; prompt и provider response не передаются.

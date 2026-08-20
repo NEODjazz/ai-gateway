@@ -252,7 +252,14 @@ The gateway reads the token from the standard header:
 Authorization: Bearer <token>
 ```
 
-The authentication service first checks the demo API keys:
+The authentication service first checks the PostgreSQL virtual-key store when
+`AUTH_POSTGRES_KEYS_ENABLED=true`. Active keys can carry team, role, model, RPM,
+and TPM policy; expired or revoked keys do not authorize. The database contains
+only an HMAC-SHA256 token lookup value and an opaque key ID. Linked key rotation
+creates a replacement and revokes the previous key in one transaction.
+
+For migration and local development, static and demo fallbacks are controlled
+independently. The built-in demo API keys are:
 
 - `demo-admin-key`
 - `demo-user-key`
@@ -263,6 +270,11 @@ If the key is not found, the service tries to validate it as a JWT. HS256 is cur
 AUTH_JWT_SECRET=dev-jwt-secret
 AUTH_JWT_ISSUER=ai-gateway
 AUTH_JWT_AUDIENCE=ai-gateway
+AUTH_POSTGRES_KEYS_ENABLED=true
+AUTH_POSTGRES_DSN=postgres://ai_gateway:password@postgres:5432/ai_gateway
+AUTH_KEY_HASH_SECRET=separate-random-pepper
+AUTH_STATIC_KEY_FALLBACK_ENABLED=false
+AUTH_DEMO_KEYS_ENABLED=false
 ```
 
 Minimum claims:

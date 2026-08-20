@@ -19,6 +19,12 @@ auth:
     secret: dev-jwt-secret
     issuer: ai-gateway
     audience: ai-gateway
+  postgres:
+    enabled: true
+    dsn: postgres://ai_gateway:ai_gateway@ai-gateway-postgres:5432/ai_gateway?sslmode=disable
+  keyHashSecret: dev-auth-key-hash-secret
+  staticKeyFallbackEnabled: true
+  demoKeysEnabled: true
   # Production values should be supplied from an encrypted values source.
   virtualKeys: []
   # - token: replace-me

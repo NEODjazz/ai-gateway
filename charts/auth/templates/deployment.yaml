@@ -44,13 +44,29 @@ spec:
                 secretKeyRef:
                   name: {{ include "auth.fullname" . }}
                   key: virtual-keys.json
+            - name: AUTH_POSTGRES_KEYS_ENABLED
+              value: {{ .Values.auth.postgres.enabled | quote }}
+            - name: AUTH_POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "auth.fullname" . }}
+                  key: postgres-dsn
+            - name: AUTH_KEY_HASH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "auth.fullname" . }}
+                  key: key-hash-secret
+            - name: AUTH_STATIC_KEY_FALLBACK_ENABLED
+              value: {{ .Values.auth.staticKeyFallbackEnabled | quote }}
+            - name: AUTH_DEMO_KEYS_ENABLED
+              value: {{ .Values.auth.demoKeysEnabled | quote }}
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: http
           livenessProbe:
             httpGet:
-              path: /healthz
+              path: /livez
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
