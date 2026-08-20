@@ -1,0 +1,298 @@
+package modules
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type budgetPolicy struct {
+	ID        int64
+	ScopeType string
+	ScopeID   string
+	Period    string
+	MaxCost   float64
+	MaxTokens int64
+}
+
+type PostgresBudgetPolicyChecker struct {
+	pool    *pgxpool.Pool
+	ttl     time.Duration
+	initErr error
+}
+
+func NewPostgresBudgetPolicyChecker(dsn string, ttl time.Duration) *PostgresBudgetPolicyChecker {
+	checker := &PostgresBudgetPolicyChecker{ttl: ttl}
+	if strings.TrimSpace(dsn) == "" {
+		checker.initErr = errors.New("POSTGRES_DSN is required when budgets or quotas are enabled")
+		return checker
+	}
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		checker.initErr = errors.New("invalid postgres budget configuration")
+		return checker
+	}
+	if ttl <= 0 {
+		checker.ttl = 15 * time.Minute
+	}
+	checker.pool = pool
+	return checker
+}
+
+func (c *PostgresBudgetPolicyChecker) Ready(ctx context.Context) error {
+	if c.initErr != nil {
+		return c.initErr
+	}
+	if err := c.pool.Ping(ctx); err != nil {
+		return errors.New("billing policy postgres is unavailable")
+	}
+	var policies, reservations bool
+	if err := c.pool.QueryRow(ctx, `
+		SELECT to_regclass('public.billing_budget_policies') IS NOT NULL,
+		       to_regclass('public.billing_budget_reservations') IS NOT NULL`).Scan(&policies, &reservations); err != nil || !policies || !reservations {
+		return errors.New("billing budget migration is not applied")
+	}
+	return nil
+}
+
+func (c *PostgresBudgetPolicyChecker) Close() {
+	if c != nil && c.pool != nil {
+		c.pool.Close()
+	}
+}
+
+func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event BillingEvent) error {
+	if c.initErr != nil {
+		return c.initErr
+	}
+	if event.RequestID == "" {
+		return errors.New("request_id is required for budget accounting")
+	}
+	if event.Phase != "reserve" && event.Phase != "commit" && event.Phase != "cancel" {
+		return fmt.Errorf("invalid budget phase %q", event.Phase)
+	}
+	tx, err := c.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, event.RequestID); err != nil {
+		return err
+	}
+	policies, err := applicableBudgetPolicies(ctx, tx, event)
+	if err != nil {
+		return err
+	}
+	state, owner, found, err := reservationState(ctx, tx, event.RequestID)
+	if err != nil {
+		return err
+	}
+	if found && owner != reservationOwner(event) {
+		return fmt.Errorf("%w: request_id belongs to another billing identity", ErrBillingConflict)
+	}
+
+	switch event.Phase {
+	case "reserve":
+		if found {
+			if state != "reserved" {
+				return fmt.Errorf("%w: request lifecycle is already %s", ErrBillingConflict, state)
+			}
+			if err := checkBudgetPolicies(ctx, tx, policies, event); err != nil {
+				return err
+			}
+			_, err = tx.Exec(ctx, `
+				UPDATE billing_budget_reservations
+				SET provider_name=$2, provider_type=$3, model=$4, currency=$5,
+				    reserved_cost=$6, reserved_tokens=$7, updated_at=now()
+				WHERE request_id=$1`, event.RequestID, budgetProviderName(event),
+				budgetProviderType(event), event.Model, event.Currency, event.Cost, event.TotalTokens)
+			break
+		}
+		if err := checkBudgetPolicies(ctx, tx, policies, event); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO billing_budget_reservations
+			(request_id, owner_key, credential_id, user_id, team_id, provider_name,
+			 provider_type, model, currency, state, reserved_cost, reserved_tokens,
+			 reservation_expires_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'reserved',$10,$11,$12)`,
+			event.RequestID, reservationOwner(event), event.APIKeyFingerprint, event.UserID,
+			event.TeamID, budgetProviderName(event), budgetProviderType(event), event.Model,
+			event.Currency, event.Cost, event.TotalTokens, time.Now().UTC().Add(c.ttl))
+	case "commit":
+		if found && state == "committed" {
+			return tx.Commit(ctx)
+		}
+		if found && state == "canceled" {
+			return fmt.Errorf("%w: canceled request cannot be committed", ErrBillingConflict)
+		}
+		if found {
+			_, err = tx.Exec(ctx, `
+				UPDATE billing_budget_reservations
+				SET state='committed', actual_cost=$2, actual_tokens=$3, updated_at=now()
+				WHERE request_id=$1`, event.RequestID, event.Cost, event.TotalTokens)
+		} else if !found {
+			_, err = tx.Exec(ctx, `
+				INSERT INTO billing_budget_reservations
+				(request_id, owner_key, credential_id, user_id, team_id, provider_name,
+				 provider_type, model, currency, state, actual_cost, actual_tokens,
+				 reservation_expires_at)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'committed',$10,$11,now())`,
+				event.RequestID, reservationOwner(event), event.APIKeyFingerprint, event.UserID,
+				event.TeamID, budgetProviderName(event), budgetProviderType(event), event.Model,
+				event.Currency, event.Cost, event.TotalTokens)
+		}
+	case "cancel":
+		if found && state == "committed" {
+			return fmt.Errorf("%w: committed request cannot be canceled", ErrBillingConflict)
+		}
+		if found && state == "reserved" {
+			_, err = tx.Exec(ctx, `
+				UPDATE billing_budget_reservations
+				SET state='canceled', reserved_cost=0, reserved_tokens=0, updated_at=now()
+				WHERE request_id=$1`, event.RequestID)
+		} else if !found {
+			_, err = tx.Exec(ctx, `
+				INSERT INTO billing_budget_reservations
+				(request_id, owner_key, credential_id, user_id, team_id, provider_name,
+				 provider_type, model, currency, state, reservation_expires_at)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'canceled',now())`,
+				event.RequestID, reservationOwner(event), event.APIKeyFingerprint, event.UserID,
+				event.TeamID, budgetProviderName(event), budgetProviderType(event), event.Model, event.Currency)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func checkBudgetPolicies(ctx context.Context, tx pgx.Tx, policies []budgetPolicy, event BillingEvent) error {
+	for _, policy := range policies {
+		cost, tokens, err := budgetUsage(ctx, tx, policy, event, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		if policy.MaxCost > 0 && cost+event.Cost > policy.MaxCost+1e-12 {
+			return &BudgetExceededError{PolicyID: policy.ID, Dimension: "cost"}
+		}
+		if policy.MaxTokens > 0 && tokens+int64(event.TotalTokens) > policy.MaxTokens {
+			return &BudgetExceededError{PolicyID: policy.ID, Dimension: "tokens"}
+		}
+	}
+	return nil
+}
+
+type BudgetExceededError struct {
+	PolicyID  int64
+	Dimension string
+}
+
+func (e *BudgetExceededError) Error() string {
+	return fmt.Sprintf("%s: policy %d %s limit", ErrBudgetExceeded, e.PolicyID, e.Dimension)
+}
+
+func (e *BudgetExceededError) Unwrap() error { return ErrBudgetExceeded }
+
+func applicableBudgetPolicies(ctx context.Context, tx pgx.Tx, event BillingEvent) ([]budgetPolicy, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id, scope_type, scope_id, period,
+		       COALESCE(max_cost, 0)::float8, COALESCE(max_tokens, 0)
+		FROM billing_budget_policies
+		WHERE enabled AND currency=$1 AND (
+			scope_type='global'
+			OR (scope_type='key' AND scope_id=$2)
+			OR (scope_type='user' AND scope_id=$3)
+			OR (scope_type='team' AND scope_id=$4)
+			OR (scope_type='model' AND scope_id=$5)
+			OR (scope_type='provider' AND scope_id = ANY($6))
+		)
+		ORDER BY id
+		FOR UPDATE`, event.Currency, event.APIKeyFingerprint, event.UserID, event.TeamID,
+		event.Model, []string{budgetProviderName(event), budgetProviderType(event)})
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var policies []budgetPolicy
+	for rows.Next() {
+		var policy budgetPolicy
+		if err := rows.Scan(&policy.ID, &policy.ScopeType, &policy.ScopeID, &policy.Period, &policy.MaxCost, &policy.MaxTokens); err != nil {
+			return nil, err
+		}
+		policies = append(policies, policy)
+	}
+	return policies, rows.Err()
+}
+
+func reservationState(ctx context.Context, tx pgx.Tx, requestID string) (state, owner string, found bool, err error) {
+	err = tx.QueryRow(ctx, `SELECT state, owner_key FROM billing_budget_reservations WHERE request_id=$1 FOR UPDATE`, requestID).Scan(&state, &owner)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", false, nil
+	}
+	return state, owner, err == nil, err
+}
+
+func budgetUsage(ctx context.Context, tx pgx.Tx, policy budgetPolicy, event BillingEvent, now time.Time) (float64, int64, error) {
+	start := budgetPeriodStart(now, policy.Period)
+	var cost float64
+	var tokens int64
+	err := tx.QueryRow(ctx, `
+		SELECT COALESCE(SUM(CASE WHEN state='committed' THEN actual_cost ELSE reserved_cost END),0)::float8,
+		       COALESCE(SUM(CASE WHEN state='committed' THEN actual_tokens ELSE reserved_tokens END),0)
+		FROM billing_budget_reservations
+		WHERE created_at >= $1
+		  AND (state='committed' OR (state='reserved' AND reservation_expires_at > now()))
+		  AND request_id <> $8
+		  AND CASE $2
+			WHEN 'global' THEN true
+			WHEN 'key' THEN credential_id=$3
+			WHEN 'user' THEN user_id=$4
+			WHEN 'team' THEN team_id=$5
+			WHEN 'model' THEN model=$6
+			WHEN 'provider' THEN provider_name=$7 OR provider_type=$7
+			ELSE false
+		  END`, start, policy.ScopeType, event.APIKeyFingerprint, event.UserID,
+		event.TeamID, event.Model, policy.ScopeID, event.RequestID).Scan(&cost, &tokens)
+	return cost, tokens, err
+}
+
+func budgetPeriodStart(now time.Time, period string) time.Time {
+	now = now.UTC()
+	switch period {
+	case "hour":
+		return now.Truncate(time.Hour)
+	case "week":
+		day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		offset := (int(day.Weekday()) + 6) % 7
+		return day.AddDate(0, 0, -offset)
+	case "month":
+		return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	default:
+		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	}
+}
+
+func reservationOwner(event BillingEvent) string {
+	return strings.Join([]string{event.APIKeyFingerprint, event.UserID, event.TeamID}, "|")
+}
+
+func budgetProviderName(event BillingEvent) string {
+	if event.ProviderEndpointName != "" {
+		return event.ProviderEndpointName
+	}
+	return event.Provider
+}
+
+func budgetProviderType(event BillingEvent) string {
+	if event.ProviderEndpointType != "" {
+		return event.ProviderEndpointType
+	}
+	return event.Provider
+}

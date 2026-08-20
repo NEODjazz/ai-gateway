@@ -94,4 +94,6 @@ func (p Pipeline) RunFailure(ctx context.Context, req *RequestContext, cause err
 }
 
 var ErrUnauthorized = errors.New("unauthorized")
+var ErrBudgetExceeded = errors.New("budget exceeded")
+var ErrBillingConflict = errors.New("billing lifecycle conflict")
 var ErrContentRejected = errors.New("content rejected")

@@ -15,6 +15,17 @@ type recordingUsageWriter struct {
 	err    error
 }
 
+type recordingPolicyChecker struct {
+	events []BillingEvent
+}
+
+func (c *recordingPolicyChecker) Apply(_ context.Context, event BillingEvent) error {
+	c.events = append(c.events, event)
+	return nil
+}
+func (*recordingPolicyChecker) Ready(context.Context) error { return nil }
+func (*recordingPolicyChecker) Close()                      {}
+
 type fakeDurableRepository struct {
 	seen   map[string]bool
 	events []BillingEvent
@@ -228,6 +239,30 @@ func TestBillingCancelHasNoUsageOrCost(t *testing.T) {
 	}
 	if len(writer.events) != 1 || writer.events[0].Phase != "cancel" || writer.events[0].TotalTokens != 0 || writer.events[0].Cost != 0 {
 		t.Fatalf("unexpected cancel event: %+v", writer.events)
+	}
+}
+
+func TestBillingReservesConfiguredOutputAllowanceAndTeamScope(t *testing.T) {
+	policy := &recordingPolicyChecker{}
+	module := BillingModule{
+		required: true, pricing: PricingConfig{Currency: "USD"}, writer: NoopUsageEventWriter{},
+		policy: policy, lifecycle: NewLifecycleStore(), defaultReserveOutputTokens: 64,
+	}
+	req := RequestContext{
+		RequestID: "req-reserve", TeamID: "team-42", CredentialID: "credential-42",
+		Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "one two"}}},
+	}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if len(policy.events) != 1 || policy.events[0].Phase != "reserve" || policy.events[0].TeamID != "team-42" {
+		t.Fatalf("unexpected policy event: %+v", policy.events)
+	}
+	if policy.events[0].InputTokens != 2 || policy.events[0].OutputTokens != 64 || policy.events[0].TotalTokens != 66 {
+		t.Fatalf("unexpected reserved usage: %+v", policy.events[0])
+	}
+	if req.Usage == nil || req.Usage.TotalTokens != 2 {
+		t.Fatalf("reservation must not overwrite actual usage: %+v", req.Usage)
 	}
 }
 

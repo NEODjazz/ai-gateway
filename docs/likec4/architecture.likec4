@@ -108,7 +108,7 @@ model {
     }
     postgres = datastore 'PostgreSQL financial core' {
       technology 'PostgreSQL :5432'
-      description 'Schema and deployment exist, policy-store client is not implemented'
+      description 'Atomic budget reservations, billing ledger and durable outbox'
     }
   }
 
@@ -126,7 +126,7 @@ model {
   platform.av -> security.avIcap 'ICAP REQMOD'
   platform.billing -> stores.clickhouse 'append usage event via JSONEachRow'
   platform.anonymizer -[planned]-> stores.redis 'planned vault integration'
-  platform.billing -[planned]-> stores.postgres 'planned policy / financial integration'
+  platform.billing -> stores.postgres 'atomic budgets + durable outbox'
 }
 
 deployment {

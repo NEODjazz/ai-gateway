@@ -16,6 +16,7 @@ type RequestContext struct {
 	PostResponse          bool                           `json:"post_response,omitempty"`
 	BillingPhase          string                         `json:"billing_phase,omitempty"`
 	UserID                string                         `json:"user_id,omitempty"`
+	TeamID                string                         `json:"team_id,omitempty"`
 	Roles                 []string                       `json:"roles,omitempty"`
 	Request               openai.ChatCompletionRequest   `json:"request"`
 	ResponseRequest       *openai.ResponseRequest        `json:"response_request,omitempty"`
@@ -31,6 +32,7 @@ type BillingEvent struct {
 	EventID               string   `json:"event_id,omitempty"`
 	RequestID             string   `json:"request_id,omitempty"`
 	UserID                string   `json:"user_id,omitempty"`
+	TeamID                string   `json:"team_id,omitempty"`
 	Roles                 []string `json:"roles,omitempty"`
 	APIKeyFingerprint     string   `json:"api_key_fingerprint,omitempty"`
 	Provider              string   `json:"provider,omitempty"`
@@ -79,3 +81,5 @@ func (p Pipeline) Run(ctx context.Context, req *RequestContext) error {
 }
 
 var ErrUnauthorized = errors.New("unauthorized")
+var ErrBudgetExceeded = errors.New("budget exceeded")
+var ErrBillingConflict = errors.New("billing lifecycle conflict")

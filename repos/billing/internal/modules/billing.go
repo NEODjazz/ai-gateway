@@ -11,13 +11,14 @@ import (
 )
 
 type BillingModule struct {
-	required  bool
-	pricing   PricingConfig
-	writer    UsageEventWriter
-	policy    PolicyChecker
-	lifecycle *LifecycleStore
-	durable   DurableEventRepository
-	initErr   error
+	required                   bool
+	pricing                    PricingConfig
+	writer                     UsageEventWriter
+	policy                     PolicyChecker
+	lifecycle                  *LifecycleStore
+	durable                    DurableEventRepository
+	initErr                    error
+	defaultReserveOutputTokens int
 }
 
 type PricingConfig struct {
@@ -43,11 +44,12 @@ func NewBillingModuleWithPricing(required bool, pricing PricingConfig) BillingMo
 
 func NewBillingModuleWithSettings(required bool, settings Settings) BillingModule {
 	module := BillingModule{
-		required:  required,
-		pricing:   settings.Pricing,
-		writer:    NewUsageEventWriter(settings),
-		policy:    NewPolicyChecker(settings),
-		lifecycle: NewLifecycleStore(),
+		required:                   required,
+		pricing:                    settings.Pricing,
+		writer:                     NewUsageEventWriter(settings),
+		policy:                     NewPolicyChecker(settings),
+		lifecycle:                  NewLifecycleStore(),
+		defaultReserveOutputTokens: settings.DefaultReserveOutputTokens,
 	}
 	if settings.DurableOutboxEnabled {
 		writer := UsageEventWriter(NoopUsageEventWriter{})
@@ -80,9 +82,18 @@ func (m BillingModule) Ready(ctx context.Context) error {
 		return m.initErr
 	}
 	if m.durable != nil {
-		return m.durable.Ready(ctx)
+		if err := m.durable.Ready(ctx); err != nil {
+			return err
+		}
 	}
-	return nil
+	return m.policy.Ready(ctx)
+}
+
+func (m BillingModule) Close() {
+	m.policy.Close()
+	if repository, ok := m.durable.(*PostgresOutboxRepository); ok {
+		repository.Close()
+	}
 }
 
 func (m BillingModule) PostResponseEnabled() bool {
@@ -96,6 +107,14 @@ func (m BillingModule) HandlePostResponse(ctx context.Context, req *RequestConte
 func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	if m.initErr != nil {
 		return m.initErr
+	}
+	phase := req.BillingPhase
+	if phase == "" {
+		if req.PostResponse || req.Response != nil || req.ResponsesResponse != nil {
+			phase = "commit"
+		} else {
+			phase = "reserve"
+		}
 	}
 	promptTokens := estimatePromptTokens(req)
 	inputTokens, outputTokens, totalTokens := usageTokens(req, promptTokens)
@@ -114,29 +133,31 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	req.Metadata["billing.output_tokens"] = strconv.Itoa(outputTokens)
 	req.Metadata["billing.total_tokens"] = strconv.Itoa(totalTokens)
 
-	event := m.event(req, promptTokens, inputTokens, outputTokens, totalTokens)
-	req.BillingEvent = &event
-	phase := req.BillingPhase
-	if phase == "" {
-		if req.PostResponse || req.Response != nil || req.ResponsesResponse != nil {
-			phase = "commit"
-		} else {
-			phase = "reserve"
-		}
+	eventOutputTokens, eventTotalTokens := outputTokens, totalTokens
+	if phase == "reserve" && eventOutputTokens == 0 {
+		eventOutputTokens = reserveOutputTokens(req, m.defaultReserveOutputTokens)
+		eventTotalTokens = inputTokens + eventOutputTokens
+		req.Metadata["billing.reserved_output_tokens"] = strconv.Itoa(eventOutputTokens)
 	}
+	event := m.event(req, promptTokens, inputTokens, eventOutputTokens, eventTotalTokens)
+	req.BillingEvent = &event
 	event.Phase = phase
 	key := ""
 	if event.RequestID != "" {
 		key = event.RequestID + ":" + phase
 	}
 	event.EventID = key
+	if err := m.policy.Apply(ctx, event); err != nil {
+		return err
+	}
 	if m.durable != nil {
 		if phase == "reserve" {
-			if err := m.policy.Check(ctx, event); err != nil {
-				return err
-			}
 			created, err := m.durable.Reserve(ctx, event)
 			if err != nil {
+				cancelEvent := event
+				cancelEvent.Phase = "cancel"
+				cancelEvent.InputTokens, cancelEvent.OutputTokens, cancelEvent.TotalTokens, cancelEvent.Cost = 0, 0, 0, 0
+				_ = m.policy.Apply(ctx, cancelEvent)
 				return err
 			}
 			if !created {
@@ -164,10 +185,6 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 		return nil
 	}
 	if phase == "reserve" {
-		if err := m.policy.Check(ctx, event); err != nil {
-			m.lifecycle.Release(key)
-			return err
-		}
 		return nil
 	}
 	if phase != "commit" && phase != "cancel" {
@@ -206,6 +223,7 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 	return BillingEvent{
 		RequestID:             requestID(req),
 		UserID:                req.UserID,
+		TeamID:                req.TeamID,
 		Roles:                 append([]string(nil), req.Roles...),
 		APIKeyFingerprint:     req.CredentialID,
 		Provider:              providerName,
@@ -237,6 +255,18 @@ func requestID(req *RequestContext) string {
 
 func (m BillingModule) cost(inputTokens int, outputTokens int) float64 {
 	return (float64(inputTokens)/1000)*m.pricing.InputPricePer1K + (float64(outputTokens)/1000)*m.pricing.OutputPricePer1K
+}
+
+func reserveOutputTokens(req *RequestContext, fallback int) int {
+	if req.ResponseRequest != nil {
+		if req.ResponseRequest.MaxOutputTokens != nil && *req.ResponseRequest.MaxOutputTokens > 0 {
+			return *req.ResponseRequest.MaxOutputTokens
+		}
+	}
+	if fallback > 0 {
+		return fallback
+	}
+	return 0
 }
 
 func estimatePromptTokens(req *RequestContext) int {

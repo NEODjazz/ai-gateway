@@ -37,6 +37,10 @@ spec:
               value: {{ .Values.billing.durableOutbox.enabled | quote }}
             - name: BILLING_OUTBOX_POLL_MS
               value: {{ .Values.billing.durableOutbox.pollMilliseconds | quote }}
+            - name: BILLING_RESERVATION_TTL_SECONDS
+              value: {{ .Values.billing.budgets.reservationTTLSeconds | quote }}
+            - name: BILLING_DEFAULT_RESERVE_OUTPUT_TOKENS
+              value: {{ .Values.billing.budgets.defaultReserveOutputTokens | quote }}
             - name: CLICKHOUSE_URL
               value: {{ .Values.billing.clickhouse.url | quote }}
             - name: CLICKHOUSE_DATABASE

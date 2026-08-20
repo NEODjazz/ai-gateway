@@ -156,7 +156,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			continue
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
-			if errors.Is(err, modules.ErrContentRejected) || ctx.Err() != nil {
+			if terminalModuleError(err) || ctx.Err() != nil {
 				return openai.ChatCompletionResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
@@ -238,7 +238,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		}
 		attemptCtx.Request.Stream = true
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
-			if errors.Is(err, modules.ErrContentRejected) || ctx.Err() != nil {
+			if terminalModuleError(err) || ctx.Err() != nil {
 				return openai.ChatCompletionResponse{}, false, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
@@ -292,7 +292,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			continue
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
-			if errors.Is(err, modules.ErrContentRejected) || ctx.Err() != nil {
+			if terminalModuleError(err) || ctx.Err() != nil {
 				return openai.ResponseResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
@@ -377,7 +377,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		}
 		attemptCtx.ResponseRequest.Stream = true
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
-			if errors.Is(err, modules.ErrContentRejected) || ctx.Err() != nil {
+			if terminalModuleError(err) || ctx.Err() != nil {
 				return openai.ResponseResponse{}, false, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
@@ -410,6 +410,10 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		return openai.ResponseResponse{}, false, errors.Join(errs...)
 	}
 	return openai.ResponseResponse{}, false, nil
+}
+
+func terminalModuleError(err error) bool {
+	return errors.Is(err, modules.ErrContentRejected) || errors.Is(err, modules.ErrBudgetExceeded) || errors.Is(err, modules.ErrBillingConflict)
 }
 
 func (r Router) Models() []openai.Model {

@@ -115,12 +115,12 @@ sequenceDiagram
 1. `dlp` — только если у endpoint установлен `dlp_enabled`.
 2. `av` — только если у endpoint установлен `av_enabled`.
 3. `anonymizer` — для каждой попытки создается новая placeholder map.
-4. `billing` pre-response — оценивает prompt/input tokens и выполняет policy check.
+4. `billing` pre-response — атомарно резервирует estimated input + maximum output allowance в PostgreSQL.
 5. Вызов выбранного provider endpoint.
-6. `billing` post-response — использует provider usage, если он есть, и сохраняет событие.
+6. `billing` post-response — заменяет reservation фактическим provider usage; при окончательной ошибке выполняет cancel.
 7. Gateway восстанавливает placeholders в успешном ответе.
 
-Неуспешная попытка, включая ошибку обязательного модуля или content rejection, добавляется в агрегированную ошибку router, после чего router может перейти к следующему совместимому endpoint. Если кандидаты закончились, клиент получает `502 provider_failed`.
+Неуспешная попытка обязательного модуля или provider добавляется в агрегированную ошибку router, после чего router может перейти к следующему совместимому endpoint. Content rejection и budget rejection являются terminal: provider не вызывается, fallback не выполняется, клиент получает соответственно `451` или `429 budget_exceeded`. Если остальные кандидаты закончились, клиент получает `502 provider_failed`.
 
 ### Required и optional
 
@@ -208,9 +208,10 @@ Helm chart передает anonymizer переменную `REDIS_ADDR` и от
 
 - ClickHouse используется как append-only хранилище `usage_events` через HTTP insert в `JSONEachRow`, когда `BILLING_USAGE_EVENTS_ENABLED=true`.
 - Billing использует lifecycle `reserve -> commit/cancel`. При `BILLING_DURABLE_OUTBOX_ENABLED=true` ledger и outbox транзакционно сохраняются в PostgreSQL. Worker использует `SKIP LOCKED`, stale-lock recovery и backoff; `event_id=request_id:phase` дедуплицирует enqueue между репликами и рестартами. Доставка в ClickHouse имеет семантику at-least-once, поэтому точный финансовый расчет должен дедуплицировать события по `event_id`.
-- Если provider вернул usage, billing использует его; иначе оценивает input по тексту и считает output равным нулю.
-- PostgreSQL и миграция financial core подготовлены для tariffs, limits, quotas и financial transactions.
-- PostgreSQL policy checker пока не реализован. Включение любой из этих функций приводит к отказу billing request, даже если `POSTGRES_DSN` задан.
+- PostgreSQL policy checker сериализует matching policies через row locks и атомарно применяет cost/token budgets по global/key/user/team/model/provider scope и hour/day/week/month period. Reserve учитывает максимальный output или безопасный fallback, commit — фактический usage, cancel и TTL освобождают capacity.
+- Повторный active reserve с тем же `request_id` идемпотентен и при failover переносит reservation на новый provider/model scope. Повторное использование finalized `request_id` или смена billing identity отклоняется как `409 billing_conflict`.
+- Если provider вернул usage, commit использует его; иначе фактический output остается нулевым. Reservation при этом защищает лимит до commit/cancel/TTL.
+- Tariffs и financial transactions пока не реализованы и fail closed при включении.
 
 Локальный `docker-compose.yml` поднимает Redis, ClickHouse и PostgreSQL, но не микросервисы.
 
@@ -243,7 +244,7 @@ flowchart TB
     Gw --> AvSvc
     Billing --> ChSvc
     Gw -->|"rate limits + exact cache"| RedisSvc
-    Billing -->|"durable outbox"| PgSvc
+    Billing -->|"atomic budgets + durable outbox"| PgSvc
     Anon -. "vault client not implemented" .-> RedisSvc
     DLP --> DlpIcap["External DLP ICAP"]
     AV --> AvIcap["External AV ICAP"]
@@ -280,9 +281,10 @@ Provider API keys не хранятся в `PROVIDERS_JSON`: chart создае�
 ## Известные границы текущей реализации
 
 - Нет Redis-backed anonymization vault; placeholder map request-local.
-- PostgreSQL policy/financial checker для tariffs/quotas пока не реализован; durable billing outbox уже используется.
+- PostgreSQL budgets/quotas реализованы; tariffs и financial transactions пока fail closed.
 - Deanonymization не применяется к уже отправленным streaming chunks.
 - Tool/function arguments входят в DLP/AV text projection и anonymization pipeline; JSON Schema инструмента не изменяется.
 - DLP/AV сканируют текстовую проекцию запроса, а не произвольные бинарные вложения.
 - Content rejection является terminal и не запускает fallback на другой endpoint.
+- Budget rejection также terminal и возвращается как `429 budget_exceeded`.
 - Есть HTTP-метрики, JSON-логи и distributed request IDs; полноценный OpenTelemetry tracing пока не добавлен.

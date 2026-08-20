@@ -3,6 +3,7 @@ package modules
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -87,6 +88,9 @@ func TestRemoteBillingReceivesCredentialIDButNotBearer(t *testing.T) {
 		if body["credential_id"] != "safe-fingerprint" {
 			t.Fatalf("unexpected credential id: %v", body["credential_id"])
 		}
+		if body["team_id"] != "team-1" {
+			t.Fatalf("unexpected team id: %v", body["team_id"])
+		}
 		if body["phase"] != "reserve" {
 			t.Fatalf("expected reserve phase, got %v", body["phase"])
 		}
@@ -134,6 +138,26 @@ func TestRemoteBillingLifecyclePhases(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingMapsBudgetRejection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "budget exceeded", http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+	if err := NewRemoteBillingModule(true, server.URL).Handle(context.Background(), &RequestContext{RequestID: "req-budget"}); !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("expected budget sentinel, got %v", err)
+	}
+}
+
+func TestRemoteBillingMapsLifecycleConflict(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "billing lifecycle conflict", http.StatusConflict)
+	}))
+	defer server.Close()
+	if err := NewRemoteBillingModule(true, server.URL).Handle(context.Background(), &RequestContext{RequestID: "req-conflict"}); !errors.Is(err, ErrBillingConflict) {
+		t.Fatalf("expected billing conflict sentinel, got %v", err)
+	}
+}
+
 func contractServer(t *testing.T, response any) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -155,6 +179,7 @@ func sensitiveContext() RequestContext {
 		APIKey:       "client-bearer-token",
 		CredentialID: "safe-fingerprint",
 		UserID:       "user-1",
+		TeamID:       "team-1",
 		Roles:        []string{"developer"},
 		Request: openai.ChatCompletionRequest{
 			Messages: []openai.Message{{Role: "user", Content: "hello"}},

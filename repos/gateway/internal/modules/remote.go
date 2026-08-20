@@ -41,6 +41,12 @@ func callRemote[Request any, Response any](ctx context.Context, client *http.Cli
 	if resp.StatusCode == http.StatusUnavailableForLegalReasons {
 		return result, ErrContentRejected
 	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return result, ErrBudgetExceeded
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return result, ErrBillingConflict
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return result, fmt.Errorf("remote endpoint returned %s", resp.Status)
 	}

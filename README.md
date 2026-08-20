@@ -415,17 +415,15 @@ New GHCR packages are private by default. For a public repository, change the vi
 
 The gateway already has typed remote module contracts, OpenAI-compatible and
 Anthropic adapters, chat/Responses streaming, Redis-backed distributed limits
-and exact cache, and a PostgreSQL billing ledger with a durable ClickHouse
-outbox. The next delivery sequence is:
+and exact cache, a PostgreSQL billing ledger with a durable ClickHouse outbox,
+tools/structured output, PostgreSQL virtual keys, and atomic multi-scope
+budgets. The remaining delivery sequence is:
 
-1. Complete tools/function-calling and structured-output compatibility.
-2. Move virtual keys to a revocable PostgreSQL-backed store.
-3. Enforce atomic team, user, key, model, and provider budgets and quotas.
-4. Add a versioned model capability and pricing catalog.
-5. Add OpenTelemetry and provider/cache/security/billing metrics.
-6. Add the embeddings API through the same auth, DLP, and billing pipeline.
-7. Add adaptive routing and Responses API session affinity.
-8. Add a protected management API, opt-in tenant-safe semantic cache, and
+1. Add a versioned model capability and pricing catalog.
+2. Add OpenTelemetry and provider/cache/security/billing metrics.
+3. Add the embeddings API through the same auth, DLP, and billing pipeline.
+4. Add adaptive routing and Responses API session affinity.
+5. Add a protected management API, opt-in tenant-safe semantic cache, and
    scoped MCP/multimodal support as separate security-reviewed increments.
 
 ## License

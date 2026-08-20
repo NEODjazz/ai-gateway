@@ -12,6 +12,7 @@ type UsageRequest struct {
 	RequestID             string   `json:"request_id,omitempty"`
 	CredentialID          string   `json:"credential_id,omitempty"`
 	UserID                string   `json:"user_id,omitempty"`
+	TeamID                string   `json:"team_id,omitempty"`
 	Roles                 []string `json:"roles,omitempty"`
 	Provider              string   `json:"provider,omitempty"`
 	ProviderEndpointName  string   `json:"provider_endpoint_name,omitempty"`
@@ -88,6 +89,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		RequestID:             req.RequestID,
 		CredentialID:          req.CredentialID,
 		UserID:                req.UserID,
+		TeamID:                req.TeamID,
 		Roles:                 append([]string(nil), req.Roles...),
 		Provider:              req.Request.Provider,
 		Model:                 req.Request.Model,
@@ -102,7 +104,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		PromptTokensEstimated: estimateRequestTokens(req),
 	}
 	request.InputTokens = request.PromptTokensEstimated
-	request.TotalTokens = request.PromptTokensEstimated
+	request.OutputTokens = requestedOutputTokens(req)
+	request.TotalTokens = request.InputTokens + request.OutputTokens
 	if req.ResponseRequest != nil {
 		request.Provider = req.ResponseRequest.Provider
 		request.Model = req.ResponseRequest.Model
@@ -131,6 +134,21 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.TotalTokens = request.PromptTokensEstimated
 	}
 	return request
+}
+
+func requestedOutputTokens(req *RequestContext) int {
+	if req.ResponseRequest != nil {
+		if req.ResponseRequest.MaxOutputTokens != nil && *req.ResponseRequest.MaxOutputTokens > 0 {
+			return *req.ResponseRequest.MaxOutputTokens
+		}
+		if req.ResponseRequest.MaxTokens != nil && *req.ResponseRequest.MaxTokens > 0 {
+			return *req.ResponseRequest.MaxTokens
+		}
+	}
+	if req.Request.MaxTokens != nil && *req.Request.MaxTokens > 0 {
+		return *req.Request.MaxTokens
+	}
+	return 0
 }
 
 func estimateRequestTokens(req *RequestContext) int {

@@ -68,6 +68,14 @@ func (rejectingModule) Handle(context.Context, *modules.RequestContext) error {
 	return modules.ErrContentRejected
 }
 
+type budgetRejectingModule struct{}
+
+func (budgetRejectingModule) Name() string   { return "billing" }
+func (budgetRejectingModule) Required() bool { return true }
+func (budgetRejectingModule) Handle(context.Context, *modules.RequestContext) error {
+	return modules.ErrBudgetExceeded
+}
+
 type failureCaptureModule struct {
 	calls int
 	cause error
@@ -246,6 +254,26 @@ func TestRouterDoesNotFallbackForClientRequestError(t *testing.T) {
 	}
 	if secondary.calls != 0 {
 		t.Fatalf("client error must not trigger fallback, secondary calls=%d", secondary.calls)
+	}
+}
+
+func TestRouterDoesNotFallbackAfterBudgetRejection(t *testing.T) {
+	primary := &countingProvider{content: "must not run"}
+	secondary := &countingProvider{content: "must not run"}
+	router := Router{
+		modules: modules.NewPipeline([]modules.Module{budgetRejectingModule{}}),
+		health:  newEndpointHealthTracker(),
+		endpoints: []Endpoint{
+			{Name: "primary", Type: "openai", Models: []string{"model"}, Provider: primary},
+			{Name: "secondary", Type: "openai", Models: []string{"model"}, Provider: secondary},
+		},
+	}
+	_, err := router.ChatCompletions(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}})
+	if !errors.Is(err, modules.ErrBudgetExceeded) {
+		t.Fatalf("expected terminal budget error, got %v", err)
+	}
+	if primary.calls != 0 || secondary.calls != 0 {
+		t.Fatalf("budget rejection reached providers: primary=%d secondary=%d", primary.calls, secondary.calls)
 	}
 }
 

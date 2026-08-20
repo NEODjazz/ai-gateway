@@ -17,4 +17,4 @@ npx likec4 validate docs/likec4
 npx likec4 start docs/likec4
 ```
 
-Пунктирные связи `planned` показывают подготовленную, но еще не реализованную интеграцию: anonymizer → Redis и billing → PostgreSQL.
+Пунктирная связь `planned` показывает еще не реализованную интеграцию anonymizer → Redis. Billing уже использует PostgreSQL для atomic budgets и durable outbox.

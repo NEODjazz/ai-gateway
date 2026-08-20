@@ -27,6 +27,7 @@ The internally generated and persisted `billing_event` includes:
 
 - request id
 - user id
+- team id
 - roles
 - API key fingerprint
 - provider
@@ -62,7 +63,7 @@ CLICKHOUSE_USERNAME=
 CLICKHOUSE_PASSWORD=
 ```
 
-PostgreSQL is reserved for transactional financial data:
+PostgreSQL stores transactional billing state:
 
 - users
 - tariffs / price plans
@@ -77,13 +78,37 @@ Feature flags:
 
 ```text
 BILLING_TARIFFS_ENABLED=false
-BILLING_LIMITS_ENABLED=false
-BILLING_QUOTAS_ENABLED=false
+BILLING_LIMITS_ENABLED=true
+BILLING_QUOTAS_ENABLED=true
 BILLING_FINANCIAL_TRANSACTIONS_ENABLED=false
 POSTGRES_DSN=
+BILLING_RESERVATION_TTL_SECONDS=900
+BILLING_DEFAULT_RESERVE_OUTPUT_TOKENS=1024
 ```
 
-If one of these PostgreSQL-backed features is enabled without a configured policy store, the service rejects the billing request instead of silently skipping financial controls.
+Limits and quotas are enforced atomically for `global`, `key`, `user`, `team`,
+`model`, and `provider` scopes. A request first reserves its estimated input plus
+maximum output allowance, then replaces the reservation with actual usage on
+`commit` or releases it on `cancel`. Expired reservations stop consuming the
+budget. Repeating the same `request_id` is idempotent; reusing it for another
+billing identity or after the lifecycle is finalized returns HTTP 409. During
+provider failover, an active reservation is atomically moved to the new
+provider/model scope instead of being counted twice or bypassing that scope.
+
+Policies are stored in `billing_budget_policies`. For example:
+
+```sql
+INSERT INTO billing_budget_policies
+    (scope_type, scope_id, period, currency, max_cost, max_tokens)
+VALUES
+    ('team', 'team-42', 'month', 'USD', 100.00, 10000000);
+```
+
+When a matching limit is exhausted, billing returns HTTP 429 and the gateway
+returns `budget_exceeded` without trying another provider. Missing PostgreSQL or
+missing budget migrations make readiness and billing requests fail closed.
+Tariffs and financial transactions remain unavailable and also fail closed when
+their feature flags are enabled.
 
 ## Migrations
 
@@ -109,4 +134,5 @@ PostgreSQL:
 ```text
 migrations/postgres/001_financial_core.sql
 migrations/postgres/002_billing_outbox.sql
+migrations/postgres/004_budgets.sql
 ```

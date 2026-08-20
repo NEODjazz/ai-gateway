@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -11,6 +12,7 @@ import (
 
 func main() {
 	module := modules.NewBillingModule(true)
+	defer module.Close()
 
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := module.Ready(r.Context()); err != nil {
@@ -33,6 +35,7 @@ func main() {
 			RequestID:             request.RequestID,
 			CredentialID:          request.CredentialID,
 			UserID:                request.UserID,
+			TeamID:                request.TeamID,
 			Roles:                 request.Roles,
 			PromptTokensEstimated: request.PromptTokensEstimated,
 			PostResponse:          request.Phase == "commit",
@@ -59,7 +62,13 @@ func main() {
 			ctx.ResponseRequest = &openai.ResponseRequest{Provider: request.Provider, Model: request.Model}
 		}
 		if err := module.Handle(r.Context(), &ctx); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			if errors.Is(err, modules.ErrBudgetExceeded) {
+				http.Error(w, "budget exceeded", http.StatusTooManyRequests)
+			} else if errors.Is(err, modules.ErrBillingConflict) {
+				http.Error(w, "billing lifecycle conflict", http.StatusConflict)
+			} else {
+				http.Error(w, "billing unavailable", http.StatusServiceUnavailable)
+			}
 			return
 		}
 		_ = json.NewEncoder(w).Encode(usageResponse{Usage: ctx.Usage, Metadata: billingMetadata(ctx.Metadata)})
@@ -73,6 +82,7 @@ type usageRequest struct {
 	RequestID             string   `json:"request_id,omitempty"`
 	CredentialID          string   `json:"credential_id,omitempty"`
 	UserID                string   `json:"user_id,omitempty"`
+	TeamID                string   `json:"team_id,omitempty"`
 	Roles                 []string `json:"roles,omitempty"`
 	Provider              string   `json:"provider,omitempty"`
 	ProviderEndpointName  string   `json:"provider_endpoint_name,omitempty"`

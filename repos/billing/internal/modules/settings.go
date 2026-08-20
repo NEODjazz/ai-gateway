@@ -21,6 +21,8 @@ type Settings struct {
 	PostgresDSN                  string
 	DurableOutboxEnabled         bool
 	OutboxPollInterval           time.Duration
+	ReservationTTL               time.Duration
+	DefaultReserveOutputTokens   int
 }
 
 func SettingsFromEnv() Settings {
@@ -39,6 +41,8 @@ func SettingsFromEnv() Settings {
 		PostgresDSN:                  os.Getenv("POSTGRES_DSN"),
 		DurableOutboxEnabled:         envBool("BILLING_DURABLE_OUTBOX_ENABLED", false),
 		OutboxPollInterval:           time.Duration(envInt("BILLING_OUTBOX_POLL_MS", 500)) * time.Millisecond,
+		ReservationTTL:               time.Duration(envInt("BILLING_RESERVATION_TTL_SECONDS", 900)) * time.Second,
+		DefaultReserveOutputTokens:   envInt("BILLING_DEFAULT_RESERVE_OUTPUT_TOKENS", 1024),
 	}
 }
 

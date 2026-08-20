@@ -117,14 +117,14 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 					writeSSEDone(w)
 					return
 				}
-				writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
+				writeProviderFailure(w, err)
 				return
 			}
 			_ = response
 			writeSSEDone(w)
 			return
 		} else if err != nil {
-			writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
+			writeProviderFailure(w, err)
 			return
 		}
 	}
@@ -132,7 +132,7 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	reqCtx.Request.Stream = false
 	response, err := h.provider.ChatCompletions(r.Context(), reqCtx)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
+		writeProviderFailure(w, err)
 		return
 	}
 
@@ -191,14 +191,14 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 					writeSSEDone(w)
 					return
 				}
-				writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
+				writeProviderFailure(w, err)
 				return
 			}
 			_ = response
 			writeSSEDone(w)
 			return
 		} else if err != nil {
-			writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
+			writeProviderFailure(w, err)
 			return
 		}
 	}
@@ -206,10 +206,22 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	reqCtx.ResponseRequest.Stream = false
 	response, err := h.provider.Responses(r.Context(), reqCtx)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
+		writeProviderFailure(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func writeProviderFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, modules.ErrBudgetExceeded) {
+		writeError(w, http.StatusTooManyRequests, "budget_exceeded", "budget exceeded")
+		return
+	}
+	if errors.Is(err, modules.ErrBillingConflict) {
+		writeError(w, http.StatusConflict, "billing_conflict", "billing lifecycle conflict")
+		return
+	}
+	writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
 }
 
 func bearerToken(header string) string {

@@ -18,7 +18,9 @@ type UsageEventWriter interface {
 }
 
 type PolicyChecker interface {
-	Check(ctx context.Context, event BillingEvent) error
+	Apply(ctx context.Context, event BillingEvent) error
+	Ready(ctx context.Context) error
+	Close()
 }
 
 type NoopUsageEventWriter struct{}
@@ -29,9 +31,11 @@ func (NoopUsageEventWriter) WriteUsageEvent(context.Context, BillingEvent) error
 
 type NoopPolicyChecker struct{}
 
-func (NoopPolicyChecker) Check(context.Context, BillingEvent) error {
+func (NoopPolicyChecker) Apply(context.Context, BillingEvent) error {
 	return nil
 }
+func (NoopPolicyChecker) Ready(context.Context) error { return nil }
+func (NoopPolicyChecker) Close()                      {}
 
 type LifecycleStore struct {
 	mu   sync.Mutex
@@ -105,7 +109,7 @@ type NotConfiguredPolicyChecker struct {
 	settings Settings
 }
 
-func (c NotConfiguredPolicyChecker) Check(context.Context, BillingEvent) error {
+func (c NotConfiguredPolicyChecker) Apply(context.Context, BillingEvent) error {
 	var enabled []string
 	if c.settings.TariffsEnabled {
 		enabled = append(enabled, "tariffs")
@@ -127,6 +131,10 @@ func (c NotConfiguredPolicyChecker) Check(context.Context, BillingEvent) error {
 	}
 	return errors.New("postgres policy store is not implemented yet")
 }
+func (c NotConfiguredPolicyChecker) Ready(ctx context.Context) error {
+	return c.Apply(ctx, BillingEvent{})
+}
+func (NotConfiguredPolicyChecker) Close() {}
 
 type ClickHouseUsageEventWriter struct {
 	endpoint string
@@ -145,6 +153,9 @@ func NewUsageEventWriter(settings Settings) UsageEventWriter {
 func NewPolicyChecker(settings Settings) PolicyChecker {
 	if !settings.TariffsEnabled && !settings.LimitsEnabled && !settings.QuotasEnabled && !settings.FinancialTransactionsEnabled {
 		return NoopPolicyChecker{}
+	}
+	if !settings.TariffsEnabled && !settings.FinancialTransactionsEnabled && (settings.LimitsEnabled || settings.QuotasEnabled) {
+		return NewPostgresBudgetPolicyChecker(settings.PostgresDSN, settings.ReservationTTL)
 	}
 	return NotConfiguredPolicyChecker{settings: settings}
 }

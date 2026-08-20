@@ -19,6 +19,9 @@ billing:
   durableOutbox:
     enabled: true
     pollMilliseconds: 500
+  budgets:
+    reservationTTLSeconds: 900
+    defaultReserveOutputTokens: 1024
   clickhouse:
     url: http://ai-gateway-clickhouse:8123
     database: ai_gateway
@@ -31,8 +34,8 @@ billing:
     postgresDsn: postgres://ai_gateway:ai_gateway@ai-gateway-postgres:5432/ai_gateway?sslmode=disable
   features:
     tariffs: false
-    limits: false
-    quotas: false
+    limits: true
+    quotas: true
     financialTransactions: false
   pricing:
     inputPricePer1K: "0"

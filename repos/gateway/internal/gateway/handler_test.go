@@ -238,6 +238,25 @@ func TestReadinessFailsWithoutLeakingDependencyError(t *testing.T) {
 	}
 }
 
+func TestProviderBudgetFailureReturns429WithoutDetails(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeProviderFailure(recorder, errors.Join(errors.New("billing internal detail"), modules.ErrBudgetExceeded))
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", recorder.Code)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, `"code":"budget_exceeded"`) || strings.Contains(body, "internal detail") {
+		t.Fatalf("unexpected budget response: %s", body)
+	}
+}
+
+func TestProviderBillingConflictReturns409(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeProviderFailure(recorder, modules.ErrBillingConflict)
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"billing_conflict"`) {
+		t.Fatalf("unexpected billing conflict response: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestModelGrantRejectsRequestBeforeProvider(t *testing.T) {
 	provider := &chatProvider{}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{
