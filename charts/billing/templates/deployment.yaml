@@ -67,6 +67,8 @@ spec:
               value: {{ .Values.billing.pricing.outputPricePer1K | quote }}
             - name: BILLING_CURRENCY
               value: {{ .Values.billing.pricing.currency | quote }}
+            - name: MODEL_CATALOG_JSON
+              value: {{ .Values.billing.modelCatalog | toJson | quote }}
           readinessProbe:
             httpGet: {path: /healthz, port: http}
           livenessProbe:

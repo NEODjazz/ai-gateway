@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
@@ -697,6 +698,83 @@ func TestRouterModelsReturnsConfiguredModels(t *testing.T) {
 		if model.Object != "model" {
 			t.Fatalf("expected model object, got %q", model.Object)
 		}
+	}
+}
+
+func TestCatalogRoutesByModelCapabilitiesAndOutputLimit(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{
+		"version":"v1","unknown_model_policy":"deny","models":[
+			{"provider":"basic","model":"model","capabilities":["chat"],"max_output_tokens":100},
+			{"provider":"tools","model":"model","capabilities":["chat","tools","structured_output"],"max_output_tokens":10},
+			{"provider":"large","model":"model","capabilities":["chat","tools","structured_output"],"max_output_tokens":1000}
+		]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	basic := &countingProvider{content: "basic"}
+	tools := &countingProvider{content: "tools"}
+	large := &countingProvider{content: "large"}
+	router := Router{catalog: catalog, health: newEndpointHealthTracker(), endpoints: []Endpoint{
+		{Name: "basic", Type: "openai", Models: []string{"model"}, Priority: 1, Provider: basic},
+		{Name: "tools", Type: "openai", Models: []string{"model"}, Priority: 2, Provider: tools},
+		{Name: "large", Type: "openai", Models: []string{"model"}, Priority: 3, Provider: large},
+	}}
+	maxTokens := 50
+	request := openai.ChatCompletionRequest{
+		Model: "model", MaxTokens: &maxTokens,
+		Tools:          []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup"}}},
+		ResponseFormat: &openai.ResponseFormat{Type: "json_object"},
+	}
+	response, err := router.ChatCompletions(context.Background(), modules.RequestContext{Request: request})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if openai.ContentText(response.Choices[0].Message.Content) != "large" || basic.calls != 0 || tools.calls != 0 || large.calls != 1 {
+		t.Fatalf("catalog did not select capable endpoint: response=%+v calls=%d/%d/%d", response, basic.calls, tools.calls, large.calls)
+	}
+}
+
+func TestCatalogStrictModeRejectsUnknownModelAndFiltersModels(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"v1","unknown_model_policy":"deny","models":[{"provider":"known","model":"known-model","capabilities":["chat"]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := Router{catalog: catalog, health: newEndpointHealthTracker(), endpoints: []Endpoint{
+		{Name: "known", Type: "openai", Models: []string{"known-model", "unknown-model"}, Provider: staticProvider{content: "ok"}},
+	}}
+	if _, err := router.ChatCompletions(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "unknown-model"}}); err == nil {
+		t.Fatal("strict catalog accepted an unknown model")
+	}
+	models := router.Models()
+	if len(models) != 1 || models[0].ID != "known-model" {
+		t.Fatalf("strict catalog exposed unknown models: %+v", models)
+	}
+}
+
+func TestCatalogMatchesUpstreamModelAlias(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"v1","unknown_model_policy":"deny","models":[{"provider":"azure","model":"deployment-model","capabilities":["chat","tools"]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := &modelCaptureProvider{content: "ok"}
+	router := Router{catalog: catalog, health: newEndpointHealthTracker(), endpoints: []Endpoint{{
+		Name: "azure", Type: "openai", ModelAliases: map[string]string{"public-model": "deployment-model"}, Provider: upstream,
+	}}}
+	_, err = router.ChatCompletions(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{
+		Model: "public-model", Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup"}}},
+	}})
+	if err != nil || upstream.seenModel != "deployment-model" {
+		t.Fatalf("catalog alias lookup failed: model=%q err=%v", upstream.seenModel, err)
+	}
+}
+
+func TestResponsesCatalogRequirementsIncludeToolsStructuredOutputAndStream(t *testing.T) {
+	required := requiredResponseCapabilities(openai.ResponseRequest{
+		Tools: []openai.ResponseTool{{Type: "function", Name: "lookup"}},
+		Text:  map[string]any{"format": map[string]any{"type": "json_object"}},
+	}, true)
+	if strings.Join(required, ",") != "responses,stream,tools,structured_output" {
+		t.Fatalf("unexpected Responses capabilities: %v", required)
 	}
 }
 

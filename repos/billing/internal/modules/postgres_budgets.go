@@ -26,6 +26,19 @@ type PostgresBudgetPolicyChecker struct {
 	initErr error
 }
 
+type budgetReservation struct {
+	State           string
+	Owner           string
+	ProviderName    string
+	ProviderType    string
+	Model           string
+	Currency        string
+	CatalogVersion  string
+	PricingKey      string
+	InputCostPer1M  float64
+	OutputCostPer1M float64
+}
+
 func NewPostgresBudgetPolicyChecker(dsn string, ttl time.Duration) *PostgresBudgetPolicyChecker {
 	checker := &PostgresBudgetPolicyChecker{ttl: ttl}
 	if strings.TrimSpace(dsn) == "" {
@@ -51,10 +64,13 @@ func (c *PostgresBudgetPolicyChecker) Ready(ctx context.Context) error {
 	if err := c.pool.Ping(ctx); err != nil {
 		return errors.New("billing policy postgres is unavailable")
 	}
-	var policies, reservations bool
+	var policies, reservations, pricingSnapshots bool
 	if err := c.pool.QueryRow(ctx, `
 		SELECT to_regclass('public.billing_budget_policies') IS NOT NULL,
-		       to_regclass('public.billing_budget_reservations') IS NOT NULL`).Scan(&policies, &reservations); err != nil || !policies || !reservations {
+		       to_regclass('public.billing_budget_reservations') IS NOT NULL,
+		       EXISTS (SELECT 1 FROM information_schema.columns
+		               WHERE table_schema='public' AND table_name='billing_budget_reservations'
+		                 AND column_name='catalog_version')`).Scan(&policies, &reservations, &pricingSnapshots); err != nil || !policies || !reservations || !pricingSnapshots {
 		return errors.New("billing budget migration is not applied")
 	}
 	return nil
@@ -66,7 +82,10 @@ func (c *PostgresBudgetPolicyChecker) Close() {
 	}
 }
 
-func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event BillingEvent) error {
+func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event *BillingEvent) error {
+	if event == nil {
+		return errors.New("billing event is required")
+	}
 	if c.initErr != nil {
 		return c.initErr
 	}
@@ -84,52 +103,59 @@ func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event BillingEv
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, event.RequestID); err != nil {
 		return err
 	}
-	policies, err := applicableBudgetPolicies(ctx, tx, event)
+	reservation, found, err := reservationState(ctx, tx, event.RequestID)
 	if err != nil {
 		return err
 	}
-	state, owner, found, err := reservationState(ctx, tx, event.RequestID)
-	if err != nil {
-		return err
-	}
-	if found && owner != reservationOwner(event) {
+	if found && reservation.Owner != reservationOwner(*event) {
 		return fmt.Errorf("%w: request_id belongs to another billing identity", ErrBillingConflict)
+	}
+	if found && (event.Phase == "commit" || (event.Phase == "reserve" && samePricingRoute(reservation, *event))) {
+		applyReservationPricing(event, reservation)
+	}
+	policies, err := applicableBudgetPolicies(ctx, tx, *event)
+	if err != nil {
+		return err
 	}
 
 	switch event.Phase {
 	case "reserve":
 		if found {
-			if state != "reserved" {
-				return fmt.Errorf("%w: request lifecycle is already %s", ErrBillingConflict, state)
+			if reservation.State != "reserved" {
+				return fmt.Errorf("%w: request lifecycle is already %s", ErrBillingConflict, reservation.State)
 			}
-			if err := checkBudgetPolicies(ctx, tx, policies, event); err != nil {
+			if err := checkBudgetPolicies(ctx, tx, policies, *event); err != nil {
 				return err
 			}
 			_, err = tx.Exec(ctx, `
 				UPDATE billing_budget_reservations
 				SET provider_name=$2, provider_type=$3, model=$4, currency=$5,
-				    reserved_cost=$6, reserved_tokens=$7, updated_at=now()
-				WHERE request_id=$1`, event.RequestID, budgetProviderName(event),
-				budgetProviderType(event), event.Model, event.Currency, event.Cost, event.TotalTokens)
+				    reserved_cost=$6, reserved_tokens=$7, catalog_version=$8,
+				    pricing_key=$9, input_cost_per_1m=$10, output_cost_per_1m=$11, updated_at=now()
+				WHERE request_id=$1`, event.RequestID, budgetProviderName(*event),
+				budgetProviderType(*event), event.Model, event.Currency, event.Cost, event.TotalTokens,
+				event.CatalogVersion, event.PricingKey, event.InputCostPer1M, event.OutputCostPer1M)
 			break
 		}
-		if err := checkBudgetPolicies(ctx, tx, policies, event); err != nil {
+		if err := checkBudgetPolicies(ctx, tx, policies, *event); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `
 			INSERT INTO billing_budget_reservations
 			(request_id, owner_key, credential_id, user_id, team_id, provider_name,
 			 provider_type, model, currency, state, reserved_cost, reserved_tokens,
+			 catalog_version, pricing_key, input_cost_per_1m, output_cost_per_1m,
 			 reservation_expires_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'reserved',$10,$11,$12)`,
-			event.RequestID, reservationOwner(event), event.APIKeyFingerprint, event.UserID,
-			event.TeamID, budgetProviderName(event), budgetProviderType(event), event.Model,
-			event.Currency, event.Cost, event.TotalTokens, time.Now().UTC().Add(c.ttl))
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'reserved',$10,$11,$12,$13,$14,$15,$16)`,
+			event.RequestID, reservationOwner(*event), event.APIKeyFingerprint, event.UserID,
+			event.TeamID, budgetProviderName(*event), budgetProviderType(*event), event.Model,
+			event.Currency, event.Cost, event.TotalTokens, event.CatalogVersion, event.PricingKey,
+			event.InputCostPer1M, event.OutputCostPer1M, time.Now().UTC().Add(c.ttl))
 	case "commit":
-		if found && state == "committed" {
+		if found && reservation.State == "committed" {
 			return tx.Commit(ctx)
 		}
-		if found && state == "canceled" {
+		if found && reservation.State == "canceled" {
 			return fmt.Errorf("%w: canceled request cannot be committed", ErrBillingConflict)
 		}
 		if found {
@@ -138,21 +164,26 @@ func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event BillingEv
 				SET state='committed', actual_cost=$2, actual_tokens=$3, updated_at=now()
 				WHERE request_id=$1`, event.RequestID, event.Cost, event.TotalTokens)
 		} else if !found {
+			if event.CatalogVersion == "" {
+				return errors.New("commit has no reservation or resolved pricing snapshot")
+			}
 			_, err = tx.Exec(ctx, `
 				INSERT INTO billing_budget_reservations
 				(request_id, owner_key, credential_id, user_id, team_id, provider_name,
 				 provider_type, model, currency, state, actual_cost, actual_tokens,
+				 catalog_version, pricing_key, input_cost_per_1m, output_cost_per_1m,
 				 reservation_expires_at)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'committed',$10,$11,now())`,
-				event.RequestID, reservationOwner(event), event.APIKeyFingerprint, event.UserID,
-				event.TeamID, budgetProviderName(event), budgetProviderType(event), event.Model,
-				event.Currency, event.Cost, event.TotalTokens)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'committed',$10,$11,$12,$13,$14,$15,now())`,
+				event.RequestID, reservationOwner(*event), event.APIKeyFingerprint, event.UserID,
+				event.TeamID, budgetProviderName(*event), budgetProviderType(*event), event.Model,
+				event.Currency, event.Cost, event.TotalTokens, event.CatalogVersion, event.PricingKey,
+				event.InputCostPer1M, event.OutputCostPer1M)
 		}
 	case "cancel":
-		if found && state == "committed" {
+		if found && reservation.State == "committed" {
 			return fmt.Errorf("%w: committed request cannot be canceled", ErrBillingConflict)
 		}
-		if found && state == "reserved" {
+		if found && reservation.State == "reserved" {
 			_, err = tx.Exec(ctx, `
 				UPDATE billing_budget_reservations
 				SET state='canceled', reserved_cost=0, reserved_tokens=0, updated_at=now()
@@ -163,8 +194,8 @@ func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event BillingEv
 				(request_id, owner_key, credential_id, user_id, team_id, provider_name,
 				 provider_type, model, currency, state, reservation_expires_at)
 				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'canceled',now())`,
-				event.RequestID, reservationOwner(event), event.APIKeyFingerprint, event.UserID,
-				event.TeamID, budgetProviderName(event), budgetProviderType(event), event.Model, event.Currency)
+				event.RequestID, reservationOwner(*event), event.APIKeyFingerprint, event.UserID,
+				event.TeamID, budgetProviderName(*event), budgetProviderType(*event), event.Model, event.Currency)
 		}
 	}
 	if err != nil {
@@ -231,12 +262,35 @@ func applicableBudgetPolicies(ctx context.Context, tx pgx.Tx, event BillingEvent
 	return policies, rows.Err()
 }
 
-func reservationState(ctx context.Context, tx pgx.Tx, requestID string) (state, owner string, found bool, err error) {
-	err = tx.QueryRow(ctx, `SELECT state, owner_key FROM billing_budget_reservations WHERE request_id=$1 FOR UPDATE`, requestID).Scan(&state, &owner)
+func reservationState(ctx context.Context, tx pgx.Tx, requestID string) (budgetReservation, bool, error) {
+	var reservation budgetReservation
+	err := tx.QueryRow(ctx, `
+		SELECT state, owner_key, provider_name, provider_type, model, currency,
+		       catalog_version, pricing_key, input_cost_per_1m::float8, output_cost_per_1m::float8
+		FROM billing_budget_reservations WHERE request_id=$1 FOR UPDATE`, requestID).Scan(
+		&reservation.State, &reservation.Owner, &reservation.ProviderName, &reservation.ProviderType,
+		&reservation.Model, &reservation.Currency, &reservation.CatalogVersion, &reservation.PricingKey,
+		&reservation.InputCostPer1M, &reservation.OutputCostPer1M)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", false, nil
+		return budgetReservation{}, false, nil
 	}
-	return state, owner, err == nil, err
+	return reservation, err == nil, err
+}
+
+func samePricingRoute(reservation budgetReservation, event BillingEvent) bool {
+	return reservation.ProviderName == budgetProviderName(event) &&
+		reservation.ProviderType == budgetProviderType(event) && reservation.Model == event.Model
+}
+
+func applyReservationPricing(event *BillingEvent, reservation budgetReservation) {
+	event.Currency = reservation.Currency
+	event.CatalogVersion = reservation.CatalogVersion
+	event.PricingKey = reservation.PricingKey
+	event.InputCostPer1M = reservation.InputCostPer1M
+	event.OutputCostPer1M = reservation.OutputCostPer1M
+	event.Cost = pricingCost(event.InputTokens, event.OutputTokens, PricingSnapshot{
+		InputCostPer1M: reservation.InputCostPer1M, OutputCostPer1M: reservation.OutputCostPer1M,
+	})
 }
 
 func budgetUsage(ctx context.Context, tx pgx.Tx, policy budgetPolicy, event BillingEvent, now time.Time) (float64, int64, error) {

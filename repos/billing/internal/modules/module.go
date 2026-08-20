@@ -51,6 +51,10 @@ type BillingEvent struct {
 	TotalTokens           int      `json:"total_tokens"`
 	Cost                  float64  `json:"cost"`
 	Currency              string   `json:"currency,omitempty"`
+	CatalogVersion        string   `json:"catalog_version,omitempty"`
+	PricingKey            string   `json:"pricing_key,omitempty"`
+	InputCostPer1M        float64  `json:"input_cost_per_1m,omitempty"`
+	OutputCostPer1M       float64  `json:"output_cost_per_1m,omitempty"`
 	Timestamp             string   `json:"timestamp"`
 }
 

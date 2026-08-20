@@ -157,6 +157,14 @@ HTTP-ответы модулей декодируются в типизиров�
 
 Endpoints загружаются из `PROVIDERS_JSON`, выключенные endpoints отбрасываются, неизвестные типы игнорируются, остальные стабильно сортируются по возрастанию `priority`.
 
+`MODEL_CATALOG_JSON` — версионированный общий контракт gateway и billing.
+Gateway сопоставляет entry по endpoint name, затем provider type и `*`, проверяет
+request-derived capabilities (`chat`, `responses`, `stream`, `tools`,
+`structured_output`) и `max_output_tokens`. При
+`unknown_model_policy=deny` неизвестная модель не участвует в routing и не
+публикуется через `/v1/models`. Billing по тому же precedence выбирает цену за
+миллион input/output tokens и currency.
+
 ```mermaid
 flowchart TD
     Request["provider + model"] --> Mode{"Как задан запрос?"}
@@ -210,6 +218,7 @@ Helm chart передает anonymizer переменную `REDIS_ADDR` и от
 - Billing использует lifecycle `reserve -> commit/cancel`. При `BILLING_DURABLE_OUTBOX_ENABLED=true` ledger и outbox транзакционно сохраняются в PostgreSQL. Worker использует `SKIP LOCKED`, stale-lock recovery и backoff; `event_id=request_id:phase` дедуплицирует enqueue между репликами и рестартами. Доставка в ClickHouse имеет семантику at-least-once, поэтому точный финансовый расчет должен дедуплицировать события по `event_id`.
 - PostgreSQL policy checker сериализует matching policies через row locks и атомарно применяет cost/token budgets по global/key/user/team/model/provider scope и hour/day/week/month period. Reserve учитывает максимальный output или безопасный fallback, commit — фактический usage, cancel и TTL освобождают capacity.
 - Повторный active reserve с тем же `request_id` идемпотентен и при failover переносит reservation на новый provider/model scope. Повторное использование finalized `request_id` или смена billing identity отклоняется как `409 billing_conflict`.
+- Reservation сохраняет `catalog_version`, `pricing_key` и обе ставки. Commit всегда использует этот snapshot, даже если active catalog успел измениться или удалить модель; те же audit fields пишутся в ClickHouse.
 - Если provider вернул usage, commit использует его; иначе фактический output остается нулевым. Reservation при этом защищает лимит до commit/cancel/TTL.
 - Tariffs и financial transactions пока не реализованы и fail closed при включении.
 

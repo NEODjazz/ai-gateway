@@ -56,3 +56,15 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 		t.Fatalf("unexpected routing config: %+v", endpoint)
 	}
 }
+
+func TestLoadModelCatalog(t *testing.T) {
+	t.Setenv("MODEL_CATALOG_JSON", `{"version":"v1","unknown_model_policy":"deny","models":[{"provider":"demo","model":"model","capabilities":["chat"]}]}`)
+	cfg := Load()
+	if cfg.InitErr != nil || cfg.Catalog.Version != "v1" || !cfg.Catalog.DenyUnknownModels() {
+		t.Fatalf("model catalog was not loaded: catalog=%+v err=%v", cfg.Catalog, cfg.InitErr)
+	}
+	t.Setenv("MODEL_CATALOG_JSON", `{"models":[{"provider":"demo","model":"model"}]}`)
+	if cfg := Load(); cfg.InitErr == nil {
+		t.Fatal("invalid model catalog did not fail configuration")
+	}
+}

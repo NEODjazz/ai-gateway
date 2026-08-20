@@ -19,6 +19,7 @@ type BillingModule struct {
 	durable                    DurableEventRepository
 	initErr                    error
 	defaultReserveOutputTokens int
+	catalog                    ModelCatalog
 }
 
 type PricingConfig struct {
@@ -33,16 +34,19 @@ func NewBillingModule(required bool) BillingModule {
 }
 
 func NewBillingModuleWithPricing(required bool, pricing PricingConfig) BillingModule {
+	catalog, _ := ParseModelCatalog("")
 	return BillingModule{
 		required:  required,
 		pricing:   pricing,
 		writer:    NoopUsageEventWriter{},
 		policy:    NoopPolicyChecker{},
 		lifecycle: NewLifecycleStore(),
+		catalog:   catalog,
 	}
 }
 
 func NewBillingModuleWithSettings(required bool, settings Settings) BillingModule {
+	catalog, catalogErr := ParseModelCatalog(settings.ModelCatalogJSON)
 	module := BillingModule{
 		required:                   required,
 		pricing:                    settings.Pricing,
@@ -50,13 +54,17 @@ func NewBillingModuleWithSettings(required bool, settings Settings) BillingModul
 		policy:                     NewPolicyChecker(settings),
 		lifecycle:                  NewLifecycleStore(),
 		defaultReserveOutputTokens: settings.DefaultReserveOutputTokens,
+		catalog:                    catalog,
+		initErr:                    catalogErr,
 	}
 	if settings.DurableOutboxEnabled {
 		writer := UsageEventWriter(NoopUsageEventWriter{})
 		if settings.UsageEventsEnabled {
 			writer = NewClickHouseUsageEventWriter(settings)
 		}
-		module.durable, module.initErr = NewPostgresOutboxRepository(settings.PostgresDSN, writer, settings.OutboxPollInterval)
+		var outboxErr error
+		module.durable, outboxErr = NewPostgresOutboxRepository(settings.PostgresDSN, writer, settings.OutboxPollInterval)
+		module.initErr = errors.Join(module.initErr, outboxErr)
 	}
 	return module
 }
@@ -139,7 +147,11 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 		eventTotalTokens = inputTokens + eventOutputTokens
 		req.Metadata["billing.reserved_output_tokens"] = strconv.Itoa(eventOutputTokens)
 	}
-	event := m.event(req, promptTokens, inputTokens, eventOutputTokens, eventTotalTokens)
+	event, err := m.event(req, promptTokens, inputTokens, eventOutputTokens, eventTotalTokens)
+	pricingErr := err
+	if pricingErr != nil && phase == "reserve" {
+		return err
+	}
 	req.BillingEvent = &event
 	event.Phase = phase
 	key := ""
@@ -147,8 +159,11 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 		key = event.RequestID + ":" + phase
 	}
 	event.EventID = key
-	if err := m.policy.Apply(ctx, event); err != nil {
+	if err := m.policy.Apply(ctx, &event); err != nil {
 		return err
+	}
+	if pricingErr != nil && phase == "commit" && event.CatalogVersion == "" {
+		return pricingErr
 	}
 	if m.durable != nil {
 		if phase == "reserve" {
@@ -157,7 +172,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 				cancelEvent := event
 				cancelEvent.Phase = "cancel"
 				cancelEvent.InputTokens, cancelEvent.OutputTokens, cancelEvent.TotalTokens, cancelEvent.Cost = 0, 0, 0, 0
-				_ = m.policy.Apply(ctx, cancelEvent)
+				_ = m.policy.Apply(ctx, &cancelEvent)
 				return err
 			}
 			if !created {
@@ -204,7 +219,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	return nil
 }
 
-func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens int, outputTokens int, totalTokens int) BillingEvent {
+func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens int, outputTokens int, totalTokens int) (BillingEvent, error) {
 	model := req.Request.Model
 	providerName := req.Request.Provider
 	apiType := "chat_completions"
@@ -220,6 +235,11 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		model = req.ResponsesResponse.Model
 	}
 
+	pricing, err := m.catalog.Resolve(metadata(req, "provider.endpoint.name"), metadata(req, "provider.endpoint.type"), providerName, model, m.pricing)
+	pricingErr := err
+	if pricingErr != nil {
+		pricing = PricingSnapshot{Currency: m.pricing.Currency}
+	}
 	return BillingEvent{
 		RequestID:             requestID(req),
 		UserID:                req.UserID,
@@ -240,10 +260,14 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		InputTokens:           inputTokens,
 		OutputTokens:          outputTokens,
 		TotalTokens:           totalTokens,
-		Cost:                  m.cost(inputTokens, outputTokens),
-		Currency:              m.pricing.Currency,
+		Cost:                  pricingCost(inputTokens, outputTokens, pricing),
+		Currency:              pricing.Currency,
+		CatalogVersion:        pricing.CatalogVersion,
+		PricingKey:            pricing.PricingKey,
+		InputCostPer1M:        pricing.InputCostPer1M,
+		OutputCostPer1M:       pricing.OutputCostPer1M,
 		Timestamp:             time.Now().UTC().Format(time.RFC3339),
-	}
+	}, pricingErr
 }
 
 func requestID(req *RequestContext) string {
@@ -251,10 +275,6 @@ func requestID(req *RequestContext) string {
 		return req.RequestID
 	}
 	return metadata(req, "request.id")
-}
-
-func (m BillingModule) cost(inputTokens int, outputTokens int) float64 {
-	return (float64(inputTokens)/1000)*m.pricing.InputPricePer1K + (float64(outputTokens)/1000)*m.pricing.OutputPricePer1K
 }
 
 func reserveOutputTokens(req *RequestContext, fallback int) int {

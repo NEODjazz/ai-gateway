@@ -18,7 +18,7 @@ type UsageEventWriter interface {
 }
 
 type PolicyChecker interface {
-	Apply(ctx context.Context, event BillingEvent) error
+	Apply(ctx context.Context, event *BillingEvent) error
 	Ready(ctx context.Context) error
 	Close()
 }
@@ -31,7 +31,7 @@ func (NoopUsageEventWriter) WriteUsageEvent(context.Context, BillingEvent) error
 
 type NoopPolicyChecker struct{}
 
-func (NoopPolicyChecker) Apply(context.Context, BillingEvent) error {
+func (NoopPolicyChecker) Apply(context.Context, *BillingEvent) error {
 	return nil
 }
 func (NoopPolicyChecker) Ready(context.Context) error { return nil }
@@ -109,7 +109,7 @@ type NotConfiguredPolicyChecker struct {
 	settings Settings
 }
 
-func (c NotConfiguredPolicyChecker) Apply(context.Context, BillingEvent) error {
+func (c NotConfiguredPolicyChecker) Apply(context.Context, *BillingEvent) error {
 	var enabled []string
 	if c.settings.TariffsEnabled {
 		enabled = append(enabled, "tariffs")
@@ -132,7 +132,7 @@ func (c NotConfiguredPolicyChecker) Apply(context.Context, BillingEvent) error {
 	return errors.New("postgres policy store is not implemented yet")
 }
 func (c NotConfiguredPolicyChecker) Ready(ctx context.Context) error {
-	return c.Apply(ctx, BillingEvent{})
+	return c.Apply(ctx, &BillingEvent{})
 }
 func (NotConfiguredPolicyChecker) Close() {}
 

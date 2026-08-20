@@ -3,6 +3,7 @@ package modules
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -158,6 +159,29 @@ func TestPostgresBudgetReservationsAreAtomicAndLifecycleAware(t *testing.T) {
 	if err := checker.Apply(ctx, costSecond); err != nil {
 		t.Fatalf("cancel did not release cost budget: %v", err)
 	}
+
+	pricingRequest := "pricing-snapshot-" + suffix
+	pricingReserve := budgetTestEvent(pricingRequest, "pricing-team-"+suffix, 300)
+	pricingReserve.InputTokens, pricingReserve.OutputTokens = 100, 200
+	pricingReserve.CatalogVersion, pricingReserve.PricingKey = "v1", "provider/model@v1"
+	pricingReserve.InputCostPer1M, pricingReserve.OutputCostPer1M = 1, 2
+	pricingReserve.Cost = pricingCost(pricingReserve.InputTokens, pricingReserve.OutputTokens, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2})
+	if err := checker.Apply(ctx, pricingReserve); err != nil {
+		t.Fatal(err)
+	}
+	pricingCommit := budgetTestEvent(pricingRequest, "pricing-team-"+suffix, 100)
+	pricingCommit.Phase = "commit"
+	pricingCommit.InputTokens, pricingCommit.OutputTokens = 50, 50
+	pricingCommit.CatalogVersion, pricingCommit.PricingKey = "v2", "provider/model@v2"
+	pricingCommit.InputCostPer1M, pricingCommit.OutputCostPer1M = 100, 200
+	pricingCommit.Cost = pricingCost(50, 50, PricingSnapshot{InputCostPer1M: 100, OutputCostPer1M: 200})
+	if err := checker.Apply(ctx, pricingCommit); err != nil {
+		t.Fatal(err)
+	}
+	expectedPinnedCost := pricingCost(50, 50, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2})
+	if pricingCommit.CatalogVersion != "v1" || pricingCommit.PricingKey != "provider/model@v1" || math.Abs(pricingCommit.Cost-expectedPinnedCost) > 1e-12 {
+		t.Fatalf("commit did not use reserved pricing snapshot: %+v", pricingCommit)
+	}
 }
 
 func TestPostgresBudgetReservationExpires(t *testing.T) {
@@ -190,17 +214,19 @@ func TestPostgresBudgetReservationExpires(t *testing.T) {
 
 func applyBudgetTestMigration(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", "004_budgets.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, string(migration)); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"004_budgets.sql", "005_pricing_snapshots.sql"} {
+		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, string(migration)); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
-func budgetTestEvent(requestID, team string, tokens int) BillingEvent {
-	return BillingEvent{
+func budgetTestEvent(requestID, team string, tokens int) *BillingEvent {
+	return &BillingEvent{
 		RequestID: requestID, TeamID: team, APIKeyFingerprint: "key-" + team,
 		Model: "model", Provider: "provider", Phase: "reserve", TotalTokens: tokens,
 		Currency: "USD", Timestamp: time.Now().UTC().Format(time.RFC3339),

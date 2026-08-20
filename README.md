@@ -137,6 +137,30 @@ gateway:
       enabled: true
 ```
 
+### Versioned model catalog
+
+Gateway routing and billing accept the same `MODEL_CATALOG_JSON` schema. Each
+entry can be scoped to an endpoint name, provider type, or `*`, and records model
+capabilities, token limits, prices per one million tokens, and currency. Matching
+uses endpoint name first, then provider type, then `*`; an endpoint-specific
+price therefore overrides a provider-wide price.
+
+The gateway derives required capabilities from each request (`chat`,
+`responses`, `stream`, `tools`, and `structured_output`) and excludes catalog
+entries that cannot satisfy them or whose `max_output_tokens` is too small.
+Billing records `catalog_version`, `pricing_key`, and both rates in every usage
+event. The reserve transaction persists that snapshot, so a catalog rollout or
+model removal between reserve and commit cannot reprice an in-flight request.
+
+Set `unknown_model_policy` to `deny` in production to fail closed. The default
+`legacy` mode preserves compatibility by using endpoint capabilities and the
+legacy `BILLING_*_PRICE_PER_1K` values for unknown models. Keep
+`gateway.modelCatalog` and `billing.modelCatalog` identical when installing the
+charts as separate releases. See
+[`docs/model-catalog.example.json`](docs/model-catalog.example.json); its model
+names and prices are illustrative configuration values, not a provider price
+quote.
+
 The gateway tries endpoints in `priority` order. If an endpoint returns an error or is unavailable, the router automatically tries the next compatible endpoint.
 
 Retries and cooldown are configured per endpoint with `max_retries`,
@@ -416,14 +440,13 @@ New GHCR packages are private by default. For a public repository, change the vi
 The gateway already has typed remote module contracts, OpenAI-compatible and
 Anthropic adapters, chat/Responses streaming, Redis-backed distributed limits
 and exact cache, a PostgreSQL billing ledger with a durable ClickHouse outbox,
-tools/structured output, PostgreSQL virtual keys, and atomic multi-scope
-budgets. The remaining delivery sequence is:
+tools/structured output, PostgreSQL virtual keys, atomic multi-scope budgets,
+and a versioned capability/pricing catalog. The remaining delivery sequence is:
 
-1. Add a versioned model capability and pricing catalog.
-2. Add OpenTelemetry and provider/cache/security/billing metrics.
-3. Add the embeddings API through the same auth, DLP, and billing pipeline.
-4. Add adaptive routing and Responses API session affinity.
-5. Add a protected management API, opt-in tenant-safe semantic cache, and
+1. Add OpenTelemetry and provider/cache/security/billing metrics.
+2. Add the embeddings API through the same auth, DLP, and billing pipeline.
+3. Add adaptive routing and Responses API session affinity.
+4. Add a protected management API, opt-in tenant-safe semantic cache, and
    scoped MCP/multimodal support as separate security-reviewed increments.
 
 ## License

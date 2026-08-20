@@ -23,6 +23,7 @@ type Settings struct {
 	OutboxPollInterval           time.Duration
 	ReservationTTL               time.Duration
 	DefaultReserveOutputTokens   int
+	ModelCatalogJSON             string
 }
 
 func SettingsFromEnv() Settings {
@@ -43,6 +44,7 @@ func SettingsFromEnv() Settings {
 		OutboxPollInterval:           time.Duration(envInt("BILLING_OUTBOX_POLL_MS", 500)) * time.Millisecond,
 		ReservationTTL:               time.Duration(envInt("BILLING_RESERVATION_TTL_SECONDS", 900)) * time.Second,
 		DefaultReserveOutputTokens:   envInt("BILLING_DEFAULT_RESERVE_OUTPUT_TOKENS", 1024),
+		ModelCatalogJSON:             os.Getenv("MODEL_CATALOG_JSON"),
 	}
 }
 

@@ -40,14 +40,24 @@ The internally generated and persisted `billing_event` includes:
 - input/output/total tokens
 - estimated cost
 - currency
+- catalog version and pricing key
+- input/output price per one million tokens
 - timestamp in RFC 3339 UTC format
 
-Pricing is configured through environment variables:
+Pricing is configured through the shared versioned `MODEL_CATALOG_JSON`. Prices
+are expressed per one million tokens. Billing stores the matched catalog
+version, pricing key, and rates in both the reservation and usage event, so a
+catalog deployment cannot reprice an in-flight request. Use
+`unknown_model_policy=deny` to reject models without an explicit price.
+
+The old environment-wide price remains as a compatibility fallback when the
+catalog policy is `legacy`:
 
 ```text
 BILLING_INPUT_PRICE_PER_1K=0
 BILLING_OUTPUT_PRICE_PER_1K=0
 BILLING_CURRENCY=USD
+MODEL_CATALOG_JSON={"version":"local-v1","unknown_model_policy":"legacy","models":[]}
 ```
 
 ## Storage model
@@ -116,6 +126,7 @@ ClickHouse:
 
 ```text
 migrations/clickhouse/001_usage_events.sql
+migrations/clickhouse/002_usage_catalog.sql
 ```
 
 Billing uses an explicit `reserve`, `commit`, and `cancel` lifecycle. Events are
@@ -135,4 +146,5 @@ PostgreSQL:
 migrations/postgres/001_financial_core.sql
 migrations/postgres/002_billing_outbox.sql
 migrations/postgres/004_budgets.sql
+migrations/postgres/005_pricing_snapshots.sql
 ```

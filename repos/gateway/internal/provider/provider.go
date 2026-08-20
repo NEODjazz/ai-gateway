@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
@@ -51,6 +52,7 @@ type Config struct {
 	CacheTTL          time.Duration
 	CacheMaxBytes     int
 	CacheStore        ExactCacheStore
+	Catalog           modelcatalog.Catalog
 }
 
 type Endpoint struct {
@@ -78,6 +80,7 @@ type Router struct {
 	health          *endpointHealthTracker
 	routeCounter    *atomic.Uint64
 	cache           responseCache
+	catalog         modelcatalog.Catalog
 }
 
 func New(cfg Config) Provider {
@@ -137,12 +140,13 @@ func New(cfg Config) Provider {
 		health:          newEndpointHealthTracker(),
 		routeCounter:    &atomic.Uint64{},
 		cache:           newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
+		catalog:         cfg.Catalog,
 	}
 }
 
 func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
 	request := req.Request
-	candidates := r.candidates(request, "chat")
+	candidates := r.candidates(request, requiredChatCapabilities(request, false)...)
 	if len(candidates) == 0 {
 		return openai.ChatCompletionResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -219,7 +223,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestContext, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, bool, error) {
 	request := req.Request
 	request.Stream = true
-	candidates := r.candidates(request, "chat", "stream")
+	candidates := r.candidates(request, requiredChatCapabilities(request, true)...)
 	if len(candidates) == 0 {
 		return openai.ChatCompletionResponse{}, false, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -278,7 +282,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		return openai.ResponseResponse{}, errors.New("missing response request")
 	}
 	request := *req.ResponseRequest
-	candidates := r.responseCandidates(request, "responses")
+	candidates := r.responseCandidates(request, requiredResponseCapabilities(request, false)...)
 	if len(candidates) == 0 {
 		return openai.ResponseResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -358,7 +362,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 	}
 	request := *req.ResponseRequest
 	request.Stream = true
-	candidates := r.responseCandidates(request, "responses", "stream")
+	candidates := r.responseCandidates(request, requiredResponseCapabilities(request, true)...)
 	if len(candidates) == 0 {
 		return openai.ResponseResponse{}, false, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -429,6 +433,13 @@ func (r Router) Models() []openai.Model {
 		}
 		for _, modelID := range modelIDs {
 			if modelID == "" || seen[modelID] {
+				continue
+			}
+			lookupModels := []string{modelID}
+			if upstream, found := endpoint.ModelAliases[modelID]; found {
+				lookupModels = append(lookupModels, upstream)
+			}
+			if _, found := r.catalog.Find(endpoint.Name, endpoint.Type, lookupModels...); !found && r.catalog.DenyUnknownModels() {
 				continue
 			}
 			seen[modelID] = true
@@ -583,7 +594,10 @@ func (r Router) candidates(request openai.ChatCompletionRequest, capabilities ..
 		if !endpoint.supportsModel(request.Model) {
 			continue
 		}
-		if !endpoint.supportsCapabilities(capabilities...) {
+		if !r.supportsCapabilities(endpoint, request.Model, capabilities...) {
+			continue
+		}
+		if !r.supportsOutputLimit(endpoint, request.Model, request.MaxTokens) {
 			continue
 		}
 		candidates = append(candidates, endpoint)
@@ -594,10 +608,42 @@ func (r Router) candidates(request openai.ChatCompletionRequest, capabilities ..
 
 func (r Router) responseCandidates(request openai.ResponseRequest, capabilities ...string) []Endpoint {
 	chatRequest := openai.ChatCompletionRequest{
-		Provider: request.Provider,
-		Model:    request.Model,
+		Provider:  request.Provider,
+		Model:     request.Model,
+		MaxTokens: request.MaxOutputTokens,
+	}
+	if chatRequest.MaxTokens == nil {
+		chatRequest.MaxTokens = request.MaxTokens
 	}
 	return r.candidates(chatRequest, capabilities...)
+}
+
+func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool) []string {
+	required := []string{"chat"}
+	if stream {
+		required = append(required, "stream")
+	}
+	if len(request.Tools) > 0 {
+		required = append(required, "tools")
+	}
+	if request.ResponseFormat != nil {
+		required = append(required, "structured_output")
+	}
+	return required
+}
+
+func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) []string {
+	required := []string{"responses"}
+	if stream {
+		required = append(required, "stream")
+	}
+	if len(request.Tools) > 0 {
+		required = append(required, "tools")
+	}
+	if request.Text != nil {
+		required = append(required, "structured_output")
+	}
+	return required
 }
 
 func (e Endpoint) supportsModel(model string) bool {
@@ -629,6 +675,45 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 		}
 	}
 	return true
+}
+
+func (r Router) supportsCapabilities(endpoint Endpoint, requestedModel string, required ...string) bool {
+	models := []string{requestedModel}
+	if upstream, found := endpoint.ModelAliases[requestedModel]; found {
+		models = append(models, upstream)
+	}
+	entry, found := r.catalog.Find(endpoint.Name, endpoint.Type, models...)
+	if !found {
+		if r.catalog.DenyUnknownModels() {
+			return false
+		}
+		return endpoint.supportsCapabilities(required...)
+	}
+	if entry.Capabilities == nil {
+		return endpoint.supportsCapabilities(required...)
+	}
+	available := make(map[string]bool, len(entry.Capabilities))
+	for _, capability := range entry.Capabilities {
+		available[capability] = true
+	}
+	for _, capability := range required {
+		if !available[capability] {
+			return false
+		}
+	}
+	return true
+}
+
+func (r Router) supportsOutputLimit(endpoint Endpoint, requestedModel string, requested *int) bool {
+	if requested == nil || *requested <= 0 {
+		return true
+	}
+	models := []string{requestedModel}
+	if upstream, found := endpoint.ModelAliases[requestedModel]; found {
+		models = append(models, upstream)
+	}
+	entry, found := r.catalog.Find(endpoint.Name, endpoint.Type, models...)
+	return !found || entry.MaxOutputTokens <= 0 || *requested <= entry.MaxOutputTokens
 }
 
 func (r Router) weightedOrder(candidates []Endpoint) []Endpoint {

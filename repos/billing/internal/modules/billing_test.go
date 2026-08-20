@@ -19,8 +19,8 @@ type recordingPolicyChecker struct {
 	events []BillingEvent
 }
 
-func (c *recordingPolicyChecker) Apply(_ context.Context, event BillingEvent) error {
-	c.events = append(c.events, event)
+func (c *recordingPolicyChecker) Apply(_ context.Context, event *BillingEvent) error {
+	c.events = append(c.events, *event)
 	return nil
 }
 func (*recordingPolicyChecker) Ready(context.Context) error { return nil }

@@ -1,0 +1,5 @@
+ALTER TABLE billing_budget_reservations
+    ADD COLUMN IF NOT EXISTS catalog_version TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS pricing_key TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS input_cost_per_1m NUMERIC(18, 8) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS output_cost_per_1m NUMERIC(18, 8) NOT NULL DEFAULT 0;

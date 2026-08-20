@@ -180,6 +180,12 @@ data:
         ON billing_budget_reservations(created_at, reservation_expires_at, state);
     CREATE INDEX IF NOT EXISTS idx_billing_budget_reservations_identity
         ON billing_budget_reservations(credential_id, user_id, team_id, model, provider_name, provider_type);
+  005_pricing_snapshots.sql: |
+    ALTER TABLE billing_budget_reservations
+        ADD COLUMN IF NOT EXISTS catalog_version TEXT NOT NULL DEFAULT '',
+        ADD COLUMN IF NOT EXISTS pricing_key TEXT NOT NULL DEFAULT '',
+        ADD COLUMN IF NOT EXISTS input_cost_per_1m NUMERIC(18, 8) NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS output_cost_per_1m NUMERIC(18, 8) NOT NULL DEFAULT 0;
 
   003_virtual_keys.sql: |
     CREATE TABLE IF NOT EXISTS auth_virtual_keys

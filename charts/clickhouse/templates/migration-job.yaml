@@ -26,8 +26,11 @@ spec:
             - sh
             - -c
             - |
+              set -e
               until wget -qO- http://{{ include "clickhouse.fullname" . }}:{{ .Values.service.httpPort }}/ping; do sleep 2; done
-              clickhouse-client --host {{ include "clickhouse.fullname" . }} --user {{ .Values.username }} --password "$CLICKHOUSE_PASSWORD" --multiquery < /migrations/001_usage_events.sql
+              for migration in /migrations/*.sql; do
+                clickhouse-client --host {{ include "clickhouse.fullname" . }} --user {{ .Values.username }} --password "$CLICKHOUSE_PASSWORD" --multiquery < "$migration"
+              done
           volumeMounts:
             - name: migrations
               mountPath: /migrations

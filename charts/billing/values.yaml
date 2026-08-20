@@ -41,6 +41,10 @@ billing:
     inputPricePer1K: "0"
     outputPricePer1K: "0"
     currency: USD
+  modelCatalog:
+    version: local-v1
+    unknown_model_policy: legacy
+    models: []
 
 resources: {}
 podSecurityContext:

@@ -13,3 +13,4 @@ data:
   {{- end }}
   providers.json: {{ $providers | toJson | quote }}
   guardrail-policies.json: {{ .Values.gateway.guardrailPolicies | toJson | quote }}
+  model-catalog.json: {{ .Values.gateway.modelCatalog | toJson | quote }}

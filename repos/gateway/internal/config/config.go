@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"ai-gateway-gateway/internal/modelcatalog"
 )
 
 type Config struct {
@@ -15,6 +17,8 @@ type Config struct {
 	Redis    RedisConfig
 	Modules  ModuleConfig
 	Provider ProviderConfig
+	Catalog  modelcatalog.Catalog
+	InitErr  error
 }
 
 type CacheConfig struct {
@@ -78,6 +82,7 @@ type ProviderEndpointConfig struct {
 }
 
 func Load() Config {
+	catalog, catalogErr := modelcatalog.Parse(os.Getenv("MODEL_CATALOG_JSON"))
 	return Config{
 		HTTP: HTTPConfig{
 			Addr: env("HTTP_ADDR", ":8080"),
@@ -95,6 +100,8 @@ func Load() Config {
 			Endpoints:         loadProviderEndpoints(),
 			GuardrailPolicies: loadGuardrailPolicies(),
 		},
+		Catalog: catalog,
+		InitErr: catalogErr,
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
 				Required: envBool("AUTH_REQUIRED", true),

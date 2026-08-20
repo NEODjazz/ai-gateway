@@ -18,6 +18,10 @@ gateway:
   provider:
     default: azure-open-ai
     testModel: gpt-5.3
+  modelCatalog:
+    version: local-v1
+    unknown_model_policy: legacy
+    models: []
   guardrailPolicies: {}
   # strict:
   #   dlp: true

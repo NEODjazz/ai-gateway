@@ -58,6 +58,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "ai-gateway.providerConfigName" . }}
                   key: guardrail-policies.json
+            - name: MODEL_CATALOG_JSON
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ai-gateway.providerConfigName" . }}
+                  key: model-catalog.json
             - name: EXACT_CACHE_TTL_SECONDS
               value: {{ .Values.gateway.exactCache.ttlSeconds | quote }}
             - name: EXACT_CACHE_MAX_BYTES

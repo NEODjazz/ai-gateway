@@ -16,6 +16,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if cfg.InitErr != nil {
+		log.Fatal(cfg.InitErr)
+	}
 	redisStore := redisstore.New(redisstore.Config{
 		Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB, Prefix: cfg.Redis.Prefix,
 	})
@@ -38,6 +41,7 @@ func main() {
 		CacheTTL:          time.Duration(cfg.Cache.TTLSeconds) * time.Second,
 		CacheMaxBytes:     cfg.Cache.MaxBytes,
 		CacheStore:        redisStore,
+		Catalog:           cfg.Catalog,
 	})
 
 	var rateLimits gateway.RateLimitStore = gateway.NewMemoryRateLimitStore()
