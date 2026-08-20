@@ -137,14 +137,38 @@ func decodeCached[T any](payload []byte) (T, bool) {
 
 func (r Router) cacheGet(ctx context.Context, key string) ([]byte, bool, error) {
 	if r.cache == nil || key == "" {
+		if r.observer != nil {
+			r.observer.ObserveCache("get", "disabled")
+		}
 		return nil, false, nil
 	}
-	return r.cache.get(ctx, key)
+	payload, found, err := r.cache.get(ctx, key)
+	if r.observer != nil {
+		result := "miss"
+		if err != nil {
+			result = "error"
+		} else if found {
+			result = "hit"
+		}
+		r.observer.ObserveCache("get", result)
+	}
+	return payload, found, err
 }
 
 func (r Router) cacheSet(ctx context.Context, key string, value []byte) error {
 	if r.cache == nil || key == "" {
+		if r.observer != nil {
+			r.observer.ObserveCache("set", "disabled")
+		}
 		return nil
 	}
-	return r.cache.set(ctx, key, value)
+	err := r.cache.set(ctx, key, value)
+	if r.observer != nil {
+		result := "ok"
+		if err != nil {
+			result = "error"
+		}
+		r.observer.ObserveCache("set", result)
+	}
+	return err
 }

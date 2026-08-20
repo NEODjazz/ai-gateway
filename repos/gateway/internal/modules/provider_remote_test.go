@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -114,6 +115,16 @@ func TestPipelineStopsOnContentRejectedEvenWhenOptional(t *testing.T) {
 
 type rejectingModule struct{}
 
+type recordingModuleObserver struct {
+	module string
+	phase  string
+	result string
+}
+
+func (o *recordingModuleObserver) ObserveModule(module, phase, result string, _ time.Duration) {
+	o.module, o.phase, o.result = module, phase, result
+}
+
 func (rejectingModule) Name() string {
 	return "optional-rejecting"
 }
@@ -124,4 +135,15 @@ func (rejectingModule) Required() bool {
 
 func (rejectingModule) Handle(context.Context, *RequestContext) error {
 	return ErrContentRejected
+}
+
+func TestPipelineObservesBoundedModuleOutcome(t *testing.T) {
+	observer := &recordingModuleObserver{}
+	pipeline := NewPipelineWithObserver([]Module{rejectingModule{}}, observer)
+	if err := pipeline.Run(context.Background(), &RequestContext{}); !errors.Is(err, ErrContentRejected) {
+		t.Fatalf("expected content rejection, got %v", err)
+	}
+	if observer.module != "optional-rejecting" || observer.phase != "pre" || observer.result != "content_rejected" {
+		t.Fatalf("unexpected module observation: %+v", observer)
+	}
 }

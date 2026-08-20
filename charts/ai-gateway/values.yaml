@@ -30,6 +30,9 @@ gateway:
     # Disabled by default; bundled cache is process-local and tenant-scoped.
     ttlSeconds: 0
     maxBytes: 1048576
+  telemetry:
+    otlpTracesEndpoint: ""
+    sampleRatio: "1"
   redis:
     # Leave addr empty to use process-local stores.
     addr: ""

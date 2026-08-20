@@ -296,4 +296,5 @@ Provider API keys не хранятся в `PROVIDERS_JSON`: chart создае�
 - DLP/AV сканируют текстовую проекцию запроса, а не произвольные бинарные вложения.
 - Content rejection является terminal и не запускает fallback на другой endpoint.
 - Budget rejection также terminal и возвращается как `429 budget_exceeded`.
-- Есть HTTP-метрики, JSON-логи и distributed request IDs; полноценный OpenTelemetry tracing пока не добавлен.
+- Gateway экспортирует OTLP/HTTP traces при заданном `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, продолжает и проксирует W3C trace context и выполняет bounded graceful flush. Server/module/provider/client spans не содержат bearer, prompt или provider response.
+- `/metrics` содержит HTTP, provider attempt, cache, module, security и billing lifecycle series. HTTP path/method и result нормализуются; identity, prompt, arbitrary model и secrets не используются как labels.

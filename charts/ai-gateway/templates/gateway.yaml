@@ -36,6 +36,14 @@ spec:
             {{- include "ai-gateway.devEnv" . | nindent 12 }}
             - name: AI_GATEWAY_SERVICE
               value: gateway
+            - name: AI_GATEWAY_VERSION
+              value: {{ .Chart.AppVersion | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: ai-gateway
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: {{ .Values.gateway.telemetry.otlpTracesEndpoint | quote }}
+            - name: OTEL_TRACE_SAMPLE_RATIO
+              value: {{ .Values.gateway.telemetry.sampleRatio | quote }}
             - name: HTTP_ADDR
               value: ":8080"
             - name: PROVIDER_TYPE

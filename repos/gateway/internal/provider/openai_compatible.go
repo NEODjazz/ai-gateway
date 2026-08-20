@@ -57,9 +57,7 @@ func NewOpenAICompatible(baseURL string, apiKey string, upstreamStream bool) Ope
 		baseURL:        strings.TrimRight(baseURL, "/"),
 		apiKey:         apiKey,
 		upstreamStream: upstreamStream,
-		client: &http.Client{
-			Timeout: 180 * time.Second,
-		},
+		client:         newProviderHTTPClient(180 * time.Second),
 	}
 }
 

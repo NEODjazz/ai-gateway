@@ -8,10 +8,15 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 type modelsProvider struct{}
@@ -220,6 +225,61 @@ func TestRoutesExposePrometheusMetricsAndRequestID(t *testing.T) {
 	}
 	if strings.Contains(body, `path="/metrics"`) {
 		t.Fatalf("metrics endpoint must not observe itself: %s", body)
+	}
+
+	unmatchedRequest := httptest.NewRequest(http.MethodGet, "/tenant-controlled-value", nil)
+	unmatchedRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(unmatchedRecorder, unmatchedRequest)
+	metricsRecorder = httptest.NewRecorder()
+	handler.ServeHTTP(metricsRecorder, metricsRequest)
+	if body := metricsRecorder.Body.String(); !strings.Contains(body, `path="unmatched"`) || strings.Contains(body, "tenant-controlled-value") {
+		t.Fatalf("unmatched paths must use a bounded metric label: %s", body)
+	}
+}
+
+func TestDetailedMetricsExposeOnlyBoundedOperationalLabels(t *testing.T) {
+	metrics := NewMetrics()
+	metrics.ObserveProvider("azure-a", "openai", "chat", "ok", 10*time.Millisecond)
+	metrics.ObserveModule("billing", "pre", "budget_exceeded", 5*time.Millisecond)
+	metrics.ObserveModule("dlp", "pre", "content_rejected", 3*time.Millisecond)
+	metrics.ObserveCache("get", "hit")
+	recorder := httptest.NewRecorder()
+	metrics.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := recorder.Body.String()
+	for _, expected := range []string{
+		`ai_gateway_provider_attempts_total{endpoint="azure-a",type="openai",operation="chat",result="ok"} 1`,
+		`ai_gateway_module_calls_total{module="billing",phase="pre",result="budget_exceeded"} 1`,
+		`ai_gateway_billing_events_total{phase="pre",result="budget_exceeded"} 1`,
+		`ai_gateway_security_module_calls_total{module="dlp",phase="pre",result="content_rejected"} 1`,
+		`ai_gateway_cache_operations_total{operation="get",result="hit"} 1`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("missing metric %q in:\n%s", expected, body)
+		}
+	}
+}
+
+func TestRoutesContinueIncomingW3CTrace(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	previousPropagator := otel.GetTextMapPropagator()
+	spanRecorder := tracetest.NewSpanRecorder()
+	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
+	otel.SetTracerProvider(tracerProvider)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	defer func() {
+		_ = tracerProvider.Shutdown(context.Background())
+		otel.SetTracerProvider(previousProvider)
+		otel.SetTextMapPropagator(previousPropagator)
+	}()
+
+	handler := Routes(NewHandler(modules.NewPipeline(nil), modelsProvider{}))
+	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	request.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	spans := spanRecorder.Ended()
+	if len(spans) != 1 || spans[0].SpanContext().TraceID().String() != "4bf92f3577b34da6a3ce929d0e0e4736" {
+		t.Fatalf("incoming trace was not continued: spans=%+v", spans)
 	}
 }
 

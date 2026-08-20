@@ -8,12 +8,14 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const maxRemoteResponseBytes = 8 << 20
 
 func newRemoteHTTPClient() *http.Client {
-	return &http.Client{Timeout: 2 * time.Second}
+	return &http.Client{Timeout: 2 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}
 }
 
 func callRemote[Request any, Response any](ctx context.Context, client *http.Client, endpoint string, request Request) (Response, error) {

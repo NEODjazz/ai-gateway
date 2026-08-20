@@ -33,10 +33,17 @@ func NewHandlerWithRateLimitStore(pipeline modules.Pipeline, llmProvider provide
 }
 
 func NewHandlerWithReadiness(pipeline modules.Pipeline, llmProvider provider.Provider, rateLimits RateLimitStore, ready func(context.Context) error) Handler {
+	return NewHandlerWithMetrics(pipeline, llmProvider, rateLimits, ready, NewMetrics())
+}
+
+func NewHandlerWithMetrics(pipeline modules.Pipeline, llmProvider provider.Provider, rateLimits RateLimitStore, ready func(context.Context) error, metrics *Metrics) Handler {
 	if rateLimits == nil {
 		rateLimits = NewMemoryRateLimitStore()
 	}
-	return Handler{pipeline: pipeline, provider: llmProvider, rateLimits: rateLimits, metrics: NewMetrics(), ready: ready}
+	if metrics == nil {
+		metrics = NewMetrics()
+	}
+	return Handler{pipeline: pipeline, provider: llmProvider, rateLimits: rateLimits, metrics: metrics, ready: ready}
 }
 
 func (h Handler) Health(w http.ResponseWriter, _ *http.Request) {

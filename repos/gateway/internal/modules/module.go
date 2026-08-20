@@ -5,8 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"ai-gateway-gateway/internal/openai"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 type RequestContext struct {
@@ -46,16 +50,26 @@ type FailureModule interface {
 }
 
 type Pipeline struct {
-	modules []Module
+	modules  []Module
+	observer ModuleObserver
+}
+
+type ModuleObserver interface {
+	ObserveModule(module, phase, result string, duration time.Duration)
 }
 
 func NewPipeline(modules []Module) Pipeline {
 	return Pipeline{modules: modules}
 }
 
+func NewPipelineWithObserver(modules []Module, observer ModuleObserver) Pipeline {
+	return Pipeline{modules: modules, observer: observer}
+}
+
 func (p Pipeline) Run(ctx context.Context, req *RequestContext) error {
 	for _, module := range p.modules {
-		if err := module.Handle(ctx, req); err != nil {
+		err := p.run(ctx, req, module, "pre", module.Handle)
+		if err != nil {
 			if module.Required() || errors.Is(err, ErrContentRejected) {
 				return fmt.Errorf("%s module failed: %w", module.Name(), err)
 			}
@@ -71,7 +85,8 @@ func (p Pipeline) RunPostResponse(ctx context.Context, req *RequestContext) erro
 		if !ok || !postModule.PostResponseEnabled() {
 			continue
 		}
-		if err := postModule.HandlePostResponse(ctx, req); err != nil {
+		err := p.run(ctx, req, module, "post", postModule.HandlePostResponse)
+		if err != nil {
 			if module.Required() || errors.Is(err, ErrContentRejected) {
 				return fmt.Errorf("%s post-response module failed: %w", module.Name(), err)
 			}
@@ -87,9 +102,58 @@ func (p Pipeline) RunFailure(ctx context.Context, req *RequestContext, cause err
 		if !ok {
 			continue
 		}
-		if err := failureModule.HandleFailure(ctx, req, cause); err != nil {
+		started := time.Now()
+		spanCtx, span := otel.Tracer("ai-gateway/modules").Start(ctx, "module."+module.Name()+".failure")
+		span.SetAttributes(attribute.String("ai.module.name", module.Name()), attribute.String("ai.module.phase", "failure"))
+		err := failureModule.HandleFailure(spanCtx, req, cause)
+		result := moduleResult(err)
+		span.SetAttributes(attribute.String("ai.module.result", result))
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, result)
+		}
+		span.End()
+		if p.observer != nil {
+			p.observer.ObserveModule(module.Name(), "failure", result, time.Since(started))
+		}
+		if err != nil {
 			log.Printf("failure hook %s skipped after error: %v", module.Name(), err)
 		}
+	}
+}
+
+func (p Pipeline) run(ctx context.Context, req *RequestContext, module Module, phase string, call func(context.Context, *RequestContext) error) error {
+	started := time.Now()
+	spanCtx, span := otel.Tracer("ai-gateway/modules").Start(ctx, "module."+module.Name()+"."+phase)
+	span.SetAttributes(attribute.String("ai.module.name", module.Name()), attribute.String("ai.module.phase", phase))
+	err := call(spanCtx, req)
+	result := moduleResult(err)
+	span.SetAttributes(attribute.String("ai.module.result", result))
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, result)
+	}
+	span.End()
+	if p.observer != nil {
+		p.observer.ObserveModule(module.Name(), phase, result, time.Since(started))
+	}
+	return err
+}
+
+func moduleResult(err error) string {
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.Is(err, ErrContentRejected):
+		return "content_rejected"
+	case errors.Is(err, ErrBudgetExceeded):
+		return "budget_exceeded"
+	case errors.Is(err, ErrBillingConflict):
+		return "billing_conflict"
+	case errors.Is(err, ErrUnauthorized):
+		return "unauthorized"
+	default:
+		return "error"
 	}
 }
 

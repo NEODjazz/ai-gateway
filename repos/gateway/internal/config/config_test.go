@@ -68,3 +68,15 @@ func TestLoadModelCatalog(t *testing.T) {
 		t.Fatal("invalid model catalog did not fail configuration")
 	}
 }
+
+func TestLoadTelemetryConfiguration(t *testing.T) {
+	t.Setenv("OTEL_SERVICE_NAME", "gateway-test")
+	t.Setenv("AI_GATEWAY_VERSION", "v1.2.3")
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://collector:4318/v1/traces")
+	t.Setenv("OTEL_TRACE_SAMPLE_RATIO", "0.25")
+	cfg := Load()
+	if cfg.Telemetry.ServiceName != "gateway-test" || cfg.Telemetry.Version != "v1.2.3" ||
+		cfg.Telemetry.Endpoint != "http://collector:4318/v1/traces" || cfg.Telemetry.SampleRatio != 0.25 {
+		t.Fatalf("unexpected telemetry config: %+v", cfg.Telemetry)
+	}
+}

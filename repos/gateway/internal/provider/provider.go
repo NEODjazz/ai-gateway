@@ -16,6 +16,10 @@ import (
 	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Client interface {
@@ -53,6 +57,12 @@ type Config struct {
 	CacheMaxBytes     int
 	CacheStore        ExactCacheStore
 	Catalog           modelcatalog.Catalog
+	Observer          ProviderObserver
+}
+
+type ProviderObserver interface {
+	ObserveProvider(endpoint, providerType, operation, result string, duration time.Duration)
+	ObserveCache(operation, result string)
 }
 
 type Endpoint struct {
@@ -81,6 +91,7 @@ type Router struct {
 	routeCounter    *atomic.Uint64
 	cache           responseCache
 	catalog         modelcatalog.Catalog
+	observer        ProviderObserver
 }
 
 func New(cfg Config) Provider {
@@ -141,6 +152,7 @@ func New(cfg Config) Provider {
 		routeCounter:    &atomic.Uint64{},
 		cache:           newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
 		catalog:         cfg.Catalog,
+		observer:        cfg.Observer,
 	}
 }
 
@@ -250,7 +262,9 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		}
 
 		started := time.Now()
-		response, err := streamingProvider.StreamChatCompletions(ctx, attemptCtx.Request, write)
+		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "chat.stream")
+		response, err := streamingProvider.StreamChatCompletions(providerCtx, attemptCtx.Request, write)
+		finishProviderCall(err)
 		setAttemptMetadata(&attemptCtx, started, err)
 		if errors.Is(err, ErrStreamingUnsupported) {
 			continue
@@ -389,7 +403,9 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		}
 
 		started := time.Now()
-		response, err := streamingProvider.StreamResponses(ctx, *attemptCtx.ResponseRequest, write)
+		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "responses.stream")
+		response, err := streamingProvider.StreamResponses(providerCtx, *attemptCtx.ResponseRequest, write)
+		finishProviderCall(err)
 		setAttemptMetadata(&attemptCtx, started, err)
 		if errors.Is(err, ErrStreamingUnsupported) {
 			continue
@@ -513,7 +529,9 @@ func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.
 	var response openai.ChatCompletionResponse
 	var err error
 	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
-		response, err = endpoint.Provider.ChatCompletions(ctx, request)
+		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "chat")
+		response, err = endpoint.Provider.ChatCompletions(providerCtx, request)
+		finishProviderCall(err)
 		if err == nil {
 			r.health.success(endpoint)
 			return response, nil
@@ -530,7 +548,9 @@ func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request op
 	var response openai.ResponseResponse
 	var err error
 	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
-		response, err = endpoint.Provider.Responses(ctx, request)
+		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "responses")
+		response, err = endpoint.Provider.Responses(providerCtx, request)
+		finishProviderCall(err)
 		if err == nil {
 			r.health.success(endpoint)
 			return response, nil
@@ -541,6 +561,29 @@ func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request op
 	}
 	r.health.failure(endpoint, err)
 	return openai.ResponseResponse{}, err
+}
+
+func (r Router) startProviderCall(ctx context.Context, endpoint Endpoint, operation string) (context.Context, func(error)) {
+	started := time.Now()
+	spanCtx, span := otel.Tracer("ai-gateway/provider").Start(ctx, "provider."+operation,
+		trace.WithAttributes(
+			attribute.String("ai.provider.endpoint", endpoint.Name),
+			attribute.String("ai.provider.type", endpoint.Type),
+			attribute.String("ai.operation", operation),
+		))
+	return spanCtx, func(err error) {
+		result := "ok"
+		if err != nil {
+			result = string(failureClass(err))
+			span.RecordError(err)
+			span.SetStatus(codes.Error, result)
+		}
+		span.SetAttributes(attribute.String("ai.result", result))
+		span.End()
+		if r.observer != nil {
+			r.observer.ObserveProvider(endpoint.Name, endpoint.Type, operation, result, time.Since(started))
+		}
+	}
 }
 
 func setAttemptMetadata(req *modules.RequestContext, started time.Time, err error) {

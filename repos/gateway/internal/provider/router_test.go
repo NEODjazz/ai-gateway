@@ -35,6 +35,21 @@ type countingProvider struct {
 	responses int
 }
 
+type recordingProviderObserver struct {
+	providerCalls int
+	cacheCalls    int
+	endpoint      string
+	operation     string
+	result        string
+}
+
+func (o *recordingProviderObserver) ObserveProvider(endpoint, _ string, operation, result string, _ time.Duration) {
+	o.providerCalls++
+	o.endpoint, o.operation, o.result = endpoint, operation, result
+}
+
+func (o *recordingProviderObserver) ObserveCache(_, _ string) { o.cacheCalls++ }
+
 func (p *countingProvider) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	p.calls++
 	if p.err != nil {
@@ -238,6 +253,28 @@ func TestRouterRetriesUnavailableEndpointBeforeFallback(t *testing.T) {
 	}
 	if primary.calls != 3 || secondary.calls != 1 {
 		t.Fatalf("expected 3 primary attempts and 1 fallback, got primary=%d secondary=%d", primary.calls, secondary.calls)
+	}
+}
+
+func TestRouterObservesEveryProviderRetryAndCacheOperation(t *testing.T) {
+	observer := &recordingProviderObserver{}
+	primary := &countingProvider{err: statusError("primary", 503)}
+	secondary := &countingProvider{content: "fallback"}
+	router := Router{
+		health: newEndpointHealthTracker(), observer: observer,
+		endpoints: []Endpoint{
+			{Name: "primary", Type: "openai", Models: []string{"model"}, MaxRetries: 1, Provider: primary},
+			{Name: "secondary", Type: "openai", Models: []string{"model"}, Provider: secondary},
+		},
+	}
+	if _, err := router.ChatCompletions(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}}); err != nil {
+		t.Fatal(err)
+	}
+	if observer.providerCalls != 3 || observer.endpoint != "secondary" || observer.operation != "chat" || observer.result != "ok" {
+		t.Fatalf("unexpected provider observations: %+v", observer)
+	}
+	if observer.cacheCalls == 0 {
+		t.Fatal("cache-disabled outcome was not observed")
 	}
 }
 

@@ -176,9 +176,21 @@ provider call, and applies the rate-limit policy through a replaceable atomic
 store interface. If `REDIS_ADDR` is configured, RPM/TPM admission is performed
 atomically in Redis; otherwise the gateway uses the process-local implementation.
 
-`GET /metrics` exposes Prometheus-format HTTP counters and duration sums. Every
-response carries `X-Request-ID`, and the gateway emits one JSON request log with
-the same ID, status, path, and duration. Named guardrail profiles are configured
+`GET /metrics` exposes Prometheus-format HTTP, provider-attempt, cache,
+module, security, and billing lifecycle counters plus duration sums. Labels are
+bounded: unmatched URLs become `path="unmatched"`, results use a fixed enum, and
+identity, prompt, arbitrary model names, and secrets are never metric labels.
+Every response carries `X-Request-ID`, and the gateway emits one JSON request log
+with the same ID, trace/span IDs, status, normalized path, and duration.
+
+Set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to a full OTLP/HTTP traces URL such as
+`http://otel-collector:4318/v1/traces`. `OTEL_TRACE_SAMPLE_RATIO` accepts a value
+from `0` to `1`; an empty endpoint disables exporting. Incoming W3C trace context
+is continued, remote modules and provider HTTP calls propagate it, and gateway,
+module, provider-attempt, and HTTP client spans are flushed during graceful
+shutdown.
+
+Named guardrail profiles are configured
 with `GUARDRAIL_POLICIES_JSON` (Helm: `gateway.guardrailPolicies`) and selected
 per endpoint with `guardrail_policy`; an endpoint referencing an unknown profile
 is skipped instead of running without the intended DLP/AV controls.
@@ -443,10 +455,9 @@ and exact cache, a PostgreSQL billing ledger with a durable ClickHouse outbox,
 tools/structured output, PostgreSQL virtual keys, atomic multi-scope budgets,
 and a versioned capability/pricing catalog. The remaining delivery sequence is:
 
-1. Add OpenTelemetry and provider/cache/security/billing metrics.
-2. Add the embeddings API through the same auth, DLP, and billing pipeline.
-3. Add adaptive routing and Responses API session affinity.
-4. Add a protected management API, opt-in tenant-safe semantic cache, and
+1. Add the embeddings API through the same auth, DLP, and billing pipeline.
+2. Add adaptive routing and Responses API session affinity.
+3. Add a protected management API, opt-in tenant-safe semantic cache, and
    scoped MCP/multimodal support as separate security-reviewed increments.
 
 ## License

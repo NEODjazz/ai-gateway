@@ -43,9 +43,7 @@ func NewOllama(baseURL string, upstreamStream bool) Ollama {
 	return Ollama{
 		baseURL:        strings.TrimRight(baseURL, "/"),
 		upstreamStream: upstreamStream,
-		client: &http.Client{
-			Timeout: 180 * time.Second,
-		},
+		client:         newProviderHTTPClient(180 * time.Second),
 	}
 }
 

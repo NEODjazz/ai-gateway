@@ -6,9 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"ai-gateway-gateway/internal/openai"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func TestRemoteAuthIsTheOnlyModuleReceivingBearerToken(t *testing.T) {
@@ -155,6 +159,34 @@ func TestRemoteBillingMapsLifecycleConflict(t *testing.T) {
 	defer server.Close()
 	if err := NewRemoteBillingModule(true, server.URL).Handle(context.Background(), &RequestContext{RequestID: "req-conflict"}); !errors.Is(err, ErrBillingConflict) {
 		t.Fatalf("expected billing conflict sentinel, got %v", err)
+	}
+}
+
+func TestRemoteModulesPropagateW3CTraceContext(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	previousPropagator := otel.GetTextMapPropagator()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()))
+	otel.SetTracerProvider(provider)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	defer func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(previousProvider)
+		otel.SetTextMapPropagator(previousPropagator)
+	}()
+
+	var traceparent string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		traceparent = r.Header.Get("traceparent")
+		_ = json.NewEncoder(w).Encode(UsageResponse{})
+	}))
+	defer server.Close()
+	ctx, span := otel.Tracer("test").Start(context.Background(), "parent")
+	defer span.End()
+	if err := NewRemoteBillingModule(true, server.URL).Handle(ctx, &RequestContext{RequestID: "trace-request"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(traceparent, "00-") {
+		t.Fatalf("remote request did not carry W3C trace context: %q", traceparent)
 	}
 }
 

@@ -12,13 +12,14 @@ import (
 )
 
 type Config struct {
-	HTTP     HTTPConfig
-	Cache    CacheConfig
-	Redis    RedisConfig
-	Modules  ModuleConfig
-	Provider ProviderConfig
-	Catalog  modelcatalog.Catalog
-	InitErr  error
+	HTTP      HTTPConfig
+	Cache     CacheConfig
+	Redis     RedisConfig
+	Modules   ModuleConfig
+	Provider  ProviderConfig
+	Catalog   modelcatalog.Catalog
+	Telemetry TelemetryConfig
+	InitErr   error
 }
 
 type CacheConfig struct {
@@ -35,6 +36,13 @@ type RedisConfig struct {
 
 type HTTPConfig struct {
 	Addr string
+}
+
+type TelemetryConfig struct {
+	ServiceName string
+	Version     string
+	Endpoint    string
+	SampleRatio float64
 }
 
 type ModuleConfig struct {
@@ -101,6 +109,12 @@ func Load() Config {
 			GuardrailPolicies: loadGuardrailPolicies(),
 		},
 		Catalog: catalog,
+		Telemetry: TelemetryConfig{
+			ServiceName: env("OTEL_SERVICE_NAME", "ai-gateway"),
+			Version:     env("AI_GATEWAY_VERSION", "dev"),
+			Endpoint:    os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
+			SampleRatio: envFloat("OTEL_TRACE_SAMPLE_RATIO", 1),
+		},
 		InitErr: catalogErr,
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
@@ -230,6 +244,18 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envFloat(key string, fallback float64) float64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		return fallback
 	}
