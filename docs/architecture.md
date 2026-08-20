@@ -250,7 +250,7 @@ flowchart TB
     Gw --> Providers["External / host AI providers"]
 ```
 
-В `devMode` workloads запускаются из примонтированного исходного дерева образом `golang:1.22-alpine`. Для production следует отключить `devMode`, использовать собранные images и вынести credentials из values в управляемые Secrets.
+В `devMode` workloads запускаются из примонтированного исходного дерева закрепленным образом `golang:1.26.7-alpine`. Директива `go` в модулях сохраняет language baseline Go 1.25, а сборка выполняется исправленным Go 1.26 toolchain. Для production следует отключить `devMode`, использовать собранные images и вынести credentials из values в управляемые Secrets.
 
 ## Основная конфигурация
 

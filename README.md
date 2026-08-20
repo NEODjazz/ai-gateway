@@ -66,7 +66,7 @@ The release names in this example match the module URLs in `charts/ai-gateway/va
 
 When migrating from the previous combined release, upgrade `ai-gateway` first so Helm can remove the old module Deployments and Services, then install the new service releases. Otherwise, Helm cannot adopt existing resources owned by another release.
 
-Production mode is enabled by default and uses the published service images from `ghcr.io/neodjazz`. To run services directly from the current project directory using `golang:1.22-alpine`, enable `devMode` explicitly with `--set devMode.enabled=true` for each application chart.
+Production mode is enabled by default and uses the published service images from `ghcr.io/neodjazz`. To run services directly from the current project directory using the pinned `golang:1.26.7-alpine` toolchain, enable `devMode` explicitly with `--set devMode.enabled=true` for each application chart. The module language baseline remains Go 1.25, while production and development builds use the patched Go 1.26 toolchain.
 
 ### Ollama provider
 
@@ -399,11 +399,20 @@ New GHCR packages are private by default. For a public repository, change the vi
 
 ## Roadmap
 
-1. Connect `anonymizer` to a real Redis instance.
-2. Add an adapter/provider layer for OpenAI, Anthropic, Google, local LLMs, and other providers.
-3. Store billing events in PostgreSQL or ClickHouse.
-4. Replace the in-process auth, anonymizer, and billing modules with HTTP/gRPC clients.
-5. Add streaming support for `/v1/chat/completions`.
+The gateway already has typed remote module contracts, OpenAI-compatible and
+Anthropic adapters, chat/Responses streaming, Redis-backed distributed limits
+and exact cache, and a PostgreSQL billing ledger with a durable ClickHouse
+outbox. The next delivery sequence is:
+
+1. Complete tools/function-calling and structured-output compatibility.
+2. Move virtual keys to a revocable PostgreSQL-backed store.
+3. Enforce atomic team, user, key, model, and provider budgets and quotas.
+4. Add a versioned model capability and pricing catalog.
+5. Add OpenTelemetry and provider/cache/security/billing metrics.
+6. Add the embeddings API through the same auth, DLP, and billing pipeline.
+7. Add adaptive routing and Responses API session affinity.
+8. Add a protected management API, opt-in tenant-safe semantic cache, and
+   scoped MCP/multimodal support as separate security-reviewed increments.
 
 ## License
 
