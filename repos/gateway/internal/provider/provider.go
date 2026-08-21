@@ -345,7 +345,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 
 		started := time.Now()
 		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "chat.stream")
-		response, err := streamingProvider.StreamChatCompletions(providerCtx, attemptCtx.Request, write)
+		response, err := streamingProvider.StreamChatCompletions(providerCtx, attemptCtx.Request, deanonymizingChatStreamWriter(attemptCtx.AnonymizationValues, write))
 		finishProviderCall(err)
 		setAttemptMetadata(&attemptCtx, started, err)
 		if errors.Is(err, ErrStreamingUnsupported) {
@@ -554,7 +554,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 
 		started := time.Now()
 		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "responses.stream")
-		response, err := streamingProvider.StreamResponses(providerCtx, *attemptCtx.ResponseRequest, write)
+		response, err := streamingProvider.StreamResponses(providerCtx, *attemptCtx.ResponseRequest, deanonymizingResponseStreamWriter(attemptCtx.AnonymizationValues, write))
 		finishProviderCall(err)
 		setAttemptMetadata(&attemptCtx, started, err)
 		if errors.Is(err, ErrStreamingUnsupported) {
@@ -569,11 +569,11 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 
 		mergeResponseUsage(&response, attemptCtx.Usage)
 		attemptCtx.ResponsesResponse = &response
+		modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
+		r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
 		if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 			return openai.ResponseResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 		}
-		modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
-		r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
 		return response, true, nil
 	}
 

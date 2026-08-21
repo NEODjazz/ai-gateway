@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -30,6 +32,50 @@ type affinityResponseClient struct {
 	id       string
 	calls    int
 	previous []string
+}
+
+type splitStreamingProvider struct{}
+
+func (splitStreamingProvider) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	return openai.ChatCompletionResponse{}, nil
+}
+
+func (splitStreamingProvider) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {
+	return openai.ResponseResponse{}, nil
+}
+
+func (splitStreamingProvider) StreamChatCompletions(_ context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+	for _, content := range []string{"email={{", "EMA", "IL", "_", "1", "}}"} {
+		payload := fmt.Sprintf(`{"id":"chat-split","model":"%s","choices":[{"index":0,"delta":{"content":%q},"finish_reason":null}]}`, request.Model, content)
+		if err := write(payload); err != nil {
+			return openai.ChatCompletionResponse{}, err
+		}
+	}
+	if err := write(fmt.Sprintf(`{"id":"chat-split","model":"%s","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`, request.Model)); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	return openai.ChatCompletionResponse{
+		ID: "chat-split", Model: request.Model,
+		Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "email={{EMAIL_1}}"}, FinishReason: "stop"}},
+	}, nil
+}
+
+func (splitStreamingProvider) StreamResponses(_ context.Context, request openai.ResponseRequest, write ResponseStreamWriter) (openai.ResponseResponse, error) {
+	for _, delta := range []string{"email={{", "EMA", "IL", "_", "1", "}}"} {
+		payload := fmt.Sprintf(`{"type":"response.output_text.delta","response_id":"resp-split","output_index":0,"delta":%q}`, delta)
+		if err := write("response.output_text.delta", payload); err != nil {
+			return openai.ResponseResponse{}, err
+		}
+	}
+	response := openai.ResponseResponse{
+		ID: "resp-split", Object: "response", Status: "completed", Model: request.Model, OutputText: "email={{EMAIL_1}}",
+		Output: []openai.ResponseOutputItem{{Type: "message", Content: []openai.ResponseOutputContent{{Type: "output_text", Text: "email={{EMAIL_1}}"}}}},
+	}
+	completed, _ := json.Marshal(map[string]any{"type": "response.completed", "response": response})
+	if err := write("response.completed", string(completed)); err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	return response, nil
 }
 
 type orderingAffinity struct {
@@ -737,6 +783,74 @@ func TestRouterAppliesProviderLevelModulesForResponses(t *testing.T) {
 	}
 	if !strings.Contains(response.OutputText, "user@example.com") {
 		t.Fatalf("expected client response to be deanonymized, got %q", response.OutputText)
+	}
+}
+
+func TestRouterDeanonymizesChatPlaceholdersSplitAcrossStreamChunks(t *testing.T) {
+	router := Router{
+		modules:   modules.NewPipeline([]modules.Module{modules.NewAnonymizerModule(true, modules.RuleEmail)}),
+		endpoints: []Endpoint{{Name: "stream", Type: "demo", Capabilities: []string{"chat", "stream"}, Provider: splitStreamingProvider{}}},
+		health:    newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	request := openai.ChatCompletionRequest{Model: "test-model", Stream: true, Messages: []openai.Message{{Role: "user", Content: "user@example.com"}}}
+	var streamed strings.Builder
+	_, didStream, err := router.StreamChatCompletions(context.Background(), modules.RequestContext{Request: request}, func(payload string) error {
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			return err
+		}
+		if len(chunk.Choices) > 0 {
+			streamed.WriteString(chunk.Choices[0].Delta.Content)
+		}
+		if strings.Contains(payload, "{{EMAIL_1}}") {
+			return errors.New("placeholder leaked in chat stream")
+		}
+		return nil
+	})
+	if err != nil || !didStream {
+		t.Fatalf("stream failed: streamed=%v err=%v", didStream, err)
+	}
+	if streamed.String() != "email=user@example.com" {
+		t.Fatalf("unexpected deanonymized stream %q", streamed.String())
+	}
+}
+
+func TestRouterDeanonymizesResponsesPlaceholdersSplitAcrossStreamEvents(t *testing.T) {
+	router := Router{
+		modules:   modules.NewPipeline([]modules.Module{modules.NewAnonymizerModule(true, modules.RuleEmail)}),
+		endpoints: []Endpoint{{Name: "stream", Type: "demo", Capabilities: []string{"responses", "stream"}, Provider: splitStreamingProvider{}}},
+		health:    newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	request := openai.ResponseRequest{Model: "test-model", Stream: true, Input: "user@example.com"}
+	var streamed strings.Builder
+	response, didStream, err := router.StreamResponses(context.Background(), modules.RequestContext{
+		Request: openai.ChatCompletionRequest{Model: request.Model}, ResponseRequest: &request,
+	}, func(event, payload string) error {
+		if strings.Contains(payload, "{{EMAIL_1}}") {
+			return errors.New("placeholder leaked in responses stream")
+		}
+		if event == "response.output_text.delta" {
+			var delta struct {
+				Delta string `json:"delta"`
+			}
+			if err := json.Unmarshal([]byte(payload), &delta); err != nil {
+				return err
+			}
+			streamed.WriteString(delta.Delta)
+		}
+		return nil
+	})
+	if err != nil || !didStream {
+		t.Fatalf("stream failed: streamed=%v err=%v", didStream, err)
+	}
+	if streamed.String() != "email=user@example.com" || response.OutputText != "email=user@example.com" {
+		t.Fatalf("unexpected deanonymized stream=%q response=%q", streamed.String(), response.OutputText)
 	}
 }
 
