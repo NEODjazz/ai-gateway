@@ -165,6 +165,13 @@ request-derived capabilities (`chat`, `responses`, `embeddings`, `stream`, `tool
 публикуется через `/v1/models`. Billing по тому же precedence выбирает цену за
 миллион input/output tokens и currency.
 
+В режиме `ROUTING_STRATEGY=adaptive` порядок endpoints одного priority
+уточняется по EWMA latency и failures; priority остаётся жёсткой границей.
+Responses `previous_response_id` закрепляется за создавшим его endpoint в
+tenant-scoped affinity store. С Redis это общий state для всех replicas, без
+Redis — локальный memory fallback. Provider-scoped response ID не отправляется
+другому endpoint при failover.
+
 ```mermaid
 flowchart TD
     Request["provider + model"] --> Mode{"Как задан запрос?"}

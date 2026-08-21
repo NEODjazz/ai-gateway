@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"ai-gateway-gateway/internal/modelcatalog"
@@ -62,6 +63,9 @@ type ProviderConfig struct {
 	Default           string
 	Endpoints         []ProviderEndpointConfig
 	GuardrailPolicies map[string]GuardrailPolicyConfig
+	RoutingStrategy   string
+	AdaptiveEWMAAlpha float64
+	AffinityTTL       time.Duration
 }
 
 type GuardrailPolicyConfig struct {
@@ -107,6 +111,9 @@ func Load() Config {
 			Default:           env("DEFAULT_PROVIDER", env("PROVIDER_TYPE", "demo")),
 			Endpoints:         loadProviderEndpoints(),
 			GuardrailPolicies: loadGuardrailPolicies(),
+			RoutingStrategy:   env("ROUTING_STRATEGY", "weighted"),
+			AdaptiveEWMAAlpha: envFloat("ADAPTIVE_ROUTING_EWMA_ALPHA", 0.2),
+			AffinityTTL:       time.Duration(envInt("RESPONSES_AFFINITY_TTL_SECONDS", 3600)) * time.Second,
 		},
 		Catalog: catalog,
 		Telemetry: TelemetryConfig{

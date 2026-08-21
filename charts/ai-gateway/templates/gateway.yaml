@@ -75,6 +75,12 @@ spec:
               value: {{ .Values.gateway.exactCache.ttlSeconds | quote }}
             - name: EXACT_CACHE_MAX_BYTES
               value: {{ printf "%.0f" (float64 .Values.gateway.exactCache.maxBytes) | quote }}
+            - name: ROUTING_STRATEGY
+              value: {{ .Values.gateway.routing.strategy | quote }}
+            - name: ADAPTIVE_ROUTING_EWMA_ALPHA
+              value: {{ .Values.gateway.routing.adaptiveEwmaAlpha | quote }}
+            - name: RESPONSES_AFFINITY_TTL_SECONDS
+              value: {{ .Values.gateway.routing.responsesAffinityTtlSeconds | quote }}
             - name: REDIS_ADDR
               value: {{ .Values.gateway.redis.addr | quote }}
             - name: REDIS_DB

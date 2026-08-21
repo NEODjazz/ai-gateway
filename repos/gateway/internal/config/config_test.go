@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestNormalizeProviderEndpointsLoadsAPIKeyFromEnv(t *testing.T) {
 	t.Setenv("PROVIDER_API_KEY_OPENROUTER_KEY_A", "secret-from-env")
@@ -42,6 +45,9 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("REDIS_ADDR", "redis:6379")
 	t.Setenv("REDIS_DB", "2")
 	t.Setenv("REDIS_PREFIX", "tenant-gateway")
+	t.Setenv("ROUTING_STRATEGY", "adaptive")
+	t.Setenv("ADAPTIVE_ROUTING_EWMA_ALPHA", "0.35")
+	t.Setenv("RESPONSES_AFFINITY_TTL_SECONDS", "7200")
 	t.Setenv("GUARDRAIL_POLICIES_JSON", `{"strict":{"dlp":true,"av":true}}`)
 	t.Setenv("PROVIDERS_JSON", `[{"name":"group-a","type":"demo","model_aliases":{"fast":"upstream-fast"},"weight":3,"capabilities":["chat"]}]`)
 	cfg := Load()
@@ -50,6 +56,9 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	}
 	if cfg.Redis.Addr != "redis:6379" || cfg.Redis.DB != 2 || cfg.Redis.Prefix != "tenant-gateway" {
 		t.Fatalf("unexpected redis config: %+v", cfg.Redis)
+	}
+	if cfg.Provider.RoutingStrategy != "adaptive" || cfg.Provider.AdaptiveEWMAAlpha != 0.35 || cfg.Provider.AffinityTTL != 2*time.Hour {
+		t.Fatalf("unexpected adaptive routing config: %+v", cfg.Provider)
 	}
 	endpoint := cfg.Provider.Endpoints[0]
 	if endpoint.ModelAliases["fast"] != "upstream-fast" || endpoint.Weight != 3 || len(endpoint.Capabilities) != 1 {

@@ -26,6 +26,21 @@ type embeddingTestClient struct {
 	inputs []string
 }
 
+type affinityResponseClient struct {
+	id       string
+	calls    int
+	previous []string
+}
+
+func (p *affinityResponseClient) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	return openai.ChatCompletionResponse{}, nil
+}
+func (p *affinityResponseClient) Responses(_ context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
+	p.calls++
+	p.previous = append(p.previous, request.PreviousResponse)
+	return openai.ResponseResponse{ID: p.id, Object: "response", Model: request.Model, Status: "completed"}, nil
+}
+
 func (p *embeddingTestClient) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	return openai.ChatCompletionResponse{}, nil
 }
@@ -63,6 +78,112 @@ func TestRouterEmbeddingsFailoverAndCapabilityFilter(t *testing.T) {
 	}
 	if response.Model != "embed-model" || len(response.Data) != 1 {
 		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestRouterResponsesSessionAffinityIsTenantScoped(t *testing.T) {
+	first := &affinityResponseClient{id: "resp-first"}
+	second := &affinityResponseClient{id: "resp-second"}
+	router := Router{
+		endpoints: []Endpoint{
+			{Name: "endpoint-a", Type: "demo", Provider: first},
+			{Name: "endpoint-b", Type: "demo", Provider: second},
+		},
+		modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+		affinity: newAffinityStore(time.Hour, nil),
+	}
+	initial := openai.ResponseRequest{Model: "test-model", Input: "first"}
+	response, err := router.Responses(context.Background(), modules.RequestContext{CredentialID: "tenant-a", Request: openai.ChatCompletionRequest{Model: initial.Model}, ResponseRequest: &initial})
+	if err != nil {
+		t.Fatal(err)
+	}
+	continued := openai.ResponseRequest{Model: "test-model", Input: "continue", PreviousResponse: response.ID}
+	if _, err := router.Responses(context.Background(), modules.RequestContext{CredentialID: "tenant-a", Request: openai.ChatCompletionRequest{Model: continued.Model}, ResponseRequest: &continued}); err != nil {
+		t.Fatal(err)
+	}
+	if first.calls != 2 || second.calls != 0 {
+		t.Fatalf("session was not pinned: first=%d second=%d", first.calls, second.calls)
+	}
+	router.routeCounter.Store(1)
+	if _, err := router.Responses(context.Background(), modules.RequestContext{CredentialID: "tenant-b", Request: openai.ChatCompletionRequest{Model: continued.Model}, ResponseRequest: &continued}); err != nil {
+		t.Fatal(err)
+	}
+	if second.calls != 1 {
+		t.Fatalf("affinity leaked across tenants: second=%d", second.calls)
+	}
+}
+
+func TestRouterResponsesAffinityFailsClosedWhenEndpointUnavailable(t *testing.T) {
+	affinity := newAffinityStore(time.Hour, nil)
+	req := modules.RequestContext{CredentialID: "tenant-a"}
+	if err := affinity.set(context.Background(), affinityKey(req, "resp-existing"), "removed-endpoint"); err != nil {
+		t.Fatal(err)
+	}
+	client := &affinityResponseClient{id: "resp-new"}
+	router := Router{
+		endpoints: []Endpoint{{Name: "other-endpoint", Type: "demo", Provider: client}},
+		modules:   modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, affinity: affinity,
+	}
+	request := openai.ResponseRequest{Model: "test-model", Input: "continue", PreviousResponse: "resp-existing"}
+	req.Request = openai.ChatCompletionRequest{Model: request.Model}
+	req.ResponseRequest = &request
+	_, err := router.Responses(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "removed-endpoint") {
+		t.Fatalf("expected explicit affinity error, got %v", err)
+	}
+	if client.calls != 0 {
+		t.Fatalf("continuation leaked to another endpoint: %d", client.calls)
+	}
+}
+
+func TestStreamResponsesAffinityFallsBackToPinnedNonStreamingEndpoint(t *testing.T) {
+	affinity := newAffinityStore(time.Hour, nil)
+	req := modules.RequestContext{CredentialID: "tenant-a"}
+	if err := affinity.set(context.Background(), affinityKey(req, "resp-existing"), "endpoint-a"); err != nil {
+		t.Fatal(err)
+	}
+	client := &affinityResponseClient{id: "resp-next"}
+	router := Router{
+		endpoints: []Endpoint{{Name: "endpoint-a", Type: "demo", Capabilities: []string{"responses"}, Provider: client}},
+		modules:   modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, affinity: affinity,
+	}
+	request := openai.ResponseRequest{Model: "test-model", Input: "continue", PreviousResponse: "resp-existing", Stream: true}
+	req.Request = openai.ChatCompletionRequest{Model: request.Model}
+	req.ResponseRequest = &request
+	if _, streamed, err := router.StreamResponses(context.Background(), req, func(string, string) error { return nil }); err != nil || streamed {
+		t.Fatalf("expected non-stream fallback, streamed=%v err=%v", streamed, err)
+	}
+	request.Stream = false
+	if _, err := router.Responses(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 1 || client.previous[0] != "resp-existing" {
+		t.Fatalf("pinned non-streaming endpoint was not used: %+v", client)
+	}
+}
+
+func TestAdaptiveRoutingPrefersLowLatencyHealthyEndpoint(t *testing.T) {
+	adaptive := newAdaptiveRouter(0.5)
+	adaptive.observe("fast", 20*time.Millisecond, nil)
+	adaptive.observe("slow", 200*time.Millisecond, nil)
+	adaptive.observe("flaky", 5*time.Millisecond, errors.New("failed"))
+	router := Router{
+		routingStrategy: "adaptive", adaptive: adaptive, routeCounter: &atomic.Uint64{},
+	}
+	ordered := router.weightedOrder([]Endpoint{{Name: "slow"}, {Name: "flaky"}, {Name: "fast"}})
+	if len(ordered) != 3 || ordered[0].Name != "fast" {
+		t.Fatalf("unexpected adaptive order: %+v", ordered)
+	}
+}
+
+func TestAdaptiveRoutingPreservesPriorityBoundary(t *testing.T) {
+	adaptive := newAdaptiveRouter(0.5)
+	adaptive.observe("high-priority-slow", time.Second, nil)
+	adaptive.observe("low-priority-fast", time.Millisecond, nil)
+	router := Router{routingStrategy: "adaptive", adaptive: adaptive, routeCounter: &atomic.Uint64{}}
+	ordered := router.weightedOrder([]Endpoint{{Name: "high-priority-slow", Priority: 1}, {Name: "low-priority-fast", Priority: 2}})
+	if ordered[0].Name != "high-priority-slow" {
+		t.Fatalf("adaptive routing crossed priority boundary: %+v", ordered)
 	}
 }
 

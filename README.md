@@ -209,6 +209,21 @@ Model groups use endpoint-specific `model_aliases`, for example
 as failover candidates. `capabilities` can restrict an endpoint to `chat`,
 `responses`, `embeddings`, and/or `stream`.
 
+Set `ROUTING_STRATEGY=adaptive` (Helm: `gateway.routing.strategy`) to rank
+same-priority endpoints by an EWMA of observed latency and failures. Unknown
+endpoints are explored before the router converges, priority remains a hard
+boundary, and cooldown/failover behavior is unchanged. Tune smoothing with
+`ADAPTIVE_ROUTING_EWMA_ALPHA`; the default weighted strategy preserves static
+weighted round-robin.
+
+Responses sessions are tenant-scoped and pinned to the endpoint that created
+their response ID for `RESPONSES_AFFINITY_TTL_SECONDS` (default one hour). Redis
+makes the mapping shared across replicas; without Redis it is process-local.
+Affinity keys hash the tenant and response ID. A continuation never sends a
+provider-scoped `previous_response_id` to a different endpoint; if the pinned
+endpoint is unavailable the request fails explicitly instead of silently
+breaking session state.
+
 Exact caching is disabled by default and enabled with
 `EXACT_CACHE_TTL_SECONDS` (Helm: `gateway.exactCache.ttlSeconds`). It runs inside
 the provider pipeline: DLP/AV still execute, cached payloads are stored after
@@ -461,11 +476,11 @@ The gateway already has typed remote module contracts, OpenAI-compatible and
 Anthropic adapters, chat/Responses streaming, Redis-backed distributed limits
 and exact cache, a PostgreSQL billing ledger with a durable ClickHouse outbox,
 tools/structured output, PostgreSQL virtual keys, atomic multi-scope budgets,
-a versioned capability/pricing catalog, OpenTelemetry observability, and an
-embeddings API with security and billing parity. The remaining delivery sequence is:
+a versioned capability/pricing catalog, OpenTelemetry observability, an
+embeddings API with security and billing parity, and adaptive routing with
+tenant-scoped Responses affinity. The remaining delivery sequence is:
 
-1. Add adaptive routing and Responses API session affinity.
-2. Add a protected management API, opt-in tenant-safe semantic cache, and
+1. Add a protected management API, opt-in tenant-safe semantic cache, and
    scoped MCP/multimodal support as separate security-reviewed increments.
 
 ## License

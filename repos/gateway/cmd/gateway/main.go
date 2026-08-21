@@ -56,6 +56,10 @@ func main() {
 		CacheStore:        redisStore,
 		Catalog:           cfg.Catalog,
 		Observer:          metrics,
+		RoutingStrategy:   cfg.Provider.RoutingStrategy,
+		AdaptiveEWMAAlpha: cfg.Provider.AdaptiveEWMAAlpha,
+		SessionStore:      redisStore,
+		AffinityTTL:       cfg.Provider.AffinityTTL,
 	})
 
 	var rateLimits gateway.RateLimitStore = gateway.NewMemoryRateLimitStore()

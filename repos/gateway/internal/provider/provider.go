@@ -66,6 +66,10 @@ type Config struct {
 	CacheStore        ExactCacheStore
 	Catalog           modelcatalog.Catalog
 	Observer          ProviderObserver
+	RoutingStrategy   string
+	AdaptiveEWMAAlpha float64
+	SessionStore      SessionStore
+	AffinityTTL       time.Duration
 }
 
 type ProviderObserver interface {
@@ -100,6 +104,9 @@ type Router struct {
 	cache           responseCache
 	catalog         modelcatalog.Catalog
 	observer        ProviderObserver
+	routingStrategy string
+	adaptive        *adaptiveRouter
+	affinity        affinityStore
 }
 
 func New(cfg Config) Provider {
@@ -161,6 +168,9 @@ func New(cfg Config) Provider {
 		cache:           newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
 		catalog:         cfg.Catalog,
 		observer:        cfg.Observer,
+		routingStrategy: strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
+		adaptive:        newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
+		affinity:        newAffinityStore(cfg.AffinityTTL, cfg.SessionStore),
 	}
 }
 
@@ -304,7 +314,10 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		return openai.ResponseResponse{}, errors.New("missing response request")
 	}
 	request := *req.ResponseRequest
-	candidates := r.responseCandidates(request, requiredResponseCapabilities(request, false)...)
+	candidates, affinityErr := r.responseCandidates(ctx, req, request, requiredResponseCapabilities(request, false)...)
+	if affinityErr != nil {
+		return openai.ResponseResponse{}, affinityErr
+	}
 	if len(candidates) == 0 {
 		return openai.ResponseResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -361,6 +374,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 				return openai.ResponseResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 			}
 			modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
+			r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
 			return response, nil
 		}
 		errs = append(errs, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err))
@@ -443,7 +457,12 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 	}
 	request := *req.ResponseRequest
 	request.Stream = true
-	candidates := r.responseCandidates(request, requiredResponseCapabilities(request, true)...)
+	candidates, affinityErr := r.responseCandidates(ctx, req, request, requiredResponseCapabilities(request, true)...)
+	if affinityErr != nil {
+		// Let the handler retry the same pinned endpoint through the non-streaming
+		// path. This preserves affinity for endpoints without native streaming.
+		return openai.ResponseResponse{}, false, nil
+	}
 	if len(candidates) == 0 {
 		return openai.ResponseResponse{}, false, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -490,6 +509,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			return openai.ResponseResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 		}
 		modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
+		r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
 		return response, true, nil
 	}
 
@@ -666,6 +686,7 @@ func (r Router) startProviderCall(ctx context.Context, endpoint Endpoint, operat
 			attribute.String("ai.operation", operation),
 		))
 	return spanCtx, func(err error) {
+		duration := time.Since(started)
 		result := "ok"
 		if err != nil {
 			result = string(failureClass(err))
@@ -674,8 +695,11 @@ func (r Router) startProviderCall(ctx context.Context, endpoint Endpoint, operat
 		}
 		span.SetAttributes(attribute.String("ai.result", result))
 		span.End()
+		if r.routingStrategy == "adaptive" {
+			r.adaptive.observe(endpoint.Name, duration, err)
+		}
 		if r.observer != nil {
-			r.observer.ObserveProvider(endpoint.Name, endpoint.Type, operation, result, time.Since(started))
+			r.observer.ObserveProvider(endpoint.Name, endpoint.Type, operation, result, duration)
 		}
 	}
 }
@@ -751,7 +775,7 @@ func (r Router) candidates(request openai.ChatCompletionRequest, capabilities ..
 	return r.weightedOrder(candidates)
 }
 
-func (r Router) responseCandidates(request openai.ResponseRequest, capabilities ...string) []Endpoint {
+func (r Router) responseCandidates(ctx context.Context, req modules.RequestContext, request openai.ResponseRequest, capabilities ...string) ([]Endpoint, error) {
 	chatRequest := openai.ChatCompletionRequest{
 		Provider:  request.Provider,
 		Model:     request.Model,
@@ -760,7 +784,41 @@ func (r Router) responseCandidates(request openai.ResponseRequest, capabilities 
 	if chatRequest.MaxTokens == nil {
 		chatRequest.MaxTokens = request.MaxTokens
 	}
-	return r.candidates(chatRequest, capabilities...)
+	candidates := r.candidates(chatRequest, capabilities...)
+	if r.affinity == nil || request.PreviousResponse == "" {
+		return candidates, nil
+	}
+	key := affinityKey(req, request.PreviousResponse)
+	if key == "" {
+		return candidates, nil
+	}
+	endpointName, found, err := r.affinity.get(ctx, key)
+	if err != nil {
+		log.Printf("responses affinity lookup failed: %v", err)
+		return candidates, nil
+	}
+	if !found {
+		return candidates, nil
+	}
+	for _, endpoint := range candidates {
+		if endpoint.Name == endpointName {
+			return []Endpoint{endpoint}, nil
+		}
+	}
+	return nil, fmt.Errorf("responses session endpoint %q is unavailable for previous_response_id", endpointName)
+}
+
+func (r Router) rememberResponseAffinity(ctx context.Context, req modules.RequestContext, responseID, endpoint string) {
+	if r.affinity == nil || responseID == "" || endpoint == "" {
+		return
+	}
+	key := affinityKey(req, responseID)
+	if key == "" {
+		return
+	}
+	if err := r.affinity.set(ctx, key, endpoint); err != nil {
+		log.Printf("responses affinity store failed: %v", err)
+	}
 }
 
 func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool) []string {
@@ -893,9 +951,14 @@ func (r Router) weightedOrder(candidates []Endpoint) []Endpoint {
 			}
 			slot -= weight
 		}
-		ordered = append(ordered, group[selected])
-		ordered = append(ordered, group[:selected]...)
-		ordered = append(ordered, group[selected+1:]...)
+		selectedGroup := make([]Endpoint, 0, len(group))
+		selectedGroup = append(selectedGroup, group[selected])
+		selectedGroup = append(selectedGroup, group[:selected]...)
+		selectedGroup = append(selectedGroup, group[selected+1:]...)
+		if r.routingStrategy == "adaptive" {
+			selectedGroup = r.adaptive.order(selectedGroup)
+		}
+		ordered = append(ordered, selectedGroup...)
 		start = end
 	}
 	return ordered

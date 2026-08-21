@@ -30,6 +30,10 @@ gateway:
     # Disabled by default; bundled cache is process-local and tenant-scoped.
     ttlSeconds: 0
     maxBytes: 1048576
+  routing:
+    strategy: weighted
+    adaptiveEwmaAlpha: "0.2"
+    responsesAffinityTtlSeconds: 3600
   telemetry:
     otlpTracesEndpoint: ""
     sampleRatio: "1"
