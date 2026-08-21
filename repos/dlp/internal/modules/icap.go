@@ -82,11 +82,11 @@ func (c ICAPClient) Scan(ctx context.Context, moduleName string, payload []byte)
 	}
 
 	result := ICAPScanResult{StatusCode: statusCode, Status: line, Headers: headers}
-	if statusCode < 200 || statusCode >= 300 {
-		return result, fmt.Errorf("icap service returned %s", line)
-	}
 	if result.Rejected() {
 		return result, fmt.Errorf("%w: %s", ErrContentRejected, result.RejectionReason())
+	}
+	if statusCode < 200 || statusCode >= 300 {
+		return result, fmt.Errorf("icap service returned %s", line)
 	}
 	return result, nil
 }
