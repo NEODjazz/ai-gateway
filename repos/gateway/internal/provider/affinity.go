@@ -41,7 +41,7 @@ func newAffinityStore(ttl time.Duration, store SessionStore) affinityStore {
 	if ttl <= 0 {
 		return nil
 	}
-	if store != nil {
+	if !interfaceIsNil(store) {
 		return distributedAffinity{store: store, ttl: ttl}
 	}
 	return &memoryAffinity{ttl: ttl, entries: map[string]memoryAffinityEntry{}, now: time.Now}

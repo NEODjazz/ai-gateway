@@ -32,6 +32,38 @@ type affinityResponseClient struct {
 	previous []string
 }
 
+type orderingAffinity struct {
+	stored bool
+}
+
+func (*orderingAffinity) get(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
+
+func (a *orderingAffinity) set(context.Context, string, string) error {
+	a.stored = true
+	return nil
+}
+
+type affinityOrderingModule struct {
+	affinity *orderingAffinity
+	commits  int
+}
+
+func (m *affinityOrderingModule) Name() string   { return "billing" }
+func (m *affinityOrderingModule) Required() bool { return true }
+func (*affinityOrderingModule) Handle(context.Context, *modules.RequestContext) error {
+	return nil
+}
+func (*affinityOrderingModule) PostResponseEnabled() bool { return true }
+func (m *affinityOrderingModule) HandlePostResponse(context.Context, *modules.RequestContext) error {
+	if !m.affinity.stored {
+		return errors.New("billing committed before response affinity")
+	}
+	m.commits++
+	return nil
+}
+
 func (p *affinityResponseClient) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	return openai.ChatCompletionResponse{}, nil
 }
@@ -110,6 +142,27 @@ func TestRouterResponsesSessionAffinityIsTenantScoped(t *testing.T) {
 	}
 	if second.calls != 1 {
 		t.Fatalf("affinity leaked across tenants: second=%d", second.calls)
+	}
+}
+
+func TestRouterStoresResponsesAffinityBeforePostResponseCommit(t *testing.T) {
+	affinity := &orderingAffinity{}
+	billing := &affinityOrderingModule{affinity: affinity}
+	client := &affinityResponseClient{id: "resp-ordered"}
+	router := Router{
+		endpoints: []Endpoint{{Name: "endpoint-a", Type: "demo", Provider: client}},
+		modules:   modules.NewPipeline([]modules.Module{billing}), health: newEndpointHealthTracker(),
+		routeCounter: &atomic.Uint64{}, affinity: affinity,
+	}
+	request := openai.ResponseRequest{Model: "test-model", Input: "first"}
+	_, err := router.Responses(context.Background(), modules.RequestContext{
+		CredentialID: "tenant-a", Request: openai.ChatCompletionRequest{Model: request.Model}, ResponseRequest: &request,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if billing.commits != 1 {
+		t.Fatalf("expected one post-response commit, got %d", billing.commits)
 	}
 }
 

@@ -44,7 +44,7 @@ func newResponseCache(ttl time.Duration, maxBytes int, store ExactCacheStore) re
 	if ttl <= 0 {
 		return nil
 	}
-	if store != nil {
+	if !interfaceIsNil(store) {
 		return distributedExactCache{store: store, ttl: ttl, maxBytes: maxBytes}
 	}
 	return newExactCacheWithLimit(ttl, maxBytes)

@@ -9,6 +9,31 @@ import (
 	"ai-gateway-gateway/internal/modules"
 )
 
+type nilTestStore struct{}
+
+func (*nilTestStore) Get(context.Context, string) ([]byte, bool, error) {
+	panic("typed-nil store must not be called")
+}
+
+func (*nilTestStore) Set(context.Context, string, []byte, time.Duration) error {
+	panic("typed-nil store must not be called")
+}
+
+func TestTypedNilStoreFallsBackToMemory(t *testing.T) {
+	var store *nilTestStore
+	cache := newResponseCache(time.Minute, 1024, store)
+	if _, distributed := cache.(distributedExactCache); distributed {
+		t.Fatal("typed-nil cache store selected distributed cache")
+	}
+	affinity := newAffinityStore(time.Minute, store)
+	if _, distributed := affinity.(distributedAffinity); distributed {
+		t.Fatal("typed-nil session store selected distributed affinity")
+	}
+	if err := affinity.set(context.Background(), "key", "endpoint"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type testSessionStore struct {
 	values  map[string][]byte
 	lastTTL time.Duration
