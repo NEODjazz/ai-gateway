@@ -111,6 +111,17 @@ model.
 
 `/v1/chat/completions` forwards OpenAI function tools, tool choice, parallel-tool policy, stop/seed, and JSON object or JSON Schema response formats. Anthropic tool definitions, calls, results, and forced structured outputs are translated to and from its native content blocks; Ollama receives its native `tools` and `format` fields. Tool arguments are included in the DLP/AV text projection and anonymized independently of the tool schema.
 
+### OpenAPI contract
+
+The canonical external contract is [repos/gateway/api/openapi.yaml](repos/gateway/api/openapi.yaml).
+It uses OpenAPI 3.1 and covers inference JSON/SSE responses, multimodal content,
+function and MCP tools, virtual-key administration, authentication, error
+responses, rate-limit headers, and operational endpoints. Contract tests validate
+the document, its examples and references, and require every registered gateway
+route to have exactly one matching OpenAPI operation. Internal service endpoints
+such as `/authorize`, `/usage`, `/scan`, and `/anonymize` are intentionally not
+published.
+
 ### Multiple providers and failover
 
 Provider endpoints are configured through the `gateway.providers` list in the Helm values. A provider type can have multiple connections with different keys and priorities:

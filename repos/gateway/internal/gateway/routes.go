@@ -6,18 +6,42 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
+type RouteContract struct {
+	Method string
+	Path   string
+}
+
+type routeDefinition struct {
+	RouteContract
+	handler func(Handler) http.Handler
+}
+
+var gatewayRoutes = []routeDefinition{
+	{RouteContract{http.MethodGet, "/healthz"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Health) }},
+	{RouteContract{http.MethodGet, "/readyz"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Ready) }},
+	{RouteContract{http.MethodGet, "/metrics"}, func(h Handler) http.Handler { return h.metrics }},
+	{RouteContract{http.MethodGet, "/v1/models"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Models) }},
+	{RouteContract{http.MethodPost, "/v1/chat/completions"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ChatCompletions) }},
+	{RouteContract{http.MethodPost, "/v1/responses"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Responses) }},
+	{RouteContract{http.MethodPost, "/v1/embeddings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Embeddings) }},
+	{RouteContract{http.MethodPost, "/admin/v1/keys"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateVirtualKey) }},
+	{RouteContract{http.MethodPost, "/admin/v1/keys/{id}/rotate"}, func(h Handler) http.Handler { return http.HandlerFunc(h.RotateVirtualKey) }},
+	{RouteContract{http.MethodDelete, "/admin/v1/keys/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.RevokeVirtualKey) }},
+}
+
+func DocumentedRoutes() []RouteContract {
+	routes := make([]RouteContract, len(gatewayRoutes))
+	for index, route := range gatewayRoutes {
+		routes[index] = route.RouteContract
+	}
+	return routes
+}
+
 func Routes(handler Handler) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", handler.Health)
-	mux.HandleFunc("GET /readyz", handler.Ready)
-	mux.Handle("GET /metrics", handler.metrics)
-	mux.HandleFunc("GET /v1/models", handler.Models)
-	mux.HandleFunc("POST /v1/chat/completions", handler.ChatCompletions)
-	mux.HandleFunc("POST /v1/responses", handler.Responses)
-	mux.HandleFunc("POST /v1/embeddings", handler.Embeddings)
-	mux.HandleFunc("POST /admin/v1/keys", handler.CreateVirtualKey)
-	mux.HandleFunc("POST /admin/v1/keys/{id}/rotate", handler.RotateVirtualKey)
-	mux.HandleFunc("DELETE /admin/v1/keys/{id}", handler.RevokeVirtualKey)
+	for _, route := range gatewayRoutes {
+		mux.Handle(route.Method+" "+route.Path, route.handler(handler))
+	}
 	observed := observabilityMiddleware(handler.metrics, mux)
 	return otelhttp.NewHandler(observed, "ai-gateway.http",
 		otelhttp.WithFilter(func(r *http.Request) bool {
