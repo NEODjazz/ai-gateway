@@ -168,41 +168,15 @@ func DeanonymizeText(value string, replacements map[string]string) string {
 }
 
 func DeanonymizeAny(value any, replacements map[string]string) any {
-	switch typed := value.(type) {
-	case string:
-		return DeanonymizeText(typed, replacements)
-	case []any:
-		for index := range typed {
-			typed[index] = DeanonymizeAny(typed[index], replacements)
-		}
-		return typed
-	case map[string]any:
-		for key, nested := range typed {
-			typed[key] = DeanonymizeAny(nested, replacements)
-		}
-		return typed
-	default:
-		return value
-	}
+	return openai.TransformTextContent(value, func(text string) string {
+		return DeanonymizeText(text, replacements)
+	})
 }
 
 func (m AnonymizerModule) anonymizeAny(req *RequestContext, value any) any {
-	switch typed := value.(type) {
-	case string:
-		return m.anonymize(req, typed)
-	case []any:
-		for index := range typed {
-			typed[index] = m.anonymizeAny(req, typed[index])
-		}
-		return typed
-	case map[string]any:
-		for key, nested := range typed {
-			typed[key] = m.anonymizeAny(req, nested)
-		}
-		return typed
-	default:
-		return value
-	}
+	return openai.TransformTextContent(value, func(text string) string {
+		return m.anonymize(req, text)
+	})
 }
 
 func buildAnonymizerRules(enabled []string) []AnonymizerRule {

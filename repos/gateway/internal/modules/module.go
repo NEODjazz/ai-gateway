@@ -73,7 +73,7 @@ func (p Pipeline) Run(ctx context.Context, req *RequestContext) error {
 	for _, module := range p.modules {
 		err := p.run(ctx, req, module, "pre", module.Handle)
 		if err != nil {
-			if module.Required() || errors.Is(err, ErrContentRejected) {
+			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
 				return fmt.Errorf("%s module failed: %w", module.Name(), err)
 			}
 			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
@@ -164,3 +164,4 @@ var ErrUnauthorized = errors.New("unauthorized")
 var ErrBudgetExceeded = errors.New("budget exceeded")
 var ErrBillingConflict = errors.New("billing lifecycle conflict")
 var ErrContentRejected = errors.New("content rejected")
+var ErrGuardrailUnavailable = errors.New("guardrail unavailable")

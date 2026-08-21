@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"ai-gateway-gateway/internal/openai"
@@ -35,28 +36,61 @@ func (m RemoteAnonymizerModule) Name() string   { return "anonymizer" }
 func (m RemoteAnonymizerModule) Required() bool { return m.required }
 
 func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext) error {
-	request := AnonymizeRequest{RequestID: req.RequestID, Messages: req.Request.Messages}
+	request := AnonymizeRequest{RequestID: req.RequestID, Messages: projectMessages(req.Request.Messages)}
 	if req.ResponseRequest != nil {
-		request.Input = req.ResponseRequest.Input
+		request.Input = openai.TextOnlyProjection(req.ResponseRequest.Input)
 		request.Instructions = req.ResponseRequest.Instructions
 	}
 	if req.EmbeddingRequest != nil {
-		request.Input = req.EmbeddingRequest.Input
+		request.Input = openai.TextOnlyProjection(req.EmbeddingRequest.Input)
 	}
 	response, err := callRemote[AnonymizeRequest, AnonymizeResponse](ctx, m.client, m.endpoint, request)
 	if err != nil {
 		return err
 	}
-	req.Request.Messages = response.Messages
+	mergedMessages, err := mergeProjectedMessages(req.Request.Messages, response.Messages)
+	if err != nil {
+		return err
+	}
+	req.Request.Messages = mergedMessages
 	if req.ResponseRequest != nil {
-		req.ResponseRequest.Input = response.Input
+		req.ResponseRequest.Input = openai.MergeTextProjection(req.ResponseRequest.Input, response.Input)
 		req.ResponseRequest.Instructions = response.Instructions
 	}
 	if req.EmbeddingRequest != nil {
-		req.EmbeddingRequest.Input = response.Input
+		req.EmbeddingRequest.Input = openai.MergeTextProjection(req.EmbeddingRequest.Input, response.Input)
 	}
 	req.AnonymizationValues = cloneStringMap(response.Replacements)
 	return nil
+}
+
+func projectMessages(messages []openai.Message) []openai.Message {
+	projected := make([]openai.Message, len(messages))
+	for index, message := range messages {
+		projected[index] = message
+		projected[index].Content = openai.TextOnlyProjection(message.Content)
+		projected[index].ToolCalls = append([]openai.ToolCall(nil), message.ToolCalls...)
+	}
+	return projected
+}
+
+func mergeProjectedMessages(original []openai.Message, transformed []openai.Message) ([]openai.Message, error) {
+	if len(original) != len(transformed) {
+		return nil, errors.New("anonymizer returned an invalid message projection")
+	}
+	merged := make([]openai.Message, len(original))
+	for index := range original {
+		merged[index] = original[index]
+		merged[index].Content = openai.MergeTextProjection(original[index].Content, transformed[index].Content)
+		if len(original[index].ToolCalls) != len(transformed[index].ToolCalls) {
+			return nil, errors.New("anonymizer returned an invalid tool-call projection")
+		}
+		merged[index].ToolCalls = append([]openai.ToolCall(nil), original[index].ToolCalls...)
+		for callIndex := range merged[index].ToolCalls {
+			merged[index].ToolCalls[callIndex].Function.Arguments = transformed[index].ToolCalls[callIndex].Function.Arguments
+		}
+	}
+	return merged, nil
 }
 
 func cloneStringMap(values map[string]string) map[string]string {

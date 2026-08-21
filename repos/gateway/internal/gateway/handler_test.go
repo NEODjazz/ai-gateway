@@ -595,7 +595,7 @@ func TestChatCompletionsAcceptsMultipartMessageContent(t *testing.T) {
 				"role": "user",
 				"content": [
 					{"type": "text", "text": "describe this"},
-					{"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}}
+					{"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}}
 				]
 			}
 		]
@@ -613,5 +613,30 @@ func TestChatCompletionsAcceptsMultipartMessageContent(t *testing.T) {
 	}
 	if openai.ContentText(content) != "describe this" {
 		t.Fatalf("expected text part to be extractable, got %q", openai.ContentText(content))
+	}
+}
+
+func TestChatCompletionsRejectsRemoteImageURL(t *testing.T) {
+	provider := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), provider))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.test/image.png"}}]}]}`))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "invalid_image") {
+		t.Fatalf("remote image URL accepted: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if provider.request.Request.Model != "" {
+		t.Fatal("invalid image reached provider")
+	}
+}
+
+func TestChatCompletionsRejectsOversizedBody(t *testing.T) {
+	handler := Routes(NewHandler(modules.NewPipeline(nil), &chatProvider{}))
+	body := strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"` + strings.Repeat("x", openai.MaxInferenceBodyBytes) + `"}]}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", body)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusRequestEntityTooLarge || !strings.Contains(recorder.Body.String(), "request_too_large") {
+		t.Fatalf("oversized request accepted: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

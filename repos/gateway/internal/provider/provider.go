@@ -47,6 +47,10 @@ type MCPClient interface {
 	SupportsMCP() bool
 }
 
+type VisionClient interface {
+	SupportsVision() bool
+}
+
 type ChatCompletionStreamWriter func(payload string) error
 type ResponseStreamWriter func(event string, payload string) error
 
@@ -832,6 +836,15 @@ func (r Router) candidates(request openai.ChatCompletionRequest, capabilities ..
 				continue
 			}
 		}
+		if hasCapability(capabilities, "vision") {
+			if !endpoint.AVEnabled {
+				continue
+			}
+			visionClient, ok := endpoint.Provider.(VisionClient)
+			if !ok || !visionClient.SupportsVision() {
+				continue
+			}
+		}
 		if !r.supportsOutputLimit(endpoint, request.Model, request.MaxTokens) {
 			continue
 		}
@@ -898,6 +911,9 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	if request.ResponseFormat != nil {
 		required = append(required, "structured_output")
 	}
+	if openai.HasChatImages(request) {
+		required = append(required, "vision")
+	}
 	return required
 }
 
@@ -917,6 +933,9 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 	}
 	if request.Text != nil {
 		required = append(required, "structured_output")
+	}
+	if openai.HasResponseImages(request) {
+		required = append(required, "vision")
 	}
 	return required
 }
@@ -971,13 +990,13 @@ func (r Router) supportsCapabilities(endpoint Endpoint, requestedModel string, r
 		if r.catalog.DenyUnknownModels() {
 			return false
 		}
-		if hasCapability(required, "mcp") && !hasCapability(endpoint.Capabilities, "mcp") {
+		if requiresExplicitEndpointCapability(required) && !hasExplicitEndpointCapabilities(endpoint.Capabilities, required) {
 			return false
 		}
 		return endpoint.supportsCapabilities(required...)
 	}
 	if entry.Capabilities == nil {
-		if hasCapability(required, "mcp") && !hasCapability(endpoint.Capabilities, "mcp") {
+		if requiresExplicitEndpointCapability(required) && !hasExplicitEndpointCapabilities(endpoint.Capabilities, required) {
 			return false
 		}
 		return endpoint.supportsCapabilities(required...)
@@ -988,6 +1007,19 @@ func (r Router) supportsCapabilities(endpoint Endpoint, requestedModel string, r
 	}
 	for _, capability := range required {
 		if !available[capability] {
+			return false
+		}
+	}
+	return true
+}
+
+func requiresExplicitEndpointCapability(required []string) bool {
+	return hasCapability(required, "mcp") || hasCapability(required, "vision")
+}
+
+func hasExplicitEndpointCapabilities(available []string, required []string) bool {
+	for _, capability := range []string{"mcp", "vision"} {
+		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}
 	}

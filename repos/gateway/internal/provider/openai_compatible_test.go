@@ -19,6 +19,34 @@ func TestProviderURLDoesNotDuplicateV1(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleForwardsVisionContent(t *testing.T) {
+	var upstream openAICompatibleChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{ID: "chat-vision", Model: "vision-model"})
+	}))
+	defer server.Close()
+	content := []any{
+		map[string]any{"type": "text", "text": "describe"},
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
+	}
+	_, err := NewOpenAICompatible(server.URL, "provider-key", false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{
+		Model: "vision-model", Messages: []openai.Message{{Role: "user", Content: content}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(upstream.Messages) != 1 {
+		t.Fatalf("vision message missing: %+v", upstream.Messages)
+	}
+	encoded, _ := json.Marshal(upstream.Messages[0].Content)
+	if !strings.Contains(string(encoded), "iVBORw0KGgo=") {
+		t.Fatalf("image content was not forwarded: %s", encoded)
+	}
+}
+
 func TestOpenAICompatibleEmbeddings(t *testing.T) {
 	var upstream openAICompatibleEmbeddingRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

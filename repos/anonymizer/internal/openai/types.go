@@ -132,3 +132,38 @@ func ContentText(value any) string {
 		return ""
 	}
 }
+
+func TransformTextContent(value any, transform func(string) string) any {
+	switch typed := value.(type) {
+	case string:
+		return transform(typed)
+	case []any:
+		for index := range typed {
+			typed[index] = TransformTextContent(typed[index], transform)
+		}
+		return typed
+	case map[string]any:
+		if isMediaContent(typed) {
+			return typed
+		}
+		for key, nested := range typed {
+			if key == "type" || key == "role" || key == "name" || key == "id" {
+				continue
+			}
+			typed[key] = TransformTextContent(nested, transform)
+		}
+		return typed
+	default:
+		return value
+	}
+}
+
+func isMediaContent(value map[string]any) bool {
+	typeName, _ := value["type"].(string)
+	switch typeName {
+	case "image_url", "input_image", "image", "input_audio", "audio", "input_file", "file":
+		return true
+	default:
+		return false
+	}
+}

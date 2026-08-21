@@ -80,6 +80,37 @@ func TestRemoteAnonymizerPreservesToolCallContract(t *testing.T) {
 	}
 }
 
+func TestRemoteAnonymizerReceivesOnlyTextProjectionForImages(t *testing.T) {
+	image := "data:image/png;base64,aW1hZ2Utc2VjcmV0"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request AnonymizeRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(request)
+		if strings.Contains(string(encoded), "aW1hZ2Utc2VjcmV0") {
+			t.Fatal("anonymizer received base64 image payload")
+		}
+		request.Messages[0].Content.([]any)[0].(map[string]any)["text"] = "masked"
+		_ = json.NewEncoder(w).Encode(AnonymizeResponse{Messages: request.Messages})
+	}))
+	defer server.Close()
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: []any{
+		map[string]any{"type": "text", "text": "secret"},
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": image}},
+	}}}}}
+	if err := NewRemoteAnonymizerModule(true, server.URL).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	content := req.Request.Messages[0].Content.([]any)
+	if content[0].(map[string]any)["text"] != "masked" {
+		t.Fatalf("masked text was not merged: %+v", content)
+	}
+	if content[1].(map[string]any)["image_url"].(map[string]any)["url"] != image {
+		t.Fatal("original image payload was not restored")
+	}
+}
+
 func TestRemoteBillingReceivesCredentialIDButNotBearer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any

@@ -57,6 +57,7 @@ type anthropicResponse struct {
 type anthropicContent struct {
 	Type      string `json:"type"`
 	Text      string `json:"text,omitempty"`
+	Source    any    `json:"source,omitempty"`
 	ID        string `json:"id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Input     any    `json:"input,omitempty"`
@@ -80,6 +81,8 @@ func NewAnthropic(baseURL string, apiKey string, upstreamStream bool) Anthropic 
 		client:         newProviderHTTPClient(180 * time.Second),
 	}
 }
+
+func (Anthropic) SupportsVision() bool { return true }
 
 func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	upstreamRequest := anthropicChatRequest(request, false)
@@ -233,7 +236,7 @@ func anthropicStructuredChat(response openai.ChatCompletionResponse) openai.Chat
 
 func anthropicResponsesRequest(request openai.ResponseRequest, stream bool) anthropicRequest {
 	maxTokens := requestMaxTokens(request.MaxTokens, request.MaxOutputTokens)
-	messages := []anthropicMessage{{Role: "user", Content: responseInputText(request.Input)}}
+	messages := anthropicResponseMessages(request.Input)
 	tools, toolChoice := anthropicResponseTools(request.Tools, request.ToolChoice)
 	if structuredTool, ok := anthropicStructuredResponseTool(request.Text); ok {
 		tools = append(tools, structuredTool)
@@ -329,13 +332,79 @@ func anthropicMessages(messages []openai.Message) (string, []anthropicMessage) {
 				Type: "tool_result", ToolUseID: message.ToolCallID, Content: message.Content,
 			}}})
 		default:
-			converted = append(converted, anthropicMessage{Role: "user", Content: content})
+			converted = append(converted, anthropicMessage{Role: "user", Content: anthropicMessageContent(message.Content)})
 		}
 	}
 	if len(converted) == 0 {
 		converted = append(converted, anthropicMessage{Role: "user", Content: ""})
 	}
 	return strings.Join(system, "\n\n"), converted
+}
+
+func anthropicResponseMessages(input any) []anthropicMessage {
+	if items, ok := input.([]any); ok {
+		messages := make([]anthropicMessage, 0, len(items))
+		for _, item := range items {
+			object, ok := item.(map[string]any)
+			if !ok {
+				messages = nil
+				break
+			}
+			role, _ := object["role"].(string)
+			if role != "user" && role != "assistant" {
+				messages = nil
+				break
+			}
+			messages = append(messages, anthropicMessage{Role: role, Content: anthropicMessageContent(object["content"])})
+		}
+		if len(messages) > 0 {
+			return messages
+		}
+	}
+	return []anthropicMessage{{Role: "user", Content: anthropicMessageContent(input)}}
+}
+
+func anthropicMessageContent(value any) any {
+	items, ok := value.([]any)
+	if !ok {
+		return openai.ContentText(value)
+	}
+	blocks := make([]anthropicContent, 0, len(items))
+	for _, item := range items {
+		object, ok := item.(map[string]any)
+		if !ok {
+			if text := openai.ContentText(item); text != "" {
+				blocks = append(blocks, anthropicContent{Type: "text", Text: text})
+			}
+			continue
+		}
+		typeName, _ := object["type"].(string)
+		switch typeName {
+		case "text", "input_text":
+			if text, _ := object["text"].(string); text != "" {
+				blocks = append(blocks, anthropicContent{Type: "text", Text: text})
+			}
+		case "image_url", "input_image":
+			imageURL := ""
+			if typeName == "image_url" {
+				if image, ok := object["image_url"].(map[string]any); ok {
+					imageURL, _ = image["url"].(string)
+				}
+			} else {
+				imageURL, _ = object["image_url"].(string)
+			}
+			if attachment, err := openai.ParseDataImageURL(imageURL); err == nil {
+				blocks = append(blocks, anthropicContent{Type: "image", Source: map[string]any{
+					"type": "base64", "media_type": attachment.MediaType, "data": attachment.Data,
+				}})
+			}
+		default:
+			if text := openai.ContentText(object); text != "" {
+				blocks = append(blocks, anthropicContent{Type: "text", Text: text})
+			}
+		}
+	}
+	return blocks
 }
 
 func anthropicChatTools(tools []openai.Tool, choice any) ([]anthropicTool, map[string]any) {

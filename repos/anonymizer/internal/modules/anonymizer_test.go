@@ -2,11 +2,30 @@ package modules
 
 import (
 	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
 
 	"ai-gateway-anonymizer/internal/openai"
 )
+
+func TestAnonymizerLeavesImagePayloadUntouched(t *testing.T) {
+	image := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("api_key=sk-test-1234567890abcdef"))
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: []any{
+		map[string]any{"type": "text", "text": "user@example.com"},
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": image}},
+	}}}}}
+	if err := NewAnonymizerModule(true, RuleEmail, RuleAPIKey).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	content := req.Request.Messages[0].Content.([]any)
+	if content[0].(map[string]any)["text"] == "user@example.com" {
+		t.Fatal("text was not anonymized")
+	}
+	if got := content[1].(map[string]any)["image_url"].(map[string]any)["url"]; got != image {
+		t.Fatalf("image payload changed: %q", got)
+	}
+}
 
 func TestAnonymizerUsesConfiguredRule(t *testing.T) {
 	module, err := NewAnonymizerModuleFromConfig(true, []RuleConfig{

@@ -63,6 +63,16 @@ func TestOllamaChatCompletions(t *testing.T) {
 	}
 }
 
+func TestOllamaConvertsVisionContentToNativeImages(t *testing.T) {
+	messages := ollamaMessages([]openai.Message{{Role: "user", Content: []any{
+		map[string]any{"type": "text", "text": "describe"},
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
+	}}})
+	if len(messages) != 1 || messages[0].Content != "describe" || len(messages[0].Images) != 1 || messages[0].Images[0] != "iVBORw0KGgo=" {
+		t.Fatalf("unexpected native Ollama vision message: %+v", messages)
+	}
+}
+
 func TestOllamaEmbeddingsMapsNativeContract(t *testing.T) {
 	var upstream ollamaEmbeddingRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

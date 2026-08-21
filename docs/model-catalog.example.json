@@ -1,11 +1,11 @@
 {
-  "version": "2026-08-21.1",
+  "version": "2026-08-21.2",
   "unknown_model_policy": "deny",
   "models": [
     {
       "provider": "azure-open-ai",
       "model": "deployment-gpt-example",
-      "capabilities": ["chat", "responses", "stream", "tools", "mcp", "structured_output"],
+      "capabilities": ["chat", "responses", "stream", "tools", "vision", "mcp", "structured_output"],
       "max_input_tokens": 128000,
       "max_output_tokens": 16384,
       "input_cost_per_1m": 1.25,

@@ -74,6 +74,34 @@ func TestAnthropicChatCompletions(t *testing.T) {
 	}
 }
 
+func TestAnthropicConvertsOpenAIVisionContent(t *testing.T) {
+	_, messages := anthropicMessages([]openai.Message{{Role: "user", Content: []any{
+		map[string]any{"type": "text", "text": "describe"},
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
+	}}})
+	blocks, ok := messages[0].Content.([]anthropicContent)
+	if !ok || len(blocks) != 2 || blocks[0].Text != "describe" || blocks[1].Type != "image" {
+		t.Fatalf("unexpected Anthropic vision blocks: %+v", messages[0].Content)
+	}
+	source, ok := blocks[1].Source.(map[string]any)
+	if !ok || source["media_type"] != "image/png" || source["data"] != "iVBORw0KGgo=" {
+		t.Fatalf("unexpected Anthropic image source: %+v", blocks[1].Source)
+	}
+}
+
+func TestAnthropicConvertsResponsesVisionInput(t *testing.T) {
+	request := anthropicResponsesRequest(openai.ResponseRequest{Input: []any{map[string]any{
+		"role": "user", "content": []any{
+			map[string]any{"type": "input_text", "text": "describe"},
+			map[string]any{"type": "input_image", "image_url": "data:image/jpeg;base64,/9j/"},
+		},
+	}}}, false)
+	blocks, ok := request.Messages[0].Content.([]anthropicContent)
+	if !ok || len(blocks) != 2 || blocks[1].Type != "image" {
+		t.Fatalf("unexpected Responses vision conversion: %+v", request.Messages)
+	}
+}
+
 func TestAnthropicStreamsChatCompletions(t *testing.T) {
 	var upstreamRequest anthropicRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

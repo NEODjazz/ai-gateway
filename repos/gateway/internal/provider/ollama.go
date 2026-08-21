@@ -19,11 +19,19 @@ type Ollama struct {
 }
 
 type ollamaChatRequest struct {
-	Model    string           `json:"model"`
-	Messages []openai.Message `json:"messages"`
-	Tools    []openai.Tool    `json:"tools,omitempty"`
-	Format   any              `json:"format,omitempty"`
-	Stream   bool             `json:"stream"`
+	Model    string          `json:"model"`
+	Messages []ollamaMessage `json:"messages"`
+	Tools    []openai.Tool   `json:"tools,omitempty"`
+	Format   any             `json:"format,omitempty"`
+	Stream   bool            `json:"stream"`
+}
+
+type ollamaMessage struct {
+	Role       string            `json:"role"`
+	Content    string            `json:"content"`
+	Images     []string          `json:"images,omitempty"`
+	ToolCalls  []openai.ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
 }
 
 type ollamaChatResponse struct {
@@ -59,10 +67,12 @@ func NewOllama(baseURL string, upstreamStream bool) Ollama {
 	}
 }
 
+func (Ollama) SupportsVision() bool { return true }
+
 func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	body, err := json.Marshal(ollamaChatRequest{
 		Model:    request.Model,
-		Messages: request.Messages,
+		Messages: ollamaMessages(request.Messages),
 		Tools:    request.Tools,
 		Format:   ollamaResponseFormat(request.ResponseFormat),
 		Stream:   request.Stream && p.upstreamStream,
@@ -155,7 +165,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 
 	body, err := json.Marshal(ollamaChatRequest{
 		Model:    request.Model,
-		Messages: request.Messages,
+		Messages: ollamaMessages(request.Messages),
 		Tools:    request.Tools,
 		Format:   ollamaResponseFormat(request.ResponseFormat),
 		Stream:   true,
@@ -243,6 +253,24 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		response.Choices[0].FinishReason = "stop"
 	}
 	return response, nil
+}
+
+func ollamaMessages(messages []openai.Message) []ollamaMessage {
+	converted := make([]ollamaMessage, len(messages))
+	for index, message := range messages {
+		converted[index] = ollamaMessage{
+			Role: message.Role, Content: openai.ContentText(message.Content),
+			ToolCalls: message.ToolCalls, ToolCallID: message.ToolCallID,
+		}
+		attachments, err := openai.ChatImageAttachments([]openai.Message{message})
+		if err != nil {
+			continue
+		}
+		for _, attachment := range attachments {
+			converted[index].Images = append(converted[index].Images, attachment.Data)
+		}
+	}
+	return converted
 }
 
 func ollamaResponseFormat(format *openai.ResponseFormat) any {

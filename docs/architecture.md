@@ -58,11 +58,11 @@ flowchart LR
 | Gateway | `GET /healthz`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/responses` | OpenAI-compatible API, auth pipeline, provider routing, failover, SSE, orchestration provider-level modules, deanonymization |
 | Auth | `GET /healthz`, `GET /readyz`, `POST /authorize` | PostgreSQL virtual keys с expiry/revoke/rotation, переходный static fallback и HS256 JWT; заполняет identity и access policy |
 | DLP | `GET /healthz`, `POST /scan` | Извлекает текст запроса и отправляет его в настроенный ICAP-сервис через `REQMOD` |
-| AV | `GET /healthz`, `POST /scan` | Аналогичный HTTP-to-ICAP адаптер для антивирусной проверки |
+| AV | `GET /healthz`, `POST /scan` | HTTP-to-ICAP адаптер для текста и отдельных бинарных image attachments |
 | Anonymizer | `GET /healthz`, `POST /anonymize` | Маскирует значения по настраиваемым RE2-правилам и возвращает преобразованный контент с placeholder map |
 | Billing | `GET /healthz`, `POST /usage` | Оценивает/собирает tokens и cost, создает billing event, после ответа пишет usage event в ClickHouse |
 
-`RequestContext` существует только внутри gateway. Между сервисами используются отдельные минимальные DTO: исходный bearer token получает только auth, DLP/AV получают текстовую проекцию, anonymizer — маскируемые поля, а billing — identity fingerprint, provider metadata и счетчики tokens без prompt/response content. Ответ каждого сервиса применяется к локальному контексту по явному allowlist полей.
+`RequestContext` существует только внутри gateway. Между сервисами используются отдельные минимальные DTO: исходный bearer token получает только auth, DLP получает текстовую проекцию, AV — текст и отдельные validated binary attachments, anonymizer — текстовую проекцию без image URL/base64, а billing — identity fingerprint, provider metadata и счетчики tokens без prompt/response content. Ответ каждого сервиса применяется к локальному контексту по явному allowlist полей.
 
 ## Обработка запроса
 
@@ -147,8 +147,9 @@ Auth находится в gateway-level pipeline и выполняется од
 ### Межсервисные границы данных
 
 - `auth`: получает `{token}`, ищет persistent key по HMAC-SHA256 и возвращает `user_id`, `team_id`, policy и непрозрачный `credential_id`; после auth gateway очищает bearer из request context.
-- `dlp` / `av`: получают только `request_id` и текстовую проекцию запроса.
-- `anonymizer`: получает только messages/input/instructions и возвращает преобразованные поля с placeholder map.
+- `dlp`: получает только `request_id` и текстовую проекцию запроса.
+- `av`: получает `request_id`, текстовую проекцию и отдельные base64 image attachments без bearer/identity; декодирует и сканирует каждый payload через ICAP с исходным media type.
+- `anonymizer`: получает только текстовую проекцию messages/input/instructions; image URL/base64 удаляются до вызова и восстанавливаются неизменными после ответа.
 - `billing`: получает identity, необратимый `credential_id`, provider/model metadata и token counters; prompt и provider response не передаются.
 
 Admin management endpoints сначала проходят обычный auth pipeline и RBAC в
@@ -173,7 +174,7 @@ Endpoints загружаются из `PROVIDERS_JSON`, выключенные e
 `MODEL_CATALOG_JSON` — версионированный общий контракт gateway и billing.
 Gateway сопоставляет entry по endpoint name, затем provider type и `*`, проверяет
 request-derived capabilities (`chat`, `responses`, `embeddings`, `stream`, `tools`,
-`structured_output`) и `max_output_tokens`. При
+`vision`, `structured_output`) и `max_output_tokens`. При
 `unknown_model_policy=deny` неизвестная модель не участвует в routing и не
 публикуется через `/v1/models`. Billing по тому же precedence выбирает цену за
 миллион input/output tokens и currency.
@@ -228,7 +229,18 @@ flowchart TD
 
 ## Безопасность контента
 
-DLP и AV получают текстовую проекцию запроса и вызывают внешний ICAP endpoint методом `REQMOD`. Ответ считается блокирующим при специальных infection/blocking headers либо при наличии `res-hdr` в `Encapsulated`. Адаптер преобразует блокировку в HTTP `451`, а gateway — в `ErrContentRejected`.
+DLP получает текстовую проекцию запроса. AV получает ту же проекцию и, для
+multimodal-запроса, отдельные decoded image payloads. Каждый payload вызывается
+через внешний ICAP endpoint методом `REQMOD` с соответствующим `Content-Type`.
+Ответ считается блокирующим при специальных infection/blocking headers либо при
+наличии `res-hdr` в `Encapsulated`. Адаптер преобразует блокировку в HTTP `451`,
+а gateway — в `ErrContentRejected`. Ошибка AV для image request всегда fail
+closed, включая optional configuration.
+
+Multimodal routing требует одновременно явной capability `vision`, adapter
+marker и `av_enabled=true`. Поддерживаются только inline base64 JPEG/PNG/GIF/WebP
+с проверкой magic signature; remote URL запрещены. Лимиты: 8 файлов, 8 MiB на
+файл, 16 MiB decoded total и 24 MiB на JSON body.
 
 Включение проверок задается на каждом provider endpoint через `dlp_enabled` и `av_enabled`. Это означает, что failover endpoint должен иметь эквивалентную security policy, если обход проверки недопустим.
 
@@ -321,7 +333,7 @@ Provider API keys не хранятся в `PROVIDERS_JSON`: chart создае�
 - PostgreSQL budgets/quotas реализованы; tariffs и financial transactions пока fail closed.
 - Deanonymization не применяется к уже отправленным streaming chunks.
 - Tool/function arguments входят в DLP/AV text projection и anonymization pipeline; JSON Schema инструмента не изменяется.
-- DLP/AV сканируют текстовую проекцию запроса, а не произвольные бинарные вложения.
+- DLP сканирует только текст; AV дополнительно сканирует validated inline image attachments. Remote image URLs и иные бинарные типы пока не поддерживаются.
 - Content rejection является terminal и не запускает fallback на другой endpoint.
 - Budget rejection также terminal и возвращается как `429 budget_exceeded`.
 - Gateway экспортирует OTLP/HTTP traces при заданном `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, продолжает и проксирует W3C trace context и выполняет bounded graceful flush. Server/module/provider/client spans не содержат bearer, prompt или provider response.

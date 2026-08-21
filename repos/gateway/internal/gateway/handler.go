@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -84,8 +85,7 @@ func (h Handler) Models(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	var request openai.ChatCompletionRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	if !decodeInferenceRequest(w, r, &request) {
 		return
 	}
 
@@ -105,6 +105,10 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.APIKey = ""
+	if _, err := openai.ChatImageAttachments(reqCtx.Request.Messages); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
+		return
+	}
 	toolIdentifiers, validTools := chatToolIdentifiers(request.Tools)
 	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) {
 		return
@@ -158,8 +162,7 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	var request openai.ResponseRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	if !decodeInferenceRequest(w, r, &request) {
 		return
 	}
 
@@ -183,6 +186,10 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.APIKey = ""
+	if _, err := openai.ResponseImageAttachments(reqCtx.ResponseRequest.Input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
+		return
+	}
 	toolIdentifiers, validTools := responseToolIdentifiers(request.Tools)
 	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) {
 		return
@@ -230,8 +237,7 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 	var request openai.EmbeddingRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	if !decodeInferenceRequest(w, r, &request) {
 		return
 	}
 	if strings.TrimSpace(request.Model) == "" {
@@ -283,6 +289,25 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func decodeInferenceRequest(w http.ResponseWriter, r *http.Request, target any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, openai.MaxInferenceBodyBytes)
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(target); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds the inference limit")
+			return false
+		}
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain exactly one JSON value")
+		return false
+	}
+	return true
 }
 
 func writeProviderFailure(w http.ResponseWriter, err error) {

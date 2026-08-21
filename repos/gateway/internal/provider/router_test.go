@@ -308,6 +308,10 @@ type mcpCaptureClient struct{ *modelCaptureProvider }
 
 func (mcpCaptureClient) SupportsMCP() bool { return true }
 
+type visionCaptureClient struct{ *modelCaptureProvider }
+
+func (visionCaptureClient) SupportsVision() bool { return true }
+
 func (p *modelCaptureProvider) ChatCompletions(_ context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	p.seenModel = request.Model
 	return staticProvider{content: p.content}.ChatCompletions(context.Background(), request)
@@ -811,6 +815,29 @@ func TestRouterRequiresExplicitMCPAdapterAndCapability(t *testing.T) {
 	}
 	if legacy.seenModel != "" || mcp.seenModel != "test-model" {
 		t.Fatalf("MCP request reached an undeclared/unsupported endpoint: legacy=%q mcp=%q", legacy.seenModel, mcp.seenModel)
+	}
+}
+
+func TestRouterRequiresExplicitVisionAdapterAndCapability(t *testing.T) {
+	legacy := &modelCaptureProvider{content: "legacy"}
+	vision := &modelCaptureProvider{content: "vision"}
+	router := Router{
+		endpoints: []Endpoint{
+			{Name: "legacy", Type: "demo", Priority: 1, AVEnabled: true, Provider: visionCaptureClient{legacy}},
+			{Name: "declared-but-unsupported", Type: "demo", Priority: 2, AVEnabled: true, Capabilities: []string{"chat", "vision"}, Provider: staticProvider{content: "unsupported"}},
+			{Name: "vision-without-av", Type: "openai-compatible", Priority: 3, Capabilities: []string{"chat", "vision"}, Provider: visionCaptureClient{legacy}},
+			{Name: "vision", Type: "openai-compatible", Priority: 4, AVEnabled: true, Capabilities: []string{"chat", "vision"}, Provider: visionCaptureClient{vision}},
+		},
+		modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	request := openai.ChatCompletionRequest{Model: "test-model", Messages: []openai.Message{{Role: "user", Content: []any{
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
+	}}}}
+	if _, err := router.ChatCompletions(context.Background(), modules.RequestContext{Request: request}); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.seenModel != "" || vision.seenModel != "test-model" {
+		t.Fatalf("vision request reached undeclared/unsupported endpoint: legacy=%q vision=%q", legacy.seenModel, vision.seenModel)
 	}
 }
 

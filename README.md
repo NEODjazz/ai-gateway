@@ -207,7 +207,23 @@ Model groups use endpoint-specific `model_aliases`, for example
 `{"fast":"deployment-gpt-5-mini"}`. Endpoints at the same priority can set
 `weight`; routing uses weighted round-robin and preserves the remaining members
 as failover candidates. `capabilities` can restrict an endpoint to `chat`,
-`responses`, `embeddings`, `mcp`, and/or `stream`.
+`responses`, `embeddings`, `vision`, `mcp`, and/or `stream`.
+
+Chat Completions and Responses accept OpenAI-style image parts for endpoints
+that explicitly declare `vision`, implement a vision-capable adapter, and enable
+AV. OpenAI-compatible endpoints preserve the original blocks, Anthropic receives
+native base64 image sources, and native Ollama chat receives its `images` array.
+Only inline `data:image/{jpeg,png,gif,webp};base64,...` inputs are accepted;
+remote URLs are rejected to avoid SSRF and unscanned content. Limits are 8
+images, 8 MiB each, 16 MiB decoded in total, and 24 MiB for the JSON request.
+Image signatures must match the declared media type.
+
+DLP receives only the text projection. AV receives that projection plus
+separate binary attachments and scans each attachment through ICAP with its
+image media type. Image payloads and URLs are removed from the remote
+anonymizer request and restored unchanged after its text-only response. An AV
+failure on a multimodal request is fail-closed even when AV is otherwise
+configured as optional.
 
 Virtual keys can restrict tools with `allowed_tools`. Empty grants preserve
 backward-compatible access to all request tools; otherwise exact names and
@@ -283,7 +299,7 @@ The `provider` field accepts either a provider `type` (`ollama`, `openai-compati
 
 ### DLP and antivirus through ICAP
 
-The `dlp` and `av` modules run at the provider level before anonymization and before the request is sent to an AI provider endpoint. The gateway invokes them as remote HTTP modules, while the separate `repos/dlp` and `repos/av` microservices perform the ICAP calls.
+The `dlp` and `av` modules run at the provider level before anonymization and before the request is sent to an AI provider endpoint. The gateway invokes them as remote HTTP modules, while the separate `repos/dlp` and `repos/av` microservices perform the ICAP calls. DLP receives text only; AV additionally receives validated image attachments for multimodal requests and scans their decoded bytes separately.
 
 Enable these modules separately for each endpoint in `PROVIDERS_JSON` or Helm `gateway.providers`:
 
@@ -545,9 +561,8 @@ a versioned capability/pricing catalog, OpenTelemetry observability, an
 embeddings API with security and billing parity, and adaptive routing with
 tenant-scoped Responses affinity, plus an admin-RBAC virtual-key management API.
 It also has an opt-in, credential-scoped semantic cache for constrained text-only
-chat requests and credential-level function/MCP tool ACLs. The remaining delivery sequence is:
-
-1. Add multimodal support as a separate security-reviewed increment.
+chat requests, credential-level function/MCP tool ACLs, and bounded multimodal
+image input with explicit vision routing and fail-closed binary AV scanning.
 
 ## License
 

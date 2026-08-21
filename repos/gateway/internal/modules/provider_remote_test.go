@@ -79,6 +79,36 @@ func TestRemoteModuleMapsContentRejected(t *testing.T) {
 	}
 }
 
+func TestRemoteModuleRejectsAllowedFalse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(ScanResponse{Allowed: false})
+	}))
+	defer server.Close()
+	module := NewProviderRemoteModule("dlp", false, server.URL)
+	err := module.Handle(context.Background(), &RequestContext{Metadata: map[string]string{"provider.modules.dlp.enabled": "true"}})
+	if !errors.Is(err, ErrContentRejected) {
+		t.Fatalf("expected content rejection, got %v", err)
+	}
+}
+
+func TestOptionalAVFailsClosedForImageWhenScannerUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusBadGateway)
+	}))
+	defer server.Close()
+	module := NewProviderRemoteModule("av", false, server.URL)
+	req := RequestContext{
+		Metadata: map[string]string{"provider.modules.av.enabled": "true"},
+		Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: []any{
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
+		}}}},
+	}
+	err := NewPipeline([]Module{module}).Run(context.Background(), &req)
+	if !errors.Is(err, ErrGuardrailUnavailable) {
+		t.Fatalf("optional AV failed open: %v", err)
+	}
+}
+
 func TestProviderRemoteModuleDoesNotSendBearerToken(t *testing.T) {
 	const bearer = "super-secret-bearer-token"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -107,6 +137,41 @@ func TestProviderRemoteModuleDoesNotSendBearerToken(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAVReceivesBinaryAttachmentsWhileDLPReceivesTextOnly(t *testing.T) {
+	for _, moduleName := range []string{"dlp", "av"} {
+		t.Run(moduleName, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request ScanRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Fatal(err)
+				}
+				if request.Content != "user: describe" {
+					t.Fatalf("unexpected text projection: %q", request.Content)
+				}
+				if moduleName == "av" && (len(request.Attachments) != 1 || request.Attachments[0].Data != "iVBORw0KGgo=") {
+					t.Fatalf("AV did not receive image attachment: %+v", request.Attachments)
+				}
+				if moduleName == "dlp" && len(request.Attachments) != 0 {
+					t.Fatalf("DLP received binary attachment: %+v", request.Attachments)
+				}
+				_ = json.NewEncoder(w).Encode(ScanResponse{Allowed: true})
+			}))
+			defer server.Close()
+			module := NewProviderRemoteModule(moduleName, true, server.URL)
+			req := RequestContext{
+				Metadata: map[string]string{"provider.modules." + moduleName + ".enabled": "true"},
+				Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: []any{
+					map[string]any{"type": "text", "text": "describe"},
+					map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
+				}}}},
+			}
+			if err := module.Handle(context.Background(), &req); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

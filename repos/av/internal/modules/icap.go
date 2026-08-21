@@ -39,6 +39,10 @@ func NewICAPClient(host string, port string, service string) ICAPClient {
 }
 
 func (c ICAPClient) Scan(ctx context.Context, moduleName string, payload []byte) (ICAPScanResult, error) {
+	return c.ScanContent(ctx, moduleName, "text/plain; charset=utf-8", payload)
+}
+
+func (c ICAPClient) ScanContent(ctx context.Context, moduleName string, contentType string, payload []byte) (ICAPScanResult, error) {
 	if strings.TrimSpace(c.Host) == "" {
 		return ICAPScanResult{}, errors.New("ICAP_HOST is empty")
 	}
@@ -63,7 +67,7 @@ func (c ICAPClient) Scan(ctx context.Context, moduleName string, payload []byte)
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(c.timeout()))
 
-	if _, err := conn.Write(c.requestBytes(moduleName, payload)); err != nil {
+	if _, err := conn.Write(c.requestBytes(moduleName, contentType, payload)); err != nil {
 		return ICAPScanResult{}, err
 	}
 
@@ -98,7 +102,7 @@ func (c ICAPClient) timeout() time.Duration {
 	return c.Timeout
 }
 
-func (c ICAPClient) requestBytes(moduleName string, payload []byte) []byte {
+func (c ICAPClient) requestBytes(moduleName string, contentType string, payload []byte) []byte {
 	service := strings.TrimSpace(c.Service)
 	if service == "" {
 		service = "/" + moduleName
@@ -108,8 +112,9 @@ func (c ICAPClient) requestBytes(moduleName string, payload []byte) []byte {
 	}
 	serviceURL := "icap://" + net.JoinHostPort(c.Host, c.Port) + service
 	httpHeader := fmt.Sprintf(
-		"POST /ai-gateway/%s HTTP/1.1\r\nHost: ai-gateway\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %d\r\n\r\n",
+		"POST /ai-gateway/%s HTTP/1.1\r\nHost: ai-gateway\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n",
 		moduleName,
+		contentType,
 		len(payload),
 	)
 

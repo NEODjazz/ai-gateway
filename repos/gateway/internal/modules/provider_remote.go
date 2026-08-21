@@ -42,16 +42,49 @@ func (m ProviderRemoteModule) Handle(ctx context.Context, req *RequestContext) e
 	if strings.TrimSpace(m.endpoint) == "" {
 		return errors.New("remote module url is empty")
 	}
-	_, err := callRemote[ScanRequest, ScanResponse](ctx, m.client, m.endpoint, ScanRequest{
+	request := ScanRequest{
 		RequestID: req.RequestID,
 		Content:   scanPayload(req),
-	})
-	return err
+	}
+	if m.name == "av" {
+		attachments, err := requestImageAttachments(req)
+		if err != nil {
+			return err
+		}
+		request.Attachments = attachments
+	}
+	response, err := callRemote[ScanRequest, ScanResponse](ctx, m.client, m.endpoint, request)
+	if err != nil {
+		if m.name == "av" && len(request.Attachments) > 0 && !errors.Is(err, ErrContentRejected) {
+			return errors.Join(ErrGuardrailUnavailable, err)
+		}
+		return err
+	}
+	if !response.Allowed {
+		return ErrContentRejected
+	}
+	return nil
 }
 
 type ScanRequest struct {
-	RequestID string `json:"request_id,omitempty"`
-	Content   string `json:"content"`
+	RequestID   string                   `json:"request_id,omitempty"`
+	Content     string                   `json:"content"`
+	Attachments []openai.ImageAttachment `json:"attachments,omitempty"`
+}
+
+func requestImageAttachments(req *RequestContext) ([]openai.ImageAttachment, error) {
+	attachments, err := openai.ChatImageAttachments(req.Request.Messages)
+	if err != nil {
+		return nil, err
+	}
+	if req.ResponseRequest == nil {
+		return attachments, nil
+	}
+	responseAttachments, err := openai.ResponseImageAttachments(req.ResponseRequest.Input)
+	if err != nil {
+		return nil, err
+	}
+	return append(attachments, responseAttachments...), nil
 }
 
 type ScanResponse struct {

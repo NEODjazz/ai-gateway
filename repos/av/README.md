@@ -13,8 +13,11 @@ go run ./cmd/av
 - `GET /healthz`
 - `POST /scan`
 
-`POST /scan` accepts only `request_id` and a text projection in `content`; it
-does not receive bearer credentials, identity, or the complete gateway context.
+`POST /scan` accepts `request_id`, a text projection in `content`, and optional
+validated image `attachments` containing `media_type` and `data_base64`. It does
+not receive bearer credentials, identity, or the complete gateway context. Text
+and every decoded attachment are separate ICAP scans. JPEG, PNG, GIF, and WebP
+are supported with signature checks and bounded count/size.
 
 ## Configuration
 
