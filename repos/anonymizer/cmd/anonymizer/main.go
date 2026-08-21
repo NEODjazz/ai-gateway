@@ -24,11 +24,17 @@ func main() {
 		}
 	}
 
-	http.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+	log.Println("anonymizer listening on :8081")
+	log.Fatal(http.ListenAndServe(":8081", newHandler(module)))
+}
+
+func newHandler(module modules.AnonymizerModule) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	http.HandleFunc("/anonymize", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/anonymize", func(w http.ResponseWriter, r *http.Request) {
 		var request anonymizeRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -47,11 +53,10 @@ func main() {
 			response.Input = ctx.ResponseRequest.Input
 			response.Instructions = ctx.ResponseRequest.Instructions
 		}
+		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(response)
 	})
-
-	log.Println("anonymizer listening on :8081")
-	log.Fatal(http.ListenAndServe(":8081", nil))
+	return mux
 }
 
 type anonymizeRequest struct {
