@@ -13,14 +13,20 @@ import (
 )
 
 type Config struct {
-	HTTP      HTTPConfig
-	Cache     CacheConfig
-	Redis     RedisConfig
-	Modules   ModuleConfig
-	Provider  ProviderConfig
-	Catalog   modelcatalog.Catalog
-	Telemetry TelemetryConfig
-	InitErr   error
+	HTTP       HTTPConfig
+	Cache      CacheConfig
+	Redis      RedisConfig
+	Modules    ModuleConfig
+	Provider   ProviderConfig
+	Catalog    modelcatalog.Catalog
+	Telemetry  TelemetryConfig
+	Management ManagementConfig
+	InitErr    error
+}
+
+type ManagementConfig struct {
+	AuthURL string
+	Secret  string
 }
 
 type CacheConfig struct {
@@ -121,6 +127,10 @@ func Load() Config {
 			Version:     env("AI_GATEWAY_VERSION", "dev"),
 			Endpoint:    os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
 			SampleRatio: envFloat("OTEL_TRACE_SAMPLE_RATIO", 1),
+		},
+		Management: ManagementConfig{
+			AuthURL: env("MANAGEMENT_AUTH_URL", env("AUTH_URL", "")),
+			Secret:  os.Getenv("MANAGEMENT_SHARED_SECRET"),
 		},
 		InitErr: catalogErr,
 		Modules: ModuleConfig{

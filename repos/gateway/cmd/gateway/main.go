@@ -71,6 +71,9 @@ func main() {
 		readiness = redisStore.Ping
 	}
 	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics)
+	if cfg.Management.AuthURL != "" && cfg.Management.Secret != "" {
+		handler = handler.WithManagement(gateway.NewRemoteManagementClient(cfg.Management.AuthURL, cfg.Management.Secret))
+	}
 	server := &http.Server{
 		Addr:    cfg.HTTP.Addr,
 		Handler: gateway.Routes(handler),

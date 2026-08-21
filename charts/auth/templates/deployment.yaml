@@ -56,6 +56,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "auth.fullname" . }}
                   key: key-hash-secret
+            - name: MANAGEMENT_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "auth.fullname" . }}
+                  key: management-shared-secret
             - name: AUTH_STATIC_KEY_FALLBACK_ENABLED
               value: {{ .Values.auth.staticKeyFallbackEnabled | quote }}
             - name: AUTH_DEMO_KEYS_ENABLED

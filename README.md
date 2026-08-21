@@ -317,6 +317,34 @@ and TPM policy; expired or revoked keys do not authorize. The database contains
 only an HMAC-SHA256 token lookup value and an opaque key ID. Linked key rotation
 creates a replacement and revokes the previous key in one transaction.
 
+An authenticated caller with the `admin` role can manage persistent virtual
+keys through `POST /admin/v1/keys`, `POST /admin/v1/keys/{id}/rotate`, and
+`DELETE /admin/v1/keys/{id}`. Create and rotate accept the complete key policy
+(`user_id`, optional team/roles/model grants/rate limits/expiry) and return the
+new plaintext token exactly once. There is deliberately no list endpoint and no
+API for reading token hashes.
+
+The gateway validates the client bearer through auth, clears it, and calls auth
+management with a separate `MANAGEMENT_SHARED_SECRET`, request ID, and
+irreversible actor credential ID. The two charts must receive the same secret
+from an encrypted values source; never reuse `AUTH_KEY_HASH_SECRET`, a provider
+key, or a client bearer for it. Direct auth management requests without the
+scoped secret and audit identity are rejected.
+
+Example create policy:
+
+```json
+{
+  "user_id": "user-42",
+  "team_id": "team-a",
+  "roles": ["developer"],
+  "allowed_models": ["gpt-*"],
+  "rate_limit_rpm": 60,
+  "rate_limit_tpm": 100000,
+  "expires_at": "2027-01-01T00:00:00Z"
+}
+```
+
 For migration and local development, static and demo fallbacks are controlled
 independently. The built-in demo API keys are:
 
@@ -478,10 +506,11 @@ and exact cache, a PostgreSQL billing ledger with a durable ClickHouse outbox,
 tools/structured output, PostgreSQL virtual keys, atomic multi-scope budgets,
 a versioned capability/pricing catalog, OpenTelemetry observability, an
 embeddings API with security and billing parity, and adaptive routing with
-tenant-scoped Responses affinity. The remaining delivery sequence is:
+tenant-scoped Responses affinity, plus an admin-RBAC virtual-key management API.
+The remaining delivery sequence is:
 
-1. Add a protected management API, opt-in tenant-safe semantic cache, and
-   scoped MCP/multimodal support as separate security-reviewed increments.
+1. Add opt-in tenant-safe semantic cache and scoped MCP/multimodal support as
+   separate security-reviewed increments.
 
 ## License
 

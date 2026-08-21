@@ -34,6 +34,16 @@ keys. Set both to `false` in production after persistent keys have been loaded.
 The service fails closed on a PostgreSQL lookup error; `/readyz` verifies both
 the connection and the migration.
 
+## Internal virtual-key management
+
+The gateway exposes the admin-RBAC API; auth owns the internal persistence
+commands at `POST /internal/v1/keys`, `POST /internal/v1/keys/{id}/rotate`, and
+`DELETE /internal/v1/keys/{id}`. These endpoints require
+`X-Management-Token: <MANAGEMENT_SHARED_SECRET>` plus request and actor audit
+headers. They should remain cluster-internal and are not a replacement for
+network policy. Create and rotate return the plaintext token once; PostgreSQL
+stores only its HMAC-SHA256 lookup value.
+
 ## JWT
 
 Supported algorithm: `HS256`.

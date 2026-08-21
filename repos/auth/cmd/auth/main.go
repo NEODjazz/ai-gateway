@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 
 	"ai-gateway-auth/internal/modules"
 )
@@ -52,6 +53,7 @@ func main() {
 			RateLimitTPM:  ctx.RateLimitTPM,
 		})
 	})
+	registerManagementRoutes(http.DefaultServeMux, &module, os.Getenv("MANAGEMENT_SHARED_SECRET"))
 
 	log.Println("auth listening on :8082")
 	log.Fatal(http.ListenAndServe(":8082", nil))

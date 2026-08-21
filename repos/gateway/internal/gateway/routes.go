@@ -15,6 +15,9 @@ func Routes(handler Handler) http.Handler {
 	mux.HandleFunc("POST /v1/chat/completions", handler.ChatCompletions)
 	mux.HandleFunc("POST /v1/responses", handler.Responses)
 	mux.HandleFunc("POST /v1/embeddings", handler.Embeddings)
+	mux.HandleFunc("POST /admin/v1/keys", handler.CreateVirtualKey)
+	mux.HandleFunc("POST /admin/v1/keys/{id}/rotate", handler.RotateVirtualKey)
+	mux.HandleFunc("DELETE /admin/v1/keys/{id}", handler.RevokeVirtualKey)
 	observed := observabilityMiddleware(handler.metrics, mux)
 	return otelhttp.NewHandler(observed, "ai-gateway.http",
 		otelhttp.WithFilter(func(r *http.Request) bool {

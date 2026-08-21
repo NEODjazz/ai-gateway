@@ -105,6 +105,14 @@ spec:
               value: {{ .Values.gateway.modules.auth.required | quote }}
             - name: AUTH_URL
               value: {{ ternary .Values.gateway.modules.auth.url "" .Values.gateway.modules.auth.remote | quote }}
+            - name: MANAGEMENT_AUTH_URL
+              value: {{ .Values.gateway.management.authUrl | quote }}
+            - name: MANAGEMENT_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gateway.providerSecretName" . }}
+                  key: MANAGEMENT_SHARED_SECRET
+                  optional: false
             - name: ANONYMIZER_REQUIRED
               value: {{ .Values.gateway.modules.anonymizer.required | quote }}
             - name: ANONYMIZER_RULES

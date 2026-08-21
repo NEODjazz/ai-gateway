@@ -262,6 +262,9 @@ func metricPath(path string) string {
 	case "/healthz", "/readyz", "/metrics", "/v1/models", "/v1/chat/completions", "/v1/responses", "/v1/embeddings":
 		return path
 	default:
+		if strings.HasPrefix(path, "/admin/v1/keys") {
+			return "/admin/v1/keys/{operation}"
+		}
 		return "unmatched"
 	}
 }

@@ -121,6 +121,9 @@ func (s *PostgresVirtualKeyStore) Rotate(ctx context.Context, oldID string, repl
 	defer func() { _ = tx.Rollback(ctx) }()
 	var family string
 	if err := tx.QueryRow(ctx, `SELECT rotation_family_id FROM auth_virtual_keys WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, oldID).Scan(&family); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrVirtualKeyNotFound
+		}
 		return err
 	}
 	if replacement.ID == "" || replacement.UserID == "" || tokenHash == "" {

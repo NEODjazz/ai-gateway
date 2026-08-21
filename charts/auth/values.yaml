@@ -23,6 +23,8 @@ auth:
     enabled: true
     dsn: postgres://ai_gateway:ai_gateway@ai-gateway-postgres:5432/ai_gateway?sslmode=disable
   keyHashSecret: dev-auth-key-hash-secret
+  # Must match gateway.management.sharedSecret.
+  managementSharedSecret: dev-management-shared-secret
   staticKeyFallbackEnabled: true
   demoKeysEnabled: true
   # Production values should be supplied from an encrypted values source.

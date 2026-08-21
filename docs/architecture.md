@@ -151,6 +151,12 @@ Auth находится в gateway-level pipeline и выполняется од
 - `anonymizer`: получает только messages/input/instructions и возвращает преобразованные поля с placeholder map.
 - `billing`: получает identity, необратимый `credential_id`, provider/model metadata и token counters; prompt и provider response не передаются.
 
+Admin management endpoints сначала проходят обычный auth pipeline и RBAC в
+gateway. Клиентский bearer после этого очищается. Во внутренний auth management
+endpoint передаются только key policy, `request_id`, actor ID, необратимый actor
+credential ID и отдельный scoped service secret. Новый plaintext virtual key
+возвращается только в ответе create/rotate и в базе не хранится.
+
 HTTP-ответы модулей декодируются в типизированные DTO, поэтому удаленный сервис не может перезаписать identity, routing metadata или исходный запрос целиком.
 
 ## Маршрутизация и failover

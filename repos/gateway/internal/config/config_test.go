@@ -48,6 +48,8 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("ROUTING_STRATEGY", "adaptive")
 	t.Setenv("ADAPTIVE_ROUTING_EWMA_ALPHA", "0.35")
 	t.Setenv("RESPONSES_AFFINITY_TTL_SECONDS", "7200")
+	t.Setenv("MANAGEMENT_AUTH_URL", "http://auth:8082")
+	t.Setenv("MANAGEMENT_SHARED_SECRET", "internal-secret")
 	t.Setenv("GUARDRAIL_POLICIES_JSON", `{"strict":{"dlp":true,"av":true}}`)
 	t.Setenv("PROVIDERS_JSON", `[{"name":"group-a","type":"demo","model_aliases":{"fast":"upstream-fast"},"weight":3,"capabilities":["chat"]}]`)
 	cfg := Load()
@@ -59,6 +61,9 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	}
 	if cfg.Provider.RoutingStrategy != "adaptive" || cfg.Provider.AdaptiveEWMAAlpha != 0.35 || cfg.Provider.AffinityTTL != 2*time.Hour {
 		t.Fatalf("unexpected adaptive routing config: %+v", cfg.Provider)
+	}
+	if cfg.Management.AuthURL != "http://auth:8082" || cfg.Management.Secret != "internal-secret" {
+		t.Fatalf("unexpected management config: %+v", cfg.Management)
 	}
 	endpoint := cfg.Provider.Endpoints[0]
 	if endpoint.ModelAliases["fast"] != "upstream-fast" || endpoint.Weight != 3 || len(endpoint.Capabilities) != 1 {

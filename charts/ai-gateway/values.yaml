@@ -34,6 +34,10 @@ gateway:
     strategy: weighted
     adaptiveEwmaAlpha: "0.2"
     responsesAffinityTtlSeconds: 3600
+  management:
+    authUrl: http://ai-gateway-auth:8082
+    # Supply the same value to the auth chart from an encrypted values source.
+    sharedSecret: dev-management-shared-secret
   telemetry:
     otlpTracesEndpoint: ""
     sampleRatio: "1"

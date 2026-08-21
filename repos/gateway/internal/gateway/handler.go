@@ -21,6 +21,7 @@ type Handler struct {
 	rateLimits RateLimitStore
 	metrics    *Metrics
 	ready      func(context.Context) error
+	management ManagementClient
 }
 
 func NewHandler(pipeline modules.Pipeline, llmProvider provider.Provider) Handler {
