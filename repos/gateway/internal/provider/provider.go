@@ -57,19 +57,26 @@ type StreamingResponseClient interface {
 var ErrStreamingUnsupported = errors.New("streaming unsupported")
 
 type Config struct {
-	Default           string
-	Endpoints         []config.ProviderEndpointConfig
-	GuardrailPolicies map[string]config.GuardrailPolicyConfig
-	Modules           modules.Pipeline
-	CacheTTL          time.Duration
-	CacheMaxBytes     int
-	CacheStore        ExactCacheStore
-	Catalog           modelcatalog.Catalog
-	Observer          ProviderObserver
-	RoutingStrategy   string
-	AdaptiveEWMAAlpha float64
-	SessionStore      SessionStore
-	AffinityTTL       time.Duration
+	Default                 string
+	Endpoints               []config.ProviderEndpointConfig
+	GuardrailPolicies       map[string]config.GuardrailPolicyConfig
+	Modules                 modules.Pipeline
+	CacheTTL                time.Duration
+	CacheMaxBytes           int
+	CacheStore              ExactCacheStore
+	Catalog                 modelcatalog.Catalog
+	Observer                ProviderObserver
+	RoutingStrategy         string
+	AdaptiveEWMAAlpha       float64
+	SessionStore            SessionStore
+	AffinityTTL             time.Duration
+	SemanticCacheTTL        time.Duration
+	SemanticCacheThreshold  float64
+	SemanticCacheMaxEntries int
+	SemanticCacheMaxBytes   int
+	SemanticEmbeddingURL    string
+	SemanticEmbeddingAPIKey string
+	SemanticEmbeddingModel  string
 }
 
 type ProviderObserver interface {
@@ -107,6 +114,7 @@ type Router struct {
 	routingStrategy string
 	adaptive        *adaptiveRouter
 	affinity        affinityStore
+	semantic        *semanticResponseCache
 }
 
 func New(cfg Config) Provider {
@@ -171,6 +179,11 @@ func New(cfg Config) Provider {
 		routingStrategy: strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
 		adaptive:        newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
 		affinity:        newAffinityStore(cfg.AffinityTTL, cfg.SessionStore),
+		semantic: newSemanticResponseCache(semanticCacheConfig{
+			ttl: cfg.SemanticCacheTTL, threshold: cfg.SemanticCacheThreshold,
+			maxEntries: cfg.SemanticCacheMaxEntries, maxBytes: cfg.SemanticCacheMaxBytes,
+			embedder: newOpenAIEmbedder(cfg.SemanticEmbeddingURL, cfg.SemanticEmbeddingAPIKey, cfg.SemanticEmbeddingModel),
+		}),
 	}
 }
 
@@ -217,6 +230,39 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			attemptCtx.Metadata["provider.cache.status"] = "error"
 			log.Printf("provider cache get failed: %v", cacheErr)
 		}
+		semanticScope, semanticVector := "", []float64(nil)
+		if scope, text, eligible := semanticRequest(attemptCtx, endpoint); eligible && r.semantic != nil {
+			vector, embedErr := r.semantic.embedder.embed(ctx, text)
+			if embedErr != nil {
+				if r.observer != nil {
+					r.observer.ObserveCache("semantic_get", "error")
+				}
+				log.Printf("semantic cache embedding failed: %v", embedErr)
+			} else {
+				semanticScope, semanticVector = scope, vector
+				if payload, found := r.semantic.lookup(scope, vector); found {
+					if cached, ok := decodeCached[openai.ChatCompletionResponse](payload); ok {
+						if r.observer != nil {
+							r.observer.ObserveCache("semantic_get", "hit")
+						}
+						attemptCtx.Metadata["provider.cache.status"] = "hit"
+						attemptCtx.Metadata["provider.cache.kind"] = "semantic"
+						attemptCtx.Metadata["provider.status"] = "ok"
+						attemptCtx.Metadata["provider.latency_ms"] = "0"
+						cached.Usage = openai.Usage{}
+						attemptCtx.Response = &cached
+						if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
+							return openai.ChatCompletionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+						}
+						modules.DeanonymizeResponse(&attemptCtx, &cached)
+						return cached, nil
+					}
+				}
+				if r.observer != nil {
+					r.observer.ObserveCache("semantic_get", "miss")
+				}
+			}
+		}
 		response, err := r.callChat(ctx, endpoint, attemptCtx.Request)
 		setAttemptMetadata(&attemptCtx, started, err)
 		if err == nil {
@@ -225,6 +271,16 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 				if cacheErr := r.cacheSet(ctx, cacheKey, payload); cacheErr != nil {
 					attemptCtx.Metadata["provider.cache.status"] = "error"
 					log.Printf("provider cache set failed: %v", cacheErr)
+				}
+				if semanticScope != "" && len(semanticVector) > 0 {
+					stored := r.semantic.set(semanticScope, semanticVector, payload)
+					if r.observer != nil {
+						result := "skipped"
+						if stored {
+							result = "ok"
+						}
+						r.observer.ObserveCache("semantic_set", result)
+					}
 				}
 			}
 			mergeChatUsage(&response, attemptCtx.Usage)

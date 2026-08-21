@@ -178,6 +178,14 @@ tenant-scoped affinity store. С Redis это общий state для всех r
 Redis — локальный memory fallback. Provider-scoped response ID не отправляется
 другому endpoint при failover.
 
+Semantic cache выключен по умолчанию. Для допустимого text-only chat запроса он
+вычисляет embedding только после DLP/AV и anonymization. Scope включает
+необратимый credential ID, authenticated user, endpoint, logical model и generation settings, поэтому
+team membership само по себе не разделяет cache entries. Допускается ровно одно
+user message и exact-matched system/developer context. Tools, tool results,
+assistant history, structured output и multimodal content всегда обходят semantic cache. Embedder
+использует отдельный service credential; клиентский bearer ему не передаётся.
+
 ```mermaid
 flowchart TD
     Request["provider + model"] --> Mode{"Как задан запрос?"}

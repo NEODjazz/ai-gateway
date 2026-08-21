@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"sort"
 	"strconv"
@@ -32,6 +33,17 @@ type ManagementConfig struct {
 type CacheConfig struct {
 	TTLSeconds int
 	MaxBytes   int
+	Semantic   SemanticCacheConfig
+}
+
+type SemanticCacheConfig struct {
+	TTLSeconds      int
+	Threshold       float64
+	MaxEntries      int
+	MaxBytes        int
+	EmbeddingURL    string
+	EmbeddingAPIKey string
+	EmbeddingModel  string
 }
 
 type RedisConfig struct {
@@ -101,6 +113,17 @@ type ProviderEndpointConfig struct {
 
 func Load() Config {
 	catalog, catalogErr := modelcatalog.Parse(os.Getenv("MODEL_CATALOG_JSON"))
+	semanticTTL := envInt("SEMANTIC_CACHE_TTL_SECONDS", 0)
+	semanticThreshold := envFloat("SEMANTIC_CACHE_THRESHOLD", 0.95)
+	semanticURL := strings.TrimSpace(os.Getenv("SEMANTIC_CACHE_EMBEDDING_URL"))
+	semanticModel := strings.TrimSpace(os.Getenv("SEMANTIC_CACHE_EMBEDDING_MODEL"))
+	var semanticErr error
+	if semanticTTL > 0 && (semanticURL == "" || semanticModel == "") {
+		semanticErr = errors.New("semantic cache embedding url and model are required when enabled")
+	}
+	if semanticTTL > 0 && (semanticThreshold <= 0 || semanticThreshold > 1) {
+		semanticErr = errors.Join(semanticErr, errors.New("semantic cache threshold must be in (0,1]"))
+	}
 	return Config{
 		HTTP: HTTPConfig{
 			Addr: env("HTTP_ADDR", ":8080"),
@@ -108,6 +131,15 @@ func Load() Config {
 		Cache: CacheConfig{
 			TTLSeconds: envInt("EXACT_CACHE_TTL_SECONDS", 0),
 			MaxBytes:   envInt("EXACT_CACHE_MAX_BYTES", 1_048_576),
+			Semantic: SemanticCacheConfig{
+				TTLSeconds:      semanticTTL,
+				Threshold:       semanticThreshold,
+				MaxEntries:      envInt("SEMANTIC_CACHE_MAX_ENTRIES", 100),
+				MaxBytes:        envInt("SEMANTIC_CACHE_MAX_BYTES", 1_048_576),
+				EmbeddingURL:    semanticURL,
+				EmbeddingAPIKey: os.Getenv("SEMANTIC_CACHE_EMBEDDING_API_KEY"),
+				EmbeddingModel:  semanticModel,
+			},
 		},
 		Redis: RedisConfig{
 			Addr: env("REDIS_ADDR", ""), Password: os.Getenv("REDIS_PASSWORD"),
@@ -132,7 +164,7 @@ func Load() Config {
 			AuthURL: env("MANAGEMENT_AUTH_URL", env("AUTH_URL", "")),
 			Secret:  os.Getenv("MANAGEMENT_SHARED_SECRET"),
 		},
-		InitErr: catalogErr,
+		InitErr: errors.Join(catalogErr, semanticErr),
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
 				Required: envBool("AUTH_REQUIRED", true),

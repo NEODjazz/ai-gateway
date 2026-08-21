@@ -50,6 +50,13 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("RESPONSES_AFFINITY_TTL_SECONDS", "7200")
 	t.Setenv("MANAGEMENT_AUTH_URL", "http://auth:8082")
 	t.Setenv("MANAGEMENT_SHARED_SECRET", "internal-secret")
+	t.Setenv("SEMANTIC_CACHE_TTL_SECONDS", "600")
+	t.Setenv("SEMANTIC_CACHE_THRESHOLD", "0.97")
+	t.Setenv("SEMANTIC_CACHE_MAX_ENTRIES", "25")
+	t.Setenv("SEMANTIC_CACHE_MAX_BYTES", "4096")
+	t.Setenv("SEMANTIC_CACHE_EMBEDDING_URL", "http://embedding:8080/v1")
+	t.Setenv("SEMANTIC_CACHE_EMBEDDING_API_KEY", "embedding-secret")
+	t.Setenv("SEMANTIC_CACHE_EMBEDDING_MODEL", "text-embedding")
 	t.Setenv("GUARDRAIL_POLICIES_JSON", `{"strict":{"dlp":true,"av":true}}`)
 	t.Setenv("PROVIDERS_JSON", `[{"name":"group-a","type":"demo","model_aliases":{"fast":"upstream-fast"},"weight":3,"capabilities":["chat"]}]`)
 	cfg := Load()
@@ -64,6 +71,10 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	}
 	if cfg.Management.AuthURL != "http://auth:8082" || cfg.Management.Secret != "internal-secret" {
 		t.Fatalf("unexpected management config: %+v", cfg.Management)
+	}
+	semantic := cfg.Cache.Semantic
+	if semantic.TTLSeconds != 600 || semantic.Threshold != 0.97 || semantic.MaxEntries != 25 || semantic.MaxBytes != 4096 || semantic.EmbeddingURL != "http://embedding:8080/v1" || semantic.EmbeddingAPIKey != "embedding-secret" || semantic.EmbeddingModel != "text-embedding" {
+		t.Fatalf("unexpected semantic cache config: %+v", semantic)
 	}
 	endpoint := cfg.Provider.Endpoints[0]
 	if endpoint.ModelAliases["fast"] != "upstream-fast" || endpoint.Weight != 3 || len(endpoint.Capabilities) != 1 {
@@ -80,6 +91,21 @@ func TestLoadModelCatalog(t *testing.T) {
 	t.Setenv("MODEL_CATALOG_JSON", `{"models":[{"provider":"demo","model":"model"}]}`)
 	if cfg := Load(); cfg.InitErr == nil {
 		t.Fatal("invalid model catalog did not fail configuration")
+	}
+}
+
+func TestLoadRejectsIncompleteSemanticCacheConfiguration(t *testing.T) {
+	t.Setenv("SEMANTIC_CACHE_TTL_SECONDS", "60")
+	t.Setenv("SEMANTIC_CACHE_EMBEDDING_URL", "")
+	t.Setenv("SEMANTIC_CACHE_EMBEDDING_MODEL", "")
+	if cfg := Load(); cfg.InitErr == nil {
+		t.Fatal("enabled semantic cache without embedder was accepted")
+	}
+	t.Setenv("SEMANTIC_CACHE_EMBEDDING_URL", "http://embedding/v1")
+	t.Setenv("SEMANTIC_CACHE_EMBEDDING_MODEL", "embed-model")
+	t.Setenv("SEMANTIC_CACHE_THRESHOLD", "1.1")
+	if cfg := Load(); cfg.InitErr == nil {
+		t.Fatal("invalid semantic threshold was accepted")
 	}
 }
 

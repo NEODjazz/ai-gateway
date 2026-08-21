@@ -75,6 +75,24 @@ spec:
               value: {{ .Values.gateway.exactCache.ttlSeconds | quote }}
             - name: EXACT_CACHE_MAX_BYTES
               value: {{ printf "%.0f" (float64 .Values.gateway.exactCache.maxBytes) | quote }}
+            - name: SEMANTIC_CACHE_TTL_SECONDS
+              value: {{ .Values.gateway.semanticCache.ttlSeconds | quote }}
+            - name: SEMANTIC_CACHE_THRESHOLD
+              value: {{ .Values.gateway.semanticCache.threshold | quote }}
+            - name: SEMANTIC_CACHE_MAX_ENTRIES
+              value: {{ .Values.gateway.semanticCache.maxEntries | quote }}
+            - name: SEMANTIC_CACHE_MAX_BYTES
+              value: {{ printf "%.0f" (float64 .Values.gateway.semanticCache.maxBytes) | quote }}
+            - name: SEMANTIC_CACHE_EMBEDDING_URL
+              value: {{ .Values.gateway.semanticCache.embeddingUrl | quote }}
+            - name: SEMANTIC_CACHE_EMBEDDING_MODEL
+              value: {{ .Values.gateway.semanticCache.embeddingModel | quote }}
+            - name: SEMANTIC_CACHE_EMBEDDING_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gateway.providerSecretName" . }}
+                  key: SEMANTIC_CACHE_EMBEDDING_API_KEY
+                  optional: true
             - name: ROUTING_STRATEGY
               value: {{ .Values.gateway.routing.strategy | quote }}
             - name: ADAPTIVE_ROUTING_EWMA_ALPHA

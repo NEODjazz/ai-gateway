@@ -30,6 +30,15 @@ gateway:
     # Disabled by default; bundled cache is process-local and tenant-scoped.
     ttlSeconds: 0
     maxBytes: 1048576
+  semanticCache:
+    # Opt-in and process-local. Use only for text-only chat traffic.
+    ttlSeconds: 0
+    threshold: "0.95"
+    maxEntries: 100
+    maxBytes: 1048576
+    embeddingUrl: ""
+    embeddingModel: ""
+    embeddingApiKey: ""
   routing:
     strategy: weighted
     adaptiveEwmaAlpha: "0.2"

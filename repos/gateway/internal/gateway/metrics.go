@@ -120,7 +120,7 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintln(w, "# TYPE ai_gateway_module_calls_total counter")
 	_, _ = fmt.Fprintln(w, "# HELP ai_gateway_module_duration_seconds_sum Total module call duration.")
 	_, _ = fmt.Fprintln(w, "# TYPE ai_gateway_module_duration_seconds_sum counter")
-	_, _ = fmt.Fprintln(w, "# HELP ai_gateway_cache_operations_total Exact-cache operations.")
+	_, _ = fmt.Fprintln(w, "# HELP ai_gateway_cache_operations_total Exact and semantic cache operations.")
 	_, _ = fmt.Fprintln(w, "# TYPE ai_gateway_cache_operations_total counter")
 	_, _ = fmt.Fprintln(w, "# HELP ai_gateway_billing_events_total Billing module lifecycle outcomes.")
 	_, _ = fmt.Fprintln(w, "# TYPE ai_gateway_billing_events_total counter")

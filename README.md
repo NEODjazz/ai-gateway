@@ -231,6 +231,25 @@ anonymization, cache keys include the team or credential, and billing receives a
 cache-hit event with zero provider tokens. With `REDIS_ADDR`, cache entries are
 shared by gateway replicas; without it the cache is process-local.
 
+Semantic caching is a separate opt-in feature (`SEMANTIC_CACHE_TTL_SECONDS`;
+Helm: `gateway.semanticCache`). It applies only to non-streaming, text-only chat
+requests containing exactly one user message plus optional exact-matched
+system/developer messages, without tools, tool results, assistant history, or
+structured-output contracts. The cache
+is always scoped to the irreversible credential ID, authenticated user, endpoint,
+logical model, and generation settings; it is never shared merely because two users belong to
+the same team. Entries are process-local, TTL-bound, entry-count-bound, and
+payload-size-bound.
+
+The semantic embedder runs after DLP/AV and anonymization, receives no client
+bearer, and uses only `SEMANTIC_CACHE_EMBEDDING_API_KEY`. Configure its
+OpenAI-compatible URL/model and tune `SEMANTIC_CACHE_THRESHOLD` conservatively
+(default `0.95`). Embedder failures fail open to the normal provider path.
+Semantic hits keep the ordinary billing lifecycle but commit zero provider
+tokens. Embedding calls may still incur cost at the configured embedding
+provider and should be monitored separately. Because approximate matches can be
+wrong, keep the feature disabled for high-risk or rapidly changing answers.
+
 Request with an explicit provider:
 
 ```json
@@ -507,10 +526,11 @@ tools/structured output, PostgreSQL virtual keys, atomic multi-scope budgets,
 a versioned capability/pricing catalog, OpenTelemetry observability, an
 embeddings API with security and billing parity, and adaptive routing with
 tenant-scoped Responses affinity, plus an admin-RBAC virtual-key management API.
-The remaining delivery sequence is:
+It also has an opt-in, credential-scoped semantic cache for constrained text-only
+chat requests. The remaining delivery sequence is:
 
-1. Add opt-in tenant-safe semantic cache and scoped MCP/multimodal support as
-   separate security-reviewed increments.
+1. Add scoped MCP/tool ACL and multimodal support as separate security-reviewed
+   increments.
 
 ## License
 
