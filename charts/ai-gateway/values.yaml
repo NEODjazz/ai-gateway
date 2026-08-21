@@ -72,6 +72,20 @@ gateway:
         - gemma4:e4b
       priority: 10
       enabled: true
+    # Enable after `ollama pull nomic-embed-text`. Keeping embeddings on a
+    # dedicated endpoint prevents a chat-only model from being selected.
+    - name: ollama-embeddings
+      type: ollama
+      base_url: http://host.docker.internal:11434
+      stream: false
+      dlp_enabled: false
+      av_enabled: false
+      capabilities:
+        - embeddings
+      models:
+        - nomic-embed-text:latest
+      priority: 10
+      enabled: false
     - name: azure-open-ai
       type: openai
       base_url: $PROVIDER_BASE_URL_AZURE_OPEN_AI

@@ -109,6 +109,30 @@ providers use `/v1/embeddings`; Ollama uses its native `/api/embed`. Only
 because DLP/AV cannot inspect them safely without the tokenizer for the selected
 model.
 
+`phi3` and most chat-only Ollama models return `501 Not Implemented` from
+`/api/embed`. For a positive local smoke test, install a dedicated embedding
+model and enable the disabled `ollama-embeddings` endpoint from the chart
+values:
+
+```powershell
+ollama pull nomic-embed-text
+```
+
+Copy `charts/ai-gateway/values.yaml` into the environment-specific values file,
+set `enabled: true` on the endpoint named `ollama-embeddings`, and upgrade the
+release with that file. When overriding the complete provider array, keep the
+embedding endpoint scoped to `capabilities: [embeddings]`, model
+`nomic-embed-text:latest`, and base URL
+`http://host.docker.internal:11434`. Then run the validating smoke test (it
+requires `curl` and `jq`):
+
+```bash
+./scripts/smoke-ollama-embeddings.sh
+```
+
+The script sends two inputs and fails unless the gateway returns two non-empty
+float vectors, stable indexes, and non-zero usage.
+
 `/v1/chat/completions` forwards OpenAI function tools, tool choice, parallel-tool policy, stop/seed, and JSON object or JSON Schema response formats. Anthropic tool definitions, calls, results, and forced structured outputs are translated to and from its native content blocks; Ollama receives its native `tools` and `format` fields. Tool arguments are included in the DLP/AV text projection and anonymized independently of the tool schema.
 
 ### OpenAPI contract
