@@ -122,6 +122,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	normalizeOllamaToolCalls(&ollamaResp.Message)
 
 	finishReason := ollamaResp.DoneReason
 	if finishReason == "" {
@@ -240,6 +241,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		if chunk.Message.Role != "" {
 			response.Choices[0].Message.Role = chunk.Message.Role
 		}
+		normalizeOllamaToolCalls(&chunk.Message)
 		content := openai.ContentText(chunk.Message.Content)
 		if content != "" {
 			response.Choices[0].Message.Content = openai.ContentText(response.Choices[0].Message.Content) + content
@@ -252,6 +254,13 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 				sentRole = true
 			}
 			if err := write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, role, content, nil)); err != nil {
+				return openai.ChatCompletionResponse{}, err
+			}
+		}
+		for _, call := range chunk.Message.ToolCalls {
+			toolIndex := len(response.Choices[0].Message.ToolCalls)
+			response.Choices[0].Message.ToolCalls = append(response.Choices[0].Message.ToolCalls, call)
+			if err := write(openAIChatToolCallChunkPayload(response.ID, response.Model, toolIndex, call)); err != nil {
 				return openai.ChatCompletionResponse{}, err
 			}
 		}
@@ -311,6 +320,17 @@ func ollamaToolCalls(calls []openai.ToolCall) []ollamaRequestToolCall {
 		}
 	}
 	return converted
+}
+
+func normalizeOllamaToolCalls(message *openai.Message) {
+	if message == nil {
+		return
+	}
+	for index := range message.ToolCalls {
+		if message.ToolCalls[index].Type == "" {
+			message.ToolCalls[index].Type = "function"
+		}
+	}
 }
 
 func ollamaRequestOptions(request openai.ChatCompletionRequest) ollamaOptions {

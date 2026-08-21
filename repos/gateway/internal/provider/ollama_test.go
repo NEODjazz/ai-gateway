@@ -69,7 +69,7 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
 			t.Fatal(err)
 		}
-		_, _ = w.Write([]byte(`{"model":"llama3.2:latest","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"weather.get","arguments":{"city":"Moscow"}}}]},"done":true,"done_reason":"stop"}`))
+		_, _ = w.Write([]byte(`{"model":"llama3.2:latest","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","function":{"name":"weather.get","arguments":{"city":"Moscow"}}}]},"done":true,"done_reason":"stop"}`))
 	}))
 	defer server.Close()
 
@@ -102,8 +102,35 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 		t.Fatalf("generation options were not forwarded: %+v", upstream.Options)
 	}
 	if len(response.Choices) != 1 || len(response.Choices[0].Message.ToolCalls) != 1 ||
+		response.Choices[0].Message.ToolCalls[0].Type != "function" ||
 		response.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"city":"Moscow"}` {
 		t.Fatalf("Ollama tool arguments were not normalized: %+v", response)
+	}
+}
+
+func TestOllamaStreamsNativeToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("{\"model\":\"llama3.2:latest\",\"message\":{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"call_1\",\"function\":{\"name\":\"weather.get\",\"arguments\":{\"city\":\"Moscow\"}}}]}}\n"))
+		_, _ = w.Write([]byte("{\"model\":\"llama3.2:latest\",\"done\":true,\"done_reason\":\"stop\"}\n"))
+	}))
+	defer server.Close()
+
+	var payloads []string
+	response, err := NewOllama(server.URL, true).StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{
+		Model: "llama3.2:latest", Stream: true, Messages: []openai.Message{{Role: "user", Content: "weather"}},
+	}, func(payload string) error {
+		payloads = append(payloads, payload)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Choices[0].Message.ToolCalls) != 1 || response.Choices[0].Message.ToolCalls[0].Type != "function" {
+		t.Fatalf("streamed tool call was not accumulated: %+v", response)
+	}
+	if len(payloads) != 2 || !strings.Contains(payloads[0], `"type":"function"`) ||
+		!strings.Contains(payloads[0], `"arguments":"{\"city\":\"Moscow\"}"`) {
+		t.Fatalf("unexpected streamed tool payloads: %v", payloads)
 	}
 }
 
