@@ -69,6 +69,8 @@ func NewOpenAICompatible(baseURL string, apiKey string, upstreamStream bool) Ope
 	}
 }
 
+func (OpenAICompatible) SupportsMCP() bool { return true }
+
 func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	body, err := json.Marshal(openAICompatibleChatRequest{
 		Model: request.Model, Messages: request.Messages, Tools: request.Tools,

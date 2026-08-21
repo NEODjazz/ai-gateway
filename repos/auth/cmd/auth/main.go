@@ -49,6 +49,7 @@ func main() {
 			CredentialID:  ctx.CredentialID,
 			TeamID:        ctx.TeamID,
 			AllowedModels: ctx.AllowedModels,
+			AllowedTools:  ctx.AllowedTools,
 			RateLimitRPM:  ctx.RateLimitRPM,
 			RateLimitTPM:  ctx.RateLimitTPM,
 		})
@@ -69,6 +70,7 @@ type authResponse struct {
 	CredentialID  string   `json:"credential_id,omitempty"`
 	TeamID        string   `json:"team_id,omitempty"`
 	AllowedModels []string `json:"allowed_models,omitempty"`
+	AllowedTools  []string `json:"allowed_tools,omitempty"`
 	RateLimitRPM  int      `json:"rate_limit_rpm,omitempty"`
 	RateLimitTPM  int      `json:"rate_limit_tpm,omitempty"`
 }

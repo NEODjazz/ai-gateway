@@ -88,7 +88,7 @@ func TestAuthModuleRejectsInvalidJWTSignature(t *testing.T) {
 func TestAuthModuleAppliesVirtualKeyPolicy(t *testing.T) {
 	module := NewAuthModuleWithVirtualKeys(true, []VirtualKey{{
 		Token: "tenant-secret", UserID: "user-7", TeamID: "team-blue",
-		Roles: []string{"developer"}, AllowedModels: []string{"gpt-5.*"},
+		Roles: []string{"developer"}, AllowedModels: []string{"gpt-5.*"}, AllowedTools: []string{"mcp.weather.*"},
 		RateLimitRPM: 10, RateLimitTPM: 5000,
 	}})
 	req := RequestContext{APIKey: "tenant-secret"}
@@ -98,7 +98,7 @@ func TestAuthModuleAppliesVirtualKeyPolicy(t *testing.T) {
 	if req.UserID != "user-7" || req.TeamID != "team-blue" || req.RateLimitRPM != 10 || req.RateLimitTPM != 5000 {
 		t.Fatalf("unexpected virtual key policy: %+v", req)
 	}
-	if strings.Join(req.AllowedModels, ",") != "gpt-5.*" || req.APIKey != "" || req.CredentialID == "" {
+	if strings.Join(req.AllowedModels, ",") != "gpt-5.*" || strings.Join(req.AllowedTools, ",") != "mcp.weather.*" || req.APIKey != "" || req.CredentialID == "" {
 		t.Fatalf("virtual key was not safely applied: %+v", req)
 	}
 	if stored := module.virtualKeys[req.CredentialID]; stored.Token != "" {
@@ -109,7 +109,7 @@ func TestAuthModuleAppliesVirtualKeyPolicy(t *testing.T) {
 func TestAuthUsesPersistentVirtualKeyPolicy(t *testing.T) {
 	store := &fakeVirtualKeyStore{found: true, key: StoredVirtualKey{
 		ID: "key-id-1", UserID: "user-1", TeamID: "team-1", Roles: []string{"developer"},
-		AllowedModels: []string{"gpt-*"}, RateLimitRPM: 10, RateLimitTPM: 1000,
+		AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp:weather"}, RateLimitRPM: 10, RateLimitTPM: 1000,
 	}}
 	module := NewAuthModuleWithStore(true, store, "pepper", false)
 	req := RequestContext{APIKey: "secret-token"}
@@ -119,7 +119,7 @@ func TestAuthUsesPersistentVirtualKeyPolicy(t *testing.T) {
 	if store.lastHash == "" || store.lastHash == "secret-token" || len(store.lastHash) != 64 {
 		t.Fatalf("store received an unsafe token lookup value: %q", store.lastHash)
 	}
-	if req.CredentialID != "key-id-1" || req.UserID != "user-1" || req.TeamID != "team-1" || req.APIKey != "" || req.RateLimitRPM != 10 {
+	if req.CredentialID != "key-id-1" || req.UserID != "user-1" || req.TeamID != "team-1" || req.APIKey != "" || req.RateLimitRPM != 10 || len(req.AllowedTools) != 1 {
 		t.Fatalf("stored key policy was not applied: %+v", req)
 	}
 }

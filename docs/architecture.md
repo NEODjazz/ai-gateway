@@ -157,6 +157,13 @@ endpoint передаются только key policy, `request_id`, actor ID, �
 credential ID и отдельный scoped service secret. Новый plaintext virtual key
 возвращается только в ответе create/rotate и в базе не хранится.
 
+Virtual-key policy также содержит `allowed_tools`. Gateway сопоставляет function
+name либо MCP identity `mcp:<server_label>@<canonical-https-url>` с
+exact/wildcard grants до provider pipeline. URL привязан к grant, поэтому один
+и тот же label нельзя перенаправить на другой MCP server. MCP routing требует
+одновременно явной capability `mcp` и adapter, который реализует MCP
+passthrough; legacy empty capabilities не считаются opt-in.
+
 HTTP-ответы модулей декодируются в типизированные DTO, поэтому удаленный сервис не может перезаписать identity, routing metadata или исходный запрос целиком.
 
 ## Маршрутизация и failover

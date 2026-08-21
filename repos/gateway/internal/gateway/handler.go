@@ -105,6 +105,10 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.APIKey = ""
+	toolIdentifiers, validTools := chatToolIdentifiers(request.Tools)
+	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) {
+		return
+	}
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateChatTokens(request)) {
 		return
 	}
@@ -179,6 +183,10 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.APIKey = ""
+	toolIdentifiers, validTools := responseToolIdentifiers(request.Tools)
+	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) {
+		return
+	}
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateResponseTokens(request)) {
 		return
 	}

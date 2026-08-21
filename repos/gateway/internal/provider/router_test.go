@@ -304,6 +304,10 @@ type modelCaptureProvider struct {
 	content   string
 }
 
+type mcpCaptureClient struct{ *modelCaptureProvider }
+
+func (mcpCaptureClient) SupportsMCP() bool { return true }
+
 func (p *modelCaptureProvider) ChatCompletions(_ context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	p.seenModel = request.Model
 	return staticProvider{content: p.content}.ChatCompletions(context.Background(), request)
@@ -787,6 +791,26 @@ func TestRouterFiltersByProviderAndModel(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected no provider endpoint error")
+	}
+}
+
+func TestRouterRequiresExplicitMCPAdapterAndCapability(t *testing.T) {
+	legacy := &modelCaptureProvider{content: "legacy"}
+	mcp := &modelCaptureProvider{content: "mcp"}
+	router := Router{
+		endpoints: []Endpoint{
+			{Name: "legacy", Type: "demo", Priority: 1, Provider: mcpCaptureClient{legacy}},
+			{Name: "declared-but-unsupported", Type: "demo", Priority: 2, Capabilities: []string{"responses", "tools", "mcp"}, Provider: staticProvider{content: "unsupported"}},
+			{Name: "mcp", Type: "openai-compatible", Priority: 3, Capabilities: []string{"responses", "tools", "mcp"}, Provider: mcpCaptureClient{mcp}},
+		},
+		modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	request := openai.ResponseRequest{Model: "test-model", Input: "weather", Tools: []openai.ResponseTool{{Type: "mcp", ServerLabel: "weather", ServerURL: "https://mcp.example.test"}}}
+	if _, err := router.Responses(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, ResponseRequest: &request}); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.seenModel != "" || mcp.seenModel != "test-model" {
+		t.Fatalf("MCP request reached an undeclared/unsupported endpoint: legacy=%q mcp=%q", legacy.seenModel, mcp.seenModel)
 	}
 }
 

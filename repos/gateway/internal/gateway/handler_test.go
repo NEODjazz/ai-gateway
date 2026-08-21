@@ -23,6 +23,7 @@ type modelsProvider struct{}
 
 type accessPolicyModule struct {
 	models []string
+	tools  []string
 	rpm    int
 	tpm    int
 }
@@ -43,9 +44,66 @@ func (m accessPolicyModule) Handle(_ context.Context, req *modules.RequestContex
 	req.TeamID = "team-1"
 	req.CredentialID = "credential-1"
 	req.AllowedModels = append([]string(nil), m.models...)
+	req.AllowedTools = append([]string(nil), m.tools...)
 	req.RateLimitRPM = m.rpm
 	req.RateLimitTPM = m.tpm
 	return nil
+}
+
+func TestChatToolACLAllowsWildcardAndRejectsUnscopedTool(t *testing.T) {
+	llm := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"mcp.weather.*"}}}), llm)
+	allowed := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[{"role":"user","content":"weather"}],"tools":[{"type":"function","function":{"name":"mcp.weather.forecast"}}]}`))
+	allowedResponse := httptest.NewRecorder()
+	handler.ChatCompletions(allowedResponse, allowed)
+	if allowedResponse.Code != http.StatusOK {
+		t.Fatalf("allowed tool rejected: status=%d body=%s", allowedResponse.Code, allowedResponse.Body.String())
+	}
+	denied := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[{"role":"user","content":"mail"}],"tools":[{"type":"function","function":{"name":"mcp.mail.send"}}]}`))
+	deniedResponse := httptest.NewRecorder()
+	handler.ChatCompletions(deniedResponse, denied)
+	if deniedResponse.Code != http.StatusForbidden || !strings.Contains(deniedResponse.Body.String(), "tool_not_allowed") {
+		t.Fatalf("unscoped tool accepted: status=%d body=%s", deniedResponse.Code, deniedResponse.Body.String())
+	}
+}
+
+func TestResponsesMCPACLUsesServerIdentity(t *testing.T) {
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"mcp:weather-prod@https://mcp.example.test"}}}), &chatProvider{})
+	allowed := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test","input":"weather","tools":[{"type":"mcp","server_label":"weather-prod","server_url":"https://mcp.example.test"}]}`))
+	allowedResponse := httptest.NewRecorder()
+	handler.Responses(allowedResponse, allowed)
+	if allowedResponse.Code != http.StatusOK {
+		t.Fatalf("allowed MCP server rejected: status=%d body=%s", allowedResponse.Code, allowedResponse.Body.String())
+	}
+	denied := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test","input":"mail","tools":[{"type":"mcp","server_label":"mail","server_url":"https://mcp.example.test"}]}`))
+	deniedResponse := httptest.NewRecorder()
+	handler.Responses(deniedResponse, denied)
+	if deniedResponse.Code != http.StatusForbidden {
+		t.Fatalf("unscoped MCP server accepted: status=%d body=%s", deniedResponse.Code, deniedResponse.Body.String())
+	}
+}
+
+func TestResponsesMCPACLRejectsLabelReuseForAnotherURL(t *testing.T) {
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"mcp:weather-prod@https://mcp.example.test"}}}), &chatProvider{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test","input":"weather","tools":[{"type":"mcp","server_label":"weather-prod","server_url":"https://evil.example.test"}]}`))
+	response := httptest.NewRecorder()
+	handler.Responses(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "tool_not_allowed") {
+		t.Fatalf("MCP label reuse accepted: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestMCPToolIdentifierRejectsUnsafeURLs(t *testing.T) {
+	for _, serverURL := range []string{
+		"http://mcp.example.test",
+		"https://user@mcp.example.test",
+		"https://mcp.example.test?token=secret",
+		"https://mcp.example.test#fragment",
+	} {
+		if identifier, ok := mcpToolIdentifier(openai.ResponseTool{Type: "mcp", ServerLabel: "weather", ServerURL: serverURL}); ok {
+			t.Errorf("unsafe MCP URL %q produced identifier %q", serverURL, identifier)
+		}
+	}
 }
 
 func (modelsProvider) ChatCompletions(context.Context, modules.RequestContext) (openai.ChatCompletionResponse, error) {

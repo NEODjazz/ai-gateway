@@ -170,11 +170,17 @@ type ResponseRequest struct {
 }
 
 type ResponseTool struct {
-	Type        string `json:"type"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	Parameters  any    `json:"parameters,omitempty"`
-	Strict      *bool  `json:"strict,omitempty"`
+	Type              string            `json:"type"`
+	Name              string            `json:"name,omitempty"`
+	Description       string            `json:"description,omitempty"`
+	Parameters        any               `json:"parameters,omitempty"`
+	Strict            *bool             `json:"strict,omitempty"`
+	ServerLabel       string            `json:"server_label,omitempty"`
+	ServerURL         string            `json:"server_url,omitempty"`
+	ServerDescription string            `json:"server_description,omitempty"`
+	AllowedTools      []string          `json:"allowed_tools,omitempty"`
+	RequireApproval   any               `json:"require_approval,omitempty"`
+	Headers           map[string]string `json:"headers,omitempty"`
 }
 
 type ResponseResponse struct {

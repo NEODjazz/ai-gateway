@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,6 +84,72 @@ func modelAllowed(model string, grants []string) bool {
 		}
 	}
 	return false
+}
+
+func toolAllowed(tool string, grants []string) bool {
+	return modelAllowed(tool, grants)
+}
+
+func chatToolIdentifiers(tools []openai.Tool) ([]string, bool) {
+	identifiers := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Type != "function" || strings.TrimSpace(tool.Function.Name) == "" {
+			return nil, false
+		}
+		identifiers = append(identifiers, tool.Function.Name)
+	}
+	return identifiers, true
+}
+
+func mcpToolIdentifier(tool openai.ResponseTool) (string, bool) {
+	label := strings.TrimSpace(tool.ServerLabel)
+	parsed, err := url.Parse(tool.ServerURL)
+	if label == "" || err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", false
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Host = strings.ToLower(parsed.Host)
+	parsed.Path = strings.TrimSuffix(parsed.Path, "/")
+	parsed.RawPath = strings.TrimSuffix(parsed.RawPath, "/")
+	return "mcp:" + label + "@" + parsed.String(), true
+}
+
+func responseToolIdentifiers(tools []openai.ResponseTool) ([]string, bool) {
+	identifiers := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		var identifier string
+		switch tool.Type {
+		case "function":
+			identifier = tool.Name
+		case "mcp":
+			var valid bool
+			identifier, valid = mcpToolIdentifier(tool)
+			if !valid {
+				return nil, false
+			}
+		default:
+			return nil, false
+		}
+		if strings.TrimSpace(identifier) == "" {
+			return nil, false
+		}
+		identifiers = append(identifiers, identifier)
+	}
+	return identifiers, true
+}
+
+func (h Handler) authorizeTools(w http.ResponseWriter, req modules.RequestContext, identifiers []string, valid bool) bool {
+	if !valid {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid tool definition")
+		return false
+	}
+	for _, identifier := range identifiers {
+		if !toolAllowed(identifier, req.AllowedTools) {
+			writeError(w, http.StatusForbidden, "tool_not_allowed", "credential is not allowed to use tool "+strconv.Quote(identifier))
+			return false
+		}
+	}
+	return true
 }
 
 func filterModels(models []openai.Model, grants []string) []openai.Model {

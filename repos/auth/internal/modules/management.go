@@ -22,6 +22,7 @@ type ManagedVirtualKey struct {
 	TeamID        string     `json:"team_id,omitempty"`
 	Roles         []string   `json:"roles,omitempty"`
 	AllowedModels []string   `json:"allowed_models,omitempty"`
+	AllowedTools  []string   `json:"allowed_tools,omitempty"`
 	RateLimitRPM  int        `json:"rate_limit_rpm,omitempty"`
 	RateLimitTPM  int        `json:"rate_limit_tpm,omitempty"`
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
@@ -100,7 +101,7 @@ func (m AuthModule) newStoredVirtualKey(spec ManagedVirtualKey, rotatedFrom stri
 	if spec.UserID == "" || len(spec.UserID) > 256 || len(spec.TeamID) > 256 {
 		return StoredVirtualKey{}, "", fmt.Errorf("%w: user_id is required", ErrInvalidVirtualKey)
 	}
-	if !validPolicyStrings(spec.Roles) || !validPolicyStrings(spec.AllowedModels) {
+	if !validPolicyStrings(spec.Roles) || !validPolicyStrings(spec.AllowedModels) || !validPolicyStrings(spec.AllowedTools) {
 		return StoredVirtualKey{}, "", fmt.Errorf("%w: invalid roles or model grants", ErrInvalidVirtualKey)
 	}
 	if spec.RateLimitRPM < 0 || spec.RateLimitTPM < 0 {
@@ -122,6 +123,7 @@ func (m AuthModule) newStoredVirtualKey(spec ManagedVirtualKey, rotatedFrom stri
 	return StoredVirtualKey{
 		ID: id, UserID: spec.UserID, TeamID: spec.TeamID,
 		Roles: append([]string(nil), spec.Roles...), AllowedModels: append([]string(nil), spec.AllowedModels...),
+		AllowedTools: append([]string(nil), spec.AllowedTools...),
 		RateLimitRPM: spec.RateLimitRPM, RateLimitTPM: spec.RateLimitTPM,
 		RotatedFromID: rotatedFrom, ExpiresAt: spec.ExpiresAt,
 	}, token, nil

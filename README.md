@@ -207,7 +207,24 @@ Model groups use endpoint-specific `model_aliases`, for example
 `{"fast":"deployment-gpt-5-mini"}`. Endpoints at the same priority can set
 `weight`; routing uses weighted round-robin and preserves the remaining members
 as failover candidates. `capabilities` can restrict an endpoint to `chat`,
-`responses`, `embeddings`, and/or `stream`.
+`responses`, `embeddings`, `mcp`, and/or `stream`.
+
+Virtual keys can restrict tools with `allowed_tools`. Empty grants preserve
+backward-compatible access to all request tools; otherwise exact names and
+trailing-wildcard prefixes are enforced before rate limiting or provider
+routing. Chat function tools use their function name (namespaced names such as
+`mcp.weather.forecast` are supported). Responses MCP connectors use the full
+identity `mcp:<server_label>@<canonical-https-url>`, for example
+`mcp:weather-prod@https://mcp.example.test`. Non-HTTPS URLs and URLs containing
+userinfo, query parameters, or fragments are rejected. Invalid tool definitions
+return 400 and disallowed tools return 403 without reaching DLP, billing, or a
+provider.
+
+Responses MCP passthrough requires both an adapter implementing the MCP contract
+and an endpoint/catalog entry explicitly declaring `mcp`; legacy empty
+capabilities are not an opt-in. Connector URL, connector-level allowed tools,
+approval policy, and scoped headers are forwarded only to the selected
+OpenAI-compatible provider.
 
 Set `ROUTING_STRATEGY=adaptive` (Helm: `gateway.routing.strategy`) to rank
 same-priority endpoints by an EWMA of observed latency and failures. Unknown
@@ -332,7 +349,7 @@ Authorization: Bearer <token>
 
 The authentication service first checks the PostgreSQL virtual-key store when
 `AUTH_POSTGRES_KEYS_ENABLED=true`. Active keys can carry team, role, model, RPM,
-and TPM policy; expired or revoked keys do not authorize. The database contains
+TPM, and tool policy; expired or revoked keys do not authorize. The database contains
 only an HMAC-SHA256 token lookup value and an opaque key ID. Linked key rotation
 creates a replacement and revokes the previous key in one transaction.
 
@@ -358,6 +375,7 @@ Example create policy:
   "team_id": "team-a",
   "roles": ["developer"],
   "allowed_models": ["gpt-*"],
+  "allowed_tools": ["mcp.weather.*", "mcp:weather-prod@https://mcp.example.test"],
   "rate_limit_rpm": 60,
   "rate_limit_tpm": 100000,
   "expires_at": "2027-01-01T00:00:00Z"
@@ -527,10 +545,9 @@ a versioned capability/pricing catalog, OpenTelemetry observability, an
 embeddings API with security and billing parity, and adaptive routing with
 tenant-scoped Responses affinity, plus an admin-RBAC virtual-key management API.
 It also has an opt-in, credential-scoped semantic cache for constrained text-only
-chat requests. The remaining delivery sequence is:
+chat requests and credential-level function/MCP tool ACLs. The remaining delivery sequence is:
 
-1. Add scoped MCP/tool ACL and multimodal support as separate security-reviewed
-   increments.
+1. Add multimodal support as a separate security-reviewed increment.
 
 ## License
 

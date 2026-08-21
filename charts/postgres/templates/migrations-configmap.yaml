@@ -213,3 +213,6 @@ data:
 
     CREATE INDEX IF NOT EXISTS idx_auth_virtual_keys_user
         ON auth_virtual_keys(user_id, created_at DESC);
+  004_allowed_tools.sql: |
+    ALTER TABLE auth_virtual_keys
+        ADD COLUMN IF NOT EXISTS allowed_tools TEXT[] NOT NULL DEFAULT '{}';

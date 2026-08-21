@@ -21,6 +21,7 @@ type ManagedVirtualKey struct {
 	TeamID        string     `json:"team_id,omitempty"`
 	Roles         []string   `json:"roles,omitempty"`
 	AllowedModels []string   `json:"allowed_models,omitempty"`
+	AllowedTools  []string   `json:"allowed_tools,omitempty"`
 	RateLimitRPM  int        `json:"rate_limit_rpm,omitempty"`
 	RateLimitTPM  int        `json:"rate_limit_tpm,omitempty"`
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`

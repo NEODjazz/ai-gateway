@@ -43,6 +43,10 @@ type EmbeddingClient interface {
 	Embeddings(ctx context.Context, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error)
 }
 
+type MCPClient interface {
+	SupportsMCP() bool
+}
+
 type ChatCompletionStreamWriter func(payload string) error
 type ResponseStreamWriter func(event string, payload string) error
 
@@ -822,6 +826,12 @@ func (r Router) candidates(request openai.ChatCompletionRequest, capabilities ..
 		if !r.supportsCapabilities(endpoint, request.Model, capabilities...) {
 			continue
 		}
+		if hasCapability(capabilities, "mcp") {
+			mcpClient, ok := endpoint.Provider.(MCPClient)
+			if !ok || !mcpClient.SupportsMCP() {
+				continue
+			}
+		}
 		if !r.supportsOutputLimit(endpoint, request.Model, request.MaxTokens) {
 			continue
 		}
@@ -899,10 +909,25 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 	if len(request.Tools) > 0 {
 		required = append(required, "tools")
 	}
+	for _, tool := range request.Tools {
+		if tool.Type == "mcp" {
+			required = append(required, "mcp")
+			break
+		}
+	}
 	if request.Text != nil {
 		required = append(required, "structured_output")
 	}
 	return required
+}
+
+func hasCapability(capabilities []string, expected string) bool {
+	for _, capability := range capabilities {
+		if capability == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func (e Endpoint) supportsModel(model string) bool {
@@ -946,9 +971,15 @@ func (r Router) supportsCapabilities(endpoint Endpoint, requestedModel string, r
 		if r.catalog.DenyUnknownModels() {
 			return false
 		}
+		if hasCapability(required, "mcp") && !hasCapability(endpoint.Capabilities, "mcp") {
+			return false
+		}
 		return endpoint.supportsCapabilities(required...)
 	}
 	if entry.Capabilities == nil {
+		if hasCapability(required, "mcp") && !hasCapability(endpoint.Capabilities, "mcp") {
+			return false
+		}
 		return endpoint.supportsCapabilities(required...)
 	}
 	available := make(map[string]bool, len(entry.Capabilities))

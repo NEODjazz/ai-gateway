@@ -189,7 +189,10 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	provider := NewOpenAICompatible(server.URL, "", true)
 	response, err := provider.StreamResponses(context.Background(), openai.ResponseRequest{
 		Model: "test-model", Input: "hello", Stream: true, PreviousResponse: "resp-previous",
-		Tools:      []openai.ResponseTool{{Type: "function", Name: "weather", Parameters: map[string]any{"type": "object"}}},
+		Tools: []openai.ResponseTool{
+			{Type: "function", Name: "weather", Parameters: map[string]any{"type": "object"}},
+			{Type: "mcp", ServerLabel: "weather-prod", ServerURL: "https://mcp.example.test", AllowedTools: []string{"forecast"}, RequireApproval: "never", Headers: map[string]string{"X-MCP-Key": "scoped"}},
+		},
 		ToolChoice: "auto", Text: map[string]any{"format": map[string]any{"type": "json_object"}},
 	}, func(event string, payload string) error {
 		events = append(events, event)
@@ -202,7 +205,7 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	if !upstreamRequest.Stream {
 		t.Fatal("expected responses upstream stream to be enabled")
 	}
-	if upstreamRequest.PreviousResponse != "resp-previous" || len(upstreamRequest.Tools) != 1 || upstreamRequest.Tools[0].Name != "weather" || upstreamRequest.Text == nil {
+	if upstreamRequest.PreviousResponse != "resp-previous" || len(upstreamRequest.Tools) != 2 || upstreamRequest.Tools[0].Name != "weather" || upstreamRequest.Tools[1].ServerLabel != "weather-prod" || upstreamRequest.Tools[1].Headers["X-MCP-Key"] != "scoped" || upstreamRequest.Text == nil {
 		t.Fatalf("responses tools/state/format were not forwarded: %+v", upstreamRequest)
 	}
 	if len(payloads) != 4 {

@@ -34,6 +34,7 @@ auth:
   #   team_id: team-1
   #   roles: [developer]
   #   allowed_models: ["gpt-5.*"]
+  #   allowed_tools: ["mcp.weather.*", "mcp:weather-prod@https://mcp.example.test"]
   #   rate_limit_rpm: 60
   #   rate_limit_tpm: 100000
 

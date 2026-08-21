@@ -22,12 +22,14 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", "003_virtual_keys.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, string(migration)); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql"} {
+		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, string(migration)); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	store, err := NewPostgresVirtualKeyStore(dsn)
@@ -45,11 +47,11 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	})
 
 	oldToken := "old-token-" + suffix
-	old := StoredVirtualKey{ID: oldID, UserID: "user-1", TeamID: "team-1", Roles: []string{"developer"}, AllowedModels: []string{"gpt-*"}, RateLimitRPM: 10}
+	old := StoredVirtualKey{ID: oldID, UserID: "user-1", TeamID: "team-1", Roles: []string{"developer"}, AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp.weather.*"}, RateLimitRPM: 10}
 	if err := store.Create(ctx, old, credentialLookupHash(oldToken, "pepper")); err != nil {
 		t.Fatal(err)
 	}
-	if found, ok, err := store.Lookup(ctx, credentialLookupHash(oldToken, "pepper")); err != nil || !ok || found.ID != oldID {
+	if found, ok, err := store.Lookup(ctx, credentialLookupHash(oldToken, "pepper")); err != nil || !ok || found.ID != oldID || len(found.AllowedTools) != 1 {
 		t.Fatalf("active key lookup failed: key=%+v ok=%v err=%v", found, ok, err)
 	}
 

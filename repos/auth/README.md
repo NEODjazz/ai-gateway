@@ -26,7 +26,8 @@ Set `AUTH_POSTGRES_KEYS_ENABLED=true`, `AUTH_POSTGRES_DSN`, and a separate
 Tokens are looked up by a full HMAC-SHA256 value; the database stores no bearer
 plaintext, and the authorization response exposes the opaque key ID as
 `credential_id`. Migration `003_virtual_keys.sql` adds expiration, revocation,
-last-used tracking, and linked rotation families.
+last-used tracking, and linked rotation families; `004_allowed_tools.sql` adds
+credential-level exact/wildcard tool grants.
 
 `AUTH_STATIC_KEY_FALLBACK_ENABLED` controls migration fallback to
 `AUTH_VIRTUAL_KEYS_JSON`. `AUTH_DEMO_KEYS_ENABLED` controls the two built-in demo
