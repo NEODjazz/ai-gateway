@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -19,12 +20,22 @@ func main() {
 		env("DLP_ICAP_SERVICE", env("ICAP_SERVICE", "/dlp")),
 	)
 	client.Timeout = envDuration("DLP_ICAP_TIMEOUT", envDuration("ICAP_TIMEOUT", 5*time.Second))
+	addr := env("HTTP_ADDR", ":8084")
+	log.Printf("dlp listening on %s", addr)
+	log.Fatal(http.ListenAndServe(addr, newHandler(client)))
+}
 
-	http.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+type contentScanner interface {
+	Scan(ctx context.Context, moduleName string, payload []byte) (modules.ICAPScanResult, error)
+}
+
+func newHandler(client contentScanner) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	http.HandleFunc("/scan", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/scan", func(w http.ResponseWriter, r *http.Request) {
 		var req scanRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -46,10 +57,7 @@ func main() {
 		}
 		_ = json.NewEncoder(w).Encode(scanResponse{Allowed: true})
 	})
-
-	addr := env("HTTP_ADDR", ":8084")
-	log.Printf("dlp listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	return mux
 }
 
 type scanRequest struct {
