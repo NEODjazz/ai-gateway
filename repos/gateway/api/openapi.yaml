@@ -138,6 +138,8 @@ paths:
           $ref: '#/components/responses/RequestTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
+        '451':
+          $ref: '#/components/responses/ContentRejected'
         '502':
           $ref: '#/components/responses/ProviderFailed'
   /v1/responses:
@@ -189,6 +191,8 @@ paths:
           $ref: '#/components/responses/RequestTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
+        '451':
+          $ref: '#/components/responses/ContentRejected'
         '502':
           $ref: '#/components/responses/ProviderFailed'
   /v1/embeddings:
@@ -226,6 +230,8 @@ paths:
           $ref: '#/components/responses/RequestTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
+        '451':
+          $ref: '#/components/responses/ContentRejected'
         '502':
           $ref: '#/components/responses/ProviderFailed'
   /admin/v1/keys:
@@ -374,6 +380,15 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    ContentRejected:
+      description: A required DLP, antivirus, or content-policy guardrail rejected the request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: {code: content_rejected, message: content rejected}
+            ts: '2026-08-21T12:00:00Z'
     ProviderFailed:
       description: Provider, guardrail, billing, or post-processing failure
       content:

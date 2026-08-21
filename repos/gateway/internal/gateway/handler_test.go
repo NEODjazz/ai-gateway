@@ -419,6 +419,18 @@ func TestProviderBudgetFailureReturns429WithoutDetails(t *testing.T) {
 	}
 }
 
+func TestProviderContentRejectionReturns451WithoutDetails(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeProviderFailure(recorder, errors.Join(errors.New("dlp policy name=secret-policy"), modules.ErrContentRejected))
+	if recorder.Code != http.StatusUnavailableForLegalReasons {
+		t.Fatalf("expected 451, got %d", recorder.Code)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"code":"content_rejected"`) || strings.Contains(body, "secret-policy") {
+		t.Fatalf("unexpected content rejection response: %s", body)
+	}
+}
+
 func TestProviderBillingConflictReturns409(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	writeProviderFailure(recorder, modules.ErrBillingConflict)
