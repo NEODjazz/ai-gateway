@@ -42,10 +42,13 @@ func Routes(handler Handler) http.Handler {
 	for _, route := range gatewayRoutes {
 		mux.Handle(route.Method+" "+route.Path, route.handler(handler))
 	}
+	if handler.apiDocs.enabled {
+		registerAPIDocs(mux, handler.apiDocs)
+	}
 	observed := observabilityMiddleware(handler.metrics, mux)
 	return otelhttp.NewHandler(observed, "ai-gateway.http",
 		otelhttp.WithFilter(func(r *http.Request) bool {
-			return r.URL.Path != "/metrics" && r.URL.Path != "/healthz" && r.URL.Path != "/readyz"
+			return !isInfrastructurePath(r.URL.Path)
 		}),
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			return metricMethod(r.Method) + " " + metricPath(r.URL.Path)

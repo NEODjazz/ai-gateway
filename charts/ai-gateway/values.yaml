@@ -15,6 +15,11 @@ devMode:
 gateway:
   replicaCount: 1
   port: 8080
+  apiDocs:
+    # Keep disabled on externally reachable production gateways unless needed.
+    enabled: false
+    # Enables browser-originated API calls from Swagger UI.
+    tryItOutEnabled: false
   provider:
     default: azure-open-ai
     testModel: gpt-5.3

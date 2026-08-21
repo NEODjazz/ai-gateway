@@ -122,6 +122,22 @@ route to have exactly one matching OpenAPI operation. Internal service endpoints
 such as `/authorize`, `/usage`, `/scan`, and `/anonymize` are intentionally not
 published.
 
+The gateway can serve the same contract through a self-contained Swagger UI:
+
+```bash
+API_DOCS_ENABLED=true go run ./cmd/gateway
+# UI:   http://localhost:8080/docs/
+# YAML: http://localhost:8080/openapi.yaml
+```
+
+Swagger UI assets are embedded in the gateway binary and never loaded from a
+CDN. Documentation is disabled by default, including in Helm. When enabled it
+is read-only by default: credentials are not persisted, URL query parameters
+cannot override the UI configuration, and Swagger's `Try it out` is disabled.
+Set `API_DOCS_TRY_IT_OUT_ENABLED=true` (Helm:
+`gateway.apiDocs.tryItOutEnabled`) only in a trusted environment where
+browser-originated calls to the gateway are intended.
+
 ### Multiple providers and failover
 
 Provider endpoints are configured through the `gateway.providers` list in the Helm values. A provider type can have multiple connections with different keys and priorities:

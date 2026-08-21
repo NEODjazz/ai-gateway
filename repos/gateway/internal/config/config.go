@@ -22,7 +22,13 @@ type Config struct {
 	Catalog    modelcatalog.Catalog
 	Telemetry  TelemetryConfig
 	Management ManagementConfig
+	APIDocs    APIDocsConfig
 	InitErr    error
+}
+
+type APIDocsConfig struct {
+	Enabled         bool
+	TryItOutEnabled bool
 }
 
 type ManagementConfig struct {
@@ -163,6 +169,10 @@ func Load() Config {
 		Management: ManagementConfig{
 			AuthURL: env("MANAGEMENT_AUTH_URL", env("AUTH_URL", "")),
 			Secret:  os.Getenv("MANAGEMENT_SHARED_SECRET"),
+		},
+		APIDocs: APIDocsConfig{
+			Enabled:         envBool("API_DOCS_ENABLED", false),
+			TryItOutEnabled: envBool("API_DOCS_TRY_IT_OUT_ENABLED", false),
 		},
 		InitErr: errors.Join(catalogErr, semanticErr),
 		Modules: ModuleConfig{

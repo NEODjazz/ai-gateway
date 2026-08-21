@@ -23,6 +23,14 @@ type Handler struct {
 	metrics    *Metrics
 	ready      func(context.Context) error
 	management ManagementClient
+	apiDocs    apiDocsConfig
+}
+
+// WithAPIDocs enables the embedded API documentation. Interactive requests are
+// controlled separately so operators can expose read-only documentation.
+func (h Handler) WithAPIDocs(tryItOutEnabled bool) Handler {
+	h.apiDocs = apiDocsConfig{enabled: true, tryItOutEnabled: tryItOutEnabled}
+	return h
 }
 
 func NewHandler(pipeline modules.Pipeline, llmProvider provider.Provider) Handler {

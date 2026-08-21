@@ -120,3 +120,14 @@ func TestLoadTelemetryConfiguration(t *testing.T) {
 		t.Fatalf("unexpected telemetry config: %+v", cfg.Telemetry)
 	}
 }
+
+func TestLoadAPIDocsConfiguration(t *testing.T) {
+	if cfg := Load(); cfg.APIDocs.Enabled || cfg.APIDocs.TryItOutEnabled {
+		t.Fatalf("API docs must be disabled by default: %+v", cfg.APIDocs)
+	}
+	t.Setenv("API_DOCS_ENABLED", "true")
+	t.Setenv("API_DOCS_TRY_IT_OUT_ENABLED", "true")
+	if cfg := Load(); !cfg.APIDocs.Enabled || !cfg.APIDocs.TryItOutEnabled {
+		t.Fatalf("API docs environment was not loaded: %+v", cfg.APIDocs)
+	}
+}
