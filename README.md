@@ -138,6 +138,13 @@ Set `API_DOCS_TRY_IT_OUT_ENABLED=true` (Helm:
 `gateway.apiDocs.tryItOutEnabled`) only in a trusted environment where
 browser-originated calls to the gateway are intended.
 
+CI validates the contract independently with `oasdiff`. Pull requests are also
+compared with the exact base commit and are rejected on definite or potential
+breaking changes (`ERR` and `WARN`). The comparison remains inside the GitHub
+runner; external references and hosted review uploads are disabled. An
+intentional breaking change therefore requires a separately reviewed adjustment
+to the compatibility policy rather than silently weakening the gate.
+
 ### Multiple providers and failover
 
 Provider endpoints are configured through the `gateway.providers` list in the Helm values. A provider type can have multiple connections with different keys and priorities:

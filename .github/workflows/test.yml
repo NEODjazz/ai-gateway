@@ -16,6 +16,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  openapi:
+    name: OpenAPI contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate OpenAPI specification
+        uses: oasdiff/oasdiff-action/validate@v0.1.10
+        with:
+          spec: repos/gateway/api/openapi.yaml
+          fail-on: WARN
+          allow-external-refs: false
+
+      - name: Check whether the base revision has an OpenAPI specification
+        if: github.event_name == 'pull_request'
+        id: openapi_base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          if git cat-file -e "${BASE_SHA}:repos/gateway/api/openapi.yaml"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reject breaking OpenAPI changes
+        if: github.event_name == 'pull_request' && steps.openapi_base.outputs.exists == 'true'
+        uses: oasdiff/oasdiff-action/breaking@v0.1.10
+        with:
+          base: ${{ github.event.pull_request.base.sha }}:repos/gateway/api/openapi.yaml
+          revision: repos/gateway/api/openapi.yaml
+          fail-on: WARN
+          allow-external-refs: false
+          review: false
+
   go:
     name: Go / ${{ matrix.service }}
     runs-on: ubuntu-latest
