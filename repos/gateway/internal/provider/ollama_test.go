@@ -63,6 +63,31 @@ func TestOllamaChatCompletions(t *testing.T) {
 	}
 }
 
+func TestOllamaEmbeddingsMapsNativeContract(t *testing.T) {
+	var upstream ollamaEmbeddingRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/embed" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(ollamaEmbeddingResponse{Model: "nomic-embed", Embeddings: [][]float64{{0.25, 0.75}, {0.5, 0.5}}, PromptEvalCount: 4})
+	}))
+	defer server.Close()
+	dimensions := 2
+	response, err := NewOllama(server.URL, false).Embeddings(context.Background(), openai.EmbeddingRequest{Model: "nomic-embed", Input: []any{"one", "two"}, Dimensions: &dimensions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upstream.Dimensions == nil || *upstream.Dimensions != 2 {
+		t.Fatalf("dimensions not forwarded: %+v", upstream)
+	}
+	if len(response.Data) != 2 || response.Data[1].Index != 1 || response.Usage.TotalTokens != 4 {
+		t.Fatalf("unexpected mapped response: %+v", response)
+	}
+}
+
 func TestOllamaStreamsChatCompletions(t *testing.T) {
 	var upstreamRequest ollamaChatRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

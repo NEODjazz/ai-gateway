@@ -45,6 +45,14 @@ type openAICompatibleResponseRequest struct {
 	TopP              *float64              `json:"top_p,omitempty"`
 }
 
+type openAICompatibleEmbeddingRequest struct {
+	Model          string `json:"model"`
+	Input          any    `json:"input"`
+	EncodingFormat string `json:"encoding_format,omitempty"`
+	Dimensions     *int   `json:"dimensions,omitempty"`
+	User           string `json:"user,omitempty"`
+}
+
 type OpenAICompatible struct {
 	baseURL        string
 	apiKey         string
@@ -99,6 +107,37 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	var response openai.ChatCompletionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return openai.ChatCompletionResponse{}, err
+	}
+	return response, nil
+}
+
+func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
+	body, err := json.Marshal(openAICompatibleEmbeddingRequest{
+		Model: request.Model, Input: request.Input, EncodingFormat: request.EncodingFormat,
+		Dimensions: request.Dimensions, User: request.User,
+	})
+	if err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(p.baseURL, "embeddings"), bytes.NewReader(body))
+	if err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return openai.EmbeddingResponse{}, statusError("openai-compatible", resp.StatusCode)
+	}
+	var response openai.EmbeddingResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return openai.EmbeddingResponse{}, err
 	}
 	return response, nil
 }

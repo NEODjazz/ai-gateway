@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,35 @@ import (
 )
 
 type Demo struct{}
+
+func (Demo) Embeddings(_ context.Context, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
+	inputs, ok := openai.EmbeddingInputStrings(request.Input)
+	if !ok {
+		return openai.EmbeddingResponse{}, fmt.Errorf("invalid embedding input")
+	}
+	dimensions := 8
+	if request.Dimensions != nil {
+		dimensions = *request.Dimensions
+	}
+	if dimensions < 1 || dimensions > 3072 {
+		return openai.EmbeddingResponse{}, fmt.Errorf("dimensions must be between 1 and 3072")
+	}
+	data := make([]openai.Embedding, len(inputs))
+	promptTokens := 0
+	for index, input := range inputs {
+		promptTokens += len(strings.Fields(input))
+		vector := make([]float64, dimensions)
+		for dimension := range vector {
+			digest := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", input, dimension)))
+			vector[dimension] = float64(int(digest[0])-128) / 128
+		}
+		data[index] = openai.Embedding{Object: "embedding", Embedding: vector, Index: index}
+	}
+	return openai.EmbeddingResponse{
+		Object: "list", Data: data, Model: request.Model,
+		Usage: openai.Usage{PromptTokens: promptTokens, TotalTokens: promptTokens},
+	}, nil
+}
 
 func (Demo) ChatCompletions(_ context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	content := "Gateway accepted request for model " + request.Model

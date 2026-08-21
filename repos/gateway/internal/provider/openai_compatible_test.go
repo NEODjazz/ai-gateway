@@ -19,6 +19,34 @@ func TestProviderURLDoesNotDuplicateV1(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleEmbeddings(t *testing.T) {
+	var upstream openAICompatibleEmbeddingRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/embeddings" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer provider-key" {
+			t.Fatalf("missing provider authorization")
+		}
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(openai.EmbeddingResponse{Object: "list", Model: "embed-model", Data: []openai.Embedding{{Object: "embedding", Embedding: []float64{0.1, 0.2}, Index: 0}}, Usage: openai.Usage{PromptTokens: 2, TotalTokens: 2}})
+	}))
+	defer server.Close()
+	dimensions := 2
+	response, err := NewOpenAICompatible(server.URL, "provider-key", false).Embeddings(context.Background(), openai.EmbeddingRequest{Model: "embed-model", Input: []any{"hello"}, EncodingFormat: "float", Dimensions: &dimensions, User: "user-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upstream.Model != "embed-model" || upstream.Dimensions == nil || *upstream.Dimensions != 2 || upstream.User != "user-1" {
+		t.Fatalf("embedding request was not forwarded: %+v", upstream)
+	}
+	if len(response.Data) != 1 || len(response.Data[0].Embedding) != 2 || response.Usage.TotalTokens != 2 {
+		t.Fatalf("unexpected embedding response: %+v", response)
+	}
+}
+
 func TestProviderURLAddsV1ForRootBaseURL(t *testing.T) {
 	got := providerURL("https://example.test", "responses")
 	want := "https://example.test/v1/responses"
@@ -161,7 +189,7 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	provider := NewOpenAICompatible(server.URL, "", true)
 	response, err := provider.StreamResponses(context.Background(), openai.ResponseRequest{
 		Model: "test-model", Input: "hello", Stream: true, PreviousResponse: "resp-previous",
-		Tools: []openai.ResponseTool{{Type: "function", Name: "weather", Parameters: map[string]any{"type": "object"}}},
+		Tools:      []openai.ResponseTool{{Type: "function", Name: "weather", Parameters: map[string]any{"type": "object"}}},
 		ToolChoice: "auto", Text: map[string]any{"format": map[string]any{"type": "json_object"}},
 	}, func(event string, payload string) error {
 		events = append(events, event)

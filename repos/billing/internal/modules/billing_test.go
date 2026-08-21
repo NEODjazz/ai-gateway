@@ -170,6 +170,24 @@ func TestBillingCollectsResponsesEvent(t *testing.T) {
 	}
 }
 
+func TestBillingPreservesExplicitEmbeddingsAPIType(t *testing.T) {
+	module := NewBillingModuleWithPricing(true, PricingConfig{})
+	req := RequestContext{
+		APIType: "embeddings", BillingPhase: "commit", PromptTokensEstimated: 3,
+		Request: openai.ChatCompletionRequest{Provider: "ollama", Model: "nomic-embed"},
+		Usage:   &openai.Usage{PromptTokens: 3, TotalTokens: 3},
+	}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.BillingEvent == nil || req.BillingEvent.APIType != "embeddings" {
+		t.Fatalf("unexpected billing event: %+v", req.BillingEvent)
+	}
+	if req.BillingEvent.InputTokens != 3 || req.BillingEvent.OutputTokens != 0 || req.BillingEvent.TotalTokens != 3 {
+		t.Fatalf("unexpected embedding token accounting: %+v", req.BillingEvent)
+	}
+}
+
 func TestBillingEstimatesMultipartMessageContent(t *testing.T) {
 	module := NewBillingModuleWithPricing(true, PricingConfig{})
 	req := RequestContext{

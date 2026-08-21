@@ -36,6 +36,14 @@ func TestProviderRemoteModuleSkipsDisabledProvider(t *testing.T) {
 	}
 }
 
+func TestScanPayloadIncludesEmbeddingText(t *testing.T) {
+	req := RequestContext{EmbeddingRequest: &openai.EmbeddingRequest{Model: "embed", Input: []any{"first secret", "second secret"}}}
+	payload := scanPayload(&req)
+	if !strings.Contains(payload, "embedding_input: first secret\nsecond secret") {
+		t.Fatalf("embedding text missing from scan projection: %q", payload)
+	}
+}
+
 func TestScanPayloadIncludesToolArgumentsAndResponseFunctionOutput(t *testing.T) {
 	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{
 		Role: "assistant", ToolCalls: []openai.ToolCall{{Function: openai.FunctionCall{Arguments: `{"email":"user@example.com"}`}}},

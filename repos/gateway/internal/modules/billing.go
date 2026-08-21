@@ -41,10 +41,17 @@ func (m BillingModule) Handle(_ context.Context, req *RequestContext) error {
 		promptTokens += estimateTokens(textFromAny(req.ResponseRequest.Input))
 		promptTokens += estimateTokens(req.ResponseRequest.Instructions)
 	}
+	if req.EmbeddingRequest != nil {
+		promptTokens += estimateTokens(openai.EmbeddingInputText(req.EmbeddingRequest.Input))
+	}
 
 	req.Usage = &openai.Usage{
 		PromptTokens: promptTokens,
 		TotalTokens:  promptTokens,
+	}
+	if req.EmbeddingResponse != nil {
+		usage := req.EmbeddingResponse.Usage
+		req.Usage = &usage
 	}
 
 	if req.Metadata == nil {

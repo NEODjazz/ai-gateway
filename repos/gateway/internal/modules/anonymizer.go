@@ -79,6 +79,9 @@ func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 		req.ResponseRequest.Input = m.anonymizeAny(req, req.ResponseRequest.Input)
 		req.ResponseRequest.Instructions = m.anonymize(req, req.ResponseRequest.Instructions)
 	}
+	if req.EmbeddingRequest != nil {
+		req.EmbeddingRequest.Input = m.anonymizeAny(req, req.EmbeddingRequest.Input)
+	}
 	return nil
 }
 

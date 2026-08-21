@@ -222,11 +222,16 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens int, outputTokens int, totalTokens int) (BillingEvent, error) {
 	model := req.Request.Model
 	providerName := req.Request.Provider
-	apiType := "chat_completions"
+	apiType := req.APIType
+	if apiType == "" {
+		apiType = "chat_completions"
+	}
 	if req.ResponseRequest != nil {
 		model = req.ResponseRequest.Model
 		providerName = req.ResponseRequest.Provider
-		apiType = "responses"
+		if req.APIType == "" {
+			apiType = "responses"
+		}
 	}
 	if req.Response != nil && req.Response.Model != "" {
 		model = req.Response.Model

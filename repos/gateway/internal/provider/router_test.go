@@ -20,6 +20,52 @@ func (failingProvider) ChatCompletions(context.Context, openai.ChatCompletionReq
 	return openai.ChatCompletionResponse{}, errors.New("provider is down")
 }
 
+type embeddingTestClient struct {
+	err    error
+	calls  int
+	inputs []string
+}
+
+func (p *embeddingTestClient) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	return openai.ChatCompletionResponse{}, nil
+}
+func (p *embeddingTestClient) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {
+	return openai.ResponseResponse{}, nil
+}
+func (p *embeddingTestClient) Embeddings(_ context.Context, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
+	p.calls++
+	p.inputs, _ = openai.EmbeddingInputStrings(request.Input)
+	if p.err != nil {
+		return openai.EmbeddingResponse{}, p.err
+	}
+	return openai.EmbeddingResponse{Object: "list", Model: request.Model, Data: []openai.Embedding{{Object: "embedding", Embedding: []float64{1}, Index: 0}}, Usage: openai.Usage{PromptTokens: 1, TotalTokens: 1}}, nil
+}
+
+func TestRouterEmbeddingsFailoverAndCapabilityFilter(t *testing.T) {
+	unsupported := &embeddingTestClient{}
+	failing := &embeddingTestClient{err: &Error{Class: FailureUnavailable, Err: errors.New("temporary")}}
+	success := &embeddingTestClient{}
+	router := Router{
+		endpoints: []Endpoint{
+			{Name: "chat-only", Type: "demo", Priority: 0, Capabilities: []string{"chat"}, Provider: unsupported},
+			{Name: "embed-a", Type: "demo", Priority: 1, Capabilities: []string{"embeddings"}, Provider: failing},
+			{Name: "embed-b", Type: "demo", Priority: 2, Capabilities: []string{"embeddings"}, Provider: success},
+		},
+		modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	request := openai.EmbeddingRequest{Model: "embed-model", Input: "hello"}
+	response, err := router.Embeddings(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, EmbeddingRequest: &request})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unsupported.calls != 0 || failing.calls != 1 || success.calls != 1 {
+		t.Fatalf("unexpected routing calls: unsupported=%d failing=%d success=%d", unsupported.calls, failing.calls, success.calls)
+	}
+	if response.Model != "embed-model" || len(response.Data) != 1 {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
 func (failingProvider) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {
 	return openai.ResponseResponse{}, errors.New("provider is down")
 }

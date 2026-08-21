@@ -126,6 +126,14 @@ func estimateResponseTokens(request openai.ResponseRequest) int {
 	return tokens
 }
 
+func estimateEmbeddingTokens(request openai.EmbeddingRequest) int {
+	tokens := (len([]rune(openai.EmbeddingInputText(request.Input))) + 3) / 4
+	if tokens < 1 {
+		return 1
+	}
+	return tokens
+}
+
 func (h Handler) authorizeAccess(w http.ResponseWriter, ctx context.Context, req modules.RequestContext, model string, tokens int) bool {
 	if !modelAllowed(model, req.AllowedModels) {
 		writeError(w, 403, "model_not_allowed", "credential is not allowed to use model "+strconv.Quote(model))

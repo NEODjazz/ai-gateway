@@ -259,7 +259,7 @@ func observabilityMiddleware(metrics *Metrics, next http.Handler) http.Handler {
 
 func metricPath(path string) string {
 	switch path {
-	case "/healthz", "/readyz", "/metrics", "/v1/models", "/v1/chat/completions", "/v1/responses":
+	case "/healthz", "/readyz", "/metrics", "/v1/models", "/v1/chat/completions", "/v1/responses", "/v1/embeddings":
 		return path
 	default:
 		return "unmatched"

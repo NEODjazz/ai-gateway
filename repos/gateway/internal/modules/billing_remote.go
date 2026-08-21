@@ -111,6 +111,13 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.Model = req.ResponseRequest.Model
 		request.APIType = "responses"
 	}
+	if req.EmbeddingRequest != nil {
+		request.Provider = req.EmbeddingRequest.Provider
+		request.Model = req.EmbeddingRequest.Model
+		request.APIType = "embeddings"
+		request.OutputTokens = 0
+		request.TotalTokens = request.InputTokens
+	}
 	if req.Response != nil {
 		request.Phase = "commit"
 		request.InputTokens = req.Response.Usage.PromptTokens
@@ -127,6 +134,15 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.TotalTokens = req.ResponsesResponse.Usage.TotalTokens
 		if req.ResponsesResponse.Model != "" {
 			request.Model = req.ResponsesResponse.Model
+		}
+	}
+	if req.EmbeddingResponse != nil {
+		request.Phase = "commit"
+		request.InputTokens = req.EmbeddingResponse.Usage.PromptTokens
+		request.OutputTokens = 0
+		request.TotalTokens = req.EmbeddingResponse.Usage.TotalTokens
+		if req.EmbeddingResponse.Model != "" {
+			request.Model = req.EmbeddingResponse.Model
 		}
 	}
 	if request.TotalTokens == 0 && request.CacheStatus != "hit" {
@@ -159,6 +175,9 @@ func estimateRequestTokens(req *RequestContext) int {
 	if req.ResponseRequest != nil {
 		total += len(strings.Fields(openai.ContentText(req.ResponseRequest.Input)))
 		total += len(strings.Fields(req.ResponseRequest.Instructions))
+	}
+	if req.EmbeddingRequest != nil {
+		total += len(strings.Fields(openai.EmbeddingInputText(req.EmbeddingRequest.Input)))
 	}
 	return total
 }

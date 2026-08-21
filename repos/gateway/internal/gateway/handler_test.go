@@ -27,6 +27,15 @@ type accessPolicyModule struct {
 	tpm    int
 }
 
+type countingAccessModule struct{ calls int }
+
+func (m *countingAccessModule) Name() string   { return "counting-access" }
+func (m *countingAccessModule) Required() bool { return true }
+func (m *countingAccessModule) Handle(context.Context, *modules.RequestContext) error {
+	m.calls++
+	return nil
+}
+
 func (m accessPolicyModule) Name() string   { return "access-policy" }
 func (m accessPolicyModule) Required() bool { return true }
 func (m accessPolicyModule) Handle(_ context.Context, req *modules.RequestContext) error {
@@ -65,6 +74,15 @@ type chatProvider struct {
 	request modules.RequestContext
 }
 
+func (p *chatProvider) Embeddings(_ context.Context, req modules.RequestContext) (openai.EmbeddingResponse, error) {
+	p.request = req
+	return openai.EmbeddingResponse{
+		Object: "list", Model: req.EmbeddingRequest.Model,
+		Data:  []openai.Embedding{{Object: "embedding", Embedding: []float64{0.1, 0.2}, Index: 0}},
+		Usage: openai.Usage{PromptTokens: 2, TotalTokens: 2},
+	}, nil
+}
+
 func (p *chatProvider) ChatCompletions(_ context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
 	p.request = req
 	return openai.ChatCompletionResponse{
@@ -95,6 +113,40 @@ func (*chatProvider) StreamResponses(context.Context, modules.RequestContext, pr
 
 func (*chatProvider) Models() []openai.Model {
 	return nil
+}
+
+func TestEmbeddingsUsesAuthenticatedProviderPipeline(t *testing.T) {
+	llm := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), llm)
+	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embed-model","input":["hello","world"]}`))
+	request.Header.Set("Authorization", "Bearer test-key")
+	response := httptest.NewRecorder()
+
+	handler.Embeddings(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String())
+	}
+	if llm.request.APIKey != "" || llm.request.EmbeddingRequest == nil {
+		t.Fatalf("unsafe or missing provider context: %+v", llm.request)
+	}
+	if input := openai.EmbeddingInputText(llm.request.EmbeddingRequest.Input); input != "hello\nworld" {
+		t.Fatalf("unexpected embedding input: %q", input)
+	}
+}
+
+func TestEmbeddingsRejectsTokenArraysBeforePipeline(t *testing.T) {
+	auth := &countingAccessModule{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{auth}), &chatProvider{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embed-model","input":[1,2,3]}`))
+	response := httptest.NewRecorder()
+
+	handler.Embeddings(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String())
+	}
+	if auth.calls != 0 {
+		t.Fatalf("pipeline ran for unsupported token input: %d", auth.calls)
+	}
 }
 
 type streamingChatProvider struct {

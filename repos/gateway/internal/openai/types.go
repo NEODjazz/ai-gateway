@@ -80,6 +80,78 @@ type Usage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
+type EmbeddingRequest struct {
+	Provider       string `json:"provider,omitempty"`
+	Model          string `json:"model"`
+	Input          any    `json:"input"`
+	EncodingFormat string `json:"encoding_format,omitempty"`
+	Dimensions     *int   `json:"dimensions,omitempty"`
+	User           string `json:"user,omitempty"`
+}
+
+type EmbeddingResponse struct {
+	Object string      `json:"object"`
+	Data   []Embedding `json:"data"`
+	Model  string      `json:"model"`
+	Usage  Usage       `json:"usage"`
+}
+
+type Embedding struct {
+	Object    string    `json:"object"`
+	Embedding []float64 `json:"embedding"`
+	Index     int       `json:"index"`
+}
+
+func EmbeddingInputStrings(value any) ([]string, bool) {
+	switch typed := value.(type) {
+	case string:
+		if typed == "" {
+			return nil, false
+		}
+		return []string{typed}, true
+	case []string:
+		if len(typed) == 0 {
+			return nil, false
+		}
+		for _, item := range typed {
+			if item == "" {
+				return nil, false
+			}
+		}
+		return typed, true
+	case []any:
+		if len(typed) == 0 {
+			return nil, false
+		}
+		items := make([]string, len(typed))
+		for index, item := range typed {
+			text, ok := item.(string)
+			if !ok || text == "" {
+				return nil, false
+			}
+			items[index] = text
+		}
+		return items, true
+	default:
+		return nil, false
+	}
+}
+
+func EmbeddingInputText(value any) string {
+	items, ok := EmbeddingInputStrings(value)
+	if !ok {
+		return ""
+	}
+	text := ""
+	for _, item := range items {
+		if text != "" {
+			text += "\n"
+		}
+		text += item
+	}
+	return text
+}
+
 type ResponseRequest struct {
 	Provider          string         `json:"provider,omitempty"`
 	Model             string         `json:"model"`

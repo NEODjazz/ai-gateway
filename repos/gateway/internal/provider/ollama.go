@@ -39,6 +39,18 @@ type ollamaChatResponse struct {
 	EvalDuration       int64          `json:"eval_duration"`
 }
 
+type ollamaEmbeddingRequest struct {
+	Model      string `json:"model"`
+	Input      any    `json:"input"`
+	Dimensions *int   `json:"dimensions,omitempty"`
+}
+
+type ollamaEmbeddingResponse struct {
+	Model           string      `json:"model"`
+	Embeddings      [][]float64 `json:"embeddings"`
+	PromptEvalCount int         `json:"prompt_eval_count"`
+}
+
 func NewOllama(baseURL string, upstreamStream bool) Ollama {
 	return Ollama{
 		baseURL:        strings.TrimRight(baseURL, "/"),
@@ -101,6 +113,38 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 			CompletionTokens: ollamaResp.EvalCount,
 			TotalTokens:      ollamaResp.PromptEvalCount + ollamaResp.EvalCount,
 		},
+	}, nil
+}
+
+func (p Ollama) Embeddings(ctx context.Context, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
+	body, err := json.Marshal(ollamaEmbeddingRequest{Model: request.Model, Input: request.Input, Dimensions: request.Dimensions})
+	if err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/api/embed", bytes.NewReader(body))
+	if err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return openai.EmbeddingResponse{}, statusError("ollama", resp.StatusCode)
+	}
+	var upstream ollamaEmbeddingResponse
+	if err := json.NewDecoder(resp.Body).Decode(&upstream); err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
+	data := make([]openai.Embedding, len(upstream.Embeddings))
+	for index, vector := range upstream.Embeddings {
+		data[index] = openai.Embedding{Object: "embedding", Embedding: vector, Index: index}
+	}
+	return openai.EmbeddingResponse{
+		Object: "list", Data: data, Model: upstream.Model,
+		Usage: openai.Usage{PromptTokens: upstream.PromptEvalCount, TotalTokens: upstream.PromptEvalCount},
 	}, nil
 }
 

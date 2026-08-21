@@ -40,6 +40,7 @@ func main() {
 			PromptTokensEstimated: request.PromptTokensEstimated,
 			PostResponse:          request.Phase == "commit",
 			BillingPhase:          request.Phase,
+			APIType:               request.APIType,
 			Request: openai.ChatCompletionRequest{
 				Provider: request.Provider,
 				Model:    request.Model,

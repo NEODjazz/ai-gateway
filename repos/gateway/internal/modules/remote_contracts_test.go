@@ -218,3 +218,54 @@ func sensitiveContext() RequestContext {
 		},
 	}
 }
+
+func TestRemoteAnonymizerUsesEmbeddingInputWithoutIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{"api_key", "credential_id", "user_id", "team_id", "request", "anonymization_values"} {
+			if _, found := body[forbidden]; found {
+				t.Fatalf("anonymizer request contains %q", forbidden)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(AnonymizeResponse{Input: []any{"masked"}, Replacements: map[string]string{"{{EMAIL_1}}": "user@example.com"}})
+	}))
+	defer server.Close()
+	request := openai.EmbeddingRequest{Model: "embed", Input: []any{"user@example.com"}}
+	req := sensitiveContext()
+	req.Request.Messages = nil
+	req.EmbeddingRequest = &request
+	if err := NewRemoteAnonymizerModule(true, server.URL).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if got := openai.EmbeddingInputText(req.EmbeddingRequest.Input); got != "masked" {
+		t.Fatalf("unexpected anonymized embedding input: %q", got)
+	}
+}
+
+func TestRemoteBillingEmbeddingsContractContainsOnlyCounters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["api_type"] != "embeddings" || body["input_tokens"] != float64(3) || body["output_tokens"] != float64(0) {
+			t.Fatalf("unexpected embedding usage contract: %+v", body)
+		}
+		encoded, _ := json.Marshal(body)
+		if strings.Contains(string(encoded), "private embedding text") {
+			t.Fatal("billing received embedding content")
+		}
+		_ = json.NewEncoder(w).Encode(UsageResponse{})
+	}))
+	defer server.Close()
+	request := openai.EmbeddingRequest{Model: "embed", Input: "private embedding text"}
+	req := sensitiveContext()
+	req.Request.Messages = nil
+	req.EmbeddingRequest = &request
+	if err := NewRemoteBillingModule(true, server.URL).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+}

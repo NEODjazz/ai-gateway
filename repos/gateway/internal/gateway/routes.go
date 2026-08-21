@@ -14,6 +14,7 @@ func Routes(handler Handler) http.Handler {
 	mux.HandleFunc("GET /v1/models", handler.Models)
 	mux.HandleFunc("POST /v1/chat/completions", handler.ChatCompletions)
 	mux.HandleFunc("POST /v1/responses", handler.Responses)
+	mux.HandleFunc("POST /v1/embeddings", handler.Embeddings)
 	observed := observabilityMiddleware(handler.metrics, mux)
 	return otelhttp.NewHandler(observed, "ai-gateway.http",
 		otelhttp.WithFilter(func(r *http.Request) bool {

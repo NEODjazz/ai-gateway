@@ -101,6 +101,14 @@ Invoke-RestMethod -Method Post http://127.0.0.1:18080/v1/responses `
 
 For `/v1/responses`, the gateway uses the same flow: gateway-level authentication, provider routing and failover, provider-level anonymization, DLP, antivirus, and billing, followed by response deanonymization. The contract supports text input/output, function tools and tool choice, structured `text.format`, `previous_response_id`, and streamed function-call argument events.
 
+`POST /v1/embeddings` supports a string or an array of strings and runs through
+the same authentication, model grants, rate limits, DLP/AV, anonymization,
+provider failover, and reserve/commit/cancel billing lifecycle. OpenAI-compatible
+providers use `/v1/embeddings`; Ollama uses its native `/api/embed`. Only
+`encoding_format: "float"` is accepted. Token-ID arrays are deliberately rejected
+because DLP/AV cannot inspect them safely without the tokenizer for the selected
+model.
+
 `/v1/chat/completions` forwards OpenAI function tools, tool choice, parallel-tool policy, stop/seed, and JSON object or JSON Schema response formats. Anthropic tool definitions, calls, results, and forced structured outputs are translated to and from its native content blocks; Ollama receives its native `tools` and `format` fields. Tool arguments are included in the DLP/AV text projection and anonymized independently of the tool schema.
 
 ### Multiple providers and failover
@@ -146,7 +154,7 @@ uses endpoint name first, then provider type, then `*`; an endpoint-specific
 price therefore overrides a provider-wide price.
 
 The gateway derives required capabilities from each request (`chat`,
-`responses`, `stream`, `tools`, and `structured_output`) and excludes catalog
+`responses`, `embeddings`, `stream`, `tools`, and `structured_output`) and excludes catalog
 entries that cannot satisfy them or whose `max_output_tokens` is too small.
 Billing records `catalog_version`, `pricing_key`, and both rates in every usage
 event. The reserve transaction persists that snapshot, so a catalog rollout or
@@ -199,7 +207,7 @@ Model groups use endpoint-specific `model_aliases`, for example
 `{"fast":"deployment-gpt-5-mini"}`. Endpoints at the same priority can set
 `weight`; routing uses weighted round-robin and preserves the remaining members
 as failover candidates. `capabilities` can restrict an endpoint to `chat`,
-`responses`, and/or `stream`.
+`responses`, `embeddings`, and/or `stream`.
 
 Exact caching is disabled by default and enabled with
 `EXACT_CACHE_TTL_SECONDS` (Helm: `gateway.exactCache.ttlSeconds`). It runs inside
@@ -453,11 +461,11 @@ The gateway already has typed remote module contracts, OpenAI-compatible and
 Anthropic adapters, chat/Responses streaming, Redis-backed distributed limits
 and exact cache, a PostgreSQL billing ledger with a durable ClickHouse outbox,
 tools/structured output, PostgreSQL virtual keys, atomic multi-scope budgets,
-and a versioned capability/pricing catalog. The remaining delivery sequence is:
+a versioned capability/pricing catalog, OpenTelemetry observability, and an
+embeddings API with security and billing parity. The remaining delivery sequence is:
 
-1. Add the embeddings API through the same auth, DLP, and billing pipeline.
-2. Add adaptive routing and Responses API session affinity.
-3. Add a protected management API, opt-in tenant-safe semantic cache, and
+1. Add adaptive routing and Responses API session affinity.
+2. Add a protected management API, opt-in tenant-safe semantic cache, and
    scoped MCP/multimodal support as separate security-reviewed increments.
 
 ## License

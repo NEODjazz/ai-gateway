@@ -78,6 +78,11 @@ func scanPayload(req *RequestContext) string {
 			parts = append(parts, "input: "+text)
 		}
 	}
+	if req.EmbeddingRequest != nil {
+		if text := openai.EmbeddingInputText(req.EmbeddingRequest.Input); text != "" {
+			parts = append(parts, "embedding_input: "+text)
+		}
+	}
 	return strings.Join(parts, "\n")
 }
 

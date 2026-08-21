@@ -35,6 +35,14 @@ type Provider interface {
 	Models() []openai.Model
 }
 
+type EmbeddingProvider interface {
+	Embeddings(ctx context.Context, req modules.RequestContext) (openai.EmbeddingResponse, error)
+}
+
+type EmbeddingClient interface {
+	Embeddings(ctx context.Context, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error)
+}
+
 type ChatCompletionStreamWriter func(payload string) error
 type ResponseStreamWriter func(event string, payload string) error
 
@@ -370,6 +378,65 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 	return openai.ResponseResponse{}, joined
 }
 
+func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (openai.EmbeddingResponse, error) {
+	if req.EmbeddingRequest == nil {
+		return openai.EmbeddingResponse{}, errors.New("missing embedding request")
+	}
+	request := *req.EmbeddingRequest
+	candidates := r.candidates(openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "embeddings")
+	if len(candidates) == 0 {
+		return openai.EmbeddingResponse{}, fmt.Errorf("no embedding endpoint for provider=%q model=%q", request.Provider, request.Model)
+	}
+
+	var errs []error
+	var lastAttempt *modules.RequestContext
+	for _, endpoint := range candidates {
+		client, ok := endpoint.Provider.(EmbeddingClient)
+		if !ok {
+			continue
+		}
+		attemptCtx := providerAttemptContext(req, endpoint)
+		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
+			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
+			continue
+		}
+		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
+			if terminalModuleError(err) || ctx.Err() != nil {
+				return openai.EmbeddingResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			}
+			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
+			continue
+		}
+
+		started := time.Now()
+		lastAttempt = &attemptCtx
+		response, err := r.callEmbeddings(ctx, endpoint, client, *attemptCtx.EmbeddingRequest)
+		setAttemptMetadata(&attemptCtx, started, err)
+		if err == nil {
+			mergeEmbeddingUsage(&response, attemptCtx.Usage)
+			attemptCtx.EmbeddingResponse = &response
+			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
+				return openai.EmbeddingResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+			}
+			return response, nil
+		}
+		errs = append(errs, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err))
+		if ctx.Err() != nil || !tryNextEndpoint(err) {
+			joined := errors.Join(errs...)
+			r.modules.RunFailure(ctx, lastAttempt, joined)
+			return openai.EmbeddingResponse{}, joined
+		}
+	}
+	if len(errs) == 0 {
+		errs = append(errs, errors.New("no selected endpoint implements embeddings"))
+	}
+	joined := errors.Join(errs...)
+	if lastAttempt != nil {
+		r.modules.RunFailure(ctx, lastAttempt, joined)
+	}
+	return openai.EmbeddingResponse{}, joined
+}
+
 func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext, write ResponseStreamWriter) (openai.ResponseResponse, bool, error) {
 	if req.ResponseRequest == nil {
 		return openai.ResponseResponse{}, false, errors.New("missing response request")
@@ -479,8 +546,13 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		responseRequest := *req.ResponseRequest
 		attemptCtx.ResponseRequest = &responseRequest
 	}
+	if req.EmbeddingRequest != nil {
+		embeddingRequest := *req.EmbeddingRequest
+		attemptCtx.EmbeddingRequest = &embeddingRequest
+	}
 	attemptCtx.Response = nil
 	attemptCtx.ResponsesResponse = nil
+	attemptCtx.EmbeddingResponse = nil
 	attemptCtx.Usage = nil
 	attemptCtx.AnonymizationValues = nil
 	attemptCtx.Metadata = cloneMetadata(req.Metadata)
@@ -492,6 +564,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		attemptCtx.Request.Model = upstreamModel
 		if attemptCtx.ResponseRequest != nil {
 			attemptCtx.ResponseRequest.Model = upstreamModel
+		}
+		if attemptCtx.EmbeddingRequest != nil {
+			attemptCtx.EmbeddingRequest.Model = upstreamModel
 		}
 		attemptCtx.Metadata["provider.requested_model"] = requestedModel
 		attemptCtx.Metadata["provider.upstream_model"] = upstreamModel
@@ -563,6 +638,25 @@ func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request op
 	return openai.ResponseResponse{}, err
 }
 
+func (r Router) callEmbeddings(ctx context.Context, endpoint Endpoint, client EmbeddingClient, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
+	var response openai.EmbeddingResponse
+	var err error
+	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
+		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "embeddings")
+		response, err = client.Embeddings(providerCtx, request)
+		finishProviderCall(err)
+		if err == nil {
+			r.health.success(endpoint)
+			return response, nil
+		}
+		if ctx.Err() != nil || attempt == endpoint.MaxRetries || !retrySameEndpoint(err) {
+			break
+		}
+	}
+	r.health.failure(endpoint, err)
+	return openai.EmbeddingResponse{}, err
+}
+
 func (r Router) startProviderCall(ctx context.Context, endpoint Endpoint, operation string) (context.Context, func(error)) {
 	started := time.Now()
 	spanCtx, span := otel.Tracer("ai-gateway/provider").Start(ctx, "provider."+operation,
@@ -615,6 +709,14 @@ func mergeResponseUsage(response *openai.ResponseResponse, usage *openai.Usage) 
 		return
 	}
 	response.Usage.InputTokens = usage.PromptTokens
+	response.Usage.TotalTokens += usage.PromptTokens
+}
+
+func mergeEmbeddingUsage(response *openai.EmbeddingResponse, usage *openai.Usage) {
+	if usage == nil || response.Usage.PromptTokens != 0 {
+		return
+	}
+	response.Usage.PromptTokens = usage.PromptTokens
 	response.Usage.TotalTokens += usage.PromptTokens
 }
 

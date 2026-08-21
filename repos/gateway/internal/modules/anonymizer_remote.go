@@ -40,6 +40,9 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 		request.Input = req.ResponseRequest.Input
 		request.Instructions = req.ResponseRequest.Instructions
 	}
+	if req.EmbeddingRequest != nil {
+		request.Input = req.EmbeddingRequest.Input
+	}
 	response, err := callRemote[AnonymizeRequest, AnonymizeResponse](ctx, m.client, m.endpoint, request)
 	if err != nil {
 		return err
@@ -48,6 +51,9 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 	if req.ResponseRequest != nil {
 		req.ResponseRequest.Input = response.Input
 		req.ResponseRequest.Instructions = response.Instructions
+	}
+	if req.EmbeddingRequest != nil {
+		req.EmbeddingRequest.Input = response.Input
 	}
 	req.AnonymizationValues = cloneStringMap(response.Replacements)
 	return nil

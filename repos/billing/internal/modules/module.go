@@ -15,6 +15,7 @@ type RequestContext struct {
 	PromptTokensEstimated int                            `json:"prompt_tokens_estimated,omitempty"`
 	PostResponse          bool                           `json:"post_response,omitempty"`
 	BillingPhase          string                         `json:"billing_phase,omitempty"`
+	APIType               string                         `json:"api_type,omitempty"`
 	UserID                string                         `json:"user_id,omitempty"`
 	TeamID                string                         `json:"team_id,omitempty"`
 	Roles                 []string                       `json:"roles,omitempty"`

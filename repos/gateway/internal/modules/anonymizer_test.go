@@ -60,6 +60,22 @@ func TestAnonymizerMasksSensitiveData(t *testing.T) {
 	}
 }
 
+func TestAnonymizerMasksEmbeddingInput(t *testing.T) {
+	request := openai.EmbeddingRequest{Model: "embed", Input: []any{"send to user@example.com", "call +1 202-555-0123"}}
+	req := RequestContext{EmbeddingRequest: &request}
+	module := NewAnonymizerModule(true, RuleEmail, RulePhone)
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	text := openai.EmbeddingInputText(req.EmbeddingRequest.Input)
+	if strings.Contains(text, "user@example.com") || strings.Contains(text, "202-555") {
+		t.Fatalf("embedding input was not masked: %s", text)
+	}
+	if len(req.AnonymizationValues) != 2 {
+		t.Fatalf("unexpected replacements: %+v", req.AnonymizationValues)
+	}
+}
+
 func TestAnonymizerRulesCanBeLimited(t *testing.T) {
 	module := NewAnonymizerModule(true, RuleEmail)
 	req := RequestContext{

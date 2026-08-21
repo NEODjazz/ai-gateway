@@ -159,7 +159,7 @@ Endpoints загружаются из `PROVIDERS_JSON`, выключенные e
 
 `MODEL_CATALOG_JSON` — версионированный общий контракт gateway и billing.
 Gateway сопоставляет entry по endpoint name, затем provider type и `*`, проверяет
-request-derived capabilities (`chat`, `responses`, `stream`, `tools`,
+request-derived capabilities (`chat`, `responses`, `embeddings`, `stream`, `tools`,
 `structured_output`) и `max_output_tokens`. При
 `unknown_model_policy=deny` неизвестная модель не участвует в routing и не
 публикуется через `/v1/models`. Billing по тому же precedence выбирает цену за

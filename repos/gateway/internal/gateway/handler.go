@@ -219,6 +219,63 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
+	var request openai.EmbeddingRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if strings.TrimSpace(request.Model) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "model is required")
+		return
+	}
+	if _, ok := openai.EmbeddingInputStrings(request.Input); !ok {
+		writeError(w, http.StatusBadRequest, "invalid_request", "input must be a non-empty string or array of non-empty strings; token arrays are not supported")
+		return
+	}
+	if request.EncodingFormat != "" && request.EncodingFormat != "float" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "only encoding_format=float is supported")
+		return
+	}
+	if request.Dimensions != nil && *request.Dimensions <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "dimensions must be positive")
+		return
+	}
+
+	reqCtx := modules.RequestContext{
+		APIKey:           bearerToken(r.Header.Get("Authorization")),
+		RequestID:        requestID(r),
+		EmbeddingRequest: &request,
+		Request: openai.ChatCompletionRequest{
+			Provider: request.Provider,
+			Model:    request.Model,
+		},
+	}
+	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
+		return
+	}
+	reqCtx.APIKey = ""
+	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateEmbeddingTokens(request)) {
+		return
+	}
+	embeddingProvider, ok := h.provider.(provider.EmbeddingProvider)
+	if !ok {
+		writeError(w, http.StatusBadGateway, "provider_failed", "embeddings are not supported by the configured provider")
+		return
+	}
+	response, err := embeddingProvider.Embeddings(r.Context(), reqCtx)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func writeProviderFailure(w http.ResponseWriter, err error) {
 	if errors.Is(err, modules.ErrBudgetExceeded) {
 		writeError(w, http.StatusTooManyRequests, "budget_exceeded", "budget exceeded")
