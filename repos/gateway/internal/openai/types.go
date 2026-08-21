@@ -1,5 +1,10 @@
 package openai
 
+import (
+	"bytes"
+	"encoding/json"
+)
+
 type ChatCompletionRequest struct {
 	Provider          string          `json:"provider,omitempty"`
 	Model             string          `json:"model"`
@@ -46,6 +51,30 @@ type ToolCall struct {
 type FunctionCall struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+}
+
+func (f *FunctionCall) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	f.Name = raw.Name
+	if len(raw.Arguments) == 0 || bytes.Equal(raw.Arguments, []byte("null")) {
+		f.Arguments = ""
+		return nil
+	}
+	if raw.Arguments[0] == '"' {
+		return json.Unmarshal(raw.Arguments, &f.Arguments)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw.Arguments); err != nil {
+		return err
+	}
+	f.Arguments = compact.String()
+	return nil
 }
 
 type ResponseFormat struct {

@@ -63,6 +63,50 @@ func TestOllamaChatCompletions(t *testing.T) {
 	}
 }
 
+func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
+	var upstream ollamaChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"model":"llama3.2:latest","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"weather.get","arguments":{"city":"Moscow"}}}]},"done":true,"done_reason":"stop"}`))
+	}))
+	defer server.Close()
+
+	maxTokens := 32
+	temperature := 0.0
+	topP := 0.7
+	seed := int64(42)
+	response, err := NewOllama(server.URL, false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{
+		Model: "llama3.2:latest",
+		Messages: []openai.Message{{
+			Role: "assistant", ToolCalls: []openai.ToolCall{{
+				ID: "previous", Type: "function",
+				Function: openai.FunctionCall{Name: "weather.get", Arguments: `{"city":"Kazan"}`},
+			}},
+		}},
+		MaxTokens: &maxTokens, Temperature: &temperature, TopP: &topP, Seed: &seed,
+		Stop: []string{"END"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments, ok := upstream.Messages[0].ToolCalls[0].Function.Arguments.(map[string]any)
+	if !ok || arguments["city"] != "Kazan" {
+		t.Fatalf("tool arguments were not converted to an Ollama object: %#v", upstream.Messages[0].ToolCalls[0].Function.Arguments)
+	}
+	if upstream.Options.NumPredict == nil || *upstream.Options.NumPredict != 32 ||
+		upstream.Options.Temperature == nil || *upstream.Options.Temperature != 0 ||
+		upstream.Options.TopP == nil || *upstream.Options.TopP != 0.7 ||
+		upstream.Options.Seed == nil || *upstream.Options.Seed != 42 {
+		t.Fatalf("generation options were not forwarded: %+v", upstream.Options)
+	}
+	if len(response.Choices) != 1 || len(response.Choices[0].Message.ToolCalls) != 1 ||
+		response.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"city":"Moscow"}` {
+		t.Fatalf("Ollama tool arguments were not normalized: %+v", response)
+	}
+}
+
 func TestOllamaConvertsVisionContentToNativeImages(t *testing.T) {
 	messages := ollamaMessages([]openai.Message{{Role: "user", Content: []any{
 		map[string]any{"type": "text", "text": "describe"},
@@ -161,6 +205,11 @@ func TestOllamaStreamsChatCompletions(t *testing.T) {
 }
 
 func TestOllamaResponses(t *testing.T) {
+	maxOutputTokens := 11
+	maxTokens := 12
+	temperature := 0.2
+	topP := 0.8
+	parallel := true
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -175,6 +224,13 @@ func TestOllamaResponses(t *testing.T) {
 		}
 		if request.Stream {
 			t.Fatal("expected non-stream responses request")
+		}
+		if request.MaxOutputTokens == nil || *request.MaxOutputTokens != maxOutputTokens ||
+			request.MaxTokens == nil || *request.MaxTokens != maxTokens ||
+			request.Temperature == nil || *request.Temperature != temperature ||
+			request.TopP == nil || *request.TopP != topP || request.PreviousResponse != "resp-previous" ||
+			request.ParallelToolCalls == nil || !*request.ParallelToolCalls || len(request.Tools) != 1 {
+			t.Fatalf("Responses fields were not forwarded: %+v", request)
 		}
 
 		_ = json.NewEncoder(w).Encode(openai.ResponseResponse{
@@ -203,9 +259,10 @@ func TestOllamaResponses(t *testing.T) {
 
 	provider := NewOllama(server.URL, false)
 	response, err := provider.Responses(context.Background(), openai.ResponseRequest{
-		Model:  "test-model",
-		Input:  "ping",
-		Stream: true,
+		Model: "test-model", Input: "ping", Stream: true,
+		Tools: []openai.ResponseTool{{Type: "function", Name: "weather.get"}}, ToolChoice: "required",
+		ParallelToolCalls: &parallel, PreviousResponse: "resp-previous",
+		MaxOutputTokens: &maxOutputTokens, MaxTokens: &maxTokens, Temperature: &temperature, TopP: &topP,
 	})
 	if err != nil {
 		t.Fatal(err)

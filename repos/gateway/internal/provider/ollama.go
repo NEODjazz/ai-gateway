@@ -19,19 +19,39 @@ type Ollama struct {
 }
 
 type ollamaChatRequest struct {
-	Model    string          `json:"model"`
-	Messages []ollamaMessage `json:"messages"`
-	Tools    []openai.Tool   `json:"tools,omitempty"`
-	Format   any             `json:"format,omitempty"`
-	Stream   bool            `json:"stream"`
+	Model    string                 `json:"model"`
+	Messages []ollamaRequestMessage `json:"messages"`
+	Tools    []openai.Tool          `json:"tools,omitempty"`
+	Format   any                    `json:"format,omitempty"`
+	Options  ollamaOptions          `json:"options,omitempty"`
+	Stream   bool                   `json:"stream"`
 }
 
-type ollamaMessage struct {
-	Role       string            `json:"role"`
-	Content    string            `json:"content"`
-	Images     []string          `json:"images,omitempty"`
-	ToolCalls  []openai.ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string            `json:"tool_call_id,omitempty"`
+type ollamaOptions struct {
+	NumPredict  *int     `json:"num_predict,omitempty"`
+	Temperature *float64 `json:"temperature,omitempty"`
+	TopP        *float64 `json:"top_p,omitempty"`
+	Stop        any      `json:"stop,omitempty"`
+	Seed        *int64   `json:"seed,omitempty"`
+}
+
+type ollamaRequestMessage struct {
+	Role       string                  `json:"role"`
+	Content    string                  `json:"content"`
+	Images     []string                `json:"images,omitempty"`
+	ToolCalls  []ollamaRequestToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string                  `json:"tool_call_id,omitempty"`
+}
+
+type ollamaRequestToolCall struct {
+	ID       string                    `json:"id,omitempty"`
+	Type     string                    `json:"type,omitempty"`
+	Function ollamaRequestFunctionCall `json:"function"`
+}
+
+type ollamaRequestFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments any    `json:"arguments"`
 }
 
 type ollamaChatResponse struct {
@@ -75,6 +95,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 		Messages: ollamaMessages(request.Messages),
 		Tools:    request.Tools,
 		Format:   ollamaResponseFormat(request.ResponseFormat),
+		Options:  ollamaRequestOptions(request),
 		Stream:   request.Stream && p.upstreamStream,
 	})
 	if err != nil {
@@ -168,6 +189,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		Messages: ollamaMessages(request.Messages),
 		Tools:    request.Tools,
 		Format:   ollamaResponseFormat(request.ResponseFormat),
+		Options:  ollamaRequestOptions(request),
 		Stream:   true,
 	})
 	if err != nil {
@@ -255,12 +277,12 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	return response, nil
 }
 
-func ollamaMessages(messages []openai.Message) []ollamaMessage {
-	converted := make([]ollamaMessage, len(messages))
+func ollamaMessages(messages []openai.Message) []ollamaRequestMessage {
+	converted := make([]ollamaRequestMessage, len(messages))
 	for index, message := range messages {
-		converted[index] = ollamaMessage{
+		converted[index] = ollamaRequestMessage{
 			Role: message.Role, Content: openai.ContentText(message.Content),
-			ToolCalls: message.ToolCalls, ToolCallID: message.ToolCallID,
+			ToolCalls: ollamaToolCalls(message.ToolCalls), ToolCallID: message.ToolCallID,
 		}
 		attachments, err := openai.ChatImageAttachments([]openai.Message{message})
 		if err != nil {
@@ -271,6 +293,31 @@ func ollamaMessages(messages []openai.Message) []ollamaMessage {
 		}
 	}
 	return converted
+}
+
+func ollamaToolCalls(calls []openai.ToolCall) []ollamaRequestToolCall {
+	converted := make([]ollamaRequestToolCall, len(calls))
+	for index, call := range calls {
+		arguments := any(call.Function.Arguments)
+		if strings.TrimSpace(call.Function.Arguments) != "" {
+			var decoded any
+			if json.Unmarshal([]byte(call.Function.Arguments), &decoded) == nil {
+				arguments = decoded
+			}
+		}
+		converted[index] = ollamaRequestToolCall{
+			ID: call.ID, Type: call.Type,
+			Function: ollamaRequestFunctionCall{Name: call.Function.Name, Arguments: arguments},
+		}
+	}
+	return converted
+}
+
+func ollamaRequestOptions(request openai.ChatCompletionRequest) ollamaOptions {
+	return ollamaOptions{
+		NumPredict: request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP,
+		Stop: request.Stop, Seed: request.Seed,
+	}
 }
 
 func ollamaResponseFormat(format *openai.ResponseFormat) any {
@@ -288,11 +335,11 @@ func ollamaResponseFormat(format *openai.ResponseFormat) any {
 
 func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Model:           request.Model,
-		Input:           request.Input,
-		Instructions:    request.Instructions,
-		Stream:          false,
-		MaxOutputTokens: request.MaxOutputTokens,
+		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
+		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
+		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: false,
+		MaxOutputTokens: request.MaxOutputTokens, MaxTokens: request.MaxTokens,
+		Temperature: request.Temperature, TopP: request.TopP,
 	})
 	if err != nil {
 		return openai.ResponseResponse{}, err
@@ -328,11 +375,11 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 	}
 
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Model:           request.Model,
-		Input:           request.Input,
-		Instructions:    request.Instructions,
-		Stream:          true,
-		MaxOutputTokens: request.MaxOutputTokens,
+		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
+		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
+		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: true,
+		MaxOutputTokens: request.MaxOutputTokens, MaxTokens: request.MaxTokens,
+		Temperature: request.Temperature, TopP: request.TopP,
 	})
 	if err != nil {
 		return openai.ResponseResponse{}, err
