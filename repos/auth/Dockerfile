@@ -1,7 +1,8 @@
 FROM golang:1.26.7-alpine AS builder
 
 WORKDIR /src
-COPY go.mod ./
+COPY go.* ./
+RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 RUN go build -o /out/auth ./cmd/auth
