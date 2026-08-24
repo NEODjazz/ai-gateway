@@ -171,6 +171,14 @@ HTTP-ответы модулей декодируются в типизиров�
 
 Endpoints загружаются из `PROVIDERS_JSON`, выключенные endpoints отбрасываются, неизвестные типы игнорируются, остальные стабильно сортируются по возрастанию `priority`.
 
+Для endpoint можно задать `max_parallel_requests`, `queue_capacity` и
+`queue_timeout_ms`. Лимит охватывает всю provider-попытку, включая внутренние
+retries и lifetime streaming-соединения. Переполненный endpoint не вызывается:
+router переходит к следующему совместимому кандидату, а при исчерпании всех
+кандидатов возвращает `429 provider_busy` и `Retry-After`. Очередь ограничена по
+числу ожидающих и времени, поэтому перегрузка не создает неограниченное число
+goroutines или зависших billing reservations.
+
 `MODEL_CATALOG_JSON` — версионированный общий контракт gateway и billing.
 Gateway сопоставляет entry по endpoint name, затем provider type и `*`, проверяет
 request-derived capabilities (`chat`, `responses`, `embeddings`, `stream`, `tools`,

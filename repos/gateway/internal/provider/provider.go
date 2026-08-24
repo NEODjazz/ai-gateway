@@ -102,6 +102,7 @@ type Endpoint struct {
 	MaxRetries            int
 	CooldownAfterFailures int
 	Cooldown              time.Duration
+	Admission             *admissionController
 	GuardrailPolicy       string
 	GuardrailPolicyValid  bool
 	ModelAliases          map[string]string
@@ -158,6 +159,7 @@ func New(cfg Config) Provider {
 			MaxRetries:            endpoint.MaxRetries,
 			CooldownAfterFailures: endpoint.CooldownAfterFailures,
 			Cooldown:              time.Duration(endpoint.CooldownSeconds) * time.Second,
+			Admission:             newAdmissionController(endpoint.MaxParallelRequests, endpoint.QueueCapacity, time.Duration(endpoint.QueueTimeoutMS)*time.Millisecond),
 			GuardrailPolicy:       endpoint.GuardrailPolicy,
 			GuardrailPolicyValid:  policyValid,
 			ModelAliases:          endpoint.ModelAliases,
@@ -323,6 +325,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 	}
 
 	var errs []error
+	var lastAttempt *modules.RequestContext
 	for _, endpoint := range candidates {
 		streamingProvider, ok := endpoint.Provider.(StreamingClient)
 		if !ok {
@@ -342,11 +345,18 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
 			continue
 		}
+		lastAttempt = &attemptCtx
 
 		started := time.Now()
+		release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s/%s admission failed: %w", endpoint.Type, endpoint.Name, err))
+			continue
+		}
 		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "chat.stream")
 		response, err := streamingProvider.StreamChatCompletions(providerCtx, attemptCtx.Request, deanonymizingChatStreamWriter(attemptCtx.AnonymizationValues, write))
 		finishProviderCall(err)
+		release()
 		setAttemptMetadata(&attemptCtx, started, err)
 		if errors.Is(err, ErrStreamingUnsupported) {
 			continue
@@ -368,7 +378,11 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 	}
 
 	if len(errs) > 0 {
-		return openai.ChatCompletionResponse{}, false, errors.Join(errs...)
+		joined := errors.Join(errs...)
+		if lastAttempt != nil {
+			r.modules.RunFailure(ctx, lastAttempt, joined)
+		}
+		return openai.ChatCompletionResponse{}, false, joined
 	}
 	return openai.ChatCompletionResponse{}, false, nil
 }
@@ -532,6 +546,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 	}
 
 	var errs []error
+	var lastAttempt *modules.RequestContext
 	for _, endpoint := range candidates {
 		streamingProvider, ok := endpoint.Provider.(StreamingResponseClient)
 		if !ok {
@@ -551,11 +566,18 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
 			continue
 		}
+		lastAttempt = &attemptCtx
 
 		started := time.Now()
+		release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s/%s admission failed: %w", endpoint.Type, endpoint.Name, err))
+			continue
+		}
 		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "responses.stream")
 		response, err := streamingProvider.StreamResponses(providerCtx, *attemptCtx.ResponseRequest, deanonymizingResponseStreamWriter(attemptCtx.AnonymizationValues, write))
 		finishProviderCall(err)
+		release()
 		setAttemptMetadata(&attemptCtx, started, err)
 		if errors.Is(err, ErrStreamingUnsupported) {
 			continue
@@ -578,7 +600,11 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 	}
 
 	if len(errs) > 0 {
-		return openai.ResponseResponse{}, false, errors.Join(errs...)
+		joined := errors.Join(errs...)
+		if lastAttempt != nil {
+			r.modules.RunFailure(ctx, lastAttempt, joined)
+		}
+		return openai.ResponseResponse{}, false, joined
 	}
 	return openai.ResponseResponse{}, false, nil
 }
@@ -685,8 +711,13 @@ func boolString(value bool) string {
 }
 
 func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	defer release()
 	var response openai.ChatCompletionResponse
-	var err error
+	err = nil
 	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
 		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "chat")
 		response, err = endpoint.Provider.ChatCompletions(providerCtx, request)
@@ -704,8 +735,13 @@ func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.
 }
 
 func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request openai.ResponseRequest) (openai.ResponseResponse, error) {
+	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	defer release()
 	var response openai.ResponseResponse
-	var err error
+	err = nil
 	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
 		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "responses")
 		response, err = endpoint.Provider.Responses(providerCtx, request)
@@ -723,8 +759,13 @@ func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request op
 }
 
 func (r Router) callEmbeddings(ctx context.Context, endpoint Endpoint, client EmbeddingClient, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
+	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	if err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
+	defer release()
 	var response openai.EmbeddingResponse
-	var err error
+	err = nil
 	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
 		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "embeddings")
 		response, err = client.Embeddings(providerCtx, request)

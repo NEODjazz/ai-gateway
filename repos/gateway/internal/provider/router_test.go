@@ -530,6 +530,56 @@ func TestRouterRetriesUnavailableEndpointBeforeFallback(t *testing.T) {
 	}
 }
 
+func TestRouterFallsBackWhenPrimaryAdmissionIsFull(t *testing.T) {
+	primary := &countingProvider{content: "primary"}
+	secondary := &countingProvider{content: "fallback"}
+	primaryAdmission := newAdmissionController(1, 0, 0)
+	release, err := primaryAdmission.acquire(context.Background(), "primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	router := Router{
+		endpoints: []Endpoint{
+			{Name: "primary", Type: "openai", Models: []string{"model"}, Priority: 1, Provider: primary, Admission: primaryAdmission},
+			{Name: "secondary", Type: "openai", Models: []string{"model"}, Priority: 2, Provider: secondary},
+		},
+		modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	response, err := router.ChatCompletions(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if primary.calls != 0 || secondary.calls != 1 || openai.ContentText(response.Choices[0].Message.Content) != "fallback" {
+		t.Fatalf("admission fallback failed: primary=%d secondary=%d response=%+v", primary.calls, secondary.calls, response)
+	}
+}
+
+func TestStreamingAdmissionRejectsBeforeStreamStarts(t *testing.T) {
+	admission := newAdmissionController(1, 0, 0)
+	release, err := admission.acquire(context.Background(), "streaming")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	router := Router{
+		endpoints: []Endpoint{{
+			Name: "streaming", Type: "openai", Models: []string{"model"}, Capabilities: []string{"chat", "stream"},
+			Provider: splitStreamingProvider{}, Admission: admission,
+		}},
+		modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	_, streamed, err := router.StreamChatCompletions(context.Background(), modules.RequestContext{
+		Request: openai.ChatCompletionRequest{Model: "model", Stream: true},
+	}, func(string) error { return nil })
+	var admissionErr *AdmissionError
+	if streamed || !errors.As(err, &admissionErr) {
+		t.Fatalf("admission must fail before SSE starts: streamed=%v err=%v", streamed, err)
+	}
+}
+
 func TestRouterObservesEveryProviderRetryAndCacheOperation(t *testing.T) {
 	observer := &recordingProviderObserver{}
 	primary := &countingProvider{err: statusError("primary", 503)}

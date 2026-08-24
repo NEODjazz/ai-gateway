@@ -369,10 +369,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     RateLimited:
-      description: Credential rate limit or budget exceeded
+      description: Credential rate limit, budget, or provider concurrency capacity exceeded
       headers:
         Retry-After:
-          description: Seconds until the current rate window resets, when available
+          description: Seconds until the rate window resets or provider admission should be retried, when available
           schema:
             type: integer
             minimum: 1

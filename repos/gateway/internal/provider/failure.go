@@ -56,6 +56,10 @@ func statusError(provider string, statusCode int) error {
 }
 
 func failureClass(err error) FailureClass {
+	var admissionErr *AdmissionError
+	if errors.As(err, &admissionErr) {
+		return FailureRateLimit
+	}
 	var providerErr *Error
 	if errors.As(err, &providerErr) {
 		return providerErr.Class

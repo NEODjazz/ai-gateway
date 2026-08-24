@@ -419,6 +419,17 @@ func TestProviderBudgetFailureReturns429WithoutDetails(t *testing.T) {
 	}
 }
 
+func TestProviderAdmissionFailureReturns429WithRetryAfter(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeProviderFailure(recorder, &provider.AdmissionError{Provider: "ollama", RetryAfter: 1500 * time.Millisecond})
+	if recorder.Code != http.StatusTooManyRequests || recorder.Header().Get("Retry-After") != "2" {
+		t.Fatalf("unexpected provider busy response: code=%d retry-after=%q", recorder.Code, recorder.Header().Get("Retry-After"))
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, `"code":"provider_busy"`) || strings.Contains(body, "ollama") {
+		t.Fatalf("provider details leaked in response: %s", body)
+	}
+}
+
 func TestProviderContentRejectionReturns451WithoutDetails(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	writeProviderFailure(recorder, errors.Join(errors.New("dlp policy name=secret-policy"), modules.ErrContentRejected))

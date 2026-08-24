@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -111,6 +112,9 @@ type ProviderEndpointConfig struct {
 	MaxRetries            int               `json:"max_retries,omitempty"`
 	CooldownAfterFailures int               `json:"cooldown_after_failures,omitempty"`
 	CooldownSeconds       int               `json:"cooldown_seconds,omitempty"`
+	MaxParallelRequests   int               `json:"max_parallel_requests,omitempty"`
+	QueueCapacity         int               `json:"queue_capacity,omitempty"`
+	QueueTimeoutMS        int               `json:"queue_timeout_ms,omitempty"`
 	GuardrailPolicy       string            `json:"guardrail_policy,omitempty"`
 	ModelAliases          map[string]string `json:"model_aliases,omitempty"`
 	Weight                int               `json:"weight,omitempty"`
@@ -119,6 +123,8 @@ type ProviderEndpointConfig struct {
 
 func Load() Config {
 	catalog, catalogErr := modelcatalog.Parse(os.Getenv("MODEL_CATALOG_JSON"))
+	providerEndpoints := loadProviderEndpoints()
+	providerAdmissionErr := validateProviderAdmission(providerEndpoints)
 	semanticTTL := envInt("SEMANTIC_CACHE_TTL_SECONDS", 0)
 	semanticThreshold := envFloat("SEMANTIC_CACHE_THRESHOLD", 0.95)
 	semanticURL := strings.TrimSpace(os.Getenv("SEMANTIC_CACHE_EMBEDDING_URL"))
@@ -153,7 +159,7 @@ func Load() Config {
 		},
 		Provider: ProviderConfig{
 			Default:           env("DEFAULT_PROVIDER", env("PROVIDER_TYPE", "demo")),
-			Endpoints:         loadProviderEndpoints(),
+			Endpoints:         providerEndpoints,
 			GuardrailPolicies: loadGuardrailPolicies(),
 			RoutingStrategy:   env("ROUTING_STRATEGY", "weighted"),
 			AdaptiveEWMAAlpha: envFloat("ADAPTIVE_ROUTING_EWMA_ALPHA", 0.2),
@@ -174,7 +180,7 @@ func Load() Config {
 			Enabled:         envBool("API_DOCS_ENABLED", false),
 			TryItOutEnabled: envBool("API_DOCS_TRY_IT_OUT_ENABLED", false),
 		},
-		InitErr: errors.Join(catalogErr, semanticErr),
+		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr),
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
 				Required: envBool("AUTH_REQUIRED", true),
@@ -198,6 +204,26 @@ func Load() Config {
 			},
 		},
 	}
+}
+
+func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
+	var result error
+	for _, endpoint := range endpoints {
+		name := endpoint.Name
+		if name == "" {
+			name = endpoint.Type
+		}
+		if endpoint.MaxParallelRequests < 0 || endpoint.QueueCapacity < 0 || endpoint.QueueTimeoutMS < 0 {
+			result = errors.Join(result, fmt.Errorf("provider %q admission values must not be negative", name))
+		}
+		if endpoint.QueueCapacity > 0 && endpoint.MaxParallelRequests <= 0 {
+			result = errors.Join(result, fmt.Errorf("provider %q queue requires max_parallel_requests", name))
+		}
+		if endpoint.QueueCapacity > 0 && endpoint.QueueTimeoutMS <= 0 {
+			result = errors.Join(result, fmt.Errorf("provider %q queue requires queue_timeout_ms", name))
+		}
+	}
+	return result
 }
 
 func loadGuardrailPolicies() map[string]GuardrailPolicyConfig {

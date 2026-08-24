@@ -199,6 +199,9 @@ gateway:
     - name: ollama-local
       type: ollama
       base_url: http://host.docker.internal:11434
+      max_parallel_requests: 2
+      queue_capacity: 8
+      queue_timeout_ms: 5000
       priority: 100
       enabled: true
 ```
@@ -233,6 +236,14 @@ Retries and cooldown are configured per endpoint with `max_retries`,
 `cooldown_after_failures`, and `cooldown_seconds`. Only transient failures are
 retried on the same endpoint; invalid requests and content-policy rejections are
 terminal, and post-response failures never trigger a second model generation.
+
+Provider concurrency is bounded per endpoint with `max_parallel_requests`.
+`queue_capacity` and `queue_timeout_ms` optionally add a bounded waiting queue;
+both require a positive concurrency limit, and a positive queue capacity also
+requires a positive timeout. A saturated endpoint is skipped in favor of the
+next compatible endpoint. If every candidate is saturated, the gateway returns
+`429 provider_busy` with `Retry-After`. A slot covers the complete provider call,
+including same-endpoint retries or the lifetime of an SSE stream.
 
 The auth service supports virtual keys through `AUTH_VIRTUAL_KEYS_JSON` (Helm:
 `auth.virtualKeys`). Each key may define `team_id`, `roles`, `allowed_models`,

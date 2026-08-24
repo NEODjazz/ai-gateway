@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -329,6 +330,13 @@ func writeProviderFailure(w http.ResponseWriter, err error) {
 	}
 	if errors.Is(err, modules.ErrBillingConflict) {
 		writeError(w, http.StatusConflict, "billing_conflict", "billing lifecycle conflict")
+		return
+	}
+	var admissionErr *provider.AdmissionError
+	if errors.As(err, &admissionErr) {
+		seconds := int((admissionErr.RetryAfter + time.Second - 1) / time.Second)
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		writeError(w, http.StatusTooManyRequests, "provider_busy", "provider capacity is temporarily exhausted")
 		return
 	}
 	writeError(w, http.StatusBadGateway, "provider_failed", err.Error())

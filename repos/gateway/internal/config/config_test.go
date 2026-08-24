@@ -58,7 +58,7 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("SEMANTIC_CACHE_EMBEDDING_API_KEY", "embedding-secret")
 	t.Setenv("SEMANTIC_CACHE_EMBEDDING_MODEL", "text-embedding")
 	t.Setenv("GUARDRAIL_POLICIES_JSON", `{"strict":{"dlp":true,"av":true}}`)
-	t.Setenv("PROVIDERS_JSON", `[{"name":"group-a","type":"demo","model_aliases":{"fast":"upstream-fast"},"weight":3,"capabilities":["chat"]}]`)
+	t.Setenv("PROVIDERS_JSON", `[{"name":"group-a","type":"demo","model_aliases":{"fast":"upstream-fast"},"weight":3,"capabilities":["chat"],"max_parallel_requests":4,"queue_capacity":8,"queue_timeout_ms":250}]`)
 	cfg := Load()
 	if cfg.Cache.TTLSeconds != 120 || cfg.Cache.MaxBytes != 2048 || !cfg.Provider.GuardrailPolicies["strict"].DLP || !cfg.Provider.GuardrailPolicies["strict"].AV {
 		t.Fatalf("unexpected cache/policy config: %+v", cfg)
@@ -77,8 +77,19 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 		t.Fatalf("unexpected semantic cache config: %+v", semantic)
 	}
 	endpoint := cfg.Provider.Endpoints[0]
-	if endpoint.ModelAliases["fast"] != "upstream-fast" || endpoint.Weight != 3 || len(endpoint.Capabilities) != 1 {
+	if endpoint.ModelAliases["fast"] != "upstream-fast" || endpoint.Weight != 3 || len(endpoint.Capabilities) != 1 || endpoint.MaxParallelRequests != 4 || endpoint.QueueCapacity != 8 || endpoint.QueueTimeoutMS != 250 {
 		t.Fatalf("unexpected routing config: %+v", endpoint)
+	}
+}
+
+func TestLoadRejectsInvalidProviderAdmissionConfiguration(t *testing.T) {
+	t.Setenv("PROVIDERS_JSON", `[{"name":"broken","type":"demo","queue_capacity":2,"queue_timeout_ms":100}]`)
+	if cfg := Load(); cfg.InitErr == nil {
+		t.Fatal("queue without max_parallel_requests was accepted")
+	}
+	t.Setenv("PROVIDERS_JSON", `[{"name":"broken","type":"demo","max_parallel_requests":1,"queue_capacity":2}]`)
+	if cfg := Load(); cfg.InitErr == nil {
+		t.Fatal("queue without queue_timeout_ms was accepted")
 	}
 }
 

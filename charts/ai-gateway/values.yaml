@@ -65,6 +65,10 @@ gateway:
     - name: ollama-local
       type: ollama
       base_url: http://host.docker.internal:11434
+      # Optional endpoint admission control:
+      # max_parallel_requests: 2
+      # queue_capacity: 8
+      # queue_timeout_ms: 5000
       stream: true
       dlp_enabled: false
       av_enabled: false
