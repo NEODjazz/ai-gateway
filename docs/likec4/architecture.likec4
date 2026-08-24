@@ -68,7 +68,7 @@ model {
     }
     auth = service 'Auth' {
       technology 'Go, HTTP :8082'
-      description 'Demo API keys, HS256 JWT, users and roles'
+      description 'Virtual keys, legacy HS256 and OIDC JWKS JWT, users and roles'
     }
     dlp = service 'DLP adapter' {
       technology 'Go, HTTP :8084, ICAP'

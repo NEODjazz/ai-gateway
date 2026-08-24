@@ -39,6 +39,18 @@ spec:
               value: {{ .Values.auth.jwt.issuer | quote }}
             - name: AUTH_JWT_AUDIENCE
               value: {{ .Values.auth.jwt.audience | quote }}
+            - name: AUTH_JWT_JWKS_URL
+              value: {{ .Values.auth.jwt.jwksUrl | quote }}
+            - name: AUTH_JWT_JWKS_CACHE_TTL_SECONDS
+              value: {{ .Values.auth.jwt.jwksCacheTtlSeconds | quote }}
+            - name: AUTH_JWT_CLOCK_SKEW_SECONDS
+              value: {{ .Values.auth.jwt.clockSkewSeconds | quote }}
+            - name: AUTH_JWT_USER_ID_CLAIM
+              value: {{ .Values.auth.jwt.userIdClaim | quote }}
+            - name: AUTH_JWT_TEAM_ID_CLAIM
+              value: {{ .Values.auth.jwt.teamIdClaim | quote }}
+            - name: AUTH_JWT_ROLES_CLAIM
+              value: {{ .Values.auth.jwt.rolesClaim | quote }}
             - name: AUTH_VIRTUAL_KEYS_JSON
               valueFrom:
                 secretKeyRef:

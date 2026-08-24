@@ -16,9 +16,17 @@ auth:
   replicaCount: 1
   port: 8082
   jwt:
+    # Legacy HS256 secret. Ignored when jwksUrl is configured.
     secret: dev-jwt-secret
     issuer: ai-gateway
     audience: ai-gateway
+    # Direct JWKS endpoint for RS256/ES256 OIDC access tokens.
+    jwksUrl: ""
+    jwksCacheTtlSeconds: 300
+    clockSkewSeconds: 30
+    userIdClaim: sub
+    teamIdClaim: team_id
+    rolesClaim: roles
   postgres:
     enabled: true
     dsn: postgres://ai_gateway:ai_gateway@ai-gateway-postgres:5432/ai_gateway?sslmode=disable

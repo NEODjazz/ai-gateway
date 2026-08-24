@@ -56,7 +56,7 @@ flowchart LR
 | Сервис | HTTP API | Текущая ответственность |
 | --- | --- | --- |
 | Gateway | `GET /healthz`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/responses` | OpenAI-compatible API, auth pipeline, provider routing, failover, SSE, orchestration provider-level modules, deanonymization |
-| Auth | `GET /healthz`, `GET /readyz`, `POST /authorize` | PostgreSQL virtual keys с expiry/revoke/rotation, переходный static fallback и HS256 JWT; заполняет identity и access policy |
+| Auth | `GET /healthz`, `GET /readyz`, `POST /authorize` | PostgreSQL virtual keys с expiry/revoke/rotation, переходный static fallback, legacy HS256 и OIDC JWKS RS256/ES256; заполняет identity и access policy |
 | DLP | `GET /healthz`, `POST /scan` | Извлекает текст запроса и отправляет его в настроенный ICAP-сервис через `REQMOD` |
 | AV | `GET /healthz`, `POST /scan` | HTTP-to-ICAP адаптер для текста и отдельных бинарных image attachments |
 | Anonymizer | `GET /healthz`, `POST /anonymize` | Маскирует значения по настраиваемым RE2-правилам и возвращает преобразованный контент с placeholder map |

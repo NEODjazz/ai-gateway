@@ -442,6 +442,13 @@ TPM, and tool policy; expired or revoked keys do not authorize. The database con
 only an HMAC-SHA256 token lookup value and an opaque key ID. Linked key rotation
 creates a replacement and revokes the previous key in one transaction.
 
+The auth service also accepts OIDC access tokens through a direct JWKS endpoint.
+Set `auth.jwt.jwksUrl` (or `AUTH_JWT_JWKS_URL`) together with an exact issuer and
+audience. JWKS mode accepts RS256/ES256, requires token expiry, caches signing
+keys, and refreshes on an unknown `kid`; HS256 remains available only when no
+JWKS URL is configured. `userIdClaim`, `teamIdClaim`, and `rolesClaim` support
+dot-separated nested claim paths. JWKS availability participates in `/readyz`.
+
 An authenticated caller with the `admin` role can manage persistent virtual
 keys through `POST /admin/v1/keys`, `POST /admin/v1/keys/{id}/rotate`, and
 `DELETE /admin/v1/keys/{id}`. Create and rotate accept the complete key policy
@@ -477,12 +484,14 @@ independently. The built-in demo API keys are:
 - `demo-admin-key`
 - `demo-user-key`
 
-If the key is not found, the service tries to validate it as a JWT. HS256 is currently supported:
+If the key is not found, the service tries to validate it as a JWT. This example
+shows legacy HS256; set `AUTH_JWT_JWKS_URL` for the recommended OIDC mode:
 
 ```text
 AUTH_JWT_SECRET=dev-jwt-secret
 AUTH_JWT_ISSUER=ai-gateway
 AUTH_JWT_AUDIENCE=ai-gateway
+AUTH_JWT_JWKS_URL=
 AUTH_POSTGRES_KEYS_ENABLED=true
 AUTH_POSTGRES_DSN=postgres://ai_gateway:password@postgres:5432/ai_gateway
 AUTH_KEY_HASH_SECRET=separate-random-pepper
@@ -502,7 +511,10 @@ Minimum claims:
 }
 ```
 
-`sub` becomes `UserID`, while `roles` or `role` is passed into the role model. In production, store the secret as a Kubernetes Secret rather than in a regular `values.yaml` file.
+By default, `sub` becomes `UserID`, `team_id` becomes `TeamID`, and `roles` or
+`role` is passed into the role model. The three claim paths are configurable and
+may address nested objects. In legacy HS256 mode, store the secret as a
+Kubernetes Secret rather than in a regular `values.yaml` file.
 
 ### Anonymization configuration
 

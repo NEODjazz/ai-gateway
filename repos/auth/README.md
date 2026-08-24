@@ -45,9 +45,17 @@ headers. They should remain cluster-internal and are not a replacement for
 network policy. Create and rotate return the plaintext token once; PostgreSQL
 stores only its HMAC-SHA256 lookup value.
 
-## JWT
+## JWT and OIDC
 
-Supported algorithm: `HS256`.
+Legacy mode supports `HS256` with `AUTH_JWT_SECRET`. For production OIDC, set a
+direct `AUTH_JWT_JWKS_URL`; JWKS mode accepts only `RS256` and `ES256`, ignores
+the HS256 secret, requires `iss`, `aud`, and `exp`, caches at most 64 signing
+keys, and refreshes once when a previously unknown `kid` appears. Readiness
+warms and validates the JWKS dependency. A JWKS fetch failure is reported as a
+dependency failure rather than as an invalid client credential.
+
+User, team, and role claims support dot-separated paths for nested OIDC claims.
+The defaults are `sub`, `team_id`, and `roles`.
 
 Environment:
 
@@ -55,6 +63,12 @@ Environment:
 AUTH_JWT_SECRET=dev-jwt-secret
 AUTH_JWT_ISSUER=ai-gateway
 AUTH_JWT_AUDIENCE=ai-gateway
+AUTH_JWT_JWKS_URL=
+AUTH_JWT_JWKS_CACHE_TTL_SECONDS=300
+AUTH_JWT_CLOCK_SKEW_SECONDS=30
+AUTH_JWT_USER_ID_CLAIM=sub
+AUTH_JWT_TEAM_ID_CLAIM=team_id
+AUTH_JWT_ROLES_CLAIM=roles
 AUTH_POSTGRES_KEYS_ENABLED=true
 AUTH_POSTGRES_DSN=postgres://ai_gateway:password@postgres:5432/ai_gateway
 AUTH_KEY_HASH_SECRET=separate-random-pepper
