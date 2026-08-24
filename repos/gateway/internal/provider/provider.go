@@ -77,6 +77,7 @@ type Config struct {
 	RoutingStrategy         string
 	AdaptiveEWMAAlpha       float64
 	SessionStore            SessionStore
+	CircuitStore            CircuitStore
 	AffinityTTL             time.Duration
 	SemanticCacheTTL        time.Duration
 	SemanticCacheThreshold  float64
@@ -181,7 +182,7 @@ func New(cfg Config) Provider {
 		defaultProvider: cfg.Default,
 		endpoints:       endpoints,
 		modules:         cfg.Modules,
-		health:          newEndpointHealthTracker(),
+		health:          newEndpointHealthTracker(cfg.CircuitStore),
 		routeCounter:    &atomic.Uint64{},
 		cache:           newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
 		catalog:         cfg.Catalog,
@@ -199,7 +200,7 @@ func New(cfg Config) Provider {
 
 func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
 	request := req.Request
-	candidates := r.candidates(request, requiredChatCapabilities(request, false)...)
+	candidates := r.candidates(ctx, request, requiredChatCapabilities(request, false)...)
 	if len(candidates) == 0 {
 		return openai.ChatCompletionResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -319,7 +320,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestContext, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, bool, error) {
 	request := req.Request
 	request.Stream = true
-	candidates := r.candidates(request, requiredChatCapabilities(request, true)...)
+	candidates := r.candidates(ctx, request, requiredChatCapabilities(request, true)...)
 	if len(candidates) == 0 {
 		return openai.ChatCompletionResponse{}, false, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -353,20 +354,26 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			errs = append(errs, fmt.Errorf("%s/%s admission failed: %w", endpoint.Type, endpoint.Name, err))
 			continue
 		}
+		if err := r.health.permit(ctx, endpoint); err != nil {
+			release()
+			errs = append(errs, fmt.Errorf("%s/%s circuit denied call: %w", endpoint.Type, endpoint.Name, err))
+			continue
+		}
 		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "chat.stream")
 		response, err := streamingProvider.StreamChatCompletions(providerCtx, attemptCtx.Request, deanonymizingChatStreamWriter(attemptCtx.AnonymizationValues, write))
 		finishProviderCall(err)
 		release()
 		setAttemptMetadata(&attemptCtx, started, err)
 		if errors.Is(err, ErrStreamingUnsupported) {
+			r.health.success(ctx, endpoint)
 			continue
 		}
 		if err != nil {
-			r.health.failure(endpoint, err)
+			r.health.failure(ctx, endpoint, err)
 			r.modules.RunFailure(ctx, &attemptCtx, err)
 			return openai.ChatCompletionResponse{}, true, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err)
 		}
-		r.health.success(endpoint)
+		r.health.success(ctx, endpoint)
 
 		mergeChatUsage(&response, attemptCtx.Usage)
 		attemptCtx.Response = &response
@@ -475,7 +482,7 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 		return openai.EmbeddingResponse{}, errors.New("missing embedding request")
 	}
 	request := *req.EmbeddingRequest
-	candidates := r.candidates(openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "embeddings")
+	candidates := r.candidates(ctx, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "embeddings")
 	if len(candidates) == 0 {
 		return openai.EmbeddingResponse{}, fmt.Errorf("no embedding endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -574,20 +581,26 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			errs = append(errs, fmt.Errorf("%s/%s admission failed: %w", endpoint.Type, endpoint.Name, err))
 			continue
 		}
+		if err := r.health.permit(ctx, endpoint); err != nil {
+			release()
+			errs = append(errs, fmt.Errorf("%s/%s circuit denied call: %w", endpoint.Type, endpoint.Name, err))
+			continue
+		}
 		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "responses.stream")
 		response, err := streamingProvider.StreamResponses(providerCtx, *attemptCtx.ResponseRequest, deanonymizingResponseStreamWriter(attemptCtx.AnonymizationValues, write))
 		finishProviderCall(err)
 		release()
 		setAttemptMetadata(&attemptCtx, started, err)
 		if errors.Is(err, ErrStreamingUnsupported) {
+			r.health.success(ctx, endpoint)
 			continue
 		}
 		if err != nil {
-			r.health.failure(endpoint, err)
+			r.health.failure(ctx, endpoint, err)
 			r.modules.RunFailure(ctx, &attemptCtx, err)
 			return openai.ResponseResponse{}, true, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err)
 		}
-		r.health.success(endpoint)
+		r.health.success(ctx, endpoint)
 
 		mergeResponseUsage(&response, attemptCtx.Usage)
 		attemptCtx.ResponsesResponse = &response
@@ -716,6 +729,9 @@ func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.
 		return openai.ChatCompletionResponse{}, err
 	}
 	defer release()
+	if err := r.health.permit(ctx, endpoint); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	var response openai.ChatCompletionResponse
 	err = nil
 	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
@@ -723,14 +739,14 @@ func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.
 		response, err = endpoint.Provider.ChatCompletions(providerCtx, request)
 		finishProviderCall(err)
 		if err == nil {
-			r.health.success(endpoint)
+			r.health.success(ctx, endpoint)
 			return response, nil
 		}
 		if ctx.Err() != nil || attempt == endpoint.MaxRetries || !retrySameEndpoint(err) {
 			break
 		}
 	}
-	r.health.failure(endpoint, err)
+	r.health.failure(ctx, endpoint, err)
 	return openai.ChatCompletionResponse{}, err
 }
 
@@ -740,6 +756,9 @@ func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request op
 		return openai.ResponseResponse{}, err
 	}
 	defer release()
+	if err := r.health.permit(ctx, endpoint); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	var response openai.ResponseResponse
 	err = nil
 	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
@@ -747,14 +766,14 @@ func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request op
 		response, err = endpoint.Provider.Responses(providerCtx, request)
 		finishProviderCall(err)
 		if err == nil {
-			r.health.success(endpoint)
+			r.health.success(ctx, endpoint)
 			return response, nil
 		}
 		if ctx.Err() != nil || attempt == endpoint.MaxRetries || !retrySameEndpoint(err) {
 			break
 		}
 	}
-	r.health.failure(endpoint, err)
+	r.health.failure(ctx, endpoint, err)
 	return openai.ResponseResponse{}, err
 }
 
@@ -764,6 +783,9 @@ func (r Router) callEmbeddings(ctx context.Context, endpoint Endpoint, client Em
 		return openai.EmbeddingResponse{}, err
 	}
 	defer release()
+	if err := r.health.permit(ctx, endpoint); err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
 	var response openai.EmbeddingResponse
 	err = nil
 	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
@@ -771,14 +793,14 @@ func (r Router) callEmbeddings(ctx context.Context, endpoint Endpoint, client Em
 		response, err = client.Embeddings(providerCtx, request)
 		finishProviderCall(err)
 		if err == nil {
-			r.health.success(endpoint)
+			r.health.success(ctx, endpoint)
 			return response, nil
 		}
 		if ctx.Err() != nil || attempt == endpoint.MaxRetries || !retrySameEndpoint(err) {
 			break
 		}
 	}
-	r.health.failure(endpoint, err)
+	r.health.failure(ctx, endpoint, err)
 	return openai.EmbeddingResponse{}, err
 }
 
@@ -849,7 +871,7 @@ func mergeEmbeddingUsage(response *openai.EmbeddingResponse, usage *openai.Usage
 	response.Usage.TotalTokens += usage.PromptTokens
 }
 
-func (r Router) candidates(request openai.ChatCompletionRequest, capabilities ...string) []Endpoint {
+func (r Router) candidates(ctx context.Context, request openai.ChatCompletionRequest, capabilities ...string) []Endpoint {
 	requestedProvider := strings.TrimSpace(request.Provider)
 	filterByProvider := requestedProvider != ""
 	if requestedProvider == "" && strings.TrimSpace(request.Model) == "" {
@@ -859,9 +881,6 @@ func (r Router) candidates(request openai.ChatCompletionRequest, capabilities ..
 
 	var candidates []Endpoint
 	for _, endpoint := range r.endpoints {
-		if !r.health.available(endpoint) {
-			continue
-		}
 		if filterByProvider && requestedProvider != "auto" && requestedProvider != endpoint.Name && requestedProvider != endpoint.Type {
 			continue
 		}
@@ -889,6 +908,9 @@ func (r Router) candidates(request openai.ChatCompletionRequest, capabilities ..
 		if !r.supportsOutputLimit(endpoint, request.Model, request.MaxTokens) {
 			continue
 		}
+		if !r.health.available(ctx, endpoint) {
+			continue
+		}
 		candidates = append(candidates, endpoint)
 	}
 
@@ -904,7 +926,7 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 	if chatRequest.MaxTokens == nil {
 		chatRequest.MaxTokens = request.MaxTokens
 	}
-	candidates := r.candidates(chatRequest, capabilities...)
+	candidates := r.candidates(ctx, chatRequest, capabilities...)
 	if r.affinity == nil || request.PreviousResponse == "" {
 		return candidates, nil
 	}

@@ -3,6 +3,7 @@ package redisstore
 import (
 	"context"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -59,5 +60,56 @@ func TestRedisRateLimitIsAtomic(t *testing.T) {
 	group.Wait()
 	if allowed.Load() != 5 {
 		t.Fatalf("expected exactly five atomic admissions, got %d", allowed.Load())
+	}
+}
+
+func TestRedisCircuitIsSharedAndAllowsSingleHalfOpenProbe(t *testing.T) {
+	server := miniredis.RunT(t)
+	first := New(Config{Addr: server.Addr(), Prefix: "shared-circuit"})
+	second := New(Config{Addr: server.Addr(), Prefix: "shared-circuit"})
+	ctx := context.Background()
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	cooldown := time.Minute
+
+	if err := first.CircuitFailure(ctx, "ollama", 2, cooldown, now); err != nil {
+		t.Fatal(err)
+	}
+	if available, err := second.CircuitAvailable(ctx, "ollama", now); err != nil || !available {
+		t.Fatalf("circuit opened before threshold: available=%v err=%v", available, err)
+	}
+	if err := second.CircuitFailure(ctx, "ollama", 2, cooldown, now); err != nil {
+		t.Fatal(err)
+	}
+	if available, err := first.CircuitAvailable(ctx, "ollama", now); err != nil || available {
+		t.Fatalf("open circuit was not shared: available=%v err=%v", available, err)
+	}
+
+	afterCooldown := now.Add(cooldown)
+	if allowed, err := first.CircuitPermit(ctx, "ollama", afterCooldown, 30*time.Second); err != nil || !allowed {
+		t.Fatalf("first half-open probe was rejected: allowed=%v err=%v", allowed, err)
+	}
+	if allowed, err := second.CircuitPermit(ctx, "ollama", afterCooldown, 30*time.Second); err != nil || allowed {
+		t.Fatalf("second half-open probe was allowed: allowed=%v err=%v", allowed, err)
+	}
+	if err := first.CircuitFailure(ctx, "ollama", 2, cooldown, afterCooldown); err != nil {
+		t.Fatal(err)
+	}
+	if available, err := second.CircuitAvailable(ctx, "ollama", afterCooldown); err != nil || available {
+		t.Fatalf("failed half-open probe did not reopen circuit: available=%v err=%v", available, err)
+	}
+	afterSecondCooldown := afterCooldown.Add(cooldown)
+	if allowed, err := first.CircuitPermit(ctx, "ollama", afterSecondCooldown, 30*time.Second); err != nil || !allowed {
+		t.Fatalf("second half-open cycle was rejected: allowed=%v err=%v", allowed, err)
+	}
+	if err := first.CircuitSuccess(ctx, "ollama"); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := second.CircuitPermit(ctx, "ollama", afterSecondCooldown, 30*time.Second); err != nil || !allowed {
+		t.Fatalf("success did not close shared circuit: allowed=%v err=%v", allowed, err)
+	}
+	for _, key := range server.Keys() {
+		if strings.Contains(key, "ollama") {
+			t.Fatalf("endpoint name leaked into Redis key: %q", key)
+		}
 	}
 }

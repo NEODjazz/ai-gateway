@@ -89,6 +89,9 @@ func tryNextEndpoint(err error) bool {
 }
 
 func shouldCooldown(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
 	switch failureClass(err) {
 	case FailureAuthentication, FailureRateLimit, FailureTimeout, FailureUnavailable, FailureUnknown:
 		return true

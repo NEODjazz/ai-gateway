@@ -59,6 +59,7 @@ func main() {
 		RoutingStrategy:         cfg.Provider.RoutingStrategy,
 		AdaptiveEWMAAlpha:       cfg.Provider.AdaptiveEWMAAlpha,
 		SessionStore:            redisStore,
+		CircuitStore:            redisStore,
 		AffinityTTL:             cfg.Provider.AffinityTTL,
 		SemanticCacheTTL:        time.Duration(cfg.Cache.Semantic.TTLSeconds) * time.Second,
 		SemanticCacheThreshold:  cfg.Cache.Semantic.Threshold,

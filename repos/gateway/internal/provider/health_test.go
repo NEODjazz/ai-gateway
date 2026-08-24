@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -10,18 +12,37 @@ func TestEndpointHealthCooldownAndRecovery(t *testing.T) {
 	health := newEndpointHealthTracker()
 	health.now = func() time.Time { return now }
 	endpoint := Endpoint{Name: "primary", CooldownAfterFailures: 2, Cooldown: time.Minute}
+	ctx := context.Background()
 
-	health.failure(endpoint, statusError("primary", 503))
-	if !health.available(endpoint) {
+	health.failure(ctx, endpoint, statusError("primary", 503))
+	if !health.available(ctx, endpoint) {
 		t.Fatal("endpoint cooled down before reaching threshold")
 	}
-	health.failure(endpoint, statusError("primary", 503))
-	if health.available(endpoint) {
+	health.failure(ctx, endpoint, statusError("primary", 503))
+	if health.available(ctx, endpoint) {
 		t.Fatal("expected endpoint to be cooling down")
 	}
 	now = now.Add(time.Minute)
-	if !health.available(endpoint) {
+	if !health.available(ctx, endpoint) {
 		t.Fatal("expected endpoint to recover after cooldown")
+	}
+	if err := health.permit(ctx, endpoint); err != nil {
+		t.Fatalf("expected one half-open probe: %v", err)
+	}
+	if err := health.permit(ctx, endpoint); !errors.Is(err, ErrCircuitOpen) {
+		t.Fatalf("second half-open probe was allowed: %v", err)
+	}
+	health.failure(ctx, endpoint, statusError("primary", 503))
+	if health.available(ctx, endpoint) {
+		t.Fatal("failed half-open probe did not reopen circuit")
+	}
+	now = now.Add(time.Minute)
+	if err := health.permit(ctx, endpoint); err != nil {
+		t.Fatal(err)
+	}
+	health.success(ctx, endpoint)
+	if err := health.permit(ctx, endpoint); err != nil {
+		t.Fatalf("success did not close circuit: %v", err)
 	}
 }
 
@@ -34,5 +55,8 @@ func TestFailurePolicy(t *testing.T) {
 	}
 	if tryNextEndpoint(statusError("provider", 400)) || shouldCooldown(statusError("provider", 400)) {
 		t.Fatal("400 must be terminal and must not affect endpoint health")
+	}
+	if shouldCooldown(context.Canceled) {
+		t.Fatal("client cancellation must not affect shared endpoint health")
 	}
 }

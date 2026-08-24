@@ -189,6 +189,12 @@ request-derived capabilities (`chat`, `responses`, `embeddings`, `stream`, `tool
 
 В режиме `ROUTING_STRATEGY=adaptive` порядок endpoints одного priority
 уточняется по EWMA latency и failures; priority остаётся жёсткой границей.
+Circuit breaker считает transient failures до `cooldown_after_failures`, после
+чего сохраняет `open_until`. При настроенном Redis состояние разделяется всеми
+replicas; после cooldown только одна replica получает ограниченную по времени
+half-open probe lease. Успех закрывает circuit, а ошибка probe открывает его на
+новый `cooldown_seconds`. При ошибке Redis router использует локальный tracker,
+но readiness остается неуспешным до восстановления Redis.
 Responses `previous_response_id` закрепляется за создавшим его endpoint в
 tenant-scoped affinity store. С Redis это общий state для всех replicas, без
 Redis — локальный memory fallback. Provider-scoped response ID не отправляется

@@ -236,6 +236,10 @@ Retries and cooldown are configured per endpoint with `max_retries`,
 `cooldown_after_failures`, and `cooldown_seconds`. Only transient failures are
 retried on the same endpoint; invalid requests and content-policy rejections are
 terminal, and post-response failures never trigger a second model generation.
+When Redis is configured, failure counters, `open_until`, and a single half-open
+probe lease are shared by every gateway replica. Without Redis the same circuit
+states remain process-local. A transient Redis error falls back to the local
+tracker while readiness continues to report the Redis dependency failure.
 
 Provider concurrency is bounded per endpoint with `max_parallel_requests`.
 `queue_capacity` and `queue_timeout_ms` optionally add a bounded waiting queue;
