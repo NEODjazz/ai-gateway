@@ -369,6 +369,13 @@ bounded health signals but never base URLs, API keys or secret references.
 These overrides are process-local runtime state and are intentionally reset from
 the operator-owned Helm/environment configuration when a gateway pod restarts.
 
+Guardrail policies are also hot runtime state: each named policy enables DLP,
+AV, or both and can be attached to a model deployment. The Compliance
+Playground sends a bounded text projection directly to those internal scanners,
+never invokes a model, never echoes the submitted text, and reports
+`content_stored: false`. A rejected scanner produces an explicit deny decision;
+an unavailable enabled scanner fails closed with HTTP 503.
+
 `GET /metrics` exposes Prometheus-format HTTP, provider-attempt, cache,
 module, security, and billing lifecycle counters plus duration sums. Labels are
 bounded: unmatched URLs become `path="unmatched"`, results use a fixed enum, and

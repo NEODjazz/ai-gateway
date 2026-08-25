@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>AI Gateway Console</title>
-  <link rel="stylesheet" href="/ui/assets/app.css?v=9">
-  <script src="/ui/assets/app.js?v=9" defer></script>
+  <link rel="stylesheet" href="/ui/assets/app.css?v=10">
+  <script src="/ui/assets/app.js?v=10" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-view">
@@ -42,6 +42,7 @@
         <button class="nav-item" data-view="teams"><span>Teams</span><span id="teams-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="models"><span>Models</span><span id="models-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="deployments"><span>Model deployments</span><span id="deployments-badge" class="badge">0</span></button>
+        <button class="nav-item" data-view="guardrails"><span>Guardrails</span><span id="guardrails-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="budgets"><span>Budgets</span><span id="budgets-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="audit"><span>Audit log</span></button>
         <a class="nav-item nav-link" href="/docs/" target="_blank" rel="noreferrer"><span>API documentation</span><span>↗</span></a>
@@ -137,6 +138,11 @@
           <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Deployment</th><th>Models</th><th>Capabilities</th><th>Priority / Weight</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="deployments-table"></tbody></table></div><div id="deployments-empty" class="empty-state" hidden>No preconfigured deployments.</div></div>
         </section>
 
+        <section id="view-guardrails" class="view" aria-labelledby="guardrails-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Compliance</p><h2 id="guardrails-heading">Guardrail policies</h2><p class="muted">Runtime DLP/AV policies and a no-provider, no-content-storage compliance check.</p></div><button id="add-guardrail-button" class="primary-button">Add policy</button></div>
+          <div class="split-grid"><article class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Policy</th><th>Checks</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="guardrails-table"></tbody></table></div><div id="guardrails-empty" class="empty-state" hidden>No guardrail policies.</div></article><form id="compliance-form" class="panel playground-form"><p class="eyebrow">Compliance playground</p><h3>Dry-run text checks</h3><label>Policy<select id="compliance-policy" required></select></label><label>Text<textarea id="compliance-text" rows="8" maxlength="65536" required placeholder="Text is sent only to the selected DLP/AV scanners."></textarea></label><p class="security-note">No LLM call. Content is not stored by the gateway.</p><p id="compliance-error" class="form-error" hidden></p><button type="submit" class="primary-button">Run compliance check</button><pre id="compliance-result">Run a check to see the result.</pre></form></div>
+        </section>
+
         <section id="view-audit" class="view" aria-labelledby="audit-heading" hidden>
           <div class="section-heading"><div><p class="eyebrow">Governance</p><h2 id="audit-heading">Audit log</h2><p class="muted">Append-only management attempts and outcomes.</p></div><div class="filter-row"><input id="audit-action" type="search" placeholder="Filter action"><button id="audit-filter-button" class="secondary-button">Apply</button></div></div>
           <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Actor</th><th>Outcome</th><th>Request</th></tr></thead><tbody id="audit-table"></tbody></table></div><div id="audit-empty" class="empty-state" hidden>No audit events found.</div></div>
@@ -210,6 +216,10 @@
 
   <dialog id="deployment-dialog" class="modal">
     <form id="deployment-form" method="dialog"><div class="modal-heading"><div><p class="eyebrow">Runtime routing</p><h2>Edit deployment</h2></div><button type="button" class="icon-button close-dialog" data-dialog="deployment-dialog">×</button></div><input id="deployment-id" type="hidden"><div class="form-grid"><label>Endpoint<input id="deployment-name" readonly></label><label>Provider type<input id="deployment-type" readonly></label><label class="span-2">Models<input id="deployment-models" required placeholder="public-model, fallback-model"></label><label class="span-2">Capabilities<input id="deployment-capabilities" placeholder="chat, stream, tools"></label><label>Priority<input id="deployment-priority" type="number" min="0" step="1"></label><label>Weight<input id="deployment-weight" type="number" min="1" step="1"></label><label class="span-2">Guardrail policy<input id="deployment-guardrail" maxlength="128"></label><label class="checkbox-label span-2"><input id="deployment-enabled" type="checkbox"> Enabled for new routing decisions</label></div><p id="deployment-form-error" class="form-error" hidden></p><div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="deployment-dialog">Cancel</button><button type="submit" class="primary-button">Apply runtime update</button></div></form>
+  </dialog>
+
+  <dialog id="guardrail-dialog" class="modal">
+    <form id="guardrail-form" method="dialog"><div class="modal-heading"><div><p class="eyebrow">Compliance</p><h2>Edit guardrail policy</h2></div><button type="button" class="icon-button close-dialog" data-dialog="guardrail-dialog">×</button></div><div class="form-grid"><label>Policy name<input id="guardrail-name" required maxlength="128"></label><label class="span-2">Description<input id="guardrail-description" maxlength="1024"></label><label class="checkbox-label"><input id="guardrail-dlp" type="checkbox"> DLP text scan</label><label class="checkbox-label"><input id="guardrail-av" type="checkbox"> AV scan</label><label class="checkbox-label"><input id="guardrail-enabled" type="checkbox"> Enabled</label></div><p id="guardrail-form-error" class="form-error" hidden></p><div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="guardrail-dialog">Cancel</button><button type="submit" class="primary-button">Save policy</button></div></form>
   </dialog>
 
   <dialog id="budget-dialog" class="modal">

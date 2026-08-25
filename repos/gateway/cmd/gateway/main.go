@@ -40,9 +40,11 @@ func main() {
 	gatewayPipeline := modules.NewPipelineWithObserver([]modules.Module{
 		modules.Auth(cfg.Modules.Auth.Required, cfg.Modules.Auth.URL),
 	}, metrics)
+	dlpModule := modules.DLP(cfg.Modules.DLP.Required, cfg.Modules.DLP.URL)
+	avModule := modules.AV(cfg.Modules.AV.Required, cfg.Modules.AV.URL)
 	providerPipeline := modules.NewPipelineWithObserver([]modules.Module{
-		modules.DLP(cfg.Modules.DLP.Required, cfg.Modules.DLP.URL),
-		modules.AV(cfg.Modules.AV.Required, cfg.Modules.AV.URL),
+		dlpModule,
+		avModule,
 		modules.Anonymizer(cfg.Modules.Anonymizer.Required, cfg.Modules.Anonymizer.URL),
 		modules.BillingWithSecret(cfg.Modules.Billing.Required, cfg.Modules.Billing.URL, cfg.Modules.Billing.Secret),
 	}, metrics)
@@ -84,7 +86,7 @@ func main() {
 	if redisStore != nil {
 		readiness = redisStore.Ping
 	}
-	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry)
+	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule)
 	if cfg.APIDocs.Enabled {
 		handler = handler.WithAPIDocs(cfg.APIDocs.TryItOutEnabled)
 	}

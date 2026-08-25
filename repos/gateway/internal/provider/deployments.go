@@ -128,6 +128,18 @@ func (r Router) runtimeEndpoints() []Endpoint {
 			endpoint.Weight = deployment.Weight
 			endpoint.GuardrailPolicy = deployment.GuardrailPolicy
 		}
+		if endpoint.GuardrailPolicy != "" && r.guardrails != nil {
+			policies := r.guardrails.current.Load()
+			policy, exists := GuardrailPolicy{}, false
+			if policies != nil {
+				policy, exists = (*policies)[endpoint.GuardrailPolicy]
+			}
+			endpoint.GuardrailPolicyValid = exists && policy.Enabled
+			if endpoint.GuardrailPolicyValid {
+				endpoint.DLPEnabled = policy.DLP
+				endpoint.AVEnabled = policy.AV
+			}
+		}
 		result = append(result, endpoint)
 	}
 	sort.SliceStable(result, func(i, j int) bool { return result[i].Priority < result[j].Priority })

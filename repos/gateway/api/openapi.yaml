@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.6
+  version: 0.1.7
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -19,6 +19,7 @@ tags:
   - name: Virtual keys
   - name: Identity
   - name: Model deployments
+  - name: Guardrails
   - name: Operations
   - name: Observability
 security:
@@ -509,6 +510,42 @@ paths:
         '403': {$ref: '#/components/responses/AdminRequired'}
         '404': {$ref: '#/components/responses/NotFound'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/guardrail-policies:
+    get:
+      operationId: listGuardrailPolicies
+      tags: [Guardrails]
+      summary: List runtime DLP and AV policies
+      responses:
+        '200': {description: Guardrail policies, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/GuardrailPolicy'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/guardrail-policies/{name}:
+    put:
+      operationId: updateGuardrailPolicy
+      tags: [Guardrails]
+      summary: Create or atomically update a runtime guardrail policy
+      parameters: [{$ref: '#/components/parameters/GuardrailPolicyName'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GuardrailPolicyInput'}}}}
+      responses:
+        '200': {description: Guardrail policy saved, content: {application/json: {schema: {$ref: '#/components/schemas/GuardrailPolicy'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/compliance/check:
+    post:
+      operationId: checkCompliance
+      tags: [Guardrails]
+      summary: Dry-run text through a guardrail policy without calling a model
+      description: Text is projected to selected DLP/AV scanners and is not stored by the gateway or returned in the response.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ComplianceCheckInput'}}}}
+      responses:
+        '200': {description: Compliance decision, content: {application/json: {schema: {$ref: '#/components/schemas/ComplianceCheckResult'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/budgets:
     get:
       operationId: listBudgets
@@ -812,6 +849,11 @@ components:
       in: path
       required: true
       schema: {type: string, minLength: 1, maxLength: 256}
+    GuardrailPolicyName:
+      name: name
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
     BudgetID:
       name: id
       in: path
@@ -1622,3 +1664,35 @@ components:
             runtime_state: {type: string, enum: [available, cooling_down, disabled]}
             latency_ewma_ms: {type: number, minimum: 0}
             failure_ewma: {type: number, minimum: 0, maximum: 1}
+    GuardrailPolicyInput:
+      type: object
+      additionalProperties: false
+      required: [dlp, av, enabled]
+      properties:
+        description: {type: string, maxLength: 1024}
+        dlp: {type: boolean}
+        av: {type: boolean}
+        enabled: {type: boolean}
+    GuardrailPolicy:
+      allOf:
+        - {$ref: '#/components/schemas/GuardrailPolicyInput'}
+        - type: object
+          required: [name]
+          properties: {name: {type: string}}
+    ComplianceCheckInput:
+      type: object
+      additionalProperties: false
+      required: [policy, text]
+      properties:
+        policy: {type: string, minLength: 1, maxLength: 128}
+        text: {type: string, minLength: 1, maxLength: 65536, writeOnly: true}
+    ComplianceCheckResult:
+      type: object
+      additionalProperties: false
+      required: [request_id, policy, allowed, checks, content_stored]
+      properties:
+        request_id: {type: string}
+        policy: {type: string}
+        allowed: {type: boolean}
+        checks: {type: object, additionalProperties: {type: string, enum: [passed, rejected, unavailable, disabled]}}
+        content_stored: {type: boolean, const: false}

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], models: [], deployments: [], catalog: null, budgets: [], audit: [] };
+  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], models: [], deployments: [], guardrails: [], catalog: null, budgets: [], audit: [] };
   const $ = (id) => document.getElementById(id);
   const loginView = $("login-view");
   const consoleView = $("console-view");
@@ -9,7 +9,7 @@
   const tokenInput = $("admin-token");
   const loginError = $("login-error");
   const globalError = $("global-error");
-  const pageTitles = { overview: "Overview", usage: "Usage & spend", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", models: "Models", deployments: "Model deployments", budgets: "Budgets", audit: "Audit log" };
+  const pageTitles = { overview: "Overview", usage: "Usage & spend", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", models: "Models", deployments: "Model deployments", guardrails: "Guardrails", budgets: "Budgets", audit: "Audit log" };
   let pendingConfirmation = null;
 
   function setText(id, value) { const element = $(id); if (element) element.textContent = value; }
@@ -84,6 +84,7 @@
       api("/admin/v1/users?limit=100"),
       api("/admin/v1/teams?limit=100"),
       api("/admin/v1/model-deployments"),
+      api("/admin/v1/guardrail-policies"),
     ];
     const results = await Promise.allSettled(requests);
     const authFailure = results.find((result) => result.status === "rejected" && result.reason?.auth);
@@ -101,6 +102,7 @@
     if (results[9].status === "fulfilled") state.users = results[9].value?.data || []; else errors.push(`Users: ${results[9].reason.message}`);
     if (results[10].status === "fulfilled") state.teams = results[10].value?.data || []; else errors.push(`Teams: ${results[10].reason.message}`);
     if (results[11].status === "fulfilled") state.deployments = results[11].value?.data || []; else errors.push(`Deployments: ${results[11].reason.message}`);
+    if (results[12].status === "fulfilled") state.guardrails = results[12].value?.data || []; else errors.push(`Guardrails: ${results[12].reason.message}`);
     renderAll();
     setText("console-health", errors.length ? "Degraded" : "Operational");
     if (errors.length) { globalError.textContent = errors.join(" · "); globalError.hidden = false; }
@@ -128,6 +130,7 @@
     setText("users-badge", formatNumber(state.users.length));
     setText("teams-badge", formatNumber(state.teams.length));
     setText("deployments-badge", formatNumber(state.deployments.filter((item)=>item.enabled).length));
+    setText("guardrails-badge", formatNumber(state.guardrails.filter((item)=>item.enabled).length));
     setText("catalog-version", state.catalog?.version ? `Version ${state.catalog.version}` : "Runtime registry");
     renderOverview();
     renderRouting();
@@ -138,6 +141,7 @@
     renderUsers();
     renderTeams();
     renderDeployments();
+    renderGuardrails();
     renderModels();
     renderBudgets();
     renderAudit();
@@ -358,6 +362,11 @@
   function openDeploymentDialog(item){$("deployment-id").value=item.id;$("deployment-name").value=item.id;$("deployment-type").value=item.provider_type;$("deployment-models").value=(item.models||[]).join(", ");$("deployment-capabilities").value=(item.capabilities||[]).join(", ");$("deployment-priority").value=item.priority||0;$("deployment-weight").value=item.weight||1;$("deployment-guardrail").value=item.guardrail_policy||"";$("deployment-enabled").checked=Boolean(item.enabled);$("deployment-form-error").hidden=true;$("deployment-dialog").showModal()}
   async function saveDeployment(event){event.preventDefault();const error=$("deployment-form-error");error.hidden=true;const id=$("deployment-id").value;try{await apiJSON(`/admin/v1/model-deployments/${encodeURIComponent(id)}`,"PUT",{models:commaList("deployment-models"),capabilities:commaList("deployment-capabilities"),priority:Number($("deployment-priority").value||0),weight:Number($("deployment-weight").value||1),guardrail_policy:$("deployment-guardrail").value.trim(),enabled:$("deployment-enabled").checked});$("deployment-dialog").close();await loadData();showToast("Runtime deployment updated")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
 
+  function renderGuardrails(){const body=$("guardrails-table");clear(body);$("guardrails-empty").hidden=state.guardrails.length!==0;const select=$("compliance-policy"),selected=select.value;clear(select);for(const policy of state.guardrails){const row=document.createElement("tr");row.appendChild(textCell(policy.name,policy.description));row.appendChild(plainCell([policy.dlp?"DLP":"",policy.av?"AV":""].filter(Boolean).join(" + ")));const statusCell=document.createElement("td");const status=document.createElement("span");status.className=`outcome ${policy.enabled?"succeeded":"failed"}`;status.textContent=policy.enabled?"Enabled":"Disabled";statusCell.appendChild(status);row.appendChild(statusCell);const actions=document.createElement("td");const edit=document.createElement("button");edit.type="button";edit.className="row-button";edit.textContent="Edit";edit.addEventListener("click",()=>openGuardrailDialog(policy));actions.appendChild(edit);row.appendChild(actions);body.appendChild(row);if(policy.enabled){const option=document.createElement("option");option.value=policy.name;option.textContent=policy.name;select.appendChild(option)}}if([...select.options].some(option=>option.value===selected))select.value=selected}
+  function openGuardrailDialog(policy=null){$("guardrail-name").value=policy?.name||"";$("guardrail-name").readOnly=Boolean(policy);$("guardrail-description").value=policy?.description||"";$("guardrail-dlp").checked=Boolean(policy?.dlp);$("guardrail-av").checked=Boolean(policy?.av);$("guardrail-enabled").checked=policy?.enabled??true;$("guardrail-form-error").hidden=true;$("guardrail-dialog").showModal()}
+  async function saveGuardrail(event){event.preventDefault();const error=$("guardrail-form-error");error.hidden=true;const name=$("guardrail-name").value.trim();if(!$("guardrail-dlp").checked&&!$("guardrail-av").checked){error.textContent="Enable DLP, AV, or both.";error.hidden=false;return}try{await apiJSON(`/admin/v1/guardrail-policies/${encodeURIComponent(name)}`,"PUT",{description:$("guardrail-description").value.trim(),dlp:$("guardrail-dlp").checked,av:$("guardrail-av").checked,enabled:$("guardrail-enabled").checked});$("guardrail-dialog").close();await loadData();showToast("Guardrail policy saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
+  async function runCompliance(event){event.preventDefault();const error=$("compliance-error");error.hidden=true;try{const result=await apiJSON("/admin/v1/compliance/check","POST",{policy:$("compliance-policy").value,text:$("compliance-text").value});$("compliance-result").textContent=JSON.stringify(result,null,2)}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
+
   function openUserDialog(user=null){$("user-id").value=user?.id||"";$("user-id").readOnly=Boolean(user);$("user-email").value=user?.email||"";$("user-name").value=user?.name||"";$("user-status").value=user?.status||"active";$("user-roles").value=(user?.roles||[]).join(", ");$("user-form-error").hidden=true;$("user-dialog").showModal()}
   async function saveUser(event){event.preventDefault();const error=$("user-form-error");error.hidden=true;const id=$("user-id").value.trim();try{await apiJSON(`/admin/v1/users/${encodeURIComponent(id)}`,"PUT",{email:$("user-email").value.trim(),name:$("user-name").value.trim(),status:$("user-status").value,roles:commaList("user-roles")});$("user-dialog").close();await loadData();showToast("User saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
   function openTeamDialog(team=null){$("team-id").value=team?.id||"";$("team-id").readOnly=Boolean(team);$("team-name").value=team?.name||"";$("team-description").value=team?.description||"";$("team-status").value=team?.status||"active";$("team-form-error").hidden=true;$("team-dialog").showModal()}
@@ -569,6 +578,9 @@
   $("add-model-button").addEventListener("click", () => openModelDialog());
   $("model-form").addEventListener("submit", saveModel);
   $("deployment-form").addEventListener("submit",saveDeployment);
+  $("add-guardrail-button").addEventListener("click",()=>openGuardrailDialog());
+  $("guardrail-form").addEventListener("submit",saveGuardrail);
+  $("compliance-form").addEventListener("submit",runCompliance);
   $("add-budget-button").addEventListener("click", () => openBudgetDialog());
   $("budget-form").addEventListener("submit", saveBudget);
   for (const button of document.querySelectorAll(".close-dialog")) button.addEventListener("click", () => $(button.dataset.dialog).close());

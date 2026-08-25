@@ -26,6 +26,8 @@ type Handler struct {
 	ready       func(context.Context) error
 	management  ManagementClient
 	directory   IdentityDirectoryClient
+	dlp         modules.Module
+	av          modules.Module
 	budgets     BudgetManagementClient
 	usage       UsageManagementClient
 	requestLogs RequestLogClient

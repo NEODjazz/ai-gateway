@@ -52,6 +52,9 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPut, "/admin/v1/model-catalog"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutModelCatalog) }},
 	{RouteContract{http.MethodGet, "/admin/v1/model-deployments"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListModelDeployments) }},
 	{RouteContract{http.MethodPut, "/admin/v1/model-deployments/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateModelDeployment) }},
+	{RouteContract{http.MethodGet, "/admin/v1/guardrail-policies"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListGuardrailPolicies) }},
+	{RouteContract{http.MethodPut, "/admin/v1/guardrail-policies/{name}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateGuardrailPolicy) }},
+	{RouteContract{http.MethodPost, "/admin/v1/compliance/check"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CheckCompliance) }},
 	{RouteContract{http.MethodGet, "/admin/v1/audit/events"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListAuditEvents) }},
 }
 

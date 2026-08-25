@@ -138,6 +138,7 @@ type Router struct {
 	affinity        affinityStore
 	semantic        *semanticResponseCache
 	deployments     *deploymentRegistry
+	guardrails      *guardrailRegistry
 }
 
 func New(cfg Config) Provider {
@@ -236,6 +237,12 @@ func New(cfg Config) Provider {
 	}
 	router.deployments = &deploymentRegistry{}
 	router.deployments.current.Store(&initialDeployments)
+	initialGuardrails := make(map[string]GuardrailPolicy, len(cfg.GuardrailPolicies))
+	for name, policy := range cfg.GuardrailPolicies {
+		initialGuardrails[name] = GuardrailPolicy{Name: name, DLP: policy.DLP, AV: policy.AV, Enabled: true}
+	}
+	router.guardrails = &guardrailRegistry{}
+	router.guardrails.current.Store(&initialGuardrails)
 	return router
 }
 
