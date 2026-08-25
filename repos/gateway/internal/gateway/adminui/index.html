@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>AI Gateway Console</title>
-  <link rel="stylesheet" href="/ui/assets/app.css">
-  <script src="/ui/assets/app.js" defer></script>
+  <link rel="stylesheet" href="/ui/assets/app.css?v=2">
+  <script src="/ui/assets/app.js?v=2" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-view">
@@ -67,13 +67,13 @@
         </section>
 
         <section id="view-models" class="view" aria-labelledby="models-heading" hidden>
-          <div class="section-heading"><div><p class="eyebrow">Runtime registry</p><h2 id="models-heading">Models</h2><p class="muted">Public model names, ownership and catalog capabilities.</p></div><label class="search-field"><span class="sr-only">Search models</span><input id="model-search" type="search" placeholder="Search model or provider"></label></div>
-          <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Model</th><th>Provider</th><th>Capabilities</th><th>Input / 1M</th><th>Output / 1M</th></tr></thead><tbody id="models-table"></tbody></table></div><div id="models-empty" class="empty-state" hidden>No models match this filter.</div></div>
+          <div class="section-heading"><div><p class="eyebrow">Runtime registry</p><h2 id="models-heading">Models</h2><p class="muted">Public model names, ownership and catalog capabilities.</p></div><div class="heading-actions"><label class="search-field"><span class="sr-only">Search models</span><input id="model-search" type="search" placeholder="Search model or provider"></label><button id="add-model-button" class="primary-button">Add catalog entry</button></div></div>
+          <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Model</th><th>Provider</th><th>Capabilities</th><th>Input / 1M</th><th>Output / 1M</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="models-table"></tbody></table></div><div id="models-empty" class="empty-state" hidden>No models match this filter.</div></div>
         </section>
 
         <section id="view-budgets" class="view" aria-labelledby="budgets-heading" hidden>
-          <div class="section-heading"><div><p class="eyebrow">Policy controls</p><h2 id="budgets-heading">Budgets</h2><p class="muted">Spend and token limits enforced by scope and period.</p></div></div>
-          <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Scope</th><th>Period</th><th>Cost limit</th><th>Token limit</th><th>Status</th><th>Updated</th></tr></thead><tbody id="budgets-table"></tbody></table></div><div id="budgets-empty" class="empty-state" hidden>No budget policies configured.</div></div>
+          <div class="section-heading"><div><p class="eyebrow">Policy controls</p><h2 id="budgets-heading">Budgets</h2><p class="muted">Spend and token limits enforced by scope and period.</p></div><button id="add-budget-button" class="primary-button">Create budget</button></div>
+          <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Scope</th><th>Period</th><th>Cost limit</th><th>Token limit</th><th>Status</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="budgets-table"></tbody></table></div><div id="budgets-empty" class="empty-state" hidden>No budget policies configured.</div></div>
         </section>
 
         <section id="view-audit" class="view" aria-labelledby="audit-heading" hidden>
@@ -83,6 +83,51 @@
       </main>
     </div>
   </div>
+
+  <dialog id="model-dialog" class="modal">
+    <form id="model-form" method="dialog">
+      <div class="modal-heading"><div><p class="eyebrow">Runtime catalog</p><h2 id="model-dialog-title">Add catalog entry</h2></div><button type="button" class="icon-button close-dialog" data-dialog="model-dialog" aria-label="Close">×</button></div>
+      <input id="model-original-key" type="hidden">
+      <div class="form-grid">
+        <label>Provider<input id="model-provider" required maxlength="128" placeholder="ollama-local"></label>
+        <label>Model<input id="model-name" required maxlength="256" placeholder="phi3:latest"></label>
+        <label class="span-2">Capabilities<input id="model-capabilities" placeholder="chat, responses, stream"></label>
+        <label>Max input tokens<input id="model-max-input" type="number" min="0" step="1"></label>
+        <label>Max output tokens<input id="model-max-output" type="number" min="0" step="1"></label>
+        <label>Input cost / 1M<input id="model-input-cost" type="number" min="0" step="0.000001"></label>
+        <label>Output cost / 1M<input id="model-output-cost" type="number" min="0" step="0.000001"></label>
+        <label>Currency<input id="model-currency" maxlength="3" placeholder="USD"></label>
+      </div>
+      <p id="model-form-error" class="form-error" role="alert" hidden></p>
+      <div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="model-dialog">Cancel</button><button type="submit" class="primary-button">Save catalog</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="budget-dialog" class="modal">
+    <form id="budget-form" method="dialog">
+      <div class="modal-heading"><div><p class="eyebrow">Policy controls</p><h2 id="budget-dialog-title">Create budget</h2></div><button type="button" class="icon-button close-dialog" data-dialog="budget-dialog" aria-label="Close">×</button></div>
+      <input id="budget-id" type="hidden">
+      <div class="form-grid">
+        <label>Scope type<select id="budget-scope-type"><option>global</option><option>key</option><option>user</option><option>team</option><option>model</option><option>provider</option></select></label>
+        <label>Scope ID<input id="budget-scope-id" required maxlength="256" placeholder="team-a"></label>
+        <label>Period<select id="budget-period"><option>hour</option><option>day</option><option>week</option><option>month</option></select></label>
+        <label>Currency<input id="budget-currency" required maxlength="3" value="USD"></label>
+        <label>Maximum cost<input id="budget-max-cost" type="number" min="0" step="0.000001" placeholder="10.00"></label>
+        <label>Maximum tokens<input id="budget-max-tokens" type="number" min="1" step="1" placeholder="100000"></label>
+        <label class="checkbox-label span-2"><input id="budget-enabled" type="checkbox" checked>Policy enabled</label>
+      </div>
+      <p id="budget-form-error" class="form-error" role="alert" hidden></p>
+      <div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="budget-dialog">Cancel</button><button type="submit" class="primary-button">Save budget</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="modal confirm-modal">
+    <form id="confirm-form" method="dialog">
+      <div class="modal-heading"><div><p class="eyebrow">Confirm change</p><h2 id="confirm-title">Disable policy?</h2></div></div>
+      <p id="confirm-message" class="muted"></p>
+      <div class="modal-actions"><button id="confirm-cancel" type="button" class="secondary-button">Cancel</button><button id="confirm-submit" type="submit" class="danger-button">Confirm</button></div>
+    </form>
+  </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </body>

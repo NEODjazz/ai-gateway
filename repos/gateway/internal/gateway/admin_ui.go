@@ -15,8 +15,8 @@ func registerAdminUI(mux *http.ServeMux) {
 		http.Redirect(w, r, "/ui/", http.StatusTemporaryRedirect)
 	})))
 	mux.Handle("GET /ui/{$}", adminUISecurityHeaders(false, adminUIAsset("adminui/index.html", "text/html; charset=utf-8")))
-	mux.Handle("GET /ui/assets/app.css", adminUISecurityHeaders(true, adminUIAsset("adminui/app.css", "text/css; charset=utf-8")))
-	mux.Handle("GET /ui/assets/app.js", adminUISecurityHeaders(true, adminUIAsset("adminui/app.js", "text/javascript; charset=utf-8")))
+	mux.Handle("GET /ui/assets/app.css", adminUISecurityHeaders(false, adminUIAsset("adminui/app.css", "text/css; charset=utf-8")))
+	mux.Handle("GET /ui/assets/app.js", adminUISecurityHeaders(false, adminUIAsset("adminui/app.js", "text/javascript; charset=utf-8")))
 }
 
 func adminUIAsset(name, contentType string) http.Handler {

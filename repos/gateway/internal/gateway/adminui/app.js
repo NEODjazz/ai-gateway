@@ -10,6 +10,7 @@
   const loginError = $("login-error");
   const globalError = $("global-error");
   const pageTitles = { overview: "Overview", models: "Models", budgets: "Budgets", audit: "Audit log" };
+  let pendingConfirmation = null;
 
   function setText(id, value) { const element = $(id); if (element) element.textContent = value; }
   function clear(element) { while (element.firstChild) element.removeChild(element.firstChild); }
@@ -53,6 +54,10 @@
     return response.json();
   }
 
+  async function apiJSON(path, method, body) {
+    return api(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  }
+
   async function loadData({ action = "" } = {}) {
     globalError.hidden = true;
     const query = new URLSearchParams({ limit: "100" });
@@ -78,10 +83,9 @@
     setText("last-refresh", `Updated ${now}`);
   }
 
-  function catalogByModel() {
-    const index = new Map();
-    for (const item of state.catalog?.models || []) index.set(item.model, item);
-    return index;
+  function catalogEntry(model) {
+    const entries = (state.catalog?.models || []).filter((item) => item.model === model.id);
+    return entries.find((item) => item.provider === model.owned_by) || (entries.length === 1 ? entries[0] : {});
   }
 
   function renderAll() {
@@ -124,11 +128,12 @@
   function renderModels() {
     const body = $("models-table"); clear(body);
     const query = $("model-search").value.trim().toLowerCase();
-    const catalog = catalogByModel();
-    const visible = state.models.filter((model) => `${model.id} ${model.owned_by || ""}`.toLowerCase().includes(query));
+    const union = new Map(state.models.map((model) => [`${model.owned_by}\u0000${model.id}`, model]));
+    for (const item of state.catalog?.models || []) { const key = `${item.provider}\u0000${item.model}`; if (!union.has(key)) union.set(key, { id: item.model, object: "catalog", owned_by: item.provider }); }
+    const visible = Array.from(union.values()).filter((model) => `${model.id} ${model.owned_by || ""}`.toLowerCase().includes(query));
     $("models-empty").hidden = visible.length !== 0;
     for (const model of visible) {
-      const catalogItem = catalog.get(model.id) || {};
+      const catalogItem = catalogEntry(model);
       const row = document.createElement("tr");
       row.appendChild(textCell(model.id, model.object));
       row.appendChild(plainCell(model.owned_by));
@@ -139,6 +144,13 @@
       capabilities.appendChild(list); row.appendChild(capabilities);
       row.appendChild(plainCell(formatMoney(catalogItem.input_cost_per_1m, catalogItem.currency)));
       row.appendChild(plainCell(formatMoney(catalogItem.output_cost_per_1m, catalogItem.currency)));
+      const actions = document.createElement("td"); actions.className = "row-actions";
+      if (catalogItem.model) {
+        const edit = document.createElement("button"); edit.className = "row-button"; edit.type = "button"; edit.textContent = "Edit"; edit.addEventListener("click", () => openModelDialog(catalogItem));
+        const remove = document.createElement("button"); remove.className = "row-button danger"; remove.type = "button"; remove.textContent = "Remove"; remove.addEventListener("click", () => confirmChange("Remove catalog entry?", `${catalogItem.provider}/${catalogItem.model} will be removed from the runtime registry.`, () => removeCatalogEntry(catalogItem)));
+        actions.append(edit, remove);
+      } else { const hint = document.createElement("small"); hint.textContent = "Not cataloged"; actions.appendChild(hint); }
+      row.appendChild(actions);
       body.appendChild(row);
     }
   }
@@ -153,6 +165,10 @@
       row.appendChild(plainCell(formatNumber(budget.max_tokens)));
       const statusCell = document.createElement("td"); const status = document.createElement("span"); status.className = `outcome ${budget.enabled ? "succeeded" : "failed"}`; status.textContent = budget.enabled ? "Active" : "Disabled"; statusCell.appendChild(status); row.appendChild(statusCell);
       row.appendChild(plainCell(formatDate(budget.updated_at)));
+      const actions = document.createElement("td"); actions.className = "row-actions";
+      const edit = document.createElement("button"); edit.className = "row-button"; edit.type = "button"; edit.textContent = "Edit"; edit.addEventListener("click", () => openBudgetDialog(budget)); actions.appendChild(edit);
+      if (budget.enabled) { const disable = document.createElement("button"); disable.className = "row-button danger"; disable.type = "button"; disable.textContent = "Disable"; disable.addEventListener("click", () => confirmChange("Disable budget policy?", `${budget.scope_type}: ${budget.scope_id} will stop enforcing limits.`, () => disableBudget(budget.id))); actions.appendChild(disable); }
+      row.appendChild(actions);
       body.appendChild(row);
     }
   }
@@ -177,6 +193,84 @@
     history.replaceState(null, "", `#${name}`);
   }
 
+  function numberOrUndefined(id) {
+    const value = $(id).value.trim();
+    return value === "" ? undefined : Number(value);
+  }
+
+  function openModelDialog(item = null) {
+    if (!state.catalog) { showToast("Runtime catalog is unavailable"); return; }
+    setText("model-dialog-title", item ? "Edit catalog entry" : "Add catalog entry");
+    $("model-original-key").value = item ? `${item.provider}\u0000${item.model}` : "";
+    $("model-provider").value = item?.provider || "";
+    $("model-name").value = item?.model || "";
+    $("model-capabilities").value = (item?.capabilities || []).join(", ");
+    $("model-max-input").value = item?.max_input_tokens || "";
+    $("model-max-output").value = item?.max_output_tokens || "";
+    $("model-input-cost").value = item?.input_cost_per_1m ?? "";
+    $("model-output-cost").value = item?.output_cost_per_1m ?? "";
+    $("model-currency").value = item?.currency || "";
+    $("model-form-error").hidden = true;
+    $("model-dialog").showModal();
+  }
+
+  async function saveModel(event) {
+    event.preventDefault();
+    const error = $("model-form-error"); error.hidden = true;
+    const provider = $("model-provider").value.trim();
+    const model = $("model-name").value.trim();
+    const capabilities = [...new Set($("model-capabilities").value.split(",").map((value) => value.trim()).filter(Boolean))];
+    const entry = { provider, model };
+    const optional = { max_input_tokens: numberOrUndefined("model-max-input"), max_output_tokens: numberOrUndefined("model-max-output"), input_cost_per_1m: numberOrUndefined("model-input-cost"), output_cost_per_1m: numberOrUndefined("model-output-cost") };
+    for (const [key, value] of Object.entries(optional)) if (value !== undefined) entry[key] = value;
+    if (capabilities.length) entry.capabilities = capabilities;
+    const currency = $("model-currency").value.trim().toUpperCase(); if (currency) entry.currency = currency;
+    if ((entry.input_cost_per_1m != null || entry.output_cost_per_1m != null) && !currency) { error.textContent = "Currency is required when pricing is set."; error.hidden = false; return; }
+    const original = $("model-original-key").value;
+    const models = (state.catalog.models || []).filter((item) => `${item.provider}\u0000${item.model}` !== original && !(item.provider === provider && item.model === model));
+    models.push(entry);
+    const payload = { ...state.catalog, version: `ui-${Date.now()}`, models };
+    try { state.catalog = await apiJSON("/admin/v1/model-catalog", "PUT", payload); $("model-dialog").close(); await loadData(); showToast("Runtime catalog updated"); }
+    catch (requestError) { error.textContent = requestError.message; error.hidden = false; }
+  }
+
+  async function removeCatalogEntry(item) {
+    const payload = { ...state.catalog, version: `ui-${Date.now()}`, models: (state.catalog.models || []).filter((candidate) => candidate.provider !== item.provider || candidate.model !== item.model) };
+    state.catalog = await apiJSON("/admin/v1/model-catalog", "PUT", payload); await loadData(); showToast("Catalog entry removed");
+  }
+
+  function openBudgetDialog(item = null) {
+    setText("budget-dialog-title", item ? "Edit budget" : "Create budget");
+    $("budget-id").value = item?.id || "";
+    $("budget-scope-type").value = item?.scope_type || "team";
+    $("budget-scope-id").value = item?.scope_id || "";
+    $("budget-period").value = item?.period || "month";
+    $("budget-currency").value = item?.currency || "USD";
+    $("budget-max-cost").value = item?.max_cost ?? "";
+    $("budget-max-tokens").value = item?.max_tokens ?? "";
+    $("budget-enabled").checked = item?.enabled ?? true;
+    $("budget-form-error").hidden = true;
+    $("budget-dialog").showModal();
+  }
+
+  async function saveBudget(event) {
+    event.preventDefault();
+    const error = $("budget-form-error"); error.hidden = true;
+    const maxCost = numberOrUndefined("budget-max-cost"); const maxTokens = numberOrUndefined("budget-max-tokens");
+    if (maxCost === undefined && maxTokens === undefined) { error.textContent = "Set a maximum cost, maximum tokens, or both."; error.hidden = false; return; }
+    const payload = { scope_type: $("budget-scope-type").value, scope_id: $("budget-scope-id").value.trim(), period: $("budget-period").value, currency: $("budget-currency").value.trim().toUpperCase(), enabled: $("budget-enabled").checked };
+    if (maxCost !== undefined) payload.max_cost = maxCost; if (maxTokens !== undefined) payload.max_tokens = maxTokens;
+    const id = $("budget-id").value;
+    try { await apiJSON(id ? `/admin/v1/budgets/${id}` : "/admin/v1/budgets", id ? "PUT" : "POST", payload); $("budget-dialog").close(); await loadData(); showToast(id ? "Budget updated" : "Budget created"); }
+    catch (requestError) { error.textContent = requestError.message; error.hidden = false; }
+  }
+
+  async function disableBudget(id) { await api(`/admin/v1/budgets/${id}`, { method: "DELETE" }); await loadData(); showToast("Budget disabled"); }
+
+  function confirmChange(title, message, action) {
+    setText("confirm-title", title); setText("confirm-message", message); pendingConfirmation = action; $("confirm-dialog").showModal();
+  }
+
   function showLogin(message = "") {
     consoleView.hidden = true; loginView.hidden = false; loginError.hidden = !message; loginError.textContent = message; tokenInput.value = ""; tokenInput.focus();
   }
@@ -196,6 +290,13 @@
   $("refresh-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); showToast("Console data refreshed"); } catch (error) { if (error.auth) { sessionStorage.removeItem("ai_gateway_admin_token"); showLogin(error.message); } else { globalError.textContent = error.message; globalError.hidden = false; } } });
   $("audit-filter-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
   $("model-search").addEventListener("input", renderModels);
+  $("add-model-button").addEventListener("click", () => openModelDialog());
+  $("model-form").addEventListener("submit", saveModel);
+  $("add-budget-button").addEventListener("click", () => openBudgetDialog());
+  $("budget-form").addEventListener("submit", saveBudget);
+  for (const button of document.querySelectorAll(".close-dialog")) button.addEventListener("click", () => $(button.dataset.dialog).close());
+  $("confirm-cancel").addEventListener("click", () => { pendingConfirmation = null; $("confirm-dialog").close(); });
+  $("confirm-form").addEventListener("submit", async (event) => { event.preventDefault(); const action = pendingConfirmation; pendingConfirmation = null; $("confirm-dialog").close(); if (!action) return; try { await action(); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
   for (const item of document.querySelectorAll("[data-view]")) item.addEventListener("click", () => switchView(item.dataset.view));
   for (const item of document.querySelectorAll("[data-open-view]")) item.addEventListener("click", () => switchView(item.dataset.openView));
 

@@ -31,7 +31,7 @@ func TestAdminUIServesEmbeddedSameOriginAssets(t *testing.T) {
 	if page.Code != http.StatusOK {
 		t.Fatalf("UI status=%d body=%s", page.Code, page.Body.String())
 	}
-	for _, expected := range []string{"AI Gateway Console", "/ui/assets/app.css", "/ui/assets/app.js", "Admin bearer token", "Overview", "Models", "Budgets", "Audit log"} {
+	for _, expected := range []string{"AI Gateway Console", "/ui/assets/app.css?v=2", "/ui/assets/app.js?v=2", "Admin bearer token", "Overview", "Models", "Budgets", "Audit log", "Add catalog entry", "Create budget", "model-dialog", "budget-dialog", "confirm-dialog"} {
 		if !strings.Contains(page.Body.String(), expected) {
 			t.Errorf("UI HTML missing %q", expected)
 		}
@@ -49,7 +49,7 @@ func TestAdminUIServesEmbeddedSameOriginAssets(t *testing.T) {
 		if asset.Code != http.StatusOK || asset.Body.Len() == 0 || asset.Header().Get("Content-Type") != contentType {
 			t.Errorf("asset %s: status=%d type=%q bytes=%d", path, asset.Code, asset.Header().Get("Content-Type"), asset.Body.Len())
 		}
-		assertAdminUISecurityHeaders(t, asset.Header(), "public, max-age=31536000, immutable")
+		assertAdminUISecurityHeaders(t, asset.Header(), "no-store")
 	}
 }
 

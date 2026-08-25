@@ -160,8 +160,11 @@ The canonical external contract is [repos/gateway/api/openapi.yaml](repos/gatewa
 ### Admin UI
 
 The gateway serves a self-contained operations console at `/ui/`. It provides
-an overview plus read-only model, runtime catalog, budget, and management audit
-views. The UI has no CDN or runtime package dependency and is protected by a
+an overview, model and runtime-catalog management, budget policy management,
+and a read-only management audit view. Catalog entries can be created, edited,
+and removed; budgets can be created, edited, and disabled. Every mutation uses
+the same authenticated admin API and append-only audit path as direct API
+clients. The UI has no CDN or runtime package dependency and is protected by a
 strict same-origin CSP. Sign in with a bearer credential carrying the `admin`
 role; the credential is stored only in the current tab's `sessionStorage` and
 is sent exclusively to the gateway's existing authenticated APIs.
