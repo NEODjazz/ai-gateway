@@ -22,7 +22,7 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql", "005_virtual_key_metadata.sql"} {
+	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql", "005_virtual_key_metadata.sql", "006_identity_directory.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
 			t.Fatal(err)
@@ -42,11 +42,34 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	}
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
 	oldID, newID, expiredID := "key-old-"+suffix, "key-new-"+suffix, "key-expired-"+suffix
+	directoryUserID, directoryTeamID := "user-"+suffix, "team-"+suffix
 	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_team_memberships WHERE team_id=$1`, directoryTeamID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_teams WHERE id=$1`, directoryTeamID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, directoryUserID)
 		ids := []string{newID, oldID, expiredID}
 		_, _ = pool.Exec(context.Background(), `UPDATE auth_virtual_keys SET rotated_from_id=NULL,rotated_to_id=NULL WHERE id = ANY($1)`, ids)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_virtual_keys WHERE id = ANY($1)`, ids)
 	})
+	user, err := store.PutUser(ctx, DirectoryUser{ID: directoryUserID, Email: "owner@example.test", Name: "Owner", Status: "active", Roles: []string{"developer"}})
+	if err != nil || user.Name != "Owner" {
+		t.Fatalf("put user failed: user=%+v err=%v", user, err)
+	}
+	team, err := store.PutTeam(ctx, DirectoryTeam{ID: directoryTeamID, Name: "Platform", Status: "active"})
+	if err != nil || team.Name != "Platform" {
+		t.Fatalf("put team failed: team=%+v err=%v", team, err)
+	}
+	if _, err := store.PutMembership(ctx, TeamMembership{TeamID: directoryTeamID, UserID: directoryUserID, Roles: []string{"team_admin"}}); err != nil {
+		t.Fatal(err)
+	}
+	users, err := store.ListUsers(ctx, directoryTeamID, 10)
+	if err != nil || len(users) != 1 || users[0].ID != directoryUserID || len(users[0].TeamIDs) != 1 {
+		t.Fatalf("scoped users=%+v err=%v", users, err)
+	}
+	teams, err := store.ListTeams(ctx, directoryTeamID, 10)
+	if err != nil || len(teams) != 1 || teams[0].MemberCount != 1 {
+		t.Fatalf("scoped teams=%+v err=%v", teams, err)
+	}
 
 	oldToken := "old-token-" + suffix
 	old := StoredVirtualKey{ID: oldID, Alias: "automation", Description: "CI key", Tags: []string{"ci", "prod"}, UserID: "user-1", TeamID: "team-1", Roles: []string{"developer"}, AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp.weather.*"}, RateLimitRPM: 10}

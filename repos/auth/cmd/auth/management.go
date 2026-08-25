@@ -17,6 +17,7 @@ import (
 const managementTokenHeader = "X-Management-Token"
 
 func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sharedSecret string) {
+	registerIdentityDirectoryRoutes(mux, module, sharedSecret)
 	mux.HandleFunc("GET /internal/v1/keys", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		limit := 100
 		if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
@@ -133,6 +134,115 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 		logManagementAction(r, "virtual_key.revoke", r.PathValue("id"))
 		w.WriteHeader(http.StatusNoContent)
 	}))
+}
+
+func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthModule, sharedSecret string) {
+	mux.HandleFunc("GET /internal/v1/users", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		limit, ok := managementLimit(w, r)
+		if !ok {
+			return
+		}
+		users, err := module.ListDirectoryUsers(r.Context(), r.URL.Query().Get("team_id"), limit)
+		if err != nil {
+			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, map[string]any{"data": users})
+	}))
+	mux.HandleFunc("PUT /internal/v1/users/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		var user modules.DirectoryUser
+		if !decodeManagementJSON(w, r, &user) {
+			return
+		}
+		user.ID = r.PathValue("id")
+		saved, err := module.PutDirectoryUser(r.Context(), user)
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid user", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		logManagementAction(r, "user.upsert", saved.ID)
+		writeManagementJSON(w, http.StatusOK, saved)
+	}))
+	mux.HandleFunc("GET /internal/v1/teams", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		limit, ok := managementLimit(w, r)
+		if !ok {
+			return
+		}
+		teams, err := module.ListDirectoryTeams(r.Context(), r.URL.Query().Get("team_id"), limit)
+		if err != nil {
+			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, map[string]any{"data": teams})
+	}))
+	mux.HandleFunc("PUT /internal/v1/teams/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		var team modules.DirectoryTeam
+		if !decodeManagementJSON(w, r, &team) {
+			return
+		}
+		team.ID = r.PathValue("id")
+		saved, err := module.PutDirectoryTeam(r.Context(), team)
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid team", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		logManagementAction(r, "team.upsert", saved.ID)
+		writeManagementJSON(w, http.StatusOK, saved)
+	}))
+	mux.HandleFunc("PUT /internal/v1/teams/{id}/members/{user_id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		var membership modules.TeamMembership
+		if !decodeManagementJSON(w, r, &membership) {
+			return
+		}
+		membership.TeamID = r.PathValue("id")
+		membership.UserID = r.PathValue("user_id")
+		saved, err := module.PutTeamMembership(r.Context(), membership)
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid membership", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		logManagementAction(r, "team.membership.upsert", saved.TeamID+":"+saved.UserID)
+		writeManagementJSON(w, http.StatusOK, saved)
+	}))
+}
+
+func managementLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
+	limit := 100
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 500 {
+			http.Error(w, "invalid limit", http.StatusBadRequest)
+			return 0, false
+		}
+		limit = parsed
+	}
+	return limit, true
+}
+
+func decodeManagementJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 func managementAuthorized(sharedSecret string, next http.HandlerFunc) http.HandlerFunc {

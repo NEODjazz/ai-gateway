@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], models: [], catalog: null, budgets: [], audit: [] };
+  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], models: [], catalog: null, budgets: [], audit: [] };
   const $ = (id) => document.getElementById(id);
   const loginView = $("login-view");
   const consoleView = $("console-view");
@@ -9,7 +9,7 @@
   const tokenInput = $("admin-token");
   const loginError = $("login-error");
   const globalError = $("global-error");
-  const pageTitles = { overview: "Overview", usage: "Usage & spend", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", models: "Models", budgets: "Budgets", audit: "Audit log" };
+  const pageTitles = { overview: "Overview", usage: "Usage & spend", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", models: "Models", budgets: "Budgets", audit: "Audit log" };
   let pendingConfirmation = null;
 
   function setText(id, value) { const element = $(id); if (element) element.textContent = value; }
@@ -81,6 +81,8 @@
       api("/admin/v1/routing/diagnostics"),
       api(`/admin/v1/request-logs?${requestLogQuery()}`),
       api("/admin/v1/request-logs/settings"),
+      api("/admin/v1/users?limit=100"),
+      api("/admin/v1/teams?limit=100"),
     ];
     const results = await Promise.allSettled(requests);
     const authFailure = results.find((result) => result.status === "rejected" && result.reason?.auth);
@@ -95,6 +97,8 @@
     if (results[6].status === "fulfilled") state.routing = results[6].value; else errors.push(`Routing: ${results[6].reason.message}`);
     if (results[7].status === "fulfilled") { state.requestLogs = results[7].value?.data || []; state.requestLogNextBefore = results[7].value?.next_before || ""; state.requestLogNextRequestID = results[7].value?.next_request_id || ""; } else errors.push(`Request logs: ${results[7].reason.message}`);
     if (results[8].status === "fulfilled") state.requestLogSettings = results[8].value; else errors.push(`Request log settings: ${results[8].reason.message}`);
+    if (results[9].status === "fulfilled") state.users = results[9].value?.data || []; else errors.push(`Users: ${results[9].reason.message}`);
+    if (results[10].status === "fulfilled") state.teams = results[10].value?.data || []; else errors.push(`Teams: ${results[10].reason.message}`);
     renderAll();
     setText("console-health", errors.length ? "Degraded" : "Operational");
     if (errors.length) { globalError.textContent = errors.join(" · "); globalError.hidden = false; }
@@ -119,6 +123,8 @@
     setText("keys-badge", formatNumber(activeKeys));
     setText("budgets-badge", formatNumber(activeBudgets));
     setText("request-logs-badge", formatNumber(state.requestLogs.length));
+    setText("users-badge", formatNumber(state.users.length));
+    setText("teams-badge", formatNumber(state.teams.length));
     setText("catalog-version", state.catalog?.version ? `Version ${state.catalog.version}` : "Runtime registry");
     renderOverview();
     renderRouting();
@@ -126,6 +132,8 @@
     renderUsage();
     renderRequestLogs();
     renderKeys();
+    renderUsers();
+    renderTeams();
     renderModels();
     renderBudgets();
     renderAudit();
@@ -332,6 +340,23 @@
     }
   }
 
+  function renderUsers() {
+    const body = $("users-table"); clear(body); $("users-empty").hidden = state.users.length !== 0;
+    for (const user of state.users) { const row=document.createElement("tr");row.appendChild(textCell(user.name||user.id,user.id));row.appendChild(plainCell(user.email));row.appendChild(plainCell((user.roles||[]).join(", ")||"—"));row.appendChild(plainCell((user.team_ids||[]).join(", ")||"—"));const statusCell=document.createElement("td");const status=document.createElement("span");status.className=`outcome ${user.status==="active"?"succeeded":"failed"}`;status.textContent=user.status;statusCell.appendChild(status);row.appendChild(statusCell);const actions=document.createElement("td");actions.className="row-actions";const edit=document.createElement("button");edit.type="button";edit.className="row-button";edit.textContent="Edit";edit.addEventListener("click",()=>openUserDialog(user));actions.appendChild(edit);row.appendChild(actions);body.appendChild(row); }
+  }
+
+  function renderTeams() {
+    const body = $("teams-table"); clear(body); $("teams-empty").hidden = state.teams.length !== 0;
+    for (const team of state.teams) { const row=document.createElement("tr");row.appendChild(textCell(team.name,team.id));row.appendChild(plainCell(team.description));row.appendChild(plainCell(formatNumber(team.member_count)));const statusCell=document.createElement("td");const status=document.createElement("span");status.className=`outcome ${team.status==="active"?"succeeded":"failed"}`;status.textContent=team.status;statusCell.appendChild(status);row.appendChild(statusCell);const actions=document.createElement("td");actions.className="row-actions";const edit=document.createElement("button");edit.type="button";edit.className="row-button";edit.textContent="Edit";edit.addEventListener("click",()=>openTeamDialog(team));const member=document.createElement("button");member.type="button";member.className="row-button";member.textContent="Add member";member.addEventListener("click",()=>openMembershipDialog(team.id));actions.append(edit,member);row.appendChild(actions);body.appendChild(row); }
+  }
+
+  function openUserDialog(user=null){$("user-id").value=user?.id||"";$("user-id").readOnly=Boolean(user);$("user-email").value=user?.email||"";$("user-name").value=user?.name||"";$("user-status").value=user?.status||"active";$("user-roles").value=(user?.roles||[]).join(", ");$("user-form-error").hidden=true;$("user-dialog").showModal()}
+  async function saveUser(event){event.preventDefault();const error=$("user-form-error");error.hidden=true;const id=$("user-id").value.trim();try{await apiJSON(`/admin/v1/users/${encodeURIComponent(id)}`,"PUT",{email:$("user-email").value.trim(),name:$("user-name").value.trim(),status:$("user-status").value,roles:commaList("user-roles")});$("user-dialog").close();await loadData();showToast("User saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
+  function openTeamDialog(team=null){$("team-id").value=team?.id||"";$("team-id").readOnly=Boolean(team);$("team-name").value=team?.name||"";$("team-description").value=team?.description||"";$("team-status").value=team?.status||"active";$("team-form-error").hidden=true;$("team-dialog").showModal()}
+  async function saveTeam(event){event.preventDefault();const error=$("team-form-error");error.hidden=true;const id=$("team-id").value.trim();try{await apiJSON(`/admin/v1/teams/${encodeURIComponent(id)}`,"PUT",{name:$("team-name").value.trim(),description:$("team-description").value.trim(),status:$("team-status").value});$("team-dialog").close();await loadData();showToast("Team saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
+  function openMembershipDialog(teamID){$("membership-team-id").value=teamID;$("membership-user-id").value="";$("membership-roles").value="member";$("membership-form-error").hidden=true;$("membership-dialog").showModal()}
+  async function saveMembership(event){event.preventDefault();const error=$("membership-form-error");error.hidden=true;const teamID=$("membership-team-id").value,userID=$("membership-user-id").value.trim();try{await apiJSON(`/admin/v1/teams/${encodeURIComponent(teamID)}/members/${encodeURIComponent(userID)}`,"PUT",{roles:commaList("membership-roles")});$("membership-dialog").close();await loadData();showToast("Membership saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
+
   function renderBudgets() {
     const body = $("budgets-table"); clear(body); $("budgets-empty").hidden = state.budgets.length !== 0;
     for (const budget of state.budgets) {
@@ -526,6 +551,11 @@
   $("model-search").addEventListener("input", renderModels);
   $("add-key-button").addEventListener("click", () => openKeyDialog());
   $("key-form").addEventListener("submit", saveKey);
+  $("add-user-button").addEventListener("click",()=>openUserDialog());
+  $("user-form").addEventListener("submit",saveUser);
+  $("add-team-button").addEventListener("click",()=>openTeamDialog());
+  $("team-form").addEventListener("submit",saveTeam);
+  $("membership-form").addEventListener("submit",saveMembership);
   $("copy-issued-key").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("issued-key-token").value); showToast("Token copied"); } catch (_) { $("issued-key-token").select(); showToast("Select and copy the token manually"); } });
   $("issued-key-dialog").addEventListener("close", clearIssuedKey);
   $("add-model-button").addEventListener("click", () => openModelDialog());

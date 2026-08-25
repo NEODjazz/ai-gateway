@@ -30,6 +30,8 @@ last-used tracking, and linked rotation families; `004_allowed_tools.sql` adds
 credential-level exact/wildcard tool grants; `005_virtual_key_metadata.sql`
 adds alias, description, tags, and reversible disable state. Disabled keys fail
 authorization without losing their policy or rotation history.
+Migration `006_identity_directory.sql` adds users, teams and scoped membership
+roles. A disabled directory user or team also disables its persistent keys.
 
 `AUTH_STATIC_KEY_FALLBACK_ENABLED` controls migration fallback to
 `AUTH_VIRTUAL_KEYS_JSON`. `AUTH_DEMO_KEYS_ENABLED` controls the two built-in demo
@@ -48,6 +50,11 @@ network policy. Create and rotate return the plaintext token once; PostgreSQL
 stores only its HMAC-SHA256 lookup value. The list operation returns policy and
 lifecycle metadata only. Its response
 type has no plaintext-token or token-hash field.
+
+Identity management uses `GET /internal/v1/{users|teams}`, `PUT
+/internal/v1/users/{id}`, `PUT /internal/v1/teams/{id}`, and `PUT
+/internal/v1/teams/{id}/members/{user_id}`. The public gateway applies global
+admin or matching team-admin scope before calling these cluster-internal APIs.
 
 ## JWT and OIDC
 

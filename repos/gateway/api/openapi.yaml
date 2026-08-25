@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.4
+  version: 0.1.5
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -17,6 +17,7 @@ tags:
   - name: Inference
   - name: Models
   - name: Virtual keys
+  - name: Identity
   - name: Operations
   - name: Observability
 security:
@@ -413,6 +414,75 @@ paths:
         '403': {$ref: '#/components/responses/AdminRequired'}
         '404': {$ref: '#/components/responses/NotFound'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/users:
+    get:
+      operationId: listDirectoryUsers
+      tags: [Identity]
+      summary: List users visible to the admin scope
+      parameters:
+        - {name: team_id, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+      responses:
+        '200':
+          description: Directory users
+          content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/DirectoryUser'}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/users/{id}:
+    put:
+      operationId: putDirectoryUser
+      tags: [Identity]
+      summary: Create or update a directory user
+      parameters: [{$ref: '#/components/parameters/DirectoryUserPathID'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryUserInput'}}}}
+      responses:
+        '200': {description: User saved, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryUser'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/teams:
+    get:
+      operationId: listDirectoryTeams
+      tags: [Identity]
+      summary: List teams visible to the admin scope
+      parameters:
+        - {name: team_id, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+      responses:
+        '200': {description: Directory teams, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/DirectoryTeam'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/teams/{id}:
+    put:
+      operationId: putDirectoryTeam
+      tags: [Identity]
+      summary: Create or update a team
+      parameters: [{$ref: '#/components/parameters/DirectoryTeamID'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryTeamInput'}}}}
+      responses:
+        '200': {description: Team saved, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryTeam'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/teams/{id}/members/{user_id}:
+    put:
+      operationId: putTeamMembership
+      tags: [Identity]
+      summary: Add or update a scoped team membership
+      parameters:
+        - {$ref: '#/components/parameters/DirectoryTeamID'}
+        - {$ref: '#/components/parameters/DirectoryUserID'}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TeamMembershipInput'}}}}
+      responses:
+        '200': {description: Membership saved, content: {application/json: {schema: {$ref: '#/components/schemas/TeamMembership'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/budgets:
     get:
       operationId: listBudgets
@@ -696,6 +766,21 @@ components:
         type: string
         pattern: '^vk_[A-Za-z0-9_-]{5,125}$'
         maxLength: 128
+    DirectoryTeamID:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 256}
+    DirectoryUserID:
+      name: user_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 256}
+    DirectoryUserPathID:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 256}
     BudgetID:
       name: id
       in: path
@@ -1432,3 +1517,55 @@ components:
         disabled_at: {type: string, format: date-time}
         last_used_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
+    DirectoryUserInput:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        email: {type: string, format: email, maxLength: 320}
+        name: {type: string, maxLength: 256}
+        status: {type: string, enum: [active, disabled]}
+        roles: {type: array, maxItems: 64, items: {type: string, minLength: 1, maxLength: 256}}
+    DirectoryUser:
+      allOf:
+        - {$ref: '#/components/schemas/DirectoryUserInput'}
+        - type: object
+          required: [id, created_at, updated_at]
+          properties:
+            id: {type: string}
+            team_ids: {type: array, items: {type: string}}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+    DirectoryTeamInput:
+      type: object
+      additionalProperties: false
+      required: [name, status]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 256}
+        description: {type: string, maxLength: 1024}
+        status: {type: string, enum: [active, disabled]}
+    DirectoryTeam:
+      allOf:
+        - {$ref: '#/components/schemas/DirectoryTeamInput'}
+        - type: object
+          required: [id, member_count, created_at, updated_at]
+          properties:
+            id: {type: string}
+            member_count: {type: integer, minimum: 0}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+    TeamMembershipInput:
+      type: object
+      additionalProperties: false
+      properties:
+        roles: {type: array, maxItems: 64, items: {type: string, minLength: 1, maxLength: 256}}
+    TeamMembership:
+      allOf:
+        - {$ref: '#/components/schemas/TeamMembershipInput'}
+        - type: object
+          required: [team_id, user_id, created_at, updated_at]
+          properties:
+            team_id: {type: string}
+            user_id: {type: string}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}

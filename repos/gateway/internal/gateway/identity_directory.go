@@ -1,0 +1,252 @@
+package gateway
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"ai-gateway-gateway/internal/modules"
+)
+
+type DirectoryUser struct {
+	ID        string    `json:"id"`
+	Email     string    `json:"email,omitempty"`
+	Name      string    `json:"name,omitempty"`
+	Status    string    `json:"status"`
+	Roles     []string  `json:"roles,omitempty"`
+	TeamIDs   []string  `json:"team_ids,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+type DirectoryTeam struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	Status      string    `json:"status"`
+	MemberCount int       `json:"member_count"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+type TeamMembership struct {
+	TeamID    string    `json:"team_id"`
+	UserID    string    `json:"user_id"`
+	Roles     []string  `json:"roles,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type IdentityDirectoryClient interface {
+	ListUsers(context.Context, ManagementAudit, string, int) ([]DirectoryUser, error)
+	PutUser(context.Context, ManagementAudit, string, DirectoryUser) (DirectoryUser, error)
+	ListTeams(context.Context, ManagementAudit, string, int) ([]DirectoryTeam, error)
+	PutTeam(context.Context, ManagementAudit, string, DirectoryTeam) (DirectoryTeam, error)
+	PutMembership(context.Context, ManagementAudit, string, string, TeamMembership) (TeamMembership, error)
+}
+
+func (h Handler) WithIdentityDirectory(client IdentityDirectoryClient) Handler {
+	h.directory = client
+	return h
+}
+
+func (c *RemoteManagementClient) ListUsers(ctx context.Context, audit ManagementAudit, teamID string, limit int) ([]DirectoryUser, error) {
+	q := url.Values{"limit": {strconv.Itoa(limit)}}
+	if teamID != "" {
+		q.Set("team_id", teamID)
+	}
+	result, err := managementCall[struct{}, struct {
+		Data []DirectoryUser `json:"data"`
+	}](ctx, c, http.MethodGet, "/internal/v1/users?"+q.Encode(), audit, struct{}{})
+	return result.Data, err
+}
+func (c *RemoteManagementClient) PutUser(ctx context.Context, audit ManagementAudit, id string, user DirectoryUser) (DirectoryUser, error) {
+	return managementCall[DirectoryUser, DirectoryUser](ctx, c, http.MethodPut, "/internal/v1/users/"+url.PathEscape(id), audit, user)
+}
+func (c *RemoteManagementClient) ListTeams(ctx context.Context, audit ManagementAudit, teamID string, limit int) ([]DirectoryTeam, error) {
+	q := url.Values{"limit": {strconv.Itoa(limit)}}
+	if teamID != "" {
+		q.Set("team_id", teamID)
+	}
+	result, err := managementCall[struct{}, struct {
+		Data []DirectoryTeam `json:"data"`
+	}](ctx, c, http.MethodGet, "/internal/v1/teams?"+q.Encode(), audit, struct{}{})
+	return result.Data, err
+}
+func (c *RemoteManagementClient) PutTeam(ctx context.Context, audit ManagementAudit, id string, team DirectoryTeam) (DirectoryTeam, error) {
+	return managementCall[DirectoryTeam, DirectoryTeam](ctx, c, http.MethodPut, "/internal/v1/teams/"+url.PathEscape(id), audit, team)
+}
+func (c *RemoteManagementClient) PutMembership(ctx context.Context, audit ManagementAudit, teamID, userID string, m TeamMembership) (TeamMembership, error) {
+	return managementCall[TeamMembership, TeamMembership](ctx, c, http.MethodPut, "/internal/v1/teams/"+url.PathEscape(teamID)+"/members/"+url.PathEscape(userID), audit, m)
+}
+
+func (h Handler) ListDirectoryUsers(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.authorizeDirectory(w, r, "")
+	if !ok {
+		return
+	}
+	limit, ok := directoryLimit(w, r)
+	if !ok {
+		return
+	}
+	teamID := directoryScope(req, r.URL.Query().Get("team_id"))
+	users, err := h.directory.ListUsers(r.Context(), managementAudit(req), teamID, limit)
+	if err != nil {
+		writeManagementFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": users})
+}
+func (h Handler) ListDirectoryTeams(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.authorizeDirectory(w, r, "")
+	if !ok {
+		return
+	}
+	limit, ok := directoryLimit(w, r)
+	if !ok {
+		return
+	}
+	teamID := directoryScope(req, r.URL.Query().Get("team_id"))
+	teams, err := h.directory.ListTeams(r.Context(), managementAudit(req), teamID, limit)
+	if err != nil {
+		writeManagementFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": teams})
+}
+func (h Handler) PutDirectoryUser(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.authorizeDirectory(w, r, "__global__")
+	if !ok {
+		return
+	}
+	var user DirectoryUser
+	if !decodeDirectoryJSON(w, r, &user) {
+		return
+	}
+	user.ID = r.PathValue("id")
+	audit := managementAudit(req)
+	event := AuditEvent{Action: "user.upsert", TargetType: "user", TargetID: user.ID}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	saved, err := h.directory.PutUser(r.Context(), managementAudit(req), user.ID, user)
+	if err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeManagementFailure(w, err)
+		return
+	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
+	writeJSON(w, http.StatusOK, saved)
+}
+func (h Handler) PutDirectoryTeam(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	req, ok := h.authorizeDirectory(w, r, id)
+	if !ok {
+		return
+	}
+	var team DirectoryTeam
+	if !decodeDirectoryJSON(w, r, &team) {
+		return
+	}
+	team.ID = id
+	audit := managementAudit(req)
+	event := AuditEvent{Action: "team.upsert", TargetType: "team", TargetID: id}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	saved, err := h.directory.PutTeam(r.Context(), managementAudit(req), id, team)
+	if err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeManagementFailure(w, err)
+		return
+	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
+	writeJSON(w, http.StatusOK, saved)
+}
+func (h Handler) PutTeamMembership(w http.ResponseWriter, r *http.Request) {
+	teamID, userID := r.PathValue("id"), r.PathValue("user_id")
+	req, ok := h.authorizeDirectory(w, r, teamID)
+	if !ok {
+		return
+	}
+	var membership TeamMembership
+	if !decodeDirectoryJSON(w, r, &membership) {
+		return
+	}
+	membership.TeamID, membership.UserID = teamID, userID
+	audit := managementAudit(req)
+	event := AuditEvent{Action: "team.membership.upsert", TargetType: "team", TargetID: teamID}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	saved, err := h.directory.PutMembership(r.Context(), managementAudit(req), teamID, userID, membership)
+	if err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeManagementFailure(w, err)
+		return
+	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
+	writeJSON(w, http.StatusOK, saved)
+}
+
+func (h Handler) authorizeDirectory(w http.ResponseWriter, r *http.Request, targetTeam string) (modules.RequestContext, bool) {
+	if h.directory == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "identity directory is not configured")
+		return modules.RequestContext{}, false
+	}
+	req := modules.RequestContext{APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: requestID(r)}
+	if err := h.pipeline.Run(r.Context(), &req); err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+		return req, false
+	}
+	req.APIKey = ""
+	if hasRole(req.Roles, "admin") {
+		return req, true
+	}
+	if targetTeam == "__global__" {
+		writeError(w, http.StatusForbidden, "forbidden", "global admin role is required")
+		return req, false
+	}
+	if !hasRole(req.Roles, "team_admin") || req.TeamID == "" || (targetTeam != "" && targetTeam != req.TeamID) {
+		writeError(w, http.StatusForbidden, "forbidden", "admin or matching team_admin role is required")
+		return req, false
+	}
+	return req, true
+}
+func directoryScope(req modules.RequestContext, requested string) string {
+	if hasRole(req.Roles, "admin") {
+		return strings.TrimSpace(requested)
+	}
+	return req.TeamID
+}
+func directoryLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
+	limit := 100
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 500 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "limit must be between 1 and 500")
+			return 0, false
+		}
+		limit = value
+	}
+	return limit, true
+}
+func decodeDirectoryJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid identity directory entry")
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid identity directory entry")
+		return false
+	}
+	return true
+}

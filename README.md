@@ -354,6 +354,13 @@ provider call, and applies the rate-limit policy through a replaceable atomic
 store interface. If `REDIS_ADDR` is configured, RPM/TPM admission is performed
 atomically in Redis; otherwise the gateway uses the process-local implementation.
 
+The identity directory exposes admin APIs and console views for users, teams,
+global roles and team memberships. Global `admin` credentials can manage the
+whole directory; `team_admin` credentials are restricted to listing and
+managing memberships in their own `team_id` and cannot edit global user roles.
+Disabling a directory user or team immediately prevents its persistent virtual
+keys from authorizing while preserving audit and usage history.
+
 `GET /metrics` exposes Prometheus-format HTTP, provider-attempt, cache,
 module, security, and billing lifecycle counters plus duration sums. Labels are
 bounded: unmatched URLs become `path="unmatched"`, results use a fixed enum, and

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>AI Gateway Console</title>
-  <link rel="stylesheet" href="/ui/assets/app.css?v=7">
-  <script src="/ui/assets/app.js?v=7" defer></script>
+  <link rel="stylesheet" href="/ui/assets/app.css?v=8">
+  <script src="/ui/assets/app.js?v=8" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-view">
@@ -38,6 +38,8 @@
         <button class="nav-item" data-view="routing"><span>Routing</span></button>
         <button class="nav-item" data-view="playground"><span>Playground</span></button>
         <button class="nav-item" data-view="keys"><span>Virtual keys</span><span id="keys-badge" class="badge">0</span></button>
+        <button class="nav-item" data-view="users"><span>Users</span><span id="users-badge" class="badge">0</span></button>
+        <button class="nav-item" data-view="teams"><span>Teams</span><span id="teams-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="models"><span>Models</span><span id="models-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="budgets"><span>Budgets</span><span id="budgets-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="audit"><span>Audit log</span></button>
@@ -114,6 +116,16 @@
           <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Model</th><th>Provider</th><th>Capabilities</th><th>Input / 1M</th><th>Output / 1M</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="models-table"></tbody></table></div><div id="models-empty" class="empty-state" hidden>No models match this filter.</div></div>
         </section>
 
+        <section id="view-users" class="view" aria-labelledby="users-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Identity</p><h2 id="users-heading">Users</h2><p class="muted">Directory identities, global roles and team membership.</p></div><button id="add-user-button" class="primary-button">Add user</button></div>
+          <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>User</th><th>Email</th><th>Roles</th><th>Teams</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="users-table"></tbody></table></div><div id="users-empty" class="empty-state" hidden>No users configured.</div></div>
+        </section>
+
+        <section id="view-teams" class="view" aria-labelledby="teams-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Identity</p><h2 id="teams-heading">Teams</h2><p class="muted">Tenant groups and delegated team administration boundaries.</p></div><button id="add-team-button" class="primary-button">Add team</button></div>
+          <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Team</th><th>Description</th><th>Members</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="teams-table"></tbody></table></div><div id="teams-empty" class="empty-state" hidden>No teams configured.</div></div>
+        </section>
+
         <section id="view-budgets" class="view" aria-labelledby="budgets-heading" hidden>
           <div class="section-heading"><div><p class="eyebrow">Policy controls</p><h2 id="budgets-heading">Budgets</h2><p class="muted">Spend and token limits enforced by scope and period.</p></div><button id="add-budget-button" class="primary-button">Create budget</button></div>
           <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Scope</th><th>Period</th><th>Cost limit</th><th>Token limit</th><th>Status</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="budgets-table"></tbody></table></div><div id="budgets-empty" class="empty-state" hidden>No budget policies configured.</div></div>
@@ -157,6 +169,18 @@
       <label>Bearer token<div class="token-field"><input id="issued-key-token" readonly><button id="copy-issued-key" type="button" class="icon-button">Copy</button></div></label>
       <div class="modal-actions"><button id="close-issued-key" type="submit" class="primary-button">I have saved it</button></div>
     </form>
+  </dialog>
+
+  <dialog id="user-dialog" class="modal">
+    <form id="user-form" method="dialog"><div class="modal-heading"><div><p class="eyebrow">Identity</p><h2>Edit user</h2></div><button type="button" class="icon-button close-dialog" data-dialog="user-dialog">×</button></div><div class="form-grid"><label>User ID<input id="user-id" required maxlength="256"></label><label>Email<input id="user-email" type="email" maxlength="320"></label><label>Name<input id="user-name" maxlength="256"></label><label>Status<select id="user-status"><option value="active">Active</option><option value="disabled">Disabled</option></select></label><label class="span-2">Global roles<input id="user-roles" placeholder="developer, admin"></label></div><p id="user-form-error" class="form-error" hidden></p><div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="user-dialog">Cancel</button><button type="submit" class="primary-button">Save user</button></div></form>
+  </dialog>
+
+  <dialog id="team-dialog" class="modal">
+    <form id="team-form" method="dialog"><div class="modal-heading"><div><p class="eyebrow">Identity</p><h2>Edit team</h2></div><button type="button" class="icon-button close-dialog" data-dialog="team-dialog">×</button></div><div class="form-grid"><label>Team ID<input id="team-id" required maxlength="256"></label><label>Name<input id="team-name" required maxlength="256"></label><label class="span-2">Description<input id="team-description" maxlength="1024"></label><label>Status<select id="team-status"><option value="active">Active</option><option value="disabled">Disabled</option></select></label></div><p id="team-form-error" class="form-error" hidden></p><div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="team-dialog">Cancel</button><button type="submit" class="primary-button">Save team</button></div></form>
+  </dialog>
+
+  <dialog id="membership-dialog" class="modal">
+    <form id="membership-form" method="dialog"><div class="modal-heading"><div><p class="eyebrow">Scoped RBAC</p><h2>Add team member</h2></div><button type="button" class="icon-button close-dialog" data-dialog="membership-dialog">×</button></div><input id="membership-team-id" type="hidden"><div class="form-grid"><label>User ID<input id="membership-user-id" required maxlength="256"></label><label>Team roles<input id="membership-roles" placeholder="member, team_admin"></label></div><p id="membership-form-error" class="form-error" hidden></p><div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="membership-dialog">Cancel</button><button type="submit" class="primary-button">Save membership</button></div></form>
   </dialog>
 
   <dialog id="model-dialog" class="modal">

@@ -63,6 +63,8 @@ type ManagementAudit struct {
 	RequestID    string
 	ActorID      string
 	CredentialID string
+	TeamID       string
+	Roles        []string
 }
 
 type ManagementClient interface {
@@ -151,6 +153,8 @@ func managementCall[Request any, Response any](ctx context.Context, client *Remo
 	httpRequest.Header.Set("X-Request-ID", audit.RequestID)
 	httpRequest.Header.Set("X-Actor-ID", audit.ActorID)
 	httpRequest.Header.Set("X-Actor-Credential-ID", audit.CredentialID)
+	httpRequest.Header.Set("X-Actor-Team-ID", audit.TeamID)
+	httpRequest.Header.Set("X-Actor-Roles", strings.Join(audit.Roles, ","))
 	response, err := client.client.Do(httpRequest)
 	if err != nil {
 		return result, err
@@ -408,7 +412,7 @@ func decodeManagedVirtualKey(w http.ResponseWriter, r *http.Request) (ManagedVir
 }
 
 func managementAudit(req modules.RequestContext) ManagementAudit {
-	return ManagementAudit{RequestID: req.RequestID, ActorID: req.UserID, CredentialID: req.CredentialID}
+	return ManagementAudit{RequestID: req.RequestID, ActorID: req.UserID, CredentialID: req.CredentialID, TeamID: req.TeamID, Roles: append([]string(nil), req.Roles...)}
 }
 
 func hasRole(roles []string, expected string) bool {

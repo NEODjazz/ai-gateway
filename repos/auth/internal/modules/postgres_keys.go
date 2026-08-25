@@ -58,6 +58,8 @@ func (s *PostgresVirtualKeyStore) Lookup(ctx context.Context, tokenHash string) 
 		WHERE token_hash = $1
 		  AND revoked_at IS NULL
 		  AND disabled_at IS NULL
+		  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id=auth_virtual_keys.user_id AND u.status<>'active')
+		  AND NOT EXISTS (SELECT 1 FROM auth_teams t WHERE t.id=auth_virtual_keys.team_id AND t.status<>'active')
 		  AND (expires_at IS NULL OR expires_at > now())
 		RETURNING id, user_id, COALESCE(team_id, ''), roles, allowed_models, allowed_tools,
 		          rate_limit_rpm, rate_limit_tpm, rotation_family_id,
@@ -82,11 +84,12 @@ func (s *PostgresVirtualKeyStore) Ready(ctx context.Context) error {
 	if err := s.pool.Ping(ctx); err != nil {
 		return errors.New("auth postgres is unavailable")
 	}
-	var migrationExists, toolsColumnExists, metadataColumnExists bool
+	var migrationExists, toolsColumnExists, metadataColumnExists, directoryTableExists bool
 	if err := s.pool.QueryRow(ctx, `
 		SELECT to_regclass('public.auth_virtual_keys') IS NOT NULL,
 		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='allowed_tools'),
-		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='disabled_at')`).Scan(&migrationExists, &toolsColumnExists, &metadataColumnExists); err != nil || !migrationExists || !toolsColumnExists || !metadataColumnExists {
+		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='disabled_at'),
+		       to_regclass('public.auth_team_memberships') IS NOT NULL`).Scan(&migrationExists, &toolsColumnExists, &metadataColumnExists, &directoryTableExists); err != nil || !migrationExists || !toolsColumnExists || !metadataColumnExists || !directoryTableExists {
 		return errors.New("auth virtual-key migration is not applied")
 	}
 	return nil
