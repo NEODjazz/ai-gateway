@@ -33,8 +33,10 @@ type APIDocsConfig struct {
 }
 
 type ManagementConfig struct {
-	AuthURL string
-	Secret  string
+	AuthURL       string
+	Secret        string
+	BillingURL    string
+	BillingSecret string
 }
 
 type CacheConfig struct {
@@ -173,8 +175,10 @@ func Load() Config {
 			SampleRatio: envFloat("OTEL_TRACE_SAMPLE_RATIO", 1),
 		},
 		Management: ManagementConfig{
-			AuthURL: env("MANAGEMENT_AUTH_URL", env("AUTH_URL", "")),
-			Secret:  os.Getenv("MANAGEMENT_SHARED_SECRET"),
+			AuthURL:       env("MANAGEMENT_AUTH_URL", env("AUTH_URL", "")),
+			Secret:        os.Getenv("MANAGEMENT_SHARED_SECRET"),
+			BillingURL:    env("BILLING_MANAGEMENT_URL", env("BILLING_URL", "")),
+			BillingSecret: os.Getenv("BILLING_MANAGEMENT_SHARED_SECRET"),
 		},
 		APIDocs: APIDocsConfig{
 			Enabled:         envBool("API_DOCS_ENABLED", false),

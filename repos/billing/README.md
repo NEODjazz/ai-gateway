@@ -114,6 +114,22 @@ VALUES
     ('team', 'team-42', 'month', 'USD', 100.00, 10000000);
 ```
 
+Operators can manage the same policies through the gateway admin API instead
+of editing PostgreSQL directly. Billing exposes only its cluster-internal
+counterpart and protects it with a dedicated secret:
+
+```text
+BILLING_MANAGEMENT_SHARED_SECRET=<independent internal secret>
+GET|POST  /internal/v1/budgets
+GET|PUT|DELETE /internal/v1/budgets/{id}
+GET /internal/v1/budgets/{id}/summary
+```
+
+`DELETE` is a soft disable. Summary includes committed usage and unexpired
+reservations, using the same period and scope calculation as enforcement.
+The secret must not be shared with virtual-key management or client Bearer
+credentials.
+
 When a matching limit is exhausted, billing returns HTTP 429 and the gateway
 returns `budget_exceeded` without trying another provider. Missing PostgreSQL or
 missing budget migrations make readiness and billing requests fail closed.

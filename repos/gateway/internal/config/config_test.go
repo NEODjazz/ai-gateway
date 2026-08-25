@@ -50,6 +50,8 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("RESPONSES_AFFINITY_TTL_SECONDS", "7200")
 	t.Setenv("MANAGEMENT_AUTH_URL", "http://auth:8082")
 	t.Setenv("MANAGEMENT_SHARED_SECRET", "internal-secret")
+	t.Setenv("BILLING_MANAGEMENT_URL", "http://billing:8083")
+	t.Setenv("BILLING_MANAGEMENT_SHARED_SECRET", "billing-secret")
 	t.Setenv("SEMANTIC_CACHE_TTL_SECONDS", "600")
 	t.Setenv("SEMANTIC_CACHE_THRESHOLD", "0.97")
 	t.Setenv("SEMANTIC_CACHE_MAX_ENTRIES", "25")
@@ -69,7 +71,7 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	if cfg.Provider.RoutingStrategy != "adaptive" || cfg.Provider.AdaptiveEWMAAlpha != 0.35 || cfg.Provider.AffinityTTL != 2*time.Hour {
 		t.Fatalf("unexpected adaptive routing config: %+v", cfg.Provider)
 	}
-	if cfg.Management.AuthURL != "http://auth:8082" || cfg.Management.Secret != "internal-secret" {
+	if cfg.Management.AuthURL != "http://auth:8082" || cfg.Management.Secret != "internal-secret" || cfg.Management.BillingURL != "http://billing:8083" || cfg.Management.BillingSecret != "billing-secret" {
 		t.Fatalf("unexpected management config: %+v", cfg.Management)
 	}
 	semantic := cfg.Cache.Semantic

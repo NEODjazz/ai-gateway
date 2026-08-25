@@ -135,6 +135,14 @@ spec:
                   name: {{ include "ai-gateway.providerSecretName" . }}
                   key: MANAGEMENT_SHARED_SECRET
                   optional: false
+            - name: BILLING_MANAGEMENT_URL
+              value: {{ .Values.gateway.management.billingUrl | quote }}
+            - name: BILLING_MANAGEMENT_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gateway.providerSecretName" . }}
+                  key: BILLING_MANAGEMENT_SHARED_SECRET
+                  optional: false
             - name: ANONYMIZER_REQUIRED
               value: {{ .Values.gateway.modules.anonymizer.required | quote }}
             - name: ANONYMIZER_RULES

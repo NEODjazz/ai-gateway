@@ -294,26 +294,33 @@ func applyReservationPricing(event *BillingEvent, reservation budgetReservation)
 }
 
 func budgetUsage(ctx context.Context, tx pgx.Tx, policy budgetPolicy, event BillingEvent, now time.Time) (float64, int64, error) {
+	return budgetUsageForPolicy(ctx, tx, policy, event.RequestID, now)
+}
+
+type budgetUsageQuerier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func budgetUsageForPolicy(ctx context.Context, query budgetUsageQuerier, policy budgetPolicy, excludedRequestID string, now time.Time) (float64, int64, error) {
 	start := budgetPeriodStart(now, policy.Period)
 	var cost float64
 	var tokens int64
-	err := tx.QueryRow(ctx, `
+	err := query.QueryRow(ctx, `
 		SELECT COALESCE(SUM(CASE WHEN state='committed' THEN actual_cost ELSE reserved_cost END),0)::float8,
 		       COALESCE(SUM(CASE WHEN state='committed' THEN actual_tokens ELSE reserved_tokens END),0)
 		FROM billing_budget_reservations
 		WHERE created_at >= $1
 		  AND (state='committed' OR (state='reserved' AND reservation_expires_at > now()))
-		  AND request_id <> $8
+		  AND request_id <> $4
 		  AND CASE $2
 			WHEN 'global' THEN true
 			WHEN 'key' THEN credential_id=$3
-			WHEN 'user' THEN user_id=$4
-			WHEN 'team' THEN team_id=$5
-			WHEN 'model' THEN model=$6
-			WHEN 'provider' THEN provider_name=$7 OR provider_type=$7
+			WHEN 'user' THEN user_id=$3
+			WHEN 'team' THEN team_id=$3
+			WHEN 'model' THEN model=$3
+			WHEN 'provider' THEN provider_name=$3 OR provider_type=$3
 			ELSE false
-		  END`, start, policy.ScopeType, event.APIKeyFingerprint, event.UserID,
-		event.TeamID, event.Model, policy.ScopeID, event.RequestID).Scan(&cost, &tokens)
+		  END`, start, policy.ScopeType, policy.ScopeID, excludedRequestID).Scan(&cost, &tokens)
 	return cost, tokens, err
 }
 

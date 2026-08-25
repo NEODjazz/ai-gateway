@@ -105,7 +105,7 @@ func TestOpenAPIRequestExamplesMatchSchemas(t *testing.T) {
 
 func TestOpenAPIDoesNotExposeInternalServiceContracts(t *testing.T) {
 	specification := string(api.OpenAPI)
-	for _, path := range []string{"/authorize", "/usage", "/scan", "/anonymize", "/internal/v1/keys"} {
+	for _, path := range []string{"/authorize", "/usage", "/scan", "/anonymize", "/internal/v1/keys", "/internal/v1/budgets"} {
 		if strings.Contains(specification, "\n  "+path+":") {
 			t.Errorf("OpenAPI exposes internal route %q", path)
 		}
@@ -115,7 +115,7 @@ func TestOpenAPIDoesNotExposeInternalServiceContracts(t *testing.T) {
 func TestDocumentedRouteMethodsAreSupported(t *testing.T) {
 	for _, route := range gateway.DocumentedRoutes() {
 		switch route.Method {
-		case http.MethodGet, http.MethodPost, http.MethodDelete:
+		case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete:
 		default:
 			t.Errorf("unsupported documented method %q", route.Method)
 		}

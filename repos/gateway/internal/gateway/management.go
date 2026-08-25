@@ -128,6 +128,10 @@ func (h Handler) CreateVirtualKey(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if h.management == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "management service is not configured")
+		return
+	}
 	spec, ok := decodeManagedVirtualKey(w, r)
 	if !ok {
 		return
@@ -143,6 +147,10 @@ func (h Handler) CreateVirtualKey(w http.ResponseWriter, r *http.Request) {
 func (h Handler) RotateVirtualKey(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.authorizeAdmin(w, r)
 	if !ok {
+		return
+	}
+	if h.management == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "management service is not configured")
 		return
 	}
 	id := r.PathValue("id")
@@ -165,6 +173,10 @@ func (h Handler) RotateVirtualKey(w http.ResponseWriter, r *http.Request) {
 func (h Handler) RevokeVirtualKey(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.authorizeAdmin(w, r)
 	if !ok {
+		return
+	}
+	if h.management == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "management service is not configured")
 		return
 	}
 	id := r.PathValue("id")
@@ -192,10 +204,6 @@ func (h Handler) authorizeAdmin(w http.ResponseWriter, r *http.Request) (modules
 	req.APIKey = ""
 	if !hasRole(req.Roles, "admin") {
 		writeError(w, http.StatusForbidden, "forbidden", "admin role is required")
-		return req, false
-	}
-	if h.management == nil {
-		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "management service is not configured")
 		return req, false
 	}
 	return req, true

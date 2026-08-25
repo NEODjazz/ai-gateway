@@ -53,6 +53,8 @@ spec:
               valueFrom: {secretKeyRef: {name: {{ include "billing.secretName" . }}, key: clickhouse-password}}
             - name: POSTGRES_DSN
               valueFrom: {secretKeyRef: {name: {{ include "billing.secretName" . }}, key: postgres-dsn}}
+            - name: BILLING_MANAGEMENT_SHARED_SECRET
+              valueFrom: {secretKeyRef: {name: {{ include "billing.secretName" . }}, key: management-shared-secret}}
             - name: BILLING_TARIFFS_ENABLED
               value: {{ .Values.billing.features.tariffs | quote }}
             - name: BILLING_LIMITS_ENABLED

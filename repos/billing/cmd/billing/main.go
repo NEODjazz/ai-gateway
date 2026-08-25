@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 
 	"ai-gateway-billing/internal/modules"
 	"ai-gateway-billing/internal/openai"
@@ -24,6 +25,8 @@ func main() {
 	http.HandleFunc("/livez", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
+	manager, managerErr := module.BudgetManager()
+	registerBudgetManagement(http.DefaultServeMux, manager, managerErr, os.Getenv("BILLING_MANAGEMENT_SHARED_SECRET"))
 
 	http.HandleFunc("/usage", func(w http.ResponseWriter, r *http.Request) {
 		var request usageRequest

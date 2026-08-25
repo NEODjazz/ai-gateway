@@ -24,6 +24,7 @@ type Handler struct {
 	metrics    *Metrics
 	ready      func(context.Context) error
 	management ManagementClient
+	budgets    BudgetManagementClient
 	apiDocs    apiDocsConfig
 }
 

@@ -32,6 +32,7 @@ billing:
     clickhouseUsername: ai_gateway
     clickhousePassword: ai_gateway
     postgresDsn: postgres://ai_gateway:ai_gateway@ai-gateway-postgres:5432/ai_gateway?sslmode=disable
+    managementSharedSecret: dev-billing-management-shared-secret
   features:
     tariffs: false
     limits: true

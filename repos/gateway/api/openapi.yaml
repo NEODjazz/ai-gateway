@@ -312,6 +312,110 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ManagementUnavailable'
+  /admin/v1/budgets:
+    get:
+      operationId: listBudgets
+      tags: [Budgets]
+      summary: List budget policies
+      responses:
+        '200':
+          description: Budget policies
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/BudgetPolicy'}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    post:
+      operationId: createBudget
+      tags: [Budgets]
+      summary: Create a budget policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BudgetPolicyInput'}
+      responses:
+        '201':
+          description: Budget policy created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BudgetPolicy'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/budgets/{id}:
+    parameters:
+      - $ref: '#/components/parameters/BudgetID'
+    get:
+      operationId: getBudget
+      tags: [Budgets]
+      summary: Get a budget policy
+      responses:
+        '200':
+          description: Budget policy
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BudgetPolicy'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    put:
+      operationId: updateBudget
+      tags: [Budgets]
+      summary: Replace a budget policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BudgetPolicyInput'}
+      responses:
+        '200':
+          description: Updated budget policy
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BudgetPolicy'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    delete:
+      operationId: disableBudget
+      tags: [Budgets]
+      summary: Disable a budget policy
+      responses:
+        '204': {description: Budget policy disabled}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/budgets/{id}/summary:
+    get:
+      operationId: getBudgetSummary
+      tags: [Budgets]
+      summary: Get current committed and reserved spend
+      parameters:
+        - $ref: '#/components/parameters/BudgetID'
+      responses:
+        '200':
+          description: Current budget window summary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BudgetSummary'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
 components:
   securitySchemes:
     bearerAuth:
@@ -334,6 +438,11 @@ components:
         type: string
         pattern: '^vk_[A-Za-z0-9_-]{5,125}$'
         maxLength: 128
+    BudgetID:
+      name: id
+      in: path
+      required: true
+      schema: {type: integer, format: int64, minimum: 1}
   responses:
     InvalidRequest:
       description: Invalid request or unsupported input
@@ -408,18 +517,53 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     ManagementUnavailable:
-      description: Virtual-key management service is unavailable
+      description: Required admin management service is unavailable
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     NotFound:
-      description: Virtual key not found
+      description: Requested managed resource was not found
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    BudgetPolicyInput:
+      type: object
+      additionalProperties: false
+      required: [scope_type, scope_id, period]
+      properties:
+        scope_type: {type: string, enum: [global, key, user, team, model, provider]}
+        scope_id: {type: string, minLength: 1, maxLength: 256}
+        period: {type: string, enum: [hour, day, week, month]}
+        currency: {type: string, pattern: '^[A-Z]{3}$', default: USD}
+        max_cost: {type: number, exclusiveMinimum: 0}
+        max_tokens: {type: integer, format: int64, minimum: 1}
+        enabled: {type: boolean, default: true}
+      anyOf:
+        - required: [max_cost]
+        - required: [max_tokens]
+    BudgetPolicy:
+      allOf:
+        - $ref: '#/components/schemas/BudgetPolicyInput'
+        - type: object
+          required: [id, currency, enabled, created_at, updated_at]
+          properties:
+            id: {type: integer, format: int64, minimum: 1}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+    BudgetSummary:
+      type: object
+      required: [policy, window_start, window_end, used_cost, used_tokens]
+      properties:
+        policy: {$ref: '#/components/schemas/BudgetPolicy'}
+        window_start: {type: string, format: date-time}
+        window_end: {type: string, format: date-time}
+        used_cost: {type: number, minimum: 0}
+        remaining_cost: {type: number, minimum: 0}
+        used_tokens: {type: integer, format: int64, minimum: 0}
+        remaining_tokens: {type: integer, format: int64, minimum: 0}
     ErrorResponse:
       type: object
       additionalProperties: false

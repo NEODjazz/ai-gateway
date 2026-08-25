@@ -27,6 +27,12 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/admin/v1/keys"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateVirtualKey) }},
 	{RouteContract{http.MethodPost, "/admin/v1/keys/{id}/rotate"}, func(h Handler) http.Handler { return http.HandlerFunc(h.RotateVirtualKey) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/keys/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.RevokeVirtualKey) }},
+	{RouteContract{http.MethodGet, "/admin/v1/budgets"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListBudgets) }},
+	{RouteContract{http.MethodPost, "/admin/v1/budgets"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateBudget) }},
+	{RouteContract{http.MethodGet, "/admin/v1/budgets/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetBudget) }},
+	{RouteContract{http.MethodPut, "/admin/v1/budgets/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateBudget) }},
+	{RouteContract{http.MethodDelete, "/admin/v1/budgets/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DisableBudget) }},
+	{RouteContract{http.MethodGet, "/admin/v1/budgets/{id}/summary"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetBudgetSummary) }},
 }
 
 func DocumentedRoutes() []RouteContract {
