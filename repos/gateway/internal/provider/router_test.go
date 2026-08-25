@@ -1186,7 +1186,7 @@ func TestCatalogRoutesByModelCapabilitiesAndOutputLimit(t *testing.T) {
 	basic := &countingProvider{content: "basic"}
 	tools := &countingProvider{content: "tools"}
 	large := &countingProvider{content: "large"}
-	router := Router{catalog: catalog, health: newEndpointHealthTracker(), endpoints: []Endpoint{
+	router := Router{catalog: modelcatalog.NewRegistry(catalog, nil, time.Second), health: newEndpointHealthTracker(), endpoints: []Endpoint{
 		{Name: "basic", Type: "openai", Models: []string{"model"}, Priority: 1, Provider: basic},
 		{Name: "tools", Type: "openai", Models: []string{"model"}, Priority: 2, Provider: tools},
 		{Name: "large", Type: "openai", Models: []string{"model"}, Priority: 3, Provider: large},
@@ -1211,7 +1211,7 @@ func TestCatalogStrictModeRejectsUnknownModelAndFiltersModels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := Router{catalog: catalog, health: newEndpointHealthTracker(), endpoints: []Endpoint{
+	router := Router{catalog: modelcatalog.NewRegistry(catalog, nil, time.Second), health: newEndpointHealthTracker(), endpoints: []Endpoint{
 		{Name: "known", Type: "openai", Models: []string{"known-model", "unknown-model"}, Provider: staticProvider{content: "ok"}},
 	}}
 	if _, err := router.ChatCompletions(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "unknown-model"}}); err == nil {
@@ -1229,7 +1229,7 @@ func TestCatalogMatchesUpstreamModelAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	upstream := &modelCaptureProvider{content: "ok"}
-	router := Router{catalog: catalog, health: newEndpointHealthTracker(), endpoints: []Endpoint{{
+	router := Router{catalog: modelcatalog.NewRegistry(catalog, nil, time.Second), health: newEndpointHealthTracker(), endpoints: []Endpoint{{
 		Name: "azure", Type: "openai", ModelAliases: map[string]string{"public-model": "deployment-model"}, Provider: upstream,
 	}}}
 	_, err = router.ChatCompletions(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{
@@ -1247,6 +1247,36 @@ func TestResponsesCatalogRequirementsIncludeToolsStructuredOutputAndStream(t *te
 	}, true)
 	if strings.Join(required, ",") != "responses,stream,tools,structured_output" {
 		t.Fatalf("unexpected Responses capabilities: %v", required)
+	}
+}
+
+func TestRuntimeCatalogPricingSnapshotIsAttachedToProviderAttempt(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"runtime-v2","models":[{"provider":"endpoint-a","model":"upstream","input_cost_per_1m":1.5,"output_cost_per_1m":3,"currency":"USD"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := Endpoint{Name: "endpoint-a", Type: "openai", ModelAliases: map[string]string{"alias": "upstream"}}
+	router := Router{catalog: modelcatalog.NewRegistry(catalog, nil, time.Second)}
+	req := providerAttemptContext(modules.RequestContext{}, endpoint)
+	router.applyCatalogPricing(context.Background(), &req, endpoint, "alias")
+	if req.Metadata["model_catalog.version"] != "runtime-v2" || req.Metadata["model_catalog.pricing_key"] != "endpoint-a/upstream" || req.Metadata["model_catalog.input_cost_per_1m"] != "1.5" {
+		t.Fatalf("metadata=%v", req.Metadata)
+	}
+}
+
+func TestRuntimeCatalogUpdateChangesModelsWithoutRebuildingRouter(t *testing.T) {
+	initial, _ := modelcatalog.Parse(`{"version":"v1","unknown_model_policy":"deny","models":[{"provider":"endpoint-a","model":"old","capabilities":["chat"]}]}`)
+	updated, _ := modelcatalog.Parse(`{"version":"v2","unknown_model_policy":"deny","models":[{"provider":"endpoint-a","model":"new","capabilities":["chat"]}]}`)
+	registry := modelcatalog.NewRegistry(initial, nil, time.Second)
+	router := Router{catalog: registry, health: newEndpointHealthTracker(), endpoints: []Endpoint{{Name: "endpoint-a", Type: "openai", Models: []string{"old", "new"}, Provider: &modelCaptureProvider{}}}}
+	if models := router.Models(); len(models) != 1 || models[0].ID != "old" {
+		t.Fatalf("before=%+v", models)
+	}
+	if err := registry.Update(context.Background(), updated); err != nil {
+		t.Fatal(err)
+	}
+	if models := router.Models(); len(models) != 1 || models[0].ID != "new" {
+		t.Fatalf("after=%+v", models)
 	}
 }
 

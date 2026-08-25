@@ -273,6 +273,7 @@ Helm chart передает anonymizer переменную `REDIS_ADDR` и от
 - PostgreSQL policy checker сериализует matching policies через row locks и атомарно применяет cost/token budgets по global/key/user/team/model/provider scope и hour/day/week/month period. Reserve учитывает максимальный output или безопасный fallback, commit — фактический usage, cancel и TTL освобождают capacity.
 - Повторный active reserve с тем же `request_id` идемпотентен и при failover переносит reservation на новый provider/model scope. Повторное использование finalized `request_id` или смена billing identity отклоняется как `409 billing_conflict`.
 - Reservation сохраняет `catalog_version`, `pricing_key` и обе ставки. Commit всегда использует этот snapshot, даже если active catalog успел измениться или удалить модель; те же audit fields пишутся в ClickHouse.
+- Runtime model registry атомарно заменяется через admin API и синхронизируется между gateway replicas через Redis. Router передает billing выбранный pricing snapshot, поэтому обновление capabilities/prices не требует рестарта и не меняет цену in-flight reservation.
 - Если provider вернул usage, commit использует его; иначе фактический output остается нулевым. Reservation при этом защищает лимит до commit/cancel/TTL.
 - Tariffs и financial transactions пока не реализованы и fail closed при включении.
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log"
@@ -29,6 +30,9 @@ func main() {
 	registerBudgetManagement(http.DefaultServeMux, manager, managerErr, os.Getenv("BILLING_MANAGEMENT_SHARED_SECRET"))
 
 	http.HandleFunc("/usage", func(w http.ResponseWriter, r *http.Request) {
+		if !authorizeBillingUsage(w, r, os.Getenv("BILLING_SHARED_SECRET")) {
+			return
+		}
 		var request usageRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -54,12 +58,17 @@ func main() {
 				TotalTokens:      request.TotalTokens,
 			},
 			Metadata: map[string]string{
-				"provider.endpoint.name": request.ProviderEndpointName,
-				"provider.endpoint.type": request.ProviderEndpointType,
-				"provider.status":        request.Status,
-				"provider.error":         request.Error,
-				"provider.latency_ms":    request.LatencyMS,
-				"provider.cache.status":  request.CacheStatus,
+				"provider.endpoint.name":           request.ProviderEndpointName,
+				"provider.endpoint.type":           request.ProviderEndpointType,
+				"provider.status":                  request.Status,
+				"provider.error":                   request.Error,
+				"provider.latency_ms":              request.LatencyMS,
+				"provider.cache.status":            request.CacheStatus,
+				"model_catalog.version":            request.CatalogVersion,
+				"model_catalog.pricing_key":        request.PricingKey,
+				"model_catalog.input_cost_per_1m":  request.InputCostPer1M,
+				"model_catalog.output_cost_per_1m": request.OutputCostPer1M,
+				"model_catalog.currency":           request.Currency,
 			},
 		}
 		if request.APIType == "responses" {
@@ -82,6 +91,18 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8083", nil))
 }
 
+func authorizeBillingUsage(w http.ResponseWriter, r *http.Request, secret string) bool {
+	if secret == "" {
+		return true
+	}
+	provided := r.Header.Get("X-Service-Token")
+	if len(provided) != len(secret) || subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	return true
+}
+
 type usageRequest struct {
 	RequestID             string   `json:"request_id,omitempty"`
 	CredentialID          string   `json:"credential_id,omitempty"`
@@ -102,6 +123,11 @@ type usageRequest struct {
 	InputTokens           int      `json:"input_tokens"`
 	OutputTokens          int      `json:"output_tokens"`
 	TotalTokens           int      `json:"total_tokens"`
+	CatalogVersion        string   `json:"catalog_version,omitempty"`
+	PricingKey            string   `json:"pricing_key,omitempty"`
+	InputCostPer1M        string   `json:"input_cost_per_1m,omitempty"`
+	OutputCostPer1M       string   `json:"output_cost_per_1m,omitempty"`
+	Currency              string   `json:"currency,omitempty"`
 }
 
 type usageResponse struct {

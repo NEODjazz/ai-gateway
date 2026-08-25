@@ -55,6 +55,8 @@ spec:
               valueFrom: {secretKeyRef: {name: {{ include "billing.secretName" . }}, key: postgres-dsn}}
             - name: BILLING_MANAGEMENT_SHARED_SECRET
               valueFrom: {secretKeyRef: {name: {{ include "billing.secretName" . }}, key: management-shared-secret}}
+            - name: BILLING_SHARED_SECRET
+              valueFrom: {secretKeyRef: {name: {{ include "billing.secretName" . }}, key: billing-shared-secret}}
             - name: BILLING_TARIFFS_ENABLED
               value: {{ .Values.billing.features.tariffs | quote }}
             - name: BILLING_LIMITS_ENABLED

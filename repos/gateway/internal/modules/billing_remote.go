@@ -28,6 +28,11 @@ type UsageRequest struct {
 	InputTokens           int      `json:"input_tokens"`
 	OutputTokens          int      `json:"output_tokens"`
 	TotalTokens           int      `json:"total_tokens"`
+	CatalogVersion        string   `json:"catalog_version,omitempty"`
+	PricingKey            string   `json:"pricing_key,omitempty"`
+	InputCostPer1M        string   `json:"input_cost_per_1m,omitempty"`
+	OutputCostPer1M       string   `json:"output_cost_per_1m,omitempty"`
+	Currency              string   `json:"currency,omitempty"`
 }
 
 type UsageResponse struct {
@@ -38,11 +43,18 @@ type UsageResponse struct {
 type RemoteBillingModule struct {
 	required bool
 	endpoint string
+	secret   string
 	client   *http.Client
 }
 
 func NewRemoteBillingModule(required bool, endpoint string) RemoteBillingModule {
 	return RemoteBillingModule{required: required, endpoint: endpoint, client: newRemoteHTTPClient()}
+}
+
+func NewRemoteBillingModuleWithSecret(required bool, endpoint, secret string) RemoteBillingModule {
+	module := NewRemoteBillingModule(required, endpoint)
+	module.secret = secret
+	return module
 }
 
 func (m RemoteBillingModule) Name() string              { return "billing" }
@@ -68,7 +80,7 @@ func (m RemoteBillingModule) HandleFailure(ctx context.Context, req *RequestCont
 func (m RemoteBillingModule) send(ctx context.Context, req *RequestContext, phase string) error {
 	request := billingRequest(req)
 	request.Phase = phase
-	response, err := callRemote[UsageRequest, UsageResponse](ctx, m.client, m.endpoint, request)
+	response, err := callRemoteWithHeaders[UsageRequest, UsageResponse](ctx, m.client, m.endpoint, request, map[string]string{"X-Service-Token": m.secret})
 	if err != nil {
 		return err
 	}
@@ -102,6 +114,11 @@ func billingRequest(req *RequestContext) UsageRequest {
 		LatencyMS:             metadataValue(req.Metadata, "provider.latency_ms"),
 		CacheStatus:           metadataValue(req.Metadata, "provider.cache.status"),
 		PromptTokensEstimated: estimateRequestTokens(req),
+		CatalogVersion:        metadataValue(req.Metadata, "model_catalog.version"),
+		PricingKey:            metadataValue(req.Metadata, "model_catalog.pricing_key"),
+		InputCostPer1M:        metadataValue(req.Metadata, "model_catalog.input_cost_per_1m"),
+		OutputCostPer1M:       metadataValue(req.Metadata, "model_catalog.output_cost_per_1m"),
+		Currency:              metadataValue(req.Metadata, "model_catalog.currency"),
 	}
 	request.InputTokens = request.PromptTokensEstimated
 	request.OutputTokens = requestedOutputTokens(req)

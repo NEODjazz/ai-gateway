@@ -84,6 +84,7 @@ type ModuleConfig struct {
 type FeatureConfig struct {
 	Required bool
 	URL      string
+	Secret   string
 }
 
 type ProviderConfig struct {
@@ -197,6 +198,7 @@ func Load() Config {
 			Billing: FeatureConfig{
 				Required: envBool("BILLING_REQUIRED", false),
 				URL:      env("BILLING_URL", ""),
+				Secret:   os.Getenv("BILLING_SHARED_SECRET"),
 			},
 			DLP: FeatureConfig{
 				Required: envBool("DLP_REQUIRED", true),

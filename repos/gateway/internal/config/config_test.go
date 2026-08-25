@@ -52,6 +52,7 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("MANAGEMENT_SHARED_SECRET", "internal-secret")
 	t.Setenv("BILLING_MANAGEMENT_URL", "http://billing:8083")
 	t.Setenv("BILLING_MANAGEMENT_SHARED_SECRET", "billing-secret")
+	t.Setenv("BILLING_SHARED_SECRET", "billing-usage-secret")
 	t.Setenv("SEMANTIC_CACHE_TTL_SECONDS", "600")
 	t.Setenv("SEMANTIC_CACHE_THRESHOLD", "0.97")
 	t.Setenv("SEMANTIC_CACHE_MAX_ENTRIES", "25")
@@ -73,6 +74,9 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	}
 	if cfg.Management.AuthURL != "http://auth:8082" || cfg.Management.Secret != "internal-secret" || cfg.Management.BillingURL != "http://billing:8083" || cfg.Management.BillingSecret != "billing-secret" {
 		t.Fatalf("unexpected management config: %+v", cfg.Management)
+	}
+	if cfg.Modules.Billing.Secret != "billing-usage-secret" {
+		t.Fatal("unexpected billing service secret")
 	}
 	semantic := cfg.Cache.Semantic
 	if semantic.TTLSeconds != 600 || semantic.Threshold != 0.97 || semantic.MaxEntries != 25 || semantic.MaxBytes != 4096 || semantic.EmbeddingURL != "http://embedding:8080/v1" || semantic.EmbeddingAPIKey != "embedding-secret" || semantic.EmbeddingModel != "text-embedding" {

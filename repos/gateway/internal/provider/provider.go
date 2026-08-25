@@ -73,6 +73,7 @@ type Config struct {
 	CacheMaxBytes           int
 	CacheStore              ExactCacheStore
 	Catalog                 modelcatalog.Catalog
+	CatalogRegistry         *modelcatalog.Registry
 	Observer                ProviderObserver
 	RoutingStrategy         string
 	AdaptiveEWMAAlpha       float64
@@ -119,7 +120,7 @@ type Router struct {
 	health          *endpointHealthTracker
 	routeCounter    *atomic.Uint64
 	cache           responseCache
-	catalog         modelcatalog.Catalog
+	catalog         *modelcatalog.Registry
 	observer        ProviderObserver
 	routingStrategy string
 	adaptive        *adaptiveRouter
@@ -178,6 +179,10 @@ func New(cfg Config) Provider {
 		return endpoints[i].Priority < endpoints[j].Priority
 	})
 
+	registry := cfg.CatalogRegistry
+	if registry == nil {
+		registry = modelcatalog.NewRegistry(cfg.Catalog, nil, time.Second)
+	}
 	return Router{
 		defaultProvider: cfg.Default,
 		endpoints:       endpoints,
@@ -185,7 +190,7 @@ func New(cfg Config) Provider {
 		health:          newEndpointHealthTracker(cfg.CircuitStore),
 		routeCounter:    &atomic.Uint64{},
 		cache:           newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
-		catalog:         cfg.Catalog,
+		catalog:         registry,
 		observer:        cfg.Observer,
 		routingStrategy: strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
 		adaptive:        newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
@@ -209,6 +214,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 	var lastAttempt *modules.RequestContext
 	for _, endpoint := range candidates {
 		attemptCtx := providerAttemptContext(req, endpoint)
+		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
 			continue
@@ -334,6 +340,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		}
 
 		attemptCtx := providerAttemptContext(req, endpoint)
+		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
 			continue
@@ -411,6 +418,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 	var lastAttempt *modules.RequestContext
 	for _, endpoint := range candidates {
 		attemptCtx := providerAttemptContext(req, endpoint)
+		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
 			continue
@@ -495,6 +503,7 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 			continue
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
+		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
 			continue
@@ -561,6 +570,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		}
 
 		attemptCtx := providerAttemptContext(req, endpoint)
+		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
 			continue
@@ -627,6 +637,7 @@ func terminalModuleError(err error) bool {
 }
 
 func (r Router) Models() []openai.Model {
+	catalog := r.catalog.Current(context.Background())
 	seen := map[string]bool{}
 	models := make([]openai.Model, 0)
 	for _, endpoint := range r.endpoints {
@@ -645,7 +656,7 @@ func (r Router) Models() []openai.Model {
 			if upstream, found := endpoint.ModelAliases[modelID]; found {
 				lookupModels = append(lookupModels, upstream)
 			}
-			if _, found := r.catalog.Find(endpoint.Name, endpoint.Type, lookupModels...); !found && r.catalog.DenyUnknownModels() {
+			if _, found := catalog.Find(endpoint.Name, endpoint.Type, lookupModels...); !found && catalog.DenyUnknownModels() {
 				continue
 			}
 			seen[modelID] = true
@@ -695,6 +706,26 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		attemptCtx.Metadata["provider.upstream_model"] = upstreamModel
 	}
 	return attemptCtx
+}
+
+func (r Router) applyCatalogPricing(ctx context.Context, req *modules.RequestContext, endpoint Endpoint, requestedModel string) {
+	models := []string{requestedModel}
+	if upstream, found := endpoint.ModelAliases[requestedModel]; found {
+		models = append(models, upstream)
+	}
+	catalog := r.catalog.Current(ctx)
+	entry, found := catalog.Find(endpoint.Name, endpoint.Type, models...)
+	if !found || entry.Currency == "" {
+		return
+	}
+	if req.Metadata == nil {
+		req.Metadata = map[string]string{}
+	}
+	req.Metadata["model_catalog.version"] = catalog.Version
+	req.Metadata["model_catalog.pricing_key"] = entry.Provider + "/" + entry.Model
+	req.Metadata["model_catalog.input_cost_per_1m"] = strconv.FormatFloat(entry.InputCostPer1M, 'g', -1, 64)
+	req.Metadata["model_catalog.output_cost_per_1m"] = strconv.FormatFloat(entry.OutputCostPer1M, 'g', -1, 64)
+	req.Metadata["model_catalog.currency"] = entry.Currency
 }
 
 func cloneMetadata(metadata map[string]string) map[string]string {
@@ -872,6 +903,7 @@ func mergeEmbeddingUsage(response *openai.EmbeddingResponse, usage *openai.Usage
 }
 
 func (r Router) candidates(ctx context.Context, request openai.ChatCompletionRequest, capabilities ...string) []Endpoint {
+	catalog := r.catalog.Current(ctx)
 	requestedProvider := strings.TrimSpace(request.Provider)
 	filterByProvider := requestedProvider != ""
 	if requestedProvider == "" && strings.TrimSpace(request.Model) == "" {
@@ -887,7 +919,7 @@ func (r Router) candidates(ctx context.Context, request openai.ChatCompletionReq
 		if !endpoint.supportsModel(request.Model) {
 			continue
 		}
-		if !r.supportsCapabilities(endpoint, request.Model, capabilities...) {
+		if !supportsCatalogCapabilities(catalog, endpoint, request.Model, capabilities...) {
 			continue
 		}
 		if hasCapability(capabilities, "mcp") {
@@ -905,7 +937,7 @@ func (r Router) candidates(ctx context.Context, request openai.ChatCompletionReq
 				continue
 			}
 		}
-		if !r.supportsOutputLimit(endpoint, request.Model, request.MaxTokens) {
+		if !supportsCatalogOutputLimit(catalog, endpoint, request.Model, request.MaxTokens) {
 			continue
 		}
 		if !r.health.available(ctx, endpoint) {
@@ -1043,14 +1075,14 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 	return true
 }
 
-func (r Router) supportsCapabilities(endpoint Endpoint, requestedModel string, required ...string) bool {
+func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint, requestedModel string, required ...string) bool {
 	models := []string{requestedModel}
 	if upstream, found := endpoint.ModelAliases[requestedModel]; found {
 		models = append(models, upstream)
 	}
-	entry, found := r.catalog.Find(endpoint.Name, endpoint.Type, models...)
+	entry, found := catalog.Find(endpoint.Name, endpoint.Type, models...)
 	if !found {
-		if r.catalog.DenyUnknownModels() {
+		if catalog.DenyUnknownModels() {
 			return false
 		}
 		if requiresExplicitEndpointCapability(required) && !hasExplicitEndpointCapabilities(endpoint.Capabilities, required) {
@@ -1089,7 +1121,7 @@ func hasExplicitEndpointCapabilities(available []string, required []string) bool
 	return true
 }
 
-func (r Router) supportsOutputLimit(endpoint Endpoint, requestedModel string, requested *int) bool {
+func supportsCatalogOutputLimit(catalog modelcatalog.Catalog, endpoint Endpoint, requestedModel string, requested *int) bool {
 	if requested == nil || *requested <= 0 {
 		return true
 	}
@@ -1097,7 +1129,7 @@ func (r Router) supportsOutputLimit(endpoint Endpoint, requestedModel string, re
 	if upstream, found := endpoint.ModelAliases[requestedModel]; found {
 		models = append(models, upstream)
 	}
-	entry, found := r.catalog.Find(endpoint.Name, endpoint.Type, models...)
+	entry, found := catalog.Find(endpoint.Name, endpoint.Type, models...)
 	return !found || entry.MaxOutputTokens <= 0 || *requested <= entry.MaxOutputTokens
 }
 

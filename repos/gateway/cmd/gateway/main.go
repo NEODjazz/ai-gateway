@@ -11,6 +11,7 @@ import (
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/gateway"
+	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/provider"
 	"ai-gateway-gateway/internal/redisstore"
@@ -43,9 +44,10 @@ func main() {
 		modules.DLP(cfg.Modules.DLP.Required, cfg.Modules.DLP.URL),
 		modules.AV(cfg.Modules.AV.Required, cfg.Modules.AV.URL),
 		modules.Anonymizer(cfg.Modules.Anonymizer.Required, cfg.Modules.Anonymizer.URL),
-		modules.Billing(cfg.Modules.Billing.Required, cfg.Modules.Billing.URL),
+		modules.BillingWithSecret(cfg.Modules.Billing.Required, cfg.Modules.Billing.URL, cfg.Modules.Billing.Secret),
 	}, metrics)
 
+	modelRegistry := modelcatalog.NewRegistry(cfg.Catalog, redisStore, time.Second)
 	llmProvider := provider.New(provider.Config{
 		Default:                 cfg.Provider.Default,
 		Endpoints:               cfg.Provider.Endpoints,
@@ -55,6 +57,7 @@ func main() {
 		CacheMaxBytes:           cfg.Cache.MaxBytes,
 		CacheStore:              redisStore,
 		Catalog:                 cfg.Catalog,
+		CatalogRegistry:         modelRegistry,
 		Observer:                metrics,
 		RoutingStrategy:         cfg.Provider.RoutingStrategy,
 		AdaptiveEWMAAlpha:       cfg.Provider.AdaptiveEWMAAlpha,
@@ -78,7 +81,7 @@ func main() {
 	if redisStore != nil {
 		readiness = redisStore.Ping
 	}
-	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics)
+	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry)
 	if cfg.APIDocs.Enabled {
 		handler = handler.WithAPIDocs(cfg.APIDocs.TryItOutEnabled)
 	}

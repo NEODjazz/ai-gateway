@@ -19,6 +19,10 @@ func newRemoteHTTPClient() *http.Client {
 }
 
 func callRemote[Request any, Response any](ctx context.Context, client *http.Client, endpoint string, request Request) (Response, error) {
+	return callRemoteWithHeaders[Request, Response](ctx, client, endpoint, request, nil)
+}
+
+func callRemoteWithHeaders[Request any, Response any](ctx context.Context, client *http.Client, endpoint string, request Request, headers map[string]string) (Response, error) {
 	var result Response
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -30,6 +34,11 @@ func callRemote[Request any, Response any](ctx context.Context, client *http.Cli
 		return result, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	for key, value := range headers {
+		if value != "" {
+			httpReq.Header.Set(key, value)
+		}
+	}
 
 	resp, err := client.Do(httpReq)
 	if err != nil {

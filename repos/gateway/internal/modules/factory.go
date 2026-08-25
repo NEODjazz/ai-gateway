@@ -23,6 +23,13 @@ func Billing(required bool, url string) Module {
 	return NewBillingModule(required)
 }
 
+func BillingWithSecret(required bool, url, secret string) Module {
+	if url != "" {
+		return NewRemoteBillingModuleWithSecret(required, endpoint(url, "/usage"), secret)
+	}
+	return NewBillingModule(required)
+}
+
 func DLP(required bool, url string) Module {
 	if url == "" {
 		return NewProviderRemoteModule("dlp", required, "")

@@ -173,6 +173,36 @@ func TestRemoteBillingLifecyclePhases(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
+	req := sensitiveContext()
+	if req.Metadata == nil {
+		req.Metadata = map[string]string{}
+	}
+	req.Metadata["model_catalog.version"] = "runtime-v2"
+	req.Metadata["model_catalog.pricing_key"] = "endpoint/model"
+	req.Metadata["model_catalog.input_cost_per_1m"] = "1.5"
+	req.Metadata["model_catalog.output_cost_per_1m"] = "3"
+	req.Metadata["model_catalog.currency"] = "USD"
+	request := billingRequest(&req)
+	if request.CatalogVersion != "runtime-v2" || request.PricingKey != "endpoint/model" || request.InputCostPer1M != "1.5" || request.Currency != "USD" {
+		t.Fatalf("pricing snapshot=%+v", request)
+	}
+}
+
+func TestRemoteBillingUsesScopedServiceSecretNotBearer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" || r.Header.Get("X-Service-Token") != "billing-secret" {
+			t.Fatalf("headers=%v", r.Header)
+		}
+		_ = json.NewEncoder(w).Encode(UsageResponse{})
+	}))
+	defer server.Close()
+	req := sensitiveContext()
+	if err := NewRemoteBillingModuleWithSecret(true, server.URL, "billing-secret").Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRemoteBillingMapsBudgetRejection(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "budget exceeded", http.StatusTooManyRequests)

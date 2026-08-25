@@ -416,6 +416,40 @@ paths:
         '403': {$ref: '#/components/responses/AdminRequired'}
         '404': {$ref: '#/components/responses/NotFound'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/model-catalog:
+    get:
+      operationId: getRuntimeModelCatalog
+      tags: [Models]
+      summary: Get the active runtime model catalog
+      responses:
+        '200':
+          description: Active catalog snapshot
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ModelCatalog'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    put:
+      operationId: replaceRuntimeModelCatalog
+      tags: [Models]
+      summary: Atomically replace the active runtime model catalog
+      description: Replicas synchronize the validated catalog through Redis. Priced entries require an explicit currency.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ModelCatalog'}
+      responses:
+        '200':
+          description: Activated catalog snapshot
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ModelCatalog'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
 components:
   securitySchemes:
     bearerAuth:
@@ -529,6 +563,33 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    ModelCatalogEntry:
+      type: object
+      additionalProperties: false
+      required: [provider, model]
+      properties:
+        provider: {type: string, minLength: 1}
+        model: {type: string, minLength: 1}
+        capabilities:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [chat, responses, embeddings, stream, tools, structured_output, mcp, vision]}
+        max_input_tokens: {type: integer, minimum: 0}
+        max_output_tokens: {type: integer, minimum: 0}
+        input_cost_per_1m: {type: number, minimum: 0}
+        output_cost_per_1m: {type: number, minimum: 0}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+    ModelCatalog:
+      type: object
+      additionalProperties: false
+      required: [version, models]
+      properties:
+        version: {type: string, minLength: 1, maxLength: 128}
+        unknown_model_policy: {type: string, enum: [legacy, deny], default: legacy}
+        models:
+          type: array
+          maxItems: 5000
+          items: {$ref: '#/components/schemas/ModelCatalogEntry'}
     BudgetPolicyInput:
       type: object
       additionalProperties: false

@@ -143,6 +143,7 @@ gateway:
       required: true
       remote: true
       url: http://ai-gateway-billing:8083
+      sharedSecret: dev-billing-shared-secret
     dlp:
       required: true
       remote: true

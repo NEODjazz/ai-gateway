@@ -230,6 +230,21 @@ charts as separate releases. See
 names and prices are illustrative configuration values, not a provider price
 quote.
 
+Administrators can replace the active catalog without restarting gateway pods
+through `GET` and `PUT /admin/v1/model-catalog`. The PUT body uses the same
+versioned schema as `MODEL_CATALOG_JSON`. With Redis configured, the validated
+document is shared by all replicas and picked up within one second; without
+Redis the update is process-local for development. Priced runtime entries must
+declare a three-letter currency. The router sends billing the exact selected
+version, pricing key, rates, and currency, and reserve pins that snapshot for
+commit. If Redis is unavailable, an update fails and the last valid catalog
+remains active.
+
+Runtime pricing fields are accepted by billing only on lifecycle calls carrying
+the scoped `BILLING_SHARED_SECRET`. This secret is independent from the client
+Bearer token, `MANAGEMENT_SHARED_SECRET`, and
+`BILLING_MANAGEMENT_SHARED_SECRET`.
+
 The gateway tries endpoints in `priority` order. If an endpoint returns an error or is unavailable, the router automatically tries the next compatible endpoint.
 
 Retries and cooldown are configured per endpoint with `max_retries`,

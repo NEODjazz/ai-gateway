@@ -72,3 +72,21 @@ func TestBudgetManagementRejectsUnknownFieldsAndBadID(t *testing.T) {
 		}
 	}
 }
+
+func TestBillingUsageScopedSecret(t *testing.T) {
+	for _, tc := range []struct {
+		configured string
+		provided   string
+		allowed    bool
+	}{{"", "", true}, {"secret", "wrong", false}, {"secret", "secret", true}} {
+		request := httptest.NewRequest(http.MethodPost, "/usage", nil)
+		request.Header.Set("X-Service-Token", tc.provided)
+		response := httptest.NewRecorder()
+		if got := authorizeBillingUsage(response, request, tc.configured); got != tc.allowed {
+			t.Fatalf("configured=%q provided=%q got=%v", tc.configured, tc.provided, got)
+		}
+		if !tc.allowed && response.Code != http.StatusUnauthorized {
+			t.Fatalf("status=%d", response.Code)
+		}
+	}
+}

@@ -153,6 +153,12 @@ spec:
               value: {{ .Values.gateway.modules.billing.required | quote }}
             - name: BILLING_URL
               value: {{ ternary .Values.gateway.modules.billing.url "" .Values.gateway.modules.billing.remote | quote }}
+            - name: BILLING_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gateway.providerSecretName" . }}
+                  key: BILLING_SHARED_SECRET
+                  optional: false
             - name: DLP_REQUIRED
               value: {{ .Values.gateway.modules.dlp.required | quote }}
             - name: DLP_URL

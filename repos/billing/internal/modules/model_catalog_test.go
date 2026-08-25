@@ -113,3 +113,21 @@ func TestDocumentedModelCatalogExampleMatchesBillingSchema(t *testing.T) {
 		t.Fatalf("documented catalog does not match billing schema: catalog=%+v err=%v", catalog, err)
 	}
 }
+
+func TestSuppliedRuntimePricingSnapshotOverridesStaticCatalog(t *testing.T) {
+	req := &RequestContext{Metadata: map[string]string{"model_catalog.version": "runtime-v2", "model_catalog.pricing_key": "endpoint/model", "model_catalog.input_cost_per_1m": "2.5", "model_catalog.output_cost_per_1m": "5", "model_catalog.currency": "EUR"}}
+	pricing, supplied, err := suppliedPricingSnapshot(req)
+	if err != nil || !supplied {
+		t.Fatalf("supplied=%v err=%v", supplied, err)
+	}
+	if pricing.CatalogVersion != "runtime-v2" || pricing.InputCostPer1M != 2.5 || pricing.Currency != "EUR" {
+		t.Fatalf("pricing=%+v", pricing)
+	}
+}
+
+func TestSuppliedRuntimePricingSnapshotFailsClosed(t *testing.T) {
+	req := &RequestContext{Metadata: map[string]string{"model_catalog.version": "runtime-v2", "model_catalog.pricing_key": "endpoint/model", "model_catalog.input_cost_per_1m": "bad", "model_catalog.output_cost_per_1m": "5", "model_catalog.currency": "USD"}}
+	if _, supplied, err := suppliedPricingSnapshot(req); !supplied || err == nil {
+		t.Fatalf("supplied=%v err=%v", supplied, err)
+	}
+}

@@ -10,7 +10,7 @@ import (
 type Catalog struct {
 	Version            string  `json:"version"`
 	UnknownModelPolicy string  `json:"unknown_model_policy,omitempty"`
-	Models             []Model `json:"models,omitempty"`
+	Models             []Model `json:"models"`
 	entries            map[string]Model
 }
 

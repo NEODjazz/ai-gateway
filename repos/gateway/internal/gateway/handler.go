@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
@@ -25,6 +26,7 @@ type Handler struct {
 	ready      func(context.Context) error
 	management ManagementClient
 	budgets    BudgetManagementClient
+	models     *modelcatalog.Registry
 	apiDocs    apiDocsConfig
 }
 

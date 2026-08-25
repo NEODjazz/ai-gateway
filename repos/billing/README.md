@@ -130,6 +130,11 @@ reservations, using the same period and scope calculation as enforcement.
 The secret must not be shared with virtual-key management or client Bearer
 credentials.
 
+The `/usage` lifecycle endpoint can independently require
+`BILLING_SHARED_SECRET` via `X-Service-Token`. Configure the same value on the
+gateway; it authenticates pricing snapshots and must differ from the budget
+management secret. An empty value is supported only for local compatibility.
+
 When a matching limit is exhausted, billing returns HTTP 429 and the gateway
 returns `budget_exceeded` without trying another provider. Missing PostgreSQL or
 missing budget migrations make readiness and billing requests fail closed.

@@ -240,7 +240,13 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		model = req.ResponsesResponse.Model
 	}
 
-	pricing, err := m.catalog.Resolve(metadata(req, "provider.endpoint.name"), metadata(req, "provider.endpoint.type"), providerName, model, m.pricing)
+	pricing, supplied, suppliedErr := suppliedPricingSnapshot(req)
+	var err error
+	if !supplied && suppliedErr == nil {
+		pricing, err = m.catalog.Resolve(metadata(req, "provider.endpoint.name"), metadata(req, "provider.endpoint.type"), providerName, model, m.pricing)
+	} else {
+		err = suppliedErr
+	}
 	pricingErr := err
 	if pricingErr != nil {
 		pricing = PricingSnapshot{Currency: m.pricing.Currency}
@@ -273,6 +279,21 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		OutputCostPer1M:       pricing.OutputCostPer1M,
 		Timestamp:             time.Now().UTC().Format(time.RFC3339),
 	}, pricingErr
+}
+
+func suppliedPricingSnapshot(req *RequestContext) (PricingSnapshot, bool, error) {
+	version := metadata(req, "model_catalog.version")
+	if version == "" {
+		return PricingSnapshot{}, false, nil
+	}
+	pricingKey := metadata(req, "model_catalog.pricing_key")
+	currency := metadata(req, "model_catalog.currency")
+	input, inputErr := strconv.ParseFloat(metadata(req, "model_catalog.input_cost_per_1m"), 64)
+	output, outputErr := strconv.ParseFloat(metadata(req, "model_catalog.output_cost_per_1m"), 64)
+	if pricingKey == "" || len(currency) != 3 || inputErr != nil || outputErr != nil || input < 0 || output < 0 {
+		return PricingSnapshot{}, true, errors.New("invalid supplied pricing snapshot")
+	}
+	return PricingSnapshot{CatalogVersion: version, PricingKey: pricingKey, Currency: currency, InputCostPer1M: input, OutputCostPer1M: output}, true, nil
 }
 
 func requestID(req *RequestContext) string {
