@@ -22,7 +22,7 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql", "005_virtual_key_metadata.sql", "006_identity_directory.sql"} {
+	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql", "005_virtual_key_metadata.sql", "006_identity_directory.sql", "007_organizations.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
 			t.Fatal(err)
@@ -42,8 +42,10 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	}
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
 	oldID, newID, expiredID := "key-old-"+suffix, "key-new-"+suffix, "key-expired-"+suffix
-	directoryUserID, directoryTeamID := "user-"+suffix, "team-"+suffix
+	directoryUserID, directoryTeamID, organizationID := "user-"+suffix, "team-"+suffix, "org-"+suffix
 	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_organization_teams WHERE organization_id=$1`, organizationID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_organizations WHERE id=$1`, organizationID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_team_memberships WHERE team_id=$1`, directoryTeamID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_teams WHERE id=$1`, directoryTeamID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, directoryUserID)
@@ -69,6 +71,14 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	teams, err := store.ListTeams(ctx, directoryTeamID, 10)
 	if err != nil || len(teams) != 1 || teams[0].MemberCount != 1 {
 		t.Fatalf("scoped teams=%+v err=%v", teams, err)
+	}
+	organization, err := store.PutOrganization(ctx, Organization{ID: organizationID, Name: "Acme", Status: "active"})
+	if err != nil || organization.ID != organizationID {
+		t.Fatalf("put organization=%+v err=%v", organization, err)
+	}
+	organization, err = store.PutOrganizationTeam(ctx, organizationID, directoryTeamID)
+	if err != nil || len(organization.TeamIDs) != 1 || organization.TeamIDs[0] != directoryTeamID {
+		t.Fatalf("assign organization team=%+v err=%v", organization, err)
 	}
 
 	oldToken := "old-token-" + suffix

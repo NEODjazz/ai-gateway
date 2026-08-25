@@ -137,6 +137,49 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 }
 
 func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthModule, sharedSecret string) {
+	mux.HandleFunc("GET /internal/v1/organizations", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		limit, ok := managementLimit(w, r)
+		if !ok {
+			return
+		}
+		organizations, err := module.ListOrganizations(r.Context(), limit)
+		if err != nil {
+			http.Error(w, "organization directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, map[string]any{"data": organizations})
+	}))
+	mux.HandleFunc("PUT /internal/v1/organizations/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		var organization modules.Organization
+		if !decodeManagementJSON(w, r, &organization) {
+			return
+		}
+		organization.ID = r.PathValue("id")
+		saved, err := module.PutOrganization(r.Context(), organization)
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid organization", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "organization directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		logManagementAction(r, "organization.upsert", saved.ID)
+		writeManagementJSON(w, http.StatusOK, saved)
+	}))
+	mux.HandleFunc("PUT /internal/v1/organizations/{id}/teams/{team_id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		saved, err := module.PutOrganizationTeam(r.Context(), r.PathValue("id"), r.PathValue("team_id"))
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid organization team", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "organization directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		logManagementAction(r, "organization.team.upsert", saved.ID+":"+r.PathValue("team_id"))
+		writeManagementJSON(w, http.StatusOK, saved)
+	}))
 	mux.HandleFunc("GET /internal/v1/users", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		limit, ok := managementLimit(w, r)
 		if !ok {

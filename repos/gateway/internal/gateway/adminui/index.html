@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>AI Gateway Console</title>
-  <link rel="stylesheet" href="/ui/assets/app.css?v=12">
-  <script src="/ui/assets/app.js?v=12" defer></script>
+  <link rel="stylesheet" href="/ui/assets/app.css?v=13">
+  <script src="/ui/assets/app.js?v=13" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-view">
@@ -41,7 +41,9 @@
         <button class="nav-item" data-view="keys"><span>Virtual keys</span><span id="keys-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="users"><span>Users</span><span id="users-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="teams"><span>Teams</span><span id="teams-badge" class="badge">0</span></button>
+        <button class="nav-item" data-view="organizations"><span>Organizations</span><span id="organizations-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="models"><span>Models</span><span id="models-badge" class="badge">0</span></button>
+        <button class="nav-item" data-view="ai-hub"><span>AI Hub &amp; optimization</span></button>
         <button class="nav-item" data-view="deployments"><span>Model deployments</span><span id="deployments-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="guardrails"><span>Guardrails</span><span id="guardrails-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="mcp"><span>MCP registry</span><span id="mcp-badge" class="badge">0</span></button>
@@ -136,6 +138,14 @@
           <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Team</th><th>Description</th><th>Members</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="teams-table"></tbody></table></div><div id="teams-empty" class="empty-state" hidden>No teams configured.</div></div>
         </section>
 
+        <section id="view-organizations" class="view" aria-labelledby="organizations-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Tenant hierarchy</p><h2 id="organizations-heading">Organizations</h2><p class="muted">Group teams into persistent organization boundaries managed by global administrators.</p></div><button id="add-organization-button" class="primary-button">Add organization</button></div><div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Organization</th><th>Teams</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="organizations-table"></tbody></table></div><div id="organizations-empty" class="empty-state" hidden>No organizations configured.</div></div>
+        </section>
+
+        <section id="view-ai-hub" class="view" aria-labelledby="ai-hub-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Model intelligence</p><h2 id="ai-hub-heading">AI Hub &amp; cost optimization</h2><p class="muted">Catalog prices joined with safe runtime availability. Recommendations are deterministic and do not project usage.</p></div></div><div class="split-grid"><article class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">AI Hub</p><h3>Model availability</h3></div></div><div class="table-scroll"><table><thead><tr><th>Model</th><th>Provider</th><th>Capabilities</th><th>Price / 1M</th><th>Status</th></tr></thead><tbody id="ai-hub-table"></tbody></table></div><div id="ai-hub-empty" class="empty-state" hidden>No cataloged models.</div></article><article class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">Cost optimization</p><h3>Recommendations</h3></div></div><div class="table-scroll"><table><thead><tr><th>Finding</th><th>Model</th><th>Recommendation</th><th>Potential</th></tr></thead><tbody id="cost-recommendations-table"></tbody></table></div><div id="cost-recommendations-empty" class="empty-state" hidden>No recommendations.</div></article></div>
+        </section>
+
         <section id="view-budgets" class="view" aria-labelledby="budgets-heading" hidden>
           <div class="section-heading"><div><p class="eyebrow">Policy controls</p><h2 id="budgets-heading">Budgets</h2><p class="muted">Spend and token limits enforced by scope and period.</p></div><button id="add-budget-button" class="primary-button">Create budget</button></div>
           <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Scope</th><th>Period</th><th>Cost limit</th><th>Token limit</th><th>Status</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="budgets-table"></tbody></table></div><div id="budgets-empty" class="empty-state" hidden>No budget policies configured.</div></div>
@@ -206,6 +216,14 @@
 
   <dialog id="membership-dialog" class="modal">
     <form id="membership-form" method="dialog"><div class="modal-heading"><div><p class="eyebrow">Scoped RBAC</p><h2>Add team member</h2></div><button type="button" class="icon-button close-dialog" data-dialog="membership-dialog">×</button></div><input id="membership-team-id" type="hidden"><div class="form-grid"><label>User ID<input id="membership-user-id" required maxlength="256"></label><label>Team roles<input id="membership-roles" placeholder="member, team_admin"></label></div><p id="membership-form-error" class="form-error" hidden></p><div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="membership-dialog">Cancel</button><button type="submit" class="primary-button">Save membership</button></div></form>
+  </dialog>
+
+  <dialog id="organization-dialog" class="modal">
+    <form id="organization-form" method="dialog"><div class="modal-heading"><div><p class="eyebrow">Tenant hierarchy</p><h2>Edit organization</h2></div><button type="button" class="icon-button close-dialog" data-dialog="organization-dialog">×</button></div><div class="form-grid"><label>Organization ID<input id="organization-id" required maxlength="256"></label><label>Name<input id="organization-name" required maxlength="256"></label><label class="span-2">Description<input id="organization-description" maxlength="1024"></label><label>Status<select id="organization-status"><option value="active">Active</option><option value="disabled">Disabled</option></select></label></div><p id="organization-error" class="form-error" hidden></p><div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="organization-dialog">Cancel</button><button type="submit" class="primary-button">Save organization</button></div></form>
+  </dialog>
+
+  <dialog id="organization-team-dialog" class="modal">
+    <form id="organization-team-form" method="dialog"><div class="modal-heading"><div><p class="eyebrow">Tenant hierarchy</p><h2>Assign team</h2></div><button type="button" class="icon-button close-dialog" data-dialog="organization-team-dialog">×</button></div><input id="organization-team-org-id" type="hidden"><label>Team ID<input id="organization-team-id" required maxlength="256"></label><p id="organization-team-error" class="form-error" hidden></p><div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="organization-team-dialog">Cancel</button><button type="submit" class="primary-button">Assign team</button></div></form>
   </dialog>
 
   <dialog id="model-dialog" class="modal">

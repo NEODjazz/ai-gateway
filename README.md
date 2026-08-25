@@ -391,6 +391,14 @@ values use typed query parameters rather than SQL interpolation. The console
 shows currency-separated spend, tokens, error rate, applicable global/scoped
 budgets, and RPM/TPM key limits without exposing prompts or bearer secrets.
 
+Organizations persist a global-admin-managed tenant hierarchy that assigns each
+team to at most one organization. The AI Hub joins public catalog metadata with
+safe deployment availability and never returns endpoint URLs or credentials.
+Cost Optimization flags unavailable and unpriced entries and compares catalog
+input-plus-output prices only for the same model and currency. Reported savings
+are deterministic catalog comparisons (`usage_projection: false`), not forecasts
+of customer spend.
+
 `GET /metrics` exposes Prometheus-format HTTP, provider-attempt, cache,
 module, security, and billing lifecycle counters plus duration sums. Labels are
 bounded: unmatched URLs become `path="unmatched"`, results use a fixed enum, and

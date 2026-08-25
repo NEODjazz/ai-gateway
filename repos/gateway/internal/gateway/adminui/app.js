@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, customerUsage: null, customerScope: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], models: [], deployments: [], guardrails: [], mcpServers: [], mcpToolsets: [], catalog: null, budgets: [], audit: [] };
+  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, customerUsage: null, customerScope: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], organizations: [], models: [], aiHub: [], costRecommendations: [], deployments: [], guardrails: [], mcpServers: [], mcpToolsets: [], catalog: null, budgets: [], audit: [] };
   const $ = (id) => document.getElementById(id);
   const loginView = $("login-view");
   const consoleView = $("console-view");
@@ -9,7 +9,7 @@
   const tokenInput = $("admin-token");
   const loginError = $("login-error");
   const globalError = $("global-error");
-  const pageTitles = { overview: "Overview", usage: "Usage & spend", customers: "Customer insights", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", models: "Models", deployments: "Model deployments", guardrails: "Guardrails", mcp: "MCP registry", budgets: "Budgets", audit: "Audit log" };
+  const pageTitles = { overview: "Overview", usage: "Usage & spend", customers: "Customer insights", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", organizations: "Organizations", models: "Models", "ai-hub": "AI Hub & optimization", deployments: "Model deployments", guardrails: "Guardrails", mcp: "MCP registry", budgets: "Budgets", audit: "Audit log" };
   let pendingConfirmation = null;
 
   function setText(id, value) { const element = $(id); if (element) element.textContent = value; }
@@ -87,6 +87,9 @@
       api("/admin/v1/guardrail-policies"),
       api("/admin/v1/mcp/servers"),
       api("/admin/v1/mcp/toolsets"),
+      api("/admin/v1/organizations?limit=100"),
+      api("/admin/v1/ai-hub/models"),
+      api("/admin/v1/cost-optimization/recommendations"),
     ];
     const results = await Promise.allSettled(requests);
     const authFailure = results.find((result) => result.status === "rejected" && result.reason?.auth);
@@ -107,6 +110,9 @@
     if (results[12].status === "fulfilled") state.guardrails = results[12].value?.data || []; else errors.push(`Guardrails: ${results[12].reason.message}`);
     if (results[13].status === "fulfilled") state.mcpServers = results[13].value?.data || []; else errors.push(`MCP servers: ${results[13].reason.message}`);
     if (results[14].status === "fulfilled") state.mcpToolsets = results[14].value?.data || []; else errors.push(`MCP toolsets: ${results[14].reason.message}`);
+    if (results[15].status === "fulfilled") state.organizations = results[15].value?.data || []; else errors.push(`Organizations: ${results[15].reason.message}`);
+    if (results[16].status === "fulfilled") state.aiHub = results[16].value?.data || []; else errors.push(`AI Hub: ${results[16].reason.message}`);
+    if (results[17].status === "fulfilled") state.costRecommendations = results[17].value?.data || []; else errors.push(`Cost optimization: ${results[17].reason.message}`);
     renderAll();
     setText("console-health", errors.length ? "Degraded" : "Operational");
     if (errors.length) { globalError.textContent = errors.join(" · "); globalError.hidden = false; }
@@ -133,6 +139,7 @@
     setText("request-logs-badge", formatNumber(state.requestLogs.length));
     setText("users-badge", formatNumber(state.users.length));
     setText("teams-badge", formatNumber(state.teams.length));
+    setText("organizations-badge", formatNumber(state.organizations.filter((item)=>item.status==="active").length));
     setText("deployments-badge", formatNumber(state.deployments.filter((item)=>item.enabled).length));
     setText("guardrails-badge", formatNumber(state.guardrails.filter((item)=>item.enabled).length));
     setText("mcp-badge", formatNumber(state.mcpServers.filter((item)=>item.enabled).length));
@@ -146,6 +153,8 @@
     renderKeys();
     renderUsers();
     renderTeams();
+    renderOrganizations();
+    renderAIHub();
     renderDeployments();
     renderGuardrails();
     renderMCP();
@@ -381,6 +390,14 @@
     for (const team of state.teams) { const row=document.createElement("tr");row.appendChild(textCell(team.name,team.id));row.appendChild(plainCell(team.description));row.appendChild(plainCell(formatNumber(team.member_count)));const statusCell=document.createElement("td");const status=document.createElement("span");status.className=`outcome ${team.status==="active"?"succeeded":"failed"}`;status.textContent=team.status;statusCell.appendChild(status);row.appendChild(statusCell);const actions=document.createElement("td");actions.className="row-actions";const edit=document.createElement("button");edit.type="button";edit.className="row-button";edit.textContent="Edit";edit.addEventListener("click",()=>openTeamDialog(team));const member=document.createElement("button");member.type="button";member.className="row-button";member.textContent="Add member";member.addEventListener("click",()=>openMembershipDialog(team.id));actions.append(edit,member);row.appendChild(actions);body.appendChild(row); }
   }
 
+  function renderOrganizations(){const body=$("organizations-table");clear(body);$("organizations-empty").hidden=state.organizations.length!==0;for(const organization of state.organizations){const row=document.createElement("tr");row.appendChild(textCell(organization.name,organization.id));row.appendChild(plainCell((organization.team_ids||[]).join(", ")||"—"));row.appendChild(statusCell(organization.status==="active"));const actions=document.createElement("td");actions.className="row-actions";const edit=document.createElement("button");edit.type="button";edit.className="row-button";edit.textContent="Edit";edit.addEventListener("click",()=>openOrganizationDialog(organization));const assign=document.createElement("button");assign.type="button";assign.className="row-button";assign.textContent="Assign team";assign.addEventListener("click",()=>openOrganizationTeamDialog(organization.id));actions.append(edit,assign);row.appendChild(actions);body.appendChild(row)}}
+  function openOrganizationDialog(item=null){$("organization-id").value=item?.id||"";$("organization-id").readOnly=Boolean(item);$("organization-name").value=item?.name||"";$("organization-description").value=item?.description||"";$("organization-status").value=item?.status||"active";$("organization-error").hidden=true;$("organization-dialog").showModal()}
+  async function saveOrganization(event){event.preventDefault();const error=$("organization-error"),id=$("organization-id").value.trim();error.hidden=true;try{await apiJSON(`/admin/v1/organizations/${encodeURIComponent(id)}`,"PUT",{name:$("organization-name").value.trim(),description:$("organization-description").value.trim(),status:$("organization-status").value});$("organization-dialog").close();await loadData();showToast("Organization saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
+  function openOrganizationTeamDialog(id){$("organization-team-org-id").value=id;$("organization-team-id").value="";$("organization-team-error").hidden=true;$("organization-team-dialog").showModal()}
+  async function saveOrganizationTeam(event){event.preventDefault();const error=$("organization-team-error"),id=$("organization-team-org-id").value,teamID=$("organization-team-id").value.trim();error.hidden=true;try{await apiJSON(`/admin/v1/organizations/${encodeURIComponent(id)}/teams/${encodeURIComponent(teamID)}`,"PUT",{});$("organization-team-dialog").close();await loadData();showToast("Team assigned")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
+
+  function renderAIHub(){const hub=$("ai-hub-table");clear(hub);$("ai-hub-empty").hidden=state.aiHub.length!==0;for(const model of state.aiHub){const row=document.createElement("tr");row.appendChild(textCell(model.model,(model.deployments||[]).join(", ")||"No deployment"));row.appendChild(plainCell(model.provider));row.appendChild(plainCell((model.capabilities||[]).join(", ")||"—"));row.appendChild(textCell(formatMoney(model.input_cost_per_1m,model.currency),`output ${formatMoney(model.output_cost_per_1m,model.currency)}`));row.appendChild(statusCell(model.available));hub.appendChild(row)}const recommendations=$("cost-recommendations-table");clear(recommendations);$("cost-recommendations-empty").hidden=state.costRecommendations.length!==0;for(const item of state.costRecommendations){const row=document.createElement("tr");row.appendChild(textCell(item.type.replaceAll("_"," "),item.current_provider));row.appendChild(plainCell(item.model));row.appendChild(textCell(item.recommended_provider||"—",item.summary));row.appendChild(plainCell(item.estimated_savings_percent?`${item.estimated_savings_percent.toFixed(1)}%`:"—"));recommendations.appendChild(row)}}
+
   function renderDeployments(){const body=$("deployments-table");clear(body);$("deployments-empty").hidden=state.deployments.length!==0;for(const deployment of state.deployments){const row=document.createElement("tr");row.appendChild(textCell(deployment.id,deployment.provider_type));row.appendChild(plainCell((deployment.models||[]).join(", ")));row.appendChild(plainCell((deployment.capabilities||[]).join(", ")||"—"));row.appendChild(textCell(`P${deployment.priority}`,`weight ${deployment.weight||1}`));const statusCell=document.createElement("td");const status=document.createElement("span");status.className=`outcome ${deployment.runtime_state==="available"?"succeeded":"failed"}`;status.textContent=(deployment.runtime_state||(deployment.enabled?"available":"disabled")).replaceAll("_"," ");statusCell.appendChild(status);row.appendChild(statusCell);const actions=document.createElement("td");actions.className="row-actions";const edit=document.createElement("button");edit.type="button";edit.className="row-button";edit.textContent="Edit";edit.addEventListener("click",()=>openDeploymentDialog(deployment));actions.appendChild(edit);row.appendChild(actions);body.appendChild(row)}}
   function openDeploymentDialog(item){$("deployment-id").value=item.id;$("deployment-name").value=item.id;$("deployment-type").value=item.provider_type;$("deployment-models").value=(item.models||[]).join(", ");$("deployment-capabilities").value=(item.capabilities||[]).join(", ");$("deployment-priority").value=item.priority||0;$("deployment-weight").value=item.weight||1;$("deployment-guardrail").value=item.guardrail_policy||"";$("deployment-enabled").checked=Boolean(item.enabled);$("deployment-form-error").hidden=true;$("deployment-dialog").showModal()}
   async function saveDeployment(event){event.preventDefault();const error=$("deployment-form-error");error.hidden=true;const id=$("deployment-id").value;try{await apiJSON(`/admin/v1/model-deployments/${encodeURIComponent(id)}`,"PUT",{models:commaList("deployment-models"),capabilities:commaList("deployment-capabilities"),priority:Number($("deployment-priority").value||0),weight:Number($("deployment-weight").value||1),guardrail_policy:$("deployment-guardrail").value.trim(),enabled:$("deployment-enabled").checked});$("deployment-dialog").close();await loadData();showToast("Runtime deployment updated")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
@@ -610,6 +627,9 @@
   $("add-team-button").addEventListener("click",()=>openTeamDialog());
   $("team-form").addEventListener("submit",saveTeam);
   $("membership-form").addEventListener("submit",saveMembership);
+  $("add-organization-button").addEventListener("click",()=>openOrganizationDialog());
+  $("organization-form").addEventListener("submit",saveOrganization);
+  $("organization-team-form").addEventListener("submit",saveOrganizationTeam);
   $("copy-issued-key").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("issued-key-token").value); showToast("Token copied"); } catch (_) { $("issued-key-token").select(); showToast("Select and copy the token manually"); } });
   $("issued-key-dialog").addEventListener("close", clearIssuedKey);
   $("add-model-button").addEventListener("click", () => openModelDialog());

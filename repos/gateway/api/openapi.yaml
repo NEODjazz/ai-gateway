@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.9
+  version: 0.1.10
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -22,6 +22,9 @@ tags:
   - name: Guardrails
   - name: MCP
   - name: Customers
+  - name: Organizations
+  - name: AI Hub
+  - name: Cost optimization
   - name: Operations
   - name: Observability
 security:
@@ -487,6 +490,66 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/organizations:
+    get:
+      operationId: listOrganizations
+      tags: [Organizations]
+      summary: List persistent organizations and assigned teams
+      parameters: [{name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}]
+      responses:
+        '200': {description: Organizations, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/Organization'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/organizations/{id}:
+    put:
+      operationId: putOrganization
+      tags: [Organizations]
+      summary: Create or update an organization
+      parameters: [{$ref: '#/components/parameters/OrganizationID'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/OrganizationInput'}}}}
+      responses:
+        '200': {description: Organization saved, content: {application/json: {schema: {$ref: '#/components/schemas/Organization'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/organizations/{id}/teams/{team_id}:
+    put:
+      operationId: putOrganizationTeam
+      tags: [Organizations]
+      summary: Assign a team to an organization
+      parameters:
+        - {$ref: '#/components/parameters/OrganizationID'}
+        - {$ref: '#/components/parameters/OrganizationTeamID'}
+      responses:
+        '200': {description: Team assigned, content: {application/json: {schema: {$ref: '#/components/schemas/Organization'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/ai-hub/models:
+    get:
+      operationId: getAIHubModels
+      tags: [AI Hub]
+      summary: Join model catalog metadata with safe runtime availability
+      description: Provider URLs, API keys, and secret references are never returned.
+      responses:
+        '200': {description: AI Hub models, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/AIHubModel'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/cost-optimization/recommendations:
+    get:
+      operationId: getCostRecommendations
+      tags: [Cost optimization]
+      summary: Get deterministic catalog and availability recommendations
+      description: Savings compare catalog input plus output prices for the same model and currency. They are not usage projections.
+      responses:
+        '200': {description: Cost recommendations, content: {application/json: {schema: {$ref: '#/components/schemas/CostRecommendationResponse'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/model-deployments:
     get:
       operationId: listModelDeployments
@@ -924,6 +987,16 @@ components:
       in: path
       required: true
       schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+    OrganizationID:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9._@:-]+$'}
+    OrganizationTeamID:
+      name: team_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9._@:-]+$'}
     BudgetID:
       name: id
       in: path
@@ -1712,6 +1785,59 @@ components:
             user_id: {type: string}
             created_at: {type: string, format: date-time}
             updated_at: {type: string, format: date-time}
+    OrganizationInput:
+      type: object
+      additionalProperties: false
+      required: [name, status]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 256}
+        description: {type: string, maxLength: 1024}
+        status: {type: string, enum: [active, disabled]}
+    Organization:
+      allOf:
+        - {$ref: '#/components/schemas/OrganizationInput'}
+        - type: object
+          required: [id, team_ids, created_at, updated_at]
+          properties:
+            id: {type: string}
+            team_ids: {type: array, items: {type: string}}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+    AIHubModel:
+      type: object
+      additionalProperties: false
+      required: [provider, model, deployments, available]
+      properties:
+        provider: {type: string}
+        model: {type: string}
+        capabilities: {type: array, items: {type: string}}
+        max_input_tokens: {type: integer, minimum: 0}
+        max_output_tokens: {type: integer, minimum: 0}
+        input_cost_per_1m: {type: number, minimum: 0}
+        output_cost_per_1m: {type: number, minimum: 0}
+        currency: {type: string}
+        deployments: {type: array, items: {type: string}}
+        available: {type: boolean}
+    CostRecommendation:
+      type: object
+      additionalProperties: false
+      required: [type, model, summary]
+      properties:
+        type: {type: string, enum: [cheaper_alternative, missing_pricing, unavailable]}
+        model: {type: string}
+        current_provider: {type: string}
+        recommended_provider: {type: string}
+        currency: {type: string}
+        estimated_savings_percent: {type: number, minimum: 0, maximum: 100}
+        summary: {type: string}
+    CostRecommendationResponse:
+      type: object
+      additionalProperties: false
+      required: [data, basis, usage_projection]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/CostRecommendation'}}
+        basis: {type: string, const: catalog_prices_and_runtime_availability}
+        usage_projection: {type: boolean, const: false}
     ModelDeploymentInput:
       type: object
       additionalProperties: false
