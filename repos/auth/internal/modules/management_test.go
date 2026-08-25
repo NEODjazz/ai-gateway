@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,9 @@ func (s *managementStore) Revoke(_ context.Context, id string) (bool, error) {
 func (s *managementStore) Rotate(_ context.Context, oldID string, replacement StoredVirtualKey, tokenHash string) error {
 	s.rotatedOld, s.created, s.createdHash = oldID, replacement, tokenHash
 	return nil
+}
+func (s *managementStore) List(context.Context, int) ([]VirtualKeyMetadata, error) {
+	return []VirtualKeyMetadata{{ID: "vk_safe123", UserID: "user-1", RotationFamily: "vk_safe123"}}, nil
 }
 
 func TestCreateVirtualKeyReturnsSecretOnceAndPersistsOnlyHash(t *testing.T) {
@@ -80,5 +84,16 @@ func TestManagedVirtualKeyValidation(t *testing.T) {
 	}
 	if _, err := module.CreateVirtualKey(context.Background(), ManagedVirtualKey{UserID: "user", RateLimitRPM: -1}); err == nil {
 		t.Fatal("negative rate limit was accepted")
+	}
+}
+
+func TestListVirtualKeysReturnsSafeMetadata(t *testing.T) {
+	module := NewAuthModuleWithStore(true, &managementStore{}, "hash-secret", false)
+	keys, err := module.ListVirtualKeys(context.Background(), 100)
+	if err != nil || len(keys) != 1 || keys[0].ID != "vk_safe123" {
+		t.Fatalf("unexpected keys=%+v err=%v", keys, err)
+	}
+	if _, err := module.ListVirtualKeys(context.Background(), 0); !errors.Is(err, ErrInvalidVirtualKey) {
+		t.Fatalf("invalid limit error=%v", err)
 	}
 }

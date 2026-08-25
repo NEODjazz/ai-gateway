@@ -82,4 +82,17 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	if _, ok, err := store.Lookup(ctx, credentialLookupHash(newToken, "pepper")); err != nil || ok {
 		t.Fatalf("revoked key must not authorize: ok=%v err=%v", ok, err)
 	}
+	listed, err := store.List(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundMetadata := false
+	for _, key := range listed {
+		if key.ID == newID {
+			foundMetadata = key.UserID == "user-1" && key.RevokedAt != nil && key.RotationFamily == oldID
+		}
+	}
+	if !foundMetadata {
+		t.Fatalf("safe lifecycle metadata for %q was not listed: %+v", newID, listed)
+	}
 }

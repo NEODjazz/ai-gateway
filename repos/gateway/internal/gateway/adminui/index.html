@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>AI Gateway Console</title>
-  <link rel="stylesheet" href="/ui/assets/app.css?v=2">
-  <script src="/ui/assets/app.js?v=2" defer></script>
+  <link rel="stylesheet" href="/ui/assets/app.css?v=3">
+  <script src="/ui/assets/app.js?v=3" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-view">
@@ -33,6 +33,7 @@
       <div class="brand-lockup"><span class="brand-mark small">AG</span><div><strong>AI Gateway</strong><span>Admin console</span></div></div>
       <nav aria-label="Console navigation">
         <button class="nav-item active" data-view="overview"><span>Overview</span></button>
+        <button class="nav-item" data-view="keys"><span>Virtual keys</span><span id="keys-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="models"><span>Models</span><span id="models-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="budgets"><span>Budgets</span><span id="budgets-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="audit"><span>Audit log</span></button>
@@ -56,6 +57,7 @@
           </div>
           <div class="stats-grid">
             <article class="stat-card"><span>Available models</span><strong id="stat-models">—</strong><small>Visible to this credential</small></article>
+            <article class="stat-card"><span>Active virtual keys</span><strong id="stat-keys">—</strong><small>Revocable credentials</small></article>
             <article class="stat-card"><span>Catalog entries</span><strong id="stat-catalog">—</strong><small id="catalog-version">Runtime registry</small></article>
             <article class="stat-card"><span>Active budgets</span><strong id="stat-budgets">—</strong><small>Enforced spend policies</small></article>
             <article class="stat-card"><span>Recent audit events</span><strong id="stat-audit">—</strong><small>Latest management activity</small></article>
@@ -64,6 +66,11 @@
             <article class="panel"><div class="panel-heading"><div><p class="eyebrow">Models</p><h3>Available endpoints</h3></div><button class="text-button" data-open-view="models">View all</button></div><div id="overview-models" class="compact-list loading-block">Loading…</div></article>
             <article class="panel"><div class="panel-heading"><div><p class="eyebrow">Activity</p><h3>Latest changes</h3></div><button class="text-button" data-open-view="audit">Open audit</button></div><div id="overview-audit" class="timeline loading-block">Loading…</div></article>
           </div>
+        </section>
+
+        <section id="view-keys" class="view" aria-labelledby="keys-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Access control</p><h2 id="keys-heading">Virtual keys</h2><p class="muted">Issue revocable credentials with scoped models, tools and rate limits.</p></div><button id="add-key-button" class="primary-button">Create virtual key</button></div>
+          <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Key</th><th>Owner</th><th>Grants</th><th>Rate limits</th><th>Status</th><th>Last used</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="keys-table"></tbody></table></div><div id="keys-empty" class="empty-state" hidden>No virtual keys configured.</div></div>
         </section>
 
         <section id="view-models" class="view" aria-labelledby="models-heading" hidden>
@@ -83,6 +90,35 @@
       </main>
     </div>
   </div>
+
+  <dialog id="key-dialog" class="modal">
+    <form id="key-form" method="dialog">
+      <div class="modal-heading"><div><p class="eyebrow">Access control</p><h2 id="key-dialog-title">Create virtual key</h2></div><button type="button" class="icon-button close-dialog" data-dialog="key-dialog" aria-label="Close">×</button></div>
+      <input id="key-rotate-id" type="hidden">
+      <div class="form-grid">
+        <label>User ID<input id="key-user-id" required maxlength="256" placeholder="user-1"></label>
+        <label>Team ID<input id="key-team-id" maxlength="256" placeholder="team-a"></label>
+        <label class="span-2">Roles<input id="key-roles" placeholder="developer, analyst"></label>
+        <label class="span-2">Allowed models<input id="key-models" placeholder="gpt-*, llama3:latest"></label>
+        <label class="span-2">Allowed tools<input id="key-tools" placeholder="mcp.weather.*"></label>
+        <label>Requests / minute<input id="key-rpm" type="number" min="0" step="1" value="0"></label>
+        <label>Tokens / minute<input id="key-tpm" type="number" min="0" step="1" value="0"></label>
+        <label class="span-2">Expires at<input id="key-expires" type="datetime-local"></label>
+      </div>
+      <p id="key-form-error" class="form-error" role="alert" hidden></p>
+      <div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="key-dialog">Cancel</button><button type="submit" class="primary-button">Issue key</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="issued-key-dialog" class="modal confirm-modal">
+    <form method="dialog">
+      <div class="modal-heading"><div><p class="eyebrow">One-time secret</p><h2>Virtual key issued</h2></div></div>
+      <p class="muted">Copy this token now. The gateway does not store it and cannot display it again.</p>
+      <label>Key ID<input id="issued-key-id" readonly></label>
+      <label>Bearer token<div class="token-field"><input id="issued-key-token" readonly><button id="copy-issued-key" type="button" class="icon-button">Copy</button></div></label>
+      <div class="modal-actions"><button id="close-issued-key" type="submit" class="primary-button">I have saved it</button></div>
+    </form>
+  </dialog>
 
   <dialog id="model-dialog" class="modal">
     <form id="model-form" method="dialog">

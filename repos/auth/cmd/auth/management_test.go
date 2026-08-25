@@ -13,6 +13,7 @@ import (
 
 type commandManagementStore struct {
 	created modules.StoredVirtualKey
+	listed  []modules.VirtualKeyMetadata
 }
 
 func (s *commandManagementStore) Lookup(context.Context, string) (modules.StoredVirtualKey, bool, error) {
@@ -27,6 +28,9 @@ func (s *commandManagementStore) Create(_ context.Context, key modules.StoredVir
 func (s *commandManagementStore) Revoke(context.Context, string) (bool, error) { return true, nil }
 func (s *commandManagementStore) Rotate(context.Context, string, modules.StoredVirtualKey, string) error {
 	return nil
+}
+func (s *commandManagementStore) List(context.Context, int) ([]modules.VirtualKeyMetadata, error) {
+	return s.listed, nil
 }
 
 func TestInternalManagementRequiresScopedSecretAndAuditIdentity(t *testing.T) {
@@ -66,5 +70,27 @@ func TestInternalManagementRequiresScopedSecretAndAuditIdentity(t *testing.T) {
 	}
 	if issued.Token == "" || store.created.UserID != "user-1" {
 		t.Fatalf("key was not issued/persisted: issued=%+v stored=%+v", issued, store.created)
+	}
+}
+
+func TestInternalManagementListsOnlySafeVirtualKeyMetadata(t *testing.T) {
+	store := &commandManagementStore{listed: []modules.VirtualKeyMetadata{{ID: "vk_safe123", UserID: "user-1", RotationFamily: "vk_safe123"}}}
+	module := modules.NewAuthModuleWithStore(true, store, "hash-secret", false)
+	mux := http.NewServeMux()
+	registerManagementRoutes(mux, &module, "internal-secret")
+	request := httptest.NewRequest(http.MethodGet, "/internal/v1/keys?limit=25", nil)
+	request.Header.Set(managementTokenHeader, "internal-secret")
+	request.Header.Set("X-Request-ID", "req-list")
+	request.Header.Set("X-Actor-ID", "admin-user")
+	request.Header.Set("X-Actor-Credential-ID", "fingerprint")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"vk_safe123"`) {
+		t.Fatalf("unexpected list response %d: %s", response.Code, response.Body.String())
+	}
+	for _, forbidden := range []string{"token_hash", `"token"`} {
+		if strings.Contains(response.Body.String(), forbidden) {
+			t.Fatalf("list response exposed secret field %q: %s", forbidden, response.Body.String())
+		}
 	}
 }

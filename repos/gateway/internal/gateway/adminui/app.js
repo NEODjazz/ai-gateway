@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", models: [], catalog: null, budgets: [], audit: [] };
+  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", keys: [], models: [], catalog: null, budgets: [], audit: [] };
   const $ = (id) => document.getElementById(id);
   const loginView = $("login-view");
   const consoleView = $("console-view");
@@ -9,7 +9,7 @@
   const tokenInput = $("admin-token");
   const loginError = $("login-error");
   const globalError = $("global-error");
-  const pageTitles = { overview: "Overview", models: "Models", budgets: "Budgets", audit: "Audit log" };
+  const pageTitles = { overview: "Overview", keys: "Virtual keys", models: "Models", budgets: "Budgets", audit: "Audit log" };
   let pendingConfirmation = null;
 
   function setText(id, value) { const element = $(id); if (element) element.textContent = value; }
@@ -63,6 +63,7 @@
     const query = new URLSearchParams({ limit: "100" });
     if (action.trim()) query.set("action", action.trim());
     const requests = [
+      api("/admin/v1/keys?limit=100"),
       api("/v1/models"),
       api("/admin/v1/model-catalog"),
       api("/admin/v1/budgets"),
@@ -72,10 +73,11 @@
     const authFailure = results.find((result) => result.status === "rejected" && result.reason?.auth);
     if (authFailure) throw authFailure.reason;
     const errors = [];
-    if (results[0].status === "fulfilled") state.models = results[0].value?.data || []; else errors.push(`Models: ${results[0].reason.message}`);
-    if (results[1].status === "fulfilled") state.catalog = results[1].value; else errors.push(`Catalog: ${results[1].reason.message}`);
-    if (results[2].status === "fulfilled") state.budgets = results[2].value?.data || []; else errors.push(`Budgets: ${results[2].reason.message}`);
-    if (results[3].status === "fulfilled") state.audit = results[3].value?.data || []; else errors.push(`Audit: ${results[3].reason.message}`);
+    if (results[0].status === "fulfilled") state.keys = results[0].value?.data || []; else errors.push(`Virtual keys: ${results[0].reason.message}`);
+    if (results[1].status === "fulfilled") state.models = results[1].value?.data || []; else errors.push(`Models: ${results[1].reason.message}`);
+    if (results[2].status === "fulfilled") state.catalog = results[2].value; else errors.push(`Catalog: ${results[2].reason.message}`);
+    if (results[3].status === "fulfilled") state.budgets = results[3].value?.data || []; else errors.push(`Budgets: ${results[3].reason.message}`);
+    if (results[4].status === "fulfilled") state.audit = results[4].value?.data || []; else errors.push(`Audit: ${results[4].reason.message}`);
     renderAll();
     setText("console-health", errors.length ? "Degraded" : "Operational");
     if (errors.length) { globalError.textContent = errors.join(" · "); globalError.hidden = false; }
@@ -89,15 +91,19 @@
   }
 
   function renderAll() {
+    const activeKeys = state.keys.filter((item) => !item.revoked_at && (!item.expires_at || new Date(item.expires_at) > new Date())).length;
     const activeBudgets = state.budgets.filter((item) => item.enabled).length;
     setText("stat-models", formatNumber(state.models.length));
+    setText("stat-keys", formatNumber(activeKeys));
     setText("stat-catalog", formatNumber(state.catalog?.models?.length || 0));
     setText("stat-budgets", formatNumber(activeBudgets));
     setText("stat-audit", formatNumber(state.audit.length));
     setText("models-badge", formatNumber(state.models.length));
+    setText("keys-badge", formatNumber(activeKeys));
     setText("budgets-badge", formatNumber(activeBudgets));
     setText("catalog-version", state.catalog?.version ? `Version ${state.catalog.version}` : "Runtime registry");
     renderOverview();
+    renderKeys();
     renderModels();
     renderBudgets();
     renderAudit();
@@ -122,6 +128,29 @@
       const title = document.createElement("strong"); title.textContent = event.action || "Management event";
       const detail = document.createElement("small"); detail.textContent = `${event.outcome || "unknown"} · ${formatDate(event.occurred_at)}`;
       item.append(title, detail); audit.appendChild(item);
+    }
+  }
+
+  function renderKeys() {
+    const body = $("keys-table"); clear(body); $("keys-empty").hidden = state.keys.length !== 0;
+    for (const key of state.keys) {
+      const row = document.createElement("tr");
+      row.appendChild(textCell(key.id, `Created ${formatDate(key.created_at)}`));
+      row.appendChild(textCell(key.user_id, key.team_id));
+      const grants = [...(key.roles || []), ...(key.allowed_models || []).map((value) => `model:${value}`), ...(key.allowed_tools || []).map((value) => `tool:${value}`)];
+      row.appendChild(plainCell(grants.join(", ") || "Unscoped"));
+      row.appendChild(textCell(key.rate_limit_rpm ? `${formatNumber(key.rate_limit_rpm)} RPM` : "No RPM limit", key.rate_limit_tpm ? `${formatNumber(key.rate_limit_tpm)} TPM` : "No TPM limit"));
+      const expired = key.expires_at && new Date(key.expires_at) <= new Date();
+      const active = !key.revoked_at && !expired;
+      const statusCell = document.createElement("td"); const status = document.createElement("span"); status.className = `outcome ${active ? "succeeded" : "failed"}`; status.textContent = key.revoked_at ? "Revoked" : expired ? "Expired" : "Active"; statusCell.appendChild(status); row.appendChild(statusCell);
+      row.appendChild(plainCell(formatDate(key.last_used_at)));
+      const actions = document.createElement("td"); actions.className = "row-actions";
+      if (active) {
+        const rotate = document.createElement("button"); rotate.type = "button"; rotate.className = "row-button"; rotate.textContent = "Rotate"; rotate.addEventListener("click", () => openKeyDialog(key));
+        const revoke = document.createElement("button"); revoke.type = "button"; revoke.className = "row-button danger"; revoke.textContent = "Revoke"; revoke.addEventListener("click", () => confirmChange("Revoke virtual key?", `${key.id} will stop authorizing requests immediately.`, () => revokeKey(key.id)));
+        actions.append(rotate, revoke);
+      }
+      row.appendChild(actions); body.appendChild(row);
     }
   }
 
@@ -197,6 +226,54 @@
     const value = $(id).value.trim();
     return value === "" ? undefined : Number(value);
   }
+
+  function commaList(id) { return [...new Set($(id).value.split(",").map((value) => value.trim()).filter(Boolean))]; }
+
+  function localDateTime(value) {
+    if (!value) return "";
+    const date = new Date(value); if (Number.isNaN(date.getTime())) return "";
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+  }
+
+  function openKeyDialog(key = null) {
+    setText("key-dialog-title", key ? "Rotate virtual key" : "Create virtual key");
+    $("key-rotate-id").value = key?.id || "";
+    $("key-user-id").value = key?.user_id || "";
+    $("key-team-id").value = key?.team_id || "";
+    $("key-roles").value = (key?.roles || []).join(", ");
+    $("key-models").value = (key?.allowed_models || []).join(", ");
+    $("key-tools").value = (key?.allowed_tools || []).join(", ");
+    $("key-rpm").value = key?.rate_limit_rpm || 0;
+    $("key-tpm").value = key?.rate_limit_tpm || 0;
+    $("key-expires").value = localDateTime(key?.expires_at);
+    $("key-form-error").hidden = true;
+    $("key-dialog").showModal();
+  }
+
+  async function saveKey(event) {
+    event.preventDefault();
+    const error = $("key-form-error"); error.hidden = true;
+    const payload = {
+      user_id: $("key-user-id").value.trim(), team_id: $("key-team-id").value.trim(),
+      roles: commaList("key-roles"), allowed_models: commaList("key-models"), allowed_tools: commaList("key-tools"),
+      rate_limit_rpm: Number($("key-rpm").value || 0), rate_limit_tpm: Number($("key-tpm").value || 0),
+    };
+    const expires = $("key-expires").value; if (expires) payload.expires_at = new Date(expires).toISOString();
+    const rotateID = $("key-rotate-id").value;
+    try {
+      const issued = await apiJSON(rotateID ? `/admin/v1/keys/${encodeURIComponent(rotateID)}/rotate` : "/admin/v1/keys", "POST", payload);
+      $("key-dialog").close();
+      $("issued-key-id").value = issued.id;
+      $("issued-key-token").value = issued.token;
+      $("issued-key-dialog").showModal();
+      await loadData();
+    } catch (requestError) { error.textContent = requestError.message; error.hidden = false; }
+  }
+
+  async function revokeKey(id) { await api(`/admin/v1/keys/${encodeURIComponent(id)}`, { method: "DELETE" }); await loadData(); showToast("Virtual key revoked"); }
+
+  function clearIssuedKey() { $("issued-key-id").value = ""; $("issued-key-token").value = ""; }
 
   function openModelDialog(item = null) {
     if (!state.catalog) { showToast("Runtime catalog is unavailable"); return; }
@@ -290,6 +367,10 @@
   $("refresh-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); showToast("Console data refreshed"); } catch (error) { if (error.auth) { sessionStorage.removeItem("ai_gateway_admin_token"); showLogin(error.message); } else { globalError.textContent = error.message; globalError.hidden = false; } } });
   $("audit-filter-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
   $("model-search").addEventListener("input", renderModels);
+  $("add-key-button").addEventListener("click", () => openKeyDialog());
+  $("key-form").addEventListener("submit", saveKey);
+  $("copy-issued-key").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("issued-key-token").value); showToast("Token copied"); } catch (_) { $("issued-key-token").select(); showToast("Select and copy the token manually"); } });
+  $("issued-key-dialog").addEventListener("close", clearIssuedKey);
   $("add-model-button").addEventListener("click", () => openModelDialog());
   $("model-form").addEventListener("submit", saveModel);
   $("add-budget-button").addEventListener("click", () => openBudgetDialog());

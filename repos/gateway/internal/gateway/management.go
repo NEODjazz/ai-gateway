@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,24 @@ type IssuedVirtualKey struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
+type VirtualKeyMetadata struct {
+	ID             string     `json:"id"`
+	UserID         string     `json:"user_id"`
+	TeamID         string     `json:"team_id,omitempty"`
+	Roles          []string   `json:"roles,omitempty"`
+	AllowedModels  []string   `json:"allowed_models,omitempty"`
+	AllowedTools   []string   `json:"allowed_tools,omitempty"`
+	RateLimitRPM   int        `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM   int        `json:"rate_limit_tpm,omitempty"`
+	RotationFamily string     `json:"rotation_family_id"`
+	RotatedFromID  string     `json:"rotated_from_id,omitempty"`
+	RotatedToID    string     `json:"rotated_to_id,omitempty"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	RevokedAt      *time.Time `json:"revoked_at,omitempty"`
+	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
 type ManagementAudit struct {
 	RequestID    string
 	ActorID      string
@@ -40,6 +59,7 @@ type ManagementAudit struct {
 }
 
 type ManagementClient interface {
+	ListVirtualKeys(context.Context, ManagementAudit, int) ([]VirtualKeyMetadata, error)
 	CreateVirtualKey(context.Context, ManagementAudit, ManagedVirtualKey) (IssuedVirtualKey, error)
 	RotateVirtualKey(context.Context, ManagementAudit, string, ManagedVirtualKey) (IssuedVirtualKey, error)
 	RevokeVirtualKey(context.Context, ManagementAudit, string) error
@@ -70,6 +90,13 @@ func (c *RemoteManagementClient) CreateVirtualKey(ctx context.Context, audit Man
 	return managementCall[ManagedVirtualKey, IssuedVirtualKey](ctx, c, http.MethodPost, "/internal/v1/keys", audit, spec)
 }
 
+func (c *RemoteManagementClient) ListVirtualKeys(ctx context.Context, audit ManagementAudit, limit int) ([]VirtualKeyMetadata, error) {
+	result, err := managementCall[struct{}, struct {
+		Data []VirtualKeyMetadata `json:"data"`
+	}](ctx, c, http.MethodGet, "/internal/v1/keys?limit="+url.QueryEscape(fmt.Sprint(limit)), audit, struct{}{})
+	return result.Data, err
+}
+
 func (c *RemoteManagementClient) RotateVirtualKey(ctx context.Context, audit ManagementAudit, id string, spec ManagedVirtualKey) (IssuedVirtualKey, error) {
 	return managementCall[ManagedVirtualKey, IssuedVirtualKey](ctx, c, http.MethodPost, "/internal/v1/keys/"+url.PathEscape(id)+"/rotate", audit, spec)
 }
@@ -85,7 +112,7 @@ func managementCall[Request any, Response any](ctx context.Context, client *Remo
 		return result, errors.New("management service is not configured")
 	}
 	var body io.Reader
-	if method != http.MethodDelete {
+	if method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch {
 		payload, err := json.Marshal(request)
 		if err != nil {
 			return result, err
@@ -116,6 +143,32 @@ func managementCall[Request any, Response any](ctx context.Context, client *Remo
 		return result, err
 	}
 	return result, nil
+}
+
+func (h Handler) ListVirtualKeys(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.authorizeAdmin(w, r)
+	if !ok {
+		return
+	}
+	if h.management == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "management service is not configured")
+		return
+	}
+	limit := 100
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 500 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "limit must be between 1 and 500")
+			return
+		}
+		limit = parsed
+	}
+	keys, err := h.management.ListVirtualKeys(r.Context(), managementAudit(req), limit)
+	if err != nil {
+		writeManagementFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": keys})
 }
 
 func (h Handler) WithManagement(client ManagementClient) Handler {

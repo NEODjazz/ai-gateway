@@ -38,6 +38,11 @@ type recordingManagementClient struct {
 	revokes int
 }
 
+func (c *recordingManagementClient) ListVirtualKeys(_ context.Context, audit ManagementAudit, _ int) ([]VirtualKeyMetadata, error) {
+	c.audit = audit
+	return []VirtualKeyMetadata{{ID: "vk_safe123", UserID: "user-1", RotationFamily: "vk_safe123"}}, nil
+}
+
 func (c *recordingManagementClient) CreateVirtualKey(_ context.Context, audit ManagementAudit, spec ManagedVirtualKey) (IssuedVirtualKey, error) {
 	c.audit, c.spec, c.creates = audit, spec, c.creates+1
 	return IssuedVirtualKey{ID: "vk_created", Token: "sk-ag-once"}, nil
@@ -83,6 +88,23 @@ func TestAdminVirtualKeyCreateReturnsOneTimeTokenAndAuditIdentity(t *testing.T) 
 	}
 	if client.audit.RequestID != "req-admin-1" || client.audit.ActorID != "admin-user" || client.audit.CredentialID != "admin-credential" {
 		t.Fatalf("missing audit identity: %+v", client.audit)
+	}
+}
+
+func TestAdminVirtualKeyListReturnsSafeMetadata(t *testing.T) {
+	client := &recordingManagementClient{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithManagement(client)
+	request := httptest.NewRequest(http.MethodGet, "/admin/v1/keys?limit=25", nil)
+	request.Header.Set("Authorization", "Bearer admin-key")
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"vk_safe123"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	for _, forbidden := range []string{"token_hash", `"token"`} {
+		if strings.Contains(response.Body.String(), forbidden) {
+			t.Fatalf("list exposed secret field %q: %s", forbidden, response.Body.String())
+		}
 	}
 }
 
@@ -133,5 +155,23 @@ func TestRemoteManagementClientUsesScopedSecretNotClientBearer(t *testing.T) {
 	issued, err := client.CreateVirtualKey(context.Background(), ManagementAudit{RequestID: "req-1", ActorID: "admin-user", CredentialID: "fingerprint"}, ManagedVirtualKey{UserID: "user-1"})
 	if err != nil || issued.ID != "vk_created" {
 		t.Fatalf("unexpected remote result: issued=%+v err=%v", issued, err)
+	}
+}
+
+func TestRemoteManagementClientListsMetadataWithoutRequestBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Query().Get("limit") != "25" || r.ContentLength > 0 {
+			t.Fatalf("unexpected list request: method=%s url=%s content_length=%d", r.Method, r.URL.String(), r.ContentLength)
+		}
+		if r.Header.Get("Authorization") != "" || r.Header.Get("X-Management-Token") != "internal-secret" {
+			t.Fatalf("unsafe management headers: %+v", r.Header)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []VirtualKeyMetadata{{ID: "vk_safe123", UserID: "user-1", RotationFamily: "vk_safe123"}}})
+	}))
+	defer server.Close()
+	client := NewRemoteManagementClient(server.URL, "internal-secret")
+	keys, err := client.ListVirtualKeys(context.Background(), ManagementAudit{RequestID: "req-list", ActorID: "admin-user", CredentialID: "fingerprint"}, 25)
+	if err != nil || len(keys) != 1 || keys[0].ID != "vk_safe123" {
+		t.Fatalf("unexpected keys=%+v err=%v", keys, err)
 	}
 }

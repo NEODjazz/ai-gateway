@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"ai-gateway-auth/internal/modules"
@@ -16,6 +17,27 @@ import (
 const managementTokenHeader = "X-Management-Token"
 
 func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sharedSecret string) {
+	mux.HandleFunc("GET /internal/v1/keys", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		limit := 100
+		if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 1 || parsed > 500 {
+				http.Error(w, "invalid virtual key list limit", http.StatusBadRequest)
+				return
+			}
+			limit = parsed
+		}
+		keys, err := module.ListVirtualKeys(r.Context(), limit)
+		if errors.Is(err, modules.ErrInvalidVirtualKey) {
+			http.Error(w, "invalid virtual key list limit", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "virtual key listing failed", http.StatusServiceUnavailable)
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, map[string]any{"data": keys})
+	}))
 	mux.HandleFunc("POST /internal/v1/keys", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		spec, ok := decodeManagedVirtualKey(w, r)
 		if !ok {

@@ -111,6 +111,38 @@ func (s *PostgresVirtualKeyStore) Create(ctx context.Context, key StoredVirtualK
 	return err
 }
 
+func (s *PostgresVirtualKeyStore) List(ctx context.Context, limit int) ([]VirtualKeyMetadata, error) {
+	if s == nil || s.pool == nil {
+		return nil, errors.New("auth key store is not initialized")
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, user_id, COALESCE(team_id, ''), roles, allowed_models, allowed_tools,
+		       rate_limit_rpm, rate_limit_tpm, rotation_family_id,
+		       COALESCE(rotated_from_id, ''), COALESCE(rotated_to_id, ''),
+		       expires_at, revoked_at, last_used_at, created_at
+		FROM auth_virtual_keys
+		ORDER BY created_at DESC, id DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list virtual keys: %w", err)
+	}
+	defer rows.Close()
+	keys := make([]VirtualKeyMetadata, 0)
+	for rows.Next() {
+		var key VirtualKeyMetadata
+		if err := rows.Scan(&key.ID, &key.UserID, &key.TeamID, &key.Roles, &key.AllowedModels, &key.AllowedTools,
+			&key.RateLimitRPM, &key.RateLimitTPM, &key.RotationFamily, &key.RotatedFromID, &key.RotatedToID,
+			&key.ExpiresAt, &key.RevokedAt, &key.LastUsedAt, &key.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan virtual key metadata: %w", err)
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list virtual keys: %w", err)
+	}
+	return keys, nil
+}
+
 func (s *PostgresVirtualKeyStore) Revoke(ctx context.Context, id string) (bool, error) {
 	result, err := s.pool.Exec(ctx, `UPDATE auth_virtual_keys SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1 AND revoked_at IS NULL`, id)
 	return result.RowsAffected() == 1, err

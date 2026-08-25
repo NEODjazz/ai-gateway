@@ -79,7 +79,7 @@ nav { display: flex; flex-direction: column; gap: 5px; }
 .hero-panel h2 { max-width: 580px; margin: 7px 0 7px; font-size: clamp(27px,3vw,38px); line-height: 1.05; letter-spacing: -.045em; }
 .hero-panel p:last-child { margin: 0; color: #c5d9df; }
 .health-pill { display: flex; align-items: center; gap: 9px; padding: 9px 13px; border: 1px solid rgba(255,255,255,.16); border-radius: 20px; background: rgba(0,0,0,.11); white-space: nowrap; font-size: 12px; font-weight: 800; }
-.stats-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px; margin-top: 17px; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(170px,1fr)); gap: 14px; margin-top: 17px; }
 .stat-card, .panel { border: 1px solid var(--line); background: var(--surface); box-shadow: 0 5px 18px rgba(18,38,58,.035); }
 .stat-card { min-height: 135px; display: flex; flex-direction: column; padding: 20px; border-radius: 13px; }
 .stat-card span { color: var(--muted); font-size: 12px; font-weight: 700; }

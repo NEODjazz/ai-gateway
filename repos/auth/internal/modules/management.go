@@ -34,6 +34,26 @@ type IssuedVirtualKey struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
+// VirtualKeyMetadata is the safe management projection of a stored key. It
+// deliberately has no plaintext token or token-hash field.
+type VirtualKeyMetadata struct {
+	ID             string     `json:"id"`
+	UserID         string     `json:"user_id"`
+	TeamID         string     `json:"team_id,omitempty"`
+	Roles          []string   `json:"roles,omitempty"`
+	AllowedModels  []string   `json:"allowed_models,omitempty"`
+	AllowedTools   []string   `json:"allowed_tools,omitempty"`
+	RateLimitRPM   int        `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM   int        `json:"rate_limit_tpm,omitempty"`
+	RotationFamily string     `json:"rotation_family_id"`
+	RotatedFromID  string     `json:"rotated_from_id,omitempty"`
+	RotatedToID    string     `json:"rotated_to_id,omitempty"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	RevokedAt      *time.Time `json:"revoked_at,omitempty"`
+	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
 var ErrVirtualKeyNotFound = errors.New("virtual key not found")
 var ErrInvalidVirtualKey = errors.New("invalid virtual key policy")
 
@@ -79,6 +99,22 @@ func (m AuthModule) RevokeVirtualKey(ctx context.Context, id string) (bool, erro
 		return false, fmt.Errorf("%w: id is required", ErrInvalidVirtualKey)
 	}
 	return manager.Revoke(ctx, id)
+}
+
+func (m AuthModule) ListVirtualKeys(ctx context.Context, limit int) ([]VirtualKeyMetadata, error) {
+	if m.initErr != nil {
+		return nil, m.initErr
+	}
+	lister, ok := m.store.(interface {
+		List(context.Context, int) ([]VirtualKeyMetadata, error)
+	})
+	if !ok || lister == nil {
+		return nil, errors.New("persistent virtual key listing is unavailable")
+	}
+	if limit <= 0 || limit > 500 {
+		return nil, fmt.Errorf("%w: limit must be between 1 and 500", ErrInvalidVirtualKey)
+	}
+	return lister.List(ctx, limit)
 }
 
 func (m AuthModule) keyManager() (virtualKeyManager, error) {
