@@ -76,6 +76,15 @@ func (r *Router) UpdateProvider(id string, input ManagedProvider) (ManagedProvid
 	next := cloneProviders(*current)
 	next[id] = provider
 	r.providers.current.Store(&next)
+	if deployments := r.deployments.current.Load(); deployments != nil {
+		for _, deployment := range *deployments {
+			if deployment.ProviderID == id {
+				if endpoint, buildErr := r.endpointForDeployment(deployment); buildErr == nil {
+					r.replaceRuntimeEndpoint(deployment.ID, endpoint)
+				}
+			}
+		}
+	}
 	return provider, nil
 }
 

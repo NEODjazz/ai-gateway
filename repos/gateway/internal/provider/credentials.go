@@ -121,12 +121,13 @@ func (r *Router) storeCredential(id string, input CredentialInput) (Credential, 
 	}
 	ciphertext := r.credentials.aead.Seal(nil, nonce, []byte(input.Secret), []byte(input.ID))
 	r.credentials.mu.Lock()
-	defer r.credentials.mu.Unlock()
 	existing, found := r.credentials.current[input.ID]
 	if id == "" && found {
+		r.credentials.mu.Unlock()
 		return Credential{}, ErrCredentialExists
 	}
 	if id != "" && !found {
+		r.credentials.mu.Unlock()
 		return Credential{}, ErrCredentialNotFound
 	}
 	now := time.Now().UTC()
@@ -136,6 +137,18 @@ func (r *Router) storeCredential(id string, input CredentialInput) (Credential, 
 	}
 	credential := Credential{ID: input.ID, ProviderID: input.ProviderID, Description: input.Description, CreatedAt: created, UpdatedAt: now}
 	r.credentials.current[input.ID] = encryptedCredential{Credential: credential, Nonce: nonce, Ciphertext: ciphertext}
+	r.credentials.mu.Unlock()
+	if id != "" {
+		if deployments := r.deployments.current.Load(); deployments != nil {
+			for _, deployment := range *deployments {
+				if deployment.CredentialID == input.ID {
+					if endpoint, buildErr := r.endpointForDeployment(deployment); buildErr == nil {
+						r.replaceRuntimeEndpoint(deployment.ID, endpoint)
+					}
+				}
+			}
+		}
+	}
 	return credential, nil
 }
 

@@ -26,7 +26,15 @@ func (h Handler) ListModelDeployments(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": controller.ListModelDeployments(r.Context())})
 }
 
+func (h Handler) CreateModelDeployment(w http.ResponseWriter, r *http.Request) {
+	h.mutateModelDeployment(w, r, "", "model_deployment.create")
+}
+
 func (h Handler) UpdateModelDeployment(w http.ResponseWriter, r *http.Request) {
+	h.mutateModelDeployment(w, r, r.PathValue("id"), "model_deployment.update")
+}
+
+func (h Handler) mutateModelDeployment(w http.ResponseWriter, r *http.Request, id, action string) {
 	req, ok := h.authorizeAdmin(w, r)
 	if !ok {
 		return
@@ -37,6 +45,10 @@ func (h Handler) UpdateModelDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
+		ID              string   `json:"id,omitempty"`
+		ProviderID      string   `json:"provider_id,omitempty"`
+		CredentialID    string   `json:"credential_id,omitempty"`
+		UpstreamModel   string   `json:"upstream_model,omitempty"`
 		Models          []string `json:"models"`
 		Capabilities    []string `json:"capabilities,omitempty"`
 		Priority        int      `json:"priority"`
@@ -54,19 +66,32 @@ func (h Handler) UpdateModelDeployment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid model deployment")
 		return
 	}
-	id := r.PathValue("id")
-	deployment := provider.ModelDeployment{Models: input.Models, Capabilities: input.Capabilities, Priority: input.Priority, Weight: input.Weight, GuardrailPolicy: input.GuardrailPolicy, Enabled: input.Enabled}
+	deployment := provider.ModelDeployment{ID: input.ID, ProviderID: input.ProviderID, CredentialID: input.CredentialID, UpstreamModel: input.UpstreamModel, Models: input.Models, Capabilities: input.Capabilities, Priority: input.Priority, Weight: input.Weight, GuardrailPolicy: input.GuardrailPolicy, Enabled: input.Enabled}
+	targetID := input.ID
+	if id != "" {
+		targetID = id
+	}
 	audit := managementAudit(req)
-	event := AuditEvent{Action: "model_deployment.update", TargetType: "model_deployment", TargetID: id}
+	event := AuditEvent{Action: action, TargetType: "model_deployment", TargetID: targetID}
 	if !h.auditMutation(r.Context(), audit, event) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
 	}
-	saved, err := controller.UpdateModelDeployment(id, deployment)
+	var saved provider.ModelDeployment
+	var err error
+	if id == "" {
+		saved, err = controller.CreateModelDeployment(deployment)
+	} else {
+		saved, err = controller.UpdateModelDeployment(id, deployment)
+	}
 	if err != nil {
 		h.auditOutcome(r.Context(), audit, event, "failed")
 		if errors.Is(err, provider.ErrDeploymentNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "model deployment not found")
+			return
+		}
+		if errors.Is(err, provider.ErrDeploymentExists) {
+			writeError(w, http.StatusConflict, "already_exists", "model deployment already exists")
 			return
 		}
 		if errors.Is(err, provider.ErrInvalidDeployment) {
@@ -77,5 +102,39 @@ func (h Handler) UpdateModelDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.auditOutcome(r.Context(), audit, event, "succeeded")
-	writeJSON(w, http.StatusOK, saved)
+	status := http.StatusOK
+	if id == "" {
+		status = http.StatusCreated
+	}
+	writeJSON(w, status, saved)
+}
+
+func (h Handler) DeleteModelDeployment(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.authorizeAdmin(w, r)
+	if !ok {
+		return
+	}
+	controller, ok := h.deploymentController()
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "runtime deployment management is unavailable")
+		return
+	}
+	id := r.PathValue("id")
+	audit := managementAudit(req)
+	event := AuditEvent{Action: "model_deployment.delete", TargetType: "model_deployment", TargetID: id}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	if err := controller.DeleteModelDeployment(id); err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		if errors.Is(err, provider.ErrDeploymentNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "model deployment not found")
+			return
+		}
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "runtime deployment deletion failed")
+		return
+	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
+	w.WriteHeader(http.StatusNoContent)
 }

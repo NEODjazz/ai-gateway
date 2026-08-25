@@ -24,3 +24,28 @@ func TestAdminModelDeploymentLifecycle(t *testing.T) {
 		t.Fatalf("update failed: status=%d body=%s", update.Code, update.Body.String())
 	}
 }
+
+func TestAdminCreatesAndDeletesRoutableModelDeployment(t *testing.T) {
+	runtime := provider.New(provider.Config{})
+	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
+	createProvider := httptest.NewRecorder()
+	handler.ServeHTTP(createProvider, httptest.NewRequest(http.MethodPost, "/admin/v1/providers", strings.NewReader(`{"id":"managed-demo","type":"demo","enabled":true}`)))
+	if createProvider.Code != http.StatusCreated {
+		t.Fatalf("provider create failed: %d %s", createProvider.Code, createProvider.Body.String())
+	}
+	create := httptest.NewRecorder()
+	handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/admin/v1/model-deployments", strings.NewReader(`{"id":"managed-deployment","provider_id":"managed-demo","models":["managed-model"],"capabilities":["chat"],"priority":1,"weight":2,"enabled":true}`)))
+	if create.Code != http.StatusCreated || !strings.Contains(create.Body.String(), `"provider_id":"managed-demo"`) {
+		t.Fatalf("deployment create failed: %d %s", create.Code, create.Body.String())
+	}
+	models := httptest.NewRecorder()
+	handler.ServeHTTP(models, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if models.Code != http.StatusOK || !strings.Contains(models.Body.String(), "managed-model") {
+		t.Fatalf("new deployment is not routable: %d %s", models.Code, models.Body.String())
+	}
+	remove := httptest.NewRecorder()
+	handler.ServeHTTP(remove, httptest.NewRequest(http.MethodDelete, "/admin/v1/model-deployments/managed-deployment", nil))
+	if remove.Code != http.StatusNoContent {
+		t.Fatalf("deployment delete failed: %d %s", remove.Code, remove.Body.String())
+	}
+}

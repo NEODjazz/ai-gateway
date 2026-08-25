@@ -128,6 +128,7 @@ type Endpoint struct {
 type Router struct {
 	defaultProvider string
 	endpoints       []Endpoint
+	endpointState   atomic.Pointer[[]Endpoint]
 	modules         modules.Pipeline
 	health          *endpointHealthTracker
 	routeCounter    *atomic.Uint64
@@ -242,6 +243,7 @@ func New(cfg Config) Provider {
 	}
 	router.deployments = &deploymentRegistry{}
 	router.deployments.current.Store(&initialDeployments)
+	router.endpointState.Store(&endpoints)
 	router.providers = &managedProviderRegistry{}
 	router.providers.current.Store(&initialProviders)
 	router.credentials = newCredentialVault(cfg.CredentialEncryptionKey)
