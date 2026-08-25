@@ -265,6 +265,9 @@ func metricPath(path string) string {
 		if path == "/docs" || strings.HasPrefix(path, "/docs/") {
 			return "/docs/{asset}"
 		}
+		if path == "/ui" || strings.HasPrefix(path, "/ui/") {
+			return "/ui/{asset}"
+		}
 		if strings.HasPrefix(path, "/admin/v1/keys") {
 			return "/admin/v1/keys/{operation}"
 		}
@@ -283,7 +286,8 @@ func metricPath(path string) string {
 
 func isInfrastructurePath(path string) bool {
 	return path == "/metrics" || path == "/healthz" || path == "/readyz" ||
-		path == "/openapi.yaml" || path == "/docs" || strings.HasPrefix(path, "/docs/")
+		path == "/openapi.yaml" || path == "/docs" || strings.HasPrefix(path, "/docs/") ||
+		path == "/ui" || strings.HasPrefix(path, "/ui/")
 }
 
 func metricMethod(method string) string {

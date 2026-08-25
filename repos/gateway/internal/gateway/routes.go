@@ -55,6 +55,9 @@ func Routes(handler Handler) http.Handler {
 	if handler.apiDocs.enabled {
 		registerAPIDocs(mux, handler.apiDocs)
 	}
+	if handler.adminUI {
+		registerAdminUI(mux)
+	}
 	observed := observabilityMiddleware(handler.metrics, mux)
 	return otelhttp.NewHandler(observed, "ai-gateway.http",
 		otelhttp.WithFilter(func(r *http.Request) bool {

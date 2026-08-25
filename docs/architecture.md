@@ -171,6 +171,11 @@ HTTP-ответы модулей декодируются в типизиров�
 
 Endpoints загружаются из `PROVIDERS_JSON`, выключенные endpoints отбрасываются, неизвестные типы игнорируются, остальные стабильно сортируются по возрастанию `priority`.
 
+Gateway также раздаёт встроенный `/ui/` control-plane console без внешних CDN.
+UI является недоверенным статическим клиентом: bearer хранится только в
+`sessionStorage`, а модели, бюджеты и audit читаются через те же admin RBAC API,
+что используются CLI-клиентами. Отключение UI не меняет доступность API.
+
 Для endpoint можно задать `max_parallel_requests`, `queue_capacity` и
 `queue_timeout_ms`. Лимит охватывает всю provider-попытку, включая внутренние
 retries и lifetime streaming-соединения. Переполненный endpoint не вызывается:

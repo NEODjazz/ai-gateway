@@ -168,3 +168,13 @@ func TestLoadAPIDocsConfiguration(t *testing.T) {
 		t.Fatalf("API docs environment was not loaded: %+v", cfg.APIDocs)
 	}
 }
+
+func TestLoadAdminUIConfiguration(t *testing.T) {
+	if cfg := Load(); !cfg.AdminUI.Enabled {
+		t.Fatal("admin UI should be enabled by default")
+	}
+	t.Setenv("ADMIN_UI_ENABLED", "false")
+	if cfg := Load(); cfg.AdminUI.Enabled {
+		t.Fatal("admin UI environment override was ignored")
+	}
+}

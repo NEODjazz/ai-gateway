@@ -24,12 +24,17 @@ type Config struct {
 	Telemetry  TelemetryConfig
 	Management ManagementConfig
 	APIDocs    APIDocsConfig
+	AdminUI    AdminUIConfig
 	InitErr    error
 }
 
 type APIDocsConfig struct {
 	Enabled         bool
 	TryItOutEnabled bool
+}
+
+type AdminUIConfig struct {
+	Enabled bool
 }
 
 type ManagementConfig struct {
@@ -189,6 +194,7 @@ func Load() Config {
 			Enabled:         envBool("API_DOCS_ENABLED", false),
 			TryItOutEnabled: envBool("API_DOCS_TRY_IT_OUT_ENABLED", false),
 		},
+		AdminUI: AdminUIConfig{Enabled: envBool("ADMIN_UI_ENABLED", true)},
 		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr),
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{

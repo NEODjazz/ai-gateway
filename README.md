@@ -156,6 +156,21 @@ curl -sS http://127.0.0.1:18080/v1/rerank \
 ### OpenAPI contract
 
 The canonical external contract is [repos/gateway/api/openapi.yaml](repos/gateway/api/openapi.yaml).
+
+### Admin UI
+
+The gateway serves a self-contained operations console at `/ui/`. It provides
+an overview plus read-only model, runtime catalog, budget, and management audit
+views. The UI has no CDN or runtime package dependency and is protected by a
+strict same-origin CSP. Sign in with a bearer credential carrying the `admin`
+role; the credential is stored only in the current tab's `sessionStorage` and
+is sent exclusively to the gateway's existing authenticated APIs.
+
+The UI is enabled by default. Disable it with `ADMIN_UI_ENABLED=false` or Helm
+`gateway.adminUI.enabled=false`. Static UI pages are intentionally accessible
+without authentication, while every data request still passes through the
+normal authentication and admin-RBAC pipeline. Operators should expose `/ui/`
+only over HTTPS outside local development.
 It uses OpenAPI 3.1 and covers inference JSON/SSE responses, multimodal content,
 function and MCP tools, virtual-key administration, authentication, error
 responses, rate-limit headers, and operational endpoints. Contract tests validate

@@ -46,6 +46,8 @@ spec:
               value: {{ .Values.gateway.telemetry.sampleRatio | quote }}
             - name: HTTP_ADDR
               value: ":8080"
+            - name: ADMIN_UI_ENABLED
+              value: {{ .Values.gateway.adminUI.enabled | quote }}
             - name: API_DOCS_ENABLED
               value: {{ .Values.gateway.apiDocs.enabled | quote }}
             - name: API_DOCS_TRY_IT_OUT_ENABLED

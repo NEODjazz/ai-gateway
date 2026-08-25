@@ -29,12 +29,20 @@ type Handler struct {
 	models     *modelcatalog.Registry
 	audit      AuditClient
 	apiDocs    apiDocsConfig
+	adminUI    bool
 }
 
 // WithAPIDocs enables the embedded API documentation. Interactive requests are
 // controlled separately so operators can expose read-only documentation.
 func (h Handler) WithAPIDocs(tryItOutEnabled bool) Handler {
 	h.apiDocs = apiDocsConfig{enabled: true, tryItOutEnabled: tryItOutEnabled}
+	return h
+}
+
+// WithAdminUI enables the embedded management console. All data APIs remain
+// protected by the normal admin bearer authentication and RBAC pipeline.
+func (h Handler) WithAdminUI() Handler {
+	h.adminUI = true
 	return h
 }
 

@@ -85,6 +85,9 @@ func main() {
 	if cfg.APIDocs.Enabled {
 		handler = handler.WithAPIDocs(cfg.APIDocs.TryItOutEnabled)
 	}
+	if cfg.AdminUI.Enabled {
+		handler = handler.WithAdminUI()
+	}
 	if cfg.Management.AuthURL != "" && cfg.Management.Secret != "" {
 		handler = handler.WithManagement(gateway.NewRemoteManagementClient(cfg.Management.AuthURL, cfg.Management.Secret))
 	}

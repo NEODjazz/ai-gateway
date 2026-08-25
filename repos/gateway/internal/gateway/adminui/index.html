@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>AI Gateway Console</title>
+  <link rel="stylesheet" href="/ui/assets/app.css">
+  <script src="/ui/assets/app.js" defer></script>
+</head>
+<body>
+  <div id="login-view" class="login-view">
+    <main class="login-card" aria-labelledby="login-title">
+      <div class="brand-mark" aria-hidden="true">AG</div>
+      <p class="eyebrow">AI Gateway</p>
+      <h1 id="login-title">Operations console</h1>
+      <p class="muted">Manage models, budgets and audit activity from one protected workspace.</p>
+      <form id="login-form">
+        <label for="admin-token">Admin bearer token</label>
+        <div class="token-field">
+          <input id="admin-token" name="token" type="password" autocomplete="off" spellcheck="false" required placeholder="Enter admin token">
+          <button id="toggle-token" type="button" class="icon-button" aria-label="Show token">Show</button>
+        </div>
+        <p id="login-error" class="form-error" role="alert" hidden></p>
+        <button type="submit" class="primary-button full-width">Open console</button>
+      </form>
+      <p class="security-note">The token is held only in this browser tab and is never written to persistent storage.</p>
+    </main>
+  </div>
+
+  <div id="console-view" class="console" hidden>
+    <aside class="sidebar">
+      <div class="brand-lockup"><span class="brand-mark small">AG</span><div><strong>AI Gateway</strong><span>Admin console</span></div></div>
+      <nav aria-label="Console navigation">
+        <button class="nav-item active" data-view="overview"><span>Overview</span></button>
+        <button class="nav-item" data-view="models"><span>Models</span><span id="models-badge" class="badge">0</span></button>
+        <button class="nav-item" data-view="budgets"><span>Budgets</span><span id="budgets-badge" class="badge">0</span></button>
+        <button class="nav-item" data-view="audit"><span>Audit log</span></button>
+        <a class="nav-item nav-link" href="/docs/" target="_blank" rel="noreferrer"><span>API documentation</span><span>↗</span></a>
+      </nav>
+      <div class="sidebar-footer"><span class="status-dot"></span><span>Gateway connected</span></div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div><p class="eyebrow">Control plane</p><h1 id="page-title">Overview</h1></div>
+        <div class="topbar-actions"><span id="last-refresh" class="muted compact"></span><button id="refresh-button" class="secondary-button">Refresh</button><button id="logout-button" class="ghost-button">Sign out</button></div>
+      </header>
+
+      <main class="content">
+        <div id="global-error" class="alert" role="alert" hidden></div>
+        <section id="view-overview" class="view active-view" aria-labelledby="overview-heading">
+          <div class="hero-panel">
+            <div><p class="eyebrow light">System workspace</p><h2 id="overview-heading">Your gateway at a glance</h2><p>Live control-plane data from authenticated management APIs.</p></div>
+            <div class="health-pill"><span class="status-dot bright"></span><span id="console-health">Operational</span></div>
+          </div>
+          <div class="stats-grid">
+            <article class="stat-card"><span>Available models</span><strong id="stat-models">—</strong><small>Visible to this credential</small></article>
+            <article class="stat-card"><span>Catalog entries</span><strong id="stat-catalog">—</strong><small id="catalog-version">Runtime registry</small></article>
+            <article class="stat-card"><span>Active budgets</span><strong id="stat-budgets">—</strong><small>Enforced spend policies</small></article>
+            <article class="stat-card"><span>Recent audit events</span><strong id="stat-audit">—</strong><small>Latest management activity</small></article>
+          </div>
+          <div class="split-grid">
+            <article class="panel"><div class="panel-heading"><div><p class="eyebrow">Models</p><h3>Available endpoints</h3></div><button class="text-button" data-open-view="models">View all</button></div><div id="overview-models" class="compact-list loading-block">Loading…</div></article>
+            <article class="panel"><div class="panel-heading"><div><p class="eyebrow">Activity</p><h3>Latest changes</h3></div><button class="text-button" data-open-view="audit">Open audit</button></div><div id="overview-audit" class="timeline loading-block">Loading…</div></article>
+          </div>
+        </section>
+
+        <section id="view-models" class="view" aria-labelledby="models-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Runtime registry</p><h2 id="models-heading">Models</h2><p class="muted">Public model names, ownership and catalog capabilities.</p></div><label class="search-field"><span class="sr-only">Search models</span><input id="model-search" type="search" placeholder="Search model or provider"></label></div>
+          <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Model</th><th>Provider</th><th>Capabilities</th><th>Input / 1M</th><th>Output / 1M</th></tr></thead><tbody id="models-table"></tbody></table></div><div id="models-empty" class="empty-state" hidden>No models match this filter.</div></div>
+        </section>
+
+        <section id="view-budgets" class="view" aria-labelledby="budgets-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Policy controls</p><h2 id="budgets-heading">Budgets</h2><p class="muted">Spend and token limits enforced by scope and period.</p></div></div>
+          <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Scope</th><th>Period</th><th>Cost limit</th><th>Token limit</th><th>Status</th><th>Updated</th></tr></thead><tbody id="budgets-table"></tbody></table></div><div id="budgets-empty" class="empty-state" hidden>No budget policies configured.</div></div>
+        </section>
+
+        <section id="view-audit" class="view" aria-labelledby="audit-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Governance</p><h2 id="audit-heading">Audit log</h2><p class="muted">Append-only management attempts and outcomes.</p></div><div class="filter-row"><input id="audit-action" type="search" placeholder="Filter action"><button id="audit-filter-button" class="secondary-button">Apply</button></div></div>
+          <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Actor</th><th>Outcome</th><th>Request</th></tr></thead><tbody id="audit-table"></tbody></table></div><div id="audit-empty" class="empty-state" hidden>No audit events found.</div></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
