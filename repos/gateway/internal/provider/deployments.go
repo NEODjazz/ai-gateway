@@ -36,6 +36,7 @@ type DeploymentController interface {
 
 var ErrDeploymentNotFound = errors.New("model deployment not found")
 var ErrDeploymentExists = errors.New("model deployment already exists")
+var ErrDeploymentInUse = errors.New("model deployment is used by a model group")
 var ErrInvalidDeployment = errors.New("invalid model deployment")
 
 type deploymentRegistry struct {
@@ -175,6 +176,13 @@ func (r *Router) DeleteModelDeployment(id string) error {
 	if _, found := (*current)[id]; !found {
 		return ErrDeploymentNotFound
 	}
+	if r.modelGroups != nil && r.modelGroups.current.Load() != nil {
+		for _, group := range *r.modelGroups.current.Load() {
+			if containsDeployment(group.DeploymentIDs, id) {
+				return ErrDeploymentInUse
+			}
+		}
+	}
 	next := make(map[string]ModelDeployment, len(*current)-1)
 	for key, value := range *current {
 		if key != id {
@@ -228,8 +236,41 @@ func (r Router) runtimeEndpoints() []Endpoint {
 		}
 		result = append(result, endpoint)
 	}
+	if r.modelGroups != nil && r.modelGroups.current.Load() != nil {
+		groups := r.modelGroups.current.Load()
+		for index := range result {
+			aliases := make(map[string]string, len(result[index].ModelAliases))
+			for alias, upstream := range result[index].ModelAliases {
+				aliases[alias] = upstream
+			}
+			result[index].ModelAliases = aliases
+			for _, group := range *groups {
+				if !group.Enabled || !containsDeployment(group.DeploymentIDs, result[index].Name) {
+					continue
+				}
+				if !containsDeployment(result[index].Models, group.ID) {
+					result[index].Models = append(result[index].Models, group.ID)
+				}
+				if result[index].ModelAliases == nil {
+					result[index].ModelAliases = map[string]string{}
+				}
+				if deployment, found := (*current)[result[index].Name]; found && deployment.UpstreamModel != "" {
+					result[index].ModelAliases[group.ID] = deployment.UpstreamModel
+				}
+			}
+		}
+	}
 	sort.SliceStable(result, func(i, j int) bool { return result[i].Priority < result[j].Priority })
 	return result
+}
+
+func containsDeployment(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Router) validateDeployment(deployment ModelDeployment) error {

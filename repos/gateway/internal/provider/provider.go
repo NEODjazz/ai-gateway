@@ -142,6 +142,7 @@ type Router struct {
 	deployments     *deploymentRegistry
 	providers       *managedProviderRegistry
 	credentials     *credentialVault
+	modelGroups     *modelGroupRegistry
 	guardrails      *guardrailRegistry
 }
 
@@ -200,8 +201,12 @@ func New(cfg Config) Provider {
 		if deploymentWeight == 0 {
 			deploymentWeight = 1
 		}
+		upstreamModel := ""
+		if len(endpoint.Models) == 1 {
+			upstreamModel = endpoint.Models[0]
+		}
 		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(endpoint.BaseURL, "/"), Enabled: true}
-		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, Enabled: enabled}
+		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, UpstreamModel: upstreamModel, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, Enabled: enabled}
 	}
 
 	hasPrimary := false
@@ -247,6 +252,9 @@ func New(cfg Config) Provider {
 	router.providers = &managedProviderRegistry{}
 	router.providers.current.Store(&initialProviders)
 	router.credentials = newCredentialVault(cfg.CredentialEncryptionKey)
+	router.modelGroups = &modelGroupRegistry{}
+	emptyModelGroups := map[string]ModelGroup{}
+	router.modelGroups.current.Store(&emptyModelGroups)
 	initialGuardrails := make(map[string]GuardrailPolicy, len(cfg.GuardrailPolicies))
 	for name, policy := range cfg.GuardrailPolicies {
 		initialGuardrails[name] = GuardrailPolicy{Name: name, DLP: policy.DLP, AV: policy.AV, Enabled: true}
@@ -1114,8 +1122,18 @@ func (r Router) candidates(ctx context.Context, request openai.ChatCompletionReq
 	}
 
 	var candidates []Endpoint
+	group, grouped := r.modelGroup(request.Model)
+	groupDeployments := map[string]bool{}
+	if grouped {
+		for _, id := range group.DeploymentIDs {
+			groupDeployments[id] = true
+		}
+	}
 	for _, endpoint := range r.runtimeEndpoints() {
 		if endpoint.Shadow {
+			continue
+		}
+		if grouped && !groupDeployments[endpoint.Name] {
 			continue
 		}
 		if filterByProvider && requestedProvider != "auto" && requestedProvider != endpoint.Name && requestedProvider != endpoint.Type {
@@ -1151,6 +1169,11 @@ func (r Router) candidates(ctx context.Context, request openai.ChatCompletionReq
 		candidates = append(candidates, endpoint)
 	}
 
+	if grouped {
+		groupRouter := r
+		groupRouter.routingStrategy = group.Strategy
+		return groupRouter.weightedOrder(candidates)
+	}
 	return r.weightedOrder(candidates)
 }
 

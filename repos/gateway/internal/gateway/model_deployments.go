@@ -132,6 +132,10 @@ func (h Handler) DeleteModelDeployment(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "model deployment not found")
 			return
 		}
+		if errors.Is(err, provider.ErrDeploymentInUse) {
+			writeError(w, http.StatusConflict, "deployment_in_use", "model deployment is used by a model group")
+			return
+		}
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "runtime deployment deletion failed")
 		return
 	}
