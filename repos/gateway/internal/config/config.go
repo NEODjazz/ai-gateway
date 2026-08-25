@@ -122,6 +122,9 @@ type ProviderEndpointConfig struct {
 	ModelAliases          map[string]string `json:"model_aliases,omitempty"`
 	Weight                int               `json:"weight,omitempty"`
 	Capabilities          []string          `json:"capabilities,omitempty"`
+	Shadow                bool              `json:"shadow,omitempty"`
+	MirrorPercentage      float64           `json:"mirror_percentage,omitempty"`
+	MirrorTimeoutMS       int               `json:"mirror_timeout_ms,omitempty"`
 }
 
 func Load() Config {
@@ -224,6 +227,12 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 		}
 		if endpoint.QueueCapacity > 0 && endpoint.MaxParallelRequests <= 0 {
 			result = errors.Join(result, fmt.Errorf("provider %q queue requires max_parallel_requests", name))
+		}
+		if endpoint.MirrorPercentage < 0 || endpoint.MirrorPercentage > 100 || endpoint.MirrorTimeoutMS < 0 {
+			result = errors.Join(result, fmt.Errorf("provider %q mirror values are invalid", name))
+		}
+		if endpoint.Shadow && endpoint.MaxParallelRequests <= 0 {
+			result = errors.Join(result, fmt.Errorf("shadow provider %q requires max_parallel_requests", name))
 		}
 		if endpoint.QueueCapacity > 0 && endpoint.QueueTimeoutMS <= 0 {
 			result = errors.Join(result, fmt.Errorf("provider %q queue requires queue_timeout_ms", name))

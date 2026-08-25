@@ -275,6 +275,7 @@ Helm chart передает anonymizer переменную `REDIS_ADDR` и от
 - Reservation сохраняет `catalog_version`, `pricing_key` и обе ставки. Commit всегда использует этот snapshot, даже если active catalog успел измениться или удалить модель; те же audit fields пишутся в ClickHouse.
 - Runtime model registry атомарно заменяется через admin API и синхронизируется между gateway replicas через Redis. Router передает billing выбранный pricing snapshot, поэтому обновление capabilities/prices не требует рестарта и не меняет цену in-flight reservation.
 - Management mutations используют fail-closed PostgreSQL audit preflight: append-only `attempted` фиксируется до side effect, затем добавляется `succeeded` или `failed`. Журнал не содержит Bearer/API keys или тела inference-запросов и читается только через admin RBAC.
+- Shadow endpoints исключены из primary/fallback routing и model listing. Асинхронная mirror-копия создается после guardrails/anonymization, имеет собственные admission/timeout, не запускает billing, не меняет circuit health и отбрасывает ответ.
 - Если provider вернул usage, commit использует его; иначе фактический output остается нулевым. Reservation при этом защищает лимит до commit/cancel/TTL.
 - Tariffs и financial transactions пока не реализованы и fail closed при включении.
 

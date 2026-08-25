@@ -273,6 +273,22 @@ next compatible endpoint. If every candidate is saturated, the gateway returns
 `429 provider_busy` with `Retry-After`. A slot covers the complete provider call,
 including same-endpoint retries or the lifetime of an SSE stream.
 
+### Shadow traffic mirroring
+
+An endpoint with `shadow: true` is never selected as a primary/fallback route
+and is omitted from `/v1/models`. `mirror_percentage` (default `100`) selects a
+deterministic subset by request ID; `mirror_timeout_ms` (default `5000`) bounds
+each detached asynchronous call. Mirroring starts only when a primary provider
+call is actually needed, so exact/semantic cache hits are not duplicated.
+
+The shadow receives a deep-cloned provider DTO after required DLP, AV, and
+anonymization modules have completed. It receives neither client Bearer/API
+keys nor the deanonymization map. Shadow responses are discarded, are not
+billed, never affect primary circuit/fallback state, and cannot delay or alter
+the client response. Configure independent shadow admission limits because the
+shadow provider may still incur external cost; `max_parallel_requests` is
+therefore required for every shadow endpoint.
+
 The auth service supports virtual keys through `AUTH_VIRTUAL_KEYS_JSON` (Helm:
 `auth.virtualKeys`). Each key may define `team_id`, `roles`, `allowed_models`,
 `rate_limit_rpm`, and `rate_limit_tpm`. The gateway receives only the key

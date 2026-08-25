@@ -110,6 +110,9 @@ type Endpoint struct {
 	ModelAliases          map[string]string
 	Weight                int
 	Capabilities          []string
+	Shadow                bool
+	MirrorPercentage      float64
+	MirrorTimeout         time.Duration
 	Provider              Client
 }
 
@@ -151,6 +154,14 @@ func New(cfg Config) Provider {
 				avEnabled = policy.AV
 			}
 		}
+		mirrorPercentage := endpoint.MirrorPercentage
+		if endpoint.Shadow && mirrorPercentage == 0 {
+			mirrorPercentage = 100
+		}
+		mirrorTimeout := time.Duration(endpoint.MirrorTimeoutMS) * time.Millisecond
+		if endpoint.Shadow && mirrorTimeout <= 0 {
+			mirrorTimeout = 5 * time.Second
+		}
 		endpoints = append(endpoints, Endpoint{
 			Name:                  endpoint.Name,
 			Type:                  endpoint.Type,
@@ -167,11 +178,21 @@ func New(cfg Config) Provider {
 			ModelAliases:          endpoint.ModelAliases,
 			Weight:                endpoint.Weight,
 			Capabilities:          endpoint.Capabilities,
+			Shadow:                endpoint.Shadow,
+			MirrorPercentage:      mirrorPercentage,
+			MirrorTimeout:         mirrorTimeout,
 			Provider:              provider,
 		})
 	}
 
-	if len(endpoints) == 0 {
+	hasPrimary := false
+	for _, endpoint := range endpoints {
+		if !endpoint.Shadow {
+			hasPrimary = true
+			break
+		}
+	}
+	if !hasPrimary {
 		endpoints = append(endpoints, Endpoint{Name: "demo", Type: "demo", Provider: Demo{}})
 	}
 
@@ -212,6 +233,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 
 	var errs []error
 	var lastAttempt *modules.RequestContext
+	mirrored := false
 	for _, endpoint := range candidates {
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
@@ -280,6 +302,10 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 				}
 			}
 		}
+		if !mirrored {
+			r.mirrorChat(ctx, req.RequestID, attemptCtx.Request, request.Model, requiredChatCapabilities(request, false)...)
+			mirrored = true
+		}
 		response, err := r.callChat(ctx, endpoint, attemptCtx.Request)
 		setAttemptMetadata(&attemptCtx, started, err)
 		if err == nil {
@@ -333,6 +359,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 
 	var errs []error
 	var lastAttempt *modules.RequestContext
+	mirrored := false
 	for _, endpoint := range candidates {
 		streamingProvider, ok := endpoint.Provider.(StreamingClient)
 		if !ok {
@@ -354,6 +381,10 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			continue
 		}
 		lastAttempt = &attemptCtx
+		if !mirrored {
+			r.mirrorChat(ctx, req.RequestID, attemptCtx.Request, request.Model, requiredChatCapabilities(request, true)...)
+			mirrored = true
+		}
 
 		started := time.Now()
 		release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
@@ -416,6 +447,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 
 	var errs []error
 	var lastAttempt *modules.RequestContext
+	mirrored := false
 	for _, endpoint := range candidates {
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
@@ -450,6 +482,10 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		} else if cacheErr != nil {
 			attemptCtx.Metadata["provider.cache.status"] = "error"
 			log.Printf("provider cache get failed: %v", cacheErr)
+		}
+		if !mirrored {
+			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, false)...)
+			mirrored = true
 		}
 		response, err := r.callResponses(ctx, endpoint, *attemptCtx.ResponseRequest)
 		setAttemptMetadata(&attemptCtx, started, err)
@@ -497,6 +533,7 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 
 	var errs []error
 	var lastAttempt *modules.RequestContext
+	mirrored := false
 	for _, endpoint := range candidates {
 		client, ok := endpoint.Provider.(EmbeddingClient)
 		if !ok {
@@ -518,6 +555,10 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 
 		started := time.Now()
 		lastAttempt = &attemptCtx
+		if !mirrored {
+			r.mirrorEmbeddings(ctx, req.RequestID, *attemptCtx.EmbeddingRequest, request.Model)
+			mirrored = true
+		}
 		response, err := r.callEmbeddings(ctx, endpoint, client, *attemptCtx.EmbeddingRequest)
 		setAttemptMetadata(&attemptCtx, started, err)
 		if err == nil {
@@ -563,6 +604,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 
 	var errs []error
 	var lastAttempt *modules.RequestContext
+	mirrored := false
 	for _, endpoint := range candidates {
 		streamingProvider, ok := endpoint.Provider.(StreamingResponseClient)
 		if !ok {
@@ -584,6 +626,10 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			continue
 		}
 		lastAttempt = &attemptCtx
+		if !mirrored {
+			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, true)...)
+			mirrored = true
+		}
 
 		started := time.Now()
 		release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
@@ -641,6 +687,9 @@ func (r Router) Models() []openai.Model {
 	seen := map[string]bool{}
 	models := make([]openai.Model, 0)
 	for _, endpoint := range r.endpoints {
+		if endpoint.Shadow {
+			continue
+		}
 		modelIDs := append([]string(nil), endpoint.Models...)
 		for alias := range endpoint.ModelAliases {
 			modelIDs = append(modelIDs, alias)
@@ -913,6 +962,9 @@ func (r Router) candidates(ctx context.Context, request openai.ChatCompletionReq
 
 	var candidates []Endpoint
 	for _, endpoint := range r.endpoints {
+		if endpoint.Shadow {
+			continue
+		}
 		if filterByProvider && requestedProvider != "auto" && requestedProvider != endpoint.Name && requestedProvider != endpoint.Type {
 			continue
 		}

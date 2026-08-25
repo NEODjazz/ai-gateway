@@ -72,6 +72,11 @@ gateway:
       # max_parallel_requests: 2
       # queue_capacity: 8
       # queue_timeout_ms: 5000
+      # Shadow evaluation endpoint (never selected as primary):
+      # shadow: true
+      # mirror_percentage: 10
+      # mirror_timeout_ms: 5000
+      # max_parallel_requests: 2  # required for shadow endpoints
       stream: true
       dlp_enabled: false
       av_enabled: false
