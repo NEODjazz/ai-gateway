@@ -70,6 +70,10 @@ func TestPostgresControlPlaneSnapshotLifecycleIntegration(t *testing.T) {
 	if current, err := store.Revision(ctx); err != nil || current != 1 {
 		t.Fatalf("revision=%d err=%v", current, err)
 	}
+	cache.values[revisionCacheKey] = []byte("99")
+	if current, err := store.Revision(ctx); err != nil || current != 1 || string(cache.values[revisionCacheKey]) != "1" {
+		t.Fatalf("postgres revision did not repair cache: revision=%d cache=%q err=%v", current, cache.values[revisionCacheKey], err)
+	}
 }
 
 func TestPostgresControlPlaneRestoresManagedRouterIntegration(t *testing.T) {

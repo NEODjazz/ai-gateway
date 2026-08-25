@@ -169,7 +169,17 @@ HTTP-ответы модулей декодируются в типизиров�
 
 ## Маршрутизация и failover
 
-Endpoints загружаются из `PROVIDERS_JSON`, выключенные endpoints отбрасываются, неизвестные типы игнорируются, остальные стабильно сортируются по возрастанию `priority`.
+Endpoints первоначально загружаются из `PROVIDERS_JSON`, выключенные endpoints
+отбрасываются, неизвестные типы игнорируются, остальные стабильно сортируются
+по возрастанию `priority`. Если задан
+`PROVIDER_CONTROL_PLANE_POSTGRES_DSN`, пустое persistent-состояние атомарно
+инициализируется этой конфигурацией, после чего PostgreSQL становится source of
+truth для Providers, encrypted Credentials, Deployments и Model Groups.
+Изменение сначала сохраняет versioned JSONB snapshot с optimistic revision и
+только затем считается успешным. При ошибке runtime snapshot откатывается.
+Реплики сверяют durable revision и Redis revision marker, перечитывают snapshot
+и атомарно перестраивают provider clients. Plaintext credentials границу Router
+не покидают: PostgreSQL получает только AES-GCM nonce/ciphertext и metadata.
 
 Gateway также раздаёт встроенный `/ui/` control-plane console без внешних CDN.
 UI является недоверенным статическим клиентом: bearer хранится только в
@@ -330,6 +340,9 @@ flowchart TB
 HTTP_ADDR=:8080
 DEFAULT_PROVIDER=azure-open-ai
 PROVIDERS_JSON=[...]
+PROVIDER_CONTROL_PLANE_POSTGRES_DSN=postgres://ai_gateway:...@ai-gateway-postgres:5432/ai_gateway?sslmode=disable
+PROVIDER_CREDENTIAL_ENCRYPTION_KEY=<stable-secret-at-least-16-characters>
+PROVIDER_CONTROL_PLANE_REFRESH_SECONDS=1
 
 AUTH_REQUIRED=true
 AUTH_URL=http://ai-gateway-auth:8082

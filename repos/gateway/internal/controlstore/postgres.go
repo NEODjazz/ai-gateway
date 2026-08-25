@@ -131,10 +131,11 @@ func (s *PostgresStore) Revision(ctx context.Context) (int64, error) {
 	}
 	if s.cache != nil {
 		if payload, found, err := s.cache.Get(ctx, revisionCacheKey); err == nil && found {
-			if cached, parseErr := strconv.ParseInt(string(payload), 10, 64); parseErr == nil && cached > postgresRevision {
-				return cached, nil
+			if cached, parseErr := strconv.ParseInt(string(payload), 10, 64); parseErr == nil && cached == postgresRevision {
+				return postgresRevision, nil
 			}
 		}
+		_ = s.cache.Set(ctx, revisionCacheKey, []byte(strconv.FormatInt(postgresRevision, 10)), 0)
 	}
 	return postgresRevision, nil
 }

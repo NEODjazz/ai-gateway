@@ -169,9 +169,15 @@ provider model discovery. A credential secret is accepted only when created or
 rotated; list and mutation responses contain metadata only. Set a stable
 `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` in managed environments. Without it, the
 gateway generates an ephemeral process key suitable only for local runtime
-management. Provider, credential, deployment, and group mutations currently
-apply to the running gateway process and must also be represented in deployment
-configuration before a restart.
+management. Set `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` to persist providers,
+encrypted credentials, deployments, and model groups as one versioned JSONB
+snapshot. The gateway seeds an empty store from `PROVIDERS_JSON`, then treats
+PostgreSQL as the source of truth. Every mutation uses an optimistic revision,
+is committed before the API reports success, and is rolled back in memory when
+persistence fails. Replicas poll the durable revision (one second by default),
+while Redis carries the same revision marker for cross-replica observability.
+Startup fails if PostgreSQL is unavailable, the persisted snapshot is invalid,
+or the stable encryption key cannot decrypt a credential.
 The Usage & Spend view reads final request outcomes from ClickHouse for a
 bounded 7/30/90-day window and breaks requests, tokens, latency, and spend down
 by day, model, and provider. Costs remain separated by currency.
