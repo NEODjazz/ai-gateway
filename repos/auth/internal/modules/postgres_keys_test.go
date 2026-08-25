@@ -22,7 +22,7 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql"} {
+	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql", "005_virtual_key_metadata.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
 			t.Fatal(err)
@@ -49,12 +49,29 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	})
 
 	oldToken := "old-token-" + suffix
-	old := StoredVirtualKey{ID: oldID, UserID: "user-1", TeamID: "team-1", Roles: []string{"developer"}, AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp.weather.*"}, RateLimitRPM: 10}
+	old := StoredVirtualKey{ID: oldID, Alias: "automation", Description: "CI key", Tags: []string{"ci", "prod"}, UserID: "user-1", TeamID: "team-1", Roles: []string{"developer"}, AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp.weather.*"}, RateLimitRPM: 10}
 	if err := store.Create(ctx, old, credentialLookupHash(oldToken, "pepper")); err != nil {
 		t.Fatal(err)
 	}
 	if found, ok, err := store.Lookup(ctx, credentialLookupHash(oldToken, "pepper")); err != nil || !ok || found.ID != oldID || len(found.AllowedTools) != 1 {
 		t.Fatalf("active key lookup failed: key=%+v ok=%v err=%v", found, ok, err)
+	}
+	old.RateLimitRPM = 15
+	old.Description = "updated CI key"
+	if updated, err := store.Update(ctx, oldID, old); err != nil || !updated {
+		t.Fatalf("update failed: updated=%v err=%v", updated, err)
+	}
+	if disabled, err := store.SetDisabled(ctx, oldID, true); err != nil || !disabled {
+		t.Fatalf("disable failed: disabled=%v err=%v", disabled, err)
+	}
+	if _, ok, err := store.Lookup(ctx, credentialLookupHash(oldToken, "pepper")); err != nil || ok {
+		t.Fatalf("disabled key must not authorize: ok=%v err=%v", ok, err)
+	}
+	if enabled, err := store.SetDisabled(ctx, oldID, false); err != nil || !enabled {
+		t.Fatalf("enable failed: enabled=%v err=%v", enabled, err)
+	}
+	if found, ok, err := store.Lookup(ctx, credentialLookupHash(oldToken, "pepper")); err != nil || !ok || found.RateLimitRPM != 15 {
+		t.Fatalf("enabled updated key lookup failed: key=%+v ok=%v err=%v", found, ok, err)
 	}
 
 	expiredAt := time.Now().Add(-time.Minute)

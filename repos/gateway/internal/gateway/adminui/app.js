@@ -60,7 +60,7 @@
 
   function requestLogQuery(before = "", beforeRequestID = "") {
     const query = new URLSearchParams({ days: $("request-log-days").value, limit: "100" });
-    for (const [name, id] of [["status", "request-log-status"], ["request_id", "request-log-request-id"], ["model", "request-log-model"], ["provider", "request-log-provider"], ["team_id", "request-log-team"]]) {
+    for (const [name, id] of [["status", "request-log-status"], ["request_id", "request-log-request-id"], ["model", "request-log-model"], ["provider", "request-log-provider"], ["team_id", "request-log-team"], ["credential_id", "request-log-credential"]]) {
       const value = $(id).value.trim(); if (value) query.set(name, value);
     }
     if (before) { query.set("before", before); query.set("before_request_id", beforeRequestID); }
@@ -279,20 +279,24 @@
     const body = $("keys-table"); clear(body); $("keys-empty").hidden = state.keys.length !== 0;
     for (const key of state.keys) {
       const row = document.createElement("tr");
-      row.appendChild(textCell(key.id, `Created ${formatDate(key.created_at)}`));
+      row.appendChild(textCell(key.alias || key.id, `${key.id} · Created ${formatDate(key.created_at)}`));
       row.appendChild(textCell(key.user_id, key.team_id));
       const grants = [...(key.roles || []), ...(key.allowed_models || []).map((value) => `model:${value}`), ...(key.allowed_tools || []).map((value) => `tool:${value}`)];
       row.appendChild(plainCell(grants.join(", ") || "Unscoped"));
       row.appendChild(textCell(key.rate_limit_rpm ? `${formatNumber(key.rate_limit_rpm)} RPM` : "No RPM limit", key.rate_limit_tpm ? `${formatNumber(key.rate_limit_tpm)} TPM` : "No TPM limit"));
       const expired = key.expires_at && new Date(key.expires_at) <= new Date();
       const active = !key.revoked_at && !expired;
-      const statusCell = document.createElement("td"); const status = document.createElement("span"); status.className = `outcome ${active ? "succeeded" : "failed"}`; status.textContent = key.revoked_at ? "Revoked" : expired ? "Expired" : "Active"; statusCell.appendChild(status); row.appendChild(statusCell);
+      const statusCell = document.createElement("td"); const status = document.createElement("span"); status.className = `outcome ${active && !key.disabled_at ? "succeeded" : "failed"}`; status.textContent = key.revoked_at ? "Revoked" : expired ? "Expired" : key.disabled_at ? "Disabled" : "Active"; statusCell.appendChild(status); row.appendChild(statusCell);
       row.appendChild(plainCell(formatDate(key.last_used_at)));
       const actions = document.createElement("td"); actions.className = "row-actions";
       if (active) {
-        const rotate = document.createElement("button"); rotate.type = "button"; rotate.className = "row-button"; rotate.textContent = "Rotate"; rotate.addEventListener("click", () => openKeyDialog(key));
+        const edit = document.createElement("button"); edit.type = "button"; edit.className = "row-button"; edit.textContent = "Edit"; edit.addEventListener("click", () => openKeyDialog(key, "edit"));
+        const rotate = document.createElement("button"); rotate.type = "button"; rotate.className = "row-button"; rotate.textContent = "Rotate"; rotate.addEventListener("click", () => openKeyDialog(key, "rotate"));
+        const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "row-button"; toggle.textContent = key.disabled_at ? "Enable" : "Disable"; toggle.addEventListener("click", () => setKeyDisabled(key.id, !key.disabled_at));
+        const usage = document.createElement("button"); usage.type = "button"; usage.className = "row-button"; usage.textContent = "Usage"; usage.addEventListener("click", () => showKeyUsage(key.id));
+        const budget = document.createElement("button"); budget.type = "button"; budget.className = "row-button"; budget.textContent = "Budget"; budget.addEventListener("click", () => openBudgetDialog({ scope_type: "key", scope_id: key.id, period: "month", currency: "USD", enabled: true }));
         const revoke = document.createElement("button"); revoke.type = "button"; revoke.className = "row-button danger"; revoke.textContent = "Revoke"; revoke.addEventListener("click", () => confirmChange("Revoke virtual key?", `${key.id} will stop authorizing requests immediately.`, () => revokeKey(key.id)));
-        actions.append(rotate, revoke);
+        actions.append(edit, rotate, toggle, usage, budget, revoke);
       }
       row.appendChild(actions); body.appendChild(row);
     }
@@ -380,9 +384,10 @@
     return local.toISOString().slice(0, 16);
   }
 
-  function openKeyDialog(key = null) {
-    setText("key-dialog-title", key ? "Rotate virtual key" : "Create virtual key");
-    $("key-rotate-id").value = key?.id || "";
+  function openKeyDialog(key = null, mode = "create") {
+    setText("key-dialog-title", mode === "edit" ? "Edit virtual key" : mode === "rotate" ? "Rotate virtual key" : "Create virtual key");
+    $("key-id").value = key?.id || ""; $("key-mode").value = mode;
+    $("key-alias").value = key?.alias || ""; $("key-description").value = key?.description || ""; $("key-tags").value = (key?.tags || []).join(", ");
     $("key-user-id").value = key?.user_id || "";
     $("key-team-id").value = key?.team_id || "";
     $("key-roles").value = (key?.roles || []).join(", ");
@@ -399,14 +404,16 @@
     event.preventDefault();
     const error = $("key-form-error"); error.hidden = true;
     const payload = {
+      alias: $("key-alias").value.trim(), description: $("key-description").value.trim(), tags: commaList("key-tags"),
       user_id: $("key-user-id").value.trim(), team_id: $("key-team-id").value.trim(),
       roles: commaList("key-roles"), allowed_models: commaList("key-models"), allowed_tools: commaList("key-tools"),
       rate_limit_rpm: Number($("key-rpm").value || 0), rate_limit_tpm: Number($("key-tpm").value || 0),
     };
     const expires = $("key-expires").value; if (expires) payload.expires_at = new Date(expires).toISOString();
-    const rotateID = $("key-rotate-id").value;
+    const id = $("key-id").value; const mode = $("key-mode").value;
     try {
-      const issued = await apiJSON(rotateID ? `/admin/v1/keys/${encodeURIComponent(rotateID)}/rotate` : "/admin/v1/keys", "POST", payload);
+      if (mode === "edit") { await apiJSON(`/admin/v1/keys/${encodeURIComponent(id)}`, "PUT", payload); $("key-dialog").close(); await loadData(); showToast("Virtual key updated"); return; }
+      const issued = await apiJSON(mode === "rotate" ? `/admin/v1/keys/${encodeURIComponent(id)}/rotate` : "/admin/v1/keys", "POST", payload);
       $("key-dialog").close();
       $("issued-key-id").value = issued.id;
       $("issued-key-token").value = issued.token;
@@ -416,6 +423,8 @@
   }
 
   async function revokeKey(id) { await api(`/admin/v1/keys/${encodeURIComponent(id)}`, { method: "DELETE" }); await loadData(); showToast("Virtual key revoked"); }
+  async function setKeyDisabled(id, disabled) { await api(`/admin/v1/keys/${encodeURIComponent(id)}/${disabled ? "disable" : "enable"}`, { method: "POST" }); await loadData(); showToast(disabled ? "Virtual key disabled" : "Virtual key enabled"); }
+  async function showKeyUsage(id) { $("request-log-credential").value = id; switchView("request-logs"); await loadRequestLogs(false); }
 
   function clearIssuedKey() { $("issued-key-id").value = ""; $("issued-key-token").value = ""; }
 
@@ -461,7 +470,7 @@
   }
 
   function openBudgetDialog(item = null) {
-    setText("budget-dialog-title", item ? "Edit budget" : "Create budget");
+    setText("budget-dialog-title", item?.id ? "Edit budget" : "Create budget");
     $("budget-id").value = item?.id || "";
     $("budget-scope-type").value = item?.scope_type || "team";
     $("budget-scope-id").value = item?.scope_id || "";

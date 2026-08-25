@@ -18,6 +18,9 @@ type virtualKeyManager interface {
 }
 
 type ManagedVirtualKey struct {
+	Alias         string     `json:"alias,omitempty"`
+	Description   string     `json:"description,omitempty"`
+	Tags          []string   `json:"tags,omitempty"`
 	UserID        string     `json:"user_id"`
 	TeamID        string     `json:"team_id,omitempty"`
 	Roles         []string   `json:"roles,omitempty"`
@@ -38,6 +41,9 @@ type IssuedVirtualKey struct {
 // deliberately has no plaintext token or token-hash field.
 type VirtualKeyMetadata struct {
 	ID             string     `json:"id"`
+	Alias          string     `json:"alias,omitempty"`
+	Description    string     `json:"description,omitempty"`
+	Tags           []string   `json:"tags,omitempty"`
 	UserID         string     `json:"user_id"`
 	TeamID         string     `json:"team_id,omitempty"`
 	Roles          []string   `json:"roles,omitempty"`
@@ -50,6 +56,7 @@ type VirtualKeyMetadata struct {
 	RotatedToID    string     `json:"rotated_to_id,omitempty"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 	RevokedAt      *time.Time `json:"revoked_at,omitempty"`
+	DisabledAt     *time.Time `json:"disabled_at,omitempty"`
 	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 }
@@ -101,6 +108,36 @@ func (m AuthModule) RevokeVirtualKey(ctx context.Context, id string) (bool, erro
 	return manager.Revoke(ctx, id)
 }
 
+func (m AuthModule) UpdateVirtualKey(ctx context.Context, id string, spec ManagedVirtualKey) (bool, error) {
+	if id == "" {
+		return false, fmt.Errorf("%w: id is required", ErrInvalidVirtualKey)
+	}
+	key, err := validateStoredVirtualKey(spec)
+	if err != nil {
+		return false, err
+	}
+	manager, ok := m.store.(interface {
+		Update(context.Context, string, StoredVirtualKey) (bool, error)
+	})
+	if !ok || manager == nil {
+		return false, errors.New("persistent virtual key updates are unavailable")
+	}
+	return manager.Update(ctx, id, key)
+}
+
+func (m AuthModule) SetVirtualKeyDisabled(ctx context.Context, id string, disabled bool) (bool, error) {
+	if id == "" {
+		return false, fmt.Errorf("%w: id is required", ErrInvalidVirtualKey)
+	}
+	manager, ok := m.store.(interface {
+		SetDisabled(context.Context, string, bool) (bool, error)
+	})
+	if !ok || manager == nil {
+		return false, errors.New("persistent virtual key status updates are unavailable")
+	}
+	return manager.SetDisabled(ctx, id, disabled)
+}
+
 func (m AuthModule) ListVirtualKeys(ctx context.Context, limit int) ([]VirtualKeyMetadata, error) {
 	if m.initErr != nil {
 		return nil, m.initErr
@@ -132,19 +169,9 @@ func (m AuthModule) keyManager() (virtualKeyManager, error) {
 }
 
 func (m AuthModule) newStoredVirtualKey(spec ManagedVirtualKey, rotatedFrom string) (StoredVirtualKey, string, error) {
-	spec.UserID = strings.TrimSpace(spec.UserID)
-	spec.TeamID = strings.TrimSpace(spec.TeamID)
-	if spec.UserID == "" || len(spec.UserID) > 256 || len(spec.TeamID) > 256 {
-		return StoredVirtualKey{}, "", fmt.Errorf("%w: user_id is required", ErrInvalidVirtualKey)
-	}
-	if !validPolicyStrings(spec.Roles) || !validPolicyStrings(spec.AllowedModels) || !validPolicyStrings(spec.AllowedTools) {
-		return StoredVirtualKey{}, "", fmt.Errorf("%w: invalid roles or model grants", ErrInvalidVirtualKey)
-	}
-	if spec.RateLimitRPM < 0 || spec.RateLimitTPM < 0 {
-		return StoredVirtualKey{}, "", fmt.Errorf("%w: rate limits cannot be negative", ErrInvalidVirtualKey)
-	}
-	if spec.ExpiresAt != nil && !spec.ExpiresAt.After(time.Now()) {
-		return StoredVirtualKey{}, "", fmt.Errorf("%w: expires_at must be in the future", ErrInvalidVirtualKey)
+	key, err := validateStoredVirtualKey(spec)
+	if err != nil {
+		return StoredVirtualKey{}, "", err
 	}
 	idBytes := make([]byte, 16)
 	tokenBytes := make([]byte, 32)
@@ -154,15 +181,35 @@ func (m AuthModule) newStoredVirtualKey(spec ManagedVirtualKey, rotatedFrom stri
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return StoredVirtualKey{}, "", err
 	}
-	id := "vk_" + hex.EncodeToString(idBytes)
-	token := "sk-ag-" + base64.RawURLEncoding.EncodeToString(tokenBytes)
+	key.ID = "vk_" + hex.EncodeToString(idBytes)
+	key.RotatedFromID = rotatedFrom
+	return key, "sk-ag-" + base64.RawURLEncoding.EncodeToString(tokenBytes), nil
+}
+
+func validateStoredVirtualKey(spec ManagedVirtualKey) (StoredVirtualKey, error) {
+	spec.UserID = strings.TrimSpace(spec.UserID)
+	spec.TeamID = strings.TrimSpace(spec.TeamID)
+	spec.Alias = strings.TrimSpace(spec.Alias)
+	spec.Description = strings.TrimSpace(spec.Description)
+	if spec.UserID == "" || len(spec.UserID) > 256 || len(spec.TeamID) > 256 {
+		return StoredVirtualKey{}, fmt.Errorf("%w: user_id is required", ErrInvalidVirtualKey)
+	}
+	if len(spec.Alias) > 128 || len(spec.Description) > 1024 || !validPolicyStrings(spec.Tags) || !validPolicyStrings(spec.Roles) || !validPolicyStrings(spec.AllowedModels) || !validPolicyStrings(spec.AllowedTools) {
+		return StoredVirtualKey{}, fmt.Errorf("%w: invalid metadata or grants", ErrInvalidVirtualKey)
+	}
+	if spec.RateLimitRPM < 0 || spec.RateLimitTPM < 0 {
+		return StoredVirtualKey{}, fmt.Errorf("%w: rate limits cannot be negative", ErrInvalidVirtualKey)
+	}
+	if spec.ExpiresAt != nil && !spec.ExpiresAt.After(time.Now()) {
+		return StoredVirtualKey{}, fmt.Errorf("%w: expires_at must be in the future", ErrInvalidVirtualKey)
+	}
 	return StoredVirtualKey{
-		ID: id, UserID: spec.UserID, TeamID: spec.TeamID,
+		Alias: spec.Alias, Description: spec.Description, Tags: append([]string(nil), spec.Tags...), UserID: spec.UserID, TeamID: spec.TeamID,
 		Roles: append([]string(nil), spec.Roles...), AllowedModels: append([]string(nil), spec.AllowedModels...),
 		AllowedTools: append([]string(nil), spec.AllowedTools...),
 		RateLimitRPM: spec.RateLimitRPM, RateLimitTPM: spec.RateLimitTPM,
-		RotatedFromID: rotatedFrom, ExpiresAt: spec.ExpiresAt,
-	}, token, nil
+		ExpiresAt: spec.ExpiresAt,
+	}, nil
 }
 
 func validPolicyStrings(values []string) bool {

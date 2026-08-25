@@ -13,6 +13,9 @@ type managementStore struct {
 	createdHash string
 	rotatedOld  string
 	revokedID   string
+	updatedID   string
+	disabledID  string
+	disabled    bool
 }
 
 func (s *managementStore) Lookup(context.Context, string) (StoredVirtualKey, bool, error) {
@@ -35,6 +38,14 @@ func (s *managementStore) Rotate(_ context.Context, oldID string, replacement St
 func (s *managementStore) List(context.Context, int) ([]VirtualKeyMetadata, error) {
 	return []VirtualKeyMetadata{{ID: "vk_safe123", UserID: "user-1", RotationFamily: "vk_safe123"}}, nil
 }
+func (s *managementStore) Update(_ context.Context, id string, key StoredVirtualKey) (bool, error) {
+	s.updatedID, s.created = id, key
+	return true, nil
+}
+func (s *managementStore) SetDisabled(_ context.Context, id string, disabled bool) (bool, error) {
+	s.disabledID, s.disabled = id, disabled
+	return true, nil
+}
 
 func TestCreateVirtualKeyReturnsSecretOnceAndPersistsOnlyHash(t *testing.T) {
 	store := &managementStore{}
@@ -55,6 +66,21 @@ func TestCreateVirtualKeyReturnsSecretOnceAndPersistsOnlyHash(t *testing.T) {
 	}
 	if store.createdHash == "" || store.createdHash == issued.Token || store.createdHash != credentialLookupHash(issued.Token, "hash-secret") {
 		t.Fatalf("plaintext or invalid token hash persisted: %q", store.createdHash)
+	}
+}
+
+func TestUpdateDisableAndEnableVirtualKey(t *testing.T) {
+	store := &managementStore{}
+	module := NewAuthModuleWithStore(true, store, "hash-secret", false)
+	updated, err := module.UpdateVirtualKey(context.Background(), "vk_existing", ManagedVirtualKey{Alias: "production", Description: "owner: platform", Tags: []string{"prod"}, UserID: "user-1", RateLimitRPM: 20})
+	if err != nil || !updated || store.updatedID != "vk_existing" || store.created.Alias != "production" || len(store.created.Tags) != 1 {
+		t.Fatalf("update failed: updated=%v store=%+v err=%v", updated, store, err)
+	}
+	if disabled, err := module.SetVirtualKeyDisabled(context.Background(), "vk_existing", true); err != nil || !disabled || store.disabledID != "vk_existing" || !store.disabled {
+		t.Fatalf("disable failed: disabled=%v store=%+v err=%v", disabled, store, err)
+	}
+	if enabled, err := module.SetVirtualKeyDisabled(context.Background(), "vk_existing", false); err != nil || !enabled || store.disabled {
+		t.Fatalf("enable failed: enabled=%v store=%+v err=%v", enabled, store, err)
 	}
 }
 

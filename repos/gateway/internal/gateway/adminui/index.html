@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>AI Gateway Console</title>
-  <link rel="stylesheet" href="/ui/assets/app.css?v=6">
-  <script src="/ui/assets/app.js?v=6" defer></script>
+  <link rel="stylesheet" href="/ui/assets/app.css?v=7">
+  <script src="/ui/assets/app.js?v=7" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-view">
@@ -98,6 +98,7 @@
             <label>Model<input id="request-log-model" type="search" maxlength="256" placeholder="Any model"></label>
             <label>Provider<input id="request-log-provider" type="search" maxlength="256" placeholder="Any endpoint"></label>
             <label>Team<input id="request-log-team" type="search" maxlength="256" placeholder="Any team"></label>
+            <label>Virtual key<input id="request-log-credential" type="search" maxlength="256" placeholder="Any key ID"></label>
             <button type="submit" class="secondary-button">Apply filters</button>
           </form>
           <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Time / Request</th><th>Outcome</th><th>Model / Endpoint</th><th>Identity</th><th>Tokens</th><th>Latency</th><th>Cost</th><th><span class="sr-only">Details</span></th></tr></thead><tbody id="request-logs-table"></tbody></table></div><div id="request-logs-empty" class="empty-state" hidden>No request outcomes match these filters.</div><div class="pagination-row"><button id="request-logs-more" type="button" class="secondary-button" hidden>Load older</button></div></div>
@@ -129,8 +130,11 @@
   <dialog id="key-dialog" class="modal">
     <form id="key-form" method="dialog">
       <div class="modal-heading"><div><p class="eyebrow">Access control</p><h2 id="key-dialog-title">Create virtual key</h2></div><button type="button" class="icon-button close-dialog" data-dialog="key-dialog" aria-label="Close">×</button></div>
-      <input id="key-rotate-id" type="hidden">
+      <input id="key-id" type="hidden"><input id="key-mode" type="hidden">
       <div class="form-grid">
+        <label>Alias<input id="key-alias" maxlength="128" placeholder="production-app"></label>
+        <label>Tags<input id="key-tags" placeholder="production, customer-a"></label>
+        <label class="span-2">Description<input id="key-description" maxlength="1024" placeholder="Credential purpose and owner"></label>
         <label>User ID<input id="key-user-id" required maxlength="256" placeholder="user-1"></label>
         <label>Team ID<input id="key-team-id" maxlength="256" placeholder="team-a"></label>
         <label class="span-2">Roles<input id="key-roles" placeholder="developer, analyst"></label>

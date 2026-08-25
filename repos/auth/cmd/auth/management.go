@@ -76,6 +76,50 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 		logManagementAction(r, "virtual_key.rotate", issued.ID)
 		writeManagementJSON(w, http.StatusCreated, issued)
 	}))
+	mux.HandleFunc("PUT /internal/v1/keys/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		spec, ok := decodeManagedVirtualKey(w, r)
+		if !ok {
+			return
+		}
+		updated, err := module.UpdateVirtualKey(r.Context(), r.PathValue("id"), spec)
+		if errors.Is(err, modules.ErrInvalidVirtualKey) {
+			http.Error(w, "invalid virtual key policy", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "virtual key update failed", http.StatusServiceUnavailable)
+			return
+		}
+		if !updated {
+			http.Error(w, "virtual key not found", http.StatusNotFound)
+			return
+		}
+		logManagementAction(r, "virtual_key.update", r.PathValue("id"))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	for _, route := range []struct {
+		pattern  string
+		disabled bool
+		action   string
+	}{
+		{"POST /internal/v1/keys/{id}/disable", true, "virtual_key.disable"},
+		{"POST /internal/v1/keys/{id}/enable", false, "virtual_key.enable"},
+	} {
+		route := route
+		mux.HandleFunc(route.pattern, managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+			updated, err := module.SetVirtualKeyDisabled(r.Context(), r.PathValue("id"), route.disabled)
+			if err != nil {
+				http.Error(w, "virtual key status update failed", http.StatusServiceUnavailable)
+				return
+			}
+			if !updated {
+				http.Error(w, "virtual key not found or status unchanged", http.StatusNotFound)
+				return
+			}
+			logManagementAction(r, route.action, r.PathValue("id"))
+			w.WriteHeader(http.StatusNoContent)
+		}))
+	}
 	mux.HandleFunc("DELETE /internal/v1/keys/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		revoked, err := module.RevokeVirtualKey(r.Context(), r.PathValue("id"))
 		if err != nil {

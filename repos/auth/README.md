@@ -27,7 +27,9 @@ Tokens are looked up by a full HMAC-SHA256 value; the database stores no bearer
 plaintext, and the authorization response exposes the opaque key ID as
 `credential_id`. Migration `003_virtual_keys.sql` adds expiration, revocation,
 last-used tracking, and linked rotation families; `004_allowed_tools.sql` adds
-credential-level exact/wildcard tool grants.
+credential-level exact/wildcard tool grants; `005_virtual_key_metadata.sql`
+adds alias, description, tags, and reversible disable state. Disabled keys fail
+authorization without losing their policy or rotation history.
 
 `AUTH_STATIC_KEY_FALLBACK_ENABLED` controls migration fallback to
 `AUTH_VIRTUAL_KEYS_JSON`. `AUTH_DEMO_KEYS_ENABLED` controls the two built-in demo
@@ -38,8 +40,8 @@ the connection and the migration.
 ## Internal virtual-key management
 
 The gateway exposes the admin-RBAC API; auth owns the internal persistence
-commands at `GET|POST /internal/v1/keys`, `POST /internal/v1/keys/{id}/rotate`,
-and `DELETE /internal/v1/keys/{id}`. These endpoints require
+commands at `GET|POST /internal/v1/keys`, `PUT|DELETE /internal/v1/keys/{id}`,
+and `POST /internal/v1/keys/{id}/{rotate|disable|enable}`. These endpoints require
 `X-Management-Token: <MANAGEMENT_SHARED_SECRET>` plus request and actor audit
 headers. They should remain cluster-internal and are not a replacement for
 network policy. Create and rotate return the plaintext token once; PostgreSQL

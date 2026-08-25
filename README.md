@@ -342,9 +342,13 @@ the client response. Configure independent shadow admission limits because the
 shadow provider may still incur external cost; `max_parallel_requests` is
 therefore required for every shadow endpoint.
 
-The auth service supports virtual keys through `AUTH_VIRTUAL_KEYS_JSON` (Helm:
-`auth.virtualKeys`). Each key may define `team_id`, `roles`, `allowed_models`,
-`rate_limit_rpm`, and `rate_limit_tpm`. The gateway receives only the key
+The auth service supports virtual keys through PostgreSQL management APIs and,
+for migration fallback, `AUTH_VIRTUAL_KEYS_JSON` (Helm: `auth.virtualKeys`).
+Managed keys include an alias, description and tags plus `team_id`, `roles`,
+`allowed_models`, `allowed_tools`, `rate_limit_rpm`, `rate_limit_tpm` and expiry.
+Admins can update policy without changing the bearer secret, temporarily
+disable/re-enable a key, rotate it atomically, revoke it, open its metadata-only
+request history, and assign a key-scoped budget from the console. The gateway receives only the key
 fingerprint and policy, filters `/v1/models`, enforces model grants before the
 provider call, and applies the rate-limit policy through a replaceable atomic
 store interface. If `REDIS_ADDR` is configured, RPM/TPM admission is performed

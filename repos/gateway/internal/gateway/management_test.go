@@ -30,12 +30,14 @@ func (m managementAuthModule) Handle(_ context.Context, req *modules.RequestCont
 }
 
 type recordingManagementClient struct {
-	audit   ManagementAudit
-	spec    ManagedVirtualKey
-	id      string
-	creates int
-	rotates int
-	revokes int
+	audit    ManagementAudit
+	spec     ManagedVirtualKey
+	id       string
+	creates  int
+	rotates  int
+	revokes  int
+	updates  int
+	disabled *bool
 }
 
 func (c *recordingManagementClient) ListVirtualKeys(_ context.Context, audit ManagementAudit, _ int) ([]VirtualKeyMetadata, error) {
@@ -54,6 +56,32 @@ func (c *recordingManagementClient) RotateVirtualKey(_ context.Context, audit Ma
 func (c *recordingManagementClient) RevokeVirtualKey(_ context.Context, audit ManagementAudit, id string) error {
 	c.audit, c.id, c.revokes = audit, id, c.revokes+1
 	return nil
+}
+func (c *recordingManagementClient) UpdateVirtualKey(_ context.Context, audit ManagementAudit, id string, spec ManagedVirtualKey) error {
+	c.audit, c.id, c.spec, c.updates = audit, id, spec, c.updates+1
+	return nil
+}
+func (c *recordingManagementClient) SetVirtualKeyDisabled(_ context.Context, audit ManagementAudit, id string, disabled bool) error {
+	c.audit, c.id, c.disabled = audit, id, &disabled
+	return nil
+}
+
+func TestAdminVirtualKeyUpdateAndDisable(t *testing.T) {
+	client := &recordingManagementClient{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithManagement(client)
+	update := httptest.NewRequest(http.MethodPut, "/admin/v1/keys/vk_safe123", strings.NewReader(`{"alias":"ci","description":"automation","tags":["prod"],"user_id":"user-1"}`))
+	update.Header.Set("X-Request-ID", "req-update")
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, update)
+	if response.Code != http.StatusNoContent || client.updates != 1 || client.spec.Alias != "ci" || len(client.spec.Tags) != 1 {
+		t.Fatalf("update failed: status=%d client=%+v", response.Code, client)
+	}
+	disable := httptest.NewRequest(http.MethodPost, "/admin/v1/keys/vk_safe123/disable", nil)
+	response = httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, disable)
+	if response.Code != http.StatusNoContent || client.disabled == nil || !*client.disabled {
+		t.Fatalf("disable failed: status=%d client=%+v", response.Code, client)
+	}
 }
 
 func TestAdminVirtualKeyAPIRequiresAdminRole(t *testing.T) {

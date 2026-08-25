@@ -18,6 +18,9 @@ import (
 )
 
 type ManagedVirtualKey struct {
+	Alias         string     `json:"alias,omitempty"`
+	Description   string     `json:"description,omitempty"`
+	Tags          []string   `json:"tags,omitempty"`
 	UserID        string     `json:"user_id"`
 	TeamID        string     `json:"team_id,omitempty"`
 	Roles         []string   `json:"roles,omitempty"`
@@ -36,6 +39,9 @@ type IssuedVirtualKey struct {
 
 type VirtualKeyMetadata struct {
 	ID             string     `json:"id"`
+	Alias          string     `json:"alias,omitempty"`
+	Description    string     `json:"description,omitempty"`
+	Tags           []string   `json:"tags,omitempty"`
 	UserID         string     `json:"user_id"`
 	TeamID         string     `json:"team_id,omitempty"`
 	Roles          []string   `json:"roles,omitempty"`
@@ -48,6 +54,7 @@ type VirtualKeyMetadata struct {
 	RotatedToID    string     `json:"rotated_to_id,omitempty"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 	RevokedAt      *time.Time `json:"revoked_at,omitempty"`
+	DisabledAt     *time.Time `json:"disabled_at,omitempty"`
 	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 }
@@ -62,6 +69,8 @@ type ManagementClient interface {
 	ListVirtualKeys(context.Context, ManagementAudit, int) ([]VirtualKeyMetadata, error)
 	CreateVirtualKey(context.Context, ManagementAudit, ManagedVirtualKey) (IssuedVirtualKey, error)
 	RotateVirtualKey(context.Context, ManagementAudit, string, ManagedVirtualKey) (IssuedVirtualKey, error)
+	UpdateVirtualKey(context.Context, ManagementAudit, string, ManagedVirtualKey) error
+	SetVirtualKeyDisabled(context.Context, ManagementAudit, string, bool) error
 	RevokeVirtualKey(context.Context, ManagementAudit, string) error
 }
 
@@ -103,6 +112,20 @@ func (c *RemoteManagementClient) RotateVirtualKey(ctx context.Context, audit Man
 
 func (c *RemoteManagementClient) RevokeVirtualKey(ctx context.Context, audit ManagementAudit, id string) error {
 	_, err := managementCall[struct{}, struct{}](ctx, c, http.MethodDelete, "/internal/v1/keys/"+url.PathEscape(id), audit, struct{}{})
+	return err
+}
+
+func (c *RemoteManagementClient) UpdateVirtualKey(ctx context.Context, audit ManagementAudit, id string, spec ManagedVirtualKey) error {
+	_, err := managementCall[ManagedVirtualKey, struct{}](ctx, c, http.MethodPut, "/internal/v1/keys/"+url.PathEscape(id), audit, spec)
+	return err
+}
+
+func (c *RemoteManagementClient) SetVirtualKeyDisabled(ctx context.Context, audit ManagementAudit, id string, disabled bool) error {
+	action := "enable"
+	if disabled {
+		action = "disable"
+	}
+	_, err := managementCall[struct{}, struct{}](ctx, c, http.MethodPost, "/internal/v1/keys/"+url.PathEscape(id)+"/"+action, audit, struct{}{})
 	return err
 }
 
@@ -262,6 +285,83 @@ func (h Handler) RevokeVirtualKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.management.RevokeVirtualKey(r.Context(), audit, id); err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeManagementFailure(w, err)
+		return
+	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h Handler) UpdateVirtualKey(w http.ResponseWriter, r *http.Request) {
+	h.mutateVirtualKeyPolicy(w, r)
+}
+
+func (h Handler) DisableVirtualKey(w http.ResponseWriter, r *http.Request) {
+	h.setVirtualKeyDisabled(w, r, true)
+}
+func (h Handler) EnableVirtualKey(w http.ResponseWriter, r *http.Request) {
+	h.setVirtualKeyDisabled(w, r, false)
+}
+
+func (h Handler) mutateVirtualKeyPolicy(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.authorizeAdmin(w, r)
+	if !ok {
+		return
+	}
+	if h.management == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "management service is not configured")
+		return
+	}
+	id := r.PathValue("id")
+	if !validVirtualKeyID(id) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid virtual key id")
+		return
+	}
+	spec, ok := decodeManagedVirtualKey(w, r)
+	if !ok {
+		return
+	}
+	audit := managementAudit(req)
+	event := AuditEvent{Action: "virtual_key.update", TargetType: "virtual_key", TargetID: id}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	if err := h.management.UpdateVirtualKey(r.Context(), audit, id, spec); err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeManagementFailure(w, err)
+		return
+	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h Handler) setVirtualKeyDisabled(w http.ResponseWriter, r *http.Request, disabled bool) {
+	req, ok := h.authorizeAdmin(w, r)
+	if !ok {
+		return
+	}
+	if h.management == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "management service is not configured")
+		return
+	}
+	id := r.PathValue("id")
+	if !validVirtualKeyID(id) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid virtual key id")
+		return
+	}
+	action := "virtual_key.enable"
+	if disabled {
+		action = "virtual_key.disable"
+	}
+	audit := managementAudit(req)
+	event := AuditEvent{Action: action, TargetType: "virtual_key", TargetID: id}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	if err := h.management.SetVirtualKeyDisabled(r.Context(), audit, id, disabled); err != nil {
 		h.auditOutcome(r.Context(), audit, event, "failed")
 		writeManagementFailure(w, err)
 		return
