@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type recordingAuditClient struct {
@@ -76,5 +77,28 @@ func TestRemoteAuditClientUsesScopedHeadersAndFilters(t *testing.T) {
 	events, err := client.ListAudit(context.Background(), ManagementAudit{RequestID: "r", ActorID: "admin", CredentialID: "c"}, AuditFilter{Limit: 25, Action: "budget.update"})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("events=%+v err=%v", events, err)
+	}
+}
+
+func TestRemoteAuditAppendSendsOnlyMutableEventFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{"id", "occurred_at", "request_id", "actor_id", "actor_credential_id"} {
+			if _, found := body[forbidden]; found {
+				t.Errorf("append body contains read-only field %q: %+v", forbidden, body)
+			}
+		}
+		if body["action"] != "budget.update" || body["outcome"] != "attempted" {
+			t.Errorf("unexpected append body: %+v", body)
+		}
+		_ = json.NewEncoder(w).Encode(AuditEvent{ID: 1, OccurredAt: time.Now(), RequestID: "req-1", ActorID: "admin", ActorCredentialID: "credential", Action: "budget.update", TargetType: "budget", Outcome: "attempted"})
+	}))
+	defer server.Close()
+	client := NewRemoteBudgetManagementClient(server.URL, "secret")
+	if _, err := client.AppendAudit(context.Background(), ManagementAudit{RequestID: "req-1", ActorID: "admin", CredentialID: "credential"}, AuditEvent{Action: "budget.update", TargetType: "budget", Outcome: "attempted"}); err != nil {
+		t.Fatal(err)
 	}
 }

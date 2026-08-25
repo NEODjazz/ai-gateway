@@ -35,7 +35,14 @@ type AuditClient interface {
 
 func (c *RemoteBudgetManagementClient) AppendAudit(ctx context.Context, audit ManagementAudit, event AuditEvent) (AuditEvent, error) {
 	var result AuditEvent
-	err := c.call(ctx, http.MethodPost, "/internal/v1/audit/events", audit, event, &result)
+	payload := struct {
+		Action     string         `json:"action"`
+		TargetType string         `json:"target_type"`
+		TargetID   string         `json:"target_id,omitempty"`
+		Outcome    string         `json:"outcome"`
+		Details    map[string]any `json:"details,omitempty"`
+	}{Action: event.Action, TargetType: event.TargetType, TargetID: event.TargetID, Outcome: event.Outcome, Details: event.Details}
+	err := c.call(ctx, http.MethodPost, "/internal/v1/audit/events", audit, payload, &result)
 	return result, err
 }
 func (c *RemoteBudgetManagementClient) ListAudit(ctx context.Context, audit ManagementAudit, filter AuditFilter) ([]AuditEvent, error) {
