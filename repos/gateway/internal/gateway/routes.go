@@ -57,6 +57,8 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/admin/v1/providers"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateProvider) }},
 	{RouteContract{http.MethodPut, "/admin/v1/providers/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateProvider) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/providers/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteProvider) }},
+	{RouteContract{http.MethodPost, "/admin/v1/providers/{id}/test"}, func(h Handler) http.Handler { return http.HandlerFunc(h.TestProviderConnection) }},
+	{RouteContract{http.MethodPost, "/admin/v1/providers/{id}/discover-models"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DiscoverProviderModels) }},
 	{RouteContract{http.MethodGet, "/admin/v1/credentials"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListCredentials) }},
 	{RouteContract{http.MethodPost, "/admin/v1/credentials"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateCredential) }},
 	{RouteContract{http.MethodPut, "/admin/v1/credentials/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateCredential) }},
