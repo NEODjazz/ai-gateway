@@ -361,6 +361,14 @@ managing memberships in their own `team_id` and cannot edit global user roles.
 Disabling a directory user or team immediately prevents its persistent virtual
 keys from authorizing while preserving audit and usage history.
 
+Model deployments expose a safe runtime control surface over endpoints already
+configured by operators. Admins can change model bindings, capabilities,
+priority, weight, guardrail policy and enabled state atomically; new routing
+decisions observe the update immediately. The API returns provider type and
+bounded health signals but never base URLs, API keys or secret references.
+These overrides are process-local runtime state and are intentionally reset from
+the operator-owned Helm/environment configuration when a gateway pod restarts.
+
 `GET /metrics` exposes Prometheus-format HTTP, provider-attempt, cache,
 module, security, and billing lifecycle counters plus duration sums. Labels are
 bounded: unmatched URLs become `path="unmatched"`, results use a fixed enum, and

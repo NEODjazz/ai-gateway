@@ -98,7 +98,7 @@ func (r Router) mirrorRerank(ctx context.Context, requestID string, request open
 
 func (r Router) shadowEndpoints(catalog modelcatalog.Catalog, model string, capabilities ...string) []Endpoint {
 	result := make([]Endpoint, 0)
-	for _, endpoint := range r.endpoints {
+	for _, endpoint := range r.runtimeEndpoints() {
 		if !endpoint.Shadow || !endpoint.supportsModel(model) || !supportsCatalogCapabilities(catalog, endpoint, model, capabilities...) {
 			continue
 		}

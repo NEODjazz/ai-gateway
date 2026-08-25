@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.5
+  version: 0.1.6
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -18,6 +18,7 @@ tags:
   - name: Models
   - name: Virtual keys
   - name: Identity
+  - name: Model deployments
   - name: Operations
   - name: Observability
 security:
@@ -483,6 +484,31 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/model-deployments:
+    get:
+      operationId: listModelDeployments
+      tags: [Model deployments]
+      summary: List safe runtime deployment metadata
+      description: Endpoint URLs, API keys and secret references are never returned.
+      responses:
+        '200': {description: Runtime deployments, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/ModelDeployment'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/model-deployments/{id}:
+    put:
+      operationId: updateModelDeployment
+      tags: [Model deployments]
+      summary: Atomically update runtime routing metadata for a preconfigured endpoint
+      parameters: [{$ref: '#/components/parameters/ModelDeploymentID'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelDeploymentInput'}}}}
+      responses:
+        '200': {description: Runtime deployment updated, content: {application/json: {schema: {$ref: '#/components/schemas/ModelDeployment'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/budgets:
     get:
       operationId: listBudgets
@@ -777,6 +803,11 @@ components:
       required: true
       schema: {type: string, minLength: 1, maxLength: 256}
     DirectoryUserPathID:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 256}
+    ModelDeploymentID:
       name: id
       in: path
       required: true
@@ -1569,3 +1600,25 @@ components:
             user_id: {type: string}
             created_at: {type: string, format: date-time}
             updated_at: {type: string, format: date-time}
+    ModelDeploymentInput:
+      type: object
+      additionalProperties: false
+      required: [models, priority, weight, enabled]
+      properties:
+        models: {type: array, maxItems: 128, items: {type: string, minLength: 1, maxLength: 256}}
+        capabilities: {type: array, maxItems: 128, items: {type: string, minLength: 1, maxLength: 256}}
+        priority: {type: integer, minimum: 0}
+        weight: {type: integer, minimum: 1}
+        guardrail_policy: {type: string, maxLength: 128}
+        enabled: {type: boolean}
+    ModelDeployment:
+      allOf:
+        - {$ref: '#/components/schemas/ModelDeploymentInput'}
+        - type: object
+          required: [id, provider_type]
+          properties:
+            id: {type: string}
+            provider_type: {type: string}
+            runtime_state: {type: string, enum: [available, cooling_down, disabled]}
+            latency_ewma_ms: {type: number, minimum: 0}
+            failure_ewma: {type: number, minimum: 0, maximum: 1}

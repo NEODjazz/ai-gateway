@@ -31,7 +31,7 @@ func TestAdminUIServesEmbeddedSameOriginAssets(t *testing.T) {
 	if page.Code != http.StatusOK {
 		t.Fatalf("UI status=%d body=%s", page.Code, page.Body.String())
 	}
-	for _, expected := range []string{"AI Gateway Console", "/ui/assets/app.css?v=8", "/ui/assets/app.js?v=8", "Admin bearer token", "Overview", "Usage &amp; spend", "Request logs", "Virtual key", "request-log-credential", "Routing", "Playground", "Virtual keys", "Users", "Teams", "Scoped RBAC", "users-table", "teams-table", "membership-dialog", "Models", "Budgets", "Audit log", "routing-cards", "playground-form", "usage-chart", "usage-models-table", "request-log-filter-form", "request-logs-table", "Content storage off", "Add catalog entry", "Create budget", "Create virtual key", "key-alias", "key-dialog", "issued-key-dialog", "model-dialog", "budget-dialog", "request-log-dialog", "confirm-dialog"} {
+	for _, expected := range []string{"AI Gateway Console", "/ui/assets/app.css?v=9", "/ui/assets/app.js?v=9", "Admin bearer token", "Overview", "Usage &amp; spend", "Request logs", "Virtual key", "request-log-credential", "Routing", "Playground", "Virtual keys", "Users", "Teams", "Scoped RBAC", "users-table", "teams-table", "membership-dialog", "Models", "Model deployments", "deployments-table", "deployment-dialog", "Budgets", "Audit log", "routing-cards", "playground-form", "usage-chart", "usage-models-table", "request-log-filter-form", "request-logs-table", "Content storage off", "Add catalog entry", "Create budget", "Create virtual key", "key-alias", "key-dialog", "issued-key-dialog", "model-dialog", "budget-dialog", "request-log-dialog", "confirm-dialog"} {
 		if !strings.Contains(page.Body.String(), expected) {
 			t.Errorf("UI HTML missing %q", expected)
 		}

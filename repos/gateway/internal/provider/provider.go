@@ -137,15 +137,13 @@ type Router struct {
 	adaptive        *adaptiveRouter
 	affinity        affinityStore
 	semantic        *semanticResponseCache
+	deployments     *deploymentRegistry
 }
 
 func New(cfg Config) Provider {
 	endpoints := make([]Endpoint, 0, len(cfg.Endpoints))
+	initialDeployments := make(map[string]ModelDeployment)
 	for _, endpoint := range cfg.Endpoints {
-		if endpoint.Enabled != nil && !*endpoint.Enabled {
-			continue
-		}
-
 		provider := providerFor(endpoint)
 		if provider == nil {
 			continue
@@ -191,6 +189,12 @@ func New(cfg Config) Provider {
 			MirrorTimeout:         mirrorTimeout,
 			Provider:              provider,
 		})
+		enabled := endpoint.Enabled == nil || *endpoint.Enabled
+		deploymentWeight := endpoint.Weight
+		if deploymentWeight == 0 {
+			deploymentWeight = 1
+		}
+		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderType: endpoint.Type, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, Enabled: enabled}
 	}
 
 	hasPrimary := false
@@ -212,7 +216,7 @@ func New(cfg Config) Provider {
 	if registry == nil {
 		registry = modelcatalog.NewRegistry(cfg.Catalog, nil, time.Second)
 	}
-	return Router{
+	router := &Router{
 		defaultProvider: cfg.Default,
 		endpoints:       endpoints,
 		modules:         cfg.Modules,
@@ -230,6 +234,9 @@ func New(cfg Config) Provider {
 			embedder: newOpenAIEmbedder(cfg.SemanticEmbeddingURL, cfg.SemanticEmbeddingAPIKey, cfg.SemanticEmbeddingModel),
 		}),
 	}
+	router.deployments = &deploymentRegistry{}
+	router.deployments.current.Store(&initialDeployments)
+	return router
 }
 
 func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
@@ -779,7 +786,7 @@ func (r Router) Models() []openai.Model {
 	catalog := r.catalog.Current(context.Background())
 	seen := map[string]bool{}
 	models := make([]openai.Model, 0)
-	for _, endpoint := range r.endpoints {
+	for _, endpoint := range r.runtimeEndpoints() {
 		if endpoint.Shadow {
 			continue
 		}
@@ -1090,7 +1097,7 @@ func (r Router) candidates(ctx context.Context, request openai.ChatCompletionReq
 	}
 
 	var candidates []Endpoint
-	for _, endpoint := range r.endpoints {
+	for _, endpoint := range r.runtimeEndpoints() {
 		if endpoint.Shadow {
 			continue
 		}

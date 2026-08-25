@@ -45,8 +45,9 @@ func (r Router) Diagnostics(ctx context.Context) RoutingDiagnostics {
 	if strategy == "" {
 		strategy = "priority_weighted"
 	}
-	result := RoutingDiagnostics{Strategy: strategy, Endpoints: make([]EndpointDiagnostics, 0, len(r.endpoints))}
-	for _, endpoint := range r.endpoints {
+	endpoints := r.runtimeEndpoints()
+	result := RoutingDiagnostics{Strategy: strategy, Endpoints: make([]EndpointDiagnostics, 0, len(endpoints))}
+	for _, endpoint := range endpoints {
 		available := r.health.available(ctx, endpoint)
 		health := r.health.localState(endpoint.Name)
 		adaptive := r.adaptive.snapshot(endpoint.Name)
