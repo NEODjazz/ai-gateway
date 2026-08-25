@@ -376,6 +376,15 @@ never invokes a model, never echoes the submitted text, and reports
 `content_stored: false`. A rejected scanner produces an explicit deny decision;
 an unavailable enabled scanner fails closed with HTTP 503.
 
+The MCP registry stores only approved HTTPS endpoint metadata, transport type,
+and canonical tool identifiers. It deliberately has no credential, header, or
+secret fields, and rejects URLs containing user info, query parameters, or
+fragments. Toolsets group exact or prefix-wildcard tool identifiers; virtual
+keys receive them through `allowed_tools` grants such as `toolset:weather`.
+Disabled toolsets stop authorizing immediately. Registry changes are audited
+and are process-local runtime state, so operator configuration remains the
+source of truth after a pod restart.
+
 `GET /metrics` exposes Prometheus-format HTTP, provider-attempt, cache,
 module, security, and billing lifecycle counters plus duration sums. Labels are
 bounded: unmatched URLs become `path="unmatched"`, results use a fixed enum, and

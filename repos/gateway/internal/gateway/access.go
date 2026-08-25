@@ -144,12 +144,27 @@ func (h Handler) authorizeTools(w http.ResponseWriter, req modules.RequestContex
 		return false
 	}
 	for _, identifier := range identifiers {
-		if !toolAllowed(identifier, req.AllowedTools) {
+		if !h.toolAllowed(identifier, req.AllowedTools) {
 			writeError(w, http.StatusForbidden, "tool_not_allowed", "credential is not allowed to use tool "+strconv.Quote(identifier))
 			return false
 		}
 	}
 	return true
+}
+
+func (h Handler) toolAllowed(identifier string, grants []string) bool {
+	if toolAllowed(identifier, grants) {
+		return true
+	}
+	if h.mcp == nil {
+		return false
+	}
+	for _, grant := range grants {
+		if strings.HasPrefix(grant, "toolset:") && h.mcp.ToolsetAllows(strings.TrimPrefix(grant, "toolset:"), identifier) {
+			return true
+		}
+	}
+	return false
 }
 
 func filterModels(models []openai.Model, grants []string) []openai.Model {

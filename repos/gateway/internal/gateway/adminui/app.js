@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], models: [], deployments: [], guardrails: [], catalog: null, budgets: [], audit: [] };
+  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], models: [], deployments: [], guardrails: [], mcpServers: [], mcpToolsets: [], catalog: null, budgets: [], audit: [] };
   const $ = (id) => document.getElementById(id);
   const loginView = $("login-view");
   const consoleView = $("console-view");
@@ -9,7 +9,7 @@
   const tokenInput = $("admin-token");
   const loginError = $("login-error");
   const globalError = $("global-error");
-  const pageTitles = { overview: "Overview", usage: "Usage & spend", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", models: "Models", deployments: "Model deployments", guardrails: "Guardrails", budgets: "Budgets", audit: "Audit log" };
+  const pageTitles = { overview: "Overview", usage: "Usage & spend", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", models: "Models", deployments: "Model deployments", guardrails: "Guardrails", mcp: "MCP registry", budgets: "Budgets", audit: "Audit log" };
   let pendingConfirmation = null;
 
   function setText(id, value) { const element = $(id); if (element) element.textContent = value; }
@@ -85,6 +85,8 @@
       api("/admin/v1/teams?limit=100"),
       api("/admin/v1/model-deployments"),
       api("/admin/v1/guardrail-policies"),
+      api("/admin/v1/mcp/servers"),
+      api("/admin/v1/mcp/toolsets"),
     ];
     const results = await Promise.allSettled(requests);
     const authFailure = results.find((result) => result.status === "rejected" && result.reason?.auth);
@@ -103,6 +105,8 @@
     if (results[10].status === "fulfilled") state.teams = results[10].value?.data || []; else errors.push(`Teams: ${results[10].reason.message}`);
     if (results[11].status === "fulfilled") state.deployments = results[11].value?.data || []; else errors.push(`Deployments: ${results[11].reason.message}`);
     if (results[12].status === "fulfilled") state.guardrails = results[12].value?.data || []; else errors.push(`Guardrails: ${results[12].reason.message}`);
+    if (results[13].status === "fulfilled") state.mcpServers = results[13].value?.data || []; else errors.push(`MCP servers: ${results[13].reason.message}`);
+    if (results[14].status === "fulfilled") state.mcpToolsets = results[14].value?.data || []; else errors.push(`MCP toolsets: ${results[14].reason.message}`);
     renderAll();
     setText("console-health", errors.length ? "Degraded" : "Operational");
     if (errors.length) { globalError.textContent = errors.join(" · "); globalError.hidden = false; }
@@ -131,6 +135,7 @@
     setText("teams-badge", formatNumber(state.teams.length));
     setText("deployments-badge", formatNumber(state.deployments.filter((item)=>item.enabled).length));
     setText("guardrails-badge", formatNumber(state.guardrails.filter((item)=>item.enabled).length));
+    setText("mcp-badge", formatNumber(state.mcpServers.filter((item)=>item.enabled).length));
     setText("catalog-version", state.catalog?.version ? `Version ${state.catalog.version}` : "Runtime registry");
     renderOverview();
     renderRouting();
@@ -142,6 +147,7 @@
     renderTeams();
     renderDeployments();
     renderGuardrails();
+    renderMCP();
     renderModels();
     renderBudgets();
     renderAudit();
@@ -367,6 +373,19 @@
   async function saveGuardrail(event){event.preventDefault();const error=$("guardrail-form-error");error.hidden=true;const name=$("guardrail-name").value.trim();if(!$("guardrail-dlp").checked&&!$("guardrail-av").checked){error.textContent="Enable DLP, AV, or both.";error.hidden=false;return}try{await apiJSON(`/admin/v1/guardrail-policies/${encodeURIComponent(name)}`,"PUT",{description:$("guardrail-description").value.trim(),dlp:$("guardrail-dlp").checked,av:$("guardrail-av").checked,enabled:$("guardrail-enabled").checked});$("guardrail-dialog").close();await loadData();showToast("Guardrail policy saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
   async function runCompliance(event){event.preventDefault();const error=$("compliance-error");error.hidden=true;try{const result=await apiJSON("/admin/v1/compliance/check","POST",{policy:$("compliance-policy").value,text:$("compliance-text").value});$("compliance-result").textContent=JSON.stringify(result,null,2)}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
 
+  function statusCell(enabled) { const cell=document.createElement("td"),status=document.createElement("span");status.className=`outcome ${enabled?"succeeded":"failed"}`;status.textContent=enabled?"Enabled":"Disabled";cell.appendChild(status);return cell; }
+  function editAction(label, callback) { const cell=document.createElement("td");cell.className="row-actions";const button=document.createElement("button");button.type="button";button.className="row-button";button.textContent=label;button.addEventListener("click",callback);cell.appendChild(button);return cell; }
+  function renderMCP(){
+    const servers=$("mcp-servers-table");clear(servers);$("mcp-servers-empty").hidden=state.mcpServers.length!==0;
+    for(const server of state.mcpServers){const row=document.createElement("tr");row.appendChild(textCell(server.label,server.id));row.appendChild(textCell(server.transport,server.server_url));row.appendChild(plainCell((server.tools||[]).join(", ")||"—"));row.appendChild(statusCell(server.enabled));row.appendChild(editAction("Edit",()=>openMCPServerDialog(server)));servers.appendChild(row)}
+    const toolsets=$("mcp-toolsets-table");clear(toolsets);$("mcp-toolsets-empty").hidden=state.mcpToolsets.length!==0;
+    for(const toolset of state.mcpToolsets){const row=document.createElement("tr");row.appendChild(textCell(`toolset:${toolset.id}`,toolset.name));row.appendChild(plainCell((toolset.tools||[]).join(", ")));row.appendChild(statusCell(toolset.enabled));row.appendChild(editAction("Edit",()=>openMCPToolsetDialog(toolset)));toolsets.appendChild(row)}
+  }
+  function openMCPServerDialog(server=null){$("mcp-server-id").value=server?.id||"";$("mcp-server-id").readOnly=Boolean(server);$("mcp-server-label").value=server?.label||"";$("mcp-server-description").value=server?.description||"";$("mcp-server-url").value=server?.server_url||"";$("mcp-server-transport").value=server?.transport||"streamable-http";$("mcp-server-tools").value=(server?.tools||[]).join(", ");$("mcp-server-enabled").checked=server?.enabled??true;$("mcp-server-error").hidden=true;$("mcp-server-dialog").showModal()}
+  async function saveMCPServer(event){event.preventDefault();const error=$("mcp-server-error"),id=$("mcp-server-id").value.trim();error.hidden=true;try{await apiJSON(`/admin/v1/mcp/servers/${encodeURIComponent(id)}`,"PUT",{label:$("mcp-server-label").value.trim(),description:$("mcp-server-description").value.trim(),server_url:$("mcp-server-url").value.trim(),transport:$("mcp-server-transport").value,tools:commaList("mcp-server-tools"),enabled:$("mcp-server-enabled").checked});$("mcp-server-dialog").close();await loadData();showToast("MCP server saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
+  function openMCPToolsetDialog(toolset=null){$("mcp-toolset-id").value=toolset?.id||"";$("mcp-toolset-id").readOnly=Boolean(toolset);$("mcp-toolset-name").value=toolset?.name||"";$("mcp-toolset-description").value=toolset?.description||"";$("mcp-toolset-tools").value=(toolset?.tools||[]).join(", ");$("mcp-toolset-enabled").checked=toolset?.enabled??true;$("mcp-toolset-error").hidden=true;$("mcp-toolset-dialog").showModal()}
+  async function saveMCPToolset(event){event.preventDefault();const error=$("mcp-toolset-error"),id=$("mcp-toolset-id").value.trim();error.hidden=true;try{await apiJSON(`/admin/v1/mcp/toolsets/${encodeURIComponent(id)}`,"PUT",{name:$("mcp-toolset-name").value.trim(),description:$("mcp-toolset-description").value.trim(),tools:commaList("mcp-toolset-tools"),enabled:$("mcp-toolset-enabled").checked});$("mcp-toolset-dialog").close();await loadData();showToast("MCP toolset saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
+
   function openUserDialog(user=null){$("user-id").value=user?.id||"";$("user-id").readOnly=Boolean(user);$("user-email").value=user?.email||"";$("user-name").value=user?.name||"";$("user-status").value=user?.status||"active";$("user-roles").value=(user?.roles||[]).join(", ");$("user-form-error").hidden=true;$("user-dialog").showModal()}
   async function saveUser(event){event.preventDefault();const error=$("user-form-error");error.hidden=true;const id=$("user-id").value.trim();try{await apiJSON(`/admin/v1/users/${encodeURIComponent(id)}`,"PUT",{email:$("user-email").value.trim(),name:$("user-name").value.trim(),status:$("user-status").value,roles:commaList("user-roles")});$("user-dialog").close();await loadData();showToast("User saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
   function openTeamDialog(team=null){$("team-id").value=team?.id||"";$("team-id").readOnly=Boolean(team);$("team-name").value=team?.name||"";$("team-description").value=team?.description||"";$("team-status").value=team?.status||"active";$("team-form-error").hidden=true;$("team-dialog").showModal()}
@@ -581,6 +600,10 @@
   $("add-guardrail-button").addEventListener("click",()=>openGuardrailDialog());
   $("guardrail-form").addEventListener("submit",saveGuardrail);
   $("compliance-form").addEventListener("submit",runCompliance);
+  $("add-mcp-server-button").addEventListener("click",()=>openMCPServerDialog());
+  $("mcp-server-form").addEventListener("submit",saveMCPServer);
+  $("add-mcp-toolset-button").addEventListener("click",()=>openMCPToolsetDialog());
+  $("mcp-toolset-form").addEventListener("submit",saveMCPToolset);
   $("add-budget-button").addEventListener("click", () => openBudgetDialog());
   $("budget-form").addEventListener("submit", saveBudget);
   for (const button of document.querySelectorAll(".close-dialog")) button.addEventListener("click", () => $(button.dataset.dialog).close());

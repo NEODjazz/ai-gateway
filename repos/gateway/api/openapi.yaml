@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.7
+  version: 0.1.8
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -20,6 +20,7 @@ tags:
   - name: Identity
   - name: Model deployments
   - name: Guardrails
+  - name: MCP
   - name: Operations
   - name: Observability
 security:
@@ -546,6 +547,53 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/mcp/servers:
+    get:
+      operationId: listMCPServers
+      tags: [MCP]
+      summary: List registered MCP server metadata
+      description: Credentials and request headers are not accepted or returned.
+      responses:
+        '200': {description: MCP servers, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/MCPServer'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/mcp/servers/{id}:
+    put:
+      operationId: updateMCPServer
+      tags: [MCP]
+      summary: Create or atomically update safe MCP server metadata
+      parameters: [{$ref: '#/components/parameters/MCPEntryID'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/MCPServerInput'}}}}
+      responses:
+        '200': {description: MCP server saved, content: {application/json: {schema: {$ref: '#/components/schemas/MCPServer'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/mcp/toolsets:
+    get:
+      operationId: listMCPToolsets
+      tags: [MCP]
+      summary: List MCP tool permission bundles
+      responses:
+        '200': {description: MCP toolsets, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/MCPToolset'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/mcp/toolsets/{id}:
+    put:
+      operationId: updateMCPToolset
+      tags: [MCP]
+      summary: Create or atomically update a toolset grant
+      parameters: [{$ref: '#/components/parameters/MCPEntryID'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/MCPToolsetInput'}}}}
+      responses:
+        '200': {description: MCP toolset saved, content: {application/json: {schema: {$ref: '#/components/schemas/MCPToolset'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/budgets:
     get:
       operationId: listBudgets
@@ -851,6 +899,11 @@ components:
       schema: {type: string, minLength: 1, maxLength: 256}
     GuardrailPolicyName:
       name: name
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+    MCPEntryID:
+      name: id
       in: path
       required: true
       schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
@@ -1696,3 +1749,35 @@ components:
         allowed: {type: boolean}
         checks: {type: object, additionalProperties: {type: string, enum: [passed, rejected, unavailable, disabled]}}
         content_stored: {type: boolean, const: false}
+    MCPServerInput:
+      type: object
+      additionalProperties: false
+      required: [label, server_url, transport, enabled]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 128}
+        description: {type: string, maxLength: 1024}
+        server_url: {type: string, format: uri, pattern: '^https://[^?#]+$'}
+        transport: {type: string, enum: [streamable-http, sse]}
+        tools: {type: array, maxItems: 256, items: {type: string, minLength: 1, maxLength: 512}}
+        enabled: {type: boolean}
+    MCPServer:
+      allOf:
+        - {$ref: '#/components/schemas/MCPServerInput'}
+        - type: object
+          required: [id]
+          properties: {id: {type: string}}
+    MCPToolsetInput:
+      type: object
+      additionalProperties: false
+      required: [name, tools, enabled]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 256}
+        description: {type: string, maxLength: 1024}
+        tools: {type: array, maxItems: 256, items: {type: string, minLength: 1, maxLength: 512}}
+        enabled: {type: boolean}
+    MCPToolset:
+      allOf:
+        - {$ref: '#/components/schemas/MCPToolsetInput'}
+        - type: object
+          required: [id]
+          properties: {id: {type: string}}

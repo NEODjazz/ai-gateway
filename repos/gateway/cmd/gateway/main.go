@@ -86,7 +86,7 @@ func main() {
 	if redisStore != nil {
 		readiness = redisStore.Ping
 	}
-	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule)
+	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithMCPRegistry(gateway.NewMCPRegistry())
 	if cfg.APIDocs.Enabled {
 		handler = handler.WithAPIDocs(cfg.APIDocs.TryItOutEnabled)
 	}

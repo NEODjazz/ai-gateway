@@ -28,6 +28,7 @@ type Handler struct {
 	directory   IdentityDirectoryClient
 	dlp         modules.Module
 	av          modules.Module
+	mcp         *MCPRegistry
 	budgets     BudgetManagementClient
 	usage       UsageManagementClient
 	requestLogs RequestLogClient
