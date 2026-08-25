@@ -138,12 +138,14 @@ type Router struct {
 	affinity        affinityStore
 	semantic        *semanticResponseCache
 	deployments     *deploymentRegistry
+	providers       *managedProviderRegistry
 	guardrails      *guardrailRegistry
 }
 
 func New(cfg Config) Provider {
 	endpoints := make([]Endpoint, 0, len(cfg.Endpoints))
 	initialDeployments := make(map[string]ModelDeployment)
+	initialProviders := make(map[string]ManagedProvider)
 	for _, endpoint := range cfg.Endpoints {
 		provider := providerFor(endpoint)
 		if provider == nil {
@@ -195,7 +197,8 @@ func New(cfg Config) Provider {
 		if deploymentWeight == 0 {
 			deploymentWeight = 1
 		}
-		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderType: endpoint.Type, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, Enabled: enabled}
+		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(endpoint.BaseURL, "/"), Enabled: true}
+		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, Enabled: enabled}
 	}
 
 	hasPrimary := false
@@ -237,6 +240,8 @@ func New(cfg Config) Provider {
 	}
 	router.deployments = &deploymentRegistry{}
 	router.deployments.current.Store(&initialDeployments)
+	router.providers = &managedProviderRegistry{}
+	router.providers.current.Store(&initialProviders)
 	initialGuardrails := make(map[string]GuardrailPolicy, len(cfg.GuardrailPolicies))
 	for name, policy := range cfg.GuardrailPolicies {
 		initialGuardrails[name] = GuardrailPolicy{Name: name, DLP: policy.DLP, AV: policy.AV, Enabled: true}
