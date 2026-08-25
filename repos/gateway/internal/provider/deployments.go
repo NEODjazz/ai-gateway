@@ -14,6 +14,7 @@ type ModelDeployment struct {
 	ID              string   `json:"id"`
 	ProviderID      string   `json:"provider_id"`
 	CredentialID    string   `json:"credential_id,omitempty"`
+	CredentialSet   bool     `json:"-"`
 	ProviderType    string   `json:"provider_type"`
 	UpstreamModel   string   `json:"upstream_model,omitempty"`
 	Models          []string `json:"models"`
@@ -41,6 +42,10 @@ var ErrInvalidDeployment = errors.New("invalid model deployment")
 
 type deploymentRegistry struct {
 	current atomic.Pointer[map[string]ModelDeployment]
+}
+
+type endpointRegistry struct {
+	current atomic.Pointer[[]Endpoint]
 }
 
 func (r *Router) ListModelDeployments(ctx context.Context) []ModelDeployment {
@@ -101,7 +106,7 @@ func (r *Router) UpdateModelDeployment(id string, deployment ModelDeployment) (M
 	if deployment.ProviderID == "" {
 		deployment.ProviderID = existing.ProviderID
 	}
-	if deployment.CredentialID == "" {
+	if !deployment.CredentialSet {
 		deployment.CredentialID = existing.CredentialID
 	}
 	if err := r.validateDeployment(deployment); err != nil {
@@ -319,8 +324,10 @@ func (r *Router) configuredEndpoints() []Endpoint {
 	if r == nil {
 		return nil
 	}
-	if current := r.endpointState.Load(); current != nil {
-		return append([]Endpoint(nil), (*current)...)
+	if r.endpointState != nil {
+		if current := r.endpointState.current.Load(); current != nil {
+			return append([]Endpoint(nil), (*current)...)
+		}
 	}
 	return append([]Endpoint(nil), r.endpoints...)
 }
@@ -341,7 +348,10 @@ func (r *Router) replaceRuntimeEndpoint(id string, endpoint Endpoint) {
 		next = append(next, endpoint)
 	}
 	sort.SliceStable(next, func(i, j int) bool { return next[i].Priority < next[j].Priority })
-	r.endpointState.Store(&next)
+	if r.endpointState == nil {
+		r.endpointState = &endpointRegistry{}
+	}
+	r.endpointState.current.Store(&next)
 }
 
 func (r *Router) removeRuntimeEndpoint(id string) {
@@ -352,7 +362,10 @@ func (r *Router) removeRuntimeEndpoint(id string) {
 			next = append(next, item)
 		}
 	}
-	r.endpointState.Store(&next)
+	if r.endpointState == nil {
+		r.endpointState = &endpointRegistry{}
+	}
+	r.endpointState.current.Store(&next)
 }
 
 func validDeploymentStrings(values []string) bool {

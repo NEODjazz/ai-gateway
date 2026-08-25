@@ -145,6 +145,7 @@ nav { display: flex; flex-direction: column; gap: 5px; }
 .playground-output .panel-heading { padding: 22px; }
 .playground-output pre { min-height: 470px; margin: 0; padding: 22px; border-top: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; color: #dce7ee; background: var(--navy); font: 13px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .table-panel { overflow: hidden; }
+.management-stack { display: grid; gap: 18px; }
 .table-scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 th { padding: 13px 18px; color: #7b858f; background: #fafbfb; text-align: left; text-transform: uppercase; letter-spacing: .07em; font-size: 9px; }

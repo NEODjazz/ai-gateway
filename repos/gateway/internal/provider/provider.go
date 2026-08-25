@@ -128,7 +128,7 @@ type Endpoint struct {
 type Router struct {
 	defaultProvider string
 	endpoints       []Endpoint
-	endpointState   atomic.Pointer[[]Endpoint]
+	endpointState   *endpointRegistry
 	modules         modules.Pipeline
 	health          *endpointHealthTracker
 	routeCounter    *atomic.Uint64
@@ -205,7 +205,7 @@ func New(cfg Config) Provider {
 		if len(endpoint.Models) == 1 {
 			upstreamModel = endpoint.Models[0]
 		}
-		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(endpoint.BaseURL, "/"), Enabled: true}
+		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(endpoint.BaseURL, "/"), Enabled: enabled}
 		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, UpstreamModel: upstreamModel, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, Enabled: enabled}
 	}
 
@@ -248,7 +248,8 @@ func New(cfg Config) Provider {
 	}
 	router.deployments = &deploymentRegistry{}
 	router.deployments.current.Store(&initialDeployments)
-	router.endpointState.Store(&endpoints)
+	router.endpointState = &endpointRegistry{}
+	router.endpointState.current.Store(&endpoints)
 	router.providers = &managedProviderRegistry{}
 	router.providers.current.Store(&initialProviders)
 	router.credentials = newCredentialVault(cfg.CredentialEncryptionKey)

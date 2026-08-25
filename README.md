@@ -162,6 +162,16 @@ The canonical external contract is [repos/gateway/api/openapi.yaml](repos/gatewa
 The gateway serves a self-contained operations console at `/ui/`. It provides
 an overview, virtual-key lifecycle management, model and runtime-catalog
 management, budget policy management, and a read-only management audit view.
+The Providers & Models workspace adds independent provider endpoint CRUD,
+AES-GCM encrypted write-only credentials, runtime deployment CRUD, public model
+groups, priority fallback, weighted/adaptive routing, connection tests, and
+provider model discovery. A credential secret is accepted only when created or
+rotated; list and mutation responses contain metadata only. Set a stable
+`PROVIDER_CREDENTIAL_ENCRYPTION_KEY` in managed environments. Without it, the
+gateway generates an ephemeral process key suitable only for local runtime
+management. Provider, credential, deployment, and group mutations currently
+apply to the running gateway process and must also be represented in deployment
+configuration before a restart.
 The Usage & Spend view reads final request outcomes from ClickHouse for a
 bounded 7/30/90-day window and breaks requests, tokens, latency, and spend down
 by day, model, and provider. Costs remain separated by currency.
@@ -418,10 +428,11 @@ with `GUARDRAIL_POLICIES_JSON` (Helm: `gateway.guardrailPolicies`) and selected
 per endpoint with `guardrail_policy`; an endpoint referencing an unknown profile
 is skipped instead of running without the intended DLP/AV controls.
 
-Model groups use endpoint-specific `model_aliases`, for example
-`{"fast":"deployment-gpt-5-mini"}`. Endpoints at the same priority can set
-`weight`; routing uses weighted round-robin and preserves the remaining members
-as failover candidates. `capabilities` can restrict an endpoint to `chat`,
+Model groups can be managed at runtime as a public model name plus an ordered
+set of deployment IDs. `priority` defines fallback tiers; endpoints at the same
+priority use `weight` for weighted round-robin or adaptive EWMA ordering. Static
+configuration can still use endpoint-specific `model_aliases`, for example
+`{"fast":"deployment-gpt-5-mini"}`. `capabilities` can restrict an endpoint to `chat`,
 `responses`, `embeddings`, `rerank`, `vision`, `mcp`, and/or `stream`.
 
 Chat Completions and Responses accept OpenAI-style image parts for endpoints

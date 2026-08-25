@@ -47,7 +47,7 @@ func (h Handler) mutateModelDeployment(w http.ResponseWriter, r *http.Request, i
 	var input struct {
 		ID              string   `json:"id,omitempty"`
 		ProviderID      string   `json:"provider_id,omitempty"`
-		CredentialID    string   `json:"credential_id,omitempty"`
+		CredentialID    *string  `json:"credential_id,omitempty"`
 		UpstreamModel   string   `json:"upstream_model,omitempty"`
 		Models          []string `json:"models"`
 		Capabilities    []string `json:"capabilities,omitempty"`
@@ -66,7 +66,11 @@ func (h Handler) mutateModelDeployment(w http.ResponseWriter, r *http.Request, i
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid model deployment")
 		return
 	}
-	deployment := provider.ModelDeployment{ID: input.ID, ProviderID: input.ProviderID, CredentialID: input.CredentialID, UpstreamModel: input.UpstreamModel, Models: input.Models, Capabilities: input.Capabilities, Priority: input.Priority, Weight: input.Weight, GuardrailPolicy: input.GuardrailPolicy, Enabled: input.Enabled}
+	credentialID := ""
+	if input.CredentialID != nil {
+		credentialID = *input.CredentialID
+	}
+	deployment := provider.ModelDeployment{ID: input.ID, ProviderID: input.ProviderID, CredentialID: credentialID, CredentialSet: input.CredentialID != nil, UpstreamModel: input.UpstreamModel, Models: input.Models, Capabilities: input.Capabilities, Priority: input.Priority, Weight: input.Weight, GuardrailPolicy: input.GuardrailPolicy, Enabled: input.Enabled}
 	targetID := input.ID
 	if id != "" {
 		targetID = id
