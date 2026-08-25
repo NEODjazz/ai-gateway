@@ -111,6 +111,16 @@ nav { display: flex; flex-direction: column; gap: 5px; }
 .heading-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
 .search-field { margin: 0; width: min(320px,100%); }
 .filter-row { display: flex; align-items: center; gap: 8px; width: min(380px,100%); }
+.range-field { min-width: 130px; margin: 0; color: #66727d; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.range-field select { margin-top: 6px; }
+.usage-stats { margin: 0 0 18px; }
+.usage-chart-panel { margin-bottom: 18px; }
+.usage-chart { min-height: 230px; display: flex; align-items: stretch; gap: 8px; padding: 10px 24px 24px; overflow-x: auto; }
+.usage-bar-column { min-width: 34px; flex: 1 0 34px; display: grid; grid-template-rows: 18px 160px 18px; gap: 5px; align-items: end; text-align: center; }
+.usage-bar-column > span, .usage-bar-column > small { color: #7c8791; font-size: 9px; }
+.usage-bar-track { height: 160px; display: flex; align-items: flex-end; border-bottom: 1px solid var(--line); background: linear-gradient(to top, transparent 49%, #f2f4f5 50%, transparent 51%); }
+.usage-bar { width: 100%; min-height: 3px; border-radius: 5px 5px 1px 1px; background: linear-gradient(180deg, var(--teal), #187c78); }
+.usage-breakdowns .panel-heading { padding: 20px 20px 10px; }
 .table-panel { overflow: hidden; }
 .table-scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; }

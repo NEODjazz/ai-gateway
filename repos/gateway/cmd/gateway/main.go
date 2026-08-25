@@ -96,7 +96,7 @@ func main() {
 	}
 	if cfg.Management.BillingURL != "" && cfg.Management.BillingSecret != "" {
 		billingManagement := gateway.NewRemoteBudgetManagementClient(cfg.Management.BillingURL, cfg.Management.BillingSecret)
-		handler = handler.WithBudgetManagement(billingManagement).WithAudit(billingManagement)
+		handler = handler.WithBudgetManagement(billingManagement).WithUsageReporting(billingManagement).WithAudit(billingManagement)
 	}
 	server := &http.Server{
 		Addr:    cfg.HTTP.Addr,

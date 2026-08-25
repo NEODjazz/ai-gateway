@@ -123,10 +123,14 @@ BILLING_MANAGEMENT_SHARED_SECRET=<independent internal secret>
 GET|POST  /internal/v1/budgets
 GET|PUT|DELETE /internal/v1/budgets/{id}
 GET /internal/v1/budgets/{id}/summary
+GET /internal/v1/usage/report?days=30
 ```
 
 `DELETE` is a soft disable. Summary includes committed usage and unexpired
 reservations, using the same period and scope calculation as enforcement.
+The usage report accepts a bounded 1–90 day range and aggregates final
+`commit`/`cancel` outcomes by currency, day, model, and provider endpoint.
+Currencies are never combined into a single spend total.
 The secret must not be shared with virtual-key management or client Bearer
 credentials.
 

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>AI Gateway Console</title>
-  <link rel="stylesheet" href="/ui/assets/app.css?v=3">
-  <script src="/ui/assets/app.js?v=3" defer></script>
+  <link rel="stylesheet" href="/ui/assets/app.css?v=4">
+  <script src="/ui/assets/app.js?v=4" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-view">
@@ -33,6 +33,7 @@
       <div class="brand-lockup"><span class="brand-mark small">AG</span><div><strong>AI Gateway</strong><span>Admin console</span></div></div>
       <nav aria-label="Console navigation">
         <button class="nav-item active" data-view="overview"><span>Overview</span></button>
+        <button class="nav-item" data-view="usage"><span>Usage &amp; spend</span></button>
         <button class="nav-item" data-view="keys"><span>Virtual keys</span><span id="keys-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="models"><span>Models</span><span id="models-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="budgets"><span>Budgets</span><span id="budgets-badge" class="badge">0</span></button>
@@ -66,6 +67,13 @@
             <article class="panel"><div class="panel-heading"><div><p class="eyebrow">Models</p><h3>Available endpoints</h3></div><button class="text-button" data-open-view="models">View all</button></div><div id="overview-models" class="compact-list loading-block">Loading…</div></article>
             <article class="panel"><div class="panel-heading"><div><p class="eyebrow">Activity</p><h3>Latest changes</h3></div><button class="text-button" data-open-view="audit">Open audit</button></div><div id="overview-audit" class="timeline loading-block">Loading…</div></article>
           </div>
+        </section>
+
+        <section id="view-usage" class="view" aria-labelledby="usage-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Analytics</p><h2 id="usage-heading">Usage &amp; spend</h2><p class="muted">Final request outcomes aggregated by ClickHouse without combining currencies.</p></div><label class="range-field">Window<select id="usage-days"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select></label></div>
+          <div class="stats-grid usage-stats"><article class="stat-card"><span>Requests</span><strong id="usage-requests">—</strong><small id="usage-error-rate">Final outcomes</small></article><article class="stat-card"><span>Total tokens</span><strong id="usage-tokens">—</strong><small>Input and output</small></article><article class="stat-card"><span>Spend</span><strong id="usage-spend">—</strong><small>Separated by currency</small></article><article class="stat-card"><span>Average latency</span><strong id="usage-latency">—</strong><small>Across final outcomes</small></article></div>
+          <article class="panel usage-chart-panel"><div class="panel-heading"><div><p class="eyebrow">Token volume</p><h3>Daily usage</h3></div></div><div id="usage-chart" class="usage-chart loading-block">Loading…</div></article>
+          <div class="split-grid usage-breakdowns"><article class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">Models</p><h3>Usage by model</h3></div></div><div class="table-scroll"><table><thead><tr><th>Model</th><th>Requests</th><th>Tokens</th><th>Spend</th></tr></thead><tbody id="usage-models-table"></tbody></table></div></article><article class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">Providers</p><h3>Usage by endpoint</h3></div></div><div class="table-scroll"><table><thead><tr><th>Provider</th><th>Requests</th><th>Tokens</th><th>Spend</th></tr></thead><tbody id="usage-providers-table"></tbody></table></div></article></div>
         </section>
 
         <section id="view-keys" class="view" aria-labelledby="keys-heading" hidden>

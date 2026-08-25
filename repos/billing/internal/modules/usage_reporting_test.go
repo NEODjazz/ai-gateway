@@ -1,0 +1,44 @@
+package modules
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestClickHouseUsageReporterBuildsBoundedReport(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		if !strings.Contains(query, "INTERVAL 30 DAY") || !strings.Contains(query, "safe_db.safe_events") || strings.Contains(query, "token_hash") {
+			t.Fatalf("unsafe report query: %s", query)
+		}
+		_, _ = w.Write([]byte("{\"kind\":\"total\",\"date\":\"\",\"name\":\"\",\"currency\":\"USD\",\"requests\":2,\"errors\":1,\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15,\"cost\":0.25,\"avg_latency_ms\":12.5}\n" +
+			"{\"kind\":\"model\",\"date\":\"\",\"name\":\"m1\",\"currency\":\"USD\",\"requests\":2,\"errors\":1,\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15,\"cost\":0.25,\"avg_latency_ms\":12.5}\n"))
+	}))
+	defer server.Close()
+	reporter, err := NewClickHouseUsageReporter(Settings{UsageEventsEnabled: true, ClickHouseURL: server.URL, ClickHouseDatabase: "safe_db", ClickHouseUsageEventsTable: "safe_events"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter.now = func() time.Time { return time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC) }
+	report, err := reporter.Report(context.Background(), 30)
+	if err != nil || len(report.Totals) != 1 || report.Totals[0].TotalTokens != 15 || len(report.ByModel) != 1 {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+}
+
+func TestClickHouseUsageReporterRejectsUnsafeConfigurationAndRange(t *testing.T) {
+	if _, err := NewClickHouseUsageReporter(Settings{UsageEventsEnabled: true, ClickHouseDatabase: "db;DROP", ClickHouseUsageEventsTable: "events"}); err == nil {
+		t.Fatal("unsafe database identifier accepted")
+	}
+	reporter, err := NewClickHouseUsageReporter(Settings{UsageEventsEnabled: true, ClickHouseDatabase: "db", ClickHouseUsageEventsTable: "events"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reporter.Report(context.Background(), 91); err == nil {
+		t.Fatal("unbounded report range accepted")
+	}
+}

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", keys: [], models: [], catalog: null, budgets: [], audit: [] };
+  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, keys: [], models: [], catalog: null, budgets: [], audit: [] };
   const $ = (id) => document.getElementById(id);
   const loginView = $("login-view");
   const consoleView = $("console-view");
@@ -9,7 +9,7 @@
   const tokenInput = $("admin-token");
   const loginError = $("login-error");
   const globalError = $("global-error");
-  const pageTitles = { overview: "Overview", keys: "Virtual keys", models: "Models", budgets: "Budgets", audit: "Audit log" };
+  const pageTitles = { overview: "Overview", usage: "Usage & spend", keys: "Virtual keys", models: "Models", budgets: "Budgets", audit: "Audit log" };
   let pendingConfirmation = null;
 
   function setText(id, value) { const element = $(id); if (element) element.textContent = value; }
@@ -63,6 +63,7 @@
     const query = new URLSearchParams({ limit: "100" });
     if (action.trim()) query.set("action", action.trim());
     const requests = [
+      api(`/admin/v1/usage/report?days=${encodeURIComponent($("usage-days").value)}`),
       api("/admin/v1/keys?limit=100"),
       api("/v1/models"),
       api("/admin/v1/model-catalog"),
@@ -73,11 +74,12 @@
     const authFailure = results.find((result) => result.status === "rejected" && result.reason?.auth);
     if (authFailure) throw authFailure.reason;
     const errors = [];
-    if (results[0].status === "fulfilled") state.keys = results[0].value?.data || []; else errors.push(`Virtual keys: ${results[0].reason.message}`);
-    if (results[1].status === "fulfilled") state.models = results[1].value?.data || []; else errors.push(`Models: ${results[1].reason.message}`);
-    if (results[2].status === "fulfilled") state.catalog = results[2].value; else errors.push(`Catalog: ${results[2].reason.message}`);
-    if (results[3].status === "fulfilled") state.budgets = results[3].value?.data || []; else errors.push(`Budgets: ${results[3].reason.message}`);
-    if (results[4].status === "fulfilled") state.audit = results[4].value?.data || []; else errors.push(`Audit: ${results[4].reason.message}`);
+    if (results[0].status === "fulfilled") state.usage = results[0].value; else errors.push(`Usage: ${results[0].reason.message}`);
+    if (results[1].status === "fulfilled") state.keys = results[1].value?.data || []; else errors.push(`Virtual keys: ${results[1].reason.message}`);
+    if (results[2].status === "fulfilled") state.models = results[2].value?.data || []; else errors.push(`Models: ${results[2].reason.message}`);
+    if (results[3].status === "fulfilled") state.catalog = results[3].value; else errors.push(`Catalog: ${results[3].reason.message}`);
+    if (results[4].status === "fulfilled") state.budgets = results[4].value?.data || []; else errors.push(`Budgets: ${results[4].reason.message}`);
+    if (results[5].status === "fulfilled") state.audit = results[5].value?.data || []; else errors.push(`Audit: ${results[5].reason.message}`);
     renderAll();
     setText("console-health", errors.length ? "Degraded" : "Operational");
     if (errors.length) { globalError.textContent = errors.join(" · "); globalError.hidden = false; }
@@ -103,6 +105,7 @@
     setText("budgets-badge", formatNumber(activeBudgets));
     setText("catalog-version", state.catalog?.version ? `Version ${state.catalog.version}` : "Runtime registry");
     renderOverview();
+    renderUsage();
     renderKeys();
     renderModels();
     renderBudgets();
@@ -129,6 +132,44 @@
       const detail = document.createElement("small"); detail.textContent = `${event.outcome || "unknown"} · ${formatDate(event.occurred_at)}`;
       item.append(title, detail); audit.appendChild(item);
     }
+  }
+
+  function renderUsage() {
+    const totals = state.usage?.totals || [];
+    const requests = totals.reduce((sum, item) => sum + Number(item.requests || 0), 0);
+    const errors = totals.reduce((sum, item) => sum + Number(item.errors || 0), 0);
+    const tokens = totals.reduce((sum, item) => sum + Number(item.total_tokens || 0), 0);
+    const latencyWeight = totals.reduce((sum, item) => sum + Number(item.avg_latency_ms || 0) * Number(item.requests || 0), 0);
+    setText("usage-requests", formatNumber(requests));
+    setText("usage-error-rate", requests ? `${(errors / requests * 100).toFixed(1)}% errors` : "No final outcomes");
+    setText("usage-tokens", formatNumber(tokens));
+    setText("usage-spend", totals.length ? totals.map((item) => formatMoney(item.cost, item.currency)).join(" · ") : "—");
+    setText("usage-latency", requests ? `${formatNumber(Math.round(latencyWeight / requests))} ms` : "—");
+
+    const chart = $("usage-chart"); clear(chart); chart.classList.remove("loading-block");
+    const byDate = new Map();
+    for (const item of state.usage?.daily || []) byDate.set(item.date, (byDate.get(item.date) || 0) + Number(item.total_tokens || 0));
+    const daily = Array.from(byDate, ([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date));
+    const maxValue = Math.max(1, ...daily.map((item) => item.value));
+    if (!daily.length) { chart.textContent = "No usage events in this window."; chart.classList.add("loading-block"); }
+    for (const item of daily) {
+      const column = document.createElement("div"); column.className = "usage-bar-column"; column.title = `${item.date}: ${formatNumber(item.value)} tokens`;
+      const value = document.createElement("span"); value.textContent = formatNumber(item.value);
+      const track = document.createElement("div"); track.className = "usage-bar-track";
+      const bar = document.createElement("div"); bar.className = "usage-bar"; bar.style.height = `${Math.max(3, item.value / maxValue * 100)}%`; track.appendChild(bar);
+      const label = document.createElement("small"); label.textContent = item.date.slice(5);
+      column.append(value, track, label); chart.appendChild(column);
+    }
+    renderUsageBreakdown("usage-models-table", state.usage?.by_model || []);
+    renderUsageBreakdown("usage-providers-table", state.usage?.by_provider || []);
+  }
+
+  function renderUsageBreakdown(id, rows) {
+    const body = $(id); clear(body);
+    for (const item of rows.slice(0, 20)) {
+      const row = document.createElement("tr"); row.appendChild(textCell(item.name)); row.appendChild(plainCell(formatNumber(item.requests))); row.appendChild(plainCell(formatNumber(item.total_tokens))); row.appendChild(plainCell(formatMoney(item.cost, item.currency))); body.appendChild(row);
+    }
+    if (!rows.length) { const row = document.createElement("tr"); const cell = document.createElement("td"); cell.colSpan = 4; cell.className = "muted"; cell.textContent = "No usage data."; row.appendChild(cell); body.appendChild(row); }
   }
 
   function renderKeys() {
@@ -366,6 +407,7 @@
   $("logout-button").addEventListener("click", () => { sessionStorage.removeItem("ai_gateway_admin_token"); state.token = ""; showLogin(); });
   $("refresh-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); showToast("Console data refreshed"); } catch (error) { if (error.auth) { sessionStorage.removeItem("ai_gateway_admin_token"); showLogin(error.message); } else { globalError.textContent = error.message; globalError.hidden = false; } } });
   $("audit-filter-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
+  $("usage-days").addEventListener("change", async () => { try { await loadData(); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
   $("model-search").addEventListener("input", renderModels);
   $("add-key-button").addEventListener("click", () => openKeyDialog());
   $("key-form").addEventListener("submit", saveKey);

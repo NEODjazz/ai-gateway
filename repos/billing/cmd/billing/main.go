@@ -37,6 +37,8 @@ func main() {
 	})
 	manager, managerErr := module.BudgetManager()
 	registerBudgetManagement(http.DefaultServeMux, manager, managerErr, os.Getenv("BILLING_MANAGEMENT_SHARED_SECRET"))
+	reporter, reporterErr := modules.NewClickHouseUsageReporter(settings)
+	registerUsageManagement(http.DefaultServeMux, reporter, reporterErr, os.Getenv("BILLING_MANAGEMENT_SHARED_SECRET"))
 	registerAuditManagement(http.DefaultServeMux, auditStore, auditErr, os.Getenv("BILLING_MANAGEMENT_SHARED_SECRET"))
 
 	http.HandleFunc("/usage", func(w http.ResponseWriter, r *http.Request) {

@@ -162,6 +162,9 @@ The canonical external contract is [repos/gateway/api/openapi.yaml](repos/gatewa
 The gateway serves a self-contained operations console at `/ui/`. It provides
 an overview, virtual-key lifecycle management, model and runtime-catalog
 management, budget policy management, and a read-only management audit view.
+The Usage & Spend view reads final request outcomes from ClickHouse for a
+bounded 7/30/90-day window and breaks requests, tokens, latency, and spend down
+by day, model, and provider. Costs remain separated by currency.
 Virtual-key tokens are shown once after creation or rotation and are cleared
 from the page when that dialog closes; list responses contain metadata only.
 Catalog entries can be created, edited, and removed; budgets can be created,

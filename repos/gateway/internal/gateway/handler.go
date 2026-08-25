@@ -26,6 +26,7 @@ type Handler struct {
 	ready      func(context.Context) error
 	management ManagementClient
 	budgets    BudgetManagementClient
+	usage      UsageManagementClient
 	models     *modelcatalog.Registry
 	audit      AuditClient
 	apiDocs    apiDocsConfig

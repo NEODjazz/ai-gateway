@@ -35,6 +35,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPut, "/admin/v1/budgets/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateBudget) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/budgets/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DisableBudget) }},
 	{RouteContract{http.MethodGet, "/admin/v1/budgets/{id}/summary"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetBudgetSummary) }},
+	{RouteContract{http.MethodGet, "/admin/v1/usage/report"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetUsageReport) }},
 	{RouteContract{http.MethodGet, "/admin/v1/model-catalog"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetModelCatalog) }},
 	{RouteContract{http.MethodPut, "/admin/v1/model-catalog"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutModelCatalog) }},
 	{RouteContract{http.MethodGet, "/admin/v1/audit/events"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListAuditEvents) }},
