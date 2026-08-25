@@ -30,7 +30,18 @@ func registerUsageManagement(mux *http.ServeMux, reporter modules.UsageReporter,
 			}
 			days = parsed
 		}
-		report, err := reporter.Report(r.Context(), days)
+		scopeType := strings.TrimSpace(r.URL.Query().Get("scope_type"))
+		scopeID := strings.TrimSpace(r.URL.Query().Get("scope_id"))
+		var report modules.UsageReport
+		var err error
+		if scopeType == "" && scopeID == "" {
+			report, err = reporter.Report(r.Context(), days)
+		} else if scoped, ok := reporter.(modules.ScopedUsageReporter); ok && (scopeType == "key" || scopeType == "user" || scopeType == "team") && scopeID != "" && len(scopeID) <= 256 {
+			report, err = scoped.ReportScoped(r.Context(), days, modules.UsageScope{Type: scopeType, ID: scopeID})
+		} else {
+			http.Error(w, "invalid usage scope", http.StatusBadRequest)
+			return
+		}
 		if err != nil {
 			http.Error(w, "usage reporting unavailable", http.StatusServiceUnavailable)
 			return

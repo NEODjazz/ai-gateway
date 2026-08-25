@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], models: [], deployments: [], guardrails: [], mcpServers: [], mcpToolsets: [], catalog: null, budgets: [], audit: [] };
+  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, customerUsage: null, customerScope: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], models: [], deployments: [], guardrails: [], mcpServers: [], mcpToolsets: [], catalog: null, budgets: [], audit: [] };
   const $ = (id) => document.getElementById(id);
   const loginView = $("login-view");
   const consoleView = $("console-view");
@@ -9,7 +9,7 @@
   const tokenInput = $("admin-token");
   const loginError = $("login-error");
   const globalError = $("global-error");
-  const pageTitles = { overview: "Overview", usage: "Usage & spend", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", models: "Models", deployments: "Model deployments", guardrails: "Guardrails", mcp: "MCP registry", budgets: "Budgets", audit: "Audit log" };
+  const pageTitles = { overview: "Overview", usage: "Usage & spend", customers: "Customer insights", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", models: "Models", deployments: "Model deployments", guardrails: "Guardrails", mcp: "MCP registry", budgets: "Budgets", audit: "Audit log" };
   let pendingConfirmation = null;
 
   function setText(id, value) { const element = $(id); if (element) element.textContent = value; }
@@ -141,6 +141,7 @@
     renderRouting();
     renderPlaygroundModels();
     renderUsage();
+    renderCustomer();
     renderRequestLogs();
     renderKeys();
     renderUsers();
@@ -256,6 +257,22 @@
     }
     if (!rows.length) { const row = document.createElement("tr"); const cell = document.createElement("td"); cell.colSpan = 4; cell.className = "muted"; cell.textContent = "No usage data."; row.appendChild(cell); body.appendChild(row); }
   }
+
+  function renderCustomer() {
+    if (!state.customerScope || !state.customerUsage) { $("customer-results").hidden=true; return; }
+    $("customer-results").hidden=false;
+    const totals=state.customerUsage.totals||[],requests=totals.reduce((sum,item)=>sum+Number(item.requests||0),0),errors=totals.reduce((sum,item)=>sum+Number(item.errors||0),0),tokens=totals.reduce((sum,item)=>sum+Number(item.total_tokens||0),0);
+    setText("customer-requests",formatNumber(requests));setText("customer-tokens",formatNumber(tokens));setText("customer-spend",totals.length?totals.map((item)=>formatMoney(item.cost,item.currency)).join(" · "):"—");setText("customer-error-rate",requests?`${(errors/requests*100).toFixed(1)}%`:"—");
+    const scope=state.customerScope;
+    const budgets=state.budgets.filter((item)=>item.scope_type==="global"||(item.scope_type===scope.type&&item.scope_id===scope.id));
+    const budgetBody=$("customer-budgets-table");clear(budgetBody);$("customer-budgets-empty").hidden=budgets.length!==0;
+    for(const budget of budgets){const row=document.createElement("tr");row.appendChild(textCell(`${budget.scope_type}: ${budget.scope_id}`,budget.period));row.appendChild(plainCell(formatMoney(budget.max_cost,budget.currency)));row.appendChild(plainCell(formatNumber(budget.max_tokens)));row.appendChild(statusCell(budget.enabled));budgetBody.appendChild(row)}
+    const keys=state.keys.filter((item)=>scope.type==="key"?item.id===scope.id:scope.type==="user"?item.user_id===scope.id:item.team_id===scope.id);
+    const keyBody=$("customer-keys-table");clear(keyBody);$("customer-keys-empty").hidden=keys.length!==0;
+    for(const key of keys){const active=!key.revoked_at&&!key.disabled_at&&(!key.expires_at||new Date(key.expires_at)>new Date());const row=document.createElement("tr");row.appendChild(textCell(key.alias||key.id,key.id));row.appendChild(plainCell(formatNumber(key.rate_limit_rpm||0)));row.appendChild(plainCell(formatNumber(key.rate_limit_tpm||0)));row.appendChild(statusCell(active));keyBody.appendChild(row)}
+  }
+
+  async function loadCustomer(event){event.preventDefault();const type=$("customer-scope-type").value,id=$("customer-scope-id").value.trim(),days=$("customer-days").value;try{state.customerUsage=await api(`/admin/v1/customers/${encodeURIComponent(type)}/${encodeURIComponent(id)}/usage?days=${encodeURIComponent(days)}`);state.customerScope={type,id};renderCustomer();showToast("Customer usage loaded")}catch(error){globalError.textContent=error.message;globalError.hidden=false}}
 
   function requestLogEndpoint(log) { return log.provider_endpoint_name || log.provider || "—"; }
 
@@ -581,6 +598,7 @@
   $("refresh-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); showToast("Console data refreshed"); } catch (error) { if (error.auth) { sessionStorage.removeItem("ai_gateway_admin_token"); showLogin(error.message); } else { globalError.textContent = error.message; globalError.hidden = false; } } });
   $("audit-filter-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
   $("usage-days").addEventListener("change", async () => { try { await loadData(); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
+  $("customer-filter-form").addEventListener("submit",loadCustomer);
   $("request-log-filter-form").addEventListener("submit", async (event) => { event.preventDefault(); try { await loadRequestLogs(false); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
   $("request-logs-more").addEventListener("click", async () => { try { await loadRequestLogs(true); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
   $("playground-form").addEventListener("submit", runPlayground);

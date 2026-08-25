@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.8
+  version: 0.1.9
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -21,6 +21,7 @@ tags:
   - name: Model deployments
   - name: Guardrails
   - name: MCP
+  - name: Customers
   - name: Operations
   - name: Observability
 security:
@@ -714,6 +715,22 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/UsageReport'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/customers/{scope_type}/{scope_id}/usage:
+    get:
+      operationId: getCustomerUsageReport
+      tags: [Customers]
+      summary: Get usage and spend for one customer scope
+      description: Aggregates metadata-only final outcomes for a user, team, or non-secret virtual-key ID. Scope values are passed to ClickHouse as typed parameters.
+      parameters:
+        - {name: scope_type, in: path, required: true, schema: {type: string, enum: [key, user, team]}}
+        - {name: scope_id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 256}}
+        - {name: days, in: query, schema: {type: integer, minimum: 1, maximum: 90, default: 30}}
+      responses:
+        '200': {description: Scoped usage and spend report, content: {application/json: {schema: {$ref: '#/components/schemas/UsageReport'}}}}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}

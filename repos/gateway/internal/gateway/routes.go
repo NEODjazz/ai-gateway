@@ -44,6 +44,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodDelete, "/admin/v1/budgets/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DisableBudget) }},
 	{RouteContract{http.MethodGet, "/admin/v1/budgets/{id}/summary"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetBudgetSummary) }},
 	{RouteContract{http.MethodGet, "/admin/v1/usage/report"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetUsageReport) }},
+	{RouteContract{http.MethodGet, "/admin/v1/customers/{scope_type}/{scope_id}/usage"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetCustomerUsageReport) }},
 	{RouteContract{http.MethodGet, "/admin/v1/request-logs"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListRequestLogs) }},
 	{RouteContract{http.MethodGet, "/admin/v1/request-logs/settings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetRequestLogSettings) }},
 	{RouteContract{http.MethodGet, "/admin/v1/request-logs/{request_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetRequestLog) }},

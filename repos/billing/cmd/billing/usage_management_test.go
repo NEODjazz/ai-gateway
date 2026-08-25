@@ -10,11 +10,19 @@ import (
 	"ai-gateway-billing/internal/modules"
 )
 
-type fakeUsageReporter struct{ days int }
+type fakeUsageReporter struct {
+	days  int
+	scope modules.UsageScope
+}
 
 func (f *fakeUsageReporter) Report(_ context.Context, days int) (modules.UsageReport, error) {
 	f.days = days
 	return modules.UsageReport{Days: days, Totals: []modules.UsageAggregate{{Currency: "USD", Requests: 2}}}, nil
+}
+
+func (f *fakeUsageReporter) ReportScoped(_ context.Context, days int, scope modules.UsageScope) (modules.UsageReport, error) {
+	f.days, f.scope = days, scope
+	return modules.UsageReport{Days: days}, nil
 }
 
 func TestUsageManagementRequiresSecretAndBoundsRange(t *testing.T) {
@@ -39,5 +47,18 @@ func TestUsageManagementRequiresSecretAndBoundsRange(t *testing.T) {
 	mux.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || reporter.days != 7 || !strings.Contains(response.Body.String(), `"requests":2`) {
 		t.Fatalf("status=%d days=%d body=%s", response.Code, reporter.days, response.Body.String())
+	}
+}
+
+func TestUsageManagementSupportsScopedCustomerReport(t *testing.T) {
+	reporter := &fakeUsageReporter{}
+	mux := http.NewServeMux()
+	registerUsageManagement(mux, reporter, nil, "secret")
+	request := httptest.NewRequest(http.MethodGet, "/internal/v1/usage/report?days=14&scope_type=team&scope_id=team-a", nil)
+	request.Header.Set("X-Management-Token", "secret")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || reporter.days != 14 || reporter.scope.Type != "team" || reporter.scope.ID != "team-a" {
+		t.Fatalf("status=%d days=%d scope=%+v body=%s", response.Code, reporter.days, reporter.scope, response.Body.String())
 	}
 }

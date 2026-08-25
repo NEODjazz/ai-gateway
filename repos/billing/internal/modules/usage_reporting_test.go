@@ -42,3 +42,20 @@ func TestClickHouseUsageReporterRejectsUnsafeConfigurationAndRange(t *testing.T)
 		t.Fatal("unbounded report range accepted")
 	}
 }
+
+func TestClickHouseUsageReporterUsesParameterizedScope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		if !strings.Contains(query, "team_id = {scope_id:String}") || strings.Contains(query, "team-a' OR") || r.URL.Query().Get("param_scope_id") != "team-a' OR 1=1" {
+			t.Fatalf("scope was not safely parameterized: query=%q params=%v", query, r.URL.Query())
+		}
+	}))
+	defer server.Close()
+	reporter, _ := NewClickHouseUsageReporter(Settings{UsageEventsEnabled: true, ClickHouseURL: server.URL, ClickHouseDatabase: "db", ClickHouseUsageEventsTable: "events"})
+	if _, err := reporter.ReportScoped(context.Background(), 7, UsageScope{Type: "team", ID: "team-a' OR 1=1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reporter.ReportScoped(context.Background(), 7, UsageScope{Type: "provider", ID: "x"}); err == nil {
+		t.Fatal("unsupported customer scope accepted")
+	}
+}

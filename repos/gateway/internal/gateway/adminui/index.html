@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>AI Gateway Console</title>
-  <link rel="stylesheet" href="/ui/assets/app.css?v=11">
-  <script src="/ui/assets/app.js?v=11" defer></script>
+  <link rel="stylesheet" href="/ui/assets/app.css?v=12">
+  <script src="/ui/assets/app.js?v=12" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-view">
@@ -34,6 +34,7 @@
       <nav aria-label="Console navigation">
         <button class="nav-item active" data-view="overview"><span>Overview</span></button>
         <button class="nav-item" data-view="usage"><span>Usage &amp; spend</span></button>
+        <button class="nav-item" data-view="customers"><span>Customer insights</span></button>
         <button class="nav-item" data-view="request-logs"><span>Request logs</span><span id="request-logs-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="routing"><span>Routing</span></button>
         <button class="nav-item" data-view="playground"><span>Playground</span></button>
@@ -92,6 +93,12 @@
           <div class="stats-grid usage-stats"><article class="stat-card"><span>Requests</span><strong id="usage-requests">—</strong><small id="usage-error-rate">Final outcomes</small></article><article class="stat-card"><span>Total tokens</span><strong id="usage-tokens">—</strong><small>Input and output</small></article><article class="stat-card"><span>Spend</span><strong id="usage-spend">—</strong><small>Separated by currency</small></article><article class="stat-card"><span>Average latency</span><strong id="usage-latency">—</strong><small>Across final outcomes</small></article></div>
           <article class="panel usage-chart-panel"><div class="panel-heading"><div><p class="eyebrow">Token volume</p><h3>Daily usage</h3></div></div><div id="usage-chart" class="usage-chart loading-block">Loading…</div></article>
           <div class="split-grid usage-breakdowns"><article class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">Models</p><h3>Usage by model</h3></div></div><div class="table-scroll"><table><thead><tr><th>Model</th><th>Requests</th><th>Tokens</th><th>Spend</th></tr></thead><tbody id="usage-models-table"></tbody></table></div></article><article class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">Providers</p><h3>Usage by endpoint</h3></div></div><div class="table-scroll"><table><thead><tr><th>Provider</th><th>Requests</th><th>Tokens</th><th>Spend</th></tr></thead><tbody id="usage-providers-table"></tbody></table></div></article></div>
+        </section>
+
+        <section id="view-customers" class="view" aria-labelledby="customers-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Customer management</p><h2 id="customers-heading">Usage, budgets &amp; rate limits</h2><p class="muted">Inspect one user, team or virtual key without exposing prompt content or bearer secrets.</p></div></div>
+          <form id="customer-filter-form" class="panel request-log-filters"><label>Scope<select id="customer-scope-type"><option value="team">Team</option><option value="user">User</option><option value="key">Virtual key</option></select></label><label>Scope ID<input id="customer-scope-id" required maxlength="256" placeholder="team-a"></label><label>Window<select id="customer-days"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select></label><button type="submit" class="primary-button">Load customer</button></form>
+          <div id="customer-results" hidden><div class="stats-grid usage-stats"><article class="stat-card"><span>Requests</span><strong id="customer-requests">—</strong><small>Final outcomes</small></article><article class="stat-card"><span>Total tokens</span><strong id="customer-tokens">—</strong><small>Input and output</small></article><article class="stat-card"><span>Spend</span><strong id="customer-spend">—</strong><small>Separated by currency</small></article><article class="stat-card"><span>Error rate</span><strong id="customer-error-rate">—</strong><small>For selected window</small></article></div><div class="split-grid"><article class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">Enforcement</p><h3>Applicable budgets</h3></div></div><div class="table-scroll"><table><thead><tr><th>Policy</th><th>Cost limit</th><th>Token limit</th><th>Status</th></tr></thead><tbody id="customer-budgets-table"></tbody></table></div><div id="customer-budgets-empty" class="empty-state" hidden>No matching budget policies.</div></article><article class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">Credentials</p><h3>Rate limits</h3></div></div><div class="table-scroll"><table><thead><tr><th>Virtual key</th><th>RPM</th><th>TPM</th><th>Status</th></tr></thead><tbody id="customer-keys-table"></tbody></table></div><div id="customer-keys-empty" class="empty-state" hidden>No matching virtual keys.</div></article></div></div>
         </section>
 
         <section id="view-request-logs" class="view" aria-labelledby="request-logs-heading" hidden>

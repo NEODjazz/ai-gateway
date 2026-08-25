@@ -385,6 +385,12 @@ Disabled toolsets stop authorizing immediately. Registry changes are audited
 and are process-local runtime state, so operator configuration remains the
 source of truth after a pod restart.
 
+Customer Insights joins scoped metadata-only usage with the already enforced
+budget and virtual-key policies for a user, team, or key ID. ClickHouse scope
+values use typed query parameters rather than SQL interpolation. The console
+shows currency-separated spend, tokens, error rate, applicable global/scoped
+budgets, and RPM/TPM key limits without exposing prompts or bearer secrets.
+
 `GET /metrics` exposes Prometheus-format HTTP, provider-attempt, cache,
 module, security, and billing lifecycle counters plus duration sums. Labels are
 bounded: unmatched URLs become `path="unmatched"`, results use a fixed enum, and
