@@ -21,7 +21,7 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
@@ -43,7 +43,9 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
 	oldID, newID, expiredID := "key-old-"+suffix, "key-new-"+suffix, "key-expired-"+suffix
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_virtual_keys WHERE id = ANY($1)`, []string{newID, oldID, expiredID})
+		ids := []string{newID, oldID, expiredID}
+		_, _ = pool.Exec(context.Background(), `UPDATE auth_virtual_keys SET rotated_from_id=NULL,rotated_to_id=NULL WHERE id = ANY($1)`, ids)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_virtual_keys WHERE id = ANY($1)`, ids)
 	})
 
 	oldToken := "old-token-" + suffix
