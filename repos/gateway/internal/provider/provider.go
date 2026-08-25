@@ -1031,9 +1031,9 @@ func (r Router) startProviderCall(ctx context.Context, endpoint Endpoint, operat
 		}
 		span.SetAttributes(attribute.String("ai.result", result))
 		span.End()
-		if r.routingStrategy == "adaptive" {
-			r.adaptive.observe(endpoint.Name, duration, err)
-		}
+		// Keep endpoint EWMAs for diagnostics under every strategy. Only the
+		// adaptive strategy consumes them when ordering candidates.
+		r.adaptive.observe(endpoint.Name, duration, err)
 		if r.observer != nil {
 			r.observer.ObserveProvider(endpoint.Name, endpoint.Type, operation, result, duration)
 		}

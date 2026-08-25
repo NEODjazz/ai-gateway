@@ -59,6 +59,15 @@ func (h *endpointHealthTracker) available(ctx context.Context, endpoint Endpoint
 	return state.cooldownUntil.IsZero() || !now.Before(state.cooldownUntil)
 }
 
+func (h *endpointHealthTracker) localState(endpoint string) endpointHealthState {
+	if h == nil {
+		return endpointHealthState{}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.states[endpoint]
+}
+
 func (h *endpointHealthTracker) permit(ctx context.Context, endpoint Endpoint) error {
 	if h == nil {
 		return nil

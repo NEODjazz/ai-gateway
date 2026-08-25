@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>AI Gateway Console</title>
-  <link rel="stylesheet" href="/ui/assets/app.css?v=4">
-  <script src="/ui/assets/app.js?v=4" defer></script>
+  <link rel="stylesheet" href="/ui/assets/app.css?v=5">
+  <script src="/ui/assets/app.js?v=5" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-view">
@@ -34,6 +34,8 @@
       <nav aria-label="Console navigation">
         <button class="nav-item active" data-view="overview"><span>Overview</span></button>
         <button class="nav-item" data-view="usage"><span>Usage &amp; spend</span></button>
+        <button class="nav-item" data-view="routing"><span>Routing</span></button>
+        <button class="nav-item" data-view="playground"><span>Playground</span></button>
         <button class="nav-item" data-view="keys"><span>Virtual keys</span><span id="keys-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="models"><span>Models</span><span id="models-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="budgets"><span>Budgets</span><span id="budgets-badge" class="badge">0</span></button>
@@ -67,6 +69,16 @@
             <article class="panel"><div class="panel-heading"><div><p class="eyebrow">Models</p><h3>Available endpoints</h3></div><button class="text-button" data-open-view="models">View all</button></div><div id="overview-models" class="compact-list loading-block">Loading…</div></article>
             <article class="panel"><div class="panel-heading"><div><p class="eyebrow">Activity</p><h3>Latest changes</h3></div><button class="text-button" data-open-view="audit">Open audit</button></div><div id="overview-audit" class="timeline loading-block">Loading…</div></article>
           </div>
+        </section>
+
+        <section id="view-routing" class="view" aria-labelledby="routing-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Reliability</p><h2 id="routing-heading">Routing diagnostics</h2><p class="muted">Circuit, adaptive routing and admission state without endpoint URLs or credentials.</p></div><span id="routing-strategy" class="provider-tag">Strategy —</span></div>
+          <div id="routing-cards" class="routing-grid loading-block">Loading…</div>
+        </section>
+
+        <section id="view-playground" class="view" aria-labelledby="playground-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Test workspace</p><h2 id="playground-heading">Chat playground</h2><p class="muted">Send a non-streaming request through the normal authenticated gateway pipeline.</p></div></div>
+          <div class="playground-grid"><form id="playground-form" class="panel playground-form"><label>Model<select id="playground-model" required></select></label><label>System instruction<textarea id="playground-system" rows="3" placeholder="You are a concise assistant."></textarea></label><label>Message<textarea id="playground-message" rows="8" required placeholder="Ask the model something…"></textarea></label><div class="form-grid"><label>Temperature<input id="playground-temperature" type="number" min="0" max="2" step="0.1" value="0.2"></label><label>Max tokens<input id="playground-max-tokens" type="number" min="1" step="1" value="256"></label></div><p id="playground-error" class="form-error" role="alert" hidden></p><button id="playground-submit" type="submit" class="primary-button">Run request</button></form><article class="panel playground-output"><div class="panel-heading"><div><p class="eyebrow">Response</p><h3>Model output</h3></div><span id="playground-meta" class="muted compact"></span></div><pre id="playground-result">Run a request to see the response.</pre></article></div>
         </section>
 
         <section id="view-usage" class="view" aria-labelledby="usage-heading" hidden>

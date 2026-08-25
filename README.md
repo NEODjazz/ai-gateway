@@ -165,6 +165,10 @@ management, budget policy management, and a read-only management audit view.
 The Usage & Spend view reads final request outcomes from ClickHouse for a
 bounded 7/30/90-day window and breaks requests, tokens, latency, and spend down
 by day, model, and provider. Costs remain separated by currency.
+Routing diagnostics expose circuit, adaptive EWMA, admission, guardrail, and
+shadow-routing state using endpoint names only; provider base URLs and secrets
+are not part of the response contract. The playground sends non-streaming chat
+requests through the same authenticated inference path as external clients.
 Virtual-key tokens are shown once after creation or rotation and are cleared
 from the page when that dialog closes; list responses contain metadata only.
 Catalog entries can be created, edited, and removed; budgets can be created,

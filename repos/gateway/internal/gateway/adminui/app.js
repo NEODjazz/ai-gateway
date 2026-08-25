@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, keys: [], models: [], catalog: null, budgets: [], audit: [] };
+  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, routing: null, keys: [], models: [], catalog: null, budgets: [], audit: [] };
   const $ = (id) => document.getElementById(id);
   const loginView = $("login-view");
   const consoleView = $("console-view");
@@ -9,7 +9,7 @@
   const tokenInput = $("admin-token");
   const loginError = $("login-error");
   const globalError = $("global-error");
-  const pageTitles = { overview: "Overview", usage: "Usage & spend", keys: "Virtual keys", models: "Models", budgets: "Budgets", audit: "Audit log" };
+  const pageTitles = { overview: "Overview", usage: "Usage & spend", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", models: "Models", budgets: "Budgets", audit: "Audit log" };
   let pendingConfirmation = null;
 
   function setText(id, value) { const element = $(id); if (element) element.textContent = value; }
@@ -69,6 +69,7 @@
       api("/admin/v1/model-catalog"),
       api("/admin/v1/budgets"),
       api(`/admin/v1/audit/events?${query}`),
+      api("/admin/v1/routing/diagnostics"),
     ];
     const results = await Promise.allSettled(requests);
     const authFailure = results.find((result) => result.status === "rejected" && result.reason?.auth);
@@ -80,6 +81,7 @@
     if (results[3].status === "fulfilled") state.catalog = results[3].value; else errors.push(`Catalog: ${results[3].reason.message}`);
     if (results[4].status === "fulfilled") state.budgets = results[4].value?.data || []; else errors.push(`Budgets: ${results[4].reason.message}`);
     if (results[5].status === "fulfilled") state.audit = results[5].value?.data || []; else errors.push(`Audit: ${results[5].reason.message}`);
+    if (results[6].status === "fulfilled") state.routing = results[6].value; else errors.push(`Routing: ${results[6].reason.message}`);
     renderAll();
     setText("console-health", errors.length ? "Degraded" : "Operational");
     if (errors.length) { globalError.textContent = errors.join(" · "); globalError.hidden = false; }
@@ -105,6 +107,8 @@
     setText("budgets-badge", formatNumber(activeBudgets));
     setText("catalog-version", state.catalog?.version ? `Version ${state.catalog.version}` : "Runtime registry");
     renderOverview();
+    renderRouting();
+    renderPlaygroundModels();
     renderUsage();
     renderKeys();
     renderModels();
@@ -132,6 +136,50 @@
       const detail = document.createElement("small"); detail.textContent = `${event.outcome || "unknown"} · ${formatDate(event.occurred_at)}`;
       item.append(title, detail); audit.appendChild(item);
     }
+  }
+
+  function renderRouting() {
+    setText("routing-strategy", `Strategy ${state.routing?.strategy || "—"}`);
+    const container = $("routing-cards"); clear(container); container.classList.remove("loading-block");
+    const endpoints = state.routing?.endpoints || [];
+    if (!endpoints.length) { container.textContent = "No routing endpoints are available."; container.classList.add("loading-block"); return; }
+    for (const endpoint of endpoints) {
+      const card = document.createElement("article"); card.className = "panel routing-card";
+      const heading = document.createElement("div"); heading.className = "routing-card-heading";
+      const identity = document.createElement("div"); const name = document.createElement("h3"); name.textContent = endpoint.name; const type = document.createElement("small"); type.textContent = `${endpoint.type} · priority ${endpoint.priority} · weight ${endpoint.weight || 1}`; identity.append(name, type);
+      const status = document.createElement("span"); status.className = `outcome ${endpoint.state === "available" ? "succeeded" : endpoint.state === "half_open" ? "attempted" : "failed"}`; status.textContent = endpoint.state.replaceAll("_", " "); heading.append(identity, status);
+      const metrics = document.createElement("div"); metrics.className = "routing-metrics";
+      for (const [label, value] of [["Latency EWMA", endpoint.samples ? `${Math.round(endpoint.latency_ewma_ms)} ms` : "No samples"], ["Failure EWMA", endpoint.samples ? `${(endpoint.failure_ewma * 100).toFixed(1)}%` : "—"], ["In flight", `${endpoint.in_flight_requests}/${endpoint.max_parallel_requests || "∞"}`], ["Queue", `${endpoint.queued_requests}/${endpoint.queue_capacity || 0}`]]) { const item = document.createElement("div"); const small = document.createElement("small"); small.textContent = label; const strong = document.createElement("strong"); strong.textContent = value; item.append(small, strong); metrics.appendChild(item); }
+      const tags = document.createElement("div"); tags.className = "capabilities";
+      for (const value of [...(endpoint.capabilities || []), ...(endpoint.models || []).map((model) => `model:${model}`), endpoint.dlp_enabled ? "DLP" : "", endpoint.av_enabled ? "AV" : "", endpoint.shadow ? `shadow:${endpoint.mirror_percentage || 0}%` : ""].filter(Boolean)) { const tag = document.createElement("span"); tag.className = "capability"; tag.textContent = value; tags.appendChild(tag); }
+      card.append(heading, metrics, tags); container.appendChild(card);
+    }
+  }
+
+  function renderPlaygroundModels() {
+    const select = $("playground-model"); const selected = select.value; clear(select);
+    for (const model of state.models) { const option = document.createElement("option"); option.value = model.id; option.textContent = `${model.id} · automatic routing`; select.appendChild(option); }
+    if (Array.from(select.options).some((option) => option.value === selected)) select.value = selected;
+  }
+
+  function responseText(content) {
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) return content.filter((item) => item?.type === "text" || item?.type === "output_text").map((item) => item.text || "").join("\n");
+    return content == null ? "" : JSON.stringify(content, null, 2);
+  }
+
+  async function runPlayground(event) {
+    event.preventDefault(); const error = $("playground-error"); error.hidden = true;
+    const submit = $("playground-submit"); submit.disabled = true; submit.textContent = "Running…";
+    const messages = []; const system = $("playground-system").value.trim(); if (system) messages.push({ role: "system", content: system }); messages.push({ role: "user", content: $("playground-message").value });
+    const started = performance.now();
+    try {
+      const response = await fetch("/v1/chat/completions", { method: "POST", cache: "no-store", headers: { "Authorization": `Bearer ${state.token}`, "Accept": "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ model: $("playground-model").value, messages, temperature: Number($("playground-temperature").value), max_tokens: Number($("playground-max-tokens").value) }) });
+      const body = await response.json(); if (!response.ok) throw new Error(body?.error?.message || `Request failed (${response.status})`);
+      $("playground-result").textContent = responseText(body.choices?.[0]?.message?.content) || JSON.stringify(body, null, 2);
+      const usage = body.usage || {}; setText("playground-meta", `${Math.round(performance.now() - started)} ms · ${formatNumber(usage.total_tokens || 0)} tokens · ${response.headers.get("X-Request-ID") || "no request id"}`);
+    } catch (requestError) { error.textContent = requestError.message; error.hidden = false; }
+    finally { submit.disabled = false; submit.textContent = "Run request"; }
   }
 
   function renderUsage() {
@@ -408,6 +456,7 @@
   $("refresh-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); showToast("Console data refreshed"); } catch (error) { if (error.auth) { sessionStorage.removeItem("ai_gateway_admin_token"); showLogin(error.message); } else { globalError.textContent = error.message; globalError.hidden = false; } } });
   $("audit-filter-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
   $("usage-days").addEventListener("change", async () => { try { await loadData(); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
+  $("playground-form").addEventListener("submit", runPlayground);
   $("model-search").addEventListener("input", renderModels);
   $("add-key-button").addEventListener("click", () => openKeyDialog());
   $("key-form").addEventListener("submit", saveKey);

@@ -493,6 +493,21 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/routing/diagnostics:
+    get:
+      operationId: getRoutingDiagnostics
+      tags: [Routing]
+      summary: Get safe provider routing diagnostics
+      description: Returns endpoint names and operational routing state. Base URLs, credentials, and internal headers are never exposed.
+      responses:
+        '200':
+          description: Routing strategy and endpoint state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RoutingDiagnostics'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/model-catalog:
     get:
       operationId: getRuntimeModelCatalog
@@ -769,6 +784,41 @@ components:
         daily: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
         by_model: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
         by_provider: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
+    EndpointDiagnostics:
+      type: object
+      additionalProperties: false
+      required: [name, type, models, priority, weight, state, consecutive_failures, samples, latency_ewma_ms, failure_ewma, in_flight_requests, queued_requests, max_retries, guardrail_policy_valid, dlp_enabled, av_enabled, shadow]
+      properties:
+        name: {type: string}
+        type: {type: string}
+        models: {type: array, items: {type: string}}
+        capabilities: {type: array, items: {type: string}}
+        priority: {type: integer}
+        weight: {type: integer}
+        state: {type: string, enum: [available, cooling_down, half_open]}
+        cooldown_until: {type: string, format: date-time}
+        consecutive_failures: {type: integer, minimum: 0}
+        samples: {type: integer, minimum: 0}
+        latency_ewma_ms: {type: number, minimum: 0}
+        failure_ewma: {type: number, minimum: 0, maximum: 1}
+        max_parallel_requests: {type: integer, minimum: 0}
+        in_flight_requests: {type: integer, minimum: 0}
+        queue_capacity: {type: integer, minimum: 0}
+        queued_requests: {type: integer, minimum: 0}
+        max_retries: {type: integer, minimum: 0}
+        guardrail_policy: {type: string}
+        guardrail_policy_valid: {type: boolean}
+        dlp_enabled: {type: boolean}
+        av_enabled: {type: boolean}
+        shadow: {type: boolean}
+        mirror_percentage: {type: number, minimum: 0, maximum: 100}
+    RoutingDiagnostics:
+      type: object
+      additionalProperties: false
+      required: [strategy, endpoints]
+      properties:
+        strategy: {type: string}
+        endpoints: {type: array, items: {$ref: '#/components/schemas/EndpointDiagnostics'}}
     ErrorResponse:
       type: object
       additionalProperties: false

@@ -51,6 +51,15 @@ func (r *adaptiveRouter) observe(endpoint string, duration time.Duration, err er
 	r.stats[endpoint] = stats
 }
 
+func (r *adaptiveRouter) snapshot(endpoint string) endpointRoutingStats {
+	if r == nil {
+		return endpointRoutingStats{}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stats[endpoint]
+}
+
 func (r *adaptiveRouter) order(endpoints []Endpoint) []Endpoint {
 	if r == nil || len(endpoints) < 2 {
 		return endpoints
