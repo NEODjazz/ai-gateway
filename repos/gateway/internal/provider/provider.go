@@ -95,6 +95,7 @@ type Config struct {
 	SemanticEmbeddingURL    string
 	SemanticEmbeddingAPIKey string
 	SemanticEmbeddingModel  string
+	CredentialEncryptionKey []byte
 }
 
 type ProviderObserver interface {
@@ -139,6 +140,7 @@ type Router struct {
 	semantic        *semanticResponseCache
 	deployments     *deploymentRegistry
 	providers       *managedProviderRegistry
+	credentials     *credentialVault
 	guardrails      *guardrailRegistry
 }
 
@@ -242,6 +244,7 @@ func New(cfg Config) Provider {
 	router.deployments.current.Store(&initialDeployments)
 	router.providers = &managedProviderRegistry{}
 	router.providers.current.Store(&initialProviders)
+	router.credentials = newCredentialVault(cfg.CredentialEncryptionKey)
 	initialGuardrails := make(map[string]GuardrailPolicy, len(cfg.GuardrailPolicies))
 	for name, policy := range cfg.GuardrailPolicies {
 		initialGuardrails[name] = GuardrailPolicy{Name: name, DLP: policy.DLP, AV: policy.AV, Enabled: true}

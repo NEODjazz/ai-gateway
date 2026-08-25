@@ -11,6 +11,7 @@ import (
 type ModelDeployment struct {
 	ID              string   `json:"id"`
 	ProviderID      string   `json:"provider_id"`
+	CredentialID    string   `json:"credential_id,omitempty"`
 	ProviderType    string   `json:"provider_type"`
 	Models          []string `json:"models"`
 	Capabilities    []string `json:"capabilities,omitempty"`

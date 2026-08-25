@@ -99,6 +99,7 @@ type ProviderConfig struct {
 	RoutingStrategy   string
 	AdaptiveEWMAAlpha float64
 	AffinityTTL       time.Duration
+	CredentialKey     string
 }
 
 type GuardrailPolicyConfig struct {
@@ -176,6 +177,7 @@ func Load() Config {
 			RoutingStrategy:   env("ROUTING_STRATEGY", "weighted"),
 			AdaptiveEWMAAlpha: envFloat("ADAPTIVE_ROUTING_EWMA_ALPHA", 0.2),
 			AffinityTTL:       time.Duration(envInt("RESPONSES_AFFINITY_TTL_SECONDS", 3600)) * time.Second,
+			CredentialKey:     os.Getenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY"),
 		},
 		Catalog: catalog,
 		Telemetry: TelemetryConfig{

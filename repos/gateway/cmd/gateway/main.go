@@ -70,6 +70,7 @@ func main() {
 		SemanticEmbeddingURL:    cfg.Cache.Semantic.EmbeddingURL,
 		SemanticEmbeddingAPIKey: cfg.Cache.Semantic.EmbeddingAPIKey,
 		SemanticEmbeddingModel:  cfg.Cache.Semantic.EmbeddingModel,
+		CredentialEncryptionKey: []byte(cfg.Provider.CredentialKey),
 	}
 	if redisStore != nil {
 		providerConfig.CacheStore = redisStore
