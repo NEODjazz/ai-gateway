@@ -42,6 +42,13 @@ func (s *PostgresStore) Close() {
 	}
 }
 
+func (s *PostgresStore) Ping(ctx context.Context) error {
+	if s == nil || s.pool == nil {
+		return errors.New("control plane postgres store is unavailable")
+	}
+	return s.pool.Ping(ctx)
+}
+
 func (s *PostgresStore) Load(ctx context.Context) (provider.ControlPlaneSnapshot, bool, error) {
 	if s == nil || s.pool == nil {
 		return provider.ControlPlaneSnapshot{}, false, errors.New("control plane postgres store is unavailable")

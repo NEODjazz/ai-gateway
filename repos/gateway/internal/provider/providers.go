@@ -34,7 +34,8 @@ type managedProviderRegistry struct {
 	current atomic.Pointer[map[string]ManagedProvider]
 }
 
-func (r *Router) ListProviders(context.Context) []ManagedProvider {
+func (r *Router) ListProviders(ctx context.Context) []ManagedProvider {
+	_ = r.refreshControlPlane(ctx)
 	if r == nil || r.providers == nil || r.providers.current.Load() == nil {
 		return nil
 	}
@@ -48,6 +49,11 @@ func (r *Router) ListProviders(context.Context) []ManagedProvider {
 }
 
 func (r *Router) CreateProvider(input ManagedProvider) (ManagedProvider, error) {
+	previous, unlock, err := r.beginControlMutation(context.Background())
+	if err != nil {
+		return ManagedProvider{}, err
+	}
+	defer unlock()
 	provider, err := normalizeManagedProvider(input)
 	if err != nil {
 		return ManagedProvider{}, err
@@ -59,10 +65,18 @@ func (r *Router) CreateProvider(input ManagedProvider) (ManagedProvider, error) 
 	next := cloneProviders(*current)
 	next[provider.ID] = provider
 	r.providers.current.Store(&next)
+	if err := r.persistControlMutation(context.Background(), previous); err != nil {
+		return ManagedProvider{}, err
+	}
 	return provider, nil
 }
 
 func (r *Router) UpdateProvider(id string, input ManagedProvider) (ManagedProvider, error) {
+	previous, unlock, err := r.beginControlMutation(context.Background())
+	if err != nil {
+		return ManagedProvider{}, err
+	}
+	defer unlock()
 	id = strings.TrimSpace(id)
 	current := r.providers.current.Load()
 	if _, found := (*current)[id]; !found {
@@ -85,10 +99,18 @@ func (r *Router) UpdateProvider(id string, input ManagedProvider) (ManagedProvid
 			}
 		}
 	}
+	if err := r.persistControlMutation(context.Background(), previous); err != nil {
+		return ManagedProvider{}, err
+	}
 	return provider, nil
 }
 
 func (r *Router) DeleteProvider(id string) error {
+	previous, unlock, err := r.beginControlMutation(context.Background())
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	id = strings.TrimSpace(id)
 	current := r.providers.current.Load()
 	if _, found := (*current)[id]; !found {
@@ -104,7 +126,7 @@ func (r *Router) DeleteProvider(id string) error {
 	next := cloneProviders(*current)
 	delete(next, id)
 	r.providers.current.Store(&next)
-	return nil
+	return r.persistControlMutation(context.Background(), previous)
 }
 
 func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {

@@ -110,6 +110,20 @@ func TestLoadRejectsInvalidProviderAdmissionConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadRequiresStableCredentialKeyForPersistentControlPlane(t *testing.T) {
+	t.Setenv("PROVIDER_CONTROL_PLANE_POSTGRES_DSN", "postgres://gateway@postgres/gateway")
+	t.Setenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY", "short")
+	if cfg := Load(); cfg.InitErr == nil {
+		t.Fatal("persistent control plane accepted a short encryption key")
+	}
+	t.Setenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY", "stable-key-at-least-16-characters")
+	t.Setenv("PROVIDER_CONTROL_PLANE_REFRESH_SECONDS", "3")
+	cfg := Load()
+	if cfg.InitErr != nil || cfg.Provider.ControlPlaneDSN == "" || cfg.Provider.ControlPlaneRefresh != 3*time.Second {
+		t.Fatalf("persistent control plane config was not loaded: %+v err=%v", cfg.Provider, cfg.InitErr)
+	}
+}
+
 func TestLoadRejectsInvalidMirrorConfiguration(t *testing.T) {
 	for _, raw := range []string{`[{"name":"broken","type":"demo","shadow":true,"max_parallel_requests":1,"mirror_percentage":101}]`, `[{"name":"broken","type":"demo","shadow":true,"max_parallel_requests":1,"mirror_timeout_ms":-1}]`, `[{"name":"broken","type":"demo","shadow":true}]`} {
 		t.Setenv("PROVIDERS_JSON", raw)

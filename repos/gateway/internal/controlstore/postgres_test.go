@@ -71,3 +71,74 @@ func TestPostgresControlPlaneSnapshotLifecycleIntegration(t *testing.T) {
 		t.Fatalf("revision=%d err=%v", current, err)
 	}
 }
+
+func TestPostgresControlPlaneRestoresManagedRouterIntegration(t *testing.T) {
+	dsn := os.Getenv("CONTROL_PLANE_POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("CONTROL_PLANE_POSTGRES_TEST_DSN is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS gateway_control_plane_state
+		(singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton), revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0), payload JSONB NOT NULL DEFAULT '{}'::jsonb, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM gateway_control_plane_state`); err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	store, err := NewPostgresStore(ctx, dsn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := []byte("stable-integration-master-key")
+	firstRuntime, err := provider.NewWithError(provider.Config{CredentialEncryptionKey: key, ControlPlaneStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := firstRuntime.(interface {
+		provider.ProviderController
+		provider.CredentialController
+		provider.DeploymentController
+		provider.ModelGroupController
+	})
+	if _, err := first.CreateProvider(provider.ManagedProvider{ID: "persisted", Type: "demo", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.CreateCredential(provider.CredentialInput{ID: "persisted-key", ProviderID: "persisted", Secret: "never-plaintext-at-rest"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.CreateModelDeployment(provider.ModelDeployment{ID: "persisted-deployment", ProviderID: "persisted", CredentialID: "persisted-key", Models: []string{"upstream"}, UpstreamModel: "upstream", Weight: 1, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.CreateModelGroup(provider.ModelGroup{ID: "persisted-public", DeploymentIDs: []string{"persisted-deployment"}, Strategy: "weighted", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	reopened, err := NewPostgresStore(ctx, dsn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	secondRuntime, err := provider.NewWithError(provider.Config{CredentialEncryptionKey: key, ControlPlaneStore: reopened})
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := secondRuntime.Models()
+	foundPublic := false
+	for _, model := range models {
+		foundPublic = foundPublic || model.ID == "persisted-public"
+	}
+	if len(models) != 2 || !foundPublic {
+		t.Fatalf("restored router models: %+v", models)
+	}
+	credentials := secondRuntime.(provider.CredentialController).ListCredentials(ctx)
+	if len(credentials) != 1 || credentials[0].ID != "persisted-key" {
+		t.Fatalf("restored credentials metadata: %+v", credentials)
+	}
+}

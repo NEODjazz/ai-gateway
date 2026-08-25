@@ -93,13 +93,15 @@ type FeatureConfig struct {
 }
 
 type ProviderConfig struct {
-	Default           string
-	Endpoints         []ProviderEndpointConfig
-	GuardrailPolicies map[string]GuardrailPolicyConfig
-	RoutingStrategy   string
-	AdaptiveEWMAAlpha float64
-	AffinityTTL       time.Duration
-	CredentialKey     string
+	Default             string
+	Endpoints           []ProviderEndpointConfig
+	GuardrailPolicies   map[string]GuardrailPolicyConfig
+	RoutingStrategy     string
+	AdaptiveEWMAAlpha   float64
+	AffinityTTL         time.Duration
+	CredentialKey       string
+	ControlPlaneDSN     string
+	ControlPlaneRefresh time.Duration
 }
 
 type GuardrailPolicyConfig struct {
@@ -143,6 +145,12 @@ func Load() Config {
 	semanticURL := strings.TrimSpace(os.Getenv("SEMANTIC_CACHE_EMBEDDING_URL"))
 	semanticModel := strings.TrimSpace(os.Getenv("SEMANTIC_CACHE_EMBEDDING_MODEL"))
 	var semanticErr error
+	controlPlaneDSN := strings.TrimSpace(os.Getenv("PROVIDER_CONTROL_PLANE_POSTGRES_DSN"))
+	credentialKey := os.Getenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY")
+	var controlPlaneErr error
+	if controlPlaneDSN != "" && len(credentialKey) < 16 {
+		controlPlaneErr = errors.New("provider credential encryption key must be at least 16 characters when control plane persistence is enabled")
+	}
 	if semanticTTL > 0 && (semanticURL == "" || semanticModel == "") {
 		semanticErr = errors.New("semantic cache embedding url and model are required when enabled")
 	}
@@ -171,13 +179,15 @@ func Load() Config {
 			DB: envInt("REDIS_DB", 0), Prefix: env("REDIS_PREFIX", "ai-gateway"),
 		},
 		Provider: ProviderConfig{
-			Default:           env("DEFAULT_PROVIDER", env("PROVIDER_TYPE", "demo")),
-			Endpoints:         providerEndpoints,
-			GuardrailPolicies: loadGuardrailPolicies(),
-			RoutingStrategy:   env("ROUTING_STRATEGY", "weighted"),
-			AdaptiveEWMAAlpha: envFloat("ADAPTIVE_ROUTING_EWMA_ALPHA", 0.2),
-			AffinityTTL:       time.Duration(envInt("RESPONSES_AFFINITY_TTL_SECONDS", 3600)) * time.Second,
-			CredentialKey:     os.Getenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY"),
+			Default:             env("DEFAULT_PROVIDER", env("PROVIDER_TYPE", "demo")),
+			Endpoints:           providerEndpoints,
+			GuardrailPolicies:   loadGuardrailPolicies(),
+			RoutingStrategy:     env("ROUTING_STRATEGY", "weighted"),
+			AdaptiveEWMAAlpha:   envFloat("ADAPTIVE_ROUTING_EWMA_ALPHA", 0.2),
+			AffinityTTL:         time.Duration(envInt("RESPONSES_AFFINITY_TTL_SECONDS", 3600)) * time.Second,
+			CredentialKey:       credentialKey,
+			ControlPlaneDSN:     controlPlaneDSN,
+			ControlPlaneRefresh: time.Duration(envInt("PROVIDER_CONTROL_PLANE_REFRESH_SECONDS", 1)) * time.Second,
 		},
 		Catalog: catalog,
 		Telemetry: TelemetryConfig{
@@ -197,7 +207,7 @@ func Load() Config {
 			TryItOutEnabled: envBool("API_DOCS_TRY_IT_OUT_ENABLED", false),
 		},
 		AdminUI: AdminUIConfig{Enabled: envBool("ADMIN_UI_ENABLED", true)},
-		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr),
+		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr),
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
 				Required: envBool("AUTH_REQUIRED", true),

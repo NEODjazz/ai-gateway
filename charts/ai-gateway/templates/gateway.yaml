@@ -105,6 +105,20 @@ spec:
               value: {{ .Values.gateway.routing.adaptiveEwmaAlpha | quote }}
             - name: RESPONSES_AFFINITY_TTL_SECONDS
               value: {{ .Values.gateway.routing.responsesAffinityTtlSeconds | quote }}
+            - name: PROVIDER_CONTROL_PLANE_REFRESH_SECONDS
+              value: {{ .Values.gateway.controlPlane.refreshSeconds | quote }}
+            - name: PROVIDER_CONTROL_PLANE_POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gateway.providerSecretName" . }}
+                  key: PROVIDER_CONTROL_PLANE_POSTGRES_DSN
+                  optional: true
+            - name: PROVIDER_CREDENTIAL_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gateway.providerSecretName" . }}
+                  key: PROVIDER_CREDENTIAL_ENCRYPTION_KEY
+                  optional: true
             - name: REDIS_ADDR
               value: {{ .Values.gateway.redis.addr | quote }}
             - name: REDIS_DB

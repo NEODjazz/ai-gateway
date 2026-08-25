@@ -122,6 +122,8 @@ func writeCredentialManagementError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "credential_in_use", "credential is used by a model deployment")
 	case errors.Is(err, provider.ErrInvalidCredential):
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid credential")
+	case errors.Is(err, provider.ErrControlPlaneConflict):
+		writeError(w, http.StatusConflict, "revision_conflict", "control plane changed; retry the request")
 	default:
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "credential management failed")
 	}

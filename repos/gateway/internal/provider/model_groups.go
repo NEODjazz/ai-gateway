@@ -32,7 +32,8 @@ type modelGroupRegistry struct {
 	current atomic.Pointer[map[string]ModelGroup]
 }
 
-func (r *Router) ListModelGroups(context.Context) []ModelGroup {
+func (r *Router) ListModelGroups(ctx context.Context) []ModelGroup {
+	_ = r.refreshControlPlane(ctx)
 	if r == nil || r.modelGroups == nil || r.modelGroups.current.Load() == nil {
 		return nil
 	}
@@ -47,6 +48,11 @@ func (r *Router) ListModelGroups(context.Context) []ModelGroup {
 }
 
 func (r *Router) CreateModelGroup(input ModelGroup) (ModelGroup, error) {
+	previous, unlock, err := r.beginControlMutation(context.Background())
+	if err != nil {
+		return ModelGroup{}, err
+	}
+	defer unlock()
 	group, err := r.normalizeModelGroup(input)
 	if err != nil {
 		return ModelGroup{}, err
@@ -58,10 +64,18 @@ func (r *Router) CreateModelGroup(input ModelGroup) (ModelGroup, error) {
 	next := cloneModelGroups(*current)
 	next[group.ID] = group
 	r.modelGroups.current.Store(&next)
+	if err := r.persistControlMutation(context.Background(), previous); err != nil {
+		return ModelGroup{}, err
+	}
 	return group, nil
 }
 
 func (r *Router) UpdateModelGroup(id string, input ModelGroup) (ModelGroup, error) {
+	previous, unlock, err := r.beginControlMutation(context.Background())
+	if err != nil {
+		return ModelGroup{}, err
+	}
+	defer unlock()
 	id = strings.TrimSpace(id)
 	current := r.modelGroups.current.Load()
 	if _, found := (*current)[id]; !found {
@@ -75,10 +89,18 @@ func (r *Router) UpdateModelGroup(id string, input ModelGroup) (ModelGroup, erro
 	next := cloneModelGroups(*current)
 	next[id] = group
 	r.modelGroups.current.Store(&next)
+	if err := r.persistControlMutation(context.Background(), previous); err != nil {
+		return ModelGroup{}, err
+	}
 	return group, nil
 }
 
 func (r *Router) DeleteModelGroup(id string) error {
+	previous, unlock, err := r.beginControlMutation(context.Background())
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	id = strings.TrimSpace(id)
 	current := r.modelGroups.current.Load()
 	if _, found := (*current)[id]; !found {
@@ -87,7 +109,7 @@ func (r *Router) DeleteModelGroup(id string) error {
 	next := cloneModelGroups(*current)
 	delete(next, id)
 	r.modelGroups.current.Store(&next)
-	return nil
+	return r.persistControlMutation(context.Background(), previous)
 }
 
 func (r *Router) normalizeModelGroup(input ModelGroup) (ModelGroup, error) {

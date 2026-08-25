@@ -102,6 +102,10 @@ func (h Handler) mutateModelDeployment(w http.ResponseWriter, r *http.Request, i
 			writeError(w, http.StatusBadRequest, "invalid_request", "invalid model deployment")
 			return
 		}
+		if errors.Is(err, provider.ErrControlPlaneConflict) {
+			writeError(w, http.StatusConflict, "revision_conflict", "control plane changed; retry the request")
+			return
+		}
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "runtime deployment update failed")
 		return
 	}
@@ -138,6 +142,10 @@ func (h Handler) DeleteModelDeployment(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, provider.ErrDeploymentInUse) {
 			writeError(w, http.StatusConflict, "deployment_in_use", "model deployment is used by a model group")
+			return
+		}
+		if errors.Is(err, provider.ErrControlPlaneConflict) {
+			writeError(w, http.StatusConflict, "revision_conflict", "control plane changed; retry the request")
 			return
 		}
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "runtime deployment deletion failed")

@@ -96,6 +96,8 @@ type Config struct {
 	SemanticEmbeddingAPIKey string
 	SemanticEmbeddingModel  string
 	CredentialEncryptionKey []byte
+	ControlPlaneStore       ControlPlaneStore
+	ControlPlaneRefresh     time.Duration
 }
 
 type ProviderObserver interface {
@@ -123,6 +125,8 @@ type Endpoint struct {
 	MirrorPercentage      float64
 	MirrorTimeout         time.Duration
 	Provider              Client
+	BaseURL               string
+	CredentialID          string
 }
 
 type Router struct {
@@ -143,10 +147,21 @@ type Router struct {
 	providers       *managedProviderRegistry
 	credentials     *credentialVault
 	modelGroups     *modelGroupRegistry
+	controlPlane    *controlPlaneRuntime
 	guardrails      *guardrailRegistry
 }
 
 func New(cfg Config) Provider {
+	result, err := NewWithError(cfg)
+	if err != nil {
+		fallback := cfg
+		fallback.ControlPlaneStore = nil
+		result, _ = NewWithError(fallback)
+	}
+	return result
+}
+
+func NewWithError(cfg Config) (Provider, error) {
 	endpoints := make([]Endpoint, 0, len(cfg.Endpoints))
 	initialDeployments := make(map[string]ModelDeployment)
 	initialProviders := make(map[string]ManagedProvider)
@@ -195,6 +210,7 @@ func New(cfg Config) Provider {
 			MirrorPercentage:      mirrorPercentage,
 			MirrorTimeout:         mirrorTimeout,
 			Provider:              provider,
+			BaseURL:               strings.TrimRight(endpoint.BaseURL, "/"),
 		})
 		enabled := endpoint.Enabled == nil || *endpoint.Enabled
 		deploymentWeight := endpoint.Weight
@@ -262,7 +278,31 @@ func New(cfg Config) Provider {
 	}
 	router.guardrails = &guardrailRegistry{}
 	router.guardrails.current.Store(&initialGuardrails)
-	return router
+	if cfg.ControlPlaneStore != nil {
+		refresh := cfg.ControlPlaneRefresh
+		if refresh <= 0 {
+			refresh = DefaultControlPlaneRefreshInterval
+		}
+		router.controlPlane = &controlPlaneRuntime{store: cfg.ControlPlaneStore, refreshInterval: refresh}
+		snapshot, found, err := cfg.ControlPlaneStore.Load(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		if found && snapshot.Revision > 0 {
+			if err := router.applyControlPlaneSnapshot(snapshot); err != nil {
+				return nil, err
+			}
+			router.controlPlane.revision = snapshot.Revision
+		} else {
+			revision, err := cfg.ControlPlaneStore.Save(context.Background(), 0, router.controlPlaneSnapshot())
+			if err != nil {
+				return nil, err
+			}
+			router.controlPlane.revision = revision
+		}
+		router.controlPlane.nextRefresh.Store(time.Now().Add(refresh).UnixNano())
+	}
+	return router, nil
 }
 
 func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {

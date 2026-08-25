@@ -50,6 +50,12 @@ gateway:
     strategy: weighted
     adaptiveEwmaAlpha: "0.2"
     responsesAffinityTtlSeconds: 3600
+  controlPlane:
+    # PostgreSQL is the source of truth; empty DSN keeps runtime-only management.
+    postgresDsn: ""
+    # Required (minimum 16 characters) whenever postgresDsn is set.
+    credentialEncryptionKey: ""
+    refreshSeconds: 1
   management:
     authUrl: http://ai-gateway-auth:8082
     # Supply the same value to the auth chart from an encrypted values source.

@@ -74,7 +74,8 @@ func newCredentialVault(keyMaterial []byte) *credentialVault {
 	return &credentialVault{aead: aead, current: map[string]encryptedCredential{}}
 }
 
-func (r *Router) ListCredentials(context.Context) []Credential {
+func (r *Router) ListCredentials(ctx context.Context) []Credential {
+	_ = r.refreshControlPlane(ctx)
 	if r == nil || r.credentials == nil {
 		return nil
 	}
@@ -97,6 +98,11 @@ func (r *Router) UpdateCredential(id string, input CredentialInput) (Credential,
 }
 
 func (r *Router) storeCredential(id string, input CredentialInput) (Credential, error) {
+	previous, unlock, err := r.beginControlMutation(context.Background())
+	if err != nil {
+		return Credential{}, err
+	}
+	defer unlock()
 	if r == nil || r.credentials == nil {
 		return Credential{}, ErrCredentialNotFound
 	}
@@ -149,10 +155,18 @@ func (r *Router) storeCredential(id string, input CredentialInput) (Credential, 
 			}
 		}
 	}
+	if err := r.persistControlMutation(context.Background(), previous); err != nil {
+		return Credential{}, err
+	}
 	return credential, nil
 }
 
 func (r *Router) DeleteCredential(id string) error {
+	previous, unlock, err := r.beginControlMutation(context.Background())
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if r == nil || r.credentials == nil {
 		return ErrCredentialNotFound
 	}
@@ -165,12 +179,13 @@ func (r *Router) DeleteCredential(id string) error {
 		}
 	}
 	r.credentials.mu.Lock()
-	defer r.credentials.mu.Unlock()
 	if _, found := r.credentials.current[id]; !found {
+		r.credentials.mu.Unlock()
 		return ErrCredentialNotFound
 	}
 	delete(r.credentials.current, id)
-	return nil
+	r.credentials.mu.Unlock()
+	return r.persistControlMutation(context.Background(), previous)
 }
 
 func (r *Router) credentialSecret(id string) (string, error) {

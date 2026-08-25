@@ -43,6 +43,9 @@ func (r *Router) TestProvider(ctx context.Context, providerID, credentialID stri
 }
 
 func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credentialID string) ([]DiscoveredModel, error) {
+	if err := r.refreshControlPlane(ctx); err != nil {
+		return nil, err
+	}
 	managed, found := r.managedProvider(providerID)
 	if !found {
 		return nil, ErrProviderNotFound

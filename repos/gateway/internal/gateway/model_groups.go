@@ -119,6 +119,8 @@ func writeModelGroupError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "already_exists", "model group already exists")
 	case errors.Is(err, provider.ErrInvalidModelGroup):
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid model group")
+	case errors.Is(err, provider.ErrControlPlaneConflict):
+		writeError(w, http.StatusConflict, "revision_conflict", "control plane changed; retry the request")
 	default:
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "model group management failed")
 	}

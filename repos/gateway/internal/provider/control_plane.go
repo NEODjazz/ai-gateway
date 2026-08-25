@@ -3,6 +3,10 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -31,3 +35,176 @@ type ControlPlaneStore interface {
 var ErrControlPlaneConflict = errors.New("control plane revision conflict")
 
 const DefaultControlPlaneRefreshInterval = time.Second
+
+type controlPlaneRuntime struct {
+	mu              sync.Mutex
+	store           ControlPlaneStore
+	revision        int64
+	refreshInterval time.Duration
+	nextRefresh     atomic.Int64
+}
+
+func (r *Router) controlPlaneSnapshot() ControlPlaneSnapshot {
+	snapshot := ControlPlaneSnapshot{}
+	if current := r.providers.current.Load(); current != nil {
+		for _, item := range *current {
+			snapshot.Providers = append(snapshot.Providers, item)
+		}
+	}
+	r.credentials.mu.RLock()
+	for _, item := range r.credentials.current {
+		snapshot.Credentials = append(snapshot.Credentials, EncryptedCredentialSnapshot{Credential: item.Credential, Nonce: append([]byte(nil), item.Nonce...), Ciphertext: append([]byte(nil), item.Ciphertext...)})
+	}
+	r.credentials.mu.RUnlock()
+	if current := r.deployments.current.Load(); current != nil {
+		for _, item := range *current {
+			item.Models = append([]string(nil), item.Models...)
+			item.Capabilities = append([]string(nil), item.Capabilities...)
+			snapshot.Deployments = append(snapshot.Deployments, item)
+		}
+	}
+	if current := r.modelGroups.current.Load(); current != nil {
+		for _, item := range *current {
+			item.DeploymentIDs = append([]string(nil), item.DeploymentIDs...)
+			snapshot.ModelGroups = append(snapshot.ModelGroups, item)
+		}
+	}
+	sort.Slice(snapshot.Providers, func(i, j int) bool { return snapshot.Providers[i].ID < snapshot.Providers[j].ID })
+	sort.Slice(snapshot.Credentials, func(i, j int) bool {
+		return snapshot.Credentials[i].Credential.ID < snapshot.Credentials[j].Credential.ID
+	})
+	sort.Slice(snapshot.Deployments, func(i, j int) bool { return snapshot.Deployments[i].ID < snapshot.Deployments[j].ID })
+	sort.Slice(snapshot.ModelGroups, func(i, j int) bool { return snapshot.ModelGroups[i].ID < snapshot.ModelGroups[j].ID })
+	return snapshot
+}
+
+func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error {
+	providers := make(map[string]ManagedProvider, len(snapshot.Providers))
+	for _, item := range snapshot.Providers {
+		normalized, err := normalizeManagedProvider(item)
+		if err != nil || providers[normalized.ID].ID != "" {
+			return fmt.Errorf("invalid persisted provider %q", item.ID)
+		}
+		providers[normalized.ID] = normalized
+	}
+	credentials := make(map[string]encryptedCredential, len(snapshot.Credentials))
+	for _, item := range snapshot.Credentials {
+		id := item.Credential.ID
+		if id == "" || credentials[id].ID != "" || len(item.Nonce) != r.credentials.aead.NonceSize() || len(item.Ciphertext) == 0 {
+			return fmt.Errorf("invalid persisted credential %q", id)
+		}
+		if _, err := r.credentials.aead.Open(nil, item.Nonce, item.Ciphertext, []byte(id)); err != nil {
+			return fmt.Errorf("decrypt persisted credential %q: %w", id, err)
+		}
+		credentials[id] = encryptedCredential{Credential: item.Credential, Nonce: append([]byte(nil), item.Nonce...), Ciphertext: append([]byte(nil), item.Ciphertext...)}
+	}
+	deployments := make(map[string]ModelDeployment, len(snapshot.Deployments))
+	for _, item := range snapshot.Deployments {
+		if item.ID == "" || deployments[item.ID].ID != "" || providers[item.ProviderID].ID == "" {
+			return fmt.Errorf("invalid persisted deployment %q", item.ID)
+		}
+		if item.CredentialID != "" && credentials[item.CredentialID].ID == "" {
+			return fmt.Errorf("persisted deployment %q references unknown credential", item.ID)
+		}
+		deployments[item.ID] = item
+	}
+	groups := make(map[string]ModelGroup, len(snapshot.ModelGroups))
+	for _, item := range snapshot.ModelGroups {
+		if item.ID == "" || groups[item.ID].ID != "" {
+			return fmt.Errorf("invalid persisted model group %q", item.ID)
+		}
+		for _, deploymentID := range item.DeploymentIDs {
+			if deployments[deploymentID].ID == "" {
+				return fmt.Errorf("persisted model group %q references unknown deployment", item.ID)
+			}
+		}
+		groups[item.ID] = item
+	}
+	previousEndpoints := map[string]Endpoint{}
+	for _, endpoint := range r.configuredEndpoints() {
+		previousEndpoints[endpoint.Name] = endpoint
+	}
+	r.providers.current.Store(&providers)
+	r.credentials.mu.Lock()
+	r.credentials.current = credentials
+	r.credentials.mu.Unlock()
+	r.deployments.current.Store(&deployments)
+	r.modelGroups.current.Store(&groups)
+	endpoints := make([]Endpoint, 0, len(deployments))
+	for _, deployment := range deployments {
+		managed := providers[deployment.ProviderID]
+		if existing, found := previousEndpoints[deployment.ID]; found && existing.Type == managed.Type && existing.BaseURL == managed.BaseURL && existing.CredentialID == deployment.CredentialID {
+			endpoints = append(endpoints, existing)
+			continue
+		}
+		endpoint, err := r.endpointForDeployment(deployment)
+		if err != nil {
+			return fmt.Errorf("build persisted deployment %q: %w", deployment.ID, err)
+		}
+		endpoints = append(endpoints, endpoint)
+	}
+	sort.SliceStable(endpoints, func(i, j int) bool { return endpoints[i].Priority < endpoints[j].Priority })
+	r.endpointState.current.Store(&endpoints)
+	return nil
+}
+
+func (r *Router) beginControlMutation(ctx context.Context) (ControlPlaneSnapshot, func(), error) {
+	if r == nil || r.controlPlane == nil || r.controlPlane.store == nil {
+		return ControlPlaneSnapshot{}, func() {}, nil
+	}
+	r.controlPlane.mu.Lock()
+	if err := r.refreshControlPlaneLocked(ctx, true); err != nil {
+		r.controlPlane.mu.Unlock()
+		return ControlPlaneSnapshot{}, func() {}, err
+	}
+	return r.controlPlaneSnapshot(), r.controlPlane.mu.Unlock, nil
+}
+
+func (r *Router) persistControlMutation(ctx context.Context, previous ControlPlaneSnapshot) error {
+	if r == nil || r.controlPlane == nil || r.controlPlane.store == nil {
+		return nil
+	}
+	revision, err := r.controlPlane.store.Save(ctx, r.controlPlane.revision, r.controlPlaneSnapshot())
+	if err != nil {
+		_ = r.applyControlPlaneSnapshot(previous)
+		return err
+	}
+	r.controlPlane.revision = revision
+	r.controlPlane.nextRefresh.Store(time.Now().Add(r.controlPlane.refreshInterval).UnixNano())
+	return nil
+}
+
+func (r *Router) refreshControlPlane(ctx context.Context) error {
+	if r == nil || r.controlPlane == nil || r.controlPlane.store == nil || time.Now().UnixNano() < r.controlPlane.nextRefresh.Load() {
+		return nil
+	}
+	r.controlPlane.mu.Lock()
+	defer r.controlPlane.mu.Unlock()
+	return r.refreshControlPlaneLocked(ctx, false)
+}
+
+func (r *Router) refreshControlPlaneLocked(ctx context.Context, force bool) error {
+	if !force && time.Now().UnixNano() < r.controlPlane.nextRefresh.Load() {
+		return nil
+	}
+	r.controlPlane.nextRefresh.Store(time.Now().Add(r.controlPlane.refreshInterval).UnixNano())
+	revision, err := r.controlPlane.store.Revision(ctx)
+	if err != nil {
+		return err
+	}
+	if revision <= r.controlPlane.revision {
+		return nil
+	}
+	snapshot, found, err := r.controlPlane.store.Load(ctx)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return errors.New("persisted control plane disappeared")
+	}
+	if err := r.applyControlPlaneSnapshot(snapshot); err != nil {
+		return err
+	}
+	r.controlPlane.revision = snapshot.Revision
+	return nil
+}

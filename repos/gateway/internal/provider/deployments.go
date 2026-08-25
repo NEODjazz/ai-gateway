@@ -49,6 +49,7 @@ type endpointRegistry struct {
 }
 
 func (r *Router) ListModelDeployments(ctx context.Context) []ModelDeployment {
+	_ = r.refreshControlPlane(ctx)
 	if r == nil {
 		return nil
 	}
@@ -90,6 +91,11 @@ func (r *Router) ListModelDeployments(ctx context.Context) []ModelDeployment {
 }
 
 func (r *Router) UpdateModelDeployment(id string, deployment ModelDeployment) (ModelDeployment, error) {
+	previous, unlock, err := r.beginControlMutation(context.Background())
+	if err != nil {
+		return ModelDeployment{}, err
+	}
+	defer unlock()
 	if r == nil || r.deployments == nil {
 		return ModelDeployment{}, ErrDeploymentNotFound
 	}
@@ -133,10 +139,18 @@ func (r *Router) UpdateModelDeployment(id string, deployment ModelDeployment) (M
 	next[id] = deployment
 	r.deployments.current.Store(&next)
 	r.replaceRuntimeEndpoint(id, endpoint)
+	if err := r.persistControlMutation(context.Background(), previous); err != nil {
+		return ModelDeployment{}, err
+	}
 	return deployment, nil
 }
 
 func (r *Router) CreateModelDeployment(deployment ModelDeployment) (ModelDeployment, error) {
+	previous, unlock, err := r.beginControlMutation(context.Background())
+	if err != nil {
+		return ModelDeployment{}, err
+	}
+	defer unlock()
 	if r == nil || r.deployments == nil {
 		return ModelDeployment{}, ErrInvalidDeployment
 	}
@@ -169,10 +183,18 @@ func (r *Router) CreateModelDeployment(deployment ModelDeployment) (ModelDeploym
 	next[deployment.ID] = deployment
 	r.deployments.current.Store(&next)
 	r.replaceRuntimeEndpoint(deployment.ID, endpoint)
+	if err := r.persistControlMutation(context.Background(), previous); err != nil {
+		return ModelDeployment{}, err
+	}
 	return deployment, nil
 }
 
 func (r *Router) DeleteModelDeployment(id string) error {
+	previous, unlock, err := r.beginControlMutation(context.Background())
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if r == nil || r.deployments == nil {
 		return ErrDeploymentNotFound
 	}
@@ -196,10 +218,11 @@ func (r *Router) DeleteModelDeployment(id string) error {
 	}
 	r.deployments.current.Store(&next)
 	r.removeRuntimeEndpoint(id)
-	return nil
+	return r.persistControlMutation(context.Background(), previous)
 }
 
 func (r Router) runtimeEndpoints() []Endpoint {
+	_ = (&r).refreshControlPlane(context.Background())
 	configured := r.configuredEndpoints()
 	if r.deployments == nil {
 		return configured
@@ -317,7 +340,7 @@ func (r *Router) endpointForDeployment(deployment ModelDeployment) (Endpoint, er
 			aliases[model] = deployment.UpstreamModel
 		}
 	}
-	return Endpoint{Name: deployment.ID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(0, 0, 0)}, nil
+	return Endpoint{Name: deployment.ID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(0, 0, 0), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID}, nil
 }
 
 func (r *Router) configuredEndpoints() []Endpoint {

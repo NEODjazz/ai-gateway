@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/controlstore"
 	"ai-gateway-gateway/internal/gateway"
 	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
@@ -36,6 +37,14 @@ func main() {
 	redisStore := redisstore.New(redisstore.Config{
 		Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB, Prefix: cfg.Redis.Prefix,
 	})
+	var providerControlStore *controlstore.PostgresStore
+	if cfg.Provider.ControlPlaneDSN != "" {
+		providerControlStore, err = controlstore.NewPostgresStore(appCtx, cfg.Provider.ControlPlaneDSN, redisStore)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer providerControlStore.Close()
+	}
 
 	gatewayPipeline := modules.NewPipelineWithObserver([]modules.Module{
 		modules.Auth(cfg.Modules.Auth.Required, cfg.Modules.Auth.URL),
@@ -71,13 +80,18 @@ func main() {
 		SemanticEmbeddingAPIKey: cfg.Cache.Semantic.EmbeddingAPIKey,
 		SemanticEmbeddingModel:  cfg.Cache.Semantic.EmbeddingModel,
 		CredentialEncryptionKey: []byte(cfg.Provider.CredentialKey),
+		ControlPlaneStore:       providerControlStore,
+		ControlPlaneRefresh:     cfg.Provider.ControlPlaneRefresh,
 	}
 	if redisStore != nil {
 		providerConfig.CacheStore = redisStore
 		providerConfig.SessionStore = redisStore
 		providerConfig.CircuitStore = redisStore
 	}
-	llmProvider := provider.New(providerConfig)
+	llmProvider, err := provider.NewWithError(providerConfig)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	var rateLimits gateway.RateLimitStore = gateway.NewMemoryRateLimitStore()
 	if redisStore != nil {
@@ -86,6 +100,17 @@ func main() {
 	var readiness func(context.Context) error
 	if redisStore != nil {
 		readiness = redisStore.Ping
+	}
+	if providerControlStore != nil {
+		redisReadiness := readiness
+		readiness = func(ctx context.Context) error {
+			if redisReadiness != nil {
+				if err := redisReadiness(ctx); err != nil {
+					return err
+				}
+			}
+			return providerControlStore.Ping(ctx)
+		}
 	}
 	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithMCPRegistry(gateway.NewMCPRegistry())
 	if cfg.APIDocs.Enabled {

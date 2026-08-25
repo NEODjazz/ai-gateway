@@ -122,6 +122,8 @@ func writeProviderManagementError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "provider_in_use", "provider is used by a model deployment")
 	case errors.Is(err, provider.ErrInvalidProvider):
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid provider")
+	case errors.Is(err, provider.ErrControlPlaneConflict):
+		writeError(w, http.StatusConflict, "revision_conflict", "control plane changed; retry the request")
 	default:
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "provider management failed")
 	}
