@@ -47,22 +47,19 @@ func main() {
 		modules.BillingWithSecret(cfg.Modules.Billing.Required, cfg.Modules.Billing.URL, cfg.Modules.Billing.Secret),
 	}, metrics)
 
-	modelRegistry := modelcatalog.NewRegistry(cfg.Catalog, redisStore, time.Second)
-	llmProvider := provider.New(provider.Config{
+	modelRegistry := modelcatalog.NewRegistry(cfg.Catalog, registryStoreFor(redisStore), time.Second)
+	providerConfig := provider.Config{
 		Default:                 cfg.Provider.Default,
 		Endpoints:               cfg.Provider.Endpoints,
 		GuardrailPolicies:       cfg.Provider.GuardrailPolicies,
 		Modules:                 providerPipeline,
 		CacheTTL:                time.Duration(cfg.Cache.TTLSeconds) * time.Second,
 		CacheMaxBytes:           cfg.Cache.MaxBytes,
-		CacheStore:              redisStore,
 		Catalog:                 cfg.Catalog,
 		CatalogRegistry:         modelRegistry,
 		Observer:                metrics,
 		RoutingStrategy:         cfg.Provider.RoutingStrategy,
 		AdaptiveEWMAAlpha:       cfg.Provider.AdaptiveEWMAAlpha,
-		SessionStore:            redisStore,
-		CircuitStore:            redisStore,
 		AffinityTTL:             cfg.Provider.AffinityTTL,
 		SemanticCacheTTL:        time.Duration(cfg.Cache.Semantic.TTLSeconds) * time.Second,
 		SemanticCacheThreshold:  cfg.Cache.Semantic.Threshold,
@@ -71,7 +68,13 @@ func main() {
 		SemanticEmbeddingURL:    cfg.Cache.Semantic.EmbeddingURL,
 		SemanticEmbeddingAPIKey: cfg.Cache.Semantic.EmbeddingAPIKey,
 		SemanticEmbeddingModel:  cfg.Cache.Semantic.EmbeddingModel,
-	})
+	}
+	if redisStore != nil {
+		providerConfig.CacheStore = redisStore
+		providerConfig.SessionStore = redisStore
+		providerConfig.CircuitStore = redisStore
+	}
+	llmProvider := provider.New(providerConfig)
 
 	var rateLimits gateway.RateLimitStore = gateway.NewMemoryRateLimitStore()
 	if redisStore != nil {
@@ -125,4 +128,11 @@ func main() {
 	if serverFailed {
 		os.Exit(1)
 	}
+}
+
+func registryStoreFor(store *redisstore.Store) modelcatalog.RegistryStore {
+	if store == nil {
+		return nil
+	}
+	return store
 }
