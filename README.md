@@ -245,6 +245,15 @@ the scoped `BILLING_SHARED_SECRET`. This secret is independent from the client
 Bearer token, `MANAGEMENT_SHARED_SECRET`, and
 `BILLING_MANAGEMENT_SHARED_SECRET`.
 
+Every configured admin mutation writes an append-only PostgreSQL audit pair:
+an `attempted` event is committed before the side effect, followed by a
+`succeeded` or `failed` outcome event. This covers virtual keys, budget policies,
+and runtime model-catalog replacement. If the initial audit append is
+unavailable, the mutation fails closed. Administrators can page and filter the
+journal with `GET /admin/v1/audit/events?before_id=&limit=&actor_id=&action=`;
+request IDs, actor IDs, credential fingerprints, targets, and outcomes are
+stored, while Bearer tokens and request bodies are never included.
+
 The gateway tries endpoints in `priority` order. If an endpoint returns an error or is unavailable, the router automatically tries the next compatible endpoint.
 
 Retries and cooldown are configured per endpoint with `max_retries`,

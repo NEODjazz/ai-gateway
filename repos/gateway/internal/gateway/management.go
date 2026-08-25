@@ -136,11 +136,20 @@ func (h Handler) CreateVirtualKey(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issued, err := h.management.CreateVirtualKey(r.Context(), managementAudit(req), spec)
+	audit := managementAudit(req)
+	event := AuditEvent{Action: "virtual_key.create", TargetType: "virtual_key"}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	issued, err := h.management.CreateVirtualKey(r.Context(), audit, spec)
 	if err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
 		writeManagementFailure(w, err)
 		return
 	}
+	event.TargetID = issued.ID
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
 	writeJSON(w, http.StatusCreated, issued)
 }
 
@@ -162,11 +171,20 @@ func (h Handler) RotateVirtualKey(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issued, err := h.management.RotateVirtualKey(r.Context(), managementAudit(req), id, spec)
+	audit := managementAudit(req)
+	event := AuditEvent{Action: "virtual_key.rotate", TargetType: "virtual_key", TargetID: id}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	issued, err := h.management.RotateVirtualKey(r.Context(), audit, id, spec)
 	if err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
 		writeManagementFailure(w, err)
 		return
 	}
+	event.TargetID = issued.ID
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
 	writeJSON(w, http.StatusCreated, issued)
 }
 
@@ -184,10 +202,18 @@ func (h Handler) RevokeVirtualKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid virtual key id")
 		return
 	}
-	if err := h.management.RevokeVirtualKey(r.Context(), managementAudit(req), id); err != nil {
+	audit := managementAudit(req)
+	event := AuditEvent{Action: "virtual_key.revoke", TargetType: "virtual_key", TargetID: id}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	if err := h.management.RevokeVirtualKey(r.Context(), audit, id); err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
 		writeManagementFailure(w, err)
 		return
 	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
 	w.WriteHeader(http.StatusNoContent)
 }
 

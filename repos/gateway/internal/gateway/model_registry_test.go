@@ -13,11 +13,12 @@ import (
 func TestAdminCanReplaceRuntimeModelCatalog(t *testing.T) {
 	initial, _ := modelcatalog.Parse(`{"version":"v1","models":[]}`)
 	registry := modelcatalog.NewRegistry(initial, nil, time.Second)
-	handler := NewHandler(modulesPipeline("admin"), modelsProvider{}).WithModelRegistry(registry)
+	auditClient := &recordingAuditClient{}
+	handler := NewHandler(modulesPipeline("admin"), modelsProvider{}).WithModelRegistry(registry).WithAudit(auditClient)
 	request := httptest.NewRequest(http.MethodPut, "/admin/v1/model-catalog", strings.NewReader(`{"version":"v2","unknown_model_policy":"deny","models":[{"provider":"ollama","model":"qwen","capabilities":["chat"],"input_cost_per_1m":1,"currency":"USD"}]}`))
 	response := httptest.NewRecorder()
 	Routes(handler).ServeHTTP(response, request)
-	if response.Code != http.StatusOK || registry.Current(request.Context()).Version != "v2" {
+	if response.Code != http.StatusOK || registry.Current(request.Context()).Version != "v2" || len(auditClient.events) != 2 || auditClient.events[1].TargetID != "v2" {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }

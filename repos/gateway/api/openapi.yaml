@@ -450,6 +450,31 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/audit/events:
+    get:
+      operationId: listManagementAuditEvents
+      tags: [Audit]
+      summary: List durable management audit events
+      description: Returns append-only attempted and terminal outcome events in descending ID order.
+      parameters:
+        - {name: before_id, in: query, schema: {type: integer, format: int64, minimum: 1}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: actor_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: action, in: query, schema: {type: string, maxLength: 128}}
+      responses:
+        '200':
+          description: Audit event page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/AuditEvent'}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
 components:
   securitySchemes:
     bearerAuth:
@@ -563,6 +588,21 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [id, occurred_at, request_id, actor_id, actor_credential_id, action, target_type, outcome]
+      properties:
+        id: {type: integer, format: int64, minimum: 1}
+        occurred_at: {type: string, format: date-time}
+        request_id: {type: string, maxLength: 128}
+        actor_id: {type: string, maxLength: 256}
+        actor_credential_id: {type: string, maxLength: 256}
+        action: {type: string, maxLength: 128}
+        target_type: {type: string, maxLength: 128}
+        target_id: {type: string, maxLength: 256}
+        outcome: {type: string, enum: [attempted, succeeded, failed]}
+        details: {type: object, additionalProperties: true}
     ModelCatalogEntry:
       type: object
       additionalProperties: false

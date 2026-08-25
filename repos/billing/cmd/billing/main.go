@@ -13,12 +13,21 @@ import (
 )
 
 func main() {
-	module := modules.NewBillingModule(true)
+	settings := modules.SettingsFromEnv()
+	module := modules.NewBillingModuleWithSettings(true, settings)
 	defer module.Close()
+	auditStore, auditErr := modules.NewPostgresAuditStore(settings.PostgresDSN)
+	if auditStore != nil {
+		defer auditStore.Close()
+	}
 
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := module.Ready(r.Context()); err != nil {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		if auditErr != nil || auditStore == nil || auditStore.Ready(r.Context()) != nil {
+			http.Error(w, "audit storage unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -28,6 +37,7 @@ func main() {
 	})
 	manager, managerErr := module.BudgetManager()
 	registerBudgetManagement(http.DefaultServeMux, manager, managerErr, os.Getenv("BILLING_MANAGEMENT_SHARED_SECRET"))
+	registerAuditManagement(http.DefaultServeMux, auditStore, auditErr, os.Getenv("BILLING_MANAGEMENT_SHARED_SECRET"))
 
 	http.HandleFunc("/usage", func(w http.ResponseWriter, r *http.Request) {
 		if !authorizeBillingUsage(w, r, os.Getenv("BILLING_SHARED_SECRET")) {

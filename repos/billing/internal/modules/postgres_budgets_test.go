@@ -219,7 +219,9 @@ func TestPostgresBudgetManagementLifecycleAndSummary(t *testing.T) {
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer pool.Close()
 	applyBudgetTestMigration(t, ctx, pool)
 	checker := NewPostgresBudgetPolicyChecker(dsn, time.Minute)
@@ -227,24 +229,41 @@ func TestPostgresBudgetManagementLifecycleAndSummary(t *testing.T) {
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
 	team := "managed-" + suffix
 	maxTokens := int64(100)
-	created, err := checker.CreateBudgetPolicy(ctx, BudgetPolicySpec{ScopeType:"team", ScopeID:team, Period:"day", MaxTokens:&maxTokens})
-	if err != nil { t.Fatal(err) }
-	if created.ID <= 0 || created.Currency != "USD" || !created.Enabled { t.Fatalf("created=%+v",created) }
-	if err := checker.Apply(ctx, budgetTestEvent("managed-request-"+suffix,team,25)); err != nil { t.Fatal(err) }
-	summary, found, err := checker.BudgetSummary(ctx,created.ID,time.Now())
-	if err != nil || !found { t.Fatalf("summary found=%v err=%v",found,err) }
-	if summary.UsedTokens != 25 || summary.RemainingTokens == nil || *summary.RemainingTokens != 75 { t.Fatalf("summary=%+v",summary) }
-	enabled := true; maxTokens = 200
-	updated, found, err := checker.UpdateBudgetPolicy(ctx,created.ID,BudgetPolicySpec{ScopeType:"team",ScopeID:team,Period:"week",Currency:"EUR",MaxTokens:&maxTokens,Enabled:&enabled})
-	if err != nil || !found || updated.Period!="week" || updated.Currency!="EUR" { t.Fatalf("updated=%+v found=%v err=%v",updated,found,err) }
-	if disabled, err := checker.DisableBudgetPolicy(ctx,created.ID); err != nil || !disabled { t.Fatalf("disabled=%v err=%v",disabled,err) }
-	got, found, err := checker.GetBudgetPolicy(ctx,created.ID)
-	if err != nil || !found || got.Enabled { t.Fatalf("got=%+v found=%v err=%v",got,found,err) }
+	created, err := checker.CreateBudgetPolicy(ctx, BudgetPolicySpec{ScopeType: "team", ScopeID: team, Period: "day", MaxTokens: &maxTokens})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ID <= 0 || created.Currency != "USD" || !created.Enabled {
+		t.Fatalf("created=%+v", created)
+	}
+	if err := checker.Apply(ctx, budgetTestEvent("managed-request-"+suffix, team, 25)); err != nil {
+		t.Fatal(err)
+	}
+	summary, found, err := checker.BudgetSummary(ctx, created.ID, time.Now())
+	if err != nil || !found {
+		t.Fatalf("summary found=%v err=%v", found, err)
+	}
+	if summary.UsedTokens != 25 || summary.RemainingTokens == nil || *summary.RemainingTokens != 75 {
+		t.Fatalf("summary=%+v", summary)
+	}
+	enabled := true
+	maxTokens = 200
+	updated, found, err := checker.UpdateBudgetPolicy(ctx, created.ID, BudgetPolicySpec{ScopeType: "team", ScopeID: team, Period: "week", Currency: "EUR", MaxTokens: &maxTokens, Enabled: &enabled})
+	if err != nil || !found || updated.Period != "week" || updated.Currency != "EUR" {
+		t.Fatalf("updated=%+v found=%v err=%v", updated, found, err)
+	}
+	if disabled, err := checker.DisableBudgetPolicy(ctx, created.ID); err != nil || !disabled {
+		t.Fatalf("disabled=%v err=%v", disabled, err)
+	}
+	got, found, err := checker.GetBudgetPolicy(ctx, created.ID)
+	if err != nil || !found || got.Enabled {
+		t.Fatalf("got=%+v found=%v err=%v", got, found, err)
+	}
 }
 
 func applyBudgetTestMigration(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	for _, name := range []string{"004_budgets.sql", "005_pricing_snapshots.sql"} {
+	for _, name := range []string{"004_budgets.sql", "005_pricing_snapshots.sql", "006_management_audit.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
 			t.Fatal(err)

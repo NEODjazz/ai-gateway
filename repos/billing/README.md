@@ -168,4 +168,10 @@ migrations/postgres/001_financial_core.sql
 migrations/postgres/002_billing_outbox.sql
 migrations/postgres/004_budgets.sql
 migrations/postgres/005_pricing_snapshots.sql
+migrations/postgres/006_management_audit.sql
 ```
+
+`management_audit_events` is an append-only management journal queried through
+the gateway admin API. The internal append/list contract is protected by
+`BILLING_MANAGEMENT_SHARED_SECRET`; audit identity comes from authenticated
+gateway headers rather than the JSON body.

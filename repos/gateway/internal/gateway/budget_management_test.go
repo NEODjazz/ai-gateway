@@ -40,13 +40,14 @@ func (c *recordingBudgetClient) Summary(context.Context, ManagementAudit, int64)
 
 func TestAdminBudgetCreateRequiresAdminAndCarriesAudit(t *testing.T) {
 	client := &recordingBudgetClient{}
-	handler := NewHandler(modulesPipeline("admin"), modelsProvider{}).WithBudgetManagement(client)
+	auditClient := &recordingAuditClient{}
+	handler := NewHandler(modulesPipeline("admin"), modelsProvider{}).WithBudgetManagement(client).WithAudit(auditClient)
 	request := httptest.NewRequest(http.MethodPost, "/admin/v1/budgets", strings.NewReader(`{"scope_type":"team","scope_id":"t1","period":"month","max_cost":10}`))
 	request.Header.Set("Authorization", "Bearer secret")
 	request.Header.Set("X-Request-ID", "req-budget")
 	response := httptest.NewRecorder()
 	Routes(handler).ServeHTTP(response, request)
-	if response.Code != http.StatusCreated || client.calls != 1 || client.audit.RequestID != "req-budget" || client.spec.ScopeID != "t1" {
+	if response.Code != http.StatusCreated || client.calls != 1 || client.audit.RequestID != "req-budget" || client.spec.ScopeID != "t1" || len(auditClient.events) != 2 || auditClient.events[1].TargetID != "1" {
 		t.Fatalf("status=%d client=%+v", response.Code, client)
 	}
 }

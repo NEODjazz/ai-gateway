@@ -21,7 +21,8 @@ func (h Handler) GetModelCatalog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) PutModelCatalog(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.modelRegistryAdmin(w, r); !ok {
+	audit, ok := h.modelRegistryAdmin(w, r)
+	if !ok {
 		return
 	}
 	payload, err := io.ReadAll(io.LimitReader(r.Body, (1<<20)+1))
@@ -61,10 +62,17 @@ func (h Handler) PutModelCatalog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	event := AuditEvent{Action: "model_catalog.replace", TargetType: "model_catalog", TargetID: catalog.Version}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
 	if err := h.models.Update(r.Context(), catalog); err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
 		writeError(w, http.StatusServiceUnavailable, "model_registry_unavailable", "model registry is unavailable")
 		return
 	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
 	writeJSON(w, http.StatusOK, catalog)
 }
 

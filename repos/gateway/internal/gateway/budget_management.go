@@ -184,11 +184,19 @@ func (h Handler) CreateBudget(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	event := AuditEvent{Action: "budget.create", TargetType: "budget"}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
 	v, err := h.budgets.Create(r.Context(), audit, spec)
 	if err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
 		writeBudgetManagementFailure(w, err)
 		return
 	}
+	event.TargetID = strconv.FormatInt(v.ID, 10)
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
 	writeJSON(w, http.StatusCreated, v)
 }
 func (h Handler) UpdateBudget(w http.ResponseWriter, r *http.Request) {
@@ -200,11 +208,18 @@ func (h Handler) UpdateBudget(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	event := AuditEvent{Action: "budget.update", TargetType: "budget", TargetID: strconv.FormatInt(id, 10)}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
 	v, err := h.budgets.Update(r.Context(), audit, id, spec)
 	if err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
 		writeBudgetManagementFailure(w, err)
 		return
 	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
 	writeJSON(w, http.StatusOK, v)
 }
 func (h Handler) DisableBudget(w http.ResponseWriter, r *http.Request) {
@@ -212,10 +227,17 @@ func (h Handler) DisableBudget(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	event := AuditEvent{Action: "budget.disable", TargetType: "budget", TargetID: strconv.FormatInt(id, 10)}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
 	if err := h.budgets.Disable(r.Context(), audit, id); err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
 		writeBudgetManagementFailure(w, err)
 		return
 	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
 	w.WriteHeader(http.StatusNoContent)
 }
 func (h Handler) GetBudgetSummary(w http.ResponseWriter, r *http.Request) {

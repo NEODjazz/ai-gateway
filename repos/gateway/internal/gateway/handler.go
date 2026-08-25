@@ -27,6 +27,7 @@ type Handler struct {
 	management ManagementClient
 	budgets    BudgetManagementClient
 	models     *modelcatalog.Registry
+	audit      AuditClient
 	apiDocs    apiDocsConfig
 }
 

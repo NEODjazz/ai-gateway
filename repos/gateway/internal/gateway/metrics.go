@@ -274,6 +274,9 @@ func metricPath(path string) string {
 		if strings.HasPrefix(path, "/admin/v1/model-catalog") {
 			return "/admin/v1/model-catalog"
 		}
+		if strings.HasPrefix(path, "/admin/v1/audit/events") {
+			return "/admin/v1/audit/events"
+		}
 		return "unmatched"
 	}
 }
