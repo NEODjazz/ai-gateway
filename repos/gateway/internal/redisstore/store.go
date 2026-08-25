@@ -45,6 +45,9 @@ func (s *Store) Ping(ctx context.Context) error {
 }
 
 func (s *Store) Get(ctx context.Context, key string) ([]byte, bool, error) {
+	if s == nil {
+		return nil, false, errors.New("redis store is not configured")
+	}
 	value, err := s.client.Get(ctx, s.cacheKey(key)).Bytes()
 	if errors.Is(err, redis.Nil) {
 		return nil, false, nil
@@ -56,6 +59,9 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, bool, error) {
 }
 
 func (s *Store) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	if s == nil {
+		return errors.New("redis store is not configured")
+	}
 	return s.client.Set(ctx, s.cacheKey(key), value, ttl).Err()
 }
 

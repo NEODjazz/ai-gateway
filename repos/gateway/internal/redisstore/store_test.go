@@ -26,6 +26,16 @@ func integrationStore(t *testing.T) *Store {
 	return store
 }
 
+func TestNilRedisStoreCacheMethodsReturnErrors(t *testing.T) {
+	var store *Store
+	if _, _, err := store.Get(context.Background(), "key"); err == nil {
+		t.Fatal("nil store Get must fail without panicking")
+	}
+	if err := store.Set(context.Background(), "key", []byte("value"), 0); err == nil {
+		t.Fatal("nil store Set must fail without panicking")
+	}
+}
+
 func TestRedisCacheRoundTrip(t *testing.T) {
 	store := integrationStore(t)
 	ctx := context.Background()
