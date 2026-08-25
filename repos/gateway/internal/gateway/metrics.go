@@ -259,7 +259,7 @@ func observabilityMiddleware(metrics *Metrics, next http.Handler) http.Handler {
 
 func metricPath(path string) string {
 	switch path {
-	case "/healthz", "/readyz", "/metrics", "/openapi.yaml", "/v1/models", "/v1/chat/completions", "/v1/responses", "/v1/embeddings":
+	case "/healthz", "/readyz", "/metrics", "/openapi.yaml", "/v1/models", "/v1/chat/completions", "/v1/responses", "/v1/embeddings", "/v1/rerank":
 		return path
 	default:
 		if path == "/docs" || strings.HasPrefix(path, "/docs/") {

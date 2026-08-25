@@ -141,6 +141,11 @@ func (p *chatProvider) Embeddings(_ context.Context, req modules.RequestContext)
 	}, nil
 }
 
+func (p *chatProvider) Rerank(_ context.Context, req modules.RequestContext) (openai.RerankResponse, error) {
+	p.request = req
+	return openai.RerankResponse{ID: "rerank-test", Results: []openai.RerankResult{{Index: 1, RelevanceScore: 0.9}}}, nil
+}
+
 func (p *chatProvider) ChatCompletions(_ context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
 	p.request = req
 	return openai.ChatCompletionResponse{
@@ -189,6 +194,32 @@ func TestEmbeddingsUsesAuthenticatedProviderPipeline(t *testing.T) {
 	}
 	if input := openai.EmbeddingInputText(llm.request.EmbeddingRequest.Input); input != "hello\nworld" {
 		t.Fatalf("unexpected embedding input: %q", input)
+	}
+}
+
+func TestRerankUsesAuthenticatedProviderPipeline(t *testing.T) {
+	llm := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), llm)
+	request := httptest.NewRequest(http.MethodPost, "/v1/rerank", strings.NewReader(`{"model":"rerank-model","query":"refund","documents":["shipping","refund policy"],"top_n":1}`))
+	request.Header.Set("Authorization", "Bearer client-secret")
+	response := httptest.NewRecorder()
+	handler.Rerank(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String())
+	}
+	if llm.request.APIKey != "" || llm.request.RerankRequest == nil {
+		t.Fatalf("unsafe or missing provider context: %+v", llm.request)
+	}
+}
+
+func TestRerankRejectsInvalidDocuments(t *testing.T) {
+	handler := NewHandler(modules.NewPipeline(nil), &chatProvider{})
+	for _, body := range []string{`{"model":"m","query":"q","documents":[]}`, `{"model":"m","query":"q","documents":[{"title":"missing text"}]}`, `{"model":"m","query":"q","documents":["x"],"top_n":2}`} {
+		response := httptest.NewRecorder()
+		handler.Rerank(response, httptest.NewRequest(http.MethodPost, "/v1/rerank", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body %s: status=%d response=%s", body, response.Code, response.Body.String())
+		}
 	}
 }
 

@@ -125,6 +125,7 @@ type ProviderEndpointConfig struct {
 	Shadow                bool              `json:"shadow,omitempty"`
 	MirrorPercentage      float64           `json:"mirror_percentage,omitempty"`
 	MirrorTimeoutMS       int               `json:"mirror_timeout_ms,omitempty"`
+	RerankPath            string            `json:"rerank_path,omitempty"`
 }
 
 func Load() Config {
@@ -233,6 +234,9 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 		}
 		if endpoint.Shadow && endpoint.MaxParallelRequests <= 0 {
 			result = errors.Join(result, fmt.Errorf("shadow provider %q requires max_parallel_requests", name))
+		}
+		if endpoint.RerankPath != "" && (!strings.HasPrefix(endpoint.RerankPath, "/") || strings.ContainsAny(endpoint.RerankPath, "?#") || strings.Contains(endpoint.RerankPath, "..")) {
+			result = errors.Join(result, fmt.Errorf("provider %q rerank_path must be an absolute path without query, fragment, or traversal", name))
 		}
 		if endpoint.QueueCapacity > 0 && endpoint.QueueTimeoutMS <= 0 {
 			result = errors.Join(result, fmt.Errorf("provider %q queue requires queue_timeout_ms", name))

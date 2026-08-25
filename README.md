@@ -133,6 +133,24 @@ requires `curl` and `jq`):
 The script sends two inputs and fails unless the gateway returns two non-empty
 float vectors, stable indexes, and non-zero usage.
 
+`POST /v1/rerank` implements the LiteLLM/Cohere-style contract with `query`,
+`documents`, optional `top_n`, `rank_fields`, and `return_documents`. Rerank is
+an explicit capability: configure a dedicated OpenAI-compatible endpoint with
+`capabilities: [rerank]`. The adapter calls `/v1/rerank` by default; for vLLM or
+TEI deployments exposing the root path, set `rerank_path: /rerank`. The request
+uses the same authentication, model ACL, rate limits, DLP/AV text projection,
+anonymization, admission control, failover, billing, and optional shadow
+mirroring as other inference APIs. When documents are returned, the gateway
+restores the original document selected by the provider index, rather than
+exposing an anonymized projection.
+
+```bash
+curl -sS http://127.0.0.1:18080/v1/rerank \
+  -H 'Authorization: Bearer demo-admin-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"rerank-model","query":"refund policy","documents":["shipping terms","refunds within 30 days"],"top_n":1,"return_documents":true}'
+```
+
 `/v1/chat/completions` forwards OpenAI function tools, tool choice, parallel-tool policy, stop/seed, and JSON object or JSON Schema response formats. Anthropic tool definitions, calls, results, and forced structured outputs are translated to and from its native content blocks; Ollama receives its native `tools` and `format` fields. Tool arguments are included in the DLP/AV text projection and anonymized independently of the tool schema.
 
 ### OpenAPI contract
@@ -320,7 +338,7 @@ Model groups use endpoint-specific `model_aliases`, for example
 `{"fast":"deployment-gpt-5-mini"}`. Endpoints at the same priority can set
 `weight`; routing uses weighted round-robin and preserves the remaining members
 as failover candidates. `capabilities` can restrict an endpoint to `chat`,
-`responses`, `embeddings`, `vision`, `mcp`, and/or `stream`.
+`responses`, `embeddings`, `rerank`, `vision`, `mcp`, and/or `stream`.
 
 Chat Completions and Responses accept OpenAI-style image parts for endpoints
 that explicitly declare `vision`, implement a vision-capable adapter, and enable

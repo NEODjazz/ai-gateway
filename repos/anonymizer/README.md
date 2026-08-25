@@ -14,7 +14,7 @@ go run ./cmd/anonymizer
 - `POST /anonymize`
 
 The endpoint accepts only maskable content (`messages`, Responses API `input`
-and `instructions`) plus `request_id`. It does not receive bearer credentials or
+and `instructions`, or rerank `query` and `documents`) plus `request_id`. It does not receive bearer credentials or
 user identity.
 
 ## Rules

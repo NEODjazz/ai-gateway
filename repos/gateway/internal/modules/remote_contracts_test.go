@@ -189,6 +189,22 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingRerankPayloadContainsNoQueryOrDocuments(t *testing.T) {
+	req := sensitiveContext()
+	req.RerankRequest = &openai.RerankRequest{Provider: "p", Model: "reranker", Query: "private query", Documents: []any{"private document"}}
+	request := billingRequest(&req)
+	payload, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.APIType != "rerank" || request.PromptTokensEstimated == 0 {
+		t.Fatalf("unexpected billing request: %+v", request)
+	}
+	if strings.Contains(string(payload), "private query") || strings.Contains(string(payload), "private document") {
+		t.Fatalf("rerank text leaked to billing: %s", payload)
+	}
+}
+
 func TestRemoteBillingUsesScopedServiceSecretNotBearer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "" || r.Header.Get("X-Service-Token") != "billing-secret" {
@@ -303,6 +319,37 @@ func TestRemoteAnonymizerUsesEmbeddingInputWithoutIdentity(t *testing.T) {
 	}
 	if got := openai.EmbeddingInputText(req.EmbeddingRequest.Input); got != "masked" {
 		t.Fatalf("unexpected anonymized embedding input: %q", got)
+	}
+}
+
+func TestRemoteAnonymizerUsesRerankProjectionWithoutIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{"api_key", "credential_id", "user_id", "team_id", "request", "anonymization_values"} {
+			if _, found := body[forbidden]; found {
+				t.Fatalf("anonymizer request contains %q", forbidden)
+			}
+		}
+		encoded, _ := json.Marshal(body)
+		if !strings.Contains(string(encoded), "private@example.com") {
+			t.Fatalf("rerank text projection missing: %s", encoded)
+		}
+		_ = json.NewEncoder(w).Encode(AnonymizeResponse{Query: "masked query", Documents: []any{"masked doc", map[string]any{"text": "masked object"}}, Replacements: map[string]string{"{{EMAIL_1}}": "private@example.com"}})
+	}))
+	defer server.Close()
+	request := openai.RerankRequest{Model: "rerank", Query: "private@example.com", Documents: []any{"private doc", map[string]any{"text": "object doc", "id": "doc-1"}}}
+	req := sensitiveContext()
+	req.Request.Messages = nil
+	req.RerankRequest = &request
+	if err := NewRemoteAnonymizerModule(true, server.URL).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	object := req.RerankRequest.Documents[1].(map[string]any)
+	if req.RerankRequest.Query != "masked query" || object["text"] != "masked object" || object["id"] != "doc-1" {
+		t.Fatalf("unexpected merged rerank projection: %+v", req.RerankRequest)
 	}
 }
 

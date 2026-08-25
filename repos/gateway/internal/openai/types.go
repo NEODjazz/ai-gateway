@@ -3,6 +3,7 @@ package openai
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 )
 
 type ChatCompletionRequest struct {
@@ -129,6 +130,86 @@ type Embedding struct {
 	Object    string    `json:"object"`
 	Embedding []float64 `json:"embedding"`
 	Index     int       `json:"index"`
+}
+
+type RerankRequest struct {
+	Provider        string   `json:"provider,omitempty"`
+	Model           string   `json:"model"`
+	Query           string   `json:"query"`
+	Documents       []any    `json:"documents"`
+	TopN            *int     `json:"top_n,omitempty"`
+	RankFields      []string `json:"rank_fields,omitempty"`
+	ReturnDocuments *bool    `json:"return_documents,omitempty"`
+	MaxChunksPerDoc *int     `json:"max_chunks_per_doc,omitempty"`
+	MaxTokensPerDoc *int     `json:"max_tokens_per_doc,omitempty"`
+}
+
+type RerankResponse struct {
+	ID      string              `json:"id,omitempty"`
+	Results []RerankResult      `json:"results"`
+	Meta    *RerankResponseMeta `json:"meta,omitempty"`
+}
+
+type RerankResult struct {
+	Index          int     `json:"index"`
+	RelevanceScore float64 `json:"relevance_score"`
+	Document       any     `json:"document,omitempty"`
+}
+
+type RerankResponseMeta struct {
+	APIVersion  map[string]any     `json:"api_version,omitempty"`
+	BilledUnits *RerankBilledUnits `json:"billed_units,omitempty"`
+	Tokens      *RerankTokens      `json:"tokens,omitempty"`
+}
+
+type RerankBilledUnits struct {
+	SearchUnits int `json:"search_units,omitempty"`
+	TotalTokens int `json:"total_tokens,omitempty"`
+}
+
+type RerankTokens struct {
+	InputTokens  int `json:"input_tokens,omitempty"`
+	OutputTokens int `json:"output_tokens,omitempty"`
+}
+
+func RerankDocumentText(request RerankRequest) (string, bool) {
+	if strings.TrimSpace(request.Query) == "" || len(request.Documents) == 0 {
+		return "", false
+	}
+	parts := []string{request.Query}
+	for _, document := range request.Documents {
+		texts, ok := RerankDocumentStrings(document, request.RankFields)
+		if !ok {
+			return "", false
+		}
+		parts = append(parts, texts...)
+	}
+	return strings.Join(parts, "\n"), true
+}
+
+func RerankDocumentStrings(document any, rankFields []string) ([]string, bool) {
+	switch value := document.(type) {
+	case string:
+		if strings.TrimSpace(value) == "" {
+			return nil, false
+		}
+		return []string{value}, true
+	case map[string]any:
+		fields := rankFields
+		if len(fields) == 0 {
+			fields = []string{"text"}
+		}
+		texts := make([]string, 0, len(fields))
+		for _, field := range fields {
+			text, ok := value[field].(string)
+			if ok && strings.TrimSpace(text) != "" {
+				texts = append(texts, text)
+			}
+		}
+		return texts, len(texts) > 0
+	default:
+		return nil, false
+	}
 }
 
 func EmbeddingInputStrings(value any) ([]string, bool) {

@@ -44,6 +44,14 @@ func TestScanPayloadIncludesEmbeddingText(t *testing.T) {
 	}
 }
 
+func TestScanPayloadIncludesRerankTextOnly(t *testing.T) {
+	req := RequestContext{RerankRequest: &openai.RerankRequest{Model: "rerank", Query: "private query", Documents: []any{"private document", map[string]any{"text": "object document", "binary": []byte{1, 2}}}}}
+	payload := scanPayload(&req)
+	if !strings.Contains(payload, "private query") || !strings.Contains(payload, "object document") || strings.Contains(payload, "AQI") {
+		t.Fatalf("unexpected scan projection: %q", payload)
+	}
+}
+
 func TestScanPayloadIncludesToolArgumentsAndResponseFunctionOutput(t *testing.T) {
 	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{
 		Role: "assistant", ToolCalls: []openai.ToolCall{{Function: openai.FunctionCall{Arguments: `{"email":"user@example.com"}`}}},

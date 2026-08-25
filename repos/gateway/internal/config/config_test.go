@@ -39,6 +39,17 @@ func TestNormalizeProviderEndpointsKeepsExplicitAPIKey(t *testing.T) {
 	}
 }
 
+func TestValidateProviderAdmissionRejectsUnsafeRerankPath(t *testing.T) {
+	for _, path := range []string{"rerank", "/../rerank", "/rerank?token=secret", "/rerank#fragment"} {
+		if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "reranker", RerankPath: path}}); err == nil {
+			t.Fatalf("unsafe rerank path %q accepted", path)
+		}
+	}
+	if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "reranker", RerankPath: "/rerank"}}); err != nil {
+		t.Fatalf("safe rerank path rejected: %v", err)
+	}
+}
+
 func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("EXACT_CACHE_TTL_SECONDS", "120")
 	t.Setenv("EXACT_CACHE_MAX_BYTES", "2048")

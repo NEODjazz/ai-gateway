@@ -75,6 +75,45 @@ func TestOpenAICompatibleEmbeddings(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleRerankUsesProviderCredentialAndConfiguredPath(t *testing.T) {
+	var upstream openAICompatibleRerankRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rerank" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer provider-key" {
+			t.Fatalf("unexpected authorization: %q", r.Header.Get("Authorization"))
+		}
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(openai.RerankResponse{ID: "r-1", Results: []openai.RerankResult{{Index: 0, RelevanceScore: 0.8}}})
+	}))
+	defer server.Close()
+	topN := 1
+	response, err := NewOpenAICompatibleWithRerankPath(server.URL+"/v1", "provider-key", false, "/rerank").Rerank(context.Background(), openai.RerankRequest{Provider: "must-not-leak", Model: "reranker", Query: "q", Documents: []any{"doc"}, TopN: &topN})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upstream.Model != "reranker" || upstream.Query != "q" || len(upstream.Documents) != 1 || response.ID != "r-1" {
+		t.Fatalf("request=%+v response=%+v", upstream, response)
+	}
+}
+
+func TestOpenAICompatibleRerankDefaultsToV1Path(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/rerank" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(openai.RerankResponse{Results: []openai.RerankResult{{Index: 0, RelevanceScore: 1}}})
+	}))
+	defer server.Close()
+	_, err := NewOpenAICompatible(server.URL, "", false).Rerank(context.Background(), openai.RerankRequest{Model: "m", Query: "q", Documents: []any{"d"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProviderURLAddsV1ForRootBaseURL(t *testing.T) {
 	got := providerURL("https://example.test", "responses")
 	want := "https://example.test/v1/responses"

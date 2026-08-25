@@ -28,6 +28,27 @@ type embeddingTestClient struct {
 	inputs []string
 }
 
+type rerankTestClient struct {
+	calls int
+	err   error
+	model string
+}
+
+func (p *rerankTestClient) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	return openai.ChatCompletionResponse{}, nil
+}
+func (p *rerankTestClient) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {
+	return openai.ResponseResponse{}, nil
+}
+func (p *rerankTestClient) Rerank(_ context.Context, request openai.RerankRequest) (openai.RerankResponse, error) {
+	p.calls++
+	p.model = request.Model
+	if p.err != nil {
+		return openai.RerankResponse{}, p.err
+	}
+	return openai.RerankResponse{Results: []openai.RerankResult{{Index: 1, RelevanceScore: 0.8, Document: "anonymized"}}}, nil
+}
+
 type affinityResponseClient struct {
 	id       string
 	calls    int
@@ -156,6 +177,32 @@ func TestRouterEmbeddingsFailoverAndCapabilityFilter(t *testing.T) {
 	}
 	if response.Model != "embed-model" || len(response.Data) != 1 {
 		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestRouterRerankFailoverAliasAndRestoresOriginalDocument(t *testing.T) {
+	failing := &rerankTestClient{err: &Error{Class: FailureUnavailable, Err: errors.New("temporary")}}
+	success := &rerankTestClient{}
+	router := Router{
+		endpoints: []Endpoint{
+			{Name: "chat-only", Type: "demo", Priority: 0, Capabilities: []string{"chat"}, Provider: success, Admission: newAdmissionController(0, 0, 0)},
+			{Name: "rerank-a", Type: "openai-compatible", Priority: 1, Capabilities: []string{"rerank"}, Provider: failing, Admission: newAdmissionController(0, 0, 0)},
+			{Name: "rerank-b", Type: "openai-compatible", Priority: 2, Capabilities: []string{"rerank"}, ModelAliases: map[string]string{"public-rerank": "upstream-rerank"}, Provider: success, Admission: newAdmissionController(0, 0, 0)},
+		},
+		modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	returnDocuments := true
+	request := openai.RerankRequest{Model: "public-rerank", Query: "refund", Documents: []any{"shipping", map[string]any{"text": "refund policy", "id": "doc-2"}}, ReturnDocuments: &returnDocuments}
+	response, err := router.Rerank(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, RerankRequest: &request})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failing.calls != 1 || success.calls != 1 || success.model != "upstream-rerank" {
+		t.Fatalf("calls failing=%d success=%d model=%q", failing.calls, success.calls, success.model)
+	}
+	document, ok := response.Results[0].Document.(map[string]any)
+	if !ok || document["id"] != "doc-2" {
+		t.Fatalf("original document not restored: %+v", response.Results[0].Document)
 	}
 }
 

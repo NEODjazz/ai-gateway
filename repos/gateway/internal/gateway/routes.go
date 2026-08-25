@@ -24,6 +24,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/v1/chat/completions"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ChatCompletions) }},
 	{RouteContract{http.MethodPost, "/v1/responses"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Responses) }},
 	{RouteContract{http.MethodPost, "/v1/embeddings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Embeddings) }},
+	{RouteContract{http.MethodPost, "/v1/rerank"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Rerank) }},
 	{RouteContract{http.MethodPost, "/admin/v1/keys"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateVirtualKey) }},
 	{RouteContract{http.MethodPost, "/admin/v1/keys/{id}/rotate"}, func(h Handler) http.Handler { return http.HandlerFunc(h.RotateVirtualKey) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/keys/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.RevokeVirtualKey) }},

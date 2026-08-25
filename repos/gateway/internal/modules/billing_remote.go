@@ -135,6 +135,13 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = 0
 		request.TotalTokens = request.InputTokens
 	}
+	if req.RerankRequest != nil {
+		request.Provider = req.RerankRequest.Provider
+		request.Model = req.RerankRequest.Model
+		request.APIType = "rerank"
+		request.OutputTokens = 0
+		request.TotalTokens = request.InputTokens
+	}
 	if req.Response != nil {
 		request.Phase = "commit"
 		request.InputTokens = req.Response.Usage.PromptTokens
@@ -160,6 +167,20 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.TotalTokens = req.EmbeddingResponse.Usage.TotalTokens
 		if req.EmbeddingResponse.Model != "" {
 			request.Model = req.EmbeddingResponse.Model
+		}
+	}
+	if req.RerankResponse != nil {
+		request.Phase = "commit"
+		if req.RerankResponse.Meta != nil {
+			if req.RerankResponse.Meta.Tokens != nil {
+				request.InputTokens = req.RerankResponse.Meta.Tokens.InputTokens
+				request.OutputTokens = req.RerankResponse.Meta.Tokens.OutputTokens
+				request.TotalTokens = request.InputTokens + request.OutputTokens
+			}
+			if request.TotalTokens == 0 && req.RerankResponse.Meta.BilledUnits != nil {
+				request.TotalTokens = req.RerankResponse.Meta.BilledUnits.TotalTokens
+				request.InputTokens = request.TotalTokens
+			}
 		}
 	}
 	if request.TotalTokens == 0 && request.CacheStatus != "hit" {
@@ -195,6 +216,11 @@ func estimateRequestTokens(req *RequestContext) int {
 	}
 	if req.EmbeddingRequest != nil {
 		total += len(strings.Fields(openai.EmbeddingInputText(req.EmbeddingRequest.Input)))
+	}
+	if req.RerankRequest != nil {
+		if text, ok := openai.RerankDocumentText(*req.RerankRequest); ok {
+			total += len(strings.Fields(text))
+		}
 	}
 	return total
 }

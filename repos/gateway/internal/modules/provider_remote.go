@@ -116,6 +116,11 @@ func scanPayload(req *RequestContext) string {
 			parts = append(parts, "embedding_input: "+text)
 		}
 	}
+	if req.RerankRequest != nil {
+		if text, ok := openai.RerankDocumentText(*req.RerankRequest); ok {
+			parts = append(parts, "rerank: "+text)
+		}
+	}
 	return strings.Join(parts, "\n")
 }
 

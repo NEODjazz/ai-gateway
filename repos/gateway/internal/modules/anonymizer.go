@@ -82,6 +82,12 @@ func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 	if req.EmbeddingRequest != nil {
 		req.EmbeddingRequest.Input = m.anonymizeAny(req, req.EmbeddingRequest.Input)
 	}
+	if req.RerankRequest != nil {
+		req.RerankRequest.Query = m.anonymize(req, req.RerankRequest.Query)
+		for index := range req.RerankRequest.Documents {
+			req.RerankRequest.Documents[index] = m.anonymizeAny(req, req.RerankRequest.Documents[index])
+		}
+	}
 	return nil
 }
 

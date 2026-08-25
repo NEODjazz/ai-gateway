@@ -31,6 +31,23 @@ func TestAnonymizeReturnsJSONContentType(t *testing.T) {
 	}
 }
 
+func TestAnonymizeRerankProjection(t *testing.T) {
+	handler := newHandler(modules.NewAnonymizerModule(true, modules.RuleEmail))
+	request := httptest.NewRequest(http.MethodPost, "/anonymize", strings.NewReader(`{"request_id":"req-rerank","query":"find user@example.com","documents":["contact user@example.com",{"text":"owner@example.com","id":"doc-1"}]}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body anonymizeResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body.Query, "{{EMAIL_1}}") || len(body.Documents) != 2 || len(body.Replacements) != 2 {
+		t.Fatalf("unexpected response: %+v", body)
+	}
+}
+
 func TestAnonymizerHealthReturns204(t *testing.T) {
 	response := httptest.NewRecorder()
 	newHandler(modules.NewAnonymizerModule(true)).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/healthz", nil))

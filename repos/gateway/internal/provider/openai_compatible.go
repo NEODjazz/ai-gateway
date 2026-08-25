@@ -53,20 +53,79 @@ type openAICompatibleEmbeddingRequest struct {
 	User           string `json:"user,omitempty"`
 }
 
+type openAICompatibleRerankRequest struct {
+	Model           string   `json:"model"`
+	Query           string   `json:"query"`
+	Documents       []any    `json:"documents"`
+	TopN            *int     `json:"top_n,omitempty"`
+	RankFields      []string `json:"rank_fields,omitempty"`
+	ReturnDocuments *bool    `json:"return_documents,omitempty"`
+	MaxChunksPerDoc *int     `json:"max_chunks_per_doc,omitempty"`
+	MaxTokensPerDoc *int     `json:"max_tokens_per_doc,omitempty"`
+}
+
 type OpenAICompatible struct {
 	baseURL        string
 	apiKey         string
 	upstreamStream bool
+	rerankPath     string
 	client         *http.Client
 }
 
 func NewOpenAICompatible(baseURL string, apiKey string, upstreamStream bool) OpenAICompatible {
+	return NewOpenAICompatibleWithRerankPath(baseURL, apiKey, upstreamStream, "")
+}
+
+func NewOpenAICompatibleWithRerankPath(baseURL string, apiKey string, upstreamStream bool, rerankPath string) OpenAICompatible {
 	return OpenAICompatible{
 		baseURL:        strings.TrimRight(baseURL, "/"),
 		apiKey:         apiKey,
 		upstreamStream: upstreamStream,
+		rerankPath:     rerankPath,
 		client:         newProviderHTTPClient(180 * time.Second),
 	}
+}
+
+func (p OpenAICompatible) Rerank(ctx context.Context, request openai.RerankRequest) (openai.RerankResponse, error) {
+	body, err := json.Marshal(openAICompatibleRerankRequest{
+		Model: request.Model, Query: request.Query, Documents: request.Documents, TopN: request.TopN,
+		RankFields: request.RankFields, ReturnDocuments: request.ReturnDocuments,
+		MaxChunksPerDoc: request.MaxChunksPerDoc, MaxTokensPerDoc: request.MaxTokensPerDoc,
+	})
+	if err != nil {
+		return openai.RerankResponse{}, err
+	}
+	url := providerURL(p.baseURL, "rerank")
+	if p.rerankPath != "" {
+		url = strings.TrimRight(p.baseURL, "/")
+		if index := strings.Index(url, "://"); index >= 0 {
+			if slash := strings.Index(url[index+3:], "/"); slash >= 0 {
+				url = url[:index+3+slash]
+			}
+		}
+		url += p.rerankPath
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return openai.RerankResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return openai.RerankResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return openai.RerankResponse{}, statusError("openai-compatible", resp.StatusCode)
+	}
+	var response openai.RerankResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&response); err != nil {
+		return openai.RerankResponse{}, err
+	}
+	return response, nil
 }
 
 func (OpenAICompatible) SupportsMCP() bool    { return true }

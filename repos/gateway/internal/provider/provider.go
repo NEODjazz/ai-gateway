@@ -43,6 +43,14 @@ type EmbeddingClient interface {
 	Embeddings(ctx context.Context, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error)
 }
 
+type RerankProvider interface {
+	Rerank(ctx context.Context, req modules.RequestContext) (openai.RerankResponse, error)
+}
+
+type RerankClient interface {
+	Rerank(ctx context.Context, request openai.RerankRequest) (openai.RerankResponse, error)
+}
+
 type MCPClient interface {
 	SupportsMCP() bool
 }
@@ -586,6 +594,91 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 	return openai.EmbeddingResponse{}, joined
 }
 
+func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.RerankResponse, error) {
+	if req.RerankRequest == nil {
+		return openai.RerankResponse{}, errors.New("missing rerank request")
+	}
+	request := *req.RerankRequest
+	candidates := r.candidates(ctx, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "rerank")
+	if len(candidates) == 0 {
+		return openai.RerankResponse{}, fmt.Errorf("no rerank endpoint for provider=%q model=%q", request.Provider, request.Model)
+	}
+	var errs []error
+	var lastAttempt *modules.RequestContext
+	mirrored := false
+	for _, endpoint := range candidates {
+		client, ok := endpoint.Provider.(RerankClient)
+		if !ok {
+			continue
+		}
+		attemptCtx := providerAttemptContext(req, endpoint)
+		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
+		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
+			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
+			continue
+		}
+		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
+			if terminalModuleError(err) || ctx.Err() != nil {
+				return openai.RerankResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			}
+			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
+			continue
+		}
+		started := time.Now()
+		lastAttempt = &attemptCtx
+		if !mirrored {
+			r.mirrorRerank(ctx, req.RequestID, *attemptCtx.RerankRequest, request.Model)
+			mirrored = true
+		}
+		response, err := r.callRerank(ctx, endpoint, client, *attemptCtx.RerankRequest)
+		setAttemptMetadata(&attemptCtx, started, err)
+		if err == nil {
+			if validationErr := validateRerankResponse(response, len(request.Documents)); validationErr != nil {
+				err = validationErr
+			} else {
+				if request.ReturnDocuments != nil && *request.ReturnDocuments {
+					for index := range response.Results {
+						response.Results[index].Document = request.Documents[response.Results[index].Index]
+					}
+				}
+				attemptCtx.RerankResponse = &response
+				if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
+					return openai.RerankResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+				}
+				return response, nil
+			}
+		}
+		errs = append(errs, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err))
+		if ctx.Err() != nil || !tryNextEndpoint(err) {
+			joined := errors.Join(errs...)
+			r.modules.RunFailure(ctx, lastAttempt, joined)
+			return openai.RerankResponse{}, joined
+		}
+	}
+	if len(errs) == 0 {
+		errs = append(errs, errors.New("no selected endpoint implements rerank"))
+	}
+	joined := errors.Join(errs...)
+	if lastAttempt != nil {
+		r.modules.RunFailure(ctx, lastAttempt, joined)
+	}
+	return openai.RerankResponse{}, joined
+}
+
+func validateRerankResponse(response openai.RerankResponse, documentCount int) error {
+	seen := make(map[int]bool, len(response.Results))
+	for _, result := range response.Results {
+		if result.Index < 0 || result.Index >= documentCount || seen[result.Index] {
+			return errors.New("provider returned invalid rerank result indices")
+		}
+		seen[result.Index] = true
+		if result.RelevanceScore != result.RelevanceScore || result.RelevanceScore > 1.7976931348623157e308 || result.RelevanceScore < -1.7976931348623157e308 {
+			return errors.New("provider returned invalid rerank relevance score")
+		}
+	}
+	return nil
+}
+
 func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext, write ResponseStreamWriter) (openai.ResponseResponse, bool, error) {
 	if req.ResponseRequest == nil {
 		return openai.ResponseResponse{}, false, errors.New("missing response request")
@@ -733,9 +826,16 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		embeddingRequest := *req.EmbeddingRequest
 		attemptCtx.EmbeddingRequest = &embeddingRequest
 	}
+	if req.RerankRequest != nil {
+		rerankRequest, ok := cloneMirrorRequest(*req.RerankRequest)
+		if ok {
+			attemptCtx.RerankRequest = &rerankRequest
+		}
+	}
 	attemptCtx.Response = nil
 	attemptCtx.ResponsesResponse = nil
 	attemptCtx.EmbeddingResponse = nil
+	attemptCtx.RerankResponse = nil
 	attemptCtx.Usage = nil
 	attemptCtx.AnonymizationValues = nil
 	attemptCtx.Metadata = cloneMetadata(req.Metadata)
@@ -750,6 +850,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		}
 		if attemptCtx.EmbeddingRequest != nil {
 			attemptCtx.EmbeddingRequest.Model = upstreamModel
+		}
+		if attemptCtx.RerankRequest != nil {
+			attemptCtx.RerankRequest.Model = upstreamModel
 		}
 		attemptCtx.Metadata["provider.requested_model"] = requestedModel
 		attemptCtx.Metadata["provider.upstream_model"] = upstreamModel
@@ -882,6 +985,32 @@ func (r Router) callEmbeddings(ctx context.Context, endpoint Endpoint, client Em
 	}
 	r.health.failure(ctx, endpoint, err)
 	return openai.EmbeddingResponse{}, err
+}
+
+func (r Router) callRerank(ctx context.Context, endpoint Endpoint, client RerankClient, request openai.RerankRequest) (openai.RerankResponse, error) {
+	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	if err != nil {
+		return openai.RerankResponse{}, err
+	}
+	defer release()
+	if err := r.health.permit(ctx, endpoint); err != nil {
+		return openai.RerankResponse{}, err
+	}
+	var response openai.RerankResponse
+	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
+		providerCtx, finish := r.startProviderCall(ctx, endpoint, "rerank")
+		response, err = client.Rerank(providerCtx, request)
+		finish(err)
+		if err == nil {
+			r.health.success(ctx, endpoint)
+			return response, nil
+		}
+		if ctx.Err() != nil || attempt == endpoint.MaxRetries || !retrySameEndpoint(err) {
+			break
+		}
+	}
+	r.health.failure(ctx, endpoint, err)
+	return openai.RerankResponse{}, err
 }
 
 func (r Router) startProviderCall(ctx context.Context, endpoint Endpoint, operation string) (context.Context, func(error)) {
@@ -1161,11 +1290,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "mcp") || hasCapability(required, "vision")
+	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"mcp", "vision"} {
+	for _, capability := range []string{"mcp", "vision", "rerank"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}
@@ -1235,7 +1364,7 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 	case "ollama":
 		return NewOllama(endpoint.BaseURL, endpoint.Stream)
 	case "openai", "openai-compatible", "openrouter":
-		return NewOpenAICompatible(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
+		return NewOpenAICompatibleWithRerankPath(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.RerankPath)
 	case "anthropic":
 		return NewAnthropic(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "demo":

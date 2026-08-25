@@ -56,6 +56,11 @@ type ResponseRequest struct {
 	MaxOutputTokens *int   `json:"max_output_tokens,omitempty"`
 }
 
+type RerankRequest struct {
+	Query     string `json:"query"`
+	Documents []any  `json:"documents"`
+}
+
 type ResponseResponse struct {
 	ID         string               `json:"id"`
 	Object     string               `json:"object"`

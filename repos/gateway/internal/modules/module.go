@@ -27,9 +27,11 @@ type RequestContext struct {
 	Request             openai.ChatCompletionRequest   `json:"request"`
 	ResponseRequest     *openai.ResponseRequest        `json:"response_request,omitempty"`
 	EmbeddingRequest    *openai.EmbeddingRequest       `json:"embedding_request,omitempty"`
+	RerankRequest       *openai.RerankRequest          `json:"rerank_request,omitempty"`
 	Response            *openai.ChatCompletionResponse `json:"response,omitempty"`
 	ResponsesResponse   *openai.ResponseResponse       `json:"responses_response,omitempty"`
 	EmbeddingResponse   *openai.EmbeddingResponse      `json:"embedding_response,omitempty"`
+	RerankResponse      *openai.RerankResponse         `json:"rerank_response,omitempty"`
 	Usage               *openai.Usage                  `json:"usage,omitempty"`
 	Metadata            map[string]string              `json:"metadata,omitempty"`
 	AnonymizationValues map[string]string              `json:"anonymization_values,omitempty"`

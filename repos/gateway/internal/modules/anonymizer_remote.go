@@ -13,12 +13,16 @@ type AnonymizeRequest struct {
 	Messages     []openai.Message `json:"messages,omitempty"`
 	Input        any              `json:"input,omitempty"`
 	Instructions string           `json:"instructions,omitempty"`
+	Query        string           `json:"query,omitempty"`
+	Documents    []any            `json:"documents,omitempty"`
 }
 
 type AnonymizeResponse struct {
 	Messages     []openai.Message  `json:"messages,omitempty"`
 	Input        any               `json:"input,omitempty"`
 	Instructions string            `json:"instructions,omitempty"`
+	Query        string            `json:"query,omitempty"`
+	Documents    []any             `json:"documents,omitempty"`
 	Replacements map[string]string `json:"replacements,omitempty"`
 }
 
@@ -44,6 +48,13 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 	if req.EmbeddingRequest != nil {
 		request.Input = openai.TextOnlyProjection(req.EmbeddingRequest.Input)
 	}
+	if req.RerankRequest != nil {
+		request.Query = req.RerankRequest.Query
+		request.Documents = make([]any, len(req.RerankRequest.Documents))
+		for index, document := range req.RerankRequest.Documents {
+			request.Documents[index] = openai.TextOnlyProjection(document)
+		}
+	}
 	response, err := callRemote[AnonymizeRequest, AnonymizeResponse](ctx, m.client, m.endpoint, request)
 	if err != nil {
 		return err
@@ -59,6 +70,15 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 	}
 	if req.EmbeddingRequest != nil {
 		req.EmbeddingRequest.Input = openai.MergeTextProjection(req.EmbeddingRequest.Input, response.Input)
+	}
+	if req.RerankRequest != nil {
+		if len(response.Documents) != len(req.RerankRequest.Documents) {
+			return errors.New("anonymizer returned an invalid rerank document projection")
+		}
+		req.RerankRequest.Query = response.Query
+		for index := range req.RerankRequest.Documents {
+			req.RerankRequest.Documents[index] = openai.MergeTextProjection(req.RerankRequest.Documents[index], response.Documents[index])
+		}
 	}
 	req.AnonymizationValues = cloneStringMap(response.Replacements)
 	return nil

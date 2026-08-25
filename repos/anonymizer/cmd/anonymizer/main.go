@@ -44,6 +44,9 @@ func newHandler(module modules.AnonymizerModule) http.Handler {
 		if request.Input != nil || request.Instructions != "" {
 			ctx.ResponseRequest = &openai.ResponseRequest{Input: request.Input, Instructions: request.Instructions}
 		}
+		if request.Query != "" || request.Documents != nil {
+			ctx.RerankRequest = &openai.RerankRequest{Query: request.Query, Documents: request.Documents}
+		}
 		if err := module.Handle(r.Context(), &ctx); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -52,6 +55,10 @@ func newHandler(module modules.AnonymizerModule) http.Handler {
 		if ctx.ResponseRequest != nil {
 			response.Input = ctx.ResponseRequest.Input
 			response.Instructions = ctx.ResponseRequest.Instructions
+		}
+		if ctx.RerankRequest != nil {
+			response.Query = ctx.RerankRequest.Query
+			response.Documents = ctx.RerankRequest.Documents
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(response)
@@ -64,11 +71,15 @@ type anonymizeRequest struct {
 	Messages     []openai.Message `json:"messages,omitempty"`
 	Input        any              `json:"input,omitempty"`
 	Instructions string           `json:"instructions,omitempty"`
+	Query        string           `json:"query,omitempty"`
+	Documents    []any            `json:"documents,omitempty"`
 }
 
 type anonymizeResponse struct {
 	Messages     []openai.Message  `json:"messages,omitempty"`
 	Input        any               `json:"input,omitempty"`
 	Instructions string            `json:"instructions,omitempty"`
+	Query        string            `json:"query,omitempty"`
+	Documents    []any             `json:"documents,omitempty"`
 	Replacements map[string]string `json:"replacements,omitempty"`
 }

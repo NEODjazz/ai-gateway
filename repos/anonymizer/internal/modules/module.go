@@ -14,6 +14,7 @@ type RequestContext struct {
 	Roles               []string                       `json:"roles,omitempty"`
 	Request             openai.ChatCompletionRequest   `json:"request"`
 	ResponseRequest     *openai.ResponseRequest        `json:"response_request,omitempty"`
+	RerankRequest       *openai.RerankRequest          `json:"rerank_request,omitempty"`
 	Response            *openai.ChatCompletionResponse `json:"response,omitempty"`
 	ResponsesResponse   *openai.ResponseResponse       `json:"responses_response,omitempty"`
 	Usage               *openai.Usage                  `json:"usage,omitempty"`

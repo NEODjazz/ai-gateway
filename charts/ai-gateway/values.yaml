@@ -107,7 +107,17 @@ gateway:
       models:
         - gpt-5.3
       priority: 10
-      enabled: true      
+      enabled: true
+    # OpenAI-compatible reranker. Some vLLM/TEI installations expose
+    # /rerank instead of /v1/rerank, hence the explicit path override.
+    # - name: local-reranker
+    #   type: openai-compatible
+    #   base_url: http://reranker:8000
+    #   rerank_path: /rerank
+    #   capabilities: [rerank]
+    #   models: [rerank-model]
+    #   max_parallel_requests: 4
+    #   enabled: true
     - name: anthropic
       type: anthropic
       base_url: https://api.anthropic.com

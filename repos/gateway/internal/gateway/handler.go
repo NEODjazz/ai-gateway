@@ -304,6 +304,84 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h Handler) Rerank(w http.ResponseWriter, r *http.Request) {
+	var request openai.RerankRequest
+	if !decodeInferenceRequest(w, r, &request) {
+		return
+	}
+	if message := validateRerankRequest(request); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
+	reqCtx := modules.RequestContext{
+		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: requestID(r), RerankRequest: &request,
+		Request: openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model},
+	}
+	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
+		return
+	}
+	reqCtx.APIKey = ""
+	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateRerankTokens(request)) {
+		return
+	}
+	rerankProvider, ok := h.provider.(provider.RerankProvider)
+	if !ok {
+		writeError(w, http.StatusBadGateway, "provider_failed", "rerank is not supported by the configured provider")
+		return
+	}
+	response, err := rerankProvider.Rerank(r.Context(), reqCtx)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func validateRerankRequest(request openai.RerankRequest) string {
+	if strings.TrimSpace(request.Model) == "" {
+		return "model is required"
+	}
+	if strings.TrimSpace(request.Query) == "" {
+		return "query is required"
+	}
+	if len(request.Documents) == 0 || len(request.Documents) > 1000 {
+		return "documents must contain between 1 and 1000 items"
+	}
+	if request.TopN != nil && (*request.TopN <= 0 || *request.TopN > len(request.Documents)) {
+		return "top_n must be between 1 and the number of documents"
+	}
+	if request.MaxChunksPerDoc != nil && *request.MaxChunksPerDoc <= 0 {
+		return "max_chunks_per_doc must be positive"
+	}
+	if request.MaxTokensPerDoc != nil && *request.MaxTokensPerDoc <= 0 {
+		return "max_tokens_per_doc must be positive"
+	}
+	if len(request.RankFields) > 32 {
+		return "rank_fields must not contain more than 32 fields"
+	}
+	seen := map[string]bool{}
+	for _, field := range request.RankFields {
+		field = strings.TrimSpace(field)
+		if field == "" || seen[field] {
+			return "rank_fields must contain unique non-empty fields"
+		}
+		seen[field] = true
+	}
+	text, ok := openai.RerankDocumentText(request)
+	if !ok {
+		return "documents must be non-empty strings or objects containing text in rank_fields (default: text)"
+	}
+	if len(text) > 4<<20 {
+		return "query and document text exceed the rerank limit"
+	}
+	return ""
+}
+
 func decodeInferenceRequest(w http.ResponseWriter, r *http.Request, target any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, openai.MaxInferenceBodyBytes)
 	decoder := json.NewDecoder(r.Body)
