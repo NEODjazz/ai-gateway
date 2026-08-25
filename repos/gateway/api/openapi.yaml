@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.2
+  version: 0.1.3
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -18,6 +18,7 @@ tags:
   - name: Models
   - name: Virtual keys
   - name: Operations
+  - name: Observability
 security:
   - bearerAuth: []
 paths:
@@ -493,6 +494,69 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/request-logs:
+    get:
+      operationId: listRequestLogs
+      tags: [Observability]
+      summary: List inference request outcomes
+      description: Returns bounded metadata-only final outcomes. Prompts, responses, raw provider errors, credentials, and upstream URLs are never returned.
+      parameters:
+        - {name: days, in: query, schema: {type: integer, minimum: 1, maximum: 90, default: 7}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+        - {name: before, in: query, schema: {type: string, format: date-time}}
+        - {name: before_request_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: request_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: status, in: query, schema: {type: string, enum: [ok, error]}}
+        - {name: model, in: query, schema: {type: string, maxLength: 256}}
+        - {name: provider, in: query, schema: {type: string, maxLength: 256}}
+        - {name: user_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: team_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: credential_id, in: query, schema: {type: string, maxLength: 256}}
+      responses:
+        '200':
+          description: Request log page ordered newest first
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RequestLogPage'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/request-logs/settings:
+    get:
+      operationId: getRequestLogSettings
+      tags: [Observability]
+      summary: Get request-log privacy and retention settings
+      responses:
+        '200':
+          description: Effective request-log settings
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RequestLogSettings'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/request-logs/{request_id}:
+    get:
+      operationId: getRequestLog
+      tags: [Observability]
+      summary: Get one inference request outcome
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 256}
+      responses:
+        '200':
+          description: Safe request outcome metadata
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RequestLog'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/routing/diagnostics:
     get:
       operationId: getRoutingDiagnostics
@@ -784,6 +848,49 @@ components:
         daily: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
         by_model: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
         by_provider: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
+    RequestLog:
+      type: object
+      additionalProperties: false
+      required: [timestamp, request_id, api_type, phase, status, latency_ms, input_tokens, output_tokens, total_tokens, cost, currency, content_stored]
+      properties:
+        timestamp: {type: string, format: date-time}
+        request_id: {type: string}
+        user_id: {type: string}
+        team_id: {type: string}
+        roles: {type: array, items: {type: string}}
+        credential_id: {type: string, description: Non-secret credential identifier or fingerprint}
+        provider: {type: string}
+        provider_endpoint_name: {type: string}
+        provider_endpoint_type: {type: string}
+        model: {type: string}
+        api_type: {type: string}
+        phase: {type: string, enum: [commit, cancel]}
+        status: {type: string, enum: [ok, error]}
+        failure_class: {type: string, description: Bounded failure category; raw provider errors are excluded}
+        latency_ms: {type: integer, minimum: 0}
+        cache_status: {type: string}
+        input_tokens: {type: integer, minimum: 0}
+        output_tokens: {type: integer, minimum: 0}
+        total_tokens: {type: integer, minimum: 0}
+        cost: {type: number, minimum: 0}
+        currency: {type: string}
+        content_stored: {type: boolean, const: false}
+    RequestLogPage:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/RequestLog'}}
+        next_before: {type: string, format: date-time}
+        next_request_id: {type: string}
+    RequestLogSettings:
+      type: object
+      additionalProperties: false
+      required: [retention_days, content_stored, max_query_days]
+      properties:
+        retention_days: {type: integer, minimum: 1}
+        content_stored: {type: boolean, const: false}
+        max_query_days: {type: integer, minimum: 1, maximum: 90}
     EndpointDiagnostics:
       type: object
       additionalProperties: false

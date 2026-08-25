@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS ai_gateway.usage_events
     cache_status LowCardinality(String),
     status LowCardinality(String),
     error String,
+    failure_class LowCardinality(String),
     latency_ms UInt32,
     prompt_tokens_estimated UInt32,
     input_tokens UInt32,
@@ -45,3 +46,6 @@ ALTER TABLE ai_gateway.usage_events
 
 ALTER TABLE ai_gateway.usage_events
     ADD COLUMN IF NOT EXISTS cache_status LowCardinality(String) AFTER phase;
+
+ALTER TABLE ai_gateway.usage_events
+    ADD COLUMN IF NOT EXISTS failure_class LowCardinality(String) AFTER error;

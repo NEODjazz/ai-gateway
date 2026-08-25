@@ -13,6 +13,9 @@ go run ./cmd/gateway
 - `GET /healthz`
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
+- `GET /admin/v1/request-logs`
+- `GET /admin/v1/request-logs/{request_id}`
+- `GET /admin/v1/request-logs/settings`
 
 Gateway-level module:
 

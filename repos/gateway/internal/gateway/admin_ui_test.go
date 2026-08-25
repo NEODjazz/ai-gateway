@@ -31,7 +31,7 @@ func TestAdminUIServesEmbeddedSameOriginAssets(t *testing.T) {
 	if page.Code != http.StatusOK {
 		t.Fatalf("UI status=%d body=%s", page.Code, page.Body.String())
 	}
-	for _, expected := range []string{"AI Gateway Console", "/ui/assets/app.css?v=5", "/ui/assets/app.js?v=5", "Admin bearer token", "Overview", "Usage &amp; spend", "Routing", "Playground", "Virtual keys", "Models", "Budgets", "Audit log", "routing-cards", "playground-form", "usage-chart", "usage-models-table", "Add catalog entry", "Create budget", "Create virtual key", "key-dialog", "issued-key-dialog", "model-dialog", "budget-dialog", "confirm-dialog"} {
+	for _, expected := range []string{"AI Gateway Console", "/ui/assets/app.css?v=6", "/ui/assets/app.js?v=6", "Admin bearer token", "Overview", "Usage &amp; spend", "Request logs", "Routing", "Playground", "Virtual keys", "Models", "Budgets", "Audit log", "routing-cards", "playground-form", "usage-chart", "usage-models-table", "request-log-filter-form", "request-logs-table", "Content storage off", "Add catalog entry", "Create budget", "Create virtual key", "key-dialog", "issued-key-dialog", "model-dialog", "budget-dialog", "request-log-dialog", "confirm-dialog"} {
 		if !strings.Contains(page.Body.String(), expected) {
 			t.Errorf("UI HTML missing %q", expected)
 		}

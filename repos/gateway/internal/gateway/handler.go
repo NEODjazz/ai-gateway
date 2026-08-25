@@ -19,18 +19,19 @@ import (
 )
 
 type Handler struct {
-	pipeline   modules.Pipeline
-	provider   provider.Provider
-	rateLimits RateLimitStore
-	metrics    *Metrics
-	ready      func(context.Context) error
-	management ManagementClient
-	budgets    BudgetManagementClient
-	usage      UsageManagementClient
-	models     *modelcatalog.Registry
-	audit      AuditClient
-	apiDocs    apiDocsConfig
-	adminUI    bool
+	pipeline    modules.Pipeline
+	provider    provider.Provider
+	rateLimits  RateLimitStore
+	metrics     *Metrics
+	ready       func(context.Context) error
+	management  ManagementClient
+	budgets     BudgetManagementClient
+	usage       UsageManagementClient
+	requestLogs RequestLogClient
+	models      *modelcatalog.Registry
+	audit       AuditClient
+	apiDocs     apiDocsConfig
+	adminUI     bool
 }
 
 // WithAPIDocs enables the embedded API documentation. Interactive requests are

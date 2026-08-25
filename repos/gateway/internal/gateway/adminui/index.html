@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>AI Gateway Console</title>
-  <link rel="stylesheet" href="/ui/assets/app.css?v=5">
-  <script src="/ui/assets/app.js?v=5" defer></script>
+  <link rel="stylesheet" href="/ui/assets/app.css?v=6">
+  <script src="/ui/assets/app.js?v=6" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-view">
@@ -34,6 +34,7 @@
       <nav aria-label="Console navigation">
         <button class="nav-item active" data-view="overview"><span>Overview</span></button>
         <button class="nav-item" data-view="usage"><span>Usage &amp; spend</span></button>
+        <button class="nav-item" data-view="request-logs"><span>Request logs</span><span id="request-logs-badge" class="badge">0</span></button>
         <button class="nav-item" data-view="routing"><span>Routing</span></button>
         <button class="nav-item" data-view="playground"><span>Playground</span></button>
         <button class="nav-item" data-view="keys"><span>Virtual keys</span><span id="keys-badge" class="badge">0</span></button>
@@ -86,6 +87,20 @@
           <div class="stats-grid usage-stats"><article class="stat-card"><span>Requests</span><strong id="usage-requests">—</strong><small id="usage-error-rate">Final outcomes</small></article><article class="stat-card"><span>Total tokens</span><strong id="usage-tokens">—</strong><small>Input and output</small></article><article class="stat-card"><span>Spend</span><strong id="usage-spend">—</strong><small>Separated by currency</small></article><article class="stat-card"><span>Average latency</span><strong id="usage-latency">—</strong><small>Across final outcomes</small></article></div>
           <article class="panel usage-chart-panel"><div class="panel-heading"><div><p class="eyebrow">Token volume</p><h3>Daily usage</h3></div></div><div id="usage-chart" class="usage-chart loading-block">Loading…</div></article>
           <div class="split-grid usage-breakdowns"><article class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">Models</p><h3>Usage by model</h3></div></div><div class="table-scroll"><table><thead><tr><th>Model</th><th>Requests</th><th>Tokens</th><th>Spend</th></tr></thead><tbody id="usage-models-table"></tbody></table></div></article><article class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">Providers</p><h3>Usage by endpoint</h3></div></div><div class="table-scroll"><table><thead><tr><th>Provider</th><th>Requests</th><th>Tokens</th><th>Spend</th></tr></thead><tbody id="usage-providers-table"></tbody></table></div></article></div>
+        </section>
+
+        <section id="view-request-logs" class="view" aria-labelledby="request-logs-heading" hidden>
+          <div class="section-heading"><div><p class="eyebrow">Observability</p><h2 id="request-logs-heading">Request logs</h2><p class="muted">Metadata-only final outcomes. Prompts, responses, credentials and raw provider errors are excluded from this view.</p></div><div id="request-log-privacy" class="privacy-pill">Content storage off</div></div>
+          <form id="request-log-filter-form" class="panel request-log-filters">
+            <label>Window<select id="request-log-days"><option value="1">24 hours</option><option value="7" selected>7 days</option><option value="30">30 days</option><option value="90">90 days</option></select></label>
+            <label>Status<select id="request-log-status"><option value="">All</option><option value="ok">Success</option><option value="error">Error</option></select></label>
+            <label>Request ID<input id="request-log-request-id" type="search" maxlength="256" placeholder="req-..."></label>
+            <label>Model<input id="request-log-model" type="search" maxlength="256" placeholder="Any model"></label>
+            <label>Provider<input id="request-log-provider" type="search" maxlength="256" placeholder="Any endpoint"></label>
+            <label>Team<input id="request-log-team" type="search" maxlength="256" placeholder="Any team"></label>
+            <button type="submit" class="secondary-button">Apply filters</button>
+          </form>
+          <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Time / Request</th><th>Outcome</th><th>Model / Endpoint</th><th>Identity</th><th>Tokens</th><th>Latency</th><th>Cost</th><th><span class="sr-only">Details</span></th></tr></thead><tbody id="request-logs-table"></tbody></table></div><div id="request-logs-empty" class="empty-state" hidden>No request outcomes match these filters.</div><div class="pagination-row"><button id="request-logs-more" type="button" class="secondary-button" hidden>Load older</button></div></div>
         </section>
 
         <section id="view-keys" class="view" aria-labelledby="keys-heading" hidden>
@@ -182,6 +197,15 @@
       <div class="modal-heading"><div><p class="eyebrow">Confirm change</p><h2 id="confirm-title">Disable policy?</h2></div></div>
       <p id="confirm-message" class="muted"></p>
       <div class="modal-actions"><button id="confirm-cancel" type="button" class="secondary-button">Cancel</button><button id="confirm-submit" type="submit" class="danger-button">Confirm</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="request-log-dialog" class="modal request-log-modal">
+    <form method="dialog">
+      <div class="modal-heading"><div><p class="eyebrow">Inference outcome</p><h2 id="request-log-dialog-title">Request details</h2></div><button type="button" class="icon-button close-dialog" data-dialog="request-log-dialog" aria-label="Close">×</button></div>
+      <div id="request-log-detail" class="request-log-detail"></div>
+      <p class="security-note">Request and response content, bearer tokens, upstream URLs and raw provider errors are excluded from this contract.</p>
+      <div class="modal-actions"><button type="submit" class="primary-button">Close</button></div>
     </form>
   </dialog>
 

@@ -39,6 +39,7 @@ func main() {
 	registerBudgetManagement(http.DefaultServeMux, manager, managerErr, os.Getenv("BILLING_MANAGEMENT_SHARED_SECRET"))
 	reporter, reporterErr := modules.NewClickHouseUsageReporter(settings)
 	registerUsageManagement(http.DefaultServeMux, reporter, reporterErr, os.Getenv("BILLING_MANAGEMENT_SHARED_SECRET"))
+	registerRequestLogManagement(http.DefaultServeMux, reporter, reporterErr, os.Getenv("BILLING_MANAGEMENT_SHARED_SECRET"))
 	registerAuditManagement(http.DefaultServeMux, auditStore, auditErr, os.Getenv("BILLING_MANAGEMENT_SHARED_SECRET"))
 
 	http.HandleFunc("/usage", func(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +75,7 @@ func main() {
 				"provider.endpoint.type":           request.ProviderEndpointType,
 				"provider.status":                  request.Status,
 				"provider.error":                   request.Error,
+				"provider.failure_class":           request.FailureClass,
 				"provider.latency_ms":              request.LatencyMS,
 				"provider.cache.status":            request.CacheStatus,
 				"model_catalog.version":            request.CatalogVersion,
@@ -129,6 +131,7 @@ type usageRequest struct {
 	Phase                 string   `json:"phase"`
 	Status                string   `json:"status,omitempty"`
 	Error                 string   `json:"error,omitempty"`
+	FailureClass          string   `json:"failure_class,omitempty"`
 	LatencyMS             string   `json:"latency_ms,omitempty"`
 	CacheStatus           string   `json:"cache_status,omitempty"`
 	PromptTokensEstimated int      `json:"prompt_tokens_estimated"`

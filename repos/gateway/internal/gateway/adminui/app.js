@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, routing: null, keys: [], models: [], catalog: null, budgets: [], audit: [] };
+  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], models: [], catalog: null, budgets: [], audit: [] };
   const $ = (id) => document.getElementById(id);
   const loginView = $("login-view");
   const consoleView = $("console-view");
@@ -9,7 +9,7 @@
   const tokenInput = $("admin-token");
   const loginError = $("login-error");
   const globalError = $("global-error");
-  const pageTitles = { overview: "Overview", usage: "Usage & spend", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", models: "Models", budgets: "Budgets", audit: "Audit log" };
+  const pageTitles = { overview: "Overview", usage: "Usage & spend", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", models: "Models", budgets: "Budgets", audit: "Audit log" };
   let pendingConfirmation = null;
 
   function setText(id, value) { const element = $(id); if (element) element.textContent = value; }
@@ -58,6 +58,15 @@
     return api(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   }
 
+  function requestLogQuery(before = "", beforeRequestID = "") {
+    const query = new URLSearchParams({ days: $("request-log-days").value, limit: "100" });
+    for (const [name, id] of [["status", "request-log-status"], ["request_id", "request-log-request-id"], ["model", "request-log-model"], ["provider", "request-log-provider"], ["team_id", "request-log-team"]]) {
+      const value = $(id).value.trim(); if (value) query.set(name, value);
+    }
+    if (before) { query.set("before", before); query.set("before_request_id", beforeRequestID); }
+    return query;
+  }
+
   async function loadData({ action = "" } = {}) {
     globalError.hidden = true;
     const query = new URLSearchParams({ limit: "100" });
@@ -70,6 +79,8 @@
       api("/admin/v1/budgets"),
       api(`/admin/v1/audit/events?${query}`),
       api("/admin/v1/routing/diagnostics"),
+      api(`/admin/v1/request-logs?${requestLogQuery()}`),
+      api("/admin/v1/request-logs/settings"),
     ];
     const results = await Promise.allSettled(requests);
     const authFailure = results.find((result) => result.status === "rejected" && result.reason?.auth);
@@ -82,6 +93,8 @@
     if (results[4].status === "fulfilled") state.budgets = results[4].value?.data || []; else errors.push(`Budgets: ${results[4].reason.message}`);
     if (results[5].status === "fulfilled") state.audit = results[5].value?.data || []; else errors.push(`Audit: ${results[5].reason.message}`);
     if (results[6].status === "fulfilled") state.routing = results[6].value; else errors.push(`Routing: ${results[6].reason.message}`);
+    if (results[7].status === "fulfilled") { state.requestLogs = results[7].value?.data || []; state.requestLogNextBefore = results[7].value?.next_before || ""; state.requestLogNextRequestID = results[7].value?.next_request_id || ""; } else errors.push(`Request logs: ${results[7].reason.message}`);
+    if (results[8].status === "fulfilled") state.requestLogSettings = results[8].value; else errors.push(`Request log settings: ${results[8].reason.message}`);
     renderAll();
     setText("console-health", errors.length ? "Degraded" : "Operational");
     if (errors.length) { globalError.textContent = errors.join(" · "); globalError.hidden = false; }
@@ -105,11 +118,13 @@
     setText("models-badge", formatNumber(state.models.length));
     setText("keys-badge", formatNumber(activeKeys));
     setText("budgets-badge", formatNumber(activeBudgets));
+    setText("request-logs-badge", formatNumber(state.requestLogs.length));
     setText("catalog-version", state.catalog?.version ? `Version ${state.catalog.version}` : "Runtime registry");
     renderOverview();
     renderRouting();
     renderPlaygroundModels();
     renderUsage();
+    renderRequestLogs();
     renderKeys();
     renderModels();
     renderBudgets();
@@ -218,6 +233,46 @@
       const row = document.createElement("tr"); row.appendChild(textCell(item.name)); row.appendChild(plainCell(formatNumber(item.requests))); row.appendChild(plainCell(formatNumber(item.total_tokens))); row.appendChild(plainCell(formatMoney(item.cost, item.currency))); body.appendChild(row);
     }
     if (!rows.length) { const row = document.createElement("tr"); const cell = document.createElement("td"); cell.colSpan = 4; cell.className = "muted"; cell.textContent = "No usage data."; row.appendChild(cell); body.appendChild(row); }
+  }
+
+  function requestLogEndpoint(log) { return log.provider_endpoint_name || log.provider || "—"; }
+
+  function renderRequestLogs() {
+    const body = $("request-logs-table"); clear(body); $("request-logs-empty").hidden = state.requestLogs.length !== 0;
+    const settings = state.requestLogSettings;
+    setText("request-log-privacy", settings ? `Content storage ${settings.content_stored ? "on" : "off"} · ${settings.retention_days}d retention` : "Content storage off");
+    for (const log of state.requestLogs) {
+      const row = document.createElement("tr");
+      row.appendChild(textCell(formatDate(log.timestamp), log.request_id));
+      const outcomeCell = document.createElement("td"); const outcome = document.createElement("span"); outcome.className = `outcome ${log.status === "ok" ? "succeeded" : "failed"}`; outcome.textContent = log.status === "ok" ? "Success" : log.failure_class || "Error"; outcomeCell.appendChild(outcome); row.appendChild(outcomeCell);
+      row.appendChild(textCell(log.model, `${requestLogEndpoint(log)} · ${log.api_type || "request"}`));
+      row.appendChild(textCell(log.user_id || "—", log.team_id || log.credential_id || ""));
+      row.appendChild(textCell(formatNumber(log.total_tokens), `${formatNumber(log.input_tokens)} in · ${formatNumber(log.output_tokens)} out`));
+      row.appendChild(textCell(`${formatNumber(log.latency_ms)} ms`, log.cache_status ? `cache ${log.cache_status}` : ""));
+      row.appendChild(plainCell(formatMoney(log.cost, log.currency)));
+      const actions = document.createElement("td"); actions.className = "row-actions"; const details = document.createElement("button"); details.type = "button"; details.className = "row-button"; details.textContent = "Details"; details.addEventListener("click", () => openRequestLog(log.request_id)); actions.appendChild(details); row.appendChild(actions);
+      body.appendChild(row);
+    }
+    $("request-logs-more").hidden = !state.requestLogNextBefore;
+  }
+
+  async function loadRequestLogs(append = false) {
+    const page = await api(`/admin/v1/request-logs?${requestLogQuery(append ? state.requestLogNextBefore : "", append ? state.requestLogNextRequestID : "")}`);
+    state.requestLogs = append ? state.requestLogs.concat(page.data || []) : (page.data || []);
+    state.requestLogNextBefore = page.next_before || "";
+    state.requestLogNextRequestID = page.next_request_id || "";
+    renderRequestLogs(); setText("request-logs-badge", formatNumber(state.requestLogs.length));
+  }
+
+  async function openRequestLog(requestID) {
+    try {
+      const log = await api(`/admin/v1/request-logs/${encodeURIComponent(requestID)}`);
+      setText("request-log-dialog-title", log.request_id || "Request details");
+      const detail = $("request-log-detail"); clear(detail);
+      const fields = [["Timestamp", formatDate(log.timestamp)], ["Outcome", log.status], ["Failure class", log.failure_class], ["API type", log.api_type], ["Model", log.model], ["Endpoint", requestLogEndpoint(log)], ["Endpoint type", log.provider_endpoint_type], ["User", log.user_id], ["Team", log.team_id], ["Credential fingerprint", log.credential_id], ["Tokens", `${formatNumber(log.input_tokens)} input · ${formatNumber(log.output_tokens)} output · ${formatNumber(log.total_tokens)} total`], ["Latency", `${formatNumber(log.latency_ms)} ms`], ["Cache", log.cache_status], ["Cost", formatMoney(log.cost, log.currency)], ["Content stored", log.content_stored ? "Yes" : "No"]];
+      for (const [label, value] of fields) { const item = document.createElement("div"); const key = document.createElement("small"); key.textContent = label; const data = document.createElement("strong"); data.textContent = value || "—"; item.append(key, data); detail.appendChild(item); }
+      $("request-log-dialog").showModal();
+    } catch (error) { globalError.textContent = error.message; globalError.hidden = false; }
   }
 
   function renderKeys() {
@@ -456,6 +511,8 @@
   $("refresh-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); showToast("Console data refreshed"); } catch (error) { if (error.auth) { sessionStorage.removeItem("ai_gateway_admin_token"); showLogin(error.message); } else { globalError.textContent = error.message; globalError.hidden = false; } } });
   $("audit-filter-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
   $("usage-days").addEventListener("change", async () => { try { await loadData(); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
+  $("request-log-filter-form").addEventListener("submit", async (event) => { event.preventDefault(); try { await loadRequestLogs(false); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
+  $("request-logs-more").addEventListener("click", async () => { try { await loadRequestLogs(true); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
   $("playground-form").addEventListener("submit", runPlayground);
   $("model-search").addEventListener("input", renderModels);
   $("add-key-button").addEventListener("click", () => openKeyDialog());

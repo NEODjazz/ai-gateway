@@ -22,6 +22,7 @@ type UsageRequest struct {
 	Phase                 string   `json:"phase"`
 	Status                string   `json:"status,omitempty"`
 	Error                 string   `json:"error,omitempty"`
+	FailureClass          string   `json:"failure_class,omitempty"`
 	LatencyMS             string   `json:"latency_ms,omitempty"`
 	CacheStatus           string   `json:"cache_status,omitempty"`
 	PromptTokensEstimated int      `json:"prompt_tokens_estimated"`
@@ -111,6 +112,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		ProviderEndpointType:  metadataValue(req.Metadata, "provider.endpoint.type"),
 		Status:                metadataValue(req.Metadata, "provider.status"),
 		Error:                 metadataValue(req.Metadata, "provider.error"),
+		FailureClass:          metadataValue(req.Metadata, "provider.failure_class"),
 		LatencyMS:             metadataValue(req.Metadata, "provider.latency_ms"),
 		CacheStatus:           metadataValue(req.Metadata, "provider.cache.status"),
 		PromptTokensEstimated: estimateRequestTokens(req),

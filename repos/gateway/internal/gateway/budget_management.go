@@ -132,7 +132,7 @@ func (c *RemoteBudgetManagementClient) call(ctx context.Context, method, path st
 	if result == nil || response.StatusCode == http.StatusNoContent {
 		return nil
 	}
-	return json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(result)
+	return json.NewDecoder(io.LimitReader(response.Body, 2<<20)).Decode(result)
 }
 
 func (h Handler) WithBudgetManagement(client BudgetManagementClient) Handler {

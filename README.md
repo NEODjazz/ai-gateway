@@ -165,6 +165,13 @@ management, budget policy management, and a read-only management audit view.
 The Usage & Spend view reads final request outcomes from ClickHouse for a
 bounded 7/30/90-day window and breaks requests, tokens, latency, and spend down
 by day, model, and provider. Costs remain separated by currency.
+The Request Logs view provides a bounded, cursor-paginated explorer over the
+same final outcomes with filters for request, status, model, endpoint, user,
+team, and credential fingerprint. Its detail contract contains operational
+metadata, token counts, cost, cache state, and a bounded failure class only.
+Prompts, responses, bearer credentials, upstream URLs, and raw provider error
+strings are excluded. Content storage is disabled and the effective 730-day
+ClickHouse retention plus the 90-day maximum query window are shown in the UI.
 Routing diagnostics expose circuit, adaptive EWMA, admission, guardrail, and
 shadow-routing state using endpoint names only; provider base URLs and secrets
 are not part of the response contract. The playground sends non-streaming chat

@@ -44,6 +44,7 @@ type BillingEvent struct {
 	Phase                 string   `json:"phase"`
 	Status                string   `json:"status,omitempty"`
 	Error                 string   `json:"error,omitempty"`
+	FailureClass          string   `json:"failure_class,omitempty"`
 	LatencyMS             int      `json:"latency_ms,omitempty"`
 	CacheStatus           string   `json:"cache_status,omitempty"`
 	PromptTokensEstimated int      `json:"prompt_tokens_estimated"`

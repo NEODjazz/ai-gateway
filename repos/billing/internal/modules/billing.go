@@ -251,6 +251,8 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 	if pricingErr != nil {
 		pricing = PricingSnapshot{Currency: m.pricing.Currency}
 	}
+	// Raw upstream error strings may contain request fragments or provider
+	// internals. Persist only the bounded failure class used by operators.
 	return BillingEvent{
 		RequestID:             requestID(req),
 		UserID:                req.UserID,
@@ -264,7 +266,7 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		APIType:               apiType,
 		Phase:                 req.BillingPhase,
 		Status:                metadataDefault(req, "provider.status", "ok"),
-		Error:                 metadata(req, "provider.error"),
+		FailureClass:          metadata(req, "provider.failure_class"),
 		LatencyMS:             metadataInt(req, "provider.latency_ms"),
 		CacheStatus:           metadata(req, "provider.cache.status"),
 		PromptTokensEstimated: promptTokens,

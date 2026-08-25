@@ -120,6 +120,25 @@ func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 	}
 }
 
+func TestBillingPersistsBoundedFailureClassWithoutRawProviderError(t *testing.T) {
+	module := NewBillingModuleWithPricing(true, PricingConfig{Currency: "USD"})
+	req := RequestContext{
+		BillingPhase: "cancel",
+		Request:      openai.ChatCompletionRequest{Provider: "openai", Model: "test-model"},
+		Metadata: map[string]string{
+			"provider.status":        "error",
+			"provider.failure_class": "upstream",
+			"provider.error":         "secret request fragment must not be retained",
+		},
+	}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.BillingEvent == nil || req.BillingEvent.FailureClass != "upstream" || req.BillingEvent.Error != "" {
+		t.Fatalf("unsafe failure event: %+v", req.BillingEvent)
+	}
+}
+
 func TestBillingCollectsResponsesEvent(t *testing.T) {
 	module := NewBillingModuleWithPricing(true, PricingConfig{
 		InputPricePer1K:  0.01,
