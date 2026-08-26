@@ -116,6 +116,7 @@ type Endpoint struct {
 	MaxRetries            int
 	CooldownAfterFailures int
 	Cooldown              time.Duration
+	RequestTimeout        time.Duration
 	Admission             *admissionController
 	GuardrailPolicy       string
 	GuardrailPolicyValid  bool
@@ -225,7 +226,7 @@ func NewWithError(cfg Config) (Provider, error) {
 			upstreamModel = endpoint.Models[0]
 		}
 		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(endpoint.BaseURL, "/"), Enabled: enabled}
-		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, UpstreamModel: upstreamModel, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, Enabled: enabled}
+		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, UpstreamModel: upstreamModel, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, MaxRetries: endpoint.MaxRetries, CooldownAfterFailures: endpoint.CooldownAfterFailures, CooldownSeconds: endpoint.CooldownSeconds, MaxParallelRequests: endpoint.MaxParallelRequests, QueueCapacity: endpoint.QueueCapacity, QueueTimeoutMS: endpoint.QueueTimeoutMS, Enabled: enabled}
 	}
 
 	hasPrimary := false
@@ -1097,13 +1098,19 @@ func (r Router) callRerank(ctx context.Context, endpoint Endpoint, client Rerank
 
 func (r Router) startProviderCall(ctx context.Context, endpoint Endpoint, operation string) (context.Context, func(error)) {
 	started := time.Now()
-	spanCtx, span := otel.Tracer("ai-gateway/provider").Start(ctx, "provider."+operation,
+	providerCtx := ctx
+	cancel := func() {}
+	if endpoint.RequestTimeout > 0 {
+		providerCtx, cancel = context.WithTimeout(ctx, endpoint.RequestTimeout)
+	}
+	spanCtx, span := otel.Tracer("ai-gateway/provider").Start(providerCtx, "provider."+operation,
 		trace.WithAttributes(
 			attribute.String("ai.provider.endpoint", endpoint.Name),
 			attribute.String("ai.provider.type", endpoint.Type),
 			attribute.String("ai.operation", operation),
 		))
 	return spanCtx, func(err error) {
+		defer cancel()
 		duration := time.Since(started)
 		result := "ok"
 		if err != nil {

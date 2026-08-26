@@ -6,26 +6,34 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"ai-gateway-gateway/internal/config"
 )
 
 type ModelDeployment struct {
-	ID              string   `json:"id"`
-	ProviderID      string   `json:"provider_id"`
-	CredentialID    string   `json:"credential_id,omitempty"`
-	CredentialSet   bool     `json:"-"`
-	ProviderType    string   `json:"provider_type"`
-	UpstreamModel   string   `json:"upstream_model,omitempty"`
-	Models          []string `json:"models"`
-	Capabilities    []string `json:"capabilities,omitempty"`
-	Priority        int      `json:"priority"`
-	Weight          int      `json:"weight"`
-	GuardrailPolicy string   `json:"guardrail_policy,omitempty"`
-	Enabled         bool     `json:"enabled"`
-	RuntimeState    string   `json:"runtime_state"`
-	LatencyEWMAms   float64  `json:"latency_ewma_ms,omitempty"`
-	FailureEWMA     float64  `json:"failure_ewma,omitempty"`
+	ID                    string   `json:"id"`
+	ProviderID            string   `json:"provider_id"`
+	CredentialID          string   `json:"credential_id,omitempty"`
+	CredentialSet         bool     `json:"-"`
+	ProviderType          string   `json:"provider_type"`
+	UpstreamModel         string   `json:"upstream_model,omitempty"`
+	Models                []string `json:"models"`
+	Capabilities          []string `json:"capabilities,omitempty"`
+	Priority              int      `json:"priority"`
+	Weight                int      `json:"weight"`
+	GuardrailPolicy       string   `json:"guardrail_policy,omitempty"`
+	RequestTimeoutMS      int      `json:"request_timeout_ms,omitempty"`
+	MaxRetries            int      `json:"max_retries,omitempty"`
+	CooldownAfterFailures int      `json:"cooldown_after_failures,omitempty"`
+	CooldownSeconds       int      `json:"cooldown_seconds,omitempty"`
+	MaxParallelRequests   int      `json:"max_parallel_requests,omitempty"`
+	QueueCapacity         int      `json:"queue_capacity,omitempty"`
+	QueueTimeoutMS        int      `json:"queue_timeout_ms,omitempty"`
+	Enabled               bool     `json:"enabled"`
+	RuntimeState          string   `json:"runtime_state"`
+	LatencyEWMAms         float64  `json:"latency_ewma_ms,omitempty"`
+	FailureEWMA           float64  `json:"failure_ewma,omitempty"`
 }
 
 type DeploymentController interface {
@@ -303,7 +311,7 @@ func containsDeployment(values []string, expected string) bool {
 }
 
 func (r *Router) validateDeployment(deployment ModelDeployment) error {
-	if strings.TrimSpace(deployment.ID) == "" || len(deployment.ID) > 128 || strings.TrimSpace(deployment.ProviderID) == "" || len(deployment.ProviderID) > 128 || len(deployment.CredentialID) > 128 || len(deployment.UpstreamModel) > 256 || deployment.Priority < 0 || deployment.Weight < 0 || len(deployment.Models) == 0 || len(deployment.Models) > 128 || !validDeploymentStrings(deployment.Models) || !validDeploymentStrings(deployment.Capabilities) || len(deployment.GuardrailPolicy) > 128 {
+	if strings.TrimSpace(deployment.ID) == "" || len(deployment.ID) > 128 || strings.TrimSpace(deployment.ProviderID) == "" || len(deployment.ProviderID) > 128 || len(deployment.CredentialID) > 128 || len(deployment.UpstreamModel) > 256 || deployment.Priority < 0 || deployment.Weight < 0 || len(deployment.Models) == 0 || len(deployment.Models) > 128 || !validDeploymentStrings(deployment.Models) || !validDeploymentStrings(deployment.Capabilities) || len(deployment.GuardrailPolicy) > 128 || !validDeploymentOperations(deployment) {
 		return ErrInvalidDeployment
 	}
 	if deployment.CredentialID != "" {
@@ -312,6 +320,25 @@ func (r *Router) validateDeployment(deployment ModelDeployment) error {
 		}
 	}
 	return nil
+}
+
+func validDeploymentOperations(deployment ModelDeployment) bool {
+	if !(deployment.RequestTimeoutMS >= 0 && deployment.RequestTimeoutMS <= 600000 &&
+		deployment.MaxRetries >= 0 && deployment.MaxRetries <= 10 &&
+		deployment.CooldownAfterFailures >= 0 && deployment.CooldownAfterFailures <= 100 &&
+		deployment.CooldownSeconds >= 0 && deployment.CooldownSeconds <= 86400 &&
+		deployment.MaxParallelRequests >= 0 && deployment.MaxParallelRequests <= 100000 &&
+		deployment.QueueCapacity >= 0 && deployment.QueueCapacity <= 100000 &&
+		deployment.QueueTimeoutMS >= 0 && deployment.QueueTimeoutMS <= 600000) {
+		return false
+	}
+	if deployment.MaxParallelRequests == 0 {
+		return deployment.QueueCapacity == 0 && deployment.QueueTimeoutMS == 0
+	}
+	if deployment.QueueCapacity == 0 {
+		return deployment.QueueTimeoutMS == 0
+	}
+	return deployment.QueueTimeoutMS > 0
 }
 
 func (r *Router) managedProvider(id string) (ManagedProvider, bool) {
@@ -341,7 +368,7 @@ func (r *Router) endpointForDeployment(deployment ModelDeployment) (Endpoint, er
 			aliases[model] = deployment.UpstreamModel
 		}
 	}
-	return Endpoint{Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(0, 0, 0), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID}, nil
+	return Endpoint{Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second}, nil
 }
 
 func (r *Router) configuredEndpoints() []Endpoint {

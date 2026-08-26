@@ -1080,6 +1080,19 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/routing/simulate:
+    post:
+      operationId: simulateRouting
+      tags: [Routing]
+      summary: Explain deployment selection without calling a provider
+      description: Uses a copy of routing state so weighted selection counters and endpoint health are not mutated.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoutingSimulationRequest'}}}}
+      responses:
+        '200': {description: Ordered eligible deployments and selected route, content: {application/json: {schema: {$ref: '#/components/schemas/RoutingSimulation'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/model-catalog:
     get:
       operationId: getRuntimeModelCatalog
@@ -1479,6 +1492,35 @@ components:
       properties:
         strategy: {type: string}
         endpoints: {type: array, items: {$ref: '#/components/schemas/EndpointDiagnostics'}}
+    RoutingSimulationRequest:
+      type: object
+      additionalProperties: false
+      required: [model]
+      properties:
+        model: {type: string, minLength: 1, maxLength: 256}
+        provider: {type: string, maxLength: 128}
+        capabilities: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 256}}
+        max_output_tokens: {type: integer, minimum: 0}
+    RoutingSimulationCandidate:
+      type: object
+      additionalProperties: false
+      required: [deployment_id, provider_id, provider_type, priority, weight, order]
+      properties:
+        deployment_id: {type: string}
+        provider_id: {type: string}
+        provider_type: {type: string}
+        priority: {type: integer}
+        weight: {type: integer}
+        order: {type: integer, minimum: 1}
+    RoutingSimulation:
+      type: object
+      additionalProperties: false
+      required: [strategy, reason, candidates]
+      properties:
+        strategy: {type: string}
+        selected: {type: string}
+        reason: {type: string}
+        candidates: {type: array, items: {$ref: '#/components/schemas/RoutingSimulationCandidate'}}
     ErrorResponse:
       type: object
       additionalProperties: false
@@ -2118,6 +2160,13 @@ components:
         priority: {type: integer, minimum: 0}
         weight: {type: integer, minimum: 1}
         guardrail_policy: {type: string, maxLength: 128}
+        request_timeout_ms: {type: integer, minimum: 0, maximum: 600000}
+        max_retries: {type: integer, minimum: 0, maximum: 10}
+        cooldown_after_failures: {type: integer, minimum: 0, maximum: 100}
+        cooldown_seconds: {type: integer, minimum: 0, maximum: 86400}
+        max_parallel_requests: {type: integer, minimum: 0, maximum: 100000}
+        queue_capacity: {type: integer, minimum: 0, maximum: 100000}
+        queue_timeout_ms: {type: integer, minimum: 0, maximum: 600000}
         enabled: {type: boolean}
     ModelDeployment:
       allOf:

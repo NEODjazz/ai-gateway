@@ -65,8 +65,8 @@ func TestAdminCreatesAndDeletesRoutableModelDeployment(t *testing.T) {
 		t.Fatalf("provider create failed: %d %s", createProvider.Code, createProvider.Body.String())
 	}
 	create := httptest.NewRecorder()
-	handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/admin/v1/model-deployments", strings.NewReader(`{"id":"managed-deployment","provider_id":"managed-demo","models":["managed-model"],"capabilities":["chat"],"priority":1,"weight":2,"enabled":true}`)))
-	if create.Code != http.StatusCreated || !strings.Contains(create.Body.String(), `"provider_id":"managed-demo"`) {
+	handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/admin/v1/model-deployments", strings.NewReader(`{"id":"managed-deployment","provider_id":"managed-demo","models":["managed-model"],"capabilities":["chat"],"priority":1,"weight":2,"request_timeout_ms":2500,"max_retries":2,"cooldown_after_failures":3,"cooldown_seconds":30,"max_parallel_requests":4,"queue_capacity":5,"queue_timeout_ms":750,"enabled":true}`)))
+	if create.Code != http.StatusCreated || !strings.Contains(create.Body.String(), `"provider_id":"managed-demo"`) || !strings.Contains(create.Body.String(), `"max_retries":2`) || !strings.Contains(create.Body.String(), `"max_parallel_requests":4`) {
 		t.Fatalf("deployment create failed: %d %s", create.Code, create.Body.String())
 	}
 	models := httptest.NewRecorder()

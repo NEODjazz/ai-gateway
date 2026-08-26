@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/provider"
 )
 
@@ -14,6 +15,16 @@ type diagnosticsProvider struct{ modelsProvider }
 
 func (diagnosticsProvider) Diagnostics(context.Context) provider.RoutingDiagnostics {
 	return provider.RoutingDiagnostics{Strategy: "adaptive", Endpoints: []provider.EndpointDiagnostics{{Name: "safe-endpoint", Type: "ollama", State: "available", Models: []string{"m1"}}}}
+}
+
+func TestAdminRoutingSimulationReturnsEligibleOrder(t *testing.T) {
+	runtime := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "demo-route", Type: "demo", Models: []string{"model"}}}})
+	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/admin/v1/routing/simulate", strings.NewReader(`{"model":"model","capabilities":["chat"]}`)))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"selected":"demo-route"`) || !strings.Contains(response.Body.String(), `"order":1`) {
+		t.Fatalf("unexpected simulation: %d %s", response.Code, response.Body.String())
+	}
 }
 
 func TestAdminRoutingDiagnosticsReturnsSafeProjection(t *testing.T) {

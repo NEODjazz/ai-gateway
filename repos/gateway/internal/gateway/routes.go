@@ -52,6 +52,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/admin/v1/request-logs/settings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetRequestLogSettings) }},
 	{RouteContract{http.MethodGet, "/admin/v1/request-logs/{request_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetRequestLog) }},
 	{RouteContract{http.MethodGet, "/admin/v1/routing/diagnostics"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetRoutingDiagnostics) }},
+	{RouteContract{http.MethodPost, "/admin/v1/routing/simulate"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SimulateRouting) }},
 	{RouteContract{http.MethodGet, "/admin/v1/model-catalog"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetModelCatalog) }},
 	{RouteContract{http.MethodGet, "/admin/v1/providers"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListProviders) }},
 	{RouteContract{http.MethodPost, "/admin/v1/providers"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateProvider) }},

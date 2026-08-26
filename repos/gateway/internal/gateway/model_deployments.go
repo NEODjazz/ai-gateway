@@ -45,16 +45,23 @@ func (h Handler) mutateModelDeployment(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	var input struct {
-		ID              string   `json:"id,omitempty"`
-		ProviderID      string   `json:"provider_id,omitempty"`
-		CredentialID    *string  `json:"credential_id,omitempty"`
-		UpstreamModel   string   `json:"upstream_model,omitempty"`
-		Models          []string `json:"models"`
-		Capabilities    []string `json:"capabilities,omitempty"`
-		Priority        int      `json:"priority"`
-		Weight          int      `json:"weight"`
-		GuardrailPolicy string   `json:"guardrail_policy,omitempty"`
-		Enabled         bool     `json:"enabled"`
+		ID                    string   `json:"id,omitempty"`
+		ProviderID            string   `json:"provider_id,omitempty"`
+		CredentialID          *string  `json:"credential_id,omitempty"`
+		UpstreamModel         string   `json:"upstream_model,omitempty"`
+		Models                []string `json:"models"`
+		Capabilities          []string `json:"capabilities,omitempty"`
+		Priority              int      `json:"priority"`
+		Weight                int      `json:"weight"`
+		GuardrailPolicy       string   `json:"guardrail_policy,omitempty"`
+		RequestTimeoutMS      int      `json:"request_timeout_ms,omitempty"`
+		MaxRetries            int      `json:"max_retries,omitempty"`
+		CooldownAfterFailures int      `json:"cooldown_after_failures,omitempty"`
+		CooldownSeconds       int      `json:"cooldown_seconds,omitempty"`
+		MaxParallelRequests   int      `json:"max_parallel_requests,omitempty"`
+		QueueCapacity         int      `json:"queue_capacity,omitempty"`
+		QueueTimeoutMS        int      `json:"queue_timeout_ms,omitempty"`
+		Enabled               bool     `json:"enabled"`
 	}
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 64<<10))
 	decoder.DisallowUnknownFields()
@@ -70,7 +77,7 @@ func (h Handler) mutateModelDeployment(w http.ResponseWriter, r *http.Request, i
 	if input.CredentialID != nil {
 		credentialID = *input.CredentialID
 	}
-	deployment := provider.ModelDeployment{ID: input.ID, ProviderID: input.ProviderID, CredentialID: credentialID, CredentialSet: input.CredentialID != nil, UpstreamModel: input.UpstreamModel, Models: input.Models, Capabilities: input.Capabilities, Priority: input.Priority, Weight: input.Weight, GuardrailPolicy: input.GuardrailPolicy, Enabled: input.Enabled}
+	deployment := provider.ModelDeployment{ID: input.ID, ProviderID: input.ProviderID, CredentialID: credentialID, CredentialSet: input.CredentialID != nil, UpstreamModel: input.UpstreamModel, Models: input.Models, Capabilities: input.Capabilities, Priority: input.Priority, Weight: input.Weight, GuardrailPolicy: input.GuardrailPolicy, RequestTimeoutMS: input.RequestTimeoutMS, MaxRetries: input.MaxRetries, CooldownAfterFailures: input.CooldownAfterFailures, CooldownSeconds: input.CooldownSeconds, MaxParallelRequests: input.MaxParallelRequests, QueueCapacity: input.QueueCapacity, QueueTimeoutMS: input.QueueTimeoutMS, Enabled: input.Enabled}
 	targetID := input.ID
 	if id != "" {
 		targetID = id
