@@ -16,3 +16,5 @@ coverage.out
 *.swp
 .DS_Store
 Thumbs.db
+# Agent MD
+AGENTS.md
