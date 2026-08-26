@@ -49,8 +49,9 @@ func main() {
 	gatewayPipeline := modules.NewPipelineWithObserver([]modules.Module{
 		modules.Auth(cfg.Modules.Auth.Required, cfg.Modules.Auth.URL),
 	}, metrics)
-	dlpModule := modules.DLP(cfg.Modules.DLP.Required, cfg.Modules.DLP.URL)
-	avModule := modules.AV(cfg.Modules.AV.Required, cfg.Modules.AV.URL)
+	guardrailMonitor := gateway.NewGuardrailMonitor(200)
+	dlpModule := gateway.NewGuardrailMonitoringModule(modules.DLP(cfg.Modules.DLP.Required, cfg.Modules.DLP.URL), guardrailMonitor)
+	avModule := gateway.NewGuardrailMonitoringModule(modules.AV(cfg.Modules.AV.Required, cfg.Modules.AV.URL), guardrailMonitor)
 	providerPipeline := modules.NewPipelineWithObserver([]modules.Module{
 		dlpModule,
 		avModule,
@@ -112,7 +113,7 @@ func main() {
 			return providerControlStore.Ping(ctx)
 		}
 	}
-	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithMCPRegistry(gateway.NewMCPRegistry()).WithAccessRegistry(gateway.NewAccessRegistry())
+	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithGuardrailMonitor(guardrailMonitor).WithMCPRegistry(gateway.NewMCPRegistry()).WithAccessRegistry(gateway.NewAccessRegistry())
 	if cfg.APIDocs.Enabled {
 		handler = handler.WithAPIDocs(cfg.APIDocs.TryItOutEnabled)
 	}

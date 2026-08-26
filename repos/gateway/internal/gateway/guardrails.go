@@ -104,7 +104,7 @@ func (h Handler) CheckCompliance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "guardrail policy is missing or disabled")
 		return
 	}
-	scan := modules.RequestContext{RequestID: req.RequestID, Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: input.Text}}}, Metadata: map[string]string{"provider.modules.dlp.enabled": strconv.FormatBool(policy.DLP), "provider.modules.av.enabled": strconv.FormatBool(policy.AV)}}
+	scan := modules.RequestContext{RequestID: req.RequestID, Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: input.Text}}}, Metadata: map[string]string{"provider.modules.dlp.enabled": strconv.FormatBool(policy.DLP), "provider.modules.av.enabled": strconv.FormatBool(policy.AV), "provider.guardrail.policy": policy.Name, "guardrail.monitor.source": "compliance"}}
 	result := complianceResult{RequestID: req.RequestID, Policy: policy.Name, Allowed: true, Checks: map[string]string{}, ContentStored: false}
 	for _, check := range []struct {
 		name    string

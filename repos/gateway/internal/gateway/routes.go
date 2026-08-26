@@ -80,6 +80,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/admin/v1/guardrail-policies"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListGuardrailPolicies) }},
 	{RouteContract{http.MethodPut, "/admin/v1/guardrail-policies/{name}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateGuardrailPolicy) }},
 	{RouteContract{http.MethodPost, "/admin/v1/compliance/check"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CheckCompliance) }},
+	{RouteContract{http.MethodGet, "/admin/v1/guardrails/monitor"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetGuardrailMonitor) }},
 	{RouteContract{http.MethodGet, "/admin/v1/mcp/servers"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListMCPServers) }},
 	{RouteContract{http.MethodPut, "/admin/v1/mcp/servers/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateMCPServer) }},
 	{RouteContract{http.MethodGet, "/admin/v1/mcp/toolsets"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListMCPToolsets) }},

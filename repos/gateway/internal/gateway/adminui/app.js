@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, customerUsage: null, customerScope: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], organizations: [], projects: [], accessGroups: [], models: [], aiHub: [], costRecommendations: [], providers: [], credentials: [], deployments: [], modelGroups: [], guardrails: [], mcpServers: [], mcpToolsets: [], catalog: null, budgets: [], audit: [] };
+  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, customerUsage: null, customerScope: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], organizations: [], projects: [], accessGroups: [], models: [], aiHub: [], costRecommendations: [], providers: [], credentials: [], deployments: [], modelGroups: [], guardrails: [], guardrailMonitor: null, mcpServers: [], mcpToolsets: [], catalog: null, budgets: [], audit: [] };
   const $ = (id) => document.getElementById(id);
   const loginView = $("login-view");
   const consoleView = $("console-view");
@@ -105,6 +105,7 @@
       api("/admin/v1/model-groups"),
       api("/admin/v1/projects"),
       api("/admin/v1/access-groups"),
+      api("/admin/v1/guardrails/monitor?limit=100"),
     ];
     const results = await Promise.allSettled(requests);
     const authFailure = results.find((result) => result.status === "rejected" && result.reason?.auth);
@@ -133,6 +134,7 @@
     if (results[20].status === "fulfilled") state.modelGroups = results[20].value?.data || []; else errors.push(`Model groups: ${results[20].reason.message}`);
     if (results[21].status === "fulfilled") state.projects = results[21].value?.data || []; else errors.push(`Projects: ${results[21].reason.message}`);
     if (results[22].status === "fulfilled") state.accessGroups = results[22].value?.data || []; else errors.push(`Access groups: ${results[22].reason.message}`);
+    if (results[23].status === "fulfilled") state.guardrailMonitor = results[23].value; else errors.push(`Guardrail monitor: ${results[23].reason.message}`);
     renderAll();
     setText("console-health", errors.length ? "Degraded" : "Operational");
     if (errors.length) { globalError.textContent = errors.join(" · "); globalError.hidden = false; }
@@ -196,6 +198,7 @@
     renderDeployments();
     renderModelGroups();
     renderGuardrails();
+    renderGuardrailMonitor();
     renderMCP();
     renderModels();
     renderBudgets();
@@ -475,6 +478,7 @@
   async function saveModelGroup(event){event.preventDefault();const error=$("model-group-form-error"),id=$("model-group-id").value.trim(),editing=$("model-group-mode").value==="edit";error.hidden=true;try{await apiJSON(editing?`/admin/v1/model-groups/${encodeURIComponent(id)}`:"/admin/v1/model-groups",editing?"PUT":"POST",{id,deployment_ids:commaList("model-group-deployments"),strategy:$("model-group-strategy").value,enabled:$("model-group-enabled").checked});$("model-group-dialog").close();await loadData();showToast("Model group saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
 
   function renderGuardrails(){const body=$("guardrails-table");clear(body);$("guardrails-empty").hidden=state.guardrails.length!==0;const select=$("compliance-policy"),selected=select.value;clear(select);for(const policy of state.guardrails){const row=document.createElement("tr");row.appendChild(textCell(policy.name,policy.description));row.appendChild(plainCell([policy.dlp?"DLP":"",policy.av?"AV":""].filter(Boolean).join(" + ")));const statusCell=document.createElement("td");const status=document.createElement("span");status.className=`outcome ${policy.enabled?"succeeded":"failed"}`;status.textContent=policy.enabled?"Enabled":"Disabled";statusCell.appendChild(status);row.appendChild(statusCell);const actions=document.createElement("td");const edit=document.createElement("button");edit.type="button";edit.className="row-button";edit.textContent="Edit";edit.addEventListener("click",()=>openGuardrailDialog(policy));actions.appendChild(edit);row.appendChild(actions);body.appendChild(row);if(policy.enabled){const option=document.createElement("option");option.value=policy.name;option.textContent=policy.name;select.appendChild(option)}}if([...select.options].some(option=>option.value===selected))select.value=selected}
+  function renderGuardrailMonitor(){const summary=state.guardrailMonitor?.summary||{};setText("guardrail-monitor-total",formatNumber(summary.total||0));setText("guardrail-monitor-passed",formatNumber(summary.passed||0));setText("guardrail-monitor-rejected",formatNumber(summary.rejected||0));setText("guardrail-monitor-unavailable",formatNumber(summary.unavailable||0));const body=$("guardrail-events-table"),events=state.guardrailMonitor?.events||[];clear(body);$("guardrail-events-empty").hidden=events.length!==0;for(const event of events){const row=document.createElement("tr");row.appendChild(textCell(formatDate(event.occurred_at),event.request_id));row.appendChild(plainCell(event.policy||"Unassigned"));row.appendChild(plainCell(event.module.toUpperCase()));row.appendChild(plainCell(event.source));const outcome=document.createElement("td"),badge=document.createElement("span");badge.className=`outcome ${event.outcome==="passed"?"succeeded":event.outcome==="rejected"?"attempted":"failed"}`;badge.textContent=event.outcome;outcome.appendChild(badge);row.appendChild(outcome);row.appendChild(plainCell(`${event.duration_ms||0} ms`));body.appendChild(row)}}
   function openGuardrailDialog(policy=null){$("guardrail-name").value=policy?.name||"";$("guardrail-name").readOnly=Boolean(policy);$("guardrail-description").value=policy?.description||"";$("guardrail-dlp").checked=Boolean(policy?.dlp);$("guardrail-av").checked=Boolean(policy?.av);$("guardrail-enabled").checked=policy?.enabled??true;$("guardrail-form-error").hidden=true;$("guardrail-dialog").showModal()}
   async function saveGuardrail(event){event.preventDefault();const error=$("guardrail-form-error");error.hidden=true;const name=$("guardrail-name").value.trim();if(!$("guardrail-dlp").checked&&!$("guardrail-av").checked){error.textContent="Enable DLP, AV, or both.";error.hidden=false;return}try{await apiJSON(`/admin/v1/guardrail-policies/${encodeURIComponent(name)}`,"PUT",{description:$("guardrail-description").value.trim(),dlp:$("guardrail-dlp").checked,av:$("guardrail-av").checked,enabled:$("guardrail-enabled").checked});$("guardrail-dialog").close();await loadData();showToast("Guardrail policy saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
   async function runCompliance(event){event.preventDefault();const error=$("compliance-error");error.hidden=true;try{const result=await apiJSON("/admin/v1/compliance/check","POST",{policy:$("compliance-policy").value,text:$("compliance-text").value});$("compliance-result").textContent=JSON.stringify(result,null,2)}catch(requestError){error.textContent=requestError.message;error.hidden=false}}

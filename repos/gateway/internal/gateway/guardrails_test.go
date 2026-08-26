@@ -32,7 +32,8 @@ func TestGuardrailPolicyAndCompliancePlayground(t *testing.T) {
 	runtime := provider.New(provider.Config{})
 	dlp := &complianceModule{name: "dlp"}
 	av := &complianceModule{name: "av", reject: true}
-	handler := NewHandler(modulesPipeline("admin"), runtime).WithComplianceModules(dlp, av)
+	monitor := NewGuardrailMonitor(10)
+	handler := NewHandler(modulesPipeline("admin"), runtime).WithComplianceModules(NewGuardrailMonitoringModule(dlp, monitor), NewGuardrailMonitoringModule(av, monitor)).WithGuardrailMonitor(monitor)
 	put := httptest.NewRecorder()
 	Routes(handler).ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/admin/v1/guardrail-policies/strict", strings.NewReader(`{"description":"test","dlp":true,"av":true,"enabled":true}`)))
 	if put.Code != http.StatusOK {
@@ -44,6 +45,10 @@ func TestGuardrailPolicyAndCompliancePlayground(t *testing.T) {
 	Routes(handler).ServeHTTP(check, request)
 	if check.Code != http.StatusOK || !strings.Contains(check.Body.String(), `"allowed":false`) || !strings.Contains(check.Body.String(), `"content_stored":false`) || strings.Contains(check.Body.String(), "sensitive fixture") || dlp.seen != "sensitive fixture" || av.seen != "sensitive fixture" {
 		t.Fatalf("unsafe compliance result: status=%d body=%s dlp=%q av=%q", check.Code, check.Body.String(), dlp.seen, av.seen)
+	}
+	snapshot := monitor.Snapshot(10)
+	if snapshot.Summary.Total != 2 || snapshot.Summary.Rejected != 1 || snapshot.Events[0].Source != "compliance" || snapshot.Events[0].Policy != "strict" {
+		t.Fatalf("compliance outcomes were not monitored safely: %+v", snapshot)
 	}
 }
 

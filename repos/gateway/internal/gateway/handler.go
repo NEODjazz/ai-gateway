@@ -29,6 +29,7 @@ type Handler struct {
 	organizations OrganizationDirectoryClient
 	dlp           modules.Module
 	av            modules.Module
+	guardrails    *GuardrailMonitor
 	mcp           *MCPRegistry
 	access        *AccessRegistry
 	budgets       BudgetManagementClient

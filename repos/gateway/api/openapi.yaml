@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.11
+  version: 0.1.12
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -812,6 +812,22 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ComplianceCheckInput'}}}}
       responses:
         '200': {description: Compliance decision, content: {application/json: {schema: {$ref: '#/components/schemas/ComplianceCheckResult'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/guardrails/monitor:
+    get:
+      operationId: getGuardrailMonitor
+      tags: [Guardrails]
+      summary: Inspect bounded runtime guardrail outcomes
+      description: Returns metadata-only in-memory outcomes since gateway start. Prompt text, scanner details and response content are never retained.
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 1000, default: 100}
+      responses:
+        '200': {description: Guardrail monitoring snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/GuardrailMonitorSnapshot'}}}}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
@@ -2315,6 +2331,37 @@ components:
         policy: {type: string}
         allowed: {type: boolean}
         checks: {type: object, additionalProperties: {type: string, enum: [passed, rejected, unavailable, disabled]}}
+        content_stored: {type: boolean, const: false}
+    GuardrailMonitorSummary:
+      type: object
+      additionalProperties: false
+      required: [total, passed, rejected, unavailable]
+      properties:
+        total: {type: integer, format: int64, minimum: 0}
+        passed: {type: integer, format: int64, minimum: 0}
+        rejected: {type: integer, format: int64, minimum: 0}
+        unavailable: {type: integer, format: int64, minimum: 0}
+    GuardrailMonitorEvent:
+      type: object
+      additionalProperties: false
+      required: [occurred_at, module, source, outcome, duration_ms]
+      properties:
+        occurred_at: {type: string, format: date-time}
+        request_id: {type: string, maxLength: 128}
+        policy: {type: string, maxLength: 128}
+        module: {type: string, maxLength: 32}
+        source: {type: string, enum: [inference, compliance]}
+        outcome: {type: string, enum: [passed, rejected, unavailable]}
+        duration_ms: {type: integer, format: int64, minimum: 0}
+    GuardrailMonitorSnapshot:
+      type: object
+      additionalProperties: false
+      required: [retention, summary, by_module, events, content_stored]
+      properties:
+        retention: {type: integer, minimum: 1, maximum: 10000}
+        summary: {$ref: '#/components/schemas/GuardrailMonitorSummary'}
+        by_module: {type: object, additionalProperties: {$ref: '#/components/schemas/GuardrailMonitorSummary'}}
+        events: {type: array, maxItems: 1000, items: {$ref: '#/components/schemas/GuardrailMonitorEvent'}}
         content_stored: {type: boolean, const: false}
     MCPServerInput:
       type: object

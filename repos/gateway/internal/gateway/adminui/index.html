@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>AI Gateway Console</title>
-  <link rel="stylesheet" href="/ui/assets/app.css?v=19">
-  <script src="/ui/assets/app.js?v=19" defer></script>
+  <link rel="stylesheet" href="/ui/assets/app.css?v=20">
+  <script src="/ui/assets/app.js?v=20" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-view">
@@ -170,6 +170,8 @@
         <section id="view-guardrails" class="view" aria-labelledby="guardrails-heading" hidden>
           <div class="section-heading"><div><p class="eyebrow">Compliance</p><h2 id="guardrails-heading">Guardrail policies</h2><p class="muted">Runtime DLP/AV policies and a no-provider, no-content-storage compliance check.</p></div><button id="add-guardrail-button" class="primary-button">Add policy</button></div>
           <div class="split-grid"><article class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Policy</th><th>Checks</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="guardrails-table"></tbody></table></div><div id="guardrails-empty" class="empty-state" hidden>No guardrail policies.</div></article><form id="compliance-form" class="panel playground-form"><p class="eyebrow">Compliance playground</p><h3>Dry-run text checks</h3><label>Policy<select id="compliance-policy" required></select></label><label>Text<textarea id="compliance-text" rows="8" maxlength="65536" required placeholder="Text is sent only to the selected DLP/AV scanners."></textarea></label><p class="security-note">No LLM call. Content is not stored by the gateway.</p><p id="compliance-error" class="form-error" hidden></p><button type="submit" class="primary-button">Run compliance check</button><pre id="compliance-result">Run a check to see the result.</pre></form></div>
+          <div class="stats-grid usage-stats"><article class="stat-card"><span>Scans</span><strong id="guardrail-monitor-total">—</strong><small>Since gateway start</small></article><article class="stat-card"><span>Passed</span><strong id="guardrail-monitor-passed">—</strong><small>Allowed checks</small></article><article class="stat-card"><span>Rejected</span><strong id="guardrail-monitor-rejected">—</strong><small>Content blocked</small></article><article class="stat-card"><span>Unavailable</span><strong id="guardrail-monitor-unavailable">—</strong><small>Fail-closed scanner errors</small></article></div>
+          <article class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">Runtime monitoring</p><h3>Recent guardrail outcomes</h3></div><span class="privacy-pill">Metadata only</span></div><div class="table-scroll"><table><thead><tr><th>Time / Request</th><th>Policy</th><th>Module</th><th>Source</th><th>Outcome</th><th>Latency</th></tr></thead><tbody id="guardrail-events-table"></tbody></table></div><div id="guardrail-events-empty" class="empty-state" hidden>No guardrail scans have been observed since startup.</div></article>
         </section>
 
         <section id="view-mcp" class="view" aria-labelledby="mcp-heading" hidden>
