@@ -13,16 +13,18 @@ import (
 )
 
 type UsageAggregate struct {
-	Date         string  `json:"date,omitempty"`
-	Name         string  `json:"name,omitempty"`
-	Currency     string  `json:"currency"`
-	Requests     uint64  `json:"requests"`
-	Errors       uint64  `json:"errors"`
-	InputTokens  uint64  `json:"input_tokens"`
-	OutputTokens uint64  `json:"output_tokens"`
-	TotalTokens  uint64  `json:"total_tokens"`
-	Cost         float64 `json:"cost"`
-	AvgLatencyMS float64 `json:"avg_latency_ms"`
+	Date           string  `json:"date,omitempty"`
+	Name           string  `json:"name,omitempty"`
+	Currency       string  `json:"currency"`
+	Requests       uint64  `json:"requests"`
+	Errors         uint64  `json:"errors"`
+	InputTokens    uint64  `json:"input_tokens"`
+	OutputTokens   uint64  `json:"output_tokens"`
+	TotalTokens    uint64  `json:"total_tokens"`
+	Cost           float64 `json:"cost"`
+	AvgLatencyMS   float64 `json:"avg_latency_ms"`
+	CacheHits      uint64  `json:"cache_hits"`
+	CostPerRequest float64 `json:"cost_per_request"`
 }
 
 type UsageReport struct {
@@ -35,12 +37,23 @@ type UsageReport struct {
 	ByProvider []UsageAggregate `json:"by_provider"`
 }
 
+type UsageReportQuery struct {
+	From     time.Time
+	To       time.Time
+	Model    string
+	Provider string
+}
+
 type UsageManagementClient interface {
 	UsageReport(context.Context, ManagementAudit, int) (UsageReport, error)
 }
 
 type ScopedUsageManagementClient interface {
 	ScopedUsageReport(context.Context, ManagementAudit, int, string, string) (UsageReport, error)
+}
+
+type FilteredUsageManagementClient interface {
+	FilteredUsageReport(context.Context, ManagementAudit, UsageReportQuery) (UsageReport, error)
 }
 
 func (c *RemoteBudgetManagementClient) UsageReport(ctx context.Context, audit ManagementAudit, days int) (UsageReport, error) {
@@ -53,6 +66,19 @@ func (c *RemoteBudgetManagementClient) ScopedUsageReport(ctx context.Context, au
 	query := url.Values{"days": {strconv.Itoa(days)}, "scope_type": {scopeType}, "scope_id": {scopeID}}
 	var report UsageReport
 	err := c.call(ctx, http.MethodGet, "/internal/v1/usage/report?"+query.Encode(), audit, nil, &report)
+	return report, err
+}
+
+func (c *RemoteBudgetManagementClient) FilteredUsageReport(ctx context.Context, audit ManagementAudit, query UsageReportQuery) (UsageReport, error) {
+	values := url.Values{"from": {query.From.UTC().Format(time.RFC3339)}, "to": {query.To.UTC().Format(time.RFC3339)}}
+	if query.Model != "" {
+		values.Set("model", query.Model)
+	}
+	if query.Provider != "" {
+		values.Set("provider", query.Provider)
+	}
+	var report UsageReport
+	err := c.call(ctx, http.MethodGet, "/internal/v1/usage/report?"+values.Encode(), audit, nil, &report)
 	return report, err
 }
 
@@ -79,12 +105,55 @@ func (h Handler) GetUsageReport(w http.ResponseWriter, r *http.Request) {
 		}
 		days = parsed
 	}
-	report, err := h.usage.UsageReport(r.Context(), managementAudit(req), days)
+	query, filtered, valid := usageReportFilter(r, days)
+	if !valid {
+		writeError(w, http.StatusBadRequest, "invalid_request", "from/to must be RFC3339 dates within a 90 day range; model/provider must be at most 256 characters")
+		return
+	}
+	var report UsageReport
+	var err error
+	if filtered {
+		client, ok := h.usage.(FilteredUsageManagementClient)
+		if !ok {
+			writeError(w, http.StatusServiceUnavailable, "usage_unavailable", "filtered usage reporting is not configured")
+			return
+		}
+		report, err = client.FilteredUsageReport(r.Context(), managementAudit(req), query)
+	} else {
+		report, err = h.usage.UsageReport(r.Context(), managementAudit(req), days)
+	}
 	if err != nil {
 		writeManagementFailure(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, h.normalizeUsageProviders(r.Context(), report))
+}
+
+func usageReportFilter(r *http.Request, days int) (UsageReportQuery, bool, bool) {
+	model := strings.TrimSpace(r.URL.Query().Get("model"))
+	providerID := strings.TrimSpace(r.URL.Query().Get("provider"))
+	fromRaw, toRaw := strings.TrimSpace(r.URL.Query().Get("from")), strings.TrimSpace(r.URL.Query().Get("to"))
+	filtered := model != "" || providerID != "" || fromRaw != "" || toRaw != ""
+	if len(model) > 256 || len(providerID) > 256 || (fromRaw == "") != (toRaw == "") {
+		return UsageReportQuery{}, filtered, false
+	}
+	to := time.Now().UTC()
+	from := to.AddDate(0, 0, -days)
+	if fromRaw != "" {
+		var err error
+		from, err = time.Parse(time.RFC3339, fromRaw)
+		if err != nil {
+			return UsageReportQuery{}, filtered, false
+		}
+		to, err = time.Parse(time.RFC3339, toRaw)
+		if err != nil {
+			return UsageReportQuery{}, filtered, false
+		}
+	}
+	if !to.After(from) || to.Sub(from) > 90*24*time.Hour {
+		return UsageReportQuery{}, filtered, false
+	}
+	return UsageReportQuery{From: from.UTC(), To: to.UTC(), Model: model, Provider: providerID}, filtered, true
 }
 
 func (h Handler) GetCustomerUsageReport(w http.ResponseWriter, r *http.Request) {
@@ -144,9 +213,11 @@ func (h Handler) normalizeUsageProviders(ctx context.Context, report UsageReport
 		current.InputTokens += item.InputTokens
 		current.OutputTokens += item.OutputTokens
 		current.TotalTokens += item.TotalTokens
+		current.CacheHits += item.CacheHits
 		current.Cost += item.Cost
 		if current.Requests > 0 {
 			current.AvgLatencyMS = latencyTotal / float64(current.Requests)
+			current.CostPerRequest = current.Cost / float64(current.Requests)
 		}
 		merged[key] = current
 	}

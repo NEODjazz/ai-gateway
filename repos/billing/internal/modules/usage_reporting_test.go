@@ -12,7 +12,7 @@ import (
 func TestClickHouseUsageReporterBuildsBoundedReport(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("query")
-		if !strings.Contains(query, "INTERVAL 30 DAY") || !strings.Contains(query, "safe_db.safe_events") || !strings.Contains(query, "provider_id != ''") || !strings.Contains(query, "substring(pricing_key, position(pricing_key, '/') + 1)") || !strings.Contains(query, "startsWith(model, concat(provider_endpoint_name, '-'))") || strings.Contains(query, "token_hash") {
+		if !strings.Contains(query, "{from:DateTime64}") || !strings.Contains(query, "{to:DateTime64}") || r.URL.Query().Get("param_from") != "2026-07-26T12:00:00Z" || r.URL.Query().Get("param_to") != "2026-08-25T12:00:00Z" || !strings.Contains(query, "safe_db.safe_events") || !strings.Contains(query, "provider_id != ''") || !strings.Contains(query, "substring(pricing_key, position(pricing_key, '/') + 1)") || !strings.Contains(query, "startsWith(model, concat(provider_endpoint_name, '-'))") || !strings.Contains(query, "countIf(cache_status = 'hit')") || strings.Contains(query, "token_hash") {
 			t.Fatalf("unsafe report query: %s", query)
 		}
 		_, _ = w.Write([]byte("{\"kind\":\"total\",\"date\":\"\",\"name\":\"\",\"currency\":\"USD\",\"requests\":2,\"errors\":1,\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15,\"cost\":0.25,\"avg_latency_ms\":12.5}\n" +
@@ -27,6 +27,21 @@ func TestClickHouseUsageReporterBuildsBoundedReport(t *testing.T) {
 	report, err := reporter.Report(context.Background(), 30)
 	if err != nil || len(report.Totals) != 1 || report.Totals[0].TotalTokens != 15 || len(report.ByModel) != 1 {
 		t.Fatalf("report=%+v err=%v", report, err)
+	}
+}
+
+func TestClickHouseUsageReporterParameterizesModelAndProviderFilters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		if !strings.Contains(query, "= {model:String}") || !strings.Contains(query, "= {provider:String}") || r.URL.Query().Get("param_model") != "model' OR 1=1" || r.URL.Query().Get("param_provider") != "provider/x" || strings.Contains(query, "model' OR 1=1") {
+			t.Fatalf("filters were not safely parameterized: query=%q params=%v", query, r.URL.Query())
+		}
+	}))
+	defer server.Close()
+	reporter, _ := NewClickHouseUsageReporter(Settings{UsageEventsEnabled: true, ClickHouseURL: server.URL, ClickHouseDatabase: "db", ClickHouseUsageEventsTable: "events"})
+	from := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := reporter.ReportQuery(context.Background(), UsageReportQuery{From: from, To: from.Add(24 * time.Hour), Model: "model' OR 1=1", Provider: "provider/x"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

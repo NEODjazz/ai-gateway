@@ -15,16 +15,18 @@ import (
 )
 
 type UsageAggregate struct {
-	Date         string  `json:"date,omitempty"`
-	Name         string  `json:"name,omitempty"`
-	Currency     string  `json:"currency"`
-	Requests     uint64  `json:"requests"`
-	Errors       uint64  `json:"errors"`
-	InputTokens  uint64  `json:"input_tokens"`
-	OutputTokens uint64  `json:"output_tokens"`
-	TotalTokens  uint64  `json:"total_tokens"`
-	Cost         float64 `json:"cost"`
-	AvgLatencyMS float64 `json:"avg_latency_ms"`
+	Date           string  `json:"date,omitempty"`
+	Name           string  `json:"name,omitempty"`
+	Currency       string  `json:"currency"`
+	Requests       uint64  `json:"requests"`
+	Errors         uint64  `json:"errors"`
+	InputTokens    uint64  `json:"input_tokens"`
+	OutputTokens   uint64  `json:"output_tokens"`
+	TotalTokens    uint64  `json:"total_tokens"`
+	Cost           float64 `json:"cost"`
+	AvgLatencyMS   float64 `json:"avg_latency_ms"`
+	CacheHits      uint64  `json:"cache_hits"`
+	CostPerRequest float64 `json:"cost_per_request"`
 }
 
 type UsageReport struct {
@@ -44,6 +46,18 @@ type UsageReporter interface {
 type UsageScope struct {
 	Type string
 	ID   string
+}
+
+type UsageReportQuery struct {
+	From     time.Time
+	To       time.Time
+	Scope    UsageScope
+	Model    string
+	Provider string
+}
+
+type FilteredUsageReporter interface {
+	ReportQuery(context.Context, UsageReportQuery) (UsageReport, error)
 }
 
 type ScopedUsageReporter interface {
@@ -78,26 +92,37 @@ func NewClickHouseUsageReporter(settings Settings) (*ClickHouseUsageReporter, er
 }
 
 func (r *ClickHouseUsageReporter) Report(ctx context.Context, days int) (UsageReport, error) {
-	return r.report(ctx, days, UsageScope{})
+	to := r.now().UTC()
+	return r.ReportQuery(ctx, UsageReportQuery{From: to.AddDate(0, 0, -days), To: to})
 }
 
 func (r *ClickHouseUsageReporter) ReportScoped(ctx context.Context, days int, scope UsageScope) (UsageReport, error) {
 	if (scope.Type != "key" && scope.Type != "user" && scope.Type != "team") || strings.TrimSpace(scope.ID) == "" || len(scope.ID) > 256 {
 		return UsageReport{}, errors.New("invalid usage scope")
 	}
-	return r.report(ctx, days, scope)
+	to := r.now().UTC()
+	return r.ReportQuery(ctx, UsageReportQuery{From: to.AddDate(0, 0, -days), To: to, Scope: scope})
 }
 
-func (r *ClickHouseUsageReporter) report(ctx context.Context, days int, scope UsageScope) (UsageReport, error) {
-	if r == nil || r.client == nil || days < 1 || days > 90 {
-		return UsageReport{}, errors.New("usage report days must be between 1 and 90")
+func (r *ClickHouseUsageReporter) ReportQuery(ctx context.Context, query UsageReportQuery) (UsageReport, error) {
+	if r == nil || r.client == nil || !query.To.After(query.From) || query.To.Sub(query.From) > 90*24*time.Hour || len(query.Model) > 256 || len(query.Provider) > 256 {
+		return UsageReport{}, errors.New("invalid usage report query")
 	}
-	to := r.now().UTC()
-	report := UsageReport{Days: days, From: to.AddDate(0, 0, -days), To: to, Totals: []UsageAggregate{}, Daily: []UsageAggregate{}, ByModel: []UsageAggregate{}, ByProvider: []UsageAggregate{}}
-	query := usageReportQuery(r.table, days, scope.Type)
-	parameters := url.Values{"output_format_json_quote_64bit_integers": {"0"}, "query": {query}}
-	if scope.Type != "" {
-		parameters.Set("param_scope_id", scope.ID)
+	if query.Scope.Type != "" && ((query.Scope.Type != "key" && query.Scope.Type != "user" && query.Scope.Type != "team") || strings.TrimSpace(query.Scope.ID) == "" || len(query.Scope.ID) > 256) {
+		return UsageReport{}, errors.New("invalid usage scope")
+	}
+	days := int(query.To.Sub(query.From).Hours()/24 + 0.999999)
+	report := UsageReport{Days: days, From: query.From.UTC(), To: query.To.UTC(), Totals: []UsageAggregate{}, Daily: []UsageAggregate{}, ByModel: []UsageAggregate{}, ByProvider: []UsageAggregate{}}
+	statement := usageReportQuery(r.table, query.Scope.Type, query.Model != "", query.Provider != "")
+	parameters := url.Values{"output_format_json_quote_64bit_integers": {"0"}, "query": {statement}, "param_from": {query.From.UTC().Format(time.RFC3339)}, "param_to": {query.To.UTC().Format(time.RFC3339)}}
+	if query.Scope.Type != "" {
+		parameters.Set("param_scope_id", query.Scope.ID)
+	}
+	if query.Model != "" {
+		parameters.Set("param_model", query.Model)
+	}
+	if query.Provider != "" {
+		parameters.Set("param_provider", query.Provider)
 	}
 	requestURL := r.endpoint + "/?" + parameters.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, nil)
@@ -142,13 +167,19 @@ func (r *ClickHouseUsageReporter) report(ctx context.Context, days int, scope Us
 	return report, nil
 }
 
-func usageReportQuery(table string, days int, scopeType string) string {
-	where := fmt.Sprintf("timestamp_unix >= toUnixTimestamp(now() - INTERVAL %d DAY) AND phase IN ('commit','cancel')", days)
+func usageReportQuery(table string, scopeType string, filterModel, filterProvider bool) string {
+	where := "timestamp_unix >= toUnixTimestamp({from:DateTime64}) AND timestamp_unix < toUnixTimestamp({to:DateTime64}) AND phase IN ('commit','cancel')"
 	columns := map[string]string{"key": "credential_id", "user": "user_id", "team": "team_id"}
 	if column := columns[scopeType]; column != "" {
 		where += " AND " + column + " = {scope_id:String}"
 	}
-	metrics := "count() AS requests, countIf(status != 'ok') AS errors, sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens, sum(total_tokens) AS total_tokens, sum(cost) AS cost, avg(latency_ms) AS avg_latency_ms"
+	if filterModel {
+		where += " AND " + canonicalUsageModelExpression + " = {model:String}"
+	}
+	if filterProvider {
+		where += " AND " + canonicalUsageProviderExpression + " = {provider:String}"
+	}
+	metrics := "count() AS requests, countIf(status != 'ok') AS errors, sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens, sum(total_tokens) AS total_tokens, sum(cost) AS cost, avg(latency_ms) AS avg_latency_ms, countIf(cache_status = 'hit') AS cache_hits, if(count() = 0, 0, sum(cost) / count()) AS cost_per_request"
 	return fmt.Sprintf(`
 SELECT 'total' AS kind, '' AS date, '' AS name, currency, %s FROM %s WHERE %s GROUP BY currency
 UNION ALL SELECT 'day' AS kind, toString(toDate(parseDateTimeBestEffort(timestamp))) AS date, '' AS name, currency, %s FROM %s WHERE %s GROUP BY date,currency

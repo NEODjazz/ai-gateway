@@ -67,12 +67,21 @@
     return query;
   }
 
+  function usageQuery() {
+    const query = new URLSearchParams({ days: $("usage-days").value });
+    const from = $("usage-from").value, to = $("usage-to").value;
+    if (from && to) { query.set("from", `${from}T00:00:00Z`); const exclusive = new Date(`${to}T00:00:00Z`); exclusive.setUTCDate(exclusive.getUTCDate() + 1); query.set("to", exclusive.toISOString()); }
+    const model = $("usage-model-filter").value.trim(), provider = $("usage-provider-filter").value.trim();
+    if (model) query.set("model", model); if (provider) query.set("provider", provider);
+    return query;
+  }
+
   async function loadData({ action = "" } = {}) {
     globalError.hidden = true;
     const query = new URLSearchParams({ limit: "100" });
     if (action.trim()) query.set("action", action.trim());
     const requests = [
-      api(`/admin/v1/usage/report?days=${encodeURIComponent($("usage-days").value)}`),
+      api(`/admin/v1/usage/report?${usageQuery()}`),
       api("/admin/v1/keys?limit=100"),
       api("/v1/models"),
       api("/admin/v1/model-catalog"),
@@ -281,17 +290,20 @@
       const label = document.createElement("small"); label.textContent = item.date.slice(5);
       column.append(value, track, label); chart.appendChild(column);
     }
-    renderUsageBreakdown("usage-models-table", state.usage?.by_model || []);
-    renderUsageBreakdown("usage-providers-table", state.usage?.by_provider || []);
+    renderUsageBreakdown("usage-models-table", state.usage?.by_model || [], "model");
+    renderUsageBreakdown("usage-providers-table", state.usage?.by_provider || [], "provider");
   }
 
-  function renderUsageBreakdown(id, rows) {
+  function renderUsageBreakdown(id, rows, dimension) {
     const body = $(id); clear(body);
     for (const item of rows.slice(0, 20)) {
-      const row = document.createElement("tr"); row.appendChild(textCell(item.name)); row.appendChild(plainCell(formatNumber(item.requests))); row.appendChild(plainCell(formatNumber(item.total_tokens))); row.appendChild(plainCell(formatMoney(item.cost, item.currency))); body.appendChild(row);
+      const row = document.createElement("tr"); row.appendChild(textCell(item.name)); row.appendChild(plainCell(formatNumber(item.requests))); row.appendChild(plainCell(formatNumber(item.total_tokens))); row.appendChild(plainCell(formatNumber(item.cache_hits||0))); row.appendChild(plainCell(formatMoney(item.cost, item.currency))); row.appendChild(plainCell(formatMoney(item.cost_per_request||0,item.currency))); const actions=document.createElement("td");actions.appendChild(actionButton("Logs",()=>openUsageLogs(dimension,item.name)));row.appendChild(actions);body.appendChild(row);
     }
-    if (!rows.length) { const row = document.createElement("tr"); const cell = document.createElement("td"); cell.colSpan = 4; cell.className = "muted"; cell.textContent = "No usage data."; row.appendChild(cell); body.appendChild(row); }
+    if (!rows.length) { const row = document.createElement("tr"); const cell = document.createElement("td"); cell.colSpan = 7; cell.className = "muted"; cell.textContent = "No usage data."; row.appendChild(cell); body.appendChild(row); }
   }
+
+  function openUsageLogs(dimension,name){if(dimension==="model")$("request-log-model").value=name;else $("request-log-provider").value=name;switchView("request-logs");loadRequestLogs(false).catch(error=>{globalError.textContent=error.message;globalError.hidden=false})}
+  function exportUsageCSV(){const rows=[["dimension","name","date","currency","requests","errors","input_tokens","output_tokens","total_tokens","cache_hits","cost","cost_per_request","avg_latency_ms"]];for(const [dimension,items] of [["total",state.usage?.totals||[]],["day",state.usage?.daily||[]],["model",state.usage?.by_model||[]],["provider",state.usage?.by_provider||[]]])for(const item of items)rows.push([dimension,item.name||"",item.date||"",item.currency||"",item.requests||0,item.errors||0,item.input_tokens||0,item.output_tokens||0,item.total_tokens||0,item.cache_hits||0,item.cost||0,item.cost_per_request||0,item.avg_latency_ms||0]);const csv=rows.map(row=>row.map(value=>`"${String(value).replaceAll('"','""')}"`).join(",")).join("\n");const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download="ai-gateway-usage.csv";link.click();URL.revokeObjectURL(url)}
 
   function renderCustomer() {
     if (!state.customerScope || !state.customerUsage) { $("customer-results").hidden=true; return; }
@@ -666,7 +678,9 @@
   $("logout-button").addEventListener("click", () => { sessionStorage.removeItem("ai_gateway_admin_token"); state.token = ""; showLogin(); });
   $("refresh-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); showToast("Console data refreshed"); } catch (error) { if (error.auth) { sessionStorage.removeItem("ai_gateway_admin_token"); showLogin(error.message); } else { globalError.textContent = error.message; globalError.hidden = false; } } });
   $("audit-filter-button").addEventListener("click", async () => { try { await loadData({ action: $("audit-action").value }); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
-  $("usage-days").addEventListener("change", async () => { try { await loadData(); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
+  $("usage-filter-form").addEventListener("submit",async event=>{event.preventDefault();const error=$("usage-filter-error");error.hidden=true;if(Boolean($("usage-from").value)!==Boolean($("usage-to").value)){error.textContent="Set both From and To dates.";error.hidden=false;return}try{await loadData()}catch(requestError){error.textContent=requestError.message;error.hidden=false}});
+  $("usage-filter-reset").addEventListener("click",async()=>{$("usage-days").value="30";$("usage-from").value="";$("usage-to").value="";$("usage-model-filter").value="";$("usage-provider-filter").value="";await loadData()});
+  $("usage-export").addEventListener("click",exportUsageCSV);
   $("customer-filter-form").addEventListener("submit",loadCustomer);
   $("request-log-filter-form").addEventListener("submit", async (event) => { event.preventDefault(); try { await loadRequestLogs(false); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
   $("request-logs-more").addEventListener("click", async () => { try { await loadRequestLogs(true); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
