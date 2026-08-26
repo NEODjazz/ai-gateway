@@ -248,6 +248,7 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 	// internals. Persist only the bounded failure class used by operators.
 	return BillingEvent{
 		RequestID:             requestID(req),
+		SessionID:             req.SessionID,
 		UserID:                req.UserID,
 		TeamID:                req.TeamID,
 		Roles:                 append([]string(nil), req.Roles...),

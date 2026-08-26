@@ -16,6 +16,7 @@ import (
 type RequestContext struct {
 	APIKey              string                         `json:"-"`
 	RequestID           string                         `json:"request_id,omitempty"`
+	SessionID           string                         `json:"session_id,omitempty"`
 	CredentialID        string                         `json:"credential_id,omitempty"`
 	TeamID              string                         `json:"team_id,omitempty"`
 	AllowedModels       []string                       `json:"allowed_models,omitempty"`

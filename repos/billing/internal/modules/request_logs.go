@@ -22,6 +22,7 @@ type RequestLogFilter struct {
 	Before          time.Time
 	BeforeRequestID string
 	RequestID       string
+	SessionID       string
 	Status          string
 	Model           string
 	Provider        string
@@ -33,6 +34,7 @@ type RequestLogFilter struct {
 type RequestLog struct {
 	Timestamp            string   `json:"timestamp"`
 	RequestID            string   `json:"request_id"`
+	SessionID            string   `json:"session_id,omitempty"`
 	UserID               string   `json:"user_id,omitempty"`
 	TeamID               string   `json:"team_id,omitempty"`
 	Roles                []string `json:"roles,omitempty"`
@@ -93,6 +95,7 @@ func (r *ClickHouseUsageReporter) ListRequestLogs(ctx context.Context, filter Re
 		params.Set("param_"+name, value)
 	}
 	addStringFilter("request_id", "request_id", filter.RequestID)
+	addStringFilter("session_id", "session_id", filter.SessionID)
 	addStringFilter("status", "status", filter.Status)
 	addStringFilter(canonicalUsageModelExpression, "model", filter.Model)
 	addStringFilter(canonicalUsageProviderExpression, "provider", filter.Provider)
@@ -144,7 +147,7 @@ func (r *ClickHouseUsageReporter) GetRequestLog(ctx context.Context, requestID s
 var ErrRequestLogNotFound = errors.New("request log not found")
 
 func requestLogColumns() string {
-	return "timestamp,request_id,user_id,team_id,roles,api_key_fingerprint AS credential_id,provider,provider_id,provider_endpoint_name,provider_endpoint_type,model,upstream_model,api_type,phase,status,failure_class,latency_ms,cache_status,input_tokens,output_tokens,total_tokens,cost,currency,false AS content_stored"
+	return "timestamp,request_id,session_id,user_id,team_id,roles,api_key_fingerprint AS credential_id,provider,provider_id,provider_endpoint_name,provider_endpoint_type,model,upstream_model,api_type,phase,status,failure_class,latency_ms,cache_status,input_tokens,output_tokens,total_tokens,cost,currency,false AS content_stored"
 }
 
 func (r *ClickHouseUsageReporter) queryRequestLogs(ctx context.Context, params url.Values) ([]RequestLog, error) {

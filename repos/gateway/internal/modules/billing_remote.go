@@ -10,6 +10,7 @@ import (
 
 type UsageRequest struct {
 	RequestID             string   `json:"request_id,omitempty"`
+	SessionID             string   `json:"session_id,omitempty"`
 	CredentialID          string   `json:"credential_id,omitempty"`
 	UserID                string   `json:"user_id,omitempty"`
 	TeamID                string   `json:"team_id,omitempty"`
@@ -102,6 +103,7 @@ func (m RemoteBillingModule) send(ctx context.Context, req *RequestContext, phas
 func billingRequest(req *RequestContext) UsageRequest {
 	request := UsageRequest{
 		RequestID:             req.RequestID,
+		SessionID:             req.SessionID,
 		CredentialID:          req.CredentialID,
 		UserID:                req.UserID,
 		TeamID:                req.TeamID,

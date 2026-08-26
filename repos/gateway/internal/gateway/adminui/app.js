@@ -11,6 +11,7 @@
   const globalError = $("global-error");
   const pageTitles = { overview: "Overview", usage: "Usage & spend", customers: "Customer insights", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", organizations: "Organizations", models: "Models", "ai-hub": "AI Hub & optimization", deployments: "Providers & models", guardrails: "Guardrails", mcp: "MCP registry", budgets: "Budgets", audit: "Audit log" };
   let pendingConfirmation = null;
+  let requestLogLiveTimer = null;
 
   function setText(id, value) { const element = $(id); if (element) element.textContent = value; }
   function clear(element) { while (element.firstChild) element.removeChild(element.firstChild); }
@@ -60,7 +61,7 @@
 
   function requestLogQuery(before = "", beforeRequestID = "") {
     const query = new URLSearchParams({ days: $("request-log-days").value, limit: "100" });
-    for (const [name, id] of [["status", "request-log-status"], ["request_id", "request-log-request-id"], ["model", "request-log-model"], ["provider", "request-log-provider"], ["team_id", "request-log-team"], ["credential_id", "request-log-credential"]]) {
+    for (const [name, id] of [["status", "request-log-status"], ["request_id", "request-log-request-id"], ["session_id", "request-log-session-id"], ["model", "request-log-model"], ["provider", "request-log-provider"], ["team_id", "request-log-team"], ["credential_id", "request-log-credential"]]) {
       const value = $(id).value.trim(); if (value) query.set(name, value);
     }
     if (before) { query.set("before", before); query.set("before_request_id", beforeRequestID); }
@@ -329,7 +330,7 @@
     setText("request-log-privacy", settings ? `Content storage ${settings.content_stored ? "on" : "off"} · ${settings.retention_days}d retention` : "Content storage off");
     for (const log of state.requestLogs) {
       const row = document.createElement("tr");
-      row.appendChild(textCell(formatDate(log.timestamp), log.request_id));
+      row.appendChild(textCell(formatDate(log.timestamp), log.session_id ? `${log.request_id} · ${log.session_id}` : log.request_id));
       const outcomeCell = document.createElement("td"); const outcome = document.createElement("span"); outcome.className = `outcome ${log.status === "ok" ? "succeeded" : "failed"}`; outcome.textContent = log.status === "ok" ? "Success" : log.failure_class || "Error"; outcomeCell.appendChild(outcome); row.appendChild(outcomeCell);
       const modelDetail = log.upstream_model && log.upstream_model !== log.model ? `${log.upstream_model} upstream · ` : "";
       row.appendChild(textCell(log.model, `${modelDetail}${requestLogEndpoint(log)} · ${log.api_type || "request"}`));
@@ -351,12 +352,14 @@
     renderRequestLogs(); setText("request-logs-badge", formatNumber(state.requestLogs.length));
   }
 
+  function toggleRequestLogLiveTail(){if(requestLogLiveTimer){window.clearInterval(requestLogLiveTimer);requestLogLiveTimer=null;$("request-logs-live").textContent="Start live tail";return}loadRequestLogs(false).catch(()=>{});requestLogLiveTimer=window.setInterval(()=>loadRequestLogs(false).catch(()=>{}),15000);$("request-logs-live").textContent="Stop live tail"}
+
   async function openRequestLog(requestID) {
     try {
       const log = await api(`/admin/v1/request-logs/${encodeURIComponent(requestID)}`);
       setText("request-log-dialog-title", log.request_id || "Request details");
       const detail = $("request-log-detail"); clear(detail);
-      const fields = [["Timestamp", formatDate(log.timestamp)], ["Outcome", log.status], ["Failure class", log.failure_class], ["API type", log.api_type], ["Model", log.model], ["Endpoint", requestLogEndpoint(log)], ["Endpoint type", log.provider_endpoint_type], ["User", log.user_id], ["Team", log.team_id], ["Credential fingerprint", log.credential_id], ["Tokens", `${formatNumber(log.input_tokens)} input · ${formatNumber(log.output_tokens)} output · ${formatNumber(log.total_tokens)} total`], ["Latency", `${formatNumber(log.latency_ms)} ms`], ["Cache", log.cache_status], ["Cost", formatMoney(log.cost, log.currency)], ["Content stored", log.content_stored ? "Yes" : "No"]];
+      const fields = [["Timestamp", formatDate(log.timestamp)], ["Session", log.session_id], ["Outcome", log.status], ["Failure class", log.failure_class], ["API type", log.api_type], ["Model", log.model], ["Endpoint", requestLogEndpoint(log)], ["Endpoint type", log.provider_endpoint_type], ["User", log.user_id], ["Team", log.team_id], ["Credential fingerprint", log.credential_id], ["Tokens", `${formatNumber(log.input_tokens)} input · ${formatNumber(log.output_tokens)} output · ${formatNumber(log.total_tokens)} total`], ["Latency", `${formatNumber(log.latency_ms)} ms`], ["Cache", log.cache_status], ["Cost", formatMoney(log.cost, log.currency)], ["Content stored", log.content_stored ? "Yes" : "No"]];
       for (const [label, value] of fields) { const item = document.createElement("div"); const key = document.createElement("small"); key.textContent = label; const data = document.createElement("strong"); data.textContent = value || "—"; item.append(key, data); detail.appendChild(item); }
       $("request-log-dialog").showModal();
     } catch (error) { globalError.textContent = error.message; globalError.hidden = false; }
@@ -684,6 +687,7 @@
   $("customer-filter-form").addEventListener("submit",loadCustomer);
   $("request-log-filter-form").addEventListener("submit", async (event) => { event.preventDefault(); try { await loadRequestLogs(false); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
   $("request-logs-more").addEventListener("click", async () => { try { await loadRequestLogs(true); } catch (error) { globalError.textContent = error.message; globalError.hidden = false; } });
+  $("request-logs-live").addEventListener("click",toggleRequestLogLiveTail);
   $("playground-form").addEventListener("submit", runPlayground);
   $("model-search").addEventListener("input", renderModels);
   $("add-key-button").addEventListener("click", () => openKeyDialog());

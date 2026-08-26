@@ -12,6 +12,7 @@ import (
 type RequestContext struct {
 	CredentialID          string                         `json:"credential_id,omitempty"`
 	RequestID             string                         `json:"request_id,omitempty"`
+	SessionID             string                         `json:"session_id,omitempty"`
 	PromptTokensEstimated int                            `json:"prompt_tokens_estimated,omitempty"`
 	PostResponse          bool                           `json:"post_response,omitempty"`
 	BillingPhase          string                         `json:"billing_phase,omitempty"`
@@ -32,6 +33,7 @@ type RequestContext struct {
 type BillingEvent struct {
 	EventID               string   `json:"event_id,omitempty"`
 	RequestID             string   `json:"request_id,omitempty"`
+	SessionID             string   `json:"session_id,omitempty"`
 	UserID                string   `json:"user_id,omitempty"`
 	TeamID                string   `json:"team_id,omitempty"`
 	Roles                 []string `json:"roles,omitempty"`

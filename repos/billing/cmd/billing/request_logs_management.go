@@ -49,7 +49,7 @@ func (h requestLogManagementHandler) list(w http.ResponseWriter, r *http.Request
 	}
 	filter := modules.RequestLogFilter{Days: days, Limit: limit}
 	for name, target := range map[string]*string{
-		"request_id": &filter.RequestID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider,
+		"request_id": &filter.RequestID, "session_id": &filter.SessionID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider,
 		"user_id": &filter.UserID, "team_id": &filter.TeamID, "credential_id": &filter.CredentialID,
 	} {
 		*target = strings.TrimSpace(r.URL.Query().Get(name))

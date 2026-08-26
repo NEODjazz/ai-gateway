@@ -16,6 +16,7 @@ type RequestLogFilter struct {
 	Before          time.Time
 	BeforeRequestID string
 	RequestID       string
+	SessionID       string
 	Status          string
 	Model           string
 	Provider        string
@@ -27,6 +28,7 @@ type RequestLogFilter struct {
 type RequestLog struct {
 	Timestamp            string   `json:"timestamp"`
 	RequestID            string   `json:"request_id"`
+	SessionID            string   `json:"session_id,omitempty"`
 	UserID               string   `json:"user_id,omitempty"`
 	TeamID               string   `json:"team_id,omitempty"`
 	Roles                []string `json:"roles,omitempty"`
@@ -71,7 +73,7 @@ type RequestLogClient interface {
 
 func (c *RemoteBudgetManagementClient) ListRequestLogs(ctx context.Context, audit ManagementAudit, filter RequestLogFilter) (RequestLogPage, error) {
 	query := url.Values{"days": {strconv.Itoa(filter.Days)}, "limit": {strconv.Itoa(filter.Limit)}}
-	for key, value := range map[string]string{"request_id": filter.RequestID, "status": filter.Status, "model": filter.Model, "provider": filter.Provider, "user_id": filter.UserID, "team_id": filter.TeamID, "credential_id": filter.CredentialID} {
+	for key, value := range map[string]string{"request_id": filter.RequestID, "session_id": filter.SessionID, "status": filter.Status, "model": filter.Model, "provider": filter.Provider, "user_id": filter.UserID, "team_id": filter.TeamID, "credential_id": filter.CredentialID} {
 		if value != "" {
 			query.Set(key, value)
 		}
@@ -170,7 +172,7 @@ func requestLogFilter(r *http.Request) (RequestLogFilter, error) {
 		return RequestLogFilter{}, errors.New("days must be 1-90 and limit must be 1-200")
 	}
 	filter := RequestLogFilter{Days: days, Limit: limit}
-	for name, target := range map[string]*string{"request_id": &filter.RequestID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider, "user_id": &filter.UserID, "team_id": &filter.TeamID, "credential_id": &filter.CredentialID} {
+	for name, target := range map[string]*string{"request_id": &filter.RequestID, "session_id": &filter.SessionID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider, "user_id": &filter.UserID, "team_id": &filter.TeamID, "credential_id": &filter.CredentialID} {
 		*target = strings.TrimSpace(r.URL.Query().Get(name))
 		if len(*target) > 256 {
 			return RequestLogFilter{}, errors.New("request log filters must not exceed 256 characters")

@@ -28,12 +28,12 @@ func (*recordingRequestLogClient) GetRequestLogSettings(_ context.Context, _ Man
 func TestAdminRequestLogsRequireAdminAndValidateFilters(t *testing.T) {
 	client := &recordingRequestLogClient{}
 	handler := Routes(NewHandler(modulesPipeline("admin"), modelsProvider{}).WithRequestLogs(client))
-	request := httptest.NewRequest(http.MethodGet, "/admin/v1/request-logs?days=14&limit=25&status=error&team_id=team-a", nil)
+	request := httptest.NewRequest(http.MethodGet, "/admin/v1/request-logs?days=14&limit=25&status=error&team_id=team-a&session_id=session-1", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	request.Header.Set("X-Request-ID", "req-admin")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || client.filter.Days != 14 || client.filter.Limit != 25 || client.filter.Status != "error" || client.filter.TeamID != "team-a" || client.audit.RequestID != "req-admin" {
+	if response.Code != http.StatusOK || client.filter.Days != 14 || client.filter.Limit != 25 || client.filter.Status != "error" || client.filter.TeamID != "team-a" || client.filter.SessionID != "session-1" || client.audit.RequestID != "req-admin" {
 		t.Fatalf("status=%d filter=%+v audit=%+v body=%s", response.Code, client.filter, client.audit, response.Body.String())
 	}
 	invalid := httptest.NewRecorder()

@@ -94,6 +94,7 @@ func (h Handler) Models(w http.ResponseWriter, r *http.Request) {
 	reqCtx := modules.RequestContext{
 		APIKey:    bearerToken(r.Header.Get("Authorization")),
 		RequestID: requestID(r),
+		SessionID: sessionID(r),
 	}
 	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
 		if errors.Is(err, modules.ErrUnauthorized) {
@@ -125,6 +126,7 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	reqCtx := modules.RequestContext{
 		APIKey:    bearerToken(r.Header.Get("Authorization")),
 		RequestID: requestID(r),
+		SessionID: sessionID(r),
 		Request:   request,
 	}
 
@@ -201,6 +203,7 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	reqCtx := modules.RequestContext{
 		APIKey:          bearerToken(r.Header.Get("Authorization")),
 		RequestID:       requestID(r),
+		SessionID:       sessionID(r),
 		ResponseRequest: &request,
 		Request: openai.ChatCompletionRequest{
 			Provider: request.Provider,
@@ -292,6 +295,7 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 	reqCtx := modules.RequestContext{
 		APIKey:           bearerToken(r.Header.Get("Authorization")),
 		RequestID:        requestID(r),
+		SessionID:        sessionID(r),
 		EmbeddingRequest: &request,
 		Request: openai.ChatCompletionRequest{
 			Provider: request.Provider,
@@ -333,7 +337,7 @@ func (h Handler) Rerank(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx := modules.RequestContext{
-		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: requestID(r), RerankRequest: &request,
+		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: requestID(r), SessionID: sessionID(r), RerankRequest: &request,
 		Request: openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model},
 	}
 	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
@@ -484,6 +488,14 @@ func requestID(r *http.Request) string {
 		return fmt.Sprintf("req-%d", time.Now().UTC().UnixNano())
 	}
 	return fmt.Sprintf("%x", value[:])
+}
+
+func sessionID(r *http.Request) string {
+	value := strings.TrimSpace(r.Header.Get("X-Session-ID"))
+	if value != "" && len(value) <= 128 {
+		return value
+	}
+	return ""
 }
 
 func responseMessages(request openai.ResponseRequest) []openai.Message {

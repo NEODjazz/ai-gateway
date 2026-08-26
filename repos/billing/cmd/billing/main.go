@@ -53,6 +53,7 @@ func main() {
 		}
 		ctx := modules.RequestContext{
 			RequestID:             request.RequestID,
+			SessionID:             request.SessionID,
 			CredentialID:          request.CredentialID,
 			UserID:                request.UserID,
 			TeamID:                request.TeamID,
@@ -121,6 +122,7 @@ func authorizeBillingUsage(w http.ResponseWriter, r *http.Request, secret string
 
 type usageRequest struct {
 	RequestID             string   `json:"request_id,omitempty"`
+	SessionID             string   `json:"session_id,omitempty"`
 	CredentialID          string   `json:"credential_id,omitempty"`
 	UserID                string   `json:"user_id,omitempty"`
 	TeamID                string   `json:"team_id,omitempty"`
