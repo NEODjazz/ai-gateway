@@ -116,6 +116,10 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !decodeInferenceRequest(w, r, &request) {
 		return
 	}
+	if request.MaxTokens != nil && request.MaxCompletionTokens != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "max_tokens and max_completion_tokens are mutually exclusive")
+		return
+	}
 
 	stream := request.Stream
 	reqCtx := modules.RequestContext{
@@ -436,7 +440,31 @@ func writeProviderFailure(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusTooManyRequests, "provider_busy", "provider capacity is temporarily exhausted")
 		return
 	}
+	var providerErr *provider.Error
+	if errors.As(err, &providerErr) && providerErr.Class == provider.FailureClientRequest {
+		code := providerErr.UpstreamCode
+		if code == "" {
+			code = "provider_invalid_request"
+		}
+		message := "provider rejected the request"
+		if providerErr.Param != "" {
+			message = "provider rejected parameter " + providerErr.Param
+		}
+		writeProviderParameterError(w, providerErr.StatusCode, code, message, providerErr.Param)
+		return
+	}
 	writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
+}
+
+func writeProviderParameterError(w http.ResponseWriter, status int, code, message, param string) {
+	if status < 400 || status >= 500 {
+		status = http.StatusBadRequest
+	}
+	detail := map[string]any{"code": code, "message": message}
+	if param != "" {
+		detail["param"] = param
+	}
+	writeJSON(w, status, map[string]any{"error": detail, "ts": time.Now().UTC().Format(time.RFC3339)})
 }
 
 func bearerToken(header string) string {

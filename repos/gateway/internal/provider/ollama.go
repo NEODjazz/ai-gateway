@@ -334,8 +334,12 @@ func normalizeOllamaToolCalls(message *openai.Message) {
 }
 
 func ollamaRequestOptions(request openai.ChatCompletionRequest) ollamaOptions {
+	maxTokens := request.MaxTokens
+	if maxTokens == nil {
+		maxTokens = request.MaxCompletionTokens
+	}
 	return ollamaOptions{
-		NumPredict: request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP,
+		NumPredict: maxTokens, Temperature: request.Temperature, TopP: request.TopP,
 		Stop: request.Stop, Seed: request.Seed,
 	}
 }

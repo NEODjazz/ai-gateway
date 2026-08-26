@@ -15,18 +15,19 @@ import (
 )
 
 type openAICompatibleChatRequest struct {
-	Model             string                 `json:"model"`
-	Messages          []openai.Message       `json:"messages"`
-	Tools             []openai.Tool          `json:"tools,omitempty"`
-	ToolChoice        any                    `json:"tool_choice,omitempty"`
-	ParallelToolCalls *bool                  `json:"parallel_tool_calls,omitempty"`
-	ResponseFormat    *openai.ResponseFormat `json:"response_format,omitempty"`
-	Stream            bool                   `json:"stream,omitempty"`
-	MaxTokens         *int                   `json:"max_tokens,omitempty"`
-	Temperature       *float64               `json:"temperature,omitempty"`
-	TopP              *float64               `json:"top_p,omitempty"`
-	Stop              any                    `json:"stop,omitempty"`
-	Seed              *int64                 `json:"seed,omitempty"`
+	Model               string                 `json:"model"`
+	Messages            []openai.Message       `json:"messages"`
+	Tools               []openai.Tool          `json:"tools,omitempty"`
+	ToolChoice          any                    `json:"tool_choice,omitempty"`
+	ParallelToolCalls   *bool                  `json:"parallel_tool_calls,omitempty"`
+	ResponseFormat      *openai.ResponseFormat `json:"response_format,omitempty"`
+	Stream              bool                   `json:"stream,omitempty"`
+	MaxTokens           *int                   `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int                   `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64               `json:"temperature,omitempty"`
+	TopP                *float64               `json:"top_p,omitempty"`
+	Stop                any                    `json:"stop,omitempty"`
+	Seed                *int64                 `json:"seed,omitempty"`
 }
 
 type openAICompatibleResponseRequest struct {
@@ -136,7 +137,8 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 		Model: request.Model, Messages: request.Messages, Tools: request.Tools,
 		ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		ResponseFormat: request.ResponseFormat, Stream: request.Stream && p.upstreamStream,
-		MaxTokens: request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP,
+		MaxTokens: request.MaxTokens, MaxCompletionTokens: request.MaxCompletionTokens,
+		Temperature: request.Temperature, TopP: request.TopP,
 		Stop: request.Stop, Seed: request.Seed,
 	})
 	if err != nil {
@@ -159,7 +161,7 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ChatCompletionResponse{}, statusError("openai-compatible", resp.StatusCode)
+		return openai.ChatCompletionResponse{}, responseStatusError("openai-compatible", resp)
 	}
 
 	if request.Stream && p.upstreamStream {
@@ -213,7 +215,8 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 		Model: request.Model, Messages: request.Messages, Tools: request.Tools,
 		ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		ResponseFormat: request.ResponseFormat, Stream: true,
-		MaxTokens: request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP,
+		MaxTokens: request.MaxTokens, MaxCompletionTokens: request.MaxCompletionTokens,
+		Temperature: request.Temperature, TopP: request.TopP,
 		Stop: request.Stop, Seed: request.Seed,
 	})
 	if err != nil {
@@ -236,7 +239,7 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ChatCompletionResponse{}, statusError("openai-compatible", resp.StatusCode)
+		return openai.ChatCompletionResponse{}, responseStatusError("openai-compatible", resp)
 	}
 
 	return streamChatCompletionData(resp.Body, request.Model, write)

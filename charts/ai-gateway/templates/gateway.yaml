@@ -20,6 +20,10 @@ spec:
         {{- include "ai-gateway.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: gateway
     spec:
+      {{- with .Values.gateway.dnsConfig }}
+      dnsConfig:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:

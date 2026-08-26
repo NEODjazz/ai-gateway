@@ -11,6 +11,14 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
+func TestAnthropicMapsMaxCompletionTokensToMaxTokens(t *testing.T) {
+	limit := 321
+	request := anthropicChatRequest(openai.ChatCompletionRequest{Model: "claude", MaxCompletionTokens: &limit}, false)
+	if request.MaxTokens != limit {
+		t.Fatalf("max_completion_tokens was not mapped: %+v", request)
+	}
+}
+
 func TestAnthropicChatCompletions(t *testing.T) {
 	var upstreamRequest anthropicRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

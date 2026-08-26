@@ -30,6 +30,17 @@ type accessPolicyModule struct {
 
 type countingAccessModule struct{ calls int }
 
+func TestChatCompletionsRejectsConflictingTokenLimits(t *testing.T) {
+	handler := NewHandler(modules.NewPipeline(nil), &chatProvider{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[{"role":"user","content":"hello"}],"max_tokens":10,"max_completion_tokens":20}`))
+	response := httptest.NewRecorder()
+
+	handler.ChatCompletions(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "mutually exclusive") {
+		t.Fatalf("unexpected response: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func (m *countingAccessModule) Name() string   { return "counting-access" }
 func (m *countingAccessModule) Required() bool { return true }
 func (m *countingAccessModule) Handle(context.Context, *modules.RequestContext) error {
@@ -458,6 +469,26 @@ func TestProviderAdmissionFailureReturns429WithRetryAfter(t *testing.T) {
 	}
 	if body := recorder.Body.String(); !strings.Contains(body, `"code":"provider_busy"`) || strings.Contains(body, "ollama") {
 		t.Fatalf("provider details leaked in response: %s", body)
+	}
+}
+
+func TestProviderClientRequestPreservesSafeStatusAndParameter(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeProviderFailure(recorder, &provider.Error{
+		Class: provider.FailureClientRequest, StatusCode: http.StatusBadRequest,
+		UpstreamCode: "unsupported_parameter", Param: "max_tokens", Err: errors.New("raw upstream secret"),
+	})
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := recorder.Body.String()
+	for _, expected := range []string{`"code":"unsupported_parameter"`, `"param":"max_tokens"`, `"message":"provider rejected parameter max_tokens"`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("missing %s in %s", expected, body)
+		}
+	}
+	if strings.Contains(body, "raw upstream secret") {
+		t.Fatalf("raw upstream error leaked: %s", body)
 	}
 }
 

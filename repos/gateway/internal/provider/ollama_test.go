@@ -11,6 +11,14 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
+func TestOllamaMapsMaxCompletionTokensToNumPredict(t *testing.T) {
+	limit := 321
+	options := ollamaRequestOptions(openai.ChatCompletionRequest{MaxCompletionTokens: &limit})
+	if options.NumPredict == nil || *options.NumPredict != limit {
+		t.Fatalf("max_completion_tokens was not mapped: %+v", options)
+	}
+}
+
 func TestOllamaChatCompletions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/chat" {

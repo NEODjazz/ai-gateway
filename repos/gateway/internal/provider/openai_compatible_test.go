@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,54 @@ func TestProviderURLDoesNotDuplicateV1(t *testing.T) {
 	want := "https://example.test/openai/v1/chat/completions"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestOpenAICompatibleForwardsMaxCompletionTokensWithoutLegacyParameters(t *testing.T) {
+	var upstream map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{ID: "chat-modern", Model: "gpt-modern"})
+	}))
+	defer server.Close()
+
+	maxCompletionTokens := 256
+	_, err := NewOpenAICompatible(server.URL, "provider-key", false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{
+		Model: "gpt-modern", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxCompletionTokens: &maxCompletionTokens,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(upstream["max_completion_tokens"]) != "256" {
+		t.Fatalf("max_completion_tokens was not forwarded: %s", upstream["max_completion_tokens"])
+	}
+	if _, found := upstream["max_tokens"]; found {
+		t.Fatal("legacy max_tokens must be omitted")
+	}
+	if _, found := upstream["temperature"]; found {
+		t.Fatal("unset temperature must be omitted")
+	}
+}
+
+func TestOpenAICompatibleCapturesSafeUpstreamParameterError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":"unsupported_parameter","param":"max_tokens","message":"secret request content"}}`))
+	}))
+	defer server.Close()
+
+	_, err := NewOpenAICompatible(server.URL, "provider-key", false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "model"})
+	var providerErr *Error
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("expected provider error, got %v", err)
+	}
+	if providerErr.Class != FailureClientRequest || providerErr.StatusCode != http.StatusBadRequest || providerErr.UpstreamCode != "unsupported_parameter" || providerErr.Param != "max_tokens" {
+		t.Fatalf("unexpected safe diagnostics: %+v", providerErr)
+	}
+	if strings.Contains(providerErr.Error(), "secret request content") {
+		t.Fatal("raw upstream message leaked")
 	}
 }
 

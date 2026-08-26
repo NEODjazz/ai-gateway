@@ -7,19 +7,20 @@ import (
 )
 
 type ChatCompletionRequest struct {
-	Provider          string          `json:"provider,omitempty"`
-	Model             string          `json:"model"`
-	Messages          []Message       `json:"messages"`
-	Tools             []Tool          `json:"tools,omitempty"`
-	ToolChoice        any             `json:"tool_choice,omitempty"`
-	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"`
-	ResponseFormat    *ResponseFormat `json:"response_format,omitempty"`
-	Stream            bool            `json:"stream,omitempty"`
-	MaxTokens         *int            `json:"max_tokens,omitempty"`
-	Temperature       *float64        `json:"temperature,omitempty"`
-	TopP              *float64        `json:"top_p,omitempty"`
-	Stop              any             `json:"stop,omitempty"`
-	Seed              *int64          `json:"seed,omitempty"`
+	Provider            string          `json:"provider,omitempty"`
+	Model               string          `json:"model"`
+	Messages            []Message       `json:"messages"`
+	Tools               []Tool          `json:"tools,omitempty"`
+	ToolChoice          any             `json:"tool_choice,omitempty"`
+	ParallelToolCalls   *bool           `json:"parallel_tool_calls,omitempty"`
+	ResponseFormat      *ResponseFormat `json:"response_format,omitempty"`
+	Stream              bool            `json:"stream,omitempty"`
+	MaxTokens           *int            `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int            `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64        `json:"temperature,omitempty"`
+	TopP                *float64        `json:"top_p,omitempty"`
+	Stop                any             `json:"stop,omitempty"`
+	Seed                *int64          `json:"seed,omitempty"`
 }
 
 type Message struct {

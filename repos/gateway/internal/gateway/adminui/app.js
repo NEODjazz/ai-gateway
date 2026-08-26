@@ -230,7 +230,10 @@
     const messages = []; const system = $("playground-system").value.trim(); if (system) messages.push({ role: "system", content: system }); messages.push({ role: "user", content: $("playground-message").value });
     const started = performance.now();
     try {
-      const response = await fetch("/v1/chat/completions", { method: "POST", cache: "no-store", headers: { "Authorization": `Bearer ${state.token}`, "Accept": "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ model: $("playground-model").value, messages, temperature: Number($("playground-temperature").value), max_tokens: Number($("playground-max-tokens").value) }) });
+      const payload = { model: $("playground-model").value, messages };
+      const temperature = $("playground-temperature").value.trim(); if (temperature !== "") payload.temperature = Number(temperature);
+      const maxTokens = $("playground-max-tokens").value.trim(); if (maxTokens !== "") payload.max_completion_tokens = Number(maxTokens);
+      const response = await fetch("/v1/chat/completions", { method: "POST", cache: "no-store", headers: { "Authorization": `Bearer ${state.token}`, "Accept": "application/json", "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const body = await response.json(); if (!response.ok) throw new Error(body?.error?.message || `Request failed (${response.status})`);
       $("playground-result").textContent = responseText(body.choices?.[0]?.message?.content) || JSON.stringify(body, null, 2);
       const usage = body.usage || {}; setText("playground-meta", `${Math.round(performance.now() - started)} ms · ${formatNumber(usage.total_tokens || 0)} tokens · ${response.headers.get("X-Request-ID") || "no request id"}`);

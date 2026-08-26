@@ -2,9 +2,13 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"regexp"
+	"strings"
 )
 
 type FailureClass string
@@ -21,10 +25,12 @@ const (
 )
 
 type Error struct {
-	Class      FailureClass
-	Provider   string
-	StatusCode int
-	Err        error
+	Class        FailureClass
+	Provider     string
+	StatusCode   int
+	UpstreamCode string
+	Param        string
+	Err          error
 }
 
 func (e *Error) Error() string {
@@ -53,6 +59,39 @@ func statusError(provider string, statusCode int) error {
 		class = FailureUnavailable
 	}
 	return &Error{Class: class, Provider: provider, StatusCode: statusCode, Err: fmt.Errorf("HTTP %s", http.StatusText(statusCode))}
+}
+
+var safeUpstreamIdentifier = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
+
+// responseStatusError preserves only bounded, identifier-like diagnostics.
+// Raw upstream messages and response bodies can echo request content and must
+// never be returned to gateway clients or retained in metadata.
+func responseStatusError(provider string, response *http.Response) error {
+	err := statusError(provider, response.StatusCode)
+	var providerErr *Error
+	if !errors.As(err, &providerErr) {
+		return err
+	}
+	payload, readErr := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
+	if readErr != nil || len(payload) > 64<<10 {
+		return err
+	}
+	var body struct {
+		Error struct {
+			Code  string `json:"code"`
+			Param string `json:"param"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(payload, &body) != nil {
+		return err
+	}
+	if safeUpstreamIdentifier.MatchString(strings.TrimSpace(body.Error.Code)) {
+		providerErr.UpstreamCode = strings.TrimSpace(body.Error.Code)
+	}
+	if safeUpstreamIdentifier.MatchString(strings.TrimSpace(body.Error.Param)) {
+		providerErr.Param = strings.TrimSpace(body.Error.Param)
+	}
+	return providerErr
 }
 
 func failureClass(err error) FailureClass {

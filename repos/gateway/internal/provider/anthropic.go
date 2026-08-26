@@ -215,7 +215,7 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		Messages:    messages,
 		Tools:       tools,
 		ToolChoice:  toolChoice,
-		MaxTokens:   requestMaxTokens(request.MaxTokens, nil),
+		MaxTokens:   requestMaxTokens(request.MaxTokens, request.MaxCompletionTokens),
 		Stream:      stream,
 		Temperature: request.Temperature,
 		TopP:        request.TopP,
