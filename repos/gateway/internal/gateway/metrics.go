@@ -106,6 +106,22 @@ func (m *Metrics) ObserveCache(operation, result string) {
 	m.mu.Unlock()
 }
 
+func (m *Metrics) CacheOperations() map[string]map[string]uint64 {
+	result := map[string]map[string]uint64{}
+	if m == nil {
+		return result
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, value := range m.cache {
+		if result[key.Operation] == nil {
+			result[key.Operation] = map[string]uint64{}
+		}
+		result[key.Operation][key.Result] = value
+	}
+	return result
+}
+
 func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = fmt.Fprintln(w, "# HELP ai_gateway_http_requests_total Total HTTP requests.")

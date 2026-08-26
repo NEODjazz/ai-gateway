@@ -30,6 +30,8 @@ type Handler struct {
 	dlp           modules.Module
 	av            modules.Module
 	guardrails    *GuardrailMonitor
+	cacheConfig   CacheRuntimeConfig
+	logging       *LoggingRegistry
 	mcp           *MCPRegistry
 	access        *AccessRegistry
 	budgets       BudgetManagementClient

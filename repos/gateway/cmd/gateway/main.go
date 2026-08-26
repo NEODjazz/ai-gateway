@@ -50,6 +50,7 @@ func main() {
 		modules.Auth(cfg.Modules.Auth.Required, cfg.Modules.Auth.URL),
 	}, metrics)
 	guardrailMonitor := gateway.NewGuardrailMonitor(200)
+	loggingRegistry := gateway.NewLoggingRegistry(nil)
 	dlpModule := gateway.NewGuardrailMonitoringModule(modules.DLP(cfg.Modules.DLP.Required, cfg.Modules.DLP.URL), guardrailMonitor)
 	avModule := gateway.NewGuardrailMonitoringModule(modules.AV(cfg.Modules.AV.Required, cfg.Modules.AV.URL), guardrailMonitor)
 	providerPipeline := modules.NewPipelineWithObserver([]modules.Module{
@@ -57,6 +58,7 @@ func main() {
 		avModule,
 		modules.Anonymizer(cfg.Modules.Anonymizer.Required, cfg.Modules.Anonymizer.URL),
 		modules.BillingWithSecret(cfg.Modules.Billing.Required, cfg.Modules.Billing.URL, cfg.Modules.Billing.Secret),
+		gateway.NewLoggingModule(loggingRegistry),
 	}, metrics)
 
 	modelRegistry := modelcatalog.NewRegistry(cfg.Catalog, registryStoreFor(redisStore), time.Second)
@@ -113,7 +115,7 @@ func main() {
 			return providerControlStore.Ping(ctx)
 		}
 	}
-	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithGuardrailMonitor(guardrailMonitor).WithMCPRegistry(gateway.NewMCPRegistry()).WithAccessRegistry(gateway.NewAccessRegistry())
+	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithGuardrailMonitor(guardrailMonitor).WithCacheDiagnostics(gateway.CacheRuntimeConfig{ExactTTLSeconds: cfg.Cache.TTLSeconds, ExactMaxBytes: cfg.Cache.MaxBytes, SemanticTTLSeconds: cfg.Cache.Semantic.TTLSeconds, SemanticMaxEntries: cfg.Cache.Semantic.MaxEntries, SemanticMaxBytes: cfg.Cache.Semantic.MaxBytes}).WithLoggingRegistry(loggingRegistry).WithMCPRegistry(gateway.NewMCPRegistry()).WithAccessRegistry(gateway.NewAccessRegistry())
 	if cfg.APIDocs.Enabled {
 		handler = handler.WithAPIDocs(cfg.APIDocs.TryItOutEnabled)
 	}

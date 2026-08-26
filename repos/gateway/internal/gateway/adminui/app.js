@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, customerUsage: null, customerScope: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], organizations: [], projects: [], accessGroups: [], models: [], aiHub: [], costRecommendations: [], providers: [], credentials: [], deployments: [], modelGroups: [], guardrails: [], guardrailMonitor: null, mcpServers: [], mcpToolsets: [], catalog: null, budgets: [], audit: [] };
+  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, customerUsage: null, customerScope: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], organizations: [], projects: [], accessGroups: [], models: [], aiHub: [], costRecommendations: [], providers: [], credentials: [], deployments: [], modelGroups: [], guardrails: [], guardrailMonitor: null, cacheDiagnostics: null, loggingDestinations: [], loggingDelivery: null, mcpServers: [], mcpToolsets: [], catalog: null, budgets: [], audit: [] };
   const $ = (id) => document.getElementById(id);
   const loginView = $("login-view");
   const consoleView = $("console-view");
@@ -9,7 +9,7 @@
   const tokenInput = $("admin-token");
   const loginError = $("login-error");
   const globalError = $("global-error");
-  const pageTitles = { overview: "Overview", usage: "Usage & spend", customers: "Customer insights", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", organizations: "Organizations", access: "Projects & access", models: "Models", "ai-hub": "AI Hub & optimization", deployments: "Providers & models", guardrails: "Guardrails", mcp: "MCP registry", budgets: "Budgets", audit: "Audit log" };
+  const pageTitles = { overview: "Overview", usage: "Usage & spend", customers: "Customer insights", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", organizations: "Organizations", access: "Projects & access", models: "Models", "ai-hub": "AI Hub & optimization", deployments: "Providers & models", guardrails: "Guardrails", mcp: "MCP registry", integrations: "Caching & logging", budgets: "Budgets", audit: "Audit log" };
   let pendingConfirmation = null;
   let requestLogLiveTimer = null;
 
@@ -106,6 +106,8 @@
       api("/admin/v1/projects"),
       api("/admin/v1/access-groups"),
       api("/admin/v1/guardrails/monitor?limit=100"),
+      api("/admin/v1/cache/diagnostics"),
+      api("/admin/v1/logging/destinations"),
     ];
     const results = await Promise.allSettled(requests);
     const authFailure = results.find((result) => result.status === "rejected" && result.reason?.auth);
@@ -135,6 +137,8 @@
     if (results[21].status === "fulfilled") state.projects = results[21].value?.data || []; else errors.push(`Projects: ${results[21].reason.message}`);
     if (results[22].status === "fulfilled") state.accessGroups = results[22].value?.data || []; else errors.push(`Access groups: ${results[22].reason.message}`);
     if (results[23].status === "fulfilled") state.guardrailMonitor = results[23].value; else errors.push(`Guardrail monitor: ${results[23].reason.message}`);
+    if (results[24].status === "fulfilled") state.cacheDiagnostics = results[24].value; else errors.push(`Cache diagnostics: ${results[24].reason.message}`);
+    if (results[25].status === "fulfilled") { state.loggingDestinations = results[25].value?.data || []; state.loggingDelivery = results[25].value?.delivery || null; } else errors.push(`Logging integrations: ${results[25].reason.message}`);
     renderAll();
     setText("console-health", errors.length ? "Degraded" : "Operational");
     if (errors.length) { globalError.textContent = errors.join(" · "); globalError.hidden = false; }
@@ -180,6 +184,7 @@
     setText("deployments-badge", formatNumber(state.deployments.filter((item)=>item.enabled).length));
     setText("guardrails-badge", formatNumber(state.guardrails.filter((item)=>item.enabled).length));
     setText("mcp-badge", formatNumber(state.mcpServers.filter((item)=>item.enabled).length));
+    setText("logging-badge", formatNumber(state.loggingDestinations.filter((item)=>item.enabled).length));
     setText("catalog-version", state.catalog?.version ? `Version ${state.catalog.version}` : "Runtime registry");
     renderOverview();
     renderRouting();
@@ -199,6 +204,7 @@
     renderModelGroups();
     renderGuardrails();
     renderGuardrailMonitor();
+    renderIntegrations();
     renderMCP();
     renderModels();
     renderBudgets();
@@ -508,6 +514,11 @@
   async function saveAccessGroup(event){event.preventDefault();const error=$("access-group-error"),id=$("access-group-id").value.trim();error.hidden=true;try{await apiJSON(`/admin/v1/access-groups/${encodeURIComponent(id)}`,"PUT",{name:$("access-group-name").value.trim(),description:$("access-group-description").value.trim(),project_id:$("access-group-project").value,allowed_models:commaList("access-group-models"),allowed_tools:commaList("access-group-tools"),tags:commaList("access-group-tags"),enabled:$("access-group-enabled").checked});$("access-group-dialog").close();await loadData();showToast("Access group saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
   function useAccessGroupForKey(group){openKeyDialog();$("key-models").value=(group.allowed_models||[]).join(", ");$("key-tools").value=(group.allowed_tools||[]).join(", ");$("key-tags").value=[`access-group:${group.id}`,group.project_id?`project:${group.project_id}`:"",...(group.tags||[])].filter(Boolean).join(", ");showToast("Permission template copied into the new key")}
 
+  function renderIntegrations(){const cache=state.cacheDiagnostics||{},exact=cache.exact||{},semantic=cache.semantic||{},config=cache.config||{};setText("cache-exact-status",exact.enabled?"Enabled":"Disabled");setText("cache-exact-ratio",`${((exact.hit_ratio||0)*100).toFixed(1)}% hit ratio`);setText("cache-exact-hits",formatNumber(exact.hits||0));setText("cache-exact-misses",formatNumber(exact.misses||0));setText("cache-exact-writes",formatNumber(exact.writes||0));setText("cache-exact-config",`TTL ${config.exact_ttl_seconds||0}s · max response ${formatNumber(config.exact_max_bytes||0)} bytes`);setText("cache-semantic-status",semantic.enabled?"Enabled":"Disabled");setText("cache-semantic-ratio",`${((semantic.hit_ratio||0)*100).toFixed(1)}% hit ratio`);setText("cache-semantic-hits",formatNumber(semantic.hits||0));setText("cache-semantic-misses",formatNumber(semantic.misses||0));setText("cache-semantic-errors",formatNumber(semantic.errors||0));setText("cache-semantic-config",`TTL ${config.semantic_ttl_seconds||0}s · ${formatNumber(config.semantic_max_entries||0)} entries · ${formatNumber(config.semantic_max_bytes||0)} bytes`);const delivery=state.loggingDelivery||{};setText("logging-delivery-stats",`queued ${delivery.queued||0} · delivered ${delivery.delivered||0} · failed ${delivery.failed||0} · dropped ${delivery.dropped||0}`);const body=$("logging-table");clear(body);$("logging-empty").hidden=state.loggingDestinations.length!==0;for(const item of state.loggingDestinations){const row=document.createElement("tr");row.appendChild(textCell(item.name,item.id));row.appendChild(textCell(item.type,item.url));row.appendChild(plainCell((item.event_types||[]).join(", ")));row.appendChild(plainCell(item.secret_configured?"Configured":"None"));row.appendChild(statusCell(item.enabled));const actions=document.createElement("td");actions.className="row-actions";actions.append(actionButton("Test",()=>testLoggingDestination(item)),actionButton("Edit",()=>openLoggingDialog(item)),actionButton("Delete",()=>confirmChange("Delete logging destination?",`Delete ${item.id}. Runtime callbacks stop immediately.`,async()=>{await api(`/admin/v1/logging/destinations/${encodeURIComponent(item.id)}`,{method:"DELETE"});await loadData();showToast("Logging destination deleted")}),true));row.appendChild(actions);body.appendChild(row)}}
+  function openLoggingDialog(item=null){$("logging-id").value=item?.id||"";$("logging-id").readOnly=Boolean(item);$("logging-name").value=item?.name||"";$("logging-type").value=item?.type||"webhook";$("logging-url").value=item?.url||"";$("logging-secret").value="";$("logging-enabled").checked=item?.enabled??true;const events=new Set(item?.event_types||["request_outcome"]);for(const option of $("logging-events").options)option.selected=events.has(option.value);$("logging-error").hidden=true;$("logging-dialog").showModal()}
+  async function saveLoggingDestination(event){event.preventDefault();const error=$("logging-error"),id=$("logging-id").value.trim(),secret=$("logging-secret").value;error.hidden=true;try{await apiJSON(`/admin/v1/logging/destinations/${encodeURIComponent(id)}`,"PUT",{name:$("logging-name").value.trim(),type:$("logging-type").value,url:$("logging-url").value.trim(),event_types:[...$("logging-events").selectedOptions].map(option=>option.value),enabled:$("logging-enabled").checked,secret});$("logging-secret").value="";$("logging-dialog").close();await loadData();showToast("Logging destination saved")}catch(requestError){$("logging-secret").value="";error.textContent=requestError.message;error.hidden=false}}
+  async function testLoggingDestination(item){try{const result=await api(`/admin/v1/logging/destinations/${encodeURIComponent(item.id)}/test`,{method:"POST"});showToast(`${item.id} available · ${result.latency_ms||0} ms · synthetic metadata probe`)}catch(error){globalError.textContent=error.message;globalError.hidden=false}}
+
   function openUserDialog(user=null){$("user-id").value=user?.id||"";$("user-id").readOnly=Boolean(user);$("user-email").value=user?.email||"";$("user-name").value=user?.name||"";$("user-status").value=user?.status||"active";$("user-roles").value=(user?.roles||[]).join(", ");$("user-form-error").hidden=true;$("user-dialog").showModal()}
   async function saveUser(event){event.preventDefault();const error=$("user-form-error");error.hidden=true;const id=$("user-id").value.trim();try{await apiJSON(`/admin/v1/users/${encodeURIComponent(id)}`,"PUT",{email:$("user-email").value.trim(),name:$("user-name").value.trim(),status:$("user-status").value,roles:commaList("user-roles")});$("user-dialog").close();await loadData();showToast("User saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
   function openTeamDialog(team=null){$("team-id").value=team?.id||"";$("team-id").readOnly=Boolean(team);$("team-name").value=team?.name||"";$("team-description").value=team?.description||"";$("team-status").value=team?.status||"active";$("team-form-error").hidden=true;$("team-dialog").showModal()}
@@ -746,6 +757,8 @@
   $("project-form").addEventListener("submit",saveProject);
   $("add-access-group-button").addEventListener("click",()=>openAccessGroupDialog());
   $("access-group-form").addEventListener("submit",saveAccessGroup);
+  $("add-logging-button").addEventListener("click",()=>openLoggingDialog());
+  $("logging-form").addEventListener("submit",saveLoggingDestination);
   $("add-budget-button").addEventListener("click", () => openBudgetDialog());
   $("budget-form").addEventListener("submit", saveBudget);
   for (const button of document.querySelectorAll(".close-dialog")) button.addEventListener("click", () => $(button.dataset.dialog).close());
