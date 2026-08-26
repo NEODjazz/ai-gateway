@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, customerUsage: null, customerScope: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], organizations: [], models: [], aiHub: [], costRecommendations: [], providers: [], credentials: [], deployments: [], modelGroups: [], guardrails: [], mcpServers: [], mcpToolsets: [], catalog: null, budgets: [], audit: [] };
+  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, customerUsage: null, customerScope: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], organizations: [], projects: [], accessGroups: [], models: [], aiHub: [], costRecommendations: [], providers: [], credentials: [], deployments: [], modelGroups: [], guardrails: [], mcpServers: [], mcpToolsets: [], catalog: null, budgets: [], audit: [] };
   const $ = (id) => document.getElementById(id);
   const loginView = $("login-view");
   const consoleView = $("console-view");
@@ -9,7 +9,7 @@
   const tokenInput = $("admin-token");
   const loginError = $("login-error");
   const globalError = $("global-error");
-  const pageTitles = { overview: "Overview", usage: "Usage & spend", customers: "Customer insights", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", organizations: "Organizations", models: "Models", "ai-hub": "AI Hub & optimization", deployments: "Providers & models", guardrails: "Guardrails", mcp: "MCP registry", budgets: "Budgets", audit: "Audit log" };
+  const pageTitles = { overview: "Overview", usage: "Usage & spend", customers: "Customer insights", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", organizations: "Organizations", access: "Projects & access", models: "Models", "ai-hub": "AI Hub & optimization", deployments: "Providers & models", guardrails: "Guardrails", mcp: "MCP registry", budgets: "Budgets", audit: "Audit log" };
   let pendingConfirmation = null;
   let requestLogLiveTimer = null;
 
@@ -103,6 +103,8 @@
       api("/admin/v1/providers"),
       api("/admin/v1/credentials"),
       api("/admin/v1/model-groups"),
+      api("/admin/v1/projects"),
+      api("/admin/v1/access-groups"),
     ];
     const results = await Promise.allSettled(requests);
     const authFailure = results.find((result) => result.status === "rejected" && result.reason?.auth);
@@ -129,6 +131,8 @@
     if (results[18].status === "fulfilled") state.providers = results[18].value?.data || []; else errors.push(`Providers: ${results[18].reason.message}`);
     if (results[19].status === "fulfilled") state.credentials = results[19].value?.data || []; else errors.push(`Credentials: ${results[19].reason.message}`);
     if (results[20].status === "fulfilled") state.modelGroups = results[20].value?.data || []; else errors.push(`Model groups: ${results[20].reason.message}`);
+    if (results[21].status === "fulfilled") state.projects = results[21].value?.data || []; else errors.push(`Projects: ${results[21].reason.message}`);
+    if (results[22].status === "fulfilled") state.accessGroups = results[22].value?.data || []; else errors.push(`Access groups: ${results[22].reason.message}`);
     renderAll();
     setText("console-health", errors.length ? "Degraded" : "Operational");
     if (errors.length) { globalError.textContent = errors.join(" · "); globalError.hidden = false; }
@@ -170,6 +174,7 @@
     setText("users-badge", formatNumber(state.users.length));
     setText("teams-badge", formatNumber(state.teams.length));
     setText("organizations-badge", formatNumber(state.organizations.filter((item)=>item.status==="active").length));
+    setText("access-badge", formatNumber(state.accessGroups.filter((item)=>item.enabled).length));
     setText("deployments-badge", formatNumber(state.deployments.filter((item)=>item.enabled).length));
     setText("guardrails-badge", formatNumber(state.guardrails.filter((item)=>item.enabled).length));
     setText("mcp-badge", formatNumber(state.mcpServers.filter((item)=>item.enabled).length));
@@ -184,6 +189,7 @@
     renderUsers();
     renderTeams();
     renderOrganizations();
+    renderAccess();
     renderAIHub();
     renderProviders();
     renderCredentials();
@@ -486,6 +492,18 @@
   function openMCPToolsetDialog(toolset=null){$("mcp-toolset-id").value=toolset?.id||"";$("mcp-toolset-id").readOnly=Boolean(toolset);$("mcp-toolset-name").value=toolset?.name||"";$("mcp-toolset-description").value=toolset?.description||"";$("mcp-toolset-tools").value=(toolset?.tools||[]).join(", ");$("mcp-toolset-enabled").checked=toolset?.enabled??true;$("mcp-toolset-error").hidden=true;$("mcp-toolset-dialog").showModal()}
   async function saveMCPToolset(event){event.preventDefault();const error=$("mcp-toolset-error"),id=$("mcp-toolset-id").value.trim();error.hidden=true;try{await apiJSON(`/admin/v1/mcp/toolsets/${encodeURIComponent(id)}`,"PUT",{name:$("mcp-toolset-name").value.trim(),description:$("mcp-toolset-description").value.trim(),tools:commaList("mcp-toolset-tools"),enabled:$("mcp-toolset-enabled").checked});$("mcp-toolset-dialog").close();await loadData();showToast("MCP toolset saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
 
+  function renderAccess(){
+    const projects=$("projects-table");clear(projects);$("projects-empty").hidden=state.projects.length!==0;
+    for(const project of state.projects){const row=document.createElement("tr");row.appendChild(textCell(project.name,project.id));row.appendChild(plainCell(project.team_id));row.appendChild(plainCell((project.tags||[]).join(", ")));row.appendChild(statusCell(project.enabled));const actions=document.createElement("td");actions.className="row-actions";actions.append(actionButton("Edit",()=>openProjectDialog(project)),actionButton("Delete",()=>confirmChange("Delete project?",`Delete ${project.id}. Projects referenced by access groups are protected.`,async()=>{await api(`/admin/v1/projects/${encodeURIComponent(project.id)}`,{method:"DELETE"});await loadData();showToast("Project deleted")}),true));row.appendChild(actions);projects.appendChild(row)}
+    const groups=$("access-groups-table");clear(groups);$("access-groups-empty").hidden=state.accessGroups.length!==0;
+    for(const group of state.accessGroups){const row=document.createElement("tr");row.appendChild(textCell(group.name,group.id));row.appendChild(plainCell(group.project_id));row.appendChild(textCell((group.allowed_models||[]).join(", ")||"No model grant",(group.allowed_tools||[]).join(", ")||"No tool grant"));row.appendChild(statusCell(group.enabled));const actions=document.createElement("td");actions.className="row-actions";if(group.enabled)actions.appendChild(actionButton("Use for key",()=>useAccessGroupForKey(group)));actions.append(actionButton("Edit",()=>openAccessGroupDialog(group)),actionButton("Delete",()=>confirmChange("Delete access group?",`Delete permission template ${group.id}. Existing keys keep their copied grants.`,async()=>{await api(`/admin/v1/access-groups/${encodeURIComponent(group.id)}`,{method:"DELETE"});await loadData();showToast("Access group deleted")}),true));row.appendChild(actions);groups.appendChild(row)}
+  }
+  function openProjectDialog(project=null){$("project-id").value=project?.id||"";$("project-id").readOnly=Boolean(project);$("project-name").value=project?.name||"";$("project-description").value=project?.description||"";$("project-team").value=project?.team_id||"";$("project-tags").value=(project?.tags||[]).join(", ");$("project-enabled").checked=project?.enabled??true;$("project-error").hidden=true;$("project-dialog").showModal()}
+  async function saveProject(event){event.preventDefault();const error=$("project-error"),id=$("project-id").value.trim();error.hidden=true;try{await apiJSON(`/admin/v1/projects/${encodeURIComponent(id)}`,"PUT",{name:$("project-name").value.trim(),description:$("project-description").value.trim(),team_id:$("project-team").value.trim(),tags:commaList("project-tags"),enabled:$("project-enabled").checked});$("project-dialog").close();await loadData();showToast("Project saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
+  function openAccessGroupDialog(group=null){$("access-group-id").value=group?.id||"";$("access-group-id").readOnly=Boolean(group);const select=$("access-group-project"),selected=group?.project_id||"";clear(select);const none=document.createElement("option");none.value="";none.textContent="No project";select.appendChild(none);for(const project of state.projects.filter(item=>item.enabled||item.id===selected)){const option=document.createElement("option");option.value=project.id;option.textContent=`${project.name} (${project.id})`;select.appendChild(option)}select.value=selected;$("access-group-name").value=group?.name||"";$("access-group-description").value=group?.description||"";$("access-group-models").value=(group?.allowed_models||[]).join(", ");$("access-group-tools").value=(group?.allowed_tools||[]).join(", ");$("access-group-tags").value=(group?.tags||[]).join(", ");$("access-group-enabled").checked=group?.enabled??true;$("access-group-error").hidden=true;$("access-group-dialog").showModal()}
+  async function saveAccessGroup(event){event.preventDefault();const error=$("access-group-error"),id=$("access-group-id").value.trim();error.hidden=true;try{await apiJSON(`/admin/v1/access-groups/${encodeURIComponent(id)}`,"PUT",{name:$("access-group-name").value.trim(),description:$("access-group-description").value.trim(),project_id:$("access-group-project").value,allowed_models:commaList("access-group-models"),allowed_tools:commaList("access-group-tools"),tags:commaList("access-group-tags"),enabled:$("access-group-enabled").checked});$("access-group-dialog").close();await loadData();showToast("Access group saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
+  function useAccessGroupForKey(group){openKeyDialog();$("key-models").value=(group.allowed_models||[]).join(", ");$("key-tools").value=(group.allowed_tools||[]).join(", ");$("key-tags").value=[`access-group:${group.id}`,group.project_id?`project:${group.project_id}`:"",...(group.tags||[])].filter(Boolean).join(", ");showToast("Permission template copied into the new key")}
+
   function openUserDialog(user=null){$("user-id").value=user?.id||"";$("user-id").readOnly=Boolean(user);$("user-email").value=user?.email||"";$("user-name").value=user?.name||"";$("user-status").value=user?.status||"active";$("user-roles").value=(user?.roles||[]).join(", ");$("user-form-error").hidden=true;$("user-dialog").showModal()}
   async function saveUser(event){event.preventDefault();const error=$("user-form-error");error.hidden=true;const id=$("user-id").value.trim();try{await apiJSON(`/admin/v1/users/${encodeURIComponent(id)}`,"PUT",{email:$("user-email").value.trim(),name:$("user-name").value.trim(),status:$("user-status").value,roles:commaList("user-roles")});$("user-dialog").close();await loadData();showToast("User saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
   function openTeamDialog(team=null){$("team-id").value=team?.id||"";$("team-id").readOnly=Boolean(team);$("team-name").value=team?.name||"";$("team-description").value=team?.description||"";$("team-status").value=team?.status||"active";$("team-form-error").hidden=true;$("team-dialog").showModal()}
@@ -720,6 +738,10 @@
   $("mcp-server-form").addEventListener("submit",saveMCPServer);
   $("add-mcp-toolset-button").addEventListener("click",()=>openMCPToolsetDialog());
   $("mcp-toolset-form").addEventListener("submit",saveMCPToolset);
+  $("add-project-button").addEventListener("click",()=>openProjectDialog());
+  $("project-form").addEventListener("submit",saveProject);
+  $("add-access-group-button").addEventListener("click",()=>openAccessGroupDialog());
+  $("access-group-form").addEventListener("submit",saveAccessGroup);
   $("add-budget-button").addEventListener("click", () => openBudgetDialog());
   $("budget-form").addEventListener("submit", saveBudget);
   for (const button of document.querySelectorAll(".close-dialog")) button.addEventListener("click", () => $(button.dataset.dialog).close());

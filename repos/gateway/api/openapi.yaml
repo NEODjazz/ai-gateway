@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.10
+  version: 0.1.11
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -21,6 +21,7 @@ tags:
   - name: Model deployments
   - name: Guardrails
   - name: MCP
+  - name: Projects and access
   - name: Customers
   - name: Organizations
   - name: AI Hub
@@ -862,6 +863,72 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/projects:
+    get:
+      operationId: listProjects
+      tags: [Projects and access]
+      summary: List project ownership metadata
+      responses:
+        '200': {description: Projects, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/Project'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/projects/{id}:
+    parameters: [{$ref: '#/components/parameters/AccessEntryID'}]
+    put:
+      operationId: putProject
+      tags: [Projects and access]
+      summary: Create or update a project
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectInput'}}}}
+      responses:
+        '200': {description: Project saved, content: {application/json: {schema: {$ref: '#/components/schemas/Project'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    delete:
+      operationId: deleteProject
+      tags: [Projects and access]
+      summary: Delete an unused project
+      responses:
+        '204': {description: Project deleted}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Project is referenced by an access group}
+  /admin/v1/access-groups:
+    get:
+      operationId: listAccessGroups
+      tags: [Projects and access]
+      summary: List reusable virtual-key permission templates
+      responses:
+        '200': {description: Access groups, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/AccessGroup'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/access-groups/{id}:
+    parameters: [{$ref: '#/components/parameters/AccessEntryID'}]
+    put:
+      operationId: putAccessGroup
+      tags: [Projects and access]
+      summary: Create or update a virtual-key permission template
+      description: Applying a template in the UI copies its grants into a key; existing keys do not inherit later template changes.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccessGroupInput'}}}}
+      responses:
+        '200': {description: Access group saved, content: {application/json: {schema: {$ref: '#/components/schemas/AccessGroup'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    delete:
+      operationId: deleteAccessGroup
+      tags: [Projects and access]
+      summary: Delete an access-group template
+      responses:
+        '204': {description: Access group deleted}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
   /admin/v1/budgets:
     get:
       operationId: listBudgets
@@ -1215,6 +1282,11 @@ components:
       required: true
       schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
     MCPEntryID:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+    AccessEntryID:
       name: id
       in: path
       required: true
@@ -2273,6 +2345,40 @@ components:
     MCPToolset:
       allOf:
         - {$ref: '#/components/schemas/MCPToolsetInput'}
+        - type: object
+          required: [id]
+          properties: {id: {type: string}}
+    ProjectInput:
+      type: object
+      additionalProperties: false
+      required: [name, enabled]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 256}
+        description: {type: string, maxLength: 1024}
+        team_id: {type: string, maxLength: 256}
+        tags: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+        enabled: {type: boolean}
+    Project:
+      allOf:
+        - {$ref: '#/components/schemas/ProjectInput'}
+        - type: object
+          required: [id]
+          properties: {id: {type: string}}
+    AccessGroupInput:
+      type: object
+      additionalProperties: false
+      required: [name, enabled]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 256}
+        description: {type: string, maxLength: 1024}
+        project_id: {type: string, maxLength: 128}
+        allowed_models: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+        allowed_tools: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+        tags: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+        enabled: {type: boolean}
+    AccessGroup:
+      allOf:
+        - {$ref: '#/components/schemas/AccessGroupInput'}
         - type: object
           required: [id]
           properties: {id: {type: string}}

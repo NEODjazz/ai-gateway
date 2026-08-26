@@ -30,6 +30,7 @@ type Handler struct {
 	dlp           modules.Module
 	av            modules.Module
 	mcp           *MCPRegistry
+	access        *AccessRegistry
 	budgets       BudgetManagementClient
 	usage         UsageManagementClient
 	requestLogs   RequestLogClient
