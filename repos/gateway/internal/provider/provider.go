@@ -107,6 +107,7 @@ type ProviderObserver interface {
 
 type Endpoint struct {
 	Name                  string
+	ProviderID            string
 	Type                  string
 	Models                []string
 	Priority              int
@@ -192,6 +193,7 @@ func NewWithError(cfg Config) (Provider, error) {
 		}
 		endpoints = append(endpoints, Endpoint{
 			Name:                  endpoint.Name,
+			ProviderID:            endpoint.Name,
 			Type:                  endpoint.Type,
 			Models:                endpoint.Models,
 			Priority:              endpoint.Priority,
@@ -233,7 +235,7 @@ func NewWithError(cfg Config) (Provider, error) {
 		}
 	}
 	if !hasPrimary {
-		endpoints = append(endpoints, Endpoint{Name: "demo", Type: "demo", Provider: Demo{}})
+		endpoints = append(endpoints, Endpoint{Name: "demo", ProviderID: "demo", Type: "demo", Provider: Demo{}})
 	}
 
 	sort.SliceStable(endpoints, func(i, j int) bool {
@@ -871,14 +873,18 @@ func (r Router) Models() []openai.Model {
 			if upstream, found := endpoint.ModelAliases[modelID]; found {
 				lookupModels = append(lookupModels, upstream)
 			}
-			if _, found := catalog.Find(endpoint.Name, endpoint.Type, lookupModels...); !found && catalog.DenyUnknownModels() {
+			if _, found := findEndpointCatalogEntry(catalog, endpoint, lookupModels...); !found && catalog.DenyUnknownModels() {
 				continue
 			}
 			seen[modelID] = true
+			owner := endpoint.ProviderID
+			if owner == "" {
+				owner = endpoint.Name
+			}
 			models = append(models, openai.Model{
 				ID:      modelID,
 				Object:  "model",
-				OwnedBy: endpoint.Name,
+				OwnedBy: owner,
 			})
 		}
 	}
@@ -939,7 +945,7 @@ func (r Router) applyCatalogPricing(ctx context.Context, req *modules.RequestCon
 		models = append(models, upstream)
 	}
 	catalog := r.catalog.Current(ctx)
-	entry, found := catalog.Find(endpoint.Name, endpoint.Type, models...)
+	entry, found := findEndpointCatalogEntry(catalog, endpoint, models...)
 	if !found || entry.Currency == "" {
 		return
 	}
@@ -1201,7 +1207,11 @@ func (r Router) candidates(ctx context.Context, request openai.ChatCompletionReq
 				continue
 			}
 		}
-		if !supportsCatalogOutputLimit(catalog, endpoint, request.Model, request.MaxTokens) {
+		requestedOutputTokens := request.MaxTokens
+		if requestedOutputTokens == nil {
+			requestedOutputTokens = request.MaxCompletionTokens
+		}
+		if !supportsCatalogOutputLimit(catalog, endpoint, request.Model, requestedOutputTokens) {
 			continue
 		}
 		if !r.health.available(ctx, endpoint) {
@@ -1349,7 +1359,7 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 	if upstream, found := endpoint.ModelAliases[requestedModel]; found {
 		models = append(models, upstream)
 	}
-	entry, found := catalog.Find(endpoint.Name, endpoint.Type, models...)
+	entry, found := findEndpointCatalogEntry(catalog, endpoint, models...)
 	if !found {
 		if catalog.DenyUnknownModels() {
 			return false
@@ -1398,8 +1408,12 @@ func supportsCatalogOutputLimit(catalog modelcatalog.Catalog, endpoint Endpoint,
 	if upstream, found := endpoint.ModelAliases[requestedModel]; found {
 		models = append(models, upstream)
 	}
-	entry, found := catalog.Find(endpoint.Name, endpoint.Type, models...)
+	entry, found := findEndpointCatalogEntry(catalog, endpoint, models...)
 	return !found || entry.MaxOutputTokens <= 0 || *requested <= entry.MaxOutputTokens
+}
+
+func findEndpointCatalogEntry(catalog modelcatalog.Catalog, endpoint Endpoint, models ...string) (modelcatalog.Model, bool) {
+	return catalog.FindForProviders([]string{endpoint.Name, endpoint.ProviderID, endpoint.Type}, models...)
 }
 
 func (r Router) weightedOrder(candidates []Endpoint) []Endpoint {

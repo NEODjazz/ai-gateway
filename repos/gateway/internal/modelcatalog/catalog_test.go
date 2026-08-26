@@ -29,6 +29,17 @@ func TestCatalogLookupPrecedenceAndValidation(t *testing.T) {
 	}
 }
 
+func TestCatalogLookupSupportsManagedProviderIdentity(t *testing.T) {
+	catalog, err := Parse(`{"version":"v1","models":[{"provider":"azure-open-ai","model":"gpt-5.6-luna","input_cost_per_1m":0.2,"currency":"USD"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, found := catalog.FindForProviders([]string{"luna-deployment", "azure-open-ai", "openai-compatible"}, "gpt-5.6-luna")
+	if !found || entry.Provider != "azure-open-ai" || entry.InputCostPer1M != 0.2 {
+		t.Fatalf("managed provider entry was not resolved: %+v found=%v", entry, found)
+	}
+}
+
 func TestCatalogRejectsInvalidOrDuplicateEntries(t *testing.T) {
 	for _, raw := range []string{
 		`{"models":[{"provider":"p","model":"m"}]}`,

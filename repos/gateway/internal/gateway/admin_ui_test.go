@@ -64,6 +64,21 @@ func TestAdminUIPathsHaveBoundedObservabilityLabels(t *testing.T) {
 	}
 }
 
+func TestAdminUIUsesCanonicalProviderIdentityForModelCatalogActions(t *testing.T) {
+	handler := Routes(NewHandler(modules.NewPipeline(nil), modelsProvider{}).WithAdminUI())
+	asset := httptest.NewRecorder()
+	handler.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "/ui/assets/app.js", nil))
+	body := asset.Body.String()
+	for _, expected := range []string{"modelProviderAliases", "canonicalModelProvider", "Edit model metadata", `remove.textContent = "Delete"`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("admin UI asset missing %q", expected)
+		}
+	}
+	if strings.Contains(body, "Not cataloged") || strings.Contains(body, "Add pricing") {
+		t.Fatalf("admin UI retained split catalog actions")
+	}
+}
+
 func assertAdminUISecurityHeaders(t *testing.T, headers http.Header, cacheControl string) {
 	t.Helper()
 	if got := headers.Get("Content-Security-Policy"); got != adminUICSP {

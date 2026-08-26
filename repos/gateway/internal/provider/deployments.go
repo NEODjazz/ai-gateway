@@ -340,7 +340,7 @@ func (r *Router) endpointForDeployment(deployment ModelDeployment) (Endpoint, er
 			aliases[model] = deployment.UpstreamModel
 		}
 	}
-	return Endpoint{Name: deployment.ID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(0, 0, 0), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID}, nil
+	return Endpoint{Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(0, 0, 0), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID}, nil
 }
 
 func (r *Router) configuredEndpoints() []Endpoint {

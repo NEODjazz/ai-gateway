@@ -92,7 +92,7 @@ func (h Handler) aiHubModels(r *http.Request) []AIHubModel {
 	for _, entry := range catalog.Models {
 		item := AIHubModel{Provider: entry.Provider, Model: entry.Model, Capabilities: append([]string(nil), entry.Capabilities...), MaxInputTokens: entry.MaxInputTokens, MaxOutputTokens: entry.MaxOutputTokens, InputCostPer1M: entry.InputCostPer1M, OutputCostPer1M: entry.OutputCostPer1M, Currency: entry.Currency, Deployments: []string{}}
 		for _, deployment := range deployments {
-			if deployment.ProviderType != entry.Provider && deployment.ID != entry.Provider {
+			if deployment.ProviderID != entry.Provider && deployment.ProviderType != entry.Provider && deployment.ID != entry.Provider {
 				continue
 			}
 			if !containsModel(deployment.Models, entry.Model) {

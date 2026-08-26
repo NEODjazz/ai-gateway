@@ -278,10 +278,12 @@ gateway:
 ### Versioned model catalog
 
 Gateway routing and billing accept the same `MODEL_CATALOG_JSON` schema. Each
-entry can be scoped to an endpoint name, provider type, or `*`, and records model
+entry can be scoped to a deployment ID, managed provider ID, provider type, or `*`, and records model
 capabilities, token limits, prices per one million tokens, and currency. Matching
-uses endpoint name first, then provider type, then `*`; an endpoint-specific
-price therefore overrides a provider-wide price.
+uses deployment ID first, then managed provider ID, provider type, and `*`; a
+deployment-specific price therefore overrides a provider-wide price. The Admin
+UI uses `(provider_id, public model)` as its stable identity and keeps deployment
+IDs as availability metadata rather than creating duplicate model rows.
 
 The gateway derives required capabilities from each request (`chat`,
 `responses`, `embeddings`, `stream`, `tools`, and `structured_output`) and excludes catalog

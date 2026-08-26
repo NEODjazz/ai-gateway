@@ -29,3 +29,27 @@ func TestAIHubAndCostRecommendations(t *testing.T) {
 		t.Fatalf("recommendations status=%d body=%s", recommendations.Code, body)
 	}
 }
+
+func TestAIHubJoinsCatalogByManagedProviderID(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"test","models":[{"provider":"azure-open-ai","model":"gpt-5.6-luna","input_cost_per_1m":0.2,"output_cost_per_1m":20,"currency":"USD"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := provider.New(provider.Config{})
+	providerController := runtime.(provider.ProviderController)
+	if _, err := providerController.CreateProvider(provider.ManagedProvider{ID: "azure-open-ai", Type: "demo", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	deploymentController := runtime.(provider.DeploymentController)
+	if _, err := deploymentController.CreateModelDeployment(provider.ModelDeployment{ID: "luna-deployment", ProviderID: "azure-open-ai", Models: []string{"gpt-5.6-luna"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewHandler(modulesPipeline("admin"), runtime).WithModelRegistry(modelcatalog.NewRegistry(catalog, nil, 0))
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/v1/ai-hub/models", nil))
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"provider":"azure-open-ai"`) || !strings.Contains(body, `"deployments":["luna-deployment"]`) || !strings.Contains(body, `"available":true`) {
+		t.Fatalf("managed provider catalog was not joined: status=%d body=%s", response.Code, body)
+	}
+}

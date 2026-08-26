@@ -195,7 +195,8 @@ router переходит к следующему совместимому ка�
 goroutines или зависших billing reservations.
 
 `MODEL_CATALOG_JSON` — версионированный общий контракт gateway и billing.
-Gateway сопоставляет entry по endpoint name, затем provider type и `*`, проверяет
+Gateway сопоставляет entry по deployment ID, затем managed provider ID,
+provider type и `*`, проверяет
 request-derived capabilities (`chat`, `responses`, `embeddings`, `rerank`, `stream`, `tools`,
 `vision`, `structured_output`) и `max_output_tokens`. При
 `unknown_model_policy=deny` неизвестная модель не участвует в routing и не

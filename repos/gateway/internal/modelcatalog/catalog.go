@@ -63,7 +63,13 @@ func Parse(raw string) (Catalog, error) {
 }
 
 func (c Catalog) Find(endpointName, endpointType string, models ...string) (Model, bool) {
-	providers := uniqueNonEmpty(endpointName, endpointType, "*")
+	return c.FindForProviders([]string{endpointName, endpointType}, models...)
+}
+
+// FindForProviders resolves catalog metadata from the most specific runtime
+// identity to broader provider aliases, followed by the wildcard entry.
+func (c Catalog) FindForProviders(providers []string, models ...string) (Model, bool) {
+	providers = uniqueNonEmpty(append(providers, "*")...)
 	modelNames := uniqueNonEmpty(models...)
 	modelNames = append(modelNames, "*")
 	for _, provider := range providers {

@@ -126,9 +126,23 @@
     setText("last-refresh", `Updated ${now}`);
   }
 
+  function modelDeployments(model) {
+    return state.deployments.filter((deployment) => (deployment.models || []).includes(model.id) && [deployment.id, deployment.provider_id, deployment.provider_type].includes(model.owned_by));
+  }
+
+  function modelProviderAliases(model) {
+    const aliases = new Set([model.owned_by]);
+    for (const deployment of modelDeployments(model)) { aliases.add(deployment.id); aliases.add(deployment.provider_id); aliases.add(deployment.provider_type); }
+    return aliases;
+  }
+
+  function canonicalModelProvider(model) {
+    return modelDeployments(model)[0]?.provider_id || model.owned_by || "";
+  }
+
   function catalogEntry(model) {
-    const entries = (state.catalog?.models || []).filter((item) => item.model === model.id);
-    return entries.find((item) => item.provider === model.owned_by) || (entries.length === 1 ? entries[0] : {});
+    const aliases = modelProviderAliases(model);
+    return (state.catalog?.models || []).find((item) => item.model === model.id && aliases.has(item.provider)) || null;
   }
 
   function renderAll() {
@@ -365,28 +379,32 @@
   function renderModels() {
     const body = $("models-table"); clear(body);
     const query = $("model-search").value.trim().toLowerCase();
-    const union = new Map(state.models.map((model) => [`${model.owned_by}\u0000${model.id}`, model]));
-    for (const item of state.catalog?.models || []) { const key = `${item.provider}\u0000${item.model}`; if (!union.has(key)) union.set(key, { id: item.model, object: "catalog", owned_by: item.provider }); }
+    const union = new Map(state.models.map((model) => [`${canonicalModelProvider(model)}\u0000${model.id}`, model]));
+    for (const item of state.catalog?.models || []) {
+      const matched = state.models.some((model) => model.id === item.model && modelProviderAliases(model).has(item.provider));
+      const key = `${item.provider}\u0000${item.model}`; if (!matched && !union.has(key)) union.set(key, { id: item.model, object: "catalog", owned_by: item.provider });
+    }
     const visible = Array.from(union.values()).filter((model) => `${model.id} ${model.owned_by || ""}`.toLowerCase().includes(query));
     $("models-empty").hidden = visible.length !== 0;
     for (const model of visible) {
       const catalogItem = catalogEntry(model);
+      const catalogMetadata = catalogItem || {};
+      const providerID = canonicalModelProvider(model);
+      const deployments = modelDeployments(model);
+      const defaultCapabilities = [...new Set(deployments.flatMap((deployment) => deployment.capabilities || []))];
       const row = document.createElement("tr");
       row.appendChild(textCell(model.id, model.object));
-      row.appendChild(plainCell(model.owned_by));
+      row.appendChild(plainCell(providerID));
       const capabilities = document.createElement("td");
       const list = document.createElement("div"); list.className = "capabilities";
-      for (const capability of catalogItem.capabilities || []) { const tag = document.createElement("span"); tag.className = "capability"; tag.textContent = capability; list.appendChild(tag); }
+      for (const capability of catalogMetadata.capabilities || defaultCapabilities) { const tag = document.createElement("span"); tag.className = "capability"; tag.textContent = capability; list.appendChild(tag); }
       if (!list.childElementCount) list.textContent = "—";
       capabilities.appendChild(list); row.appendChild(capabilities);
-      row.appendChild(plainCell(formatMoney(catalogItem.input_cost_per_1m, catalogItem.currency)));
-      row.appendChild(plainCell(formatMoney(catalogItem.output_cost_per_1m, catalogItem.currency)));
+      row.appendChild(plainCell(formatMoney(catalogMetadata.input_cost_per_1m, catalogMetadata.currency)));
+      row.appendChild(plainCell(formatMoney(catalogMetadata.output_cost_per_1m, catalogMetadata.currency)));
       const actions = document.createElement("td"); actions.className = "row-actions";
-      if (catalogItem.model) {
-        const edit = document.createElement("button"); edit.className = "row-button"; edit.type = "button"; edit.textContent = "Edit"; edit.addEventListener("click", () => openModelDialog(catalogItem));
-        const remove = document.createElement("button"); remove.className = "row-button danger"; remove.type = "button"; remove.textContent = "Remove"; remove.addEventListener("click", () => confirmChange("Remove catalog entry?", `${catalogItem.provider}/${catalogItem.model} will be removed from the runtime registry.`, () => removeCatalogEntry(catalogItem)));
-        actions.append(edit, remove);
-      } else { const hint = document.createElement("small"); hint.textContent = "Not cataloged"; actions.appendChild(hint); }
+      const edit = document.createElement("button"); edit.className = "row-button"; edit.type = "button"; edit.textContent = "Edit"; edit.addEventListener("click", () => openModelDialog(catalogItem, { provider: providerID, model: model.id, capabilities: defaultCapabilities })); actions.appendChild(edit);
+      if (catalogItem) { const remove = document.createElement("button"); remove.className = "row-button danger"; remove.type = "button"; remove.textContent = "Delete"; remove.addEventListener("click", () => confirmChange("Delete model metadata?", `Pricing and catalog metadata for ${catalogItem.provider}/${catalogItem.model} will be deleted. The deployment will remain available.`, () => removeCatalogEntry(catalogItem))); actions.appendChild(remove); }
       row.appendChild(actions);
       body.appendChild(row);
     }
@@ -552,18 +570,19 @@
 
   function clearIssuedKey() { $("issued-key-id").value = ""; $("issued-key-token").value = ""; }
 
-  function openModelDialog(item = null) {
+  function openModelDialog(item = null, defaults = null) {
     if (!state.catalog) { showToast("Runtime catalog is unavailable"); return; }
-    setText("model-dialog-title", item ? "Edit catalog entry" : "Add catalog entry");
+    const source = item || defaults || {};
+    setText("model-dialog-title", item || defaults ? "Edit model metadata" : "Add catalog entry");
     $("model-original-key").value = item ? `${item.provider}\u0000${item.model}` : "";
-    $("model-provider").value = item?.provider || "";
-    $("model-name").value = item?.model || "";
-    $("model-capabilities").value = (item?.capabilities || []).join(", ");
-    $("model-max-input").value = item?.max_input_tokens || "";
-    $("model-max-output").value = item?.max_output_tokens || "";
-    $("model-input-cost").value = item?.input_cost_per_1m ?? "";
-    $("model-output-cost").value = item?.output_cost_per_1m ?? "";
-    $("model-currency").value = item?.currency || "";
+    $("model-provider").value = source.provider || "";
+    $("model-name").value = source.model || "";
+    $("model-capabilities").value = (source.capabilities || []).join(", ");
+    $("model-max-input").value = source.max_input_tokens || "";
+    $("model-max-output").value = source.max_output_tokens || "";
+    $("model-input-cost").value = source.input_cost_per_1m ?? "";
+    $("model-output-cost").value = source.output_cost_per_1m ?? "";
+    $("model-currency").value = source.currency || "";
     $("model-form-error").hidden = true;
     $("model-dialog").showModal();
   }
