@@ -37,9 +37,11 @@ type BillingEvent struct {
 	Roles                 []string `json:"roles,omitempty"`
 	APIKeyFingerprint     string   `json:"api_key_fingerprint,omitempty"`
 	Provider              string   `json:"provider,omitempty"`
+	ProviderID            string   `json:"provider_id,omitempty"`
 	ProviderEndpointName  string   `json:"provider_endpoint_name,omitempty"`
 	ProviderEndpointType  string   `json:"provider_endpoint_type,omitempty"`
 	Model                 string   `json:"model,omitempty"`
+	UpstreamModel         string   `json:"upstream_model,omitempty"`
 	APIType               string   `json:"api_type,omitempty"`
 	Phase                 string   `json:"phase"`
 	Status                string   `json:"status,omitempty"`

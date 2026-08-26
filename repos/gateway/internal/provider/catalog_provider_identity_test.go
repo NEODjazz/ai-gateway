@@ -15,6 +15,9 @@ func TestManagedProviderIdentityOwnsModelAndAppliesCatalogPricing(t *testing.T) 
 		t.Fatal(err)
 	}
 	endpoint := Endpoint{Name: "luna-deployment", ProviderID: "azure-open-ai", Type: "openai-compatible", Models: []string{"gpt-5.6-luna"}, Provider: Demo{}}
+	if metadata := providerMetadata(endpoint); metadata["provider.id"] != "azure-open-ai" {
+		t.Fatalf("managed provider identity missing from metadata: %+v", metadata)
+	}
 	router := Router{catalog: modelcatalog.NewRegistry(catalog, nil, time.Second), endpoints: []Endpoint{endpoint}}
 
 	models := router.Models()

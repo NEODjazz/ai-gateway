@@ -319,7 +319,8 @@
       const row = document.createElement("tr");
       row.appendChild(textCell(formatDate(log.timestamp), log.request_id));
       const outcomeCell = document.createElement("td"); const outcome = document.createElement("span"); outcome.className = `outcome ${log.status === "ok" ? "succeeded" : "failed"}`; outcome.textContent = log.status === "ok" ? "Success" : log.failure_class || "Error"; outcomeCell.appendChild(outcome); row.appendChild(outcomeCell);
-      row.appendChild(textCell(log.model, `${requestLogEndpoint(log)} · ${log.api_type || "request"}`));
+      const modelDetail = log.upstream_model && log.upstream_model !== log.model ? `${log.upstream_model} upstream · ` : "";
+      row.appendChild(textCell(log.model, `${modelDetail}${requestLogEndpoint(log)} · ${log.api_type || "request"}`));
       row.appendChild(textCell(log.user_id || "—", log.team_id || log.credential_id || ""));
       row.appendChild(textCell(formatNumber(log.total_tokens), `${formatNumber(log.input_tokens)} in · ${formatNumber(log.output_tokens)} out`));
       row.appendChild(textCell(`${formatNumber(log.latency_ms)} ms`, log.cache_status ? `cache ${log.cache_status}` : ""));

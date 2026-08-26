@@ -1379,9 +1379,11 @@ components:
         roles: {type: array, items: {type: string}}
         credential_id: {type: string, description: Non-secret credential identifier or fingerprint}
         provider: {type: string}
+        provider_id: {type: string, description: Canonical managed provider identifier}
         provider_endpoint_name: {type: string}
         provider_endpoint_type: {type: string}
-        model: {type: string}
+        model: {type: string, description: Canonical public model requested by the client}
+        upstream_model: {type: string, description: Model identifier returned by the upstream provider}
         api_type: {type: string}
         phase: {type: string, enum: [commit, cancel]}
         status: {type: string, enum: [ok, error]}

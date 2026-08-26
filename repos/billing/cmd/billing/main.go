@@ -71,6 +71,7 @@ func main() {
 				TotalTokens:      request.TotalTokens,
 			},
 			Metadata: map[string]string{
+				"provider.id":                      request.ProviderID,
 				"provider.endpoint.name":           request.ProviderEndpointName,
 				"provider.endpoint.type":           request.ProviderEndpointType,
 				"provider.status":                  request.Status,
@@ -83,6 +84,7 @@ func main() {
 				"model_catalog.input_cost_per_1m":  request.InputCostPer1M,
 				"model_catalog.output_cost_per_1m": request.OutputCostPer1M,
 				"model_catalog.currency":           request.Currency,
+				"provider.upstream_model":          request.UpstreamModel,
 			},
 		}
 		if request.APIType == "responses" {
@@ -124,9 +126,11 @@ type usageRequest struct {
 	TeamID                string   `json:"team_id,omitempty"`
 	Roles                 []string `json:"roles,omitempty"`
 	Provider              string   `json:"provider,omitempty"`
+	ProviderID            string   `json:"provider_id,omitempty"`
 	ProviderEndpointName  string   `json:"provider_endpoint_name,omitempty"`
 	ProviderEndpointType  string   `json:"provider_endpoint_type,omitempty"`
 	Model                 string   `json:"model,omitempty"`
+	UpstreamModel         string   `json:"upstream_model,omitempty"`
 	APIType               string   `json:"api_type"`
 	Phase                 string   `json:"phase"`
 	Status                string   `json:"status,omitempty"`

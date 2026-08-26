@@ -68,3 +68,8 @@ data:
         ADD COLUMN IF NOT EXISTS input_cost_per_1m Float64 AFTER pricing_key;
     ALTER TABLE ai_gateway.usage_events
         ADD COLUMN IF NOT EXISTS output_cost_per_1m Float64 AFTER input_cost_per_1m;
+  003_usage_identity.sql: |
+    ALTER TABLE ai_gateway.usage_events
+        ADD COLUMN IF NOT EXISTS provider_id String AFTER provider;
+    ALTER TABLE ai_gateway.usage_events
+        ADD COLUMN IF NOT EXISTS upstream_model String AFTER model;

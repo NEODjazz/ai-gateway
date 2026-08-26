@@ -4,9 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"ai-gateway-gateway/internal/provider"
 )
 
 type UsageAggregate struct {
@@ -81,7 +84,7 @@ func (h Handler) GetUsageReport(w http.ResponseWriter, r *http.Request) {
 		writeManagementFailure(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, report)
+	writeJSON(w, http.StatusOK, h.normalizeUsageProviders(r.Context(), report))
 }
 
 func (h Handler) GetCustomerUsageReport(w http.ResponseWriter, r *http.Request) {
@@ -113,5 +116,49 @@ func (h Handler) GetCustomerUsageReport(w http.ResponseWriter, r *http.Request) 
 		writeManagementFailure(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, report)
+	writeJSON(w, http.StatusOK, h.normalizeUsageProviders(r.Context(), report))
+}
+
+func (h Handler) normalizeUsageProviders(ctx context.Context, report UsageReport) UsageReport {
+	controller, ok := h.provider.(provider.DeploymentController)
+	if !ok {
+		return report
+	}
+	aliases := map[string]string{}
+	for _, deployment := range controller.ListModelDeployments(ctx) {
+		if deployment.ID != "" && deployment.ProviderID != "" {
+			aliases[deployment.ID] = deployment.ProviderID
+		}
+	}
+	merged := map[string]UsageAggregate{}
+	for _, item := range report.ByProvider {
+		if providerID := aliases[item.Name]; providerID != "" {
+			item.Name = providerID
+		}
+		key := item.Name + "\x00" + item.Currency
+		current := merged[key]
+		latencyTotal := current.AvgLatencyMS*float64(current.Requests) + item.AvgLatencyMS*float64(item.Requests)
+		current.Name, current.Currency = item.Name, item.Currency
+		current.Requests += item.Requests
+		current.Errors += item.Errors
+		current.InputTokens += item.InputTokens
+		current.OutputTokens += item.OutputTokens
+		current.TotalTokens += item.TotalTokens
+		current.Cost += item.Cost
+		if current.Requests > 0 {
+			current.AvgLatencyMS = latencyTotal / float64(current.Requests)
+		}
+		merged[key] = current
+	}
+	report.ByProvider = report.ByProvider[:0]
+	for _, item := range merged {
+		report.ByProvider = append(report.ByProvider, item)
+	}
+	sort.Slice(report.ByProvider, func(i, j int) bool {
+		if report.ByProvider[i].Cost == report.ByProvider[j].Cost {
+			return report.ByProvider[i].TotalTokens > report.ByProvider[j].TotalTokens
+		}
+		return report.ByProvider[i].Cost > report.ByProvider[j].Cost
+	})
+	return report
 }

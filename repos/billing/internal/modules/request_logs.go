@@ -38,9 +38,11 @@ type RequestLog struct {
 	Roles                []string `json:"roles,omitempty"`
 	CredentialID         string   `json:"credential_id,omitempty"`
 	Provider             string   `json:"provider,omitempty"`
+	ProviderID           string   `json:"provider_id,omitempty"`
 	ProviderEndpointName string   `json:"provider_endpoint_name,omitempty"`
 	ProviderEndpointType string   `json:"provider_endpoint_type,omitempty"`
 	Model                string   `json:"model,omitempty"`
+	UpstreamModel        string   `json:"upstream_model,omitempty"`
 	APIType              string   `json:"api_type"`
 	Phase                string   `json:"phase"`
 	Status               string   `json:"status"`
@@ -92,8 +94,8 @@ func (r *ClickHouseUsageReporter) ListRequestLogs(ctx context.Context, filter Re
 	}
 	addStringFilter("request_id", "request_id", filter.RequestID)
 	addStringFilter("status", "status", filter.Status)
-	addStringFilter("model", "model", filter.Model)
-	addStringFilter("if(provider_endpoint_name != '',provider_endpoint_name,provider)", "provider", filter.Provider)
+	addStringFilter(canonicalUsageModelExpression, "model", filter.Model)
+	addStringFilter(canonicalUsageProviderExpression, "provider", filter.Provider)
 	addStringFilter("user_id", "user_id", filter.UserID)
 	addStringFilter("team_id", "team_id", filter.TeamID)
 	addStringFilter("api_key_fingerprint", "credential_id", filter.CredentialID)
@@ -142,7 +144,7 @@ func (r *ClickHouseUsageReporter) GetRequestLog(ctx context.Context, requestID s
 var ErrRequestLogNotFound = errors.New("request log not found")
 
 func requestLogColumns() string {
-	return "timestamp,request_id,user_id,team_id,roles,api_key_fingerprint AS credential_id,provider,provider_endpoint_name,provider_endpoint_type,model,api_type,phase,status,failure_class,latency_ms,cache_status,input_tokens,output_tokens,total_tokens,cost,currency,false AS content_stored"
+	return "timestamp,request_id,user_id,team_id,roles,api_key_fingerprint AS credential_id,provider,provider_id,provider_endpoint_name,provider_endpoint_type,model,upstream_model,api_type,phase,status,failure_class,latency_ms,cache_status,input_tokens,output_tokens,total_tokens,cost,currency,false AS content_stored"
 }
 
 func (r *ClickHouseUsageReporter) queryRequestLogs(ctx context.Context, params url.Values) ([]RequestLog, error) {

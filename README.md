@@ -284,6 +284,9 @@ uses deployment ID first, then managed provider ID, provider type, and `*`; a
 deployment-specific price therefore overrides a provider-wide price. The Admin
 UI uses `(provider_id, public model)` as its stable identity and keeps deployment
 IDs as availability metadata rather than creating duplicate model rows.
+Runtime catalog updates are stored in Redis without a TTL. Because pricing is
+operational state rather than disposable cache data, the bundled Redis chart
+enables AOF-backed persistent storage by default.
 
 The gateway derives required capabilities from each request (`chat`,
 `responses`, `embeddings`, `stream`, `tools`, and `structured_output`) and excludes catalog

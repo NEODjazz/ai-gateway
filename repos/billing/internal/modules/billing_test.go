@@ -76,7 +76,7 @@ func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 			},
 		},
 		Response: &openai.ChatCompletionResponse{
-			Model: "test-model",
+			Model: "test-model-2026-08-01",
 			Usage: openai.Usage{
 				PromptTokens:     12,
 				CompletionTokens: 8,
@@ -84,6 +84,7 @@ func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 			},
 		},
 		Metadata: map[string]string{
+			"provider.id":            "ollama",
 			"request.id":             "req-1",
 			"provider.endpoint.name": "ollama-local",
 			"provider.endpoint.type": "ollama",
@@ -105,6 +106,9 @@ func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 	}
 	if event.ProviderEndpointName != "ollama-local" {
 		t.Fatalf("unexpected endpoint: %s", event.ProviderEndpointName)
+	}
+	if event.ProviderID != "ollama" || event.Model != "test-model" || event.UpstreamModel != "test-model-2026-08-01" {
+		t.Fatalf("unexpected canonical usage identity: %+v", event)
 	}
 	if event.InputTokens != 12 || event.OutputTokens != 8 || event.TotalTokens != 20 {
 		t.Fatalf("unexpected tokens: %+v", event)

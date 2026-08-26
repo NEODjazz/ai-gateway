@@ -129,7 +129,9 @@ GET /internal/v1/usage/report?days=30
 `DELETE` is a soft disable. Summary includes committed usage and unexpired
 reservations, using the same period and scope calculation as enforcement.
 The usage report accepts a bounded 1–90 day range and aggregates final
-`commit`/`cancel` outcomes by currency, day, model, and provider endpoint.
+`commit`/`cancel` outcomes by currency, day, canonical public model, and managed
+provider. The upstream response model and deployment endpoint remain separate
+request-log dimensions and do not split usage totals.
 Currencies are never combined into a single spend total.
 The secret must not be shared with virtual-key management or client Bearer
 credentials.
@@ -152,6 +154,7 @@ ClickHouse:
 ```text
 migrations/clickhouse/001_usage_events.sql
 migrations/clickhouse/002_usage_catalog.sql
+migrations/clickhouse/003_usage_identity.sql
 ```
 
 Billing uses an explicit `reserve`, `commit`, and `cancel` lifecycle. Events are

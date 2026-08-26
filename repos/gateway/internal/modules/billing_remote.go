@@ -15,9 +15,11 @@ type UsageRequest struct {
 	TeamID                string   `json:"team_id,omitempty"`
 	Roles                 []string `json:"roles,omitempty"`
 	Provider              string   `json:"provider,omitempty"`
+	ProviderID            string   `json:"provider_id,omitempty"`
 	ProviderEndpointName  string   `json:"provider_endpoint_name,omitempty"`
 	ProviderEndpointType  string   `json:"provider_endpoint_type,omitempty"`
 	Model                 string   `json:"model,omitempty"`
+	UpstreamModel         string   `json:"upstream_model,omitempty"`
 	APIType               string   `json:"api_type"`
 	Phase                 string   `json:"phase"`
 	Status                string   `json:"status,omitempty"`
@@ -105,6 +107,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		TeamID:                req.TeamID,
 		Roles:                 append([]string(nil), req.Roles...),
 		Provider:              req.Request.Provider,
+		ProviderID:            metadataValue(req.Metadata, "provider.id"),
 		Model:                 req.Request.Model,
 		APIType:               "chat_completions",
 		Phase:                 "reserve",
@@ -149,27 +152,21 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.InputTokens = req.Response.Usage.PromptTokens
 		request.OutputTokens = req.Response.Usage.CompletionTokens
 		request.TotalTokens = req.Response.Usage.TotalTokens
-		if req.Response.Model != "" {
-			request.Model = req.Response.Model
-		}
+		request.UpstreamModel = req.Response.Model
 	}
 	if req.ResponsesResponse != nil {
 		request.Phase = "commit"
 		request.InputTokens = req.ResponsesResponse.Usage.InputTokens
 		request.OutputTokens = req.ResponsesResponse.Usage.OutputTokens
 		request.TotalTokens = req.ResponsesResponse.Usage.TotalTokens
-		if req.ResponsesResponse.Model != "" {
-			request.Model = req.ResponsesResponse.Model
-		}
+		request.UpstreamModel = req.ResponsesResponse.Model
 	}
 	if req.EmbeddingResponse != nil {
 		request.Phase = "commit"
 		request.InputTokens = req.EmbeddingResponse.Usage.PromptTokens
 		request.OutputTokens = 0
 		request.TotalTokens = req.EmbeddingResponse.Usage.TotalTokens
-		if req.EmbeddingResponse.Model != "" {
-			request.Model = req.EmbeddingResponse.Model
-		}
+		request.UpstreamModel = req.EmbeddingResponse.Model
 	}
 	if req.RerankResponse != nil {
 		request.Phase = "commit"

@@ -61,6 +61,9 @@ type ClickHouseUsageReporter struct {
 
 var clickHouseIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+const canonicalUsageModelExpression = "multiIf(pricing_key != '' AND position(pricing_key, '/') > 0 AND substring(pricing_key, position(pricing_key, '/') + 1) != '*', substring(pricing_key, position(pricing_key, '/') + 1), provider_endpoint_name != '' AND startsWith(model, concat(provider_endpoint_name, '-')), provider_endpoint_name, model)"
+const canonicalUsageProviderExpression = "multiIf(provider_id != '', provider_id, pricing_key != '' AND position(pricing_key, '/') > 0 AND substring(pricing_key, 1, position(pricing_key, '/') - 1) != '*', substring(pricing_key, 1, position(pricing_key, '/') - 1), provider_endpoint_name != '', provider_endpoint_name, provider)"
+
 func NewClickHouseUsageReporter(settings Settings) (*ClickHouseUsageReporter, error) {
 	if !settings.UsageEventsEnabled {
 		return nil, errors.New("usage reporting requires usage events")
@@ -149,8 +152,8 @@ func usageReportQuery(table string, days int, scopeType string) string {
 	return fmt.Sprintf(`
 SELECT 'total' AS kind, '' AS date, '' AS name, currency, %s FROM %s WHERE %s GROUP BY currency
 UNION ALL SELECT 'day' AS kind, toString(toDate(parseDateTimeBestEffort(timestamp))) AS date, '' AS name, currency, %s FROM %s WHERE %s GROUP BY date,currency
-UNION ALL SELECT 'model' AS kind, '' AS date, model AS name, currency, %s FROM %s WHERE %s GROUP BY name,currency
-UNION ALL SELECT 'provider' AS kind, '' AS date, if(provider_endpoint_name != '',provider_endpoint_name,provider) AS name, currency, %s FROM %s WHERE %s GROUP BY name,currency
+UNION ALL SELECT 'model' AS kind, '' AS date, %s AS name, currency, %s FROM %s WHERE %s GROUP BY name,currency
+UNION ALL SELECT 'provider' AS kind, '' AS date, %s AS name, currency, %s FROM %s WHERE %s GROUP BY name,currency
 ORDER BY kind,date,cost DESC,total_tokens DESC
-FORMAT JSONEachRow`, metrics, table, where, metrics, table, where, metrics, table, where, metrics, table, where)
+FORMAT JSONEachRow`, metrics, table, where, metrics, table, where, canonicalUsageModelExpression, metrics, table, where, canonicalUsageProviderExpression, metrics, table, where)
 }

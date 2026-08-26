@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"ai-gateway-gateway/internal/provider"
 )
 
 type recordingUsageClient struct {
@@ -14,6 +16,7 @@ type recordingUsageClient struct {
 	days      int
 	scopeType string
 	scopeID   string
+	report    UsageReport
 }
 
 func (c *recordingUsageClient) ScopedUsageReport(_ context.Context, audit ManagementAudit, days int, scopeType, scopeID string) (UsageReport, error) {
@@ -23,6 +26,10 @@ func (c *recordingUsageClient) ScopedUsageReport(_ context.Context, audit Manage
 
 func (c *recordingUsageClient) UsageReport(_ context.Context, audit ManagementAudit, days int) (UsageReport, error) {
 	c.audit, c.days = audit, days
+	if c.report.ByProvider != nil {
+		c.report.Days = days
+		return c.report, nil
+	}
 	return UsageReport{Days: days, Totals: []UsageAggregate{{Currency: "USD", Requests: 3, TotalTokens: 42, Cost: 0.12}}}, nil
 }
 
@@ -56,6 +63,32 @@ func TestAdminUsageReportRequiresAdminAndBoundsRange(t *testing.T) {
 	Routes(handler).ServeHTTP(invalid, httptest.NewRequest(http.MethodGet, "/admin/v1/usage/report?days=0", nil))
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("invalid status=%d", invalid.Code)
+	}
+}
+
+func TestAdminUsageReportMergesDeploymentRowsByManagedProvider(t *testing.T) {
+	runtime := provider.New(provider.Config{})
+	providers := runtime.(provider.ProviderController)
+	if _, err := providers.CreateProvider(provider.ManagedProvider{ID: "azure-open-ai", Type: "demo", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	deployments := runtime.(provider.DeploymentController)
+	if _, err := deployments.CreateModelDeployment(provider.ModelDeployment{ID: "gpt-5.6-luna", ProviderID: "azure-open-ai", Models: []string{"gpt-5.6-luna"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingUsageClient{report: UsageReport{ByProvider: []UsageAggregate{
+		{Name: "gpt-5.6-luna", Currency: "USD", Requests: 20, TotalTokens: 1944, AvgLatencyMS: 100},
+		{Name: "azure-open-ai", Currency: "USD", Requests: 2, TotalTokens: 58, Cost: 0.0008234, AvgLatencyMS: 200},
+	}}}
+	handler := NewHandler(modulesPipeline("admin"), runtime).WithUsageReporting(client)
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/v1/usage/report?days=30", nil))
+	var report UsageReport
+	if err := json.Unmarshal(response.Body.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || len(report.ByProvider) != 1 || report.ByProvider[0].Name != "azure-open-ai" || report.ByProvider[0].Requests != 22 || report.ByProvider[0].TotalTokens != 2002 || report.ByProvider[0].AvgLatencyMS < 109 || report.ByProvider[0].AvgLatencyMS > 110 {
+		t.Fatalf("provider usage was not merged: status=%d report=%+v", response.Code, report)
 	}
 }
 

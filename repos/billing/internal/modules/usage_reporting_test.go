@@ -12,7 +12,7 @@ import (
 func TestClickHouseUsageReporterBuildsBoundedReport(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("query")
-		if !strings.Contains(query, "INTERVAL 30 DAY") || !strings.Contains(query, "safe_db.safe_events") || strings.Contains(query, "token_hash") {
+		if !strings.Contains(query, "INTERVAL 30 DAY") || !strings.Contains(query, "safe_db.safe_events") || !strings.Contains(query, "provider_id != ''") || !strings.Contains(query, "substring(pricing_key, position(pricing_key, '/') + 1)") || !strings.Contains(query, "startsWith(model, concat(provider_endpoint_name, '-'))") || strings.Contains(query, "token_hash") {
 			t.Fatalf("unsafe report query: %s", query)
 		}
 		_, _ = w.Write([]byte("{\"kind\":\"total\",\"date\":\"\",\"name\":\"\",\"currency\":\"USD\",\"requests\":2,\"errors\":1,\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15,\"cost\":0.25,\"avg_latency_ms\":12.5}\n" +

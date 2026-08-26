@@ -79,6 +79,20 @@ func TestAdminUIUsesCanonicalProviderIdentityForModelCatalogActions(t *testing.T
 	}
 }
 
+func TestAdminUIUsesCanonicalUsageDimensions(t *testing.T) {
+	handler := Routes(NewHandler(modules.NewPipeline(nil), modelsProvider{}).WithAdminUI())
+	page := httptest.NewRecorder()
+	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/ui/", nil))
+	if !strings.Contains(page.Body.String(), "Usage by provider") || strings.Contains(page.Body.String(), "Usage by endpoint") {
+		t.Fatalf("admin UI retained endpoint-labelled provider aggregation")
+	}
+	asset := httptest.NewRecorder()
+	handler.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "/ui/assets/app.js", nil))
+	if !strings.Contains(asset.Body.String(), "log.upstream_model") {
+		t.Fatalf("admin UI does not distinguish the upstream model in request logs")
+	}
+}
+
 func assertAdminUISecurityHeaders(t *testing.T, headers http.Header, cacheControl string) {
 	t.Helper()
 	if got := headers.Get("Content-Security-Policy"); got != adminUICSP {

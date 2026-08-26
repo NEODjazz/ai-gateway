@@ -969,6 +969,7 @@ func cloneMetadata(metadata map[string]string) map[string]string {
 
 func providerMetadata(endpoint Endpoint) map[string]string {
 	return map[string]string{
+		"provider.id":                  endpoint.ProviderID,
 		"provider.endpoint.name":       endpoint.Name,
 		"provider.endpoint.type":       endpoint.Type,
 		"provider.modules.dlp.enabled": boolString(endpoint.DLPEnabled),

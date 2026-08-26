@@ -183,9 +183,15 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	req.Metadata["model_catalog.input_cost_per_1m"] = "1.5"
 	req.Metadata["model_catalog.output_cost_per_1m"] = "3"
 	req.Metadata["model_catalog.currency"] = "USD"
+	req.Metadata["provider.id"] = "azure-open-ai"
+	req.Request.Model = "gpt-5.6-luna"
+	req.Response = &openai.ChatCompletionResponse{Model: "gpt-5.6-luna-2026-07-09"}
 	request := billingRequest(&req)
 	if request.CatalogVersion != "runtime-v2" || request.PricingKey != "endpoint/model" || request.InputCostPer1M != "1.5" || request.Currency != "USD" {
 		t.Fatalf("pricing snapshot=%+v", request)
+	}
+	if request.ProviderID != "azure-open-ai" || request.Model != "gpt-5.6-luna" || request.UpstreamModel != "gpt-5.6-luna-2026-07-09" {
+		t.Fatalf("usage identity=%+v", request)
 	}
 }
 

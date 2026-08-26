@@ -233,13 +233,6 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 			apiType = "responses"
 		}
 	}
-	if req.Response != nil && req.Response.Model != "" {
-		model = req.Response.Model
-	}
-	if req.ResponsesResponse != nil && req.ResponsesResponse.Model != "" {
-		model = req.ResponsesResponse.Model
-	}
-
 	pricing, supplied, suppliedErr := suppliedPricingSnapshot(req)
 	var err error
 	if !supplied && suppliedErr == nil {
@@ -260,9 +253,11 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		Roles:                 append([]string(nil), req.Roles...),
 		APIKeyFingerprint:     req.CredentialID,
 		Provider:              providerName,
+		ProviderID:            metadata(req, "provider.id"),
 		ProviderEndpointName:  metadata(req, "provider.endpoint.name"),
 		ProviderEndpointType:  metadata(req, "provider.endpoint.type"),
 		Model:                 model,
+		UpstreamModel:         upstreamModel(req),
 		APIType:               apiType,
 		Phase:                 req.BillingPhase,
 		Status:                metadataDefault(req, "provider.status", "ok"),
@@ -281,6 +276,19 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		OutputCostPer1M:       pricing.OutputCostPer1M,
 		Timestamp:             time.Now().UTC().Format(time.RFC3339),
 	}, pricingErr
+}
+
+func upstreamModel(req *RequestContext) string {
+	if model := metadata(req, "provider.upstream_model"); model != "" {
+		return model
+	}
+	if req.Response != nil {
+		return req.Response.Model
+	}
+	if req.ResponsesResponse != nil {
+		return req.ResponsesResponse.Model
+	}
+	return ""
 }
 
 func suppliedPricingSnapshot(req *RequestContext) (PricingSnapshot, bool, error) {
