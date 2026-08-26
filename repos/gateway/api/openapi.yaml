@@ -597,6 +597,38 @@ paths:
         '403': {$ref: '#/components/responses/AdminRequired'}
         '404': {$ref: '#/components/responses/NotFound'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/model-deployments/{id}/test:
+    post:
+      operationId: testModelDeployment
+      tags: [Model deployments]
+      summary: Test a deployment with its configured credential and upstream model
+      description: Runs a minimal model request without optional generation parameters. Only bounded diagnostic metadata is retained; prompts, responses, credentials, and raw provider errors are excluded.
+      parameters: [{$ref: '#/components/parameters/ModelDeploymentID'}]
+      responses:
+        '200': {description: Completed health check, content: {application/json: {schema: {$ref: '#/components/schemas/DeploymentHealthCheck'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/model-deployments/{id}/health:
+    get:
+      operationId: listModelDeploymentHealth
+      tags: [Model deployments]
+      summary: List recent sanitized deployment health checks
+      description: History is runtime operational data and is bounded to the latest 50 checks per deployment.
+      parameters:
+        - {$ref: '#/components/parameters/ModelDeploymentID'}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 50, default: 20}
+      responses:
+        '200': {description: Recent health checks, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/DeploymentHealthCheck'}}}}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/providers:
     get:
       operationId: listManagedProviders
@@ -2098,6 +2130,21 @@ components:
             runtime_state: {type: string, enum: [available, cooling_down, disabled]}
             latency_ewma_ms: {type: number, minimum: 0}
             failure_ewma: {type: number, minimum: 0, maximum: 1}
+    DeploymentHealthCheck:
+      type: object
+      additionalProperties: false
+      required: [deployment_id, provider_id, model, status, latency_ms, checked_at]
+      properties:
+        deployment_id: {type: string}
+        provider_id: {type: string}
+        model: {type: string}
+        status: {type: string, enum: [available, unavailable]}
+        failure_class: {type: string, enum: [authentication, rate_limit, timeout, unavailable, content_policy, client_request, post_processing, network, tls, unknown]}
+        http_status: {type: integer, minimum: 100, maximum: 599}
+        upstream_code: {type: string, pattern: '^[A-Za-z0-9_.-]{1,128}$'}
+        param: {type: string, pattern: '^[A-Za-z0-9_.-]{1,128}$'}
+        latency_ms: {type: integer, format: int64, minimum: 0}
+        checked_at: {type: string, format: date-time}
     GuardrailPolicyInput:
       type: object
       additionalProperties: false

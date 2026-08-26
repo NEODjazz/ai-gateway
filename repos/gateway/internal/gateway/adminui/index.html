@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>AI Gateway Console</title>
-  <link rel="stylesheet" href="/ui/assets/app.css?v=14">
-  <script src="/ui/assets/app.js?v=14" defer></script>
+  <link rel="stylesheet" href="/ui/assets/app.css?v=15">
+  <script src="/ui/assets/app.js?v=15" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-view">
@@ -252,6 +252,17 @@
 
   <dialog id="deployment-dialog" class="modal">
     <form id="deployment-form" method="dialog"><div class="modal-heading"><div><p class="eyebrow">Runtime routing</p><h2 id="deployment-dialog-title">Add deployment</h2></div><button type="button" class="icon-button close-dialog" data-dialog="deployment-dialog">×</button></div><input id="deployment-mode" type="hidden"><div class="form-grid"><label>Deployment ID<input id="deployment-id" required maxlength="128"></label><label>Provider<select id="deployment-provider" required></select></label><label>Credential<select id="deployment-credential"><option value="">No credential</option></select></label><label>Upstream model<input id="deployment-upstream" maxlength="256"></label><label class="span-2">Public models<input id="deployment-models" required placeholder="public-model, fallback-model"></label><label class="span-2">Capabilities<input id="deployment-capabilities" placeholder="chat, stream, tools"></label><label>Priority<input id="deployment-priority" type="number" min="0" step="1"></label><label>Weight<input id="deployment-weight" type="number" min="1" step="1"></label><label class="span-2">Guardrail policy<input id="deployment-guardrail" maxlength="128"></label><label class="checkbox-label span-2"><input id="deployment-enabled" type="checkbox"> Enabled for new routing decisions</label></div><p id="deployment-form-error" class="form-error" hidden></p><div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="deployment-dialog">Cancel</button><button type="submit" class="primary-button">Save deployment</button></div></form>
+  </dialog>
+
+  <dialog id="deployment-health-dialog" class="modal wide-modal">
+    <form method="dialog">
+      <div class="modal-heading"><div><p class="eyebrow">Connectivity</p><h2 id="deployment-health-title">Deployment health</h2></div><button type="button" class="icon-button close-dialog" data-dialog="deployment-health-dialog" aria-label="Close">×</button></div>
+      <p class="security-note">Checks use the deployment credential and upstream model. Prompts, responses, secrets and raw provider errors are not retained.</p>
+      <div class="table-scroll"><table><thead><tr><th>Checked</th><th>Status</th><th>Model</th><th>Latency</th><th>Diagnostic</th></tr></thead><tbody id="deployment-health-table"></tbody></table></div>
+      <div id="deployment-health-empty" class="empty-state">No health checks recorded.</div>
+      <p id="deployment-health-error" class="form-error" role="alert" hidden></p>
+      <div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="deployment-health-dialog">Close</button></div>
+    </form>
   </dialog>
 
   <dialog id="provider-dialog" class="modal"><form id="provider-form" method="dialog"><div class="modal-heading"><div><p class="eyebrow">Connectivity</p><h2 id="provider-dialog-title">Add provider</h2></div><button type="button" class="icon-button close-dialog" data-dialog="provider-dialog">×</button></div><input id="provider-mode" type="hidden"><div class="form-grid"><label>Provider ID<input id="provider-id" required maxlength="128"></label><label>Type<select id="provider-type"><option value="ollama">Ollama</option><option value="openai">OpenAI</option><option value="openai-compatible">OpenAI compatible</option><option value="anthropic">Anthropic</option><option value="demo">Demo</option></select></label><label class="span-2">Base URL<input id="provider-base-url" type="url" maxlength="2048" placeholder="Provider API base URL"></label><label class="checkbox-label span-2"><input id="provider-enabled" type="checkbox" checked> Enabled</label></div><p class="security-note">Credentials are stored separately and are never returned by the API.</p><p id="provider-form-error" class="form-error" hidden></p><div class="modal-actions"><button type="button" class="secondary-button close-dialog" data-dialog="provider-dialog">Cancel</button><button type="submit" class="primary-button">Save provider</button></div></form></dialog>

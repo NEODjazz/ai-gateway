@@ -218,6 +218,7 @@ func (r *Router) DeleteModelDeployment(id string) error {
 	}
 	r.deployments.current.Store(&next)
 	r.removeRuntimeEndpoint(id)
+	r.deploymentHealth.delete(id)
 	return r.persistControlMutation(context.Background(), previous)
 }
 

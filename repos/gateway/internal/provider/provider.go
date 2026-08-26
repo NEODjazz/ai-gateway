@@ -131,25 +131,26 @@ type Endpoint struct {
 }
 
 type Router struct {
-	defaultProvider string
-	endpoints       []Endpoint
-	endpointState   *endpointRegistry
-	modules         modules.Pipeline
-	health          *endpointHealthTracker
-	routeCounter    *atomic.Uint64
-	cache           responseCache
-	catalog         *modelcatalog.Registry
-	observer        ProviderObserver
-	routingStrategy string
-	adaptive        *adaptiveRouter
-	affinity        affinityStore
-	semantic        *semanticResponseCache
-	deployments     *deploymentRegistry
-	providers       *managedProviderRegistry
-	credentials     *credentialVault
-	modelGroups     *modelGroupRegistry
-	controlPlane    *controlPlaneRuntime
-	guardrails      *guardrailRegistry
+	defaultProvider  string
+	endpoints        []Endpoint
+	endpointState    *endpointRegistry
+	modules          modules.Pipeline
+	health           *endpointHealthTracker
+	routeCounter     *atomic.Uint64
+	cache            responseCache
+	catalog          *modelcatalog.Registry
+	observer         ProviderObserver
+	routingStrategy  string
+	adaptive         *adaptiveRouter
+	affinity         affinityStore
+	semantic         *semanticResponseCache
+	deployments      *deploymentRegistry
+	providers        *managedProviderRegistry
+	credentials      *credentialVault
+	modelGroups      *modelGroupRegistry
+	controlPlane     *controlPlaneRuntime
+	guardrails       *guardrailRegistry
+	deploymentHealth *deploymentHealthRegistry
 }
 
 func New(cfg Config) Provider {
@@ -280,6 +281,7 @@ func NewWithError(cfg Config) (Provider, error) {
 	}
 	router.guardrails = &guardrailRegistry{}
 	router.guardrails.current.Store(&initialGuardrails)
+	router.deploymentHealth = newDeploymentHealthRegistry()
 	if cfg.ControlPlaneStore != nil {
 		refresh := cfg.ControlPlaneRefresh
 		if refresh <= 0 {

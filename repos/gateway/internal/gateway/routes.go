@@ -70,6 +70,8 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/admin/v1/model-deployments"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateModelDeployment) }},
 	{RouteContract{http.MethodPut, "/admin/v1/model-deployments/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateModelDeployment) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/model-deployments/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteModelDeployment) }},
+	{RouteContract{http.MethodPost, "/admin/v1/model-deployments/{id}/test"}, func(h Handler) http.Handler { return http.HandlerFunc(h.TestModelDeployment) }},
+	{RouteContract{http.MethodGet, "/admin/v1/model-deployments/{id}/health"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListModelDeploymentHealth) }},
 	{RouteContract{http.MethodGet, "/admin/v1/model-groups"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListModelGroups) }},
 	{RouteContract{http.MethodPost, "/admin/v1/model-groups"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateModelGroup) }},
 	{RouteContract{http.MethodPut, "/admin/v1/model-groups/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateModelGroup) }},

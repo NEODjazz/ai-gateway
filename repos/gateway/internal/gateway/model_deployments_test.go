@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,36 @@ import (
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/provider"
 )
+
+func TestAdminTestsDeploymentAndReturnsHealthHistory(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"must not escape","code":"invalid_api_key"}}`))
+	}))
+	defer upstream.Close()
+	runtime := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "remote", Type: "openai-compatible", BaseURL: upstream.URL, Models: []string{"model"}}}})
+	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
+
+	probe := httptest.NewRecorder()
+	handler.ServeHTTP(probe, httptest.NewRequest(http.MethodPost, "/admin/v1/model-deployments/remote/test", nil))
+	if probe.Code != http.StatusOK || strings.Contains(probe.Body.String(), "must not escape") {
+		t.Fatalf("unsafe deployment probe: %d %s", probe.Code, probe.Body.String())
+	}
+	var check provider.DeploymentHealthCheck
+	if err := json.Unmarshal(probe.Body.Bytes(), &check); err != nil {
+		t.Fatal(err)
+	}
+	if check.Status != "unavailable" || check.FailureClass != "authentication" || check.HTTPStatus != http.StatusUnauthorized || check.UpstreamCode != "invalid_api_key" {
+		t.Fatalf("unexpected check: %+v", check)
+	}
+
+	history := httptest.NewRecorder()
+	handler.ServeHTTP(history, httptest.NewRequest(http.MethodGet, "/admin/v1/model-deployments/remote/health?limit=10", nil))
+	if history.Code != http.StatusOK || !strings.Contains(history.Body.String(), `"failure_class":"authentication"`) || strings.Contains(history.Body.String(), "must not escape") {
+		t.Fatalf("unexpected history: %d %s", history.Code, history.Body.String())
+	}
+}
 
 func TestAdminModelDeploymentLifecycle(t *testing.T) {
 	runtime := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "safe-endpoint", Type: "demo", Models: []string{"m1"}}}})
