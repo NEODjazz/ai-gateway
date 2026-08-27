@@ -23,6 +23,36 @@ describe("ResourceForm", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it("loads configured references, filters dependent options and submits their IDs", async () => {
+    const submit = vi.fn().mockResolvedValue(undefined);
+    const loadOptions = vi.fn(async (path: string) => {
+      if (path === "/providers") return { data: [{ id: "azure", type: "openai-compatible" }, { id: "ollama", type: "ollama" }] };
+      if (path === "/credentials") return { data: [{ id: "azure-key", provider_id: "azure", description: "Production" }, { id: "local-key", provider_id: "ollama" }] };
+      return { models: [{ provider: "azure", model: "gpt-5" }, { provider: "ollama", model: "llama3" }] };
+    });
+    render(<ResourceForm title="Add deployment" fields={[
+      { key: "provider_id", label: "Provider", type: "reference", reference: { path: "/providers", labelKeys: ["type"] } },
+      { key: "credential_id", label: "Credential", type: "reference", reference: { path: "/credentials", labelKeys: ["description"], filter: { fieldKey: "provider_id", recordKey: "provider_id" } } },
+      { key: "models", label: "Models", type: "reference-multi", reference: { path: "/models", collectionKey: "models", valueKey: "model", labelKeys: ["provider"] } }
+    ]} loadOptions={loadOptions} onClose={() => {}} onSubmit={submit} />);
+
+    expect(await screen.findByRole("option", { name: "azure — openai-compatible" })).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Provider"), "azure");
+    expect(screen.getByRole("option", { name: "azure-key — Production" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "local-key" })).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Credential"), "azure-key");
+    await userEvent.selectOptions(screen.getByLabelText("Provider"), "ollama");
+    expect(screen.getByLabelText("Credential")).toHaveValue("");
+    expect(screen.getByRole("option", { name: "local-key" })).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Provider"), "azure");
+    await userEvent.selectOptions(screen.getByLabelText("Credential"), "azure-key");
+    await userEvent.selectOptions(screen.getByLabelText("Models"), ["gpt-5", "llama3"]);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(loadOptions).toHaveBeenCalledTimes(3);
+    expect(submit).toHaveBeenCalledWith({ provider_id: "azure", credential_id: "azure-key", models: ["gpt-5", "llama3"] });
+  });
+
   it("closes from the accessible close button", async () => {
     const close = vi.fn();
     render(<ResourceForm title="Edit resource" fields={[]} onClose={close} onSubmit={async () => {}} />);

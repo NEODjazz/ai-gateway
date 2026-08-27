@@ -39,6 +39,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
   const [editing, setEditing] = useState<Row | null | undefined>(undefined);
   const [operationResult, setOperationResult] = useState("");
   const idKey = config.idKey || "id";
+  const loadOptions = useCallback((path: string) => client.request(path), [client]);
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -67,7 +68,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
     if (!window.confirm(`Delete ${String(row[idKey])}?`)) return;
     try { await client.request(config.deletePath!(String(row[idKey])), { method: "DELETE" }); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not delete record"); }
   }}>Delete</button>}</div> : undefined, [client, config.deletePath, config.fields, config.operations, idKey, load]);
-  return <><PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} actions={<><button className="secondary" onClick={() => void load()}>Refresh</button>{canCreate && <button onClick={() => setEditing(null)}>Add</button>}</>} />{error && <ErrorState message={error} retry={() => void load()} />}{operationResult && <div className="operation-result" role="status">{operationResult}</div>}{loading ? <LoadingState /> : <DataTable rows={rows} columns={config.columns} actions={actions} />}{editing !== undefined && config.fields && <ResourceForm title={`${editing ? "Edit" : "Add"} ${config.title}`} fields={config.fields} initial={editing || undefined} onClose={() => setEditing(undefined)} onSubmit={async (value) => {
+  return <><PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} actions={<><button className="secondary" onClick={() => void load()}>Refresh</button>{canCreate && <button onClick={() => setEditing(null)}>Add</button>}</>} />{error && <ErrorState message={error} retry={() => void load()} />}{operationResult && <div className="operation-result" role="status">{operationResult}</div>}{loading ? <LoadingState /> : <DataTable rows={rows} columns={config.columns} actions={actions} />}{editing !== undefined && config.fields && <ResourceForm title={`${editing ? "Edit" : "Add"} ${config.title}`} fields={config.fields} initial={editing || undefined} loadOptions={loadOptions} onClose={() => setEditing(undefined)} onSubmit={async (value) => {
     const isEdit = Boolean(editing);
     const id = String(value[idKey] || editing?.[idKey] || "");
     const path = isEdit ? config.itemPath?.(String(editing?.[idKey])) : config.createPath || config.itemPath?.(id);

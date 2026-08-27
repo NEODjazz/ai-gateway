@@ -6,7 +6,7 @@ import { PageHeader } from "../components/PageHeader";
 import { ResourceForm, type Field } from "../components/ResourceForm";
 
 type Catalog = { version?: string; models?: Row[]; [key: string]: unknown };
-const fields: Field[] = [{ key: "provider", label: "Provider", required: true }, { key: "model", label: "Model", required: true }, { key: "capabilities", label: "Capabilities", type: "csv" }, { key: "max_input_tokens", label: "Maximum input tokens", type: "number" }, { key: "max_output_tokens", label: "Maximum output tokens", type: "number" }, { key: "input_cost_per_1m", label: "Input cost / 1M", type: "number" }, { key: "output_cost_per_1m", label: "Output cost / 1M", type: "number" }, { key: "currency", label: "Currency", defaultValue: "USD" }];
+const fields: Field[] = [{ key: "provider", label: "Provider", type: "reference", required: true, reference: { path: "/admin/v1/providers", labelKeys: ["type", "base_url"] } }, { key: "model", label: "Model", required: true }, { key: "capabilities", label: "Capabilities", type: "csv" }, { key: "max_input_tokens", label: "Maximum input tokens", type: "number" }, { key: "max_output_tokens", label: "Maximum output tokens", type: "number" }, { key: "input_cost_per_1m", label: "Input cost / 1M", type: "number" }, { key: "output_cost_per_1m", label: "Output cost / 1M", type: "number" }, { key: "currency", label: "Currency", defaultValue: "USD" }];
 
 function key(row: Row) { return `${String(row.provider)}\u0000${String(row.model)}`; }
 
@@ -15,6 +15,7 @@ export function ModelCatalogPage() {
   const [catalog, setCatalog] = useState<Catalog>();
   const [editing, setEditing] = useState<Row | null | undefined>(undefined);
   const [error, setError] = useState("");
+  const loadOptions = useCallback((path: string) => client.request(path), [client]);
   const load = useCallback(async () => {
     setError("");
     try { setCatalog(await client.request<Catalog>("/admin/v1/model-catalog")); }
@@ -35,5 +36,5 @@ export function ModelCatalogPage() {
     try { setCatalog(await client.request<Catalog>("/admin/v1/model-catalog", { method: "PUT", body: { ...catalog, version: `ui-${Date.now()}`, models } })); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not update catalog"); }
   }
-  return <><PageHeader eyebrow="Catalog" title="Models" description="Canonical provider/model pricing and capability metadata. Deployments remain separate and cannot create duplicate catalog identities." actions={<><button className="secondary" onClick={() => void load()}>Refresh</button><button onClick={() => setEditing(null)}>Add model</button></>} />{error && <ErrorState message={error} retry={() => void load()} />}{!catalog ? <LoadingState /> : <DataTable rows={catalog.models || []} columns={[{ key: "model", label: "Model" }, { key: "provider", label: "Provider" }, { key: "capabilities", label: "Capabilities" }, { key: "input_cost_per_1m", label: "Input / 1M" }, { key: "output_cost_per_1m", label: "Output / 1M" }, { key: "currency", label: "Currency" }]} actions={(row) => <div className="inline-actions"><button className="text-button" onClick={() => setEditing(row)}>Edit</button><button className="danger-button" onClick={() => void remove(row)}>Delete</button></div>} />}{editing !== undefined && <ResourceForm title={`${editing ? "Edit" : "Add"} model metadata`} fields={fields} initial={editing || undefined} onClose={() => setEditing(undefined)} onSubmit={save} />}</>;
+  return <><PageHeader eyebrow="Catalog" title="Models" description="Canonical provider/model pricing and capability metadata. Deployments remain separate and cannot create duplicate catalog identities." actions={<><button className="secondary" onClick={() => void load()}>Refresh</button><button onClick={() => setEditing(null)}>Add model</button></>} />{error && <ErrorState message={error} retry={() => void load()} />}{!catalog ? <LoadingState /> : <DataTable rows={catalog.models || []} columns={[{ key: "model", label: "Model" }, { key: "provider", label: "Provider" }, { key: "capabilities", label: "Capabilities" }, { key: "input_cost_per_1m", label: "Input / 1M" }, { key: "output_cost_per_1m", label: "Output / 1M" }, { key: "currency", label: "Currency" }]} actions={(row) => <div className="inline-actions"><button className="text-button" onClick={() => setEditing(row)}>Edit</button><button className="danger-button" onClick={() => void remove(row)}>Delete</button></div>} />}{editing !== undefined && <ResourceForm title={`${editing ? "Edit" : "Add"} model metadata`} fields={fields} initial={editing || undefined} loadOptions={loadOptions} onClose={() => setEditing(undefined)} onSubmit={save} />}</>;
 }
