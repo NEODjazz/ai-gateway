@@ -559,8 +559,18 @@ paths:
       tags: [Model deployments]
       summary: List safe runtime deployment metadata
       description: Endpoint URLs and secret values are never returned. Credential IDs are non-secret references.
+      parameters:
+        - {name: search, in: query, schema: {type: string, maxLength: 256}}
+        - {name: provider, in: query, schema: {type: string, maxLength: 128}}
+        - {name: model, in: query, schema: {type: string, maxLength: 256}}
+        - {name: state, in: query, schema: {type: string, enum: [available, cooling_down, disabled]}}
+        - {name: enabled, in: query, schema: {type: boolean}}
+        - {name: sort, in: query, schema: {type: string, enum: [id, provider, priority, weight, state]}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: asc}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 1000000, default: 0}}
       responses:
-        '200': {description: Runtime deployments, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/ModelDeployment'}}}}}}}
+        '200': {description: Runtime deployments, content: {application/json: {schema: {$ref: '#/components/schemas/ModelDeploymentPage'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
@@ -1317,12 +1327,23 @@ paths:
       operationId: getRuntimeModelCatalog
       tags: [Models]
       summary: Get the active runtime model catalog
+      parameters:
+        - {name: search, in: query, schema: {type: string, maxLength: 256}}
+        - {name: provider, in: query, schema: {type: string, maxLength: 256}}
+        - {name: capability, in: query, schema: {type: string}}
+        - {name: sort, in: query, schema: {type: string, enum: [model, provider, input_cost, output_cost]}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: asc}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 1000000, default: 0}}
       responses:
         '200':
           description: Active catalog snapshot
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/ModelCatalog'}
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/ModelCatalog'}
+                  - {$ref: '#/components/schemas/ModelCatalogPage'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
@@ -1574,6 +1595,17 @@ components:
           type: array
           maxItems: 5000
           items: {$ref: '#/components/schemas/ModelCatalogEntry'}
+    ModelCatalogPage:
+      type: object
+      additionalProperties: false
+      required: [data, total, limit, offset, version]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/ModelCatalogEntry'}}
+        total: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+        offset: {type: integer, minimum: 0}
+        version: {type: string}
+        unknown_model_policy: {type: string, enum: [legacy, deny]}
     BudgetPolicyInput:
       type: object
       additionalProperties: false
@@ -2416,6 +2448,15 @@ components:
             runtime_state: {type: string, enum: [available, cooling_down, disabled]}
             latency_ewma_ms: {type: number, minimum: 0}
             failure_ewma: {type: number, minimum: 0, maximum: 1}
+    ModelDeploymentPage:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/ModelDeployment'}}
+        total: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+        offset: {type: integer, minimum: 0}
     DeploymentHealthCheck:
       type: object
       additionalProperties: false

@@ -41,3 +41,18 @@ func TestRuntimeModelCatalogRequiresAdminAndValidPricing(t *testing.T) {
 		}
 	}
 }
+
+func TestModelCatalogServerQueryFiltersSortsAndPages(t *testing.T) {
+	initial, _ := modelcatalog.Parse(`{"version":"v1","models":[{"provider":"azure","model":"zeta","capabilities":["chat"],"input_cost_per_1m":2,"currency":"USD"},{"provider":"azure","model":"alpha","capabilities":["embeddings"],"input_cost_per_1m":1,"currency":"USD"},{"provider":"ollama","model":"local","capabilities":["chat"]}]}`)
+	handler := Routes(NewHandler(modulesPipeline("admin"), modelsProvider{}).WithModelRegistry(modelcatalog.NewRegistry(initial, nil, time.Second)))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/v1/model-catalog?provider=azure&sort=input_cost&order=desc&limit=1&offset=0", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"total":2`) || !strings.Contains(response.Body.String(), `"model":"zeta"`) || strings.Contains(response.Body.String(), `"model":"alpha"`) {
+		t.Fatalf("unexpected catalog page: %d %s", response.Code, response.Body.String())
+	}
+	invalid := httptest.NewRecorder()
+	handler.ServeHTTP(invalid, httptest.NewRequest(http.MethodGet, "/admin/v1/model-catalog?sort=secret", nil))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid sort status=%d", invalid.Code)
+	}
+}

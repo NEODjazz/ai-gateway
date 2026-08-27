@@ -106,6 +106,8 @@ textarea { resize: vertical; }
 .section-block { margin-top: 34px; }
 .section-block > p { color: #687884; }
 .logs-filter { grid-template-columns: repeat(5, minmax(120px, 1fr)) auto; }
+.model-filter, .deployment-filter { grid-template-columns: repeat(5, minmax(110px, 1fr)) auto; }
+.pagination { display: flex; justify-content: flex-end; align-items: center; gap: 9px; margin-top: 14px; color: #667683; font-size: 13px; }
 .load-more { margin-top: 14px; }
 .login-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 20% 15%, #dff7f1, transparent 30%), #f4f7f8; }
 .login-card { width: min(440px, 100%); padding: 34px; background: white; border: 1px solid #dce4e8; border-radius: 16px; box-shadow: 0 24px 70px rgba(29, 51, 63, .12); }

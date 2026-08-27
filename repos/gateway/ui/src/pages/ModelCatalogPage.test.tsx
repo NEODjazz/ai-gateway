@@ -36,12 +36,14 @@ describe("ModelCatalogPage", () => {
 
   it("deletes only catalog metadata", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ version: "v1", models: [{ provider: "azure", model: "gpt" }, { provider: "ollama", model: "phi3" }] }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({ version: "v2", models: [{ provider: "ollama", model: "phi3" }] }), { status: 200 }));
+    const source = { version: "v1", models: [{ provider: "azure", model: "gpt" }, { provider: "ollama", model: "phi3" }] };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, options) => options?.method === "PUT" ? new Response(JSON.stringify({ version: "v2", models: [{ provider: "ollama", model: "phi3" }] }), { status: 200 }) : new Response(JSON.stringify(source), { status: 200 }));
     renderPage(); await screen.findByText("gpt");
     const deletes = screen.getAllByRole("button", { name: "Delete" });
     await userEvent.click(deletes[0]);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[1]?.method === "PUT")).toBe(true));
+    const putCall = fetchMock.mock.calls.find((call) => call[1]?.method === "PUT")!;
+    const body = JSON.parse(String(putCall[1]?.body));
     expect(body.models).toEqual([{ provider: "ollama", model: "phi3" }]);
   });
 });

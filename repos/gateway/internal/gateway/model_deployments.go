@@ -5,6 +5,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sort"
+	"strconv"
+	"strings"
 
 	"ai-gateway-gateway/internal/provider"
 )
@@ -23,7 +26,60 @@ func (h Handler) ListModelDeployments(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "runtime deployment management is unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": controller.ListModelDeployments(r.Context())})
+	deployments := controller.ListModelDeployments(r.Context())
+	if r.URL.RawQuery == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"data": deployments})
+		return
+	}
+	query, valid := parseResourceQuery(r, map[string]bool{"id": true, "provider": true, "priority": true, "weight": true, "state": true})
+	if !valid {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid deployment query")
+		return
+	}
+	providerFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("provider")))
+	modelFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("model")))
+	stateFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("state")))
+	enabledFilter := strings.TrimSpace(r.URL.Query().Get("enabled"))
+	var enabled *bool
+	if enabledFilter != "" {
+		value, err := strconv.ParseBool(enabledFilter)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid deployment query")
+			return
+		}
+		enabled = &value
+	}
+	filtered := deployments[:0:0]
+	for _, deployment := range deployments {
+		haystack := strings.ToLower(deployment.ID + " " + deployment.ProviderID + " " + deployment.UpstreamModel + " " + strings.Join(deployment.Models, " "))
+		if query.Search != "" && !strings.Contains(haystack, query.Search) || providerFilter != "" && strings.ToLower(deployment.ProviderID) != providerFilter || modelFilter != "" && !containsFold(deployment.Models, modelFilter) || stateFilter != "" && strings.ToLower(deployment.RuntimeState) != stateFilter || enabled != nil && deployment.Enabled != *enabled {
+			continue
+		}
+		filtered = append(filtered, deployment)
+	}
+	lessDeployment := func(i, j int) bool {
+		switch query.Sort {
+		case "provider":
+			return strings.ToLower(filtered[i].ProviderID) < strings.ToLower(filtered[j].ProviderID)
+		case "priority":
+			return filtered[i].Priority < filtered[j].Priority
+		case "weight":
+			return filtered[i].Weight < filtered[j].Weight
+		case "state":
+			return filtered[i].RuntimeState < filtered[j].RuntimeState
+		default:
+			return strings.ToLower(filtered[i].ID) < strings.ToLower(filtered[j].ID)
+		}
+	}
+	sort.SliceStable(filtered, func(i, j int) bool {
+		if query.Order == "desc" {
+			return lessDeployment(j, i)
+		}
+		return lessDeployment(i, j)
+	})
+	total := len(filtered)
+	start, end := pageBounds(total, query.Offset, query.Limit)
+	writeJSON(w, http.StatusOK, map[string]any{"data": filtered[start:end], "total": total, "limit": query.Limit, "offset": query.Offset})
 }
 
 func (h Handler) CreateModelDeployment(w http.ResponseWriter, r *http.Request) {

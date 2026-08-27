@@ -3,6 +3,7 @@ package gateway
 import (
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"ai-gateway-gateway/internal/modelcatalog"
@@ -17,7 +18,56 @@ func (h Handler) GetModelCatalog(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.modelRegistryAdmin(w, r); !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, h.models.Current(r.Context()))
+	catalog := h.models.Current(r.Context())
+	if r.URL.RawQuery == "" {
+		writeJSON(w, http.StatusOK, catalog)
+		return
+	}
+	query, valid := parseResourceQuery(r, map[string]bool{"model": true, "provider": true, "input_cost": true, "output_cost": true})
+	if !valid {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid catalog query")
+		return
+	}
+	providerFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("provider")))
+	capabilityFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("capability")))
+	models := catalog.Models[:0:0]
+	for _, entry := range catalog.Models {
+		haystack := strings.ToLower(entry.Provider + " " + entry.Model + " " + strings.Join(entry.Capabilities, " "))
+		if query.Search != "" && !strings.Contains(haystack, query.Search) || providerFilter != "" && strings.ToLower(entry.Provider) != providerFilter || capabilityFilter != "" && !containsFold(entry.Capabilities, capabilityFilter) {
+			continue
+		}
+		models = append(models, entry)
+	}
+	lessModel := func(i, j int) bool {
+		switch query.Sort {
+		case "provider":
+			return strings.ToLower(models[i].Provider) < strings.ToLower(models[j].Provider)
+		case "input_cost":
+			return models[i].InputCostPer1M < models[j].InputCostPer1M
+		case "output_cost":
+			return models[i].OutputCostPer1M < models[j].OutputCostPer1M
+		default:
+			return strings.ToLower(models[i].Model) < strings.ToLower(models[j].Model)
+		}
+	}
+	sort.SliceStable(models, func(i, j int) bool {
+		if query.Order == "desc" {
+			return lessModel(j, i)
+		}
+		return lessModel(i, j)
+	})
+	total := len(models)
+	start, end := pageBounds(total, query.Offset, query.Limit)
+	writeJSON(w, http.StatusOK, map[string]any{"data": models[start:end], "total": total, "limit": query.Limit, "offset": query.Offset, "version": catalog.Version, "unknown_model_policy": catalog.UnknownModelPolicy})
+}
+
+func containsFold(values []string, wanted string) bool {
+	for _, value := range values {
+		if strings.EqualFold(value, wanted) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h Handler) PutModelCatalog(w http.ResponseWriter, r *http.Request) {

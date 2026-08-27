@@ -56,6 +56,16 @@ func TestAdminModelDeploymentLifecycle(t *testing.T) {
 	}
 }
 
+func TestModelDeploymentServerQueryFiltersSortsAndPages(t *testing.T) {
+	runtime := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "azure-z", Type: "demo", Models: []string{"chat"}, Priority: 2}, {Name: "local-a", Type: "demo", Models: []string{"chat"}, Priority: 1}}})
+	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/v1/model-deployments?model=chat&sort=priority&order=asc&limit=1", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"total":2`) || !strings.Contains(response.Body.String(), `"id":"local-a"`) || strings.Contains(response.Body.String(), `"id":"azure-z"`) {
+		t.Fatalf("unexpected deployment page: %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestAdminCreatesAndDeletesRoutableModelDeployment(t *testing.T) {
 	runtime := provider.New(provider.Config{})
 	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))

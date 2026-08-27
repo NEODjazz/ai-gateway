@@ -14,7 +14,7 @@ describe("DeploymentsPage", () => {
     const check = { deployment_id: "azure-gpt", provider_id: "azure", model: "gpt-versioned", status: "available", latency_ms: 42, checked_at: "2026-08-27T18:00:00Z" };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const path = String(input);
-      if (path === "/admin/v1/model-deployments" && !options?.method) return response({ data: [deployment] });
+      if (path.startsWith("/admin/v1/model-deployments?") && !options?.method) return response({ data: [deployment], total: 1 });
       if (path.includes("/health")) return response({ data: [check] });
       if (path.endsWith("/test")) return response(check);
       if (path === "/admin/v1/model-deployments/azure-gpt" && options?.method === "PUT") return response({ ...deployment, enabled: false });
@@ -24,6 +24,7 @@ describe("DeploymentsPage", () => {
     render(<MemoryRouter><AuthProvider><DeploymentsPage /></AuthProvider></MemoryRouter>);
 
     expect(await screen.findByText("azure-gpt")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([path]) => String(path).includes("sort=priority") && String(path).includes("limit=25"))).toBe(true);
     expect(screen.getByText("42 ms")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Details" }));
     expect(await screen.findByRole("dialog", { name: "Deployment details" })).toBeInTheDocument();
