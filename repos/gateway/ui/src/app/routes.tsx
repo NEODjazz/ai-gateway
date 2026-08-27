@@ -12,6 +12,7 @@ import { GuardrailsPage } from "../pages/GuardrailsPage";
 import { OrganizationsPage, TeamsPage } from "../pages/IdentityAssociationPages";
 import { UsagePage } from "../pages/UsagePage";
 import { ModelOnboardingPage } from "../pages/ModelOnboardingPage";
+import { DeploymentsPage } from "../pages/DeploymentsPage";
 import { resourceConfigs } from "../pages/resourceConfigs";
 
 export type AppRoute = { path: string; title: string; group: "Monitor" | "Manage" | "AI Hub" | "Govern" | "System"; element: ReactNode; available: boolean };
@@ -37,7 +38,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/model-onboarding", title: "Model onboarding", group: "Manage", element: <ModelOnboardingPage />, available: true },
   { path: "/providers", title: "Providers", group: "Manage", element: <ResourcePage config={resourceConfigs.providers} />, available: true },
   { path: "/credentials", title: "Credentials", group: "Manage", element: <ResourcePage config={resourceConfigs.credentials} />, available: true },
-  { path: "/deployments", title: "Deployments", group: "Manage", element: <ResourcePage config={resourceConfigs.deployments} />, available: true },
+  { path: "/deployments", title: "Deployments", group: "Manage", element: <DeploymentsPage />, available: true },
   { path: "/model-groups", title: "Model groups", group: "Manage", element: <ResourcePage config={resourceConfigs.modelGroups} />, available: true },
 
   { path: "/ai-hub", title: "AI Hub", group: "AI Hub", element: readOnly("AI Hub", "Catalog entries joined with safe runtime availability.", "/admin/v1/ai-hub/models", [{ key: "model", label: "Model" }, { key: "provider", label: "Provider" }, { key: "capabilities", label: "Capabilities" }, { key: "deployments", label: "Deployments" }, { key: "available", label: "Available" }]), available: true },

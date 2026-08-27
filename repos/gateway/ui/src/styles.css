@@ -4,6 +4,8 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, select, textarea { font: inherit; }
 button { border: 0; border-radius: 8px; background: #0f9f83; color: white; padding: 9px 15px; cursor: pointer; font-weight: 650; }
 button:hover { background: #0b846d; }
+.button-link { display: inline-flex; align-items: center; border-radius: 8px; background: #0f9f83; color: white; padding: 9px 15px; text-decoration: none; font-weight: 650; }
+.button-link:hover { background: #0b846d; }
 button:disabled { cursor: wait; opacity: .55; }
 .secondary { color: #344454; border: 1px solid #d7dfe5; background: white; }
 .secondary:hover { background: #f2f5f7; }
@@ -86,6 +88,11 @@ textarea { resize: vertical; }
 .candidate-row { display: grid; grid-template-columns: auto minmax(160px, 1fr) minmax(180px, 1fr) minmax(180px, 1fr); gap: 10px; align-items: center; padding: 10px; border: 1px solid #e2e7ea; border-radius: 8px; }
 .candidate-row > input[type="checkbox"] { width: auto; }
 .operation-result pre { white-space: pre-wrap; }
+.deployment-detail { width: min(980px, 100%); }
+.detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.detail-grid > div { padding: 12px; border: 1px solid #e2e7ea; border-radius: 8px; }
+.detail-grid dt { color: #73818c; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.detail-grid dd { margin: 5px 0 0; overflow-wrap: anywhere; }
 .section-block { margin-top: 34px; }
 .section-block > p { color: #687884; }
 .logs-filter { grid-template-columns: repeat(5, minmax(120px, 1fr)) auto; }
