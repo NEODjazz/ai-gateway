@@ -17,9 +17,12 @@ func TestAdminModelGroupLifecyclePublishesPublicModel(t *testing.T) {
 	}})
 	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
 	create := httptest.NewRecorder()
-	handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/admin/v1/model-groups", strings.NewReader(`{"id":"public-chat","deployment_ids":["primary","fallback"],"strategy":"weighted","enabled":true}`)))
+	handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/admin/v1/model-groups", strings.NewReader(`{"id":"public-chat","deployment_ids":["primary","fallback"],"strategy":"weighted","retry_policy":{"rate_limit":2},"enabled":true}`)))
 	if create.Code != http.StatusCreated {
 		t.Fatalf("group create failed: %d %s", create.Code, create.Body.String())
+	}
+	if !strings.Contains(create.Body.String(), `"retry_policy":{"rate_limit":2}`) {
+		t.Fatalf("retry policy missing from response: %s", create.Body.String())
 	}
 	models := httptest.NewRecorder()
 	handler.ServeHTTP(models, httptest.NewRequest(http.MethodGet, "/v1/models", nil))

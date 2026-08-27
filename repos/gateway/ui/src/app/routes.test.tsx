@@ -9,7 +9,8 @@ describe("dashboard route manifest", () => {
   });
   it("keeps unsupported capabilities explicit", () => {
     const unavailable = appRoutes.filter((route) => !route.available).map((route) => route.path);
-    expect(unavailable).toEqual(expect.arrayContaining(["/policies", "/tag-management", "/skills", "/router-settings"]));
+    expect(unavailable).toEqual(expect.arrayContaining(["/policies", "/tag-management", "/skills"]));
+    expect(unavailable).not.toContain("/router-settings");
   });
   it("covers every navigation group", () => {
     expect(new Set(appRoutes.map((route) => route.group))).toEqual(new Set(["Monitor", "Manage", "AI Hub", "Govern", "System"]));

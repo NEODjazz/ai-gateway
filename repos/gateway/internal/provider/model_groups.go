@@ -9,10 +9,11 @@ import (
 )
 
 type ModelGroup struct {
-	ID            string   `json:"id"`
-	DeploymentIDs []string `json:"deployment_ids"`
-	Strategy      string   `json:"strategy"`
-	Enabled       bool     `json:"enabled"`
+	ID            string         `json:"id"`
+	DeploymentIDs []string       `json:"deployment_ids"`
+	Strategy      string         `json:"strategy"`
+	RetryPolicy   map[string]int `json:"retry_policy,omitempty"`
+	Enabled       bool           `json:"enabled"`
 }
 
 type ModelGroupController interface {
@@ -41,6 +42,7 @@ func (r *Router) ListModelGroups(ctx context.Context) []ModelGroup {
 	result := make([]ModelGroup, 0, len(*current))
 	for _, group := range *current {
 		group.DeploymentIDs = append([]string(nil), group.DeploymentIDs...)
+		group.RetryPolicy = cloneRetryPolicy(group.RetryPolicy)
 		result = append(result, group)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
@@ -135,6 +137,13 @@ func (r *Router) normalizeModelGroup(input ModelGroup) (ModelGroup, error) {
 		input.DeploymentIDs[index] = id
 	}
 	input.DeploymentIDs = append([]string(nil), input.DeploymentIDs...)
+	allowedRetryClasses := map[string]bool{"timeout": true, "unavailable": true, "rate_limit": true, "unknown": true}
+	for class, retries := range input.RetryPolicy {
+		if !allowedRetryClasses[class] || retries < 0 || retries > 10 {
+			return ModelGroup{}, ErrInvalidModelGroup
+		}
+	}
+	input.RetryPolicy = cloneRetryPolicy(input.RetryPolicy)
 	return input, nil
 }
 
@@ -150,7 +159,19 @@ func cloneModelGroups(current map[string]ModelGroup) map[string]ModelGroup {
 	next := make(map[string]ModelGroup, len(current))
 	for key, value := range current {
 		value.DeploymentIDs = append([]string(nil), value.DeploymentIDs...)
+		value.RetryPolicy = cloneRetryPolicy(value.RetryPolicy)
 		next[key] = value
 	}
 	return next
+}
+
+func cloneRetryPolicy(value map[string]int) map[string]int {
+	if len(value) == 0 {
+		return nil
+	}
+	result := make(map[string]int, len(value))
+	for key, retries := range value {
+		result[key] = retries
+	}
+	return result
 }

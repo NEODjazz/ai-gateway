@@ -16,12 +16,13 @@ type RoutingSimulationRequest struct {
 }
 
 type RoutingSimulationCandidate struct {
-	DeploymentID string `json:"deployment_id"`
-	ProviderID   string `json:"provider_id"`
-	ProviderType string `json:"provider_type"`
-	Priority     int    `json:"priority"`
-	Weight       int    `json:"weight"`
-	Order        int    `json:"order"`
+	DeploymentID string         `json:"deployment_id"`
+	ProviderID   string         `json:"provider_id"`
+	ProviderType string         `json:"provider_type"`
+	Priority     int            `json:"priority"`
+	Weight       int            `json:"weight"`
+	RetryPolicy  map[string]int `json:"retry_policy,omitempty"`
+	Order        int            `json:"order"`
 }
 
 type RoutingSimulation struct {
@@ -52,7 +53,7 @@ func (r Router) SimulateRouting(ctx context.Context, input RoutingSimulationRequ
 	endpoints := simulation.candidates(ctx, request, input.Capabilities...)
 	result := RoutingSimulation{Strategy: strategy, Reason: "no eligible healthy deployment", Candidates: []RoutingSimulationCandidate{}}
 	for index, endpoint := range endpoints {
-		result.Candidates = append(result.Candidates, RoutingSimulationCandidate{DeploymentID: endpoint.Name, ProviderID: endpoint.ProviderID, ProviderType: endpoint.Type, Priority: endpoint.Priority, Weight: endpoint.Weight, Order: index + 1})
+		result.Candidates = append(result.Candidates, RoutingSimulationCandidate{DeploymentID: endpoint.Name, ProviderID: endpoint.ProviderID, ProviderType: endpoint.Type, Priority: endpoint.Priority, Weight: endpoint.Weight, RetryPolicy: cloneRetryPolicy(endpoint.RetryPolicy), Order: index + 1})
 	}
 	if len(result.Candidates) > 0 {
 		result.Selected = result.Candidates[0].DeploymentID

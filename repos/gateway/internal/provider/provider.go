@@ -114,6 +114,7 @@ type Endpoint struct {
 	DLPEnabled            bool
 	AVEnabled             bool
 	MaxRetries            int
+	RetryPolicy           map[string]int
 	CooldownAfterFailures int
 	Cooldown              time.Duration
 	RequestTimeout        time.Duration
@@ -1004,7 +1005,7 @@ func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.
 	}
 	var response openai.ChatCompletionResponse
 	err = nil
-	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
+	for attempt := 0; attempt <= endpointMaxRetries(endpoint); attempt++ {
 		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "chat")
 		response, err = endpoint.Provider.ChatCompletions(providerCtx, request)
 		finishProviderCall(err)
@@ -1012,7 +1013,7 @@ func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.
 			r.health.success(ctx, endpoint)
 			return response, nil
 		}
-		if ctx.Err() != nil || attempt == endpoint.MaxRetries || !retrySameEndpoint(err) {
+		if ctx.Err() != nil || attempt >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
 			break
 		}
 	}
@@ -1031,7 +1032,7 @@ func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request op
 	}
 	var response openai.ResponseResponse
 	err = nil
-	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
+	for attempt := 0; attempt <= endpointMaxRetries(endpoint); attempt++ {
 		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "responses")
 		response, err = endpoint.Provider.Responses(providerCtx, request)
 		finishProviderCall(err)
@@ -1039,7 +1040,7 @@ func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request op
 			r.health.success(ctx, endpoint)
 			return response, nil
 		}
-		if ctx.Err() != nil || attempt == endpoint.MaxRetries || !retrySameEndpoint(err) {
+		if ctx.Err() != nil || attempt >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
 			break
 		}
 	}
@@ -1058,7 +1059,7 @@ func (r Router) callEmbeddings(ctx context.Context, endpoint Endpoint, client Em
 	}
 	var response openai.EmbeddingResponse
 	err = nil
-	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
+	for attempt := 0; attempt <= endpointMaxRetries(endpoint); attempt++ {
 		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "embeddings")
 		response, err = client.Embeddings(providerCtx, request)
 		finishProviderCall(err)
@@ -1066,7 +1067,7 @@ func (r Router) callEmbeddings(ctx context.Context, endpoint Endpoint, client Em
 			r.health.success(ctx, endpoint)
 			return response, nil
 		}
-		if ctx.Err() != nil || attempt == endpoint.MaxRetries || !retrySameEndpoint(err) {
+		if ctx.Err() != nil || attempt >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
 			break
 		}
 	}
@@ -1084,7 +1085,7 @@ func (r Router) callRerank(ctx context.Context, endpoint Endpoint, client Rerank
 		return openai.RerankResponse{}, err
 	}
 	var response openai.RerankResponse
-	for attempt := 0; attempt <= endpoint.MaxRetries; attempt++ {
+	for attempt := 0; attempt <= endpointMaxRetries(endpoint); attempt++ {
 		providerCtx, finish := r.startProviderCall(ctx, endpoint, "rerank")
 		response, err = client.Rerank(providerCtx, request)
 		finish(err)
@@ -1092,7 +1093,7 @@ func (r Router) callRerank(ctx context.Context, endpoint Endpoint, client Rerank
 			r.health.success(ctx, endpoint)
 			return response, nil
 		}
-		if ctx.Err() != nil || attempt == endpoint.MaxRetries || !retrySameEndpoint(err) {
+		if ctx.Err() != nil || attempt >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
 			break
 		}
 	}
@@ -1237,7 +1238,11 @@ func (r Router) candidates(ctx context.Context, request openai.ChatCompletionReq
 	if grouped {
 		groupRouter := r
 		groupRouter.routingStrategy = group.Strategy
-		return groupRouter.weightedOrder(candidates)
+		ordered := groupRouter.weightedOrder(candidates)
+		for index := range ordered {
+			ordered[index].RetryPolicy = cloneRetryPolicy(group.RetryPolicy)
+		}
+		return ordered
 	}
 	return r.weightedOrder(candidates)
 }

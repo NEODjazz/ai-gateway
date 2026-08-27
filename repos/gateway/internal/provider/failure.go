@@ -118,6 +118,36 @@ func retrySameEndpoint(err error) bool {
 	}
 }
 
+func retrySameEndpointWithPolicy(endpoint Endpoint, err error) bool {
+	class := failureClass(err)
+	if retries, configured := endpoint.RetryPolicy[string(class)]; configured {
+		switch class {
+		case FailureTimeout, FailureUnavailable, FailureRateLimit, FailureUnknown:
+			return retries > 0
+		default:
+			return false
+		}
+	}
+	return retrySameEndpoint(err)
+}
+
+func endpointRetryLimit(endpoint Endpoint, err error) int {
+	if retries, configured := endpoint.RetryPolicy[string(failureClass(err))]; configured {
+		return retries
+	}
+	return endpoint.MaxRetries
+}
+
+func endpointMaxRetries(endpoint Endpoint) int {
+	maximum := endpoint.MaxRetries
+	for _, retries := range endpoint.RetryPolicy {
+		if retries > maximum {
+			maximum = retries
+		}
+	}
+	return maximum
+}
+
 func tryNextEndpoint(err error) bool {
 	switch failureClass(err) {
 	case FailureClientRequest, FailureContentPolicy, FailurePostProcessing:

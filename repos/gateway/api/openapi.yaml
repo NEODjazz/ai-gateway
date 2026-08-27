@@ -1739,6 +1739,7 @@ components:
         priority: {type: integer}
         weight: {type: integer}
         order: {type: integer, minimum: 1}
+        retry_policy: {$ref: '#/components/schemas/RetryPolicy'}
     RoutingSimulation:
       type: object
       additionalProperties: false
@@ -2372,7 +2373,16 @@ components:
         id: {type: string, minLength: 1, maxLength: 256}
         deployment_ids: {type: array, minItems: 1, maxItems: 128, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128}}
         strategy: {type: string, enum: [weighted, adaptive]}
+        retry_policy: {$ref: '#/components/schemas/RetryPolicy'}
         enabled: {type: boolean}
+    RetryPolicy:
+      type: object
+      additionalProperties: false
+      properties:
+        timeout: {type: integer, minimum: 0, maximum: 10}
+        unavailable: {type: integer, minimum: 0, maximum: 10}
+        rate_limit: {type: integer, minimum: 0, maximum: 10}
+        unknown: {type: integer, minimum: 0, maximum: 10}
     ModelDeploymentInput:
       type: object
       additionalProperties: false

@@ -13,6 +13,7 @@ import { OrganizationsPage, TeamsPage } from "../pages/IdentityAssociationPages"
 import { UsagePage } from "../pages/UsagePage";
 import { ModelOnboardingPage } from "../pages/ModelOnboardingPage";
 import { DeploymentsPage } from "../pages/DeploymentsPage";
+import { RouterSettingsPage } from "../pages/RouterSettingsPage";
 import { resourceConfigs } from "../pages/resourceConfigs";
 
 export type AppRoute = { path: string; title: string; group: "Monitor" | "Manage" | "AI Hub" | "Govern" | "System"; element: ReactNode; available: boolean };
@@ -59,7 +60,7 @@ export const appRoutes: AppRoute[] = [
 
   { path: "/cache", title: "Caching", group: "System", element: <EndpointPage eyebrow="Performance" title="Cache diagnostics" description="Exact and semantic cache counters and bounded configuration metadata." path="/admin/v1/cache/diagnostics" />, available: true },
   { path: "/logging", title: "Logging & alerts", group: "System", element: <ResourcePage config={resourceConfigs.logging} />, available: true },
-  { path: "/router-settings", title: "Router settings", group: "System", element: unavailable("Router settings", "Routing is configured through deployments and model groups; a dynamic field registry is not available."), available: false },
+  { path: "/router-settings", title: "Router settings", group: "System", element: <RouterSettingsPage />, available: true },
   { path: "/api-reference", title: "API reference", group: "System", element: <CapabilityPage title="API reference" description="The embedded OpenAPI and Swagger UI are available at /docs/." status="Open /docs/ in a new tab for the interactive contract." available />, available: true },
   { path: "/settings", title: "Settings", group: "System", element: <CapabilityPage title="Settings" description="Runtime settings remain environment-managed to preserve auditable deployment configuration." status="Environment-managed configuration" available />, available: true }
 ];
