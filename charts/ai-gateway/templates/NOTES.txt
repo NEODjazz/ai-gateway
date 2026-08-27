@@ -1,16 +1,26 @@
+{{- $baseURL := "http://localhost:8080" -}}
+{{- if .Values.gateway.ingress.enabled -}}
+{{- $scheme := ternary "https" "http" (not (empty .Values.gateway.ingress.tls)) -}}
+{{- $baseURL = printf "%s://%s" $scheme (first .Values.gateway.ingress.hosts).host -}}
+{{- end -}}
 AI Gateway has been installed.
 
+{{- if .Values.gateway.ingress.enabled }}
+Open gateway:
+  http{{ if .Values.gateway.ingress.tls }}s{{ end }}://{{ (first .Values.gateway.ingress.hosts).host }}/ui/
+{{- else }}
 Port-forward gateway:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ai-gateway.fullname" . }}-gateway 8080:{{ .Values.gateway.port }}
+{{- end }}
 
 Test request:
-  curl -X POST http://localhost:8080/v1/chat/completions \
+  curl -X POST {{ $baseURL }}/v1/chat/completions \
     -H "Authorization: Bearer demo-admin-key" \
     -H "Content-Type: application/json" \
     -d '{"model":"{{ .Values.gateway.provider.testModel }}","messages":[{"role":"user","content":"Reply with exactly this text and nothing else: user@example.com"}]}'
 
 Responses API request:
-  curl -X POST http://localhost:8080/v1/responses \
+  curl -X POST {{ $baseURL }}/v1/responses \
     -H "Authorization: Bearer demo-admin-key" \
     -H "Content-Type: application/json" \
     -d '{"provider":"ollama","model":"{{ .Values.gateway.provider.testModel }}","input":"Reply with exactly this text and nothing else: user@example.com"}'

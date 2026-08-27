@@ -158,6 +158,22 @@ gateway:
     anthropic: ""
   service:
     type: LoadBalancer
+  ingress:
+    enabled: false
+    # Rancher Desktop ships Traefik by default. Leave empty when the cluster
+    # selects its default IngressClass automatically.
+    className: ""
+    annotations: {}
+    hosts:
+      - host: ai-gateway.localhost
+        paths:
+          - path: /
+            pathType: Prefix
+    # Example:
+    # tls:
+    #   - secretName: ai-gateway-tls
+    #     hosts: [ai-gateway.example.com]
+    tls: []
   modules:
     auth:
       required: true
