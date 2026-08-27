@@ -14,6 +14,7 @@ import { UsagePage } from "../pages/UsagePage";
 import { ModelOnboardingPage } from "../pages/ModelOnboardingPage";
 import { DeploymentsPage } from "../pages/DeploymentsPage";
 import { RouterSettingsPage } from "../pages/RouterSettingsPage";
+import { VirtualKeysPage } from "../pages/VirtualKeysPage";
 import { resourceConfigs } from "../pages/resourceConfigs";
 
 export type AppRoute = { path: string; title: string; group: "Monitor" | "Manage" | "AI Hub" | "Govern" | "System"; element: ReactNode; available: boolean };
@@ -29,7 +30,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/routing", title: "Routing diagnostics", group: "Monitor", element: <RoutingPage />, available: true },
   { path: "/playground", title: "Playground", group: "Monitor", element: <PlaygroundPage />, available: true },
 
-  { path: "/api-keys", title: "Virtual keys", group: "Manage", element: <ResourcePage config={resourceConfigs.keys} />, available: true },
+  { path: "/api-keys", title: "Virtual keys", group: "Manage", element: <VirtualKeysPage />, available: true },
   { path: "/users", title: "Users", group: "Manage", element: <ResourcePage config={resourceConfigs.users} />, available: true },
   { path: "/teams", title: "Teams", group: "Manage", element: <TeamsPage />, available: true },
   { path: "/organizations", title: "Organizations", group: "Manage", element: <OrganizationsPage />, available: true },
