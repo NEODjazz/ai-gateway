@@ -1,7 +1,7 @@
 import { appRoutes } from "./routes";
 
 describe("dashboard route manifest", () => {
-  it("contains exactly 36 route-based pages", () => expect(appRoutes).toHaveLength(36));
+  it("contains exactly 37 route-based pages", () => expect(appRoutes).toHaveLength(37));
   it("uses unique absolute paths", () => {
     const paths = appRoutes.map((route) => route.path);
     expect(new Set(paths).size).toBe(paths.length);

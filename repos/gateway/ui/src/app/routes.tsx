@@ -11,6 +11,7 @@ import { RoutingPage } from "../pages/RoutingPage";
 import { GuardrailsPage } from "../pages/GuardrailsPage";
 import { OrganizationsPage, TeamsPage } from "../pages/IdentityAssociationPages";
 import { UsagePage } from "../pages/UsagePage";
+import { ModelOnboardingPage } from "../pages/ModelOnboardingPage";
 import { resourceConfigs } from "../pages/resourceConfigs";
 
 export type AppRoute = { path: string; title: string; group: "Monitor" | "Manage" | "AI Hub" | "Govern" | "System"; element: ReactNode; available: boolean };
@@ -33,6 +34,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/projects", title: "Projects", group: "Manage", element: <ResourcePage config={resourceConfigs.projects} />, available: true },
   { path: "/access-groups", title: "Access groups", group: "Manage", element: <ResourcePage config={resourceConfigs.accessGroups} />, available: true },
   { path: "/models", title: "Models", group: "Manage", element: <ModelCatalogPage />, available: true },
+  { path: "/model-onboarding", title: "Model onboarding", group: "Manage", element: <ModelOnboardingPage />, available: true },
   { path: "/providers", title: "Providers", group: "Manage", element: <ResourcePage config={resourceConfigs.providers} />, available: true },
   { path: "/credentials", title: "Credentials", group: "Manage", element: <ResourcePage config={resourceConfigs.credentials} />, available: true },
   { path: "/deployments", title: "Deployments", group: "Manage", element: <ResourcePage config={resourceConfigs.deployments} />, available: true },
