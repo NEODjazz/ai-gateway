@@ -159,7 +159,15 @@ The canonical external contract is [repos/gateway/api/openapi.yaml](repos/gatewa
 
 ### Admin UI
 
-The gateway serves a self-contained operations console at `/ui/`. It provides
+The gateway serves a self-contained route-based React/TypeScript operations
+console at `/ui/`. Its 36 stable dashboard routes are organized into Monitor,
+Manage, AI Hub, Govern, and System workspaces. Shared API/auth, resource table,
+form, loading, empty, conflict, and error components keep CRUD behavior
+consistent; unsupported backend capabilities are marked unavailable instead of
+showing simulated data. Deep links such as `/ui/providers` are served by the
+embedded SPA without a CDN. Frontend sources, Vitest component tests, and the
+Vite production build live in `repos/gateway/ui`; generated assets are embedded
+in the Go binary. It provides
 an overview, virtual-key lifecycle management, model and runtime-catalog
 management, budget policy management, and a read-only management audit view.
 The Providers & Models workspace adds independent provider endpoint CRUD,

@@ -104,6 +104,38 @@ jobs:
           path: repos/${{ matrix.service }}/coverage.out
           if-no-files-found: error
 
+  admin-ui:
+    name: React admin UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: repos/gateway/ui
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 26.3.1
+          cache: npm
+          cache-dependency-path: repos/gateway/ui/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check types
+        run: npm run typecheck
+
+      - name: Run component tests
+        run: npm test
+
+      - name: Build embedded assets
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
   helm:
     name: Helm / ${{ matrix.chart }}
     runs-on: ubuntu-latest

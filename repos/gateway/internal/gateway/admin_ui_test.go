@@ -31,7 +31,7 @@ func TestAdminUIServesEmbeddedSameOriginAssets(t *testing.T) {
 	if page.Code != http.StatusOK {
 		t.Fatalf("UI status=%d body=%s", page.Code, page.Body.String())
 	}
-	for _, expected := range []string{"AI Gateway Console", "/ui/assets/app.css?v=22", "/ui/assets/app.js?v=22", "Admin bearer token", "Overview", "Usage &amp; spend", "Customer insights", "customer-filter-form", "customer-budgets-table", "customer-keys-table", "Request logs", "Virtual key", "request-log-credential", "Routing", "Playground", "Max completion tokens", "Temperature (optional)", "Virtual keys", "Users", "Teams", "Organizations", "organizations-table", "organization-dialog", "organization-team-dialog", "Projects &amp; access", "projects-table", "access-groups-table", "project-dialog", "access-group-dialog", "AI Hub &amp; optimization", "ai-hub-table", "cost-recommendations-table", "Scoped RBAC", "users-table", "teams-table", "membership-dialog", "Models", "Providers &amp; models", "providers-table", "credentials-table", "deployments-table", "model-groups-table", "provider-dialog", "credential-dialog", "deployment-dialog", "deployment-health-dialog", "model-group-dialog", "Write-only secrets", "Guardrails", "guardrails-table", "guardrail-monitor-total", "guardrail-events-table", "Metadata only", "Compliance playground", "compliance-form", "guardrail-dialog", "MCP registry", "mcp-servers-table", "Agent templates", "tool-policies-table", "agent-profiles-table", "tool-policy-dialog", "agent-profile-dialog", "Caching &amp; logging", "cache-exact-hits", "cache-semantic-hits", "logging-table", "logging-dialog", "mcp-toolsets-table", "mcp-server-dialog", "mcp-toolset-dialog", "Budgets", "Audit log", "routing-cards", "playground-form", "usage-chart", "usage-models-table", "request-log-filter-form", "request-logs-table", "Content storage off", "Add catalog entry", "Create budget", "Create virtual key", "key-alias", "key-dialog", "issued-key-dialog", "model-dialog", "budget-dialog", "request-log-dialog", "confirm-dialog"} {
+	for _, expected := range []string{"AI Gateway Console", "/ui/assets/app.css", "/ui/assets/app.js", `<div id="root"></div>`} {
 		if !strings.Contains(page.Body.String(), expected) {
 			t.Errorf("UI HTML missing %q", expected)
 		}
@@ -51,6 +51,16 @@ func TestAdminUIServesEmbeddedSameOriginAssets(t *testing.T) {
 		}
 		assertAdminUISecurityHeaders(t, asset.Header(), "no-store")
 	}
+	deepLink := httptest.NewRecorder()
+	handler.ServeHTTP(deepLink, httptest.NewRequest(http.MethodGet, "/ui/providers", nil))
+	if deepLink.Code != http.StatusOK || !strings.Contains(deepLink.Body.String(), `<div id="root"></div>`) {
+		t.Fatalf("SPA deep link was not served: status=%d body=%s", deepLink.Code, deepLink.Body.String())
+	}
+	missingAsset := httptest.NewRecorder()
+	handler.ServeHTTP(missingAsset, httptest.NewRequest(http.MethodGet, "/ui/assets/missing.js", nil))
+	if missingAsset.Code != http.StatusNotFound {
+		t.Fatalf("missing asset returned %d instead of 404", missingAsset.Code)
+	}
 }
 
 func TestAdminUIPathsHaveBoundedObservabilityLabels(t *testing.T) {
@@ -64,32 +74,18 @@ func TestAdminUIPathsHaveBoundedObservabilityLabels(t *testing.T) {
 	}
 }
 
-func TestAdminUIUsesCanonicalProviderIdentityForModelCatalogActions(t *testing.T) {
+func TestAdminUIBundleContainsRouteBasedManagementConsole(t *testing.T) {
 	handler := Routes(NewHandler(modules.NewPipeline(nil), modelsProvider{}).WithAdminUI())
 	asset := httptest.NewRecorder()
 	handler.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "/ui/assets/app.js", nil))
 	body := asset.Body.String()
-	for _, expected := range []string{"modelProviderAliases", "canonicalModelProvider", "Edit model metadata", `remove.textContent = "Delete"`} {
+	for _, expected := range []string{"/overview", "/providers", "/deployments", "/model-groups", "input_cost_per_1m", "upstream_model", "control-plane-conflict"} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("admin UI asset missing %q", expected)
 		}
 	}
 	if strings.Contains(body, "Not cataloged") || strings.Contains(body, "Add pricing") {
 		t.Fatalf("admin UI retained split catalog actions")
-	}
-}
-
-func TestAdminUIUsesCanonicalUsageDimensions(t *testing.T) {
-	handler := Routes(NewHandler(modules.NewPipeline(nil), modelsProvider{}).WithAdminUI())
-	page := httptest.NewRecorder()
-	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/ui/", nil))
-	if !strings.Contains(page.Body.String(), "Usage by provider") || strings.Contains(page.Body.String(), "Usage by endpoint") {
-		t.Fatalf("admin UI retained endpoint-labelled provider aggregation")
-	}
-	asset := httptest.NewRecorder()
-	handler.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "/ui/assets/app.js", nil))
-	if !strings.Contains(asset.Body.String(), "log.upstream_model") {
-		t.Fatalf("admin UI does not distinguish the upstream model in request logs")
 	}
 }
 

@@ -1,3 +1,12 @@
+FROM node:26.3.1-alpine AS ui-builder
+
+WORKDIR /src/ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY ui/index.html ui/tsconfig.json ui/tsconfig.app.json ui/tsconfig.node.json ui/vite.config.ts ./
+COPY ui/src ./src
+RUN npm rebuild esbuild && npm run build
+
 FROM golang:1.26.7-alpine AS builder
 
 WORKDIR /src
@@ -6,6 +15,7 @@ RUN go mod download
 COPY api ./api
 COPY cmd ./cmd
 COPY internal ./internal
+COPY --from=ui-builder /src/internal/gateway/adminui ./internal/gateway/adminui
 RUN go build -o /out/gateway ./cmd/gateway
 
 FROM alpine:3.20

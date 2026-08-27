@@ -86,9 +86,9 @@ func main() {
 		SemanticEmbeddingAPIKey: cfg.Cache.Semantic.EmbeddingAPIKey,
 		SemanticEmbeddingModel:  cfg.Cache.Semantic.EmbeddingModel,
 		CredentialEncryptionKey: []byte(cfg.Provider.CredentialKey),
-		ControlPlaneStore:       providerControlStore,
 		ControlPlaneRefresh:     cfg.Provider.ControlPlaneRefresh,
 	}
+	providerConfig.ControlPlaneStore = controlPlaneStoreFor(providerControlStore)
 	if redisStore != nil {
 		providerConfig.CacheStore = redisStore
 		providerConfig.SessionStore = redisStore
@@ -174,6 +174,13 @@ func main() {
 }
 
 func registryStoreFor(store *redisstore.Store) modelcatalog.RegistryStore {
+	if store == nil {
+		return nil
+	}
+	return store
+}
+
+func controlPlaneStoreFor(store *controlstore.PostgresStore) provider.ControlPlaneStore {
 	if store == nil {
 		return nil
 	}

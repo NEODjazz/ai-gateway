@@ -9,6 +9,9 @@ dist/
 coverage.out
 *.test
 *.prof
+node_modules/
+coverage/
+*.tsbuildinfo
 
 # Editors and operating systems
 .idea/
