@@ -25,6 +25,13 @@ describe("DeploymentsPage", () => {
 
     expect(await screen.findByText("azure-gpt")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("sort=priority") && String(path).includes("limit=25"))).toBe(true);
+    await userEvent.type(screen.getByLabelText("Search deployments"), "azure");
+    await userEvent.type(screen.getByLabelText("Provider"), "azure");
+    await userEvent.selectOptions(screen.getByLabelText("Runtime"), "available");
+    await userEvent.selectOptions(screen.getByLabelText("Sort"), "provider");
+    await userEvent.selectOptions(screen.getByLabelText("Order"), "desc");
+    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await userEvent.click(screen.getByLabelText("Select all deployments"));
     expect(screen.getByText("42 ms")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Details" }));
     expect(await screen.findByRole("dialog", { name: "Deployment details" })).toBeInTheDocument();

@@ -10,10 +10,18 @@ function renderPage() {
 
 describe("ModelCatalogPage", () => {
   it("renders canonical provider/model entries", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ version: "v1", models: [{ provider: "azure", model: "gpt", input_cost_per_1m: 1, currency: "USD" }] }), { status: 200 }));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ version: "v1", models: [{ provider: "azure", model: "gpt", input_cost_per_1m: 1, currency: "USD" }] }), { status: 200 }));
     renderPage();
     expect(await screen.findByText("gpt")).toBeInTheDocument();
     expect(screen.getByText("azure")).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Search models"), "gpt");
+    await userEvent.type(screen.getByLabelText("Provider"), "azure");
+    await userEvent.type(screen.getByLabelText("Capability"), "chat");
+    await userEvent.selectOptions(screen.getByLabelText("Sort"), "input_cost");
+    await userEvent.selectOptions(screen.getByLabelText("Order"), "desc");
+    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path).includes("search=gpt") && String(path).includes("order=desc"))).toBe(true));
   });
 
   it("replaces an edited identity instead of duplicating it", async () => {
@@ -45,5 +53,28 @@ describe("ModelCatalogPage", () => {
     const putCall = fetchMock.mock.calls.find((call) => call[1]?.method === "PUT")!;
     const body = JSON.parse(String(putCall[1]?.body));
     expect(body.models).toEqual([{ provider: "ollama", model: "phi3" }]);
+  });
+
+  it("previews a pricing diff and requires confirmation before applying", async () => {
+    const current = { version: "v1", unknown_model_policy: "deny", models: [{ provider: "azure", model: "gpt", input_cost_per_1m: 1, currency: "USD" }, { provider: "ollama", model: "phi3" }] };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      if (options?.method === "PUT") return new Response(JSON.stringify({ ...current, version: "imported" }), { status: 200 });
+      if (String(input).includes("?")) return new Response(JSON.stringify({ data: current.models, total: 2, version: "v1" }), { status: 200 });
+      return new Response(JSON.stringify(current), { status: 200 });
+    });
+    Object.defineProperty(File.prototype, "text", { configurable: true, value: vi.fn().mockResolvedValue(JSON.stringify({ models: [{ provider: "azure", model: "gpt", input_cost_per_1m: 2, currency: "usd" }, { provider: "azure", model: "embed", input_cost_per_1m: 0.1, currency: "USD" }] })) });
+    renderPage(); await screen.findByText("gpt");
+    await userEvent.upload(screen.getByLabelText("Pricing JSON file"), new File(["{}"], "pricing.json", { type: "application/json" }));
+    expect(await screen.findByRole("dialog", { name: "Pricing import preview" })).toBeInTheDocument();
+    expect(screen.getByText(/Source: pricing\.json/)).toBeInTheDocument();
+    expect(screen.getByText("Added")).toBeInTheDocument(); expect(screen.getByText("Changed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply import" })).toBeDisabled();
+    await userEvent.selectOptions(screen.getByLabelText("Import mode"), "replace");
+    expect(screen.getByText("Removed")).toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText("Confirm pricing import"));
+    await userEvent.click(screen.getByRole("button", { name: "Apply import" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[1]?.method === "PUT")).toBe(true));
+    const body = JSON.parse(String(fetchMock.mock.calls.find((call) => call[1]?.method === "PUT")![1]?.body));
+    expect(body.models).toHaveLength(2); expect(body.models[0].currency).toBe("USD"); expect(body.unknown_model_policy).toBe("deny");
   });
 });
