@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, customerUsage: null, customerScope: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], organizations: [], projects: [], accessGroups: [], models: [], aiHub: [], costRecommendations: [], providers: [], credentials: [], deployments: [], modelGroups: [], guardrails: [], guardrailMonitor: null, cacheDiagnostics: null, loggingDestinations: [], loggingDelivery: null, mcpServers: [], mcpToolsets: [], catalog: null, budgets: [], audit: [] };
+  const state = { token: sessionStorage.getItem("ai_gateway_admin_token") || "", usage: null, customerUsage: null, customerScope: null, requestLogs: [], requestLogNextBefore: "", requestLogNextRequestID: "", requestLogSettings: null, routing: null, keys: [], users: [], teams: [], organizations: [], projects: [], accessGroups: [], models: [], aiHub: [], costRecommendations: [], providers: [], credentials: [], deployments: [], modelGroups: [], guardrails: [], guardrailMonitor: null, cacheDiagnostics: null, loggingDestinations: [], loggingDelivery: null, toolPolicies: [], agentProfiles: [], mcpServers: [], mcpToolsets: [], catalog: null, budgets: [], audit: [] };
   const $ = (id) => document.getElementById(id);
   const loginView = $("login-view");
   const consoleView = $("console-view");
@@ -9,7 +9,7 @@
   const tokenInput = $("admin-token");
   const loginError = $("login-error");
   const globalError = $("global-error");
-  const pageTitles = { overview: "Overview", usage: "Usage & spend", customers: "Customer insights", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", organizations: "Organizations", access: "Projects & access", models: "Models", "ai-hub": "AI Hub & optimization", deployments: "Providers & models", guardrails: "Guardrails", mcp: "MCP registry", integrations: "Caching & logging", budgets: "Budgets", audit: "Audit log" };
+  const pageTitles = { overview: "Overview", usage: "Usage & spend", customers: "Customer insights", "request-logs": "Request logs", routing: "Routing diagnostics", playground: "Chat playground", keys: "Virtual keys", users: "Users", teams: "Teams", organizations: "Organizations", access: "Projects & access", models: "Models", "ai-hub": "AI Hub & optimization", deployments: "Providers & models", guardrails: "Guardrails", mcp: "MCP registry", agents: "Agent templates", integrations: "Caching & logging", budgets: "Budgets", audit: "Audit log" };
   let pendingConfirmation = null;
   let requestLogLiveTimer = null;
 
@@ -108,6 +108,8 @@
       api("/admin/v1/guardrails/monitor?limit=100"),
       api("/admin/v1/cache/diagnostics"),
       api("/admin/v1/logging/destinations"),
+      api("/admin/v1/tool-policies"),
+      api("/admin/v1/agent-profiles"),
     ];
     const results = await Promise.allSettled(requests);
     const authFailure = results.find((result) => result.status === "rejected" && result.reason?.auth);
@@ -139,6 +141,8 @@
     if (results[23].status === "fulfilled") state.guardrailMonitor = results[23].value; else errors.push(`Guardrail monitor: ${results[23].reason.message}`);
     if (results[24].status === "fulfilled") state.cacheDiagnostics = results[24].value; else errors.push(`Cache diagnostics: ${results[24].reason.message}`);
     if (results[25].status === "fulfilled") { state.loggingDestinations = results[25].value?.data || []; state.loggingDelivery = results[25].value?.delivery || null; } else errors.push(`Logging integrations: ${results[25].reason.message}`);
+    if (results[26].status === "fulfilled") state.toolPolicies = results[26].value?.data || []; else errors.push(`Tool policies: ${results[26].reason.message}`);
+    if (results[27].status === "fulfilled") state.agentProfiles = results[27].value?.data || []; else errors.push(`Agent profiles: ${results[27].reason.message}`);
     renderAll();
     setText("console-health", errors.length ? "Degraded" : "Operational");
     if (errors.length) { globalError.textContent = errors.join(" · "); globalError.hidden = false; }
@@ -185,6 +189,7 @@
     setText("guardrails-badge", formatNumber(state.guardrails.filter((item)=>item.enabled).length));
     setText("mcp-badge", formatNumber(state.mcpServers.filter((item)=>item.enabled).length));
     setText("logging-badge", formatNumber(state.loggingDestinations.filter((item)=>item.enabled).length));
+    setText("agents-badge", formatNumber(state.agentProfiles.filter((item)=>item.enabled).length));
     setText("catalog-version", state.catalog?.version ? `Version ${state.catalog.version}` : "Runtime registry");
     renderOverview();
     renderRouting();
@@ -205,6 +210,7 @@
     renderGuardrails();
     renderGuardrailMonitor();
     renderIntegrations();
+    renderAgents();
     renderMCP();
     renderModels();
     renderBudgets();
@@ -519,6 +525,12 @@
   async function saveLoggingDestination(event){event.preventDefault();const error=$("logging-error"),id=$("logging-id").value.trim(),secret=$("logging-secret").value;error.hidden=true;try{await apiJSON(`/admin/v1/logging/destinations/${encodeURIComponent(id)}`,"PUT",{name:$("logging-name").value.trim(),type:$("logging-type").value,url:$("logging-url").value.trim(),event_types:[...$("logging-events").selectedOptions].map(option=>option.value),enabled:$("logging-enabled").checked,secret});$("logging-secret").value="";$("logging-dialog").close();await loadData();showToast("Logging destination saved")}catch(requestError){$("logging-secret").value="";error.textContent=requestError.message;error.hidden=false}}
   async function testLoggingDestination(item){try{const result=await api(`/admin/v1/logging/destinations/${encodeURIComponent(item.id)}/test`,{method:"POST"});showToast(`${item.id} available · ${result.latency_ms||0} ms · synthetic metadata probe`)}catch(error){globalError.textContent=error.message;globalError.hidden=false}}
 
+  function renderAgents(){const policies=$("tool-policies-table");clear(policies);$("tool-policies-empty").hidden=state.toolPolicies.length!==0;for(const item of state.toolPolicies){const row=document.createElement("tr");row.appendChild(textCell(item.name,item.id));row.appendChild(textCell((item.allowed_tools||[]).join(", "),`denied: ${(item.denied_tools||[]).join(", ")||"none"}`));row.appendChild(plainCell((item.approval_required||[]).join(", ")||"None"));row.appendChild(plainCell(`${item.max_tool_calls} calls`));row.appendChild(statusCell(item.enabled));const actions=document.createElement("td");actions.className="row-actions";actions.append(actionButton("Edit",()=>openToolPolicyDialog(item)),actionButton("Delete",()=>confirmChange("Delete tool policy?",`Delete ${item.id}. Existing profiles retain their materialized policy snapshot.`,async()=>{await api(`/admin/v1/tool-policies/${encodeURIComponent(item.id)}`,{method:"DELETE"});await loadData();showToast("Tool policy deleted")}),true));row.appendChild(actions);policies.appendChild(row)}const profiles=$("agent-profiles-table");clear(profiles);$("agent-profiles-empty").hidden=state.agentProfiles.length!==0;for(const item of state.agentProfiles){const row=document.createElement("tr");row.appendChild(textCell(item.name,item.id));row.appendChild(textCell(item.model,item.instructions_template_id?`instructions: ${item.instructions_template_id}`:"no instructions reference"));row.appendChild(textCell(item.tool_policy_id,(item.allowed_tools||[]).join(", ")));row.appendChild(textCell(`${item.max_iterations} iterations`,`${item.max_tool_calls} tool calls`));row.appendChild(statusCell(item.enabled));const actions=document.createElement("td");actions.className="row-actions";actions.append(actionButton("Edit",()=>openAgentProfileDialog(item)),actionButton("Delete",()=>confirmChange("Delete agent profile?",`Delete external runtime template ${item.id}.`,async()=>{await api(`/admin/v1/agent-profiles/${encodeURIComponent(item.id)}`,{method:"DELETE"});await loadData();showToast("Agent profile deleted")}),true));row.appendChild(actions);profiles.appendChild(row)}}
+  function openToolPolicyDialog(item=null){$("tool-policy-id").value=item?.id||"";$("tool-policy-id").readOnly=Boolean(item);$("tool-policy-name").value=item?.name||"";$("tool-policy-description").value=item?.description||"";$("tool-policy-allowed").value=(item?.allowed_tools||[]).join(", ");$("tool-policy-denied").value=(item?.denied_tools||[]).join(", ");$("tool-policy-approval").value=(item?.approval_required||[]).join(", ");$("tool-policy-max-calls").value=item?.max_tool_calls||10;$("tool-policy-enabled").checked=item?.enabled??true;$("tool-policy-error").hidden=true;$("tool-policy-dialog").showModal()}
+  async function saveToolPolicy(event){event.preventDefault();const error=$("tool-policy-error"),id=$("tool-policy-id").value.trim();error.hidden=true;try{await apiJSON(`/admin/v1/tool-policies/${encodeURIComponent(id)}`,"PUT",{name:$("tool-policy-name").value.trim(),description:$("tool-policy-description").value.trim(),allowed_tools:commaList("tool-policy-allowed"),denied_tools:commaList("tool-policy-denied"),approval_required:commaList("tool-policy-approval"),max_tool_calls:Number($("tool-policy-max-calls").value),enabled:$("tool-policy-enabled").checked});$("tool-policy-dialog").close();await loadData();showToast("Tool policy saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
+  function openAgentProfileDialog(item=null){$("agent-profile-id").value=item?.id||"";$("agent-profile-id").readOnly=Boolean(item);$("agent-profile-name").value=item?.name||"";$("agent-profile-description").value=item?.description||"";$("agent-profile-model").value=item?.model||"";$("agent-profile-instructions").value=item?.instructions_template_id||"";$("agent-profile-max-iterations").value=item?.max_iterations||8;$("agent-profile-tags").value=(item?.tags||[]).join(", ");$("agent-profile-enabled").checked=item?.enabled??true;const select=$("agent-profile-policy"),selected=item?.tool_policy_id||"";clear(select);for(const policy of state.toolPolicies.filter(policy=>policy.enabled||policy.id===selected)){const option=document.createElement("option");option.value=policy.id;option.textContent=`${policy.name} (${policy.id})`;select.appendChild(option)}select.value=selected;$("agent-profile-error").hidden=true;$("agent-profile-dialog").showModal()}
+  async function saveAgentProfile(event){event.preventDefault();const error=$("agent-profile-error"),id=$("agent-profile-id").value.trim();error.hidden=true;try{await apiJSON(`/admin/v1/agent-profiles/${encodeURIComponent(id)}`,"PUT",{name:$("agent-profile-name").value.trim(),description:$("agent-profile-description").value.trim(),model:$("agent-profile-model").value.trim(),instructions_template_id:$("agent-profile-instructions").value.trim(),tool_policy_id:$("agent-profile-policy").value,max_iterations:Number($("agent-profile-max-iterations").value),tags:commaList("agent-profile-tags"),enabled:$("agent-profile-enabled").checked});$("agent-profile-dialog").close();await loadData();showToast("Agent profile saved with a materialized policy snapshot")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
+
   function openUserDialog(user=null){$("user-id").value=user?.id||"";$("user-id").readOnly=Boolean(user);$("user-email").value=user?.email||"";$("user-name").value=user?.name||"";$("user-status").value=user?.status||"active";$("user-roles").value=(user?.roles||[]).join(", ");$("user-form-error").hidden=true;$("user-dialog").showModal()}
   async function saveUser(event){event.preventDefault();const error=$("user-form-error");error.hidden=true;const id=$("user-id").value.trim();try{await apiJSON(`/admin/v1/users/${encodeURIComponent(id)}`,"PUT",{email:$("user-email").value.trim(),name:$("user-name").value.trim(),status:$("user-status").value,roles:commaList("user-roles")});$("user-dialog").close();await loadData();showToast("User saved")}catch(requestError){error.textContent=requestError.message;error.hidden=false}}
   function openTeamDialog(team=null){$("team-id").value=team?.id||"";$("team-id").readOnly=Boolean(team);$("team-name").value=team?.name||"";$("team-description").value=team?.description||"";$("team-status").value=team?.status||"active";$("team-form-error").hidden=true;$("team-dialog").showModal()}
@@ -759,6 +771,10 @@
   $("access-group-form").addEventListener("submit",saveAccessGroup);
   $("add-logging-button").addEventListener("click",()=>openLoggingDialog());
   $("logging-form").addEventListener("submit",saveLoggingDestination);
+  $("add-tool-policy-button").addEventListener("click",()=>openToolPolicyDialog());
+  $("tool-policy-form").addEventListener("submit",saveToolPolicy);
+  $("add-agent-profile-button").addEventListener("click",()=>openAgentProfileDialog());
+  $("agent-profile-form").addEventListener("submit",saveAgentProfile);
   $("add-budget-button").addEventListener("click", () => openBudgetDialog());
   $("budget-form").addEventListener("submit", saveBudget);
   for (const button of document.querySelectorAll(".close-dialog")) button.addEventListener("click", () => $(button.dataset.dialog).close());

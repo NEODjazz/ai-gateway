@@ -32,6 +32,7 @@ type Handler struct {
 	guardrails    *GuardrailMonitor
 	cacheConfig   CacheRuntimeConfig
 	logging       *LoggingRegistry
+	agents        *AgentRegistry
 	mcp           *MCPRegistry
 	access        *AccessRegistry
 	budgets       BudgetManagementClient
