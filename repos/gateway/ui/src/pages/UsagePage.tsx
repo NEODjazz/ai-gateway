@@ -4,6 +4,7 @@ import { DataTable, type Row } from "../components/DataTable";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
+import { formatCost } from "../format";
 
 type UsageAggregate = {
   name?: string;
@@ -26,19 +27,6 @@ type UsageReport = {
 };
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
-
-export function formatCost(cost: number, currency: string) {
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currency || "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: cost > 0 && cost < 0.01 ? 6 : 2
-    }).format(cost);
-  } catch {
-    return `${currency || "USD"} ${cost.toFixed(cost > 0 && cost < 0.01 ? 6 : 2)}`;
-  }
-}
 
 function totalRows(report: UsageReport) {
   const requests = report.totals.reduce((sum, row) => sum + row.requests, 0);

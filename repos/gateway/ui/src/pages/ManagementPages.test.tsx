@@ -55,16 +55,30 @@ describe("management pages", () => {
   });
 
   it("loads request-log privacy settings and details", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url.includes("settings")) return json({ content_stored: false, retention_days: 730 });
       if (url.endsWith("/req-1")) return json({ request_id: "req-1", upstream_model: "gpt-versioned" });
-      return json({ data: [{ request_id: "req-1", status: "ok", model: "gpt" }] });
+      if (url.includes("before=")) return json({ data: [{ request_id: "req-2", timestamp: "2026-08-27T14:00:00Z", status: "ok", input_tokens: 1, output_tokens: 2, total_tokens: 3, latency_ms: 10, cost: 0, currency: "USD" }] });
+      return json({
+        data: [{ request_id: "req-1", timestamp: "2026-08-27T15:52:34Z", status: "ok", model: "gpt", upstream_model: "gpt-versioned", provider_id: "azure-open-ai", provider_endpoint_name: "luna", provider_endpoint_type: "openai-compatible", cache_status: "miss", input_tokens: 7, output_tokens: 12, total_tokens: 19, latency_ms: 1006, cost: 0.0002414, currency: "USD" }],
+        next_before: "2026-08-27T15:52:34Z",
+        next_request_id: "req-1"
+      });
     });
     renderAuthenticated(<RequestLogsPage />);
     expect(await screen.findByText("req-1")).toBeInTheDocument();
+    expect(screen.getByText("2026-08-27 15:52:34 UTC")).toBeInTheDocument();
+    expect(screen.getByText("azure-open-ai")).toBeInTheDocument();
+    expect(screen.getByText("Miss")).toBeInTheDocument();
+    expect(screen.getByText("$0.000241")).toBeInTheDocument();
+    expect(screen.getByText("USD")).toBeInTheDocument();
+    expect(screen.getByText("1,006 ms")).toBeInTheDocument();
     expect(await screen.findByText(/content_stored/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Details" }));
-    expect(await screen.findByText(/gpt-versioned/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Load older" }));
+    expect(await screen.findByText("req-2")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("before=2026-08-27T15%3A52%3A34Z") && String(call[0]).includes("before_request_id=req-1"))).toBe(true);
+    await userEvent.click(screen.getAllByRole("button", { name: "Details" })[0]);
+    expect(await screen.findAllByText(/gpt-versioned/)).toHaveLength(2);
   });
 });
