@@ -42,6 +42,12 @@ type Handler struct {
 	audit         AuditClient
 	apiDocs       apiDocsConfig
 	adminUI       bool
+	adminState    *AdminStateRuntime
+}
+
+func (h Handler) WithAdminState(runtime *AdminStateRuntime) Handler {
+	h.adminState = runtime
+	return h
 }
 
 // WithAPIDocs enables the embedded API documentation. Interactive requests are

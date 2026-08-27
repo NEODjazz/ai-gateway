@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -13,17 +14,24 @@ import (
 // ControlPlaneSnapshot is the durable management state. Credential material is
 // already encrypted by the Router before it crosses the store boundary.
 type ControlPlaneSnapshot struct {
-	Revision    int64                         `json:"revision"`
-	Providers   []ManagedProvider             `json:"providers"`
-	Credentials []EncryptedCredentialSnapshot `json:"credentials"`
-	Deployments []ModelDeployment             `json:"deployments"`
-	ModelGroups []ModelGroup                  `json:"model_groups"`
+	SchemaVersion int                           `json:"schema_version,omitempty"`
+	Revision      int64                         `json:"revision"`
+	Providers     []ManagedProvider             `json:"providers"`
+	Credentials   []EncryptedCredentialSnapshot `json:"credentials"`
+	Deployments   []ModelDeployment             `json:"deployments"`
+	ModelGroups   []ModelGroup                  `json:"model_groups"`
+	Guardrails    []GuardrailPolicy             `json:"guardrails,omitempty"`
+	AdminState    json.RawMessage               `json:"admin_state,omitempty"`
 }
 
 type EncryptedCredentialSnapshot struct {
 	Credential Credential `json:"credential"`
 	Nonce      []byte     `json:"nonce"`
 	Ciphertext []byte     `json:"ciphertext"`
+}
+
+type adminStateRegistry struct {
+	current atomic.Pointer[json.RawMessage]
 }
 
 type ControlPlaneStore interface {
@@ -45,7 +53,7 @@ type controlPlaneRuntime struct {
 }
 
 func (r *Router) controlPlaneSnapshot() ControlPlaneSnapshot {
-	snapshot := ControlPlaneSnapshot{}
+	snapshot := ControlPlaneSnapshot{SchemaVersion: 2}
 	if current := r.providers.current.Load(); current != nil {
 		for _, item := range *current {
 			snapshot.Providers = append(snapshot.Providers, item)
@@ -69,12 +77,21 @@ func (r *Router) controlPlaneSnapshot() ControlPlaneSnapshot {
 			snapshot.ModelGroups = append(snapshot.ModelGroups, item)
 		}
 	}
+	if current := r.guardrails.current.Load(); current != nil {
+		for _, item := range *current {
+			snapshot.Guardrails = append(snapshot.Guardrails, item)
+		}
+	}
+	if current := r.adminState.current.Load(); current != nil {
+		snapshot.AdminState = append(json.RawMessage(nil), (*current)...)
+	}
 	sort.Slice(snapshot.Providers, func(i, j int) bool { return snapshot.Providers[i].ID < snapshot.Providers[j].ID })
 	sort.Slice(snapshot.Credentials, func(i, j int) bool {
 		return snapshot.Credentials[i].Credential.ID < snapshot.Credentials[j].Credential.ID
 	})
 	sort.Slice(snapshot.Deployments, func(i, j int) bool { return snapshot.Deployments[i].ID < snapshot.Deployments[j].ID })
 	sort.Slice(snapshot.ModelGroups, func(i, j int) bool { return snapshot.ModelGroups[i].ID < snapshot.ModelGroups[j].ID })
+	sort.Slice(snapshot.Guardrails, func(i, j int) bool { return snapshot.Guardrails[i].Name < snapshot.Guardrails[j].Name })
 	return snapshot
 }
 
@@ -130,6 +147,19 @@ func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error 
 	r.credentials.mu.Unlock()
 	r.deployments.current.Store(&deployments)
 	r.modelGroups.current.Store(&groups)
+	if snapshot.SchemaVersion >= 2 {
+		guardrails := make(map[string]GuardrailPolicy, len(snapshot.Guardrails))
+		for _, item := range snapshot.Guardrails {
+			normalized, err := normalizeGuardrailPolicy(item.Name, item)
+			if err != nil || guardrails[normalized.Name].Name != "" {
+				return fmt.Errorf("invalid persisted guardrail policy %q", item.Name)
+			}
+			guardrails[normalized.Name] = normalized
+		}
+		r.guardrails.current.Store(&guardrails)
+		adminState := append(json.RawMessage(nil), snapshot.AdminState...)
+		r.adminState.current.Store(&adminState)
+	}
 	endpoints := make([]Endpoint, 0, len(deployments))
 	for _, deployment := range deployments {
 		managed := providers[deployment.ProviderID]
@@ -146,6 +176,48 @@ func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error 
 	sort.SliceStable(endpoints, func(i, j int) bool { return endpoints[i].Priority < endpoints[j].Priority })
 	r.endpointState.current.Store(&endpoints)
 	return nil
+}
+
+// AdminState returns the opaque durable state used by gateway management
+// registries. Refreshing here makes reads on one replica observe writes made by
+// another replica through the existing control-plane revision mechanism.
+func (r *Router) AdminState(ctx context.Context) (json.RawMessage, int64, error) {
+	if err := r.refreshControlPlane(ctx); err != nil {
+		return nil, 0, err
+	}
+	if r.controlPlane != nil {
+		r.controlPlane.mu.Lock()
+		defer r.controlPlane.mu.Unlock()
+	}
+	var payload json.RawMessage
+	if current := r.adminState.current.Load(); current != nil {
+		payload = append(json.RawMessage(nil), (*current)...)
+	}
+	revision := int64(0)
+	if r.controlPlane != nil {
+		revision = r.controlPlane.revision
+	}
+	return payload, revision, nil
+}
+
+// UpdateAdminState atomically persists opaque gateway management state along
+// with the provider control plane. A cross-replica conflict is returned to the
+// caller and the previous in-memory state is restored.
+func (r *Router) UpdateAdminState(ctx context.Context, payload json.RawMessage) (int64, error) {
+	previous, unlock, err := r.beginControlMutation(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
+	next := append(json.RawMessage(nil), payload...)
+	r.adminState.current.Store(&next)
+	if err := r.persistControlMutation(ctx, previous); err != nil {
+		return 0, err
+	}
+	if r.controlPlane == nil {
+		return 0, nil
+	}
+	return r.controlPlane.revision, nil
 }
 
 func (r *Router) beginControlMutation(ctx context.Context) (ControlPlaneSnapshot, func(), error) {

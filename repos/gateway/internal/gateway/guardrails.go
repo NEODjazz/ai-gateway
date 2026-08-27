@@ -59,10 +59,21 @@ func (h Handler) UpdateGuardrailPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
 	}
-	saved, err := controller.UpdateGuardrailPolicy(name, provider.GuardrailPolicy{Description: input.Description, DLP: input.DLP, AV: input.AV, Enabled: input.Enabled})
+	policy := provider.GuardrailPolicy{Description: input.Description, DLP: input.DLP, AV: input.AV, Enabled: input.Enabled}
+	var saved provider.GuardrailPolicy
+	var err error
+	if durable, ok := h.provider.(provider.DurableGuardrailController); ok {
+		saved, err = durable.UpdateGuardrailPolicyDurable(r.Context(), name, policy)
+	} else {
+		saved, err = controller.UpdateGuardrailPolicy(name, policy)
+	}
 	if err != nil {
 		h.auditOutcome(r.Context(), audit, event, "failed")
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid guardrail policy")
+		if errors.Is(err, provider.ErrControlPlaneConflict) {
+			writeError(w, http.StatusConflict, "revision_conflict", "control plane changed; refresh and retry")
+		} else {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid guardrail policy")
+		}
 		return
 	}
 	h.auditOutcome(r.Context(), audit, event, "succeeded")

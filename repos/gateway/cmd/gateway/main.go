@@ -51,6 +51,9 @@ func main() {
 	}, metrics)
 	guardrailMonitor := gateway.NewGuardrailMonitor(200)
 	loggingRegistry := gateway.NewLoggingRegistry(nil)
+	accessRegistry := gateway.NewAccessRegistry()
+	mcpRegistry := gateway.NewMCPRegistry()
+	agentRegistry := gateway.NewAgentRegistry()
 	dlpModule := gateway.NewGuardrailMonitoringModule(modules.DLP(cfg.Modules.DLP.Required, cfg.Modules.DLP.URL), guardrailMonitor)
 	avModule := gateway.NewGuardrailMonitoringModule(modules.AV(cfg.Modules.AV.Required, cfg.Modules.AV.URL), guardrailMonitor)
 	providerPipeline := modules.NewPipelineWithObserver([]modules.Module{
@@ -95,6 +98,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	adminController, ok := llmProvider.(gateway.AdminStateController)
+	if !ok {
+		log.Fatal("provider does not support durable admin state")
+	}
+	adminState, err := gateway.NewAdminStateRuntime(appCtx, adminController, []byte(cfg.Provider.CredentialKey), accessRegistry, mcpRegistry, agentRegistry, loggingRegistry)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	var rateLimits gateway.RateLimitStore = gateway.NewMemoryRateLimitStore()
 	if redisStore != nil {
@@ -115,7 +126,7 @@ func main() {
 			return providerControlStore.Ping(ctx)
 		}
 	}
-	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithGuardrailMonitor(guardrailMonitor).WithCacheDiagnostics(gateway.CacheRuntimeConfig{ExactTTLSeconds: cfg.Cache.TTLSeconds, ExactMaxBytes: cfg.Cache.MaxBytes, SemanticTTLSeconds: cfg.Cache.Semantic.TTLSeconds, SemanticMaxEntries: cfg.Cache.Semantic.MaxEntries, SemanticMaxBytes: cfg.Cache.Semantic.MaxBytes}).WithLoggingRegistry(loggingRegistry).WithAgentRegistry(gateway.NewAgentRegistry()).WithMCPRegistry(gateway.NewMCPRegistry()).WithAccessRegistry(gateway.NewAccessRegistry())
+	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithGuardrailMonitor(guardrailMonitor).WithCacheDiagnostics(gateway.CacheRuntimeConfig{ExactTTLSeconds: cfg.Cache.TTLSeconds, ExactMaxBytes: cfg.Cache.MaxBytes, SemanticTTLSeconds: cfg.Cache.Semantic.TTLSeconds, SemanticMaxEntries: cfg.Cache.Semantic.MaxEntries, SemanticMaxBytes: cfg.Cache.Semantic.MaxBytes}).WithLoggingRegistry(loggingRegistry).WithAgentRegistry(agentRegistry).WithMCPRegistry(mcpRegistry).WithAccessRegistry(accessRegistry).WithAdminState(adminState)
 	if cfg.APIDocs.Enabled {
 		handler = handler.WithAPIDocs(cfg.APIDocs.TryItOutEnabled)
 	}

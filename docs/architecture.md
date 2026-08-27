@@ -174,12 +174,17 @@ Endpoints первоначально загружаются из `PROVIDERS_JSON
 по возрастанию `priority`. Если задан
 `PROVIDER_CONTROL_PLANE_POSTGRES_DSN`, пустое persistent-состояние атомарно
 инициализируется этой конфигурацией, после чего PostgreSQL становится source of
-truth для Providers, encrypted Credentials, Deployments и Model Groups.
+truth для Providers, encrypted Credentials, Deployments, Model Groups,
+Guardrail Policies, Projects/Access Groups, MCP Servers/Toolsets, Agent/Tool
+Policy templates и Logging Destinations.
 Изменение сначала сохраняет versioned JSONB snapshot с optimistic revision и
 только затем считается успешным. При ошибке runtime snapshot откатывается.
 Реплики сверяют durable revision и Redis revision marker, перечитывают snapshot
 и атомарно перестраивают provider clients. Plaintext credentials границу Router
 не покидают: PostgreSQL получает только AES-GCM nonce/ciphertext и metadata.
+Bearer secrets для logging destinations шифруются отдельным domain-separated
+ключом. Любая неуспешная admin-state запись откатывает локальную мутацию, а
+конкурирующая запись другой реплики возвращает `409 revision_conflict`.
 
 Gateway также раздаёт встроенный `/ui/` control-plane console без внешних CDN.
 UI является недоверенным статическим клиентом: bearer хранится только в

@@ -59,11 +59,16 @@ type LoggingRegistry struct {
 var errInvalidLoggingDestination = errors.New("invalid logging destination")
 
 func NewLoggingRegistry(client *http.Client) *LoggingRegistry {
+	registry := newLoggingRegistryWithoutWorker(client)
+	go registry.run()
+	return registry
+}
+
+func newLoggingRegistryWithoutWorker(client *http.Client) *LoggingRegistry {
 	if client == nil {
 		client = &http.Client{Timeout: 2 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	registry := &LoggingRegistry{destinations: map[string]loggingDestinationEntry{}, client: client, queue: make(chan loggingDelivery, 256)}
-	go registry.run()
 	return registry
 }
 

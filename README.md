@@ -170,14 +170,17 @@ rotated; list and mutation responses contain metadata only. Set a stable
 `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` in managed environments. Without it, the
 gateway generates an ephemeral process key suitable only for local runtime
 management. Set `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` to persist providers,
-encrypted credentials, deployments, and model groups as one versioned JSONB
-snapshot. The gateway seeds an empty store from `PROVIDERS_JSON`, then treats
+encrypted credentials, deployments, model groups, guardrail policies,
+projects/access groups, MCP servers/toolsets, agent/tool-policy templates, and
+logging destinations as one versioned JSONB snapshot. Logging bearer secrets
+use domain-separated AES-GCM encryption and are never returned by the API. The
+gateway seeds an empty store from `PROVIDERS_JSON`, then treats
 PostgreSQL as the source of truth. Every mutation uses an optimistic revision,
 is committed before the API reports success, and is rolled back in memory when
 persistence fails. Replicas poll the durable revision (one second by default),
 while Redis carries the same revision marker for cross-replica observability.
 Startup fails if PostgreSQL is unavailable, the persisted snapshot is invalid,
-or the stable encryption key cannot decrypt a credential.
+or the stable encryption key cannot decrypt a credential or logging secret.
 The Usage & Spend view reads final request outcomes from ClickHouse for a
 bounded 7/30/90-day window and breaks requests, tokens, latency, and spend down
 by day, model, and provider. Costs remain separated by currency.

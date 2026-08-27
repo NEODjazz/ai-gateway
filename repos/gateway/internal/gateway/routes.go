@@ -116,7 +116,11 @@ func DocumentedRoutes() []RouteContract {
 func Routes(handler Handler) http.Handler {
 	mux := http.NewServeMux()
 	for _, route := range gatewayRoutes {
-		mux.Handle(route.Method+" "+route.Path, route.handler(handler))
+		h := route.handler(handler)
+		if handler.adminState != nil && isDurableAdminStateRoute(route.Path) {
+			h = handler.adminState.Wrap(h, isDurableAdminStateMutation(route.Method, route.Path))
+		}
+		mux.Handle(route.Method+" "+route.Path, h)
 	}
 	if handler.apiDocs.enabled {
 		registerAPIDocs(mux, handler.apiDocs)

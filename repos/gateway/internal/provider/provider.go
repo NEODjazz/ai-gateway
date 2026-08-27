@@ -151,6 +151,7 @@ type Router struct {
 	modelGroups      *modelGroupRegistry
 	controlPlane     *controlPlaneRuntime
 	guardrails       *guardrailRegistry
+	adminState       *adminStateRegistry
 	deploymentHealth *deploymentHealthRegistry
 }
 
@@ -282,6 +283,9 @@ func NewWithError(cfg Config) (Provider, error) {
 	}
 	router.guardrails = &guardrailRegistry{}
 	router.guardrails.current.Store(&initialGuardrails)
+	emptyAdminState := json.RawMessage(nil)
+	router.adminState = &adminStateRegistry{}
+	router.adminState.current.Store(&emptyAdminState)
 	router.deploymentHealth = newDeploymentHealthRegistry()
 	if cfg.ControlPlaneStore != nil {
 		refresh := cfg.ControlPlaneRefresh

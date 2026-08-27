@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"ai-gateway-gateway/internal/config"
 )
 
 type memoryControlPlaneStore struct {
@@ -113,5 +115,49 @@ func TestControlPlaneRollsBackMutationWhenPersistenceFails(t *testing.T) {
 	}
 	if providers := router.ListProviders(context.Background()); len(providers) != 0 {
 		t.Fatalf("failed mutation leaked into runtime: %+v", providers)
+	}
+}
+
+func TestControlPlaneSynchronizesAdminStateAndGuardrails(t *testing.T) {
+	store := &memoryControlPlaneStore{}
+	config := Config{CredentialEncryptionKey: []byte("stable-key"), ControlPlaneStore: store, ControlPlaneRefresh: time.Nanosecond}
+	firstProvider, err := NewWithError(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondProvider, err := NewWithError(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, second := firstProvider.(*Router), secondProvider.(*Router)
+	payload := json.RawMessage(`{"schema_version":1,"projects":[{"id":"project-a"}]}`)
+	if _, err := first.UpdateAdminState(context.Background(), payload); err != nil {
+		t.Fatal(err)
+	}
+	restored, _, err := second.AdminState(context.Background())
+	if err != nil || string(restored) != string(payload) {
+		t.Fatalf("admin state did not synchronize: payload=%s err=%v", restored, err)
+	}
+	if _, err := first.UpdateGuardrailPolicyDurable(context.Background(), "strict", GuardrailPolicy{DLP: true, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := second.AdminState(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	policy, found := second.GetGuardrailPolicy("strict")
+	if !found || !policy.DLP || !policy.Enabled {
+		t.Fatalf("guardrail did not synchronize: %+v found=%v", policy, found)
+	}
+}
+
+func TestLegacyControlPlaneSnapshotPreservesConfiguredGuardrails(t *testing.T) {
+	store := &memoryControlPlaneStore{found: true, snapshot: ControlPlaneSnapshot{Revision: 1}}
+	runtime, err := NewWithError(Config{CredentialEncryptionKey: []byte("stable-key"), ControlPlaneStore: store, GuardrailPolicies: map[string]config.GuardrailPolicyConfig{"legacy": {DLP: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, found := runtime.(*Router).GetGuardrailPolicy("legacy")
+	if !found || !policy.DLP {
+		t.Fatalf("legacy snapshot removed configured guardrail: %+v found=%v", policy, found)
 	}
 }

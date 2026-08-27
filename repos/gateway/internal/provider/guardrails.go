@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"errors"
 	"sort"
 	"strings"
@@ -21,6 +22,10 @@ type GuardrailController interface {
 	ListGuardrailPolicies() []GuardrailPolicy
 	GetGuardrailPolicy(string) (GuardrailPolicy, bool)
 	UpdateGuardrailPolicy(string, GuardrailPolicy) (GuardrailPolicy, error)
+}
+
+type DurableGuardrailController interface {
+	UpdateGuardrailPolicyDurable(context.Context, string, GuardrailPolicy) (GuardrailPolicy, error)
 }
 
 var ErrInvalidGuardrailPolicy = errors.New("invalid guardrail policy")
@@ -52,17 +57,11 @@ func (r *Router) GetGuardrailPolicy(name string) (GuardrailPolicy, bool) {
 	return policy, ok
 }
 func (r *Router) UpdateGuardrailPolicy(name string, policy GuardrailPolicy) (GuardrailPolicy, error) {
-	name = strings.TrimSpace(name)
-	policy.Description = strings.TrimSpace(policy.Description)
-	if name == "" || len(name) > 128 || len(policy.Description) > 1024 || (!policy.DLP && !policy.AV) {
-		return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
+	policy, err := normalizeGuardrailPolicy(name, policy)
+	if err != nil {
+		return GuardrailPolicy{}, err
 	}
-	for _, value := range name {
-		if !(value >= 'a' && value <= 'z') && !(value >= 'A' && value <= 'Z') && !(value >= '0' && value <= '9') && value != '-' && value != '_' && value != '.' {
-			return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
-		}
-	}
-	policy.Name = name
+	name = policy.Name
 	if r.guardrails == nil {
 		r.guardrails = &guardrailRegistry{}
 	}
@@ -75,5 +74,36 @@ func (r *Router) UpdateGuardrailPolicy(name string, policy GuardrailPolicy) (Gua
 	}
 	next[name] = policy
 	r.guardrails.current.Store(&next)
+	return policy, nil
+}
+
+func (r *Router) UpdateGuardrailPolicyDurable(ctx context.Context, name string, policy GuardrailPolicy) (GuardrailPolicy, error) {
+	previous, unlock, err := r.beginControlMutation(ctx)
+	if err != nil {
+		return GuardrailPolicy{}, err
+	}
+	defer unlock()
+	saved, err := r.UpdateGuardrailPolicy(name, policy)
+	if err != nil {
+		return GuardrailPolicy{}, err
+	}
+	if err := r.persistControlMutation(ctx, previous); err != nil {
+		return GuardrailPolicy{}, err
+	}
+	return saved, nil
+}
+
+func normalizeGuardrailPolicy(name string, policy GuardrailPolicy) (GuardrailPolicy, error) {
+	name = strings.TrimSpace(name)
+	policy.Description = strings.TrimSpace(policy.Description)
+	if name == "" || len(name) > 128 || len(policy.Description) > 1024 || (!policy.DLP && !policy.AV) {
+		return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
+	}
+	for _, value := range name {
+		if !(value >= 'a' && value <= 'z') && !(value >= 'A' && value <= 'Z') && !(value >= '0' && value <= '9') && value != '-' && value != '_' && value != '.' {
+			return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
+		}
+	}
+	policy.Name = name
 	return policy, nil
 }
