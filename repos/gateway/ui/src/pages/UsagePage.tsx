@@ -5,7 +5,57 @@ import { ErrorState, LoadingState } from "../components/AsyncState";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
 
-type UsageReport = { totals?: Record<string, unknown>; by_model?: Row[]; by_provider?: Row[]; models?: Row[]; providers?: Row[] };
+type UsageAggregate = {
+  name?: string;
+  currency: string;
+  requests: number;
+  errors: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost: number;
+  avg_latency_ms: number;
+  cache_hits: number;
+  cost_per_request: number;
+};
+
+type UsageReport = {
+  totals: UsageAggregate[];
+  by_model: UsageAggregate[];
+  by_provider: UsageAggregate[];
+};
+
+const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+
+export function formatCost(cost: number, currency: string) {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency || "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: cost > 0 && cost < 0.01 ? 6 : 2
+    }).format(cost);
+  } catch {
+    return `${currency || "USD"} ${cost.toFixed(cost > 0 && cost < 0.01 ? 6 : 2)}`;
+  }
+}
+
+function totalRows(report: UsageReport) {
+  const requests = report.totals.reduce((sum, row) => sum + row.requests, 0);
+  const tokens = report.totals.reduce((sum, row) => sum + row.total_tokens, 0);
+  const weightedLatency = requests === 0 ? 0 : report.totals.reduce((sum, row) => sum + row.avg_latency_ms * row.requests, 0) / requests;
+  const spend = report.totals.length ? report.totals.map((row) => formatCost(row.cost, row.currency)).join(" · ") : formatCost(0, "USD");
+  return { requests, tokens, weightedLatency, spend };
+}
+
+function displayRows(rows: UsageAggregate[], dimension: "model" | "provider"): Row[] {
+  return rows.map((row) => ({
+    [dimension]: row.name || "Unknown",
+    requests: row.requests,
+    tokens: row.total_tokens,
+    spend: formatCost(row.cost, row.currency)
+  }));
+}
 
 export function UsagePage() {
   const { client } = useAuth();
@@ -16,14 +66,15 @@ export function UsagePage() {
     setReport(null); setError("");
     client.request<UsageReport>(`/admin/v1/usage/report?days=${days}`).then(setReport).catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load usage"));
   }, [client, days]);
-  const totals = report?.totals || {};
-  const columns = [{ key: "model", label: "Model" }, { key: "provider", label: "Provider" }, { key: "requests", label: "Requests" }, { key: "tokens", label: "Tokens" }, { key: "spend", label: "Spend" }];
+  const totals = report ? totalRows(report) : { requests: 0, tokens: 0, weightedLatency: 0, spend: formatCost(0, "USD") };
+  const models = report ? displayRows(report.by_model || [], "model") : [];
+  const providers = report ? displayRows(report.by_provider || [], "provider") : [];
   function exportCSV() {
     if (!report) return;
-    const lines = ["dimension,type,requests,tokens,spend"];
-    for (const [type, rows] of [["model", report.by_model || report.models || []], ["provider", report.by_provider || report.providers || []]] as const) for (const row of rows) lines.push([JSON.stringify(String(row[type] ?? "")), type, row.requests ?? 0, row.tokens ?? 0, JSON.stringify(String(row.spend ?? ""))].join(","));
+    const lines = ["dimension,type,requests,total_tokens,cost,currency"];
+    for (const [type, rows] of [["model", report.by_model || []], ["provider", report.by_provider || []]] as const) for (const row of rows) lines.push([JSON.stringify(row.name || ""), type, row.requests, row.total_tokens, row.cost, JSON.stringify(row.currency)].join(","));
     const url = URL.createObjectURL(new Blob([`${lines.join("\n")}\n`], { type: "text/csv" }));
     const link = document.createElement("a"); link.href = url; link.download = `ai-gateway-usage-${days}d.csv`; link.click(); URL.revokeObjectURL(url);
   }
-  return <><PageHeader eyebrow="Analytics" title="Usage & spend" description="Final outcomes aggregated without combining currencies." actions={<><select aria-label="Window" value={days} onChange={(event) => setDays(Number(event.target.value))}><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option></select><button className="secondary" disabled={!report} onClick={exportCSV}>Export CSV</button></>} />{error ? <ErrorState message={error} /> : !report ? <LoadingState /> : <><div className="stats-grid"><StatCard label="Requests" value={String(totals.requests ?? 0)} /><StatCard label="Tokens" value={String(totals.tokens ?? totals.total_tokens ?? 0)} /><StatCard label="Spend" value={String(totals.spend ?? "$0.00")} /><StatCard label="Average latency" value={String(totals.average_latency_ms ?? 0)} detail="ms" /></div><div className="split-grid"><section><h2>Usage by model</h2><DataTable rows={report.by_model || report.models || []} columns={columns.filter((column) => column.key !== "provider")} /></section><section><h2>Usage by provider</h2><DataTable rows={report.by_provider || report.providers || []} columns={columns.filter((column) => column.key !== "model")} /></section></div></>}</>;
+  return <><PageHeader eyebrow="Analytics" title="Usage & spend" description="Final outcomes aggregated without combining currencies." actions={<><select aria-label="Window" value={days} onChange={(event) => setDays(Number(event.target.value))}><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option></select><button className="secondary" disabled={!report} onClick={exportCSV}>Export CSV</button></>} />{error ? <ErrorState message={error} /> : !report ? <LoadingState /> : <><div className="stats-grid"><StatCard label="Requests" value={number.format(totals.requests)} /><StatCard label="Tokens" value={number.format(totals.tokens)} /><StatCard label="Spend" value={totals.spend} /><StatCard label="Average latency" value={number.format(totals.weightedLatency)} detail="ms" /></div><div className="split-grid"><section><h2>Usage by model</h2><DataTable rows={models} columns={[{ key: "model", label: "Model" }, { key: "requests", label: "Requests" }, { key: "tokens", label: "Tokens" }, { key: "spend", label: "Spend" }]} /></section><section><h2>Usage by provider</h2><DataTable rows={providers} columns={[{ key: "provider", label: "Provider" }, { key: "requests", label: "Requests" }, { key: "tokens", label: "Tokens" }, { key: "spend", label: "Spend" }]} /></section></div></>}</>;
 }

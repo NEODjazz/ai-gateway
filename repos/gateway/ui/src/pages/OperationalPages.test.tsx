@@ -13,12 +13,32 @@ function authenticated(node: React.ReactNode) {
 
 describe("operational pages", () => {
   it("renders usage totals and changes the bounded window", async () => {
-    const response = { totals: { requests: 4, total_tokens: 20, spend: "USD 0.10", average_latency_ms: 12 }, by_model: [{ model: "gpt", requests: 4, tokens: 20 }], by_provider: [] };
+    const aggregate = { currency: "USD", requests: 4, errors: 0, input_tokens: 8, output_tokens: 12, total_tokens: 20, cost: 0.00265, avg_latency_ms: 12, cache_hits: 0, cost_per_request: 0.0006625 };
+    const response = { totals: [aggregate], by_model: [{ ...aggregate, name: "gpt" }], by_provider: [{ ...aggregate, name: "azure-open-ai" }] };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
     authenticated(<UsagePage />);
-    expect(await screen.findByText("USD 0.10")).toBeInTheDocument();
+    expect(await screen.findAllByText("$0.00265")).toHaveLength(3);
+    expect(screen.getByText("gpt")).toBeInTheDocument();
+    expect(screen.getByText("azure-open-ai")).toBeInTheDocument();
+    expect(screen.getAllByText("20")).toHaveLength(3);
     await userEvent.selectOptions(screen.getByLabelText("Window"), "7");
     await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/admin/v1/usage/report?days=7", expect.anything()));
+  });
+
+  it("keeps spend separated by currency and weights latency by request count", async () => {
+    const base = { errors: 0, input_tokens: 0, output_tokens: 0, total_tokens: 10, cache_hits: 0, cost_per_request: 0 };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      totals: [
+        { ...base, currency: "USD", requests: 1, cost: 1, avg_latency_ms: 100 },
+        { ...base, currency: "EUR", requests: 3, cost: 2, avg_latency_ms: 300 }
+      ],
+      by_model: [],
+      by_provider: []
+    }), { status: 200 }));
+    authenticated(<UsagePage />);
+    expect(await screen.findByText("$1.00 · €2.00")).toBeInTheDocument();
+    expect(screen.getByText("250")).toBeInTheDocument();
+    expect(screen.getByText("20")).toBeInTheDocument();
   });
 
   it("runs a playground request with max_completion_tokens", async () => {
