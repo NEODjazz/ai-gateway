@@ -34,14 +34,15 @@ type JWTAuthConfig struct {
 }
 
 type VirtualKey struct {
-	Token         string   `json:"token"`
-	UserID        string   `json:"user_id"`
-	TeamID        string   `json:"team_id,omitempty"`
-	Roles         []string `json:"roles,omitempty"`
-	AllowedModels []string `json:"allowed_models,omitempty"`
-	AllowedTools  []string `json:"allowed_tools,omitempty"`
-	RateLimitRPM  int      `json:"rate_limit_rpm,omitempty"`
-	RateLimitTPM  int      `json:"rate_limit_tpm,omitempty"`
+	Token          string   `json:"token"`
+	UserID         string   `json:"user_id,omitempty"`
+	TeamID         string   `json:"team_id,omitempty"`
+	OrganizationID string   `json:"organization_id,omitempty"`
+	Roles          []string `json:"roles,omitempty"`
+	AllowedModels  []string `json:"allowed_models,omitempty"`
+	AllowedTools   []string `json:"allowed_tools,omitempty"`
+	RateLimitRPM   int      `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM   int      `json:"rate_limit_tpm,omitempty"`
 }
 
 func NewAuthModuleWithVirtualKeys(required bool, keys []VirtualKey) AuthModule {
@@ -59,7 +60,7 @@ func VirtualKeysFromEnv() map[string]VirtualKey {
 func indexVirtualKeys(keys []VirtualKey) map[string]VirtualKey {
 	indexed := make(map[string]VirtualKey, len(keys))
 	for _, key := range keys {
-		if key.Token == "" || key.UserID == "" {
+		if key.Token == "" || (key.UserID == "" && key.TeamID == "" && key.OrganizationID == "") {
 			continue
 		}
 		fingerprint := credentialFingerprint(key.Token)
@@ -103,7 +104,11 @@ func (m AuthModule) Required() bool {
 func (m AuthModule) Handle(_ context.Context, req *RequestContext) error {
 	if key, ok := m.virtualKeys[credentialFingerprint(req.APIKey)]; ok {
 		req.UserID = key.UserID
+		if req.UserID == "" {
+			req.UserID = "virtual-key:" + credentialFingerprint(req.APIKey)
+		}
 		req.TeamID = key.TeamID
+		req.OrganizationID = key.OrganizationID
 		req.Roles = append([]string(nil), key.Roles...)
 		req.AllowedModels = append([]string(nil), key.AllowedModels...)
 		req.AllowedTools = append([]string(nil), key.AllowedTools...)

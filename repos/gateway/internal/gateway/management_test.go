@@ -119,6 +119,18 @@ func TestAdminVirtualKeyCreateReturnsOneTimeTokenAndAuditIdentity(t *testing.T) 
 	}
 }
 
+func TestAdminVirtualKeyCreateAllowsOrganizationOwnerWithoutUser(t *testing.T) {
+	client := &recordingManagementClient{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithManagement(client)
+	request := httptest.NewRequest(http.MethodPost, "/admin/v1/keys", strings.NewReader(`{"organization_id":"org-1","allowed_models":["gpt-*"]}`))
+	request.Header.Set("Authorization", "Bearer client-secret")
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || client.spec.OrganizationID != "org-1" || client.spec.UserID != "" || client.spec.TeamID != "" {
+		t.Fatalf("organization owner was not forwarded: status=%d spec=%+v body=%s", response.Code, client.spec, response.Body.String())
+	}
+}
+
 func TestAdminVirtualKeyListReturnsSafeMetadata(t *testing.T) {
 	client := &recordingManagementClient{}
 	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithManagement(client)

@@ -22,7 +22,7 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql", "005_virtual_key_metadata.sql", "006_identity_directory.sql", "007_organizations.sql"} {
+	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql", "005_virtual_key_metadata.sql", "006_identity_directory.sql", "007_organizations.sql", "008_virtual_key_ownership.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
 			t.Fatal(err)
@@ -41,17 +41,17 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
-	oldID, newID, expiredID := "key-old-"+suffix, "key-new-"+suffix, "key-expired-"+suffix
+	oldID, newID, expiredID, organizationKeyID := "key-old-"+suffix, "key-new-"+suffix, "key-expired-"+suffix, "key-org-"+suffix
 	directoryUserID, directoryTeamID, organizationID := "user-"+suffix, "team-"+suffix, "org-"+suffix
 	t.Cleanup(func() {
+		ids := []string{newID, oldID, expiredID, organizationKeyID}
+		_, _ = pool.Exec(context.Background(), `UPDATE auth_virtual_keys SET rotated_from_id=NULL,rotated_to_id=NULL WHERE id = ANY($1)`, ids)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_virtual_keys WHERE id = ANY($1)`, ids)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_organization_teams WHERE organization_id=$1`, organizationID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_organizations WHERE id=$1`, organizationID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_team_memberships WHERE team_id=$1`, directoryTeamID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_teams WHERE id=$1`, directoryTeamID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, directoryUserID)
-		ids := []string{newID, oldID, expiredID}
-		_, _ = pool.Exec(context.Background(), `UPDATE auth_virtual_keys SET rotated_from_id=NULL,rotated_to_id=NULL WHERE id = ANY($1)`, ids)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_virtual_keys WHERE id = ANY($1)`, ids)
 	})
 	user, err := store.PutUser(ctx, DirectoryUser{ID: directoryUserID, Email: "owner@example.test", Name: "Owner", Status: "active", Roles: []string{"developer"}})
 	if err != nil || user.Name != "Owner" {
@@ -79,6 +79,13 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	organization, err = store.PutOrganizationTeam(ctx, organizationID, directoryTeamID)
 	if err != nil || len(organization.TeamIDs) != 1 || organization.TeamIDs[0] != directoryTeamID {
 		t.Fatalf("assign organization team=%+v err=%v", organization, err)
+	}
+	organizationToken := "organization-token-" + suffix
+	if err := store.Create(ctx, StoredVirtualKey{ID: organizationKeyID, OrganizationID: organizationID, Roles: []string{"developer"}}, credentialLookupHash(organizationToken, "pepper")); err != nil {
+		t.Fatal(err)
+	}
+	if found, ok, err := store.Lookup(ctx, credentialLookupHash(organizationToken, "pepper")); err != nil || !ok || found.OrganizationID != organizationID || found.UserID != "" {
+		t.Fatalf("organization-owned key lookup failed: key=%+v ok=%v err=%v", found, ok, err)
 	}
 
 	oldToken := "old-token-" + suffix

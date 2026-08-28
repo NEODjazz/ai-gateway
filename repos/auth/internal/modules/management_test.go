@@ -102,7 +102,13 @@ func TestRotateAndRevokeVirtualKeyUsePersistentManager(t *testing.T) {
 func TestManagedVirtualKeyValidation(t *testing.T) {
 	module := NewAuthModuleWithStore(true, &managementStore{}, "hash-secret", false)
 	if _, err := module.CreateVirtualKey(context.Background(), ManagedVirtualKey{}); err == nil {
-		t.Fatal("missing user_id was accepted")
+		t.Fatal("missing owner was accepted")
+	}
+	if _, err := module.CreateVirtualKey(context.Background(), ManagedVirtualKey{TeamID: "team-1"}); err != nil {
+		t.Fatalf("team-owned key was rejected: %v", err)
+	}
+	if _, err := module.CreateVirtualKey(context.Background(), ManagedVirtualKey{OrganizationID: "org-1"}); err != nil {
+		t.Fatalf("organization-owned key was rejected: %v", err)
 	}
 	past := time.Now().Add(-time.Minute)
 	if _, err := module.CreateVirtualKey(context.Background(), ManagedVirtualKey{UserID: "user", ExpiresAt: &past}); err == nil {

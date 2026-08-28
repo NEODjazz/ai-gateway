@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.14
+  version: 0.1.15
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -2187,7 +2187,10 @@ components:
     VirtualKeyPolicy:
       type: object
       additionalProperties: false
-      required: [user_id]
+      anyOf:
+        - required: [organization_id]
+        - required: [team_id]
+        - required: [user_id]
       properties:
         alias: {type: string, maxLength: 128}
         description: {type: string, maxLength: 1024}
@@ -2197,6 +2200,7 @@ components:
           items: {type: string, minLength: 1, maxLength: 256}
         user_id: {type: string, minLength: 1, maxLength: 256}
         team_id: {type: string, maxLength: 256}
+        organization_id: {type: string, maxLength: 256}
         roles:
           type: array
           items: {type: string, minLength: 1}
@@ -2223,7 +2227,7 @@ components:
     VirtualKeyMetadata:
       type: object
       additionalProperties: false
-      required: [id, user_id, rotation_family_id, created_at]
+      required: [id, rotation_family_id, created_at]
       description: Safe lifecycle projection that never contains a plaintext token or token hash.
       properties:
         id: {type: string}
@@ -2232,6 +2236,7 @@ components:
         tags: {type: array, items: {type: string}}
         user_id: {type: string}
         team_id: {type: string}
+        organization_id: {type: string}
         roles: {type: array, items: {type: string}}
         allowed_models: {type: array, items: {type: string}}
         allowed_tools: {type: array, items: {type: string}}

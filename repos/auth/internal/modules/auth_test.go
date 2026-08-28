@@ -124,6 +124,18 @@ func TestAuthUsesPersistentVirtualKeyPolicy(t *testing.T) {
 	}
 }
 
+func TestAuthAppliesOrganizationOwnedKeyWithSyntheticPrincipal(t *testing.T) {
+	store := &fakeVirtualKeyStore{found: true, key: StoredVirtualKey{ID: "vk-org-1", OrganizationID: "org-1", Roles: []string{"developer"}}}
+	module := NewAuthModuleWithStore(true, store, "pepper", false)
+	req := RequestContext{APIKey: "organization-secret"}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.UserID != "virtual-key:vk-org-1" || req.OrganizationID != "org-1" || req.CredentialID != "vk-org-1" {
+		t.Fatalf("organization key scope was not applied: %+v", req)
+	}
+}
+
 func TestAuthPersistentStoreFailureIsFailClosed(t *testing.T) {
 	store := &fakeVirtualKeyStore{err: errors.New("database unavailable")}
 	module := NewAuthModuleWithStore(true, store, "pepper", true)

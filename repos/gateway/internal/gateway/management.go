@@ -18,17 +18,18 @@ import (
 )
 
 type ManagedVirtualKey struct {
-	Alias         string     `json:"alias,omitempty"`
-	Description   string     `json:"description,omitempty"`
-	Tags          []string   `json:"tags,omitempty"`
-	UserID        string     `json:"user_id"`
-	TeamID        string     `json:"team_id,omitempty"`
-	Roles         []string   `json:"roles,omitempty"`
-	AllowedModels []string   `json:"allowed_models,omitempty"`
-	AllowedTools  []string   `json:"allowed_tools,omitempty"`
-	RateLimitRPM  int        `json:"rate_limit_rpm,omitempty"`
-	RateLimitTPM  int        `json:"rate_limit_tpm,omitempty"`
-	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	Alias          string     `json:"alias,omitempty"`
+	Description    string     `json:"description,omitempty"`
+	Tags           []string   `json:"tags,omitempty"`
+	UserID         string     `json:"user_id,omitempty"`
+	TeamID         string     `json:"team_id,omitempty"`
+	OrganizationID string     `json:"organization_id,omitempty"`
+	Roles          []string   `json:"roles,omitempty"`
+	AllowedModels  []string   `json:"allowed_models,omitempty"`
+	AllowedTools   []string   `json:"allowed_tools,omitempty"`
+	RateLimitRPM   int        `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM   int        `json:"rate_limit_tpm,omitempty"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 }
 
 type IssuedVirtualKey struct {
@@ -42,8 +43,9 @@ type VirtualKeyMetadata struct {
 	Alias          string     `json:"alias,omitempty"`
 	Description    string     `json:"description,omitempty"`
 	Tags           []string   `json:"tags,omitempty"`
-	UserID         string     `json:"user_id"`
+	UserID         string     `json:"user_id,omitempty"`
 	TeamID         string     `json:"team_id,omitempty"`
+	OrganizationID string     `json:"organization_id,omitempty"`
 	Roles          []string   `json:"roles,omitempty"`
 	AllowedModels  []string   `json:"allowed_models,omitempty"`
 	AllowedTools   []string   `json:"allowed_tools,omitempty"`
@@ -404,7 +406,7 @@ func decodeManagedVirtualKey(w http.ResponseWriter, r *http.Request) (ManagedVir
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid virtual key policy")
 		return spec, false
 	}
-	if spec.UserID == "" || spec.RateLimitRPM < 0 || spec.RateLimitTPM < 0 || (spec.ExpiresAt != nil && !spec.ExpiresAt.After(time.Now())) {
+	if (strings.TrimSpace(spec.UserID) == "" && strings.TrimSpace(spec.TeamID) == "" && strings.TrimSpace(spec.OrganizationID) == "") || spec.RateLimitRPM < 0 || spec.RateLimitTPM < 0 || (spec.ExpiresAt != nil && !spec.ExpiresAt.After(time.Now())) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid virtual key policy")
 		return spec, false
 	}

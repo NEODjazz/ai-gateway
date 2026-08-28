@@ -32,6 +32,9 @@ adds alias, description, tags, and reversible disable state. Disabled keys fail
 authorization without losing their policy or rotation history.
 Migration `006_identity_directory.sql` adds users, teams and scoped membership
 roles. A disabled directory user or team also disables its persistent keys.
+Migration `007_organizations.sql` adds organizations, and
+`008_virtual_key_ownership.sql` lets a managed key be owned directly by one
+organization, team, or user.
 
 `AUTH_STATIC_KEY_FALLBACK_ENABLED` controls migration fallback to
 `AUTH_VIRTUAL_KEYS_JSON`. `AUTH_DEMO_KEYS_ENABLED` controls the two built-in demo

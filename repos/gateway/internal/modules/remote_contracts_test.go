@@ -25,7 +25,7 @@ func TestRemoteAuthIsTheOnlyModuleReceivingBearerToken(t *testing.T) {
 		if request.Token != token {
 			t.Fatalf("auth did not receive token: %q", request.Token)
 		}
-		_ = json.NewEncoder(w).Encode(AuthResponse{UserID: "user-1", TeamID: "team-1", CredentialID: "fingerprint", AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp.weather.*"}, RateLimitRPM: 5, RateLimitTPM: 100})
+		_ = json.NewEncoder(w).Encode(AuthResponse{UserID: "user-1", TeamID: "team-1", OrganizationID: "org-1", CredentialID: "fingerprint", AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp.weather.*"}, RateLimitRPM: 5, RateLimitTPM: 100})
 	}))
 	defer server.Close()
 
@@ -39,7 +39,7 @@ func TestRemoteAuthIsTheOnlyModuleReceivingBearerToken(t *testing.T) {
 	if req.APIKey != "" {
 		t.Fatal("auth did not clear bearer token after successful authorization")
 	}
-	if req.TeamID != "team-1" || req.RateLimitRPM != 5 || req.RateLimitTPM != 100 || len(req.AllowedModels) != 1 || len(req.AllowedTools) != 1 {
+	if req.TeamID != "team-1" || req.OrganizationID != "org-1" || req.RateLimitRPM != 5 || req.RateLimitTPM != 100 || len(req.AllowedModels) != 1 || len(req.AllowedTools) != 1 {
 		t.Fatalf("auth policy was not propagated: %+v", req)
 	}
 }
@@ -308,7 +308,7 @@ func TestRemoteAnonymizerUsesEmbeddingInputWithoutIdentity(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		for _, forbidden := range []string{"api_key", "credential_id", "user_id", "team_id", "request", "anonymization_values"} {
+		for _, forbidden := range []string{"api_key", "credential_id", "user_id", "team_id", "organization_id", "request", "anonymization_values"} {
 			if _, found := body[forbidden]; found {
 				t.Fatalf("anonymizer request contains %q", forbidden)
 			}
@@ -334,7 +334,7 @@ func TestRemoteAnonymizerUsesRerankProjectionWithoutIdentity(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		for _, forbidden := range []string{"api_key", "credential_id", "user_id", "team_id", "request", "anonymization_values"} {
+		for _, forbidden := range []string{"api_key", "credential_id", "user_id", "team_id", "organization_id", "request", "anonymization_values"} {
 			if _, found := body[forbidden]; found {
 				t.Fatalf("anonymizer request contains %q", forbidden)
 			}

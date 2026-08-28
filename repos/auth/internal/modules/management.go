@@ -18,17 +18,18 @@ type virtualKeyManager interface {
 }
 
 type ManagedVirtualKey struct {
-	Alias         string     `json:"alias,omitempty"`
-	Description   string     `json:"description,omitempty"`
-	Tags          []string   `json:"tags,omitempty"`
-	UserID        string     `json:"user_id"`
-	TeamID        string     `json:"team_id,omitempty"`
-	Roles         []string   `json:"roles,omitempty"`
-	AllowedModels []string   `json:"allowed_models,omitempty"`
-	AllowedTools  []string   `json:"allowed_tools,omitempty"`
-	RateLimitRPM  int        `json:"rate_limit_rpm,omitempty"`
-	RateLimitTPM  int        `json:"rate_limit_tpm,omitempty"`
-	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	Alias          string     `json:"alias,omitempty"`
+	Description    string     `json:"description,omitempty"`
+	Tags           []string   `json:"tags,omitempty"`
+	UserID         string     `json:"user_id,omitempty"`
+	TeamID         string     `json:"team_id,omitempty"`
+	OrganizationID string     `json:"organization_id,omitempty"`
+	Roles          []string   `json:"roles,omitempty"`
+	AllowedModels  []string   `json:"allowed_models,omitempty"`
+	AllowedTools   []string   `json:"allowed_tools,omitempty"`
+	RateLimitRPM   int        `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM   int        `json:"rate_limit_tpm,omitempty"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 }
 
 type IssuedVirtualKey struct {
@@ -44,8 +45,9 @@ type VirtualKeyMetadata struct {
 	Alias          string     `json:"alias,omitempty"`
 	Description    string     `json:"description,omitempty"`
 	Tags           []string   `json:"tags,omitempty"`
-	UserID         string     `json:"user_id"`
+	UserID         string     `json:"user_id,omitempty"`
 	TeamID         string     `json:"team_id,omitempty"`
+	OrganizationID string     `json:"organization_id,omitempty"`
 	Roles          []string   `json:"roles,omitempty"`
 	AllowedModels  []string   `json:"allowed_models,omitempty"`
 	AllowedTools   []string   `json:"allowed_tools,omitempty"`
@@ -189,10 +191,11 @@ func (m AuthModule) newStoredVirtualKey(spec ManagedVirtualKey, rotatedFrom stri
 func validateStoredVirtualKey(spec ManagedVirtualKey) (StoredVirtualKey, error) {
 	spec.UserID = strings.TrimSpace(spec.UserID)
 	spec.TeamID = strings.TrimSpace(spec.TeamID)
+	spec.OrganizationID = strings.TrimSpace(spec.OrganizationID)
 	spec.Alias = strings.TrimSpace(spec.Alias)
 	spec.Description = strings.TrimSpace(spec.Description)
-	if spec.UserID == "" || len(spec.UserID) > 256 || len(spec.TeamID) > 256 {
-		return StoredVirtualKey{}, fmt.Errorf("%w: user_id is required", ErrInvalidVirtualKey)
+	if (spec.UserID == "" && spec.TeamID == "" && spec.OrganizationID == "") || len(spec.UserID) > 256 || len(spec.TeamID) > 256 || len(spec.OrganizationID) > 256 {
+		return StoredVirtualKey{}, fmt.Errorf("%w: organization_id, team_id, or user_id is required", ErrInvalidVirtualKey)
 	}
 	if len(spec.Alias) > 128 || len(spec.Description) > 1024 || !validPolicyStrings(spec.Tags) || !validPolicyStrings(spec.Roles) || !validPolicyStrings(spec.AllowedModels) || !validPolicyStrings(spec.AllowedTools) {
 		return StoredVirtualKey{}, fmt.Errorf("%w: invalid metadata or grants", ErrInvalidVirtualKey)
@@ -204,7 +207,7 @@ func validateStoredVirtualKey(spec ManagedVirtualKey) (StoredVirtualKey, error) 
 		return StoredVirtualKey{}, fmt.Errorf("%w: expires_at must be in the future", ErrInvalidVirtualKey)
 	}
 	return StoredVirtualKey{
-		Alias: spec.Alias, Description: spec.Description, Tags: append([]string(nil), spec.Tags...), UserID: spec.UserID, TeamID: spec.TeamID,
+		Alias: spec.Alias, Description: spec.Description, Tags: append([]string(nil), spec.Tags...), UserID: spec.UserID, TeamID: spec.TeamID, OrganizationID: spec.OrganizationID,
 		Roles: append([]string(nil), spec.Roles...), AllowedModels: append([]string(nil), spec.AllowedModels...),
 		AllowedTools: append([]string(nil), spec.AllowedTools...),
 		RateLimitRPM: spec.RateLimitRPM, RateLimitTPM: spec.RateLimitTPM,
