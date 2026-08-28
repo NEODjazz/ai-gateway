@@ -6,7 +6,7 @@ import { CustomerInsightsPage } from "../pages/CustomerInsightsPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { ModelCatalogPage } from "../pages/ModelCatalogPage";
 import { PlaygroundPage } from "../pages/PlaygroundPage";
-import { RequestLogsPage } from "../pages/RequestLogsPage";
+import { LogsPage } from "../pages/LogsPage";
 import { RoutingPage } from "../pages/RoutingPage";
 import { GuardrailsPage } from "../pages/GuardrailsPage";
 import { OrganizationsPage, TeamsPage } from "../pages/IdentityAssociationPages";
@@ -26,7 +26,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/overview", title: "Overview", group: "Monitor", element: <OverviewPage />, available: true },
   { path: "/usage", title: "Usage & spend", group: "Monitor", element: <UsagePage />, available: true },
   { path: "/customers", title: "Customer insights", group: "Monitor", element: <CustomerInsightsPage />, available: true },
-  { path: "/request-logs", title: "Request logs", group: "Monitor", element: <RequestLogsPage />, available: true },
+  { path: "/logs", title: "Logs", group: "Monitor", element: <LogsPage />, available: true },
   { path: "/routing", title: "Routing diagnostics", group: "Monitor", element: <RoutingPage />, available: true },
   { path: "/playground", title: "Playground", group: "Monitor", element: <PlaygroundPage />, available: true },
 
@@ -58,8 +58,6 @@ export const appRoutes: AppRoute[] = [
   { path: "/budgets", title: "Budgets", group: "Govern", element: <ResourcePage config={resourceConfigs.budgets} />, available: true },
   { path: "/policies", title: "Policies", group: "Govern", element: unavailable("Policies", "Cross-resource policy attachments are not yet part of the gateway API."), available: false },
   { path: "/tag-management", title: "Tag management", group: "Govern", element: unavailable("Tag management", "Tags are accepted on resources; a central validation and cost-allocation registry is planned."), available: false },
-  { path: "/audit", title: "Audit log", group: "Govern", element: <ResourcePage config={resourceConfigs.audit} />, available: true },
-
   { path: "/cache", title: "Caching", group: "System", element: <EndpointPage eyebrow="Performance" title="Cache diagnostics" description="Exact and semantic cache counters and bounded configuration metadata." path="/admin/v1/cache/diagnostics" />, available: true },
   { path: "/logging", title: "Logging & alerts", group: "System", element: <ResourcePage config={resourceConfigs.logging} />, available: true },
   { path: "/router-settings", title: "Router settings", group: "System", element: <RouterSettingsPage />, available: true },

@@ -1,7 +1,7 @@
 import { appRoutes } from "./routes";
 
 describe("dashboard route manifest", () => {
-  it("contains exactly 37 route-based pages", () => expect(appRoutes).toHaveLength(37));
+  it("contains exactly 36 route-based pages", () => expect(appRoutes).toHaveLength(36));
   it("uses unique absolute paths", () => {
     const paths = appRoutes.map((route) => route.path);
     expect(new Set(paths).size).toBe(paths.length);
@@ -17,5 +17,9 @@ describe("dashboard route manifest", () => {
   });
   it("keeps identity resources in Access Control", () => {
     expect(appRoutes.filter((route) => route.group === "Access Control").map((route) => route.title)).toEqual(["Organizations", "Teams", "Users", "Access groups", "Projects"]);
+  });
+  it("combines request and audit logs under Monitor", () => {
+    expect(appRoutes.find((route) => route.path === "/logs")).toMatchObject({ title: "Logs", group: "Monitor", available: true });
+    expect(appRoutes.some((route) => route.path === "/audit" || route.path === "/request-logs")).toBe(false);
   });
 });

@@ -20,6 +20,7 @@ describe("App", () => {
     const navigation = await screen.findByRole("navigation", { name: "Dashboard" });
     expect(within(navigation).getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Manage", "Monitor", "Access Control", "AI Hub", "Govern", "System"]);
     expect(screen.getByRole("link", { name: "Providers" })).toHaveAttribute("href", "/ui/providers");
+    expect(screen.getByRole("link", { name: "Logs" })).toHaveAttribute("href", "/ui/logs");
     expect(within(navigation).getByRole("link", { name: "Organizations" }).closest("section")).toHaveTextContent("Access Control");
   });
 
