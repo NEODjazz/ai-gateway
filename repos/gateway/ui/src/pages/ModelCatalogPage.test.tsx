@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuthProvider } from "../auth/AuthContext";
 import { ModelCatalogPage } from "./ModelCatalogPage";
@@ -15,12 +15,13 @@ describe("ModelCatalogPage", () => {
     expect(await screen.findByText("gpt")).toBeInTheDocument();
     expect(screen.getByText("azure")).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText("Search models"), "gpt");
-    await userEvent.type(screen.getByLabelText("Provider"), "azure");
-    await userEvent.type(screen.getByLabelText("Capability"), "chat");
-    await userEvent.selectOptions(screen.getByLabelText("Sort"), "input_cost");
-    await userEvent.selectOptions(screen.getByLabelText("Order"), "desc");
-    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
-    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await userEvent.click(screen.getByRole("button", { name: "Filter" }));
+    const filters = await screen.findByRole("dialog", { name: "Filter models" });
+    await userEvent.type(within(filters).getByLabelText("Provider"), "azure");
+    await userEvent.type(within(filters).getByLabelText("Capability"), "chat");
+    await userEvent.click(within(filters).getByRole("button", { name: "Apply filters" }));
+    await userEvent.click(screen.getByRole("button", { name: /Model ↑/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Refresh table" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path).includes("search=gpt") && String(path).includes("order=desc"))).toBe(true));
   });
 

@@ -1,0 +1,20 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { ManagedDataTable } from "./ManagedDataTable";
+
+describe("ManagedDataTable", () => {
+  it("provides virtual-key-style search, columns, sorting, refresh and pagination", async () => {
+    const refresh = vi.fn();
+    render(<ManagedDataTable rows={[{ id: "b", description: "Beta" }, { id: "a", description: "Alpha" }]} columns={[{ key: "id", label: "ID" }, { key: "description", label: "Description" }]} onRefresh={refresh} searchPlaceholder="Search resources" />);
+    expect(screen.getAllByRole("row")[1]).toHaveTextContent("a");
+    await userEvent.click(screen.getByRole("button", { name: /ID/ }));
+    expect(screen.getAllByRole("row")[1]).toHaveTextContent("b");
+    await userEvent.type(screen.getByLabelText("Search resources"), "Alpha");
+    expect(screen.getByText("a")).toBeInTheDocument(); expect(screen.queryByText("b")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Columns" }));
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Description" }));
+    expect(screen.queryByRole("columnheader", { name: /Description/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Refresh table" })); expect(refresh).toHaveBeenCalled();
+    expect(screen.getByText("1–1 of 1")).toBeInTheDocument();
+  });
+});

@@ -4,7 +4,7 @@ import { EmptyState } from "./AsyncState";
 export type Row = Record<string, unknown>;
 export type Column = { key: string; label: string; render?: (value: unknown, row: Row) => ReactNode };
 
-function displayValue(value: unknown): ReactNode {
+export function displayValue(value: unknown): ReactNode {
   if (value === null || value === undefined || value === "") return <span className="muted">—</span>;
   if (typeof value === "boolean") return <span className={`status ${value ? "enabled" : "disabled"}`}>{value ? "Enabled" : "Disabled"}</span>;
   if (Array.isArray(value)) return <div className="tag-list">{value.map((item, index) => <span className="tag" key={`${String(item)}-${index}`}>{String(item)}</span>)}</div>;

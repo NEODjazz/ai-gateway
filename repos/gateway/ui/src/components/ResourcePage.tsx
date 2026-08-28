@@ -6,6 +6,7 @@ import { ErrorState, LoadingState } from "./AsyncState";
 import { PageHeader } from "./PageHeader";
 import { ResourceForm, type Field } from "./ResourceForm";
 import { ActionsMenu, type ActionMenuItem } from "./ActionsMenu";
+import { ManagedDataTable } from "./ManagedDataTable";
 
 export type ResourceConfig = {
   eyebrow: string;
@@ -21,6 +22,8 @@ export type ResourceConfig = {
   idKey?: string;
   transformPayload?: (value: Row, editing: boolean) => Row;
   operations?: Array<{ label: string; method?: "GET" | "POST"; path: (row: Row) => string; body?: (row: Row) => unknown }>;
+  managedTable?: boolean;
+  createLabel?: string;
 };
 
 function recordsFrom(payload: unknown): Row[] {
@@ -75,7 +78,8 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
     }});
     return <ActionsMenu label={`Actions for ${id}`} items={items} />;
   } : undefined, [client, config.deletePath, config.fields, config.operations, idKey, load]);
-  return <><PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} actions={<><button className="secondary" onClick={() => void load()}>Refresh</button>{canCreate && <button onClick={() => setEditing(null)}>Add</button>}</>} />{error && <ErrorState message={error} retry={() => void load()} />}{operationResult && <div className="operation-result" role="status">{operationResult}</div>}{loading ? <LoadingState /> : <DataTable rows={rows} columns={config.columns} actions={actions} />}{editing !== undefined && config.fields && <ResourceForm title={`${editing ? "Edit" : "Add"} ${config.title}`} fields={config.fields} initial={editing || undefined} loadOptions={loadOptions} onClose={() => setEditing(undefined)} onSubmit={async (value) => {
+  const createButton = canCreate ? <button onClick={() => setEditing(null)}>{config.createLabel || "Add"}</button> : undefined;
+  return <><PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} actions={config.managedTable ? undefined : <><button className="secondary" onClick={() => void load()}>Refresh</button>{createButton}</>} />{error && <ErrorState message={error} retry={() => void load()} />}{operationResult && <div className="operation-result" role="status">{operationResult}</div>}{loading ? <LoadingState /> : config.managedTable ? <ManagedDataTable rows={rows} columns={config.columns} actions={actions} primaryAction={createButton} onRefresh={load} searchPlaceholder={`Search ${config.title.toLowerCase()}`} /> : <DataTable rows={rows} columns={config.columns} actions={actions} />}{editing !== undefined && config.fields && <ResourceForm title={`${editing ? "Edit" : "Add"} ${config.title}`} fields={config.fields} initial={editing || undefined} loadOptions={loadOptions} onClose={() => setEditing(undefined)} onSubmit={async (value) => {
     const isEdit = Boolean(editing);
     const id = String(value[idKey] || editing?.[idKey] || "");
     const path = isEdit ? config.itemPath?.(String(editing?.[idKey])) : config.createPath || config.itemPath?.(id);

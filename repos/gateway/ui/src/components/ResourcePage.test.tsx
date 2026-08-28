@@ -27,6 +27,18 @@ describe("ResourcePage", () => {
     expect(screen.getByRole("columnheader", { name: "ID" })).toBeInTheDocument();
   });
 
+  it("uses the virtual-key table format for managed resources", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ data: [{ id: "one", name: "One" }] }), { status: 200 }));
+    sessionStorage.setItem("ai-gateway.admin-token", "test-token");
+    render(<AuthProvider><ResourcePage config={{ ...config, managedTable: true, createLabel: "Create Project" }} /></AuthProvider>);
+    expect(await screen.findByText("One")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Project" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Search projects")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Columns" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh table" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Rows per page")).toBeInTheDocument();
+  });
+
   it("renders a bounded loading error and retries", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "Unavailable" } }), { status: 503 })).mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }));
     renderPage();
