@@ -78,7 +78,8 @@ describe("management pages", () => {
     await userEvent.click(screen.getByRole("button", { name: "Load older" }));
     expect(await screen.findByText("req-2")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("before=2026-08-27T15%3A52%3A34Z") && String(call[0]).includes("before_request_id=req-1"))).toBe(true);
-    await userEvent.click(screen.getAllByRole("button", { name: "Details" })[0]);
+    await userEvent.click(screen.getByRole("button", { name: "Actions for req-1" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Details" }));
     expect(await screen.findAllByText(/gpt-versioned/)).toHaveLength(2);
   });
 });

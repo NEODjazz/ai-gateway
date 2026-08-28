@@ -123,18 +123,22 @@ describe("VirtualKeysPage", () => {
   it("preserves edit, rotation, status and revoke operations", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchMock = mockAPI(); renderPage(); await screen.findByText("production");
-    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for production" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const edit = await screen.findByRole("dialog", { name: "Edit virtual key" });
     await userEvent.type(within(edit).getByLabelText("Description"), "Updated policy");
     await userEvent.click(within(edit).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => path === "/admin/v1/keys/vk_alpha" && options?.method === "PUT")).toBe(true));
-    await userEvent.click(screen.getByRole("button", { name: "Disable" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for production" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Disable" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => path === "/admin/v1/keys/vk_alpha/disable")).toBe(true));
-    await userEvent.click(screen.getByRole("button", { name: "Rotate" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for production" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rotate" }));
     const rotated = await screen.findByRole("dialog", { name: "Virtual key created" });
     expect(within(rotated).getByDisplayValue("sk-ag-rotated-once")).toBeInTheDocument();
     await userEvent.click(within(rotated).getByRole("button", { name: "Close" }));
-    await userEvent.click(screen.getByRole("button", { name: "Revoke" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for production" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Revoke" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => path === "/admin/v1/keys/vk_alpha" && options?.method === "DELETE")).toBe(true));
   });
 });

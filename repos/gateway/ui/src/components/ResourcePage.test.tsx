@@ -54,7 +54,8 @@ describe("ResourcePage", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "one", name: "One" }] }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({ id: "one", name: "Updated" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }));
     renderPage();
     await screen.findByText("One");
-    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for one" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     await userEvent.clear(screen.getByLabelText("Name")); await userEvent.type(screen.getByLabelText("Name"), "Updated");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
@@ -66,7 +67,8 @@ describe("ResourcePage", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "one", name: "One" }] }), { status: 200 })).mockResolvedValueOnce(new Response(null, { status: 204 })).mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }));
     renderPage();
     await screen.findByText("One");
-    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for one" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(fetchMock.mock.calls[1][1]?.method).toBe("DELETE");
   });

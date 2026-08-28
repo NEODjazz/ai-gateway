@@ -33,13 +33,15 @@ describe("DeploymentsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Apply" }));
     await userEvent.click(screen.getByLabelText("Select all deployments"));
     expect(screen.getByText("42 ms")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Details" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for azure-gpt" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Details" }));
     expect(await screen.findByRole("dialog", { name: "Deployment details" })).toBeInTheDocument();
     expect(screen.getByText("2026-08-27 18:00:00 UTC")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Run health check" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path).endsWith("/test"))).toBe(true));
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
-    await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for azure-gpt" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Pause" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-deployments/azure-gpt" && options?.method === "PUT")).toBe(true));
     const pauseCall = fetchMock.mock.calls.find(([path, options]) => String(path) === "/admin/v1/model-deployments/azure-gpt" && options?.method === "PUT")!;
     expect(JSON.parse(String(pauseCall[1]?.body)).enabled).toBe(false);

@@ -5,6 +5,7 @@ import { DataTable, type Column, type Row } from "./DataTable";
 import { ErrorState, LoadingState } from "./AsyncState";
 import { PageHeader } from "./PageHeader";
 import { ResourceForm, type Field } from "./ResourceForm";
+import { ActionsMenu, type ActionMenuItem } from "./ActionsMenu";
 
 export type ResourceConfig = {
   eyebrow: string;
@@ -58,16 +59,22 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
     return () => window.removeEventListener("control-plane-conflict", refresh);
   }, [load]);
   const canCreate = Boolean(config.fields && (config.createPath || config.itemPath));
-  const actions = useMemo(() => config.fields || config.deletePath || config.operations?.length ? (row: Row) => <div className="inline-actions">{config.operations?.map((operation) => <button key={operation.label} className="text-button" onClick={async () => {
-    setError(""); setOperationResult("");
-    try {
-      const result = await client.request(operation.path(row), { method: operation.method || "POST", body: operation.body?.(row) });
-      setOperationResult(result === undefined ? `${operation.label} succeeded` : `${operation.label}: ${JSON.stringify(result)}`);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : `${operation.label} failed`); }
-  }}>{operation.label}</button>)}{config.fields && <button className="text-button" onClick={() => setEditing(row)}>Edit</button>}{config.deletePath && <button className="danger-button" onClick={async () => {
-    if (!window.confirm(`Delete ${String(row[idKey])}?`)) return;
-    try { await client.request(config.deletePath!(String(row[idKey])), { method: "DELETE" }); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not delete record"); }
-  }}>Delete</button>}</div> : undefined, [client, config.deletePath, config.fields, config.operations, idKey, load]);
+  const actions = useMemo(() => config.fields || config.deletePath || config.operations?.length ? (row: Row) => {
+    const id = String(row[idKey]);
+    const items: ActionMenuItem[] = (config.operations || []).map((operation) => ({ label: operation.label, onSelect: async () => {
+      setError(""); setOperationResult("");
+      try {
+        const result = await client.request(operation.path(row), { method: operation.method || "POST", body: operation.body?.(row) });
+        setOperationResult(result === undefined ? `${operation.label} succeeded` : `${operation.label}: ${JSON.stringify(result)}`);
+      } catch (cause) { setError(cause instanceof Error ? cause.message : `${operation.label} failed`); }
+    }}));
+    if (config.fields) items.push({ label: "Edit", onSelect: () => setEditing(row) });
+    if (config.deletePath) items.push({ label: "Delete", tone: "danger", onSelect: async () => {
+      if (!window.confirm(`Delete ${id}?`)) return;
+      try { await client.request(config.deletePath!(id), { method: "DELETE" }); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not delete record"); }
+    }});
+    return <ActionsMenu label={`Actions for ${id}`} items={items} />;
+  } : undefined, [client, config.deletePath, config.fields, config.operations, idKey, load]);
   return <><PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} actions={<><button className="secondary" onClick={() => void load()}>Refresh</button>{canCreate && <button onClick={() => setEditing(null)}>Add</button>}</>} />{error && <ErrorState message={error} retry={() => void load()} />}{operationResult && <div className="operation-result" role="status">{operationResult}</div>}{loading ? <LoadingState /> : <DataTable rows={rows} columns={config.columns} actions={actions} />}{editing !== undefined && config.fields && <ResourceForm title={`${editing ? "Edit" : "Add"} ${config.title}`} fields={config.fields} initial={editing || undefined} loadOptions={loadOptions} onClose={() => setEditing(undefined)} onSubmit={async (value) => {
     const isEdit = Boolean(editing);
     const id = String(value[idKey] || editing?.[idKey] || "");
