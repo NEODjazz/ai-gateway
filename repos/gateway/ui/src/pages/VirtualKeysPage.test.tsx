@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { AuthProvider } from "../auth/AuthContext";
 import { VirtualKeysPage } from "./VirtualKeysPage";
 
-const key = { id: "vk_alpha", alias: "production", user_id: "user-1", team_id: "team-1", allowed_models: ["gpt"], created_at: "2026-08-27T10:00:00Z" };
+const key = { id: "vk_alpha", alias: "production", description: "Production key", user_id: "user-1", team_id: "team-1", roles: ["operator"], allowed_models: ["gpt"], allowed_tools: ["search"], rate_limit_rpm: 60, rate_limit_tpm: 1200, tags: ["prod"], expires_at: "2026-09-27T10:00:00Z", created_at: "2026-08-27T10:00:00Z" };
 const json = (value: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } }));
 
 function mockAPI(keyRows: unknown[] = [key], userRows: unknown[] = [{ id: "user-1", name: "Alice", email: "alice@example.com", team_ids: ["team-1"], status: "active" }], teamRows: unknown[] = [{ id: "team-1", name: "Platform", status: "active" }], organizationRows: unknown[] = [{ id: "org-1", name: "Acme", team_ids: ["team-1"], status: "active" }]) {
@@ -30,6 +30,13 @@ describe("VirtualKeysPage", () => {
     expect(await screen.findByText("production")).toBeInTheDocument();
     expect(screen.getByText("100 USD / month")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create Virtual Key" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Columns" }));
+    expect(screen.getByRole("menuitemcheckbox", { name: "Key" })).toHaveAttribute("aria-checked", "true");
+    const descriptionColumn = screen.getByRole("menuitemcheckbox", { name: "Description" });
+    expect(descriptionColumn).toHaveAttribute("aria-checked", "false");
+    await userEvent.click(descriptionColumn);
+    expect(screen.getByRole("columnheader", { name: "Description" })).toBeInTheDocument();
+    expect(screen.getByText("Production key")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh virtual keys" })).toHaveTextContent("");
     for (const heading of ["Key", "Team", "User", "Created", "Budget"]) expect(screen.getByRole("button", { name: new RegExp(`^${heading}$`) })).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText("Search keys by alias"), "missing");
