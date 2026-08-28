@@ -13,6 +13,9 @@ describe("dashboard route manifest", () => {
     expect(unavailable).not.toContain("/router-settings");
   });
   it("covers every navigation group", () => {
-    expect(new Set(appRoutes.map((route) => route.group))).toEqual(new Set(["Monitor", "Manage", "AI Hub", "Govern", "System"]));
+    expect(new Set(appRoutes.map((route) => route.group))).toEqual(new Set(["Monitor", "Manage", "Access Control", "AI Hub", "Govern", "System"]));
+  });
+  it("keeps identity resources in Access Control", () => {
+    expect(appRoutes.filter((route) => route.group === "Access Control").map((route) => route.title)).toEqual(["Organizations", "Teams", "Users", "Access groups", "Projects"]);
   });
 });

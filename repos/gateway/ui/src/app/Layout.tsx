@@ -2,7 +2,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { appRoutes } from "./routes";
 
-const groups = ["Monitor", "Manage", "AI Hub", "Govern", "System"] as const;
+const groups = ["Manage", "Monitor", "Access Control", "AI Hub", "Govern", "System"] as const;
 
 export function Layout() {
   const { signOut } = useAuth();

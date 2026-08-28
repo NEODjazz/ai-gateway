@@ -17,7 +17,7 @@ import { RouterSettingsPage } from "../pages/RouterSettingsPage";
 import { VirtualKeysPage } from "../pages/VirtualKeysPage";
 import { resourceConfigs } from "../pages/resourceConfigs";
 
-export type AppRoute = { path: string; title: string; group: "Monitor" | "Manage" | "AI Hub" | "Govern" | "System"; element: ReactNode; available: boolean };
+export type AppRoute = { path: string; title: string; group: "Monitor" | "Manage" | "Access Control" | "AI Hub" | "Govern" | "System"; element: ReactNode; available: boolean };
 
 const readOnly = (title: string, description: string, path: string, columns: ResourceConfig["columns"]): ReactNode => <ResourcePage config={{ eyebrow: "Operations", title, description, listPath: path, columns }} />;
 const unavailable = (title: string, description: string): ReactNode => <CapabilityPage title={title} description={description} />;
@@ -31,17 +31,18 @@ export const appRoutes: AppRoute[] = [
   { path: "/playground", title: "Playground", group: "Monitor", element: <PlaygroundPage />, available: true },
 
   { path: "/api-keys", title: "Virtual keys", group: "Manage", element: <VirtualKeysPage />, available: true },
-  { path: "/users", title: "Users", group: "Manage", element: <ResourcePage config={resourceConfigs.users} />, available: true },
-  { path: "/teams", title: "Teams", group: "Manage", element: <TeamsPage />, available: true },
-  { path: "/organizations", title: "Organizations", group: "Manage", element: <OrganizationsPage />, available: true },
-  { path: "/projects", title: "Projects", group: "Manage", element: <ResourcePage config={resourceConfigs.projects} />, available: true },
-  { path: "/access-groups", title: "Access groups", group: "Manage", element: <ResourcePage config={resourceConfigs.accessGroups} />, available: true },
   { path: "/models", title: "Models", group: "Manage", element: <ModelCatalogPage />, available: true },
   { path: "/model-onboarding", title: "Model onboarding", group: "Manage", element: <ModelOnboardingPage />, available: true },
   { path: "/providers", title: "Providers", group: "Manage", element: <ResourcePage config={resourceConfigs.providers} />, available: true },
   { path: "/credentials", title: "Credentials", group: "Manage", element: <ResourcePage config={resourceConfigs.credentials} />, available: true },
   { path: "/deployments", title: "Deployments", group: "Manage", element: <DeploymentsPage />, available: true },
   { path: "/model-groups", title: "Model groups", group: "Manage", element: <ResourcePage config={resourceConfigs.modelGroups} />, available: true },
+
+  { path: "/organizations", title: "Organizations", group: "Access Control", element: <OrganizationsPage />, available: true },
+  { path: "/teams", title: "Teams", group: "Access Control", element: <TeamsPage />, available: true },
+  { path: "/users", title: "Users", group: "Access Control", element: <ResourcePage config={resourceConfigs.users} />, available: true },
+  { path: "/access-groups", title: "Access groups", group: "Access Control", element: <ResourcePage config={resourceConfigs.accessGroups} />, available: true },
+  { path: "/projects", title: "Projects", group: "Access Control", element: <ResourcePage config={resourceConfigs.projects} />, available: true },
 
   { path: "/ai-hub", title: "AI Hub", group: "AI Hub", element: readOnly("AI Hub", "Catalog entries joined with safe runtime availability.", "/admin/v1/ai-hub/models", [{ key: "model", label: "Model" }, { key: "provider", label: "Provider" }, { key: "capabilities", label: "Capabilities" }, { key: "deployments", label: "Deployments" }, { key: "available", label: "Available" }]), available: true },
   { path: "/cost-optimization", title: "Cost optimization", group: "AI Hub", element: readOnly("Cost optimization", "Deterministic catalog and availability recommendations.", "/admin/v1/cost-optimization/recommendations", [{ key: "type", label: "Type" }, { key: "model", label: "Model" }, { key: "current_provider", label: "Current provider" }, { key: "recommended_provider", label: "Recommended provider" }, { key: "estimated_savings_percent", label: "Savings, %" }, { key: "summary", label: "Summary" }]), available: true },

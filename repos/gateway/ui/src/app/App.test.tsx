@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuthProvider } from "../auth/AuthContext";
 import { App } from "./App";
@@ -17,8 +17,10 @@ describe("App", () => {
     render(<AuthProvider><App /></AuthProvider>);
     await userEvent.type(screen.getByLabelText("Admin bearer token"), "token");
     await userEvent.click(screen.getByRole("button", { name: "Open console" }));
-    expect(await screen.findByRole("navigation", { name: "Dashboard" })).toBeInTheDocument();
+    const navigation = await screen.findByRole("navigation", { name: "Dashboard" });
+    expect(within(navigation).getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Manage", "Monitor", "Access Control", "AI Hub", "Govern", "System"]);
     expect(screen.getByRole("link", { name: "Providers" })).toHaveAttribute("href", "/ui/providers");
+    expect(within(navigation).getByRole("link", { name: "Organizations" }).closest("section")).toHaveTextContent("Access Control");
   });
 
   it("signs out from the shared layout", async () => {
