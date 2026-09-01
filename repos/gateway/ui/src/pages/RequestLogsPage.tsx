@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { DataTable, type Row } from "../components/DataTable";
 import { ErrorState, LoadingState } from "../components/AsyncState";
@@ -36,13 +36,15 @@ type RequestLog = Row & {
 
 type LogsResponse = { data?: RequestLog[]; next_before?: string; next_request_id?: string };
 type Cursor = { before: string; requestID: string } | null;
+type GroupLogsResponse = { data?: GroupedRequestLog[]; next_before?: string; next_before_group_id?: string; next_before_currency?: string };
+type GroupCursor = { before: string; groupID: string; currency: string } | null;
 type IdentityOption = { id: string; name?: string; email?: string };
 type LogView = "requests" | "sessions" | "traces";
 type GroupedRequestLog = Row & {
   id: string; group_id: string; requests: number; errors: number; models: string[]; providers: string[];
   total_tokens: number; cache_hits: number; latency_ms: number; cost: number; currency: string; started_at: string; ended_at: string;
 };
-const emptyFilters = { request_id: "", session_id: "", trace_id: "", status: "", model: "", provider: "", cache_status: "", organization_id: "", team_id: "", user_id: "", credential_id: "" };
+const emptyFilters = { request_id: "", session_id: "", trace_id: "", status: "", model: "", provider: "", tag: "", cache_status: "", organization_id: "", team_id: "", user_id: "", credential_id: "" };
 const requestLogColumns = [
   { key: "timestamp", label: "Time" }, { key: "request_id", label: "Request" }, { key: "session_id", label: "Session" }, { key: "trace_id", label: "Trace" }, { key: "tags", label: "Tags" }, { key: "status", label: "Status" },
   { key: "model", label: "Public model" }, { key: "upstream_model", label: "Upstream model" }, { key: "provider_id", label: "Provider" },
@@ -90,6 +92,7 @@ export function groupRequestLogs(rows: RequestLog[], field: "session_id" | "trac
 export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
   const { client } = useAuth();
   const [rows, setRows] = useState<RequestLog[]>([]);
+  const [groupRows, setGroupRows] = useState<GroupedRequestLog[]>([]);
   const [filters, setFilters] = useState(emptyFilters);
   const [days, setDays] = useState("7");
   const [view, setView] = useState<LogView>("requests");
@@ -98,27 +101,43 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
   const [teams, setTeams] = useState<IdentityOption[]>([]);
   const [users, setUsers] = useState<IdentityOption[]>([]);
   const [nextCursor, setNextCursor] = useState<Cursor>(null);
+  const [nextGroupCursor, setNextGroupCursor] = useState<GroupCursor>(null);
   const [detail, setDetail] = useState<unknown>();
   const [settings, setSettings] = useState<unknown>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState(() => new Set(requestLogColumns.map((column) => column.key)));
-  const load = useCallback(async (append = false, requestedCursor: Cursor = null) => {
+  const load = useCallback(async (append = false, requestedCursor: Cursor | GroupCursor = null) => {
     setLoading(true); setError("");
     const query = new URLSearchParams({ limit: "50", days });
     for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
-    if (append && requestedCursor) {
-      query.set("before", requestedCursor.before);
-      query.set("before_request_id", requestedCursor.requestID);
-    }
     try {
-      const response = await client.request<LogsResponse>(`/admin/v1/request-logs?${query}`);
-      setRows((current) => append ? [...current, ...(response.data || [])] : response.data || []);
-      setNextCursor(response.next_before && response.next_request_id ? { before: response.next_before, requestID: response.next_request_id } : null);
+      if (view === "requests") {
+        const cursor = requestedCursor as Cursor;
+        if (append && cursor) {
+          query.set("before", cursor.before);
+          query.set("before_request_id", cursor.requestID);
+        }
+        const response = await client.request<LogsResponse>(`/admin/v1/request-logs?${query}`);
+        setRows((current) => append ? [...current, ...(response.data || [])] : response.data || []);
+        setNextCursor(response.next_before && response.next_request_id ? { before: response.next_before, requestID: response.next_request_id } : null);
+      } else {
+        const cursor = requestedCursor as GroupCursor;
+        query.set("dimension", view === "sessions" ? "session" : "trace");
+        if (append && cursor) {
+          query.set("before", cursor.before);
+          query.set("before_group_id", cursor.groupID);
+          query.set("before_currency", cursor.currency);
+        }
+        const response = await client.request<GroupLogsResponse>(`/admin/v1/request-logs/groups?${query}`);
+        const incoming = (response.data || []).map((row) => ({ ...row, id: `${row.group_id}\0${row.currency}` }));
+        setGroupRows((current) => append ? [...current, ...incoming] : incoming);
+        setNextGroupCursor(response.next_before && response.next_before_group_id && response.next_before_currency ? { before: response.next_before, groupID: response.next_before_group_id, currency: response.next_before_currency } : null);
+      }
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load request logs"); }
     finally { setLoading(false); }
-  }, [client, days, filters]);
+  }, [client, days, filters, view]);
   useEffect(() => {
     client.request("/admin/v1/request-logs/settings").then(setSettings).catch(() => undefined);
     const loadOptions = async (path: string, setter: (rows: IdentityOption[]) => void) => {
@@ -131,7 +150,7 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
     void loadOptions("/admin/v1/teams", setTeams);
     void loadOptions("/admin/v1/users", setUsers);
   }, []);
-  useEffect(() => { void load(); }, [days]); // Time-window changes reset the cursor and refresh immediately.
+  useEffect(() => { void load(); }, [days, view]); // Time-window and view changes reset the cursor and refresh immediately.
   useEffect(() => {
     if (!liveTail) return;
     const timer = window.setInterval(() => { void load(false); }, 15_000);
@@ -163,7 +182,6 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
     { key: "cost", label: "Cost", render: (value: unknown, row: Row) => formatCost(Number(value || 0), String(row.currency || "USD")) },
     { key: "currency", label: "Currency" }
   ];
-  const groupedRows = useMemo(() => view === "sessions" ? groupRequestLogs(rows, "session_id") : view === "traces" ? groupRequestLogs(rows, "trace_id") : [], [rows, view]);
   const groupedColumns = [
     { key: "group_id", label: view === "sessions" ? "Session" : "Trace" }, { key: "requests", label: "Requests" }, { key: "errors", label: "Errors" },
     { key: "models", label: "Models" }, { key: "providers", label: "Providers" }, { key: "total_tokens", label: "Tokens" }, { key: "cache_hits", label: "Cache hits" },
@@ -171,5 +189,54 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
     { key: "cost", label: "Spend", render: (value: unknown, row: Row) => formatCost(Number(value || 0), String(row.currency || "USD")) }, { key: "currency", label: "Currency" },
     { key: "started_at", label: "Started", render: formatTimestamp }, { key: "ended_at", label: "Last request", render: formatTimestamp }
   ];
-  return <>{!embedded && <PageHeader eyebrow="Observability" title="Request logs" description="Cursor-paginated final outcomes and session identity without prompts, responses or raw provider errors." />}<div className="page-tabs" role="tablist" aria-label="Request log views"><button role="tab" aria-selected={view === "requests"} className={view === "requests" ? "active" : ""} onClick={() => setView("requests")}>Requests</button><button role="tab" aria-selected={view === "sessions"} className={view === "sessions" ? "active" : ""} onClick={() => setView("sessions")}>Sessions</button><button role="tab" aria-selected={view === "traces"} className={view === "traces" ? "active" : ""} onClick={() => setView("traces")}>Traces</button></div><div className="key-toolbar"><div className="key-toolbar-right"><label>Window<select aria-label="Request log window" value={days} onChange={(event) => setDays(event.target.value)}><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option></select></label><label><input type="checkbox" checked={liveTail} onChange={(event) => setLiveTail(event.target.checked)} /> Live tail</label>{liveTail && <span className="status enabled">Every 15s</span>}</div><div className="key-toolbar-right"><label className="key-search"><span className="sr-only">Search request logs</span><input aria-label="Search request logs" placeholder="Search by request ID" value={filters.request_id} onChange={(event) => setFilters((current) => ({ ...current, request_id: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") void load(false); }} /></label>{view === "requests" && <ColumnsMenu columns={requestLogColumns} visible={visibleColumns} onChange={setVisibleColumns} />}<button className="secondary" onClick={() => setFiltersOpen(true)}>Filter{Object.entries(filters).some(([key, value]) => key !== "request_id" && value) ? " (active)" : ""}</button><button className="secondary icon-only-button" aria-label="Refresh request logs" onClick={() => void load(false)}><RefreshIcon /></button></div></div>{settings !== undefined && <div className="operation-result">Privacy settings: {JSON.stringify(settings)}</div>}{view !== "requests" && <p className="muted">Aggregated from the loaded request window; spend remains separated by currency.</p>}{error && <ErrorState message={error} retry={() => void load()} />}{loading && !rows.length ? <LoadingState /> : view === "requests" ? <DataTable rows={rows} columns={columns.filter((column) => visibleColumns.has(column.key))} actions={(row) => <ActionsMenu label={`Actions for ${String(row.request_id)}`} items={[{ label: "Details", onSelect: () => showDetail(row as RequestLog) }]} />} /> : <DataTable rows={groupedRows} columns={groupedColumns} />}{nextCursor && <button className="secondary load-more" onClick={() => void load(true, nextCursor)}>Load older</button>}{filtersOpen && <div className="modal-backdrop" role="presentation"><form className="modal compact-modal" role="dialog" aria-modal="true" aria-label="Filter request logs" onSubmit={apply}><div className="modal-heading"><h2>Filter request logs</h2><button type="button" className="icon-button" aria-label="Close filters" onClick={() => setFiltersOpen(false)}>×</button></div><div className="form-grid"><label>Session ID<input value={filters.session_id} onChange={(event) => setFilters((current) => ({ ...current, session_id: event.target.value }))} /></label><label>Trace ID<input value={filters.trace_id} onChange={(event) => setFilters((current) => ({ ...current, trace_id: event.target.value }))} /></label><label>Status<select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="">All statuses</option><option value="ok">Success</option><option value="error">Error</option></select></label><label>Cache<select value={filters.cache_status} onChange={(event) => setFilters((current) => ({ ...current, cache_status: event.target.value }))}><option value="">All requests</option><option value="hit">Hit</option><option value="miss">Miss</option><option value="error">Error</option></select></label><label>Model<input value={filters.model} onChange={(event) => setFilters((current) => ({ ...current, model: event.target.value }))} /></label><label>Provider<input value={filters.provider} onChange={(event) => setFilters((current) => ({ ...current, provider: event.target.value }))} /></label><label>Organization<select value={filters.organization_id} onChange={(event) => setFilters((current) => ({ ...current, organization_id: event.target.value }))}><option value="">All organizations</option>{organizations.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select></label><label>Team<select value={filters.team_id} onChange={(event) => setFilters((current) => ({ ...current, team_id: event.target.value }))}><option value="">All teams</option>{teams.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select></label><label>User<select value={filters.user_id} onChange={(event) => setFilters((current) => ({ ...current, user_id: event.target.value }))}><option value="">All users</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name || item.email || item.id}</option>)}</select></label><label>Credential ID<input value={filters.credential_id} onChange={(event) => setFilters((current) => ({ ...current, credential_id: event.target.value }))} /></label></div><div className="modal-actions"><button type="button" className="secondary" onClick={() => setFilters(emptyFilters)}>Reset filters</button><button>Apply filters</button></div></form></div>}{detail !== undefined && <div className="modal-backdrop" role="presentation"><section className="modal" role="dialog" aria-modal="true" aria-label="Request details"><div className="modal-heading"><h2>Request details</h2><button className="icon-button" aria-label="Close" onClick={() => setDetail(undefined)}>×</button></div><pre>{JSON.stringify(detail, null, 2)}</pre></section></div>}</>;
+  const activeCursor = view === "requests" ? nextCursor : nextGroupCursor;
+  const hasRows = view === "requests" ? rows.length > 0 : groupRows.length > 0;
+  return <>
+    {!embedded && <PageHeader eyebrow="Observability" title="Request logs" description="Cursor-paginated final outcomes and server-aggregated sessions and traces without prompts, responses or raw provider errors." />}
+    <div className="page-tabs" role="tablist" aria-label="Request log views">
+      <button role="tab" aria-selected={view === "requests"} className={view === "requests" ? "active" : ""} onClick={() => setView("requests")}>Requests</button>
+      <button role="tab" aria-selected={view === "sessions"} className={view === "sessions" ? "active" : ""} onClick={() => setView("sessions")}>Sessions</button>
+      <button role="tab" aria-selected={view === "traces"} className={view === "traces" ? "active" : ""} onClick={() => setView("traces")}>Traces</button>
+    </div>
+    <div className="key-toolbar">
+      <div className="key-toolbar-right">
+        <label>Window<select aria-label="Request log window" value={days} onChange={(event) => setDays(event.target.value)}><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option></select></label>
+        <label><input type="checkbox" checked={liveTail} onChange={(event) => setLiveTail(event.target.checked)} /> Live tail</label>
+        {liveTail && <span className="status enabled">Every 15s</span>}
+      </div>
+      <div className="key-toolbar-right">
+        <label className="key-search"><span className="sr-only">Search request logs</span><input aria-label="Search request logs" placeholder="Search by request ID" value={filters.request_id} onChange={(event) => setFilters((current) => ({ ...current, request_id: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") void load(false); }} /></label>
+        {view === "requests" && <ColumnsMenu columns={requestLogColumns} visible={visibleColumns} onChange={setVisibleColumns} />}
+        <button className="secondary" onClick={() => setFiltersOpen(true)}>Filter{Object.entries(filters).some(([key, value]) => key !== "request_id" && value) ? " (active)" : ""}</button>
+        <button className="secondary icon-only-button" aria-label="Refresh request logs" onClick={() => void load(false)}><RefreshIcon /></button>
+      </div>
+    </div>
+    {settings !== undefined && <div className="operation-result">Privacy settings: {JSON.stringify(settings)}</div>}
+    {view !== "requests" && <p className="muted">Aggregated by ClickHouse across the complete selected window; spend remains separated by currency.</p>}
+    {error && <ErrorState message={error} retry={() => void load()} />}
+    {loading && !hasRows ? <LoadingState /> : view === "requests"
+      ? <DataTable rows={rows} columns={columns.filter((column) => visibleColumns.has(column.key))} actions={(row) => <ActionsMenu label={`Actions for ${String(row.request_id)}`} items={[{ label: "Details", onSelect: () => showDetail(row as RequestLog) }]} />} />
+      : <DataTable rows={groupRows} columns={groupedColumns} />}
+    {activeCursor && <button className="secondary load-more" onClick={() => void load(true, activeCursor)}>Load older</button>}
+    {filtersOpen && <div className="modal-backdrop" role="presentation">
+      <form className="modal compact-modal" role="dialog" aria-modal="true" aria-label="Filter request logs" onSubmit={apply}>
+        <div className="modal-heading"><h2>Filter request logs</h2><button type="button" className="icon-button" aria-label="Close filters" onClick={() => setFiltersOpen(false)}>×</button></div>
+        <div className="form-grid">
+          <label>Session ID<input value={filters.session_id} onChange={(event) => setFilters((current) => ({ ...current, session_id: event.target.value }))} /></label>
+          <label>Trace ID<input value={filters.trace_id} onChange={(event) => setFilters((current) => ({ ...current, trace_id: event.target.value }))} /></label>
+          <label>Status<select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="">All statuses</option><option value="ok">Success</option><option value="error">Error</option></select></label>
+          <label>Cache<select value={filters.cache_status} onChange={(event) => setFilters((current) => ({ ...current, cache_status: event.target.value }))}><option value="">All requests</option><option value="hit">Hit</option><option value="miss">Miss</option><option value="error">Error</option></select></label>
+          <label>Model<input value={filters.model} onChange={(event) => setFilters((current) => ({ ...current, model: event.target.value }))} /></label>
+          <label>Provider<input value={filters.provider} onChange={(event) => setFilters((current) => ({ ...current, provider: event.target.value }))} /></label>
+          <label>Tag<input value={filters.tag} onChange={(event) => setFilters((current) => ({ ...current, tag: event.target.value }))} /></label>
+          <label>Organization<select value={filters.organization_id} onChange={(event) => setFilters((current) => ({ ...current, organization_id: event.target.value }))}><option value="">All organizations</option>{organizations.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select></label>
+          <label>Team<select value={filters.team_id} onChange={(event) => setFilters((current) => ({ ...current, team_id: event.target.value }))}><option value="">All teams</option>{teams.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select></label>
+          <label>User<select value={filters.user_id} onChange={(event) => setFilters((current) => ({ ...current, user_id: event.target.value }))}><option value="">All users</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name || item.email || item.id}</option>)}</select></label>
+          <label>Credential ID<input value={filters.credential_id} onChange={(event) => setFilters((current) => ({ ...current, credential_id: event.target.value }))} /></label>
+        </div>
+        <div className="modal-actions"><button type="button" className="secondary" onClick={() => setFilters(emptyFilters)}>Reset filters</button><button>Apply filters</button></div>
+      </form>
+    </div>}
+    {detail !== undefined && <div className="modal-backdrop" role="presentation"><section className="modal" role="dialog" aria-modal="true" aria-label="Request details"><div className="modal-heading"><h2>Request details</h2><button className="icon-button" aria-label="Close" onClick={() => setDetail(undefined)}>×</button></div><pre>{JSON.stringify(detail, null, 2)}</pre></section></div>}
+  </>;
 }

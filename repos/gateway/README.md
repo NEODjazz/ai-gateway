@@ -14,6 +14,7 @@ go run ./cmd/gateway
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
 - `GET /admin/v1/request-logs`
+- `GET /admin/v1/request-logs/groups?dimension=session|trace`
 - `GET /admin/v1/request-logs/{request_id}`
 - `GET /admin/v1/request-logs/settings`
 - `GET /admin/v1/policy-attachments`
@@ -40,3 +41,8 @@ Policy attachments can apply an enabled DLP/AV policy globally or to the
 intersection of configured team, virtual-key ID/alias, public model, and key-tag
 patterns. Matching policies are combined with deployment guardrails and fail
 closed if a required scanner is unavailable.
+
+Request-log session and trace views are aggregated in ClickHouse across the
+complete selected time window, rather than from the current browser page.
+Aggregation remains metadata-only and keeps spend in separate currency groups;
+the cursor consists of the last request time, group ID, and currency.

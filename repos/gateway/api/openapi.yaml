@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.20
+  version: 0.1.21
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1337,6 +1337,37 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/request-logs/groups:
+    get:
+      operationId: listRequestLogGroups
+      tags: [Observability]
+      summary: Aggregate inference outcomes by session or trace
+      description: Aggregates the complete bounded query window in ClickHouse. Spend is grouped separately by currency and content fields are never read or returned.
+      parameters:
+        - {name: dimension, in: query, required: true, schema: {type: string, enum: [session, trace]}}
+        - {name: days, in: query, schema: {type: integer, minimum: 1, maximum: 90, default: 7}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+        - {name: before, in: query, schema: {type: string, format: date-time}}
+        - {name: before_group_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: before_currency, in: query, schema: {type: string, maxLength: 16}}
+        - {name: request_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: session_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: trace_id, in: query, schema: {type: string, pattern: '^[0-9a-fA-F]{32}$'}}
+        - {name: status, in: query, schema: {type: string, enum: [ok, error]}}
+        - {name: model, in: query, schema: {type: string, maxLength: 256}}
+        - {name: provider, in: query, schema: {type: string, maxLength: 256}}
+        - {name: tag, in: query, schema: {type: string, maxLength: 256}}
+        - {name: user_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: team_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: organization_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: credential_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: cache_status, in: query, schema: {type: string, enum: [hit, miss, error]}}
+      responses:
+        '200': {description: Session or trace aggregate page ordered by latest request, content: {application/json: {schema: {$ref: '#/components/schemas/RequestLogGroupPage'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/request-logs/settings:
     get:
       operationId: getRequestLogSettings
@@ -1795,6 +1826,32 @@ components:
         data: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/RequestLog'}}
         next_before: {type: string, format: date-time}
         next_request_id: {type: string}
+    RequestLogGroup:
+      type: object
+      additionalProperties: false
+      required: [group_id, requests, errors, models, providers, total_tokens, cache_hits, latency_ms, cost, currency, started_at, ended_at]
+      properties:
+        group_id: {type: string}
+        requests: {type: integer, minimum: 0}
+        errors: {type: integer, minimum: 0}
+        models: {type: array, items: {type: string}}
+        providers: {type: array, items: {type: string}}
+        total_tokens: {type: integer, minimum: 0}
+        cache_hits: {type: integer, minimum: 0}
+        latency_ms: {type: number, minimum: 0}
+        cost: {type: number, minimum: 0}
+        currency: {type: string}
+        started_at: {type: string, format: date-time}
+        ended_at: {type: string, format: date-time}
+    RequestLogGroupPage:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/RequestLogGroup'}}
+        next_before: {type: string, format: date-time}
+        next_before_group_id: {type: string}
+        next_before_currency: {type: string}
     RequestLogSettings:
       type: object
       additionalProperties: false

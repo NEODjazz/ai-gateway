@@ -139,6 +139,19 @@ describe("management pages", () => {
       const url = String(input);
       if (url.includes("settings")) return json({ content_stored: false, retention_days: 730 });
       if (url.endsWith("/req-1")) return json({ request_id: "req-1", upstream_model: "gpt-versioned" });
+      if (url.includes("/request-logs/groups?")) return json({
+        data: [{
+          group_id: url.includes("before_group_id") ? "session-0" : url.includes("dimension=session") ? "session-1" : "0123456789abcdef0123456789abcdef",
+          requests: 3, errors: 1, models: ["gpt"], providers: ["azure-open-ai"], total_tokens: 57,
+          cache_hits: 2, latency_ms: 900.5, cost: 0.0007, currency: "USD",
+          started_at: "2026-08-27T15:00:00Z", ended_at: "2026-08-27T15:52:34Z"
+        }],
+        ...(!url.includes("before_group_id") ? {
+          next_before: "2026-08-27T15:52:34Z",
+          next_before_group_id: url.includes("dimension=session") ? "session-1" : "0123456789abcdef0123456789abcdef",
+          next_before_currency: "USD"
+        } : {})
+      });
       if (url.includes("before=")) return json({ data: [{ request_id: "req-2", timestamp: "2026-08-27T14:00:00Z", status: "ok", input_tokens: 1, output_tokens: 2, total_tokens: 3, latency_ms: 10, cost: 0, currency: "USD" }] });
       return json({
         data: [{ request_id: "req-1", session_id: "session-1", trace_id: "0123456789abcdef0123456789abcdef", tags: ["production"], timestamp: "2026-08-27T15:52:34Z", status: "ok", model: "gpt", upstream_model: "gpt-versioned", provider_id: "azure-open-ai", provider_endpoint_name: "luna", provider_endpoint_type: "openai-compatible", cache_status: "miss", input_tokens: 7, output_tokens: 12, total_tokens: 19, latency_ms: 1006, cost: 0.0002414, currency: "USD" }],
@@ -158,10 +171,16 @@ describe("management pages", () => {
     expect(screen.getByText("production")).toBeInTheDocument();
     expect(await screen.findByText(/content_stored/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Sessions" }));
-    expect(screen.getByText("session-1")).toBeInTheDocument();
-    expect(screen.getByText("Aggregated from the loaded request window; spend remains separated by currency.")).toBeInTheDocument();
+    expect(await screen.findByText("session-1")).toBeInTheDocument();
+    expect(screen.getByText("Aggregated by ClickHouse across the complete selected window; spend remains separated by currency.")).toBeInTheDocument();
+    expect(screen.getByText("57")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Load older" }));
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("before_group_id=session-1") && String(call[0]).includes("before_currency=USD"))).toBe(true);
     await userEvent.click(screen.getByRole("tab", { name: "Traces" }));
-    expect(screen.getByText("0123456789abcdef0123456789abcdef")).toBeInTheDocument();
+    expect(await screen.findByText("0123456789abcdef0123456789abcdef")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/request-logs/groups?") && String(call[0]).includes("dimension=session"))).toBe(true);
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/request-logs/groups?") && String(call[0]).includes("dimension=trace"))).toBe(true);
     await userEvent.click(screen.getByRole("tab", { name: "Requests" }));
     await userEvent.click(screen.getByRole("button", { name: "Load older" }));
     expect(await screen.findByText("req-2")).toBeInTheDocument();

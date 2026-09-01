@@ -77,6 +77,35 @@ type RequestLogPage struct {
 	NextRequestID string       `json:"next_request_id,omitempty"`
 }
 
+type RequestLogGroupFilter struct {
+	RequestLogFilter
+	Dimension      string
+	BeforeGroupID  string
+	BeforeCurrency string
+}
+
+type RequestLogGroup struct {
+	GroupID     string   `json:"group_id"`
+	Requests    uint64   `json:"requests"`
+	Errors      uint64   `json:"errors"`
+	Models      []string `json:"models"`
+	Providers   []string `json:"providers"`
+	TotalTokens uint64   `json:"total_tokens"`
+	CacheHits   uint64   `json:"cache_hits"`
+	LatencyMS   float64  `json:"latency_ms"`
+	Cost        float64  `json:"cost"`
+	Currency    string   `json:"currency"`
+	StartedAt   string   `json:"started_at"`
+	EndedAt     string   `json:"ended_at"`
+}
+
+type RequestLogGroupPage struct {
+	Data               []RequestLogGroup `json:"data"`
+	NextBefore         string            `json:"next_before,omitempty"`
+	NextBeforeGroupID  string            `json:"next_before_group_id,omitempty"`
+	NextBeforeCurrency string            `json:"next_before_currency,omitempty"`
+}
+
 type RequestLogSettings struct {
 	RetentionDays int  `json:"retention_days"`
 	ContentStored bool `json:"content_stored"`
@@ -85,8 +114,74 @@ type RequestLogSettings struct {
 
 type RequestLogReporter interface {
 	ListRequestLogs(context.Context, RequestLogFilter) (RequestLogPage, error)
+	ListRequestLogGroups(context.Context, RequestLogGroupFilter) (RequestLogGroupPage, error)
 	GetRequestLog(context.Context, string) (RequestLog, error)
 	RequestLogSettings() RequestLogSettings
+}
+
+func (r *ClickHouseUsageReporter) ListRequestLogGroups(ctx context.Context, filter RequestLogGroupFilter) (RequestLogGroupPage, error) {
+	if r == nil || r.client == nil || filter.Days < 1 || filter.Days > 90 || filter.Limit < 1 || filter.Limit > 200 {
+		return RequestLogGroupPage{}, errors.New("invalid request log group filter")
+	}
+	dimension := ""
+	switch filter.Dimension {
+	case "session":
+		dimension = "session_id"
+	case "trace":
+		dimension = "trace_id"
+	default:
+		return RequestLogGroupPage{}, errors.New("dimension must be session or trace")
+	}
+	params, where, err := requestLogQuery(filter.RequestLogFilter, false)
+	if err != nil {
+		return RequestLogGroupPage{}, err
+	}
+	groupExpression := fmt.Sprintf("if(%s = '', concat('Unassigned · ', request_id), %s)", dimension, dimension)
+	outerWhere := "1"
+	if !filter.Before.IsZero() {
+		if filter.BeforeGroupID == "" || filter.BeforeCurrency == "" {
+			return RequestLogGroupPage{}, errors.New("group id and currency are required with before timestamp")
+		}
+		outerWhere = "(parseDateTimeBestEffort(ended_at),group_id,currency) < (parseDateTimeBestEffort({before:String}),{before_group_id:String},{before_currency:String})"
+		params.Set("param_before", filter.Before.UTC().Format(time.RFC3339Nano))
+		params.Set("param_before_group_id", filter.BeforeGroupID)
+		params.Set("param_before_currency", filter.BeforeCurrency)
+	}
+	query := fmt.Sprintf(`SELECT group_id,requests,errors,models,providers,total_tokens,cache_hits,latency_ms,cost,currency,started_at,ended_at
+FROM (
+ SELECT %s AS group_id,
+  count() AS requests,
+  countIf(status = 'error') AS errors,
+  arraySort(arrayFilter(value -> value != '', groupUniqArray(%s))) AS models,
+  arraySort(arrayFilter(value -> value != '', groupUniqArray(%s))) AS providers,
+  sum(total_tokens) AS total_tokens,
+  countIf(cache_status = 'hit') AS cache_hits,
+  avg(toFloat64(latency_ms)) AS latency_ms,
+  sum(usage.cost) AS cost,
+  if(currency = '', 'USD', currency) AS currency,
+  min(timestamp) AS started_at,
+  max(timestamp) AS ended_at
+ FROM %s AS usage
+ WHERE %s
+ GROUP BY group_id,currency
+)
+WHERE %s
+ORDER BY parseDateTimeBestEffort(ended_at) DESC,group_id DESC,currency DESC
+LIMIT %d FORMAT JSONEachRow`, groupExpression, canonicalUsageModelExpression, canonicalUsageProviderExpression, r.table, strings.Join(where, " AND "), outerWhere, filter.Limit+1)
+	params.Set("query", query)
+	rows, err := r.queryRequestLogGroups(ctx, params)
+	if err != nil {
+		return RequestLogGroupPage{}, err
+	}
+	page := RequestLogGroupPage{Data: rows}
+	if len(rows) > filter.Limit {
+		page.Data = rows[:filter.Limit]
+		last := page.Data[len(page.Data)-1]
+		page.NextBefore = last.EndedAt
+		page.NextBeforeGroupID = last.GroupID
+		page.NextBeforeCurrency = last.Currency
+	}
+	return page, nil
 }
 
 func (r *ClickHouseUsageReporter) RequestLogSettings() RequestLogSettings {
@@ -97,6 +192,26 @@ func (r *ClickHouseUsageReporter) ListRequestLogs(ctx context.Context, filter Re
 	if r == nil || r.client == nil || filter.Days < 1 || filter.Days > 90 || filter.Limit < 1 || filter.Limit > 200 {
 		return RequestLogPage{}, errors.New("invalid request log filter")
 	}
+	params, where, err := requestLogQuery(filter, true)
+	if err != nil {
+		return RequestLogPage{}, err
+	}
+	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s ORDER BY parseDateTimeBestEffort(timestamp) DESC,request_id DESC LIMIT %d FORMAT JSONEachRow", requestLogColumns(), r.table, strings.Join(where, " AND "), filter.Limit+1)
+	params.Set("query", query)
+	rows, err := r.queryRequestLogs(ctx, params)
+	if err != nil {
+		return RequestLogPage{}, err
+	}
+	page := RequestLogPage{Data: rows}
+	if len(rows) > filter.Limit {
+		page.Data = rows[:filter.Limit]
+		page.NextBefore = page.Data[len(page.Data)-1].Timestamp
+		page.NextRequestID = page.Data[len(page.Data)-1].RequestID
+	}
+	return page, nil
+}
+
+func requestLogQuery(filter RequestLogFilter, includeCursor bool) (url.Values, []string, error) {
 	params := url.Values{"output_format_json_quote_64bit_integers": {"0"}}
 	where := []string{fmt.Sprintf("timestamp_unix >= toUnixTimestamp(now() - INTERVAL %d DAY)", filter.Days), "phase IN ('commit','cancel')"}
 	addStringFilter := func(column, name, value string) {
@@ -121,27 +236,15 @@ func (r *ClickHouseUsageReporter) ListRequestLogs(ctx context.Context, filter Re
 	addStringFilter("organization_id", "organization_id", filter.OrganizationID)
 	addStringFilter("api_key_fingerprint", "credential_id", filter.CredentialID)
 	addStringFilter("cache_status", "cache_status", filter.CacheStatus)
-	if !filter.Before.IsZero() {
+	if includeCursor && !filter.Before.IsZero() {
 		if filter.BeforeRequestID == "" {
-			return RequestLogPage{}, errors.New("before request id is required with before timestamp")
+			return nil, nil, errors.New("before request id is required with before timestamp")
 		}
 		where = append(where, "(parseDateTimeBestEffort(timestamp) < parseDateTimeBestEffort({before:String}) OR (parseDateTimeBestEffort(timestamp) = parseDateTimeBestEffort({before:String}) AND request_id < {before_request_id:String}))")
 		params.Set("param_before", filter.Before.UTC().Format(time.RFC3339Nano))
 		params.Set("param_before_request_id", filter.BeforeRequestID)
 	}
-	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s ORDER BY parseDateTimeBestEffort(timestamp) DESC,request_id DESC LIMIT %d FORMAT JSONEachRow", requestLogColumns(), r.table, strings.Join(where, " AND "), filter.Limit+1)
-	params.Set("query", query)
-	rows, err := r.queryRequestLogs(ctx, params)
-	if err != nil {
-		return RequestLogPage{}, err
-	}
-	page := RequestLogPage{Data: rows}
-	if len(rows) > filter.Limit {
-		page.Data = rows[:filter.Limit]
-		page.NextBefore = page.Data[len(page.Data)-1].Timestamp
-		page.NextRequestID = page.Data[len(page.Data)-1].RequestID
-	}
-	return page, nil
+	return params, where, nil
 }
 
 func (r *ClickHouseUsageReporter) GetRequestLog(ctx context.Context, requestID string) (RequestLog, error) {
@@ -197,6 +300,38 @@ func (r *ClickHouseUsageReporter) queryRequestLogs(ctx context.Context, params u
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("decode request logs: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *ClickHouseUsageReporter) queryRequestLogGroups(ctx context.Context, params url.Values) ([]RequestLogGroup, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint+"/?"+params.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if r.username != "" || r.password != "" {
+		req.SetBasicAuth(r.username, r.password)
+	}
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("query request log groups: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("query request log groups: ClickHouse returned %s: %s", resp.Status, strings.TrimSpace(string(message)))
+	}
+	rows := []RequestLogGroup{}
+	scanner := bufio.NewScanner(io.LimitReader(resp.Body, 8<<20))
+	for scanner.Scan() {
+		var row RequestLogGroup
+		if err := json.Unmarshal(scanner.Bytes(), &row); err != nil {
+			return nil, fmt.Errorf("decode request log group: %w", err)
+		}
+		rows = append(rows, row)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("decode request log groups: %w", err)
 	}
 	return rows, nil
 }

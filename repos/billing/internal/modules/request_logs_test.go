@@ -56,6 +56,46 @@ func TestClickHouseRequestLogDetailAndSettings(t *testing.T) {
 	}
 }
 
+func TestClickHouseRequestLogGroupsAreServerAggregatedAndCursorPaginated(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		for _, expected := range []string{"if(session_id = ''", "countIf(status = 'error')", "groupUniqArray(", "countIf(cache_status = 'hit')", "sum(usage.cost)", "GROUP BY group_id,currency", "before_group_id:String", "LIMIT 3"} {
+			if !strings.Contains(query, expected) {
+				t.Fatalf("group query missing %q: %s", expected, query)
+			}
+		}
+		if r.URL.Query().Get("param_tag") != "production' OR 1=1" || r.URL.Query().Get("param_before_group_id") != "session-3" || r.URL.Query().Get("param_before_currency") != "USD" {
+			t.Fatalf("group parameters were not bound: %s", r.URL.RawQuery)
+		}
+		_, _ = w.Write([]byte(
+			`{"group_id":"session-2","requests":3,"errors":1,"models":["gpt"],"providers":["azure"],"total_tokens":42,"cache_hits":2,"latency_ms":12.5,"cost":0.3,"currency":"USD","started_at":"2026-08-25T10:00:00Z","ended_at":"2026-08-25T12:00:00Z"}` + "\n" +
+				`{"group_id":"session-1","requests":2,"errors":0,"models":["phi3"],"providers":["ollama"],"total_tokens":10,"cache_hits":0,"latency_ms":8,"cost":0,"currency":"USD","started_at":"2026-08-25T09:00:00Z","ended_at":"2026-08-25T11:00:00Z"}` + "\n" +
+				`{"group_id":"older","requests":1,"errors":0,"models":[],"providers":[],"total_tokens":1,"cache_hits":0,"latency_ms":1,"cost":0,"currency":"EUR","started_at":"2026-08-24T09:00:00Z","ended_at":"2026-08-24T09:00:00Z"}` + "\n"))
+	}))
+	defer server.Close()
+	reporter, err := NewClickHouseUsageReporter(Settings{UsageEventsEnabled: true, ClickHouseURL: server.URL, ClickHouseDatabase: "safe_db", ClickHouseUsageEventsTable: "safe_events"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := reporter.ListRequestLogGroups(context.Background(), RequestLogGroupFilter{
+		RequestLogFilter: RequestLogFilter{Days: 7, Limit: 2, Tag: "production' OR 1=1", Before: time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC)},
+		Dimension:        "session", BeforeGroupID: "session-3", BeforeCurrency: "USD",
+	})
+	if err != nil || len(page.Data) != 2 || page.Data[0].Requests != 3 || page.Data[0].CacheHits != 2 || page.NextBefore != "2026-08-25T11:00:00Z" || page.NextBeforeGroupID != "session-1" || page.NextBeforeCurrency != "USD" {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+}
+
+func TestClickHouseRequestLogGroupsRejectInvalidDimensionAndPartialCursor(t *testing.T) {
+	reporter := &ClickHouseUsageReporter{client: http.DefaultClient}
+	if _, err := reporter.ListRequestLogGroups(context.Background(), RequestLogGroupFilter{RequestLogFilter: RequestLogFilter{Days: 7, Limit: 10}, Dimension: "model"}); err == nil {
+		t.Fatal("invalid group dimension accepted")
+	}
+	if _, err := reporter.ListRequestLogGroups(context.Background(), RequestLogGroupFilter{RequestLogFilter: RequestLogFilter{Days: 7, Limit: 10, Before: time.Now()}, Dimension: "trace", BeforeGroupID: "trace-1"}); err == nil {
+		t.Fatal("partial group cursor accepted")
+	}
+}
+
 func TestRequestLogFilterBounds(t *testing.T) {
 	reporter := &ClickHouseUsageReporter{client: http.DefaultClient}
 	if _, err := reporter.ListRequestLogs(context.Background(), RequestLogFilter{Days: 91, Limit: 10}); err == nil {

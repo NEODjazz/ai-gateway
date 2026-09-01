@@ -7,19 +7,42 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type recordingRequestLogClient struct {
-	audit  ManagementAudit
-	filter RequestLogFilter
+	audit       ManagementAudit
+	filter      RequestLogFilter
+	groupFilter RequestLogGroupFilter
 }
 
 func (c *recordingRequestLogClient) ListRequestLogs(_ context.Context, audit ManagementAudit, filter RequestLogFilter) (RequestLogPage, error) {
 	c.audit, c.filter = audit, filter
 	return RequestLogPage{Data: []RequestLog{{RequestID: "req-1", SessionID: "session-1", TraceID: "0123456789abcdef0123456789abcdef", Timestamp: "2026-08-25T12:00:00Z", OrganizationID: "org-a", Tags: []string{"production"}, Status: "ok", APIType: "chat_completions", Phase: "commit", FirstTokenLatencyMS: 42, RetryCount: 2, FallbackCount: 1, CacheStatus: "hit", CacheKind: "semantic", UsageEstimated: true, Currency: "USD"}}}, nil
 }
+func (c *recordingRequestLogClient) ListRequestLogGroups(_ context.Context, audit ManagementAudit, filter RequestLogGroupFilter) (RequestLogGroupPage, error) {
+	c.audit, c.groupFilter = audit, filter
+	return RequestLogGroupPage{Data: []RequestLogGroup{{GroupID: "session-1", Requests: 2, Currency: "USD"}}}, nil
+}
 func (*recordingRequestLogClient) GetRequestLog(_ context.Context, _ ManagementAudit, requestID string) (RequestLog, error) {
 	return RequestLog{RequestID: requestID, Timestamp: "2026-08-25T12:00:00Z", Status: "ok", APIType: "chat_completions", Phase: "commit", Currency: "USD"}, nil
+}
+
+func TestAdminRequestLogGroupsValidateDimensionAndCursor(t *testing.T) {
+	client := &recordingRequestLogClient{}
+	handler := Routes(NewHandler(modulesPipeline("admin"), modelsProvider{}).WithRequestLogs(client))
+	request := httptest.NewRequest(http.MethodGet, "/admin/v1/request-logs/groups?dimension=session&days=30&limit=25&tag=production&before=2026-08-25T12%3A00%3A00Z&before_group_id=session-2&before_currency=USD", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || client.groupFilter.Dimension != "session" || client.groupFilter.Tag != "production" || client.groupFilter.BeforeGroupID != "session-2" || client.groupFilter.BeforeCurrency != "USD" {
+		t.Fatalf("status=%d filter=%+v body=%s", response.Code, client.groupFilter, response.Body.String())
+	}
+	invalid := httptest.NewRecorder()
+	handler.ServeHTTP(invalid, httptest.NewRequest(http.MethodGet, "/admin/v1/request-logs/groups?dimension=model", nil))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid dimension status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
 }
 func (*recordingRequestLogClient) GetRequestLogSettings(_ context.Context, _ ManagementAudit) (RequestLogSettings, error) {
 	return RequestLogSettings{RetentionDays: 730, ContentStored: false, MaxQueryDays: 90}, nil
@@ -64,6 +87,25 @@ func TestRemoteRequestLogsUseScopedManagementCredential(t *testing.T) {
 	client := NewRemoteBudgetManagementClient(server.URL, "billing-secret")
 	page, err := client.ListRequestLogs(context.Background(), ManagementAudit{RequestID: "admin-request", ActorID: "admin", CredentialID: "cred"}, RequestLogFilter{Days: 7, Limit: 20, TeamID: "team-a", OrganizationID: "org-a", TraceID: "trace-1", Tag: "production", CacheStatus: "miss"})
 	if err != nil || len(page.Data) != 1 || page.Data[0].RequestID != "req-1" {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+}
+
+func TestRemoteRequestLogGroupsUseBoundedCursor(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if r.URL.Path != "/internal/v1/request-logs/groups" || query.Get("dimension") != "trace" || query.Get("before_group_id") != "trace-2" || query.Get("before_currency") != "EUR" || query.Get("tag") != "production" {
+			t.Fatalf("request=%s", r.URL.String())
+		}
+		_ = json.NewEncoder(w).Encode(RequestLogGroupPage{Data: []RequestLogGroup{{GroupID: "trace-1", Requests: 2, Currency: "EUR"}}})
+	}))
+	defer server.Close()
+	client := NewRemoteBudgetManagementClient(server.URL, "billing-secret")
+	page, err := client.ListRequestLogGroups(context.Background(), ManagementAudit{RequestID: "admin-request"}, RequestLogGroupFilter{
+		RequestLogFilter: RequestLogFilter{Days: 7, Limit: 20, Tag: "production", Before: time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)},
+		Dimension:        "trace", BeforeGroupID: "trace-2", BeforeCurrency: "EUR",
+	})
+	if err != nil || len(page.Data) != 1 || page.Data[0].GroupID != "trace-1" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
 }

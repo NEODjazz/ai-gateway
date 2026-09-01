@@ -21,6 +21,7 @@ type requestLogManagementHandler struct {
 func registerRequestLogManagement(mux *http.ServeMux, reporter modules.RequestLogReporter, initErr error, secret string) {
 	h := requestLogManagementHandler{reporter: reporter, initErr: initErr, secret: strings.TrimSpace(secret)}
 	mux.HandleFunc("GET /internal/v1/request-logs", h.list)
+	mux.HandleFunc("GET /internal/v1/request-logs/groups", h.listGroups)
 	mux.HandleFunc("GET /internal/v1/request-logs/settings", h.settings)
 	mux.HandleFunc("GET /internal/v1/request-logs/{request_id}", h.get)
 }
@@ -42,11 +43,52 @@ func (h requestLogManagementHandler) list(w http.ResponseWriter, r *http.Request
 	if !h.authorize(w, r) {
 		return
 	}
+	filter, err := parseRequestLogFilter(r, true)
+	if err != nil {
+		http.Error(w, "invalid request log filter", http.StatusBadRequest)
+		return
+	}
+	page, err := h.reporter.ListRequestLogs(r.Context(), filter)
+	if err != nil {
+		http.Error(w, "request logs unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	writeBudgetJSON(w, http.StatusOK, page)
+}
+
+func (h requestLogManagementHandler) listGroups(w http.ResponseWriter, r *http.Request) {
+	if !h.authorize(w, r) {
+		return
+	}
+	filter, err := parseRequestLogFilter(r, false)
+	dimension := strings.TrimSpace(r.URL.Query().Get("dimension"))
+	if err != nil || (dimension != "session" && dimension != "trace") {
+		http.Error(w, "invalid request log group filter", http.StatusBadRequest)
+		return
+	}
+	groupFilter := modules.RequestLogGroupFilter{RequestLogFilter: filter, Dimension: dimension}
+	if raw := strings.TrimSpace(r.URL.Query().Get("before")); raw != "" {
+		groupFilter.Before, err = time.Parse(time.RFC3339Nano, raw)
+		groupFilter.BeforeGroupID = strings.TrimSpace(r.URL.Query().Get("before_group_id"))
+		groupFilter.BeforeCurrency = strings.TrimSpace(r.URL.Query().Get("before_currency"))
+		if err != nil || groupFilter.BeforeGroupID == "" || len(groupFilter.BeforeGroupID) > 256 || groupFilter.BeforeCurrency == "" || len(groupFilter.BeforeCurrency) > 16 {
+			http.Error(w, "invalid request log group filter", http.StatusBadRequest)
+			return
+		}
+	}
+	page, err := h.reporter.ListRequestLogGroups(r.Context(), groupFilter)
+	if err != nil {
+		http.Error(w, "request log groups unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	writeBudgetJSON(w, http.StatusOK, page)
+}
+
+func parseRequestLogFilter(r *http.Request, includeCursor bool) (modules.RequestLogFilter, error) {
 	days, err := strconv.Atoi(defaultValue(r.URL.Query().Get("days"), "7"))
 	limit, limitErr := modules.ParseRequestLogLimit(r.URL.Query().Get("limit"), 100)
 	if err != nil || days < 1 || days > 90 || limitErr != nil {
-		http.Error(w, "invalid request log filter", http.StatusBadRequest)
-		return
+		return modules.RequestLogFilter{}, errors.New("invalid request log filter")
 	}
 	filter := modules.RequestLogFilter{Days: days, Limit: limit}
 	for name, target := range map[string]*string{
@@ -55,38 +97,30 @@ func (h requestLogManagementHandler) list(w http.ResponseWriter, r *http.Request
 	} {
 		*target = strings.TrimSpace(r.URL.Query().Get(name))
 		if len(*target) > 256 {
-			http.Error(w, "invalid request log filter", http.StatusBadRequest)
-			return
+			return modules.RequestLogFilter{}, errors.New("invalid request log filter")
 		}
 	}
 	if filter.CacheStatus != "" && filter.CacheStatus != "hit" && filter.CacheStatus != "miss" && filter.CacheStatus != "error" {
-		http.Error(w, "invalid request log filter", http.StatusBadRequest)
-		return
+		return modules.RequestLogFilter{}, errors.New("invalid request log filter")
 	}
 	if filter.TraceID != "" {
 		if len(filter.TraceID) != 32 {
-			http.Error(w, "invalid request log filter", http.StatusBadRequest)
-			return
+			return modules.RequestLogFilter{}, errors.New("invalid request log filter")
 		}
 		if _, err := hex.DecodeString(filter.TraceID); err != nil {
-			http.Error(w, "invalid request log filter", http.StatusBadRequest)
-			return
+			return modules.RequestLogFilter{}, errors.New("invalid request log filter")
 		}
 	}
-	if raw := strings.TrimSpace(r.URL.Query().Get("before")); raw != "" {
-		filter.Before, err = time.Parse(time.RFC3339Nano, raw)
-		filter.BeforeRequestID = strings.TrimSpace(r.URL.Query().Get("before_request_id"))
-		if err != nil || filter.BeforeRequestID == "" || len(filter.BeforeRequestID) > 256 {
-			http.Error(w, "invalid request log filter", http.StatusBadRequest)
-			return
+	if includeCursor {
+		if raw := strings.TrimSpace(r.URL.Query().Get("before")); raw != "" {
+			filter.Before, err = time.Parse(time.RFC3339Nano, raw)
+			filter.BeforeRequestID = strings.TrimSpace(r.URL.Query().Get("before_request_id"))
+			if err != nil || filter.BeforeRequestID == "" || len(filter.BeforeRequestID) > 256 {
+				return modules.RequestLogFilter{}, errors.New("invalid request log filter")
+			}
 		}
 	}
-	page, err := h.reporter.ListRequestLogs(r.Context(), filter)
-	if err != nil {
-		http.Error(w, "request logs unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	writeBudgetJSON(w, http.StatusOK, page)
+	return filter, nil
 }
 
 func (h requestLogManagementHandler) get(w http.ResponseWriter, r *http.Request) {

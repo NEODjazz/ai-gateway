@@ -72,6 +72,35 @@ type RequestLogPage struct {
 	NextRequestID string       `json:"next_request_id,omitempty"`
 }
 
+type RequestLogGroupFilter struct {
+	RequestLogFilter
+	Dimension      string
+	BeforeGroupID  string
+	BeforeCurrency string
+}
+
+type RequestLogGroup struct {
+	GroupID     string   `json:"group_id"`
+	Requests    uint64   `json:"requests"`
+	Errors      uint64   `json:"errors"`
+	Models      []string `json:"models"`
+	Providers   []string `json:"providers"`
+	TotalTokens uint64   `json:"total_tokens"`
+	CacheHits   uint64   `json:"cache_hits"`
+	LatencyMS   float64  `json:"latency_ms"`
+	Cost        float64  `json:"cost"`
+	Currency    string   `json:"currency"`
+	StartedAt   string   `json:"started_at"`
+	EndedAt     string   `json:"ended_at"`
+}
+
+type RequestLogGroupPage struct {
+	Data               []RequestLogGroup `json:"data"`
+	NextBefore         string            `json:"next_before,omitempty"`
+	NextBeforeGroupID  string            `json:"next_before_group_id,omitempty"`
+	NextBeforeCurrency string            `json:"next_before_currency,omitempty"`
+}
+
 type RequestLogSettings struct {
 	RetentionDays int  `json:"retention_days"`
 	ContentStored bool `json:"content_stored"`
@@ -80,17 +109,26 @@ type RequestLogSettings struct {
 
 type RequestLogClient interface {
 	ListRequestLogs(context.Context, ManagementAudit, RequestLogFilter) (RequestLogPage, error)
+	ListRequestLogGroups(context.Context, ManagementAudit, RequestLogGroupFilter) (RequestLogGroupPage, error)
 	GetRequestLog(context.Context, ManagementAudit, string) (RequestLog, error)
 	GetRequestLogSettings(context.Context, ManagementAudit) (RequestLogSettings, error)
 }
 
-func (c *RemoteBudgetManagementClient) ListRequestLogs(ctx context.Context, audit ManagementAudit, filter RequestLogFilter) (RequestLogPage, error) {
-	query := url.Values{"days": {strconv.Itoa(filter.Days)}, "limit": {strconv.Itoa(filter.Limit)}}
-	for key, value := range map[string]string{"request_id": filter.RequestID, "session_id": filter.SessionID, "trace_id": filter.TraceID, "status": filter.Status, "model": filter.Model, "provider": filter.Provider, "tag": filter.Tag, "user_id": filter.UserID, "team_id": filter.TeamID, "organization_id": filter.OrganizationID, "credential_id": filter.CredentialID, "cache_status": filter.CacheStatus} {
-		if value != "" {
-			query.Set(key, value)
-		}
+func (c *RemoteBudgetManagementClient) ListRequestLogGroups(ctx context.Context, audit ManagementAudit, filter RequestLogGroupFilter) (RequestLogGroupPage, error) {
+	query := requestLogQuery(filter.RequestLogFilter)
+	query.Set("dimension", filter.Dimension)
+	if !filter.Before.IsZero() {
+		query.Set("before", filter.Before.UTC().Format(time.RFC3339Nano))
+		query.Set("before_group_id", filter.BeforeGroupID)
+		query.Set("before_currency", filter.BeforeCurrency)
 	}
+	var page RequestLogGroupPage
+	err := c.call(ctx, http.MethodGet, "/internal/v1/request-logs/groups?"+query.Encode(), audit, nil, &page)
+	return page, err
+}
+
+func (c *RemoteBudgetManagementClient) ListRequestLogs(ctx context.Context, audit ManagementAudit, filter RequestLogFilter) (RequestLogPage, error) {
+	query := requestLogQuery(filter)
 	if !filter.Before.IsZero() {
 		query.Set("before", filter.Before.UTC().Format(time.RFC3339Nano))
 		query.Set("before_request_id", filter.BeforeRequestID)
@@ -98,6 +136,16 @@ func (c *RemoteBudgetManagementClient) ListRequestLogs(ctx context.Context, audi
 	var page RequestLogPage
 	err := c.call(ctx, http.MethodGet, "/internal/v1/request-logs?"+query.Encode(), audit, nil, &page)
 	return page, err
+}
+
+func requestLogQuery(filter RequestLogFilter) url.Values {
+	query := url.Values{"days": {strconv.Itoa(filter.Days)}, "limit": {strconv.Itoa(filter.Limit)}}
+	for key, value := range map[string]string{"request_id": filter.RequestID, "session_id": filter.SessionID, "trace_id": filter.TraceID, "status": filter.Status, "model": filter.Model, "provider": filter.Provider, "tag": filter.Tag, "user_id": filter.UserID, "team_id": filter.TeamID, "organization_id": filter.OrganizationID, "credential_id": filter.CredentialID, "cache_status": filter.CacheStatus} {
+		if value != "" {
+			query.Set(key, value)
+		}
+	}
+	return query
 }
 
 func (c *RemoteBudgetManagementClient) GetRequestLog(ctx context.Context, audit ManagementAudit, requestID string) (RequestLog, error) {
@@ -132,6 +180,28 @@ func (h Handler) ListRequestLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, err := h.requestLogs.ListRequestLogs(r.Context(), managementAudit(req), filter)
+	if err != nil {
+		writeManagementFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+func (h Handler) ListRequestLogGroups(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.authorizeAdmin(w, r)
+	if !ok {
+		return
+	}
+	if h.requestLogs == nil {
+		writeError(w, http.StatusServiceUnavailable, "request_logs_unavailable", "request logs are not configured")
+		return
+	}
+	filter, err := requestLogGroupFilter(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	page, err := h.requestLogs.ListRequestLogGroups(r.Context(), managementAudit(req), filter)
 	if err != nil {
 		writeManagementFailure(w, err)
 		return
@@ -179,6 +249,31 @@ func (h Handler) GetRequestLogSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func requestLogFilter(r *http.Request) (RequestLogFilter, error) {
+	return parseRequestLogFilter(r, true)
+}
+
+func requestLogGroupFilter(r *http.Request) (RequestLogGroupFilter, error) {
+	filter, err := parseRequestLogFilter(r, false)
+	if err != nil {
+		return RequestLogGroupFilter{}, err
+	}
+	dimension := strings.TrimSpace(r.URL.Query().Get("dimension"))
+	if dimension != "session" && dimension != "trace" {
+		return RequestLogGroupFilter{}, errors.New("dimension must be session or trace")
+	}
+	groupFilter := RequestLogGroupFilter{RequestLogFilter: filter, Dimension: dimension}
+	if raw := strings.TrimSpace(r.URL.Query().Get("before")); raw != "" {
+		groupFilter.Before, err = time.Parse(time.RFC3339Nano, raw)
+		groupFilter.BeforeGroupID = strings.TrimSpace(r.URL.Query().Get("before_group_id"))
+		groupFilter.BeforeCurrency = strings.TrimSpace(r.URL.Query().Get("before_currency"))
+		if err != nil || groupFilter.BeforeGroupID == "" || len(groupFilter.BeforeGroupID) > 256 || groupFilter.BeforeCurrency == "" || len(groupFilter.BeforeCurrency) > 16 {
+			return RequestLogGroupFilter{}, errors.New("before requires an RFC3339 timestamp, group id, and currency")
+		}
+	}
+	return groupFilter, nil
+}
+
+func parseRequestLogFilter(r *http.Request, includeCursor bool) (RequestLogFilter, error) {
 	days, err := strconv.Atoi(defaultQuery(r, "days", "7"))
 	limit, limitErr := strconv.Atoi(defaultQuery(r, "limit", "100"))
 	if err != nil || limitErr != nil || days < 1 || days > 90 || limit < 1 || limit > 200 {
@@ -205,11 +300,13 @@ func requestLogFilter(r *http.Request) (RequestLogFilter, error) {
 			return RequestLogFilter{}, errors.New("trace id must be 32 hexadecimal characters")
 		}
 	}
-	if raw := strings.TrimSpace(r.URL.Query().Get("before")); raw != "" {
-		filter.Before, err = time.Parse(time.RFC3339Nano, raw)
-		filter.BeforeRequestID = strings.TrimSpace(r.URL.Query().Get("before_request_id"))
-		if err != nil || filter.BeforeRequestID == "" || len(filter.BeforeRequestID) > 256 {
-			return RequestLogFilter{}, errors.New("before must be an RFC3339 timestamp")
+	if includeCursor {
+		if raw := strings.TrimSpace(r.URL.Query().Get("before")); raw != "" {
+			filter.Before, err = time.Parse(time.RFC3339Nano, raw)
+			filter.BeforeRequestID = strings.TrimSpace(r.URL.Query().Get("before_request_id"))
+			if err != nil || filter.BeforeRequestID == "" || len(filter.BeforeRequestID) > 256 {
+				return RequestLogFilter{}, errors.New("before must be an RFC3339 timestamp")
+			}
 		}
 	}
 	return filter, nil
