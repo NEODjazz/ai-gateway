@@ -195,7 +195,7 @@ func normalizeBudgetPolicySpec(spec BudgetPolicySpec) (BudgetPolicySpec, error) 
 		enabled := true
 		spec.Enabled = &enabled
 	}
-	if !oneOf(spec.ScopeType, "global", "key", "user", "team", "model", "provider") || spec.ScopeID == "" {
+	if !oneOf(spec.ScopeType, "global", "key", "user", "team", "model", "provider", "tag") || spec.ScopeID == "" {
 		return spec, errors.New("invalid budget scope")
 	}
 	if spec.ScopeType == "global" && spec.ScopeID != "*" {

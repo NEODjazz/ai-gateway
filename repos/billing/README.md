@@ -97,8 +97,11 @@ BILLING_DEFAULT_RESERVE_OUTPUT_TOKENS=1024
 ```
 
 Limits and quotas are enforced atomically for `global`, `key`, `user`, `team`,
-`model`, and `provider` scopes. A request first reserves its estimated input plus
-maximum output allowance, then replaces the reservation with actual usage on
+`model`, `provider`, and credential `tag` scopes. A request with multiple tags
+consumes every matching tag budget. Tags are snapshotted in the reservation so
+retries, fallback, commit, and summary use the same billing identity. A request
+first reserves its estimated input plus maximum output allowance, then replaces
+the reservation with actual usage on
 `commit` or releases it on `cancel`. Expired reservations stop consuming the
 budget. Repeating the same `request_id` is idempotent; reusing it for another
 billing identity or after the lifecycle is finalized returns HTTP 409. During
@@ -130,7 +133,7 @@ GET /internal/v1/usage/report?days=30
 reservations, using the same period and scope calculation as enforcement.
 The usage report accepts a bounded 1–90 day range and aggregates final
 `commit`/`cancel` outcomes by currency, day, canonical public model, and managed
-provider, and virtual-key tag. Untagged events appear as `Untagged`; a request
+provider and virtual-key tag. Untagged events appear as `Untagged`; a request
 with multiple tags is intentionally attributed to every tag. The upstream response model and deployment endpoint remain separate
 request-log dimensions and do not split usage totals.
 Currencies are never combined into a single spend total.

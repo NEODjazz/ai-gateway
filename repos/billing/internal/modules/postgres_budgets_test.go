@@ -160,6 +160,40 @@ func TestPostgresBudgetReservationsAreAtomicAndLifecycleAware(t *testing.T) {
 		t.Fatalf("cancel did not release cost budget: %v", err)
 	}
 
+	tagA, tagB := "tag-a-"+suffix, "tag-b-"+suffix
+	if _, err := pool.Exec(ctx, `INSERT INTO billing_budget_policies(scope_type,scope_id,period,currency,max_tokens) VALUES('tag',$1,'day','USD',5),('tag',$2,'day','USD',10)`, tagA, tagB); err != nil {
+		t.Fatal(err)
+	}
+	tagged := budgetTestEvent("tagged-"+suffix, "tag-team-"+suffix, 3)
+	tagged.Tags = []string{tagA, tagB}
+	if err := checker.Apply(ctx, tagged); err != nil {
+		t.Fatalf("multi-tag reservation failed: %v", err)
+	}
+	var storedTags []string
+	if err := pool.QueryRow(ctx, `SELECT tags FROM billing_budget_reservations WHERE request_id=$1`, tagged.RequestID).Scan(&storedTags); err != nil || len(storedTags) != 2 {
+		t.Fatalf("stored tags=%v err=%v", storedTags, err)
+	}
+	overTagA := budgetTestEvent("over-tag-a-"+suffix, "tag-team-"+suffix, 3)
+	overTagA.Tags = []string{tagA}
+	if err := checker.Apply(ctx, overTagA); !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("tag A budget was not enforced, err=%v", err)
+	}
+	withinTagB := budgetTestEvent("within-tag-b-"+suffix, "tag-team-"+suffix, 6)
+	withinTagB.Tags = []string{tagB}
+	if err := checker.Apply(ctx, withinTagB); err != nil {
+		t.Fatalf("independent tag B budget rejected valid usage: %v", err)
+	}
+	overTagB := budgetTestEvent("over-tag-b-"+suffix, "tag-team-"+suffix, 2)
+	overTagB.Tags = []string{tagB}
+	if err := checker.Apply(ctx, overTagB); !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("tag B budget was not enforced, err=%v", err)
+	}
+	retryWithChangedTags := budgetTestEvent(tagged.RequestID, "tag-team-"+suffix, 3)
+	retryWithChangedTags.Tags = []string{tagB}
+	if err := checker.Apply(ctx, retryWithChangedTags); err != nil || len(retryWithChangedTags.Tags) != 2 || retryWithChangedTags.Tags[0] != tagA {
+		t.Fatalf("reservation tag snapshot was not preserved: tags=%v err=%v", retryWithChangedTags.Tags, err)
+	}
+
 	pricingRequest := "pricing-snapshot-" + suffix
 	pricingReserve := budgetTestEvent(pricingRequest, "pricing-team-"+suffix, 300)
 	pricingReserve.InputTokens, pricingReserve.OutputTokens = 100, 200
@@ -263,7 +297,7 @@ func TestPostgresBudgetManagementLifecycleAndSummary(t *testing.T) {
 
 func applyBudgetTestMigration(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	for _, name := range []string{"004_budgets.sql", "005_pricing_snapshots.sql", "006_management_audit.sql"} {
+	for _, name := range []string{"004_budgets.sql", "005_pricing_snapshots.sql", "006_management_audit.sql", "007_tag_budgets.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
 			t.Fatal(err)

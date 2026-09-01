@@ -849,7 +849,7 @@ tenant-scoped Responses affinity, plus an admin-RBAC virtual-key management API.
 It also has an opt-in, credential-scoped semantic cache for constrained text-only
 chat requests, credential-level function/MCP tool ACLs, and bounded multimodal
 image input with explicit vision routing and fail-closed binary AV scanning.
-Admin RBAC also exposes CRUD for multi-scope budget policies and a current-window
+Admin RBAC also exposes CRUD for global/key/user/team/model/provider/tag budget policies and a current-window
 spend summary at `/admin/v1/budgets`; gateway-to-billing calls use a separate
 `BILLING_MANAGEMENT_SHARED_SECRET`, never the client Bearer token.
 
