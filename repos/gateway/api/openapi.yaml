@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.26
+  version: 0.1.27
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1805,15 +1805,17 @@ components:
     UsageReport:
       type: object
       additionalProperties: false
-      required: [days, from, to, totals, daily, by_model, by_provider, by_tag, by_key, by_user, by_team, by_organization]
+      required: [days, from, to, totals, daily, by_model, by_upstream_model, by_provider, by_endpoint, by_tag, by_key, by_user, by_team, by_organization]
       properties:
         days: {type: integer, minimum: 1, maximum: 90}
         from: {type: string, format: date-time}
         to: {type: string, format: date-time}
         totals: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
         daily: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
-        by_model: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
-        by_provider: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
+        by_model: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}, description: Usage by stable public model or model group requested by the client}
+        by_upstream_model: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}, description: Usage by the concrete provider model selected after routing}
+        by_provider: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}, description: Usage by managed logical provider}
+        by_endpoint: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}, description: Usage by concrete routed deployment or provider endpoint}
         by_tag: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
         by_key: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}, description: Usage by non-secret virtual-key ID or fingerprint}
         by_user: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}

@@ -32,3 +32,8 @@ the investigation. For example,
 session view, while `log=<request-id>` opens the bounded metadata-only detail.
 No prompt, response, raw provider error, bearer token, or provider credential is
 placed in the URL or returned by the log APIs.
+
+Usage keeps public models, concrete upstream models, logical providers, and
+routed endpoints as separate dimensions. This makes alias behavior and routing
+decisions visible without creating duplicate catalog records or attributing a
+deployment name to the provider column.

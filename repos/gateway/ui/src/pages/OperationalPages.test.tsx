@@ -16,7 +16,8 @@ describe("operational pages", () => {
     const aggregate = { currency: "USD", requests: 4, errors: 0, input_tokens: 8, output_tokens: 12, total_tokens: 20, cost: 0.00265, avg_latency_ms: 12, cache_hits: 0, cost_per_request: 0.0006625 };
     const response = {
       totals: [aggregate], daily: [{ ...aggregate, date: "2026-08-28" }], by_model: [{ ...aggregate, name: "gpt" }],
-      by_provider: [{ ...aggregate, name: "azure-open-ai" }], by_tag: [{ ...aggregate, name: "production" }],
+      by_upstream_model: [{ ...aggregate, name: "gpt-5.6-2026-07-09" }], by_provider: [{ ...aggregate, name: "azure-open-ai" }],
+      by_endpoint: [{ ...aggregate, name: "azure-primary" }], by_tag: [{ ...aggregate, name: "production" }],
       by_key: [{ ...aggregate, name: "key-1" }], by_user: [{ ...aggregate, name: "user-1" }],
       by_team: [{ ...aggregate, name: "team-1" }], by_organization: [{ ...aggregate, name: "org-1" }]
     };
@@ -25,8 +26,10 @@ describe("operational pages", () => {
     expect(await screen.findAllByText("$0.00265")).toHaveLength(2);
     expect(screen.getByText("Successful")).toBeInTheDocument();
     expect(screen.getByText("Spend per day")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("tab", { name: "Models" })); expect(screen.getByText("gpt")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Public models" })); expect(screen.getByText("gpt")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Upstream models" })); expect(screen.getByText("gpt-5.6-2026-07-09")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Providers" })); expect(screen.getByText("azure-open-ai")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Endpoints" })); expect(screen.getByText("azure-primary")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Tags" })); expect(screen.getByText("production")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Virtual keys" })); expect(screen.getByText("key-1")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Users" })); expect(screen.getByText("user-1")).toBeInTheDocument();

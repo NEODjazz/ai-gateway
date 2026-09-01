@@ -191,7 +191,9 @@ Startup fails if PostgreSQL is unavailable, the persisted snapshot is invalid,
 or the stable encryption key cannot decrypt a credential or logging secret.
 The Usage & Spend view reads final request outcomes from ClickHouse for a
 bounded 7/30/90-day window and breaks requests, tokens, latency, and spend down
-by day, model, provider, and virtual-key tag. Every tagged request is attributed
+by day, public model, concrete upstream model, logical provider, routed endpoint,
+and virtual-key tag. Public aliases are not merged with provider model names, and
+provider totals are not confused with deployment/endpoint totals. Every tagged request is attributed
 to each of its tags; untagged traffic is grouped as `Untagged`. Costs remain
 separated by currency, and model/provider/tag filters use typed ClickHouse
 parameters.

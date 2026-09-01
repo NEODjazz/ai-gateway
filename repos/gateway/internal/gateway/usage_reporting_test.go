@@ -37,7 +37,7 @@ func (c *recordingUsageClient) UsageReport(_ context.Context, audit ManagementAu
 		c.report.Days = days
 		return c.report, nil
 	}
-	return UsageReport{Days: days, Totals: []UsageAggregate{{Currency: "USD", Requests: 3, TotalTokens: 42, Cost: 0.12}}, ByKey: []UsageAggregate{{Name: "key-1", Currency: "USD", Requests: 3}}, ByUser: []UsageAggregate{{Name: "user-1", Currency: "USD", Requests: 3}}, ByTeam: []UsageAggregate{{Name: "team-1", Currency: "USD", Requests: 3}}, ByOrganization: []UsageAggregate{{Name: "org-1", Currency: "USD", Requests: 3}}}, nil
+	return UsageReport{Days: days, Totals: []UsageAggregate{{Currency: "USD", Requests: 3, TotalTokens: 42, Cost: 0.12}}, ByUpstreamModel: []UsageAggregate{{Name: "gpt-upstream", Currency: "USD", Requests: 3}}, ByEndpoint: []UsageAggregate{{Name: "azure-primary", Currency: "USD", Requests: 3}}, ByKey: []UsageAggregate{{Name: "key-1", Currency: "USD", Requests: 3}}, ByUser: []UsageAggregate{{Name: "user-1", Currency: "USD", Requests: 3}}, ByTeam: []UsageAggregate{{Name: "team-1", Currency: "USD", Requests: 3}}, ByOrganization: []UsageAggregate{{Name: "org-1", Currency: "USD", Requests: 3}}}, nil
 }
 
 func TestCustomerUsageReportValidatesAndForwardsScope(t *testing.T) {
@@ -63,7 +63,7 @@ func TestAdminUsageReportRequiresAdminAndBoundsRange(t *testing.T) {
 	request.Header.Set("X-Request-ID", "req-usage")
 	response := httptest.NewRecorder()
 	Routes(handler).ServeHTTP(response, request)
-	if response.Code != http.StatusOK || client.days != 7 || client.audit.RequestID != "req-usage" || !strings.Contains(response.Body.String(), `"total_tokens":42`) || !strings.Contains(response.Body.String(), `"by_key":[{"name":"key-1"`) || !strings.Contains(response.Body.String(), `"by_organization":[{"name":"org-1"`) {
+	if response.Code != http.StatusOK || client.days != 7 || client.audit.RequestID != "req-usage" || !strings.Contains(response.Body.String(), `"total_tokens":42`) || !strings.Contains(response.Body.String(), `"by_upstream_model":[{"name":"gpt-upstream"`) || !strings.Contains(response.Body.String(), `"by_endpoint":[{"name":"azure-primary"`) || !strings.Contains(response.Body.String(), `"by_key":[{"name":"key-1"`) || !strings.Contains(response.Body.String(), `"by_organization":[{"name":"org-1"`) {
 		t.Fatalf("status=%d client=%+v body=%s", response.Code, client, response.Body.String())
 	}
 	invalid := httptest.NewRecorder()
