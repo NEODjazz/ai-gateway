@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"ai-gateway-gateway/internal/modelcatalog"
 )
 
 // ControlPlaneSnapshot is the durable management state. Credential material is
@@ -22,6 +24,7 @@ type ControlPlaneSnapshot struct {
 	ModelGroups   []ModelGroup                  `json:"model_groups"`
 	Guardrails    []GuardrailPolicy             `json:"guardrails,omitempty"`
 	AdminState    json.RawMessage               `json:"admin_state,omitempty"`
+	ModelCatalog  json.RawMessage               `json:"model_catalog,omitempty"`
 }
 
 type EncryptedCredentialSnapshot struct {
@@ -53,7 +56,7 @@ type controlPlaneRuntime struct {
 }
 
 func (r *Router) controlPlaneSnapshot() ControlPlaneSnapshot {
-	snapshot := ControlPlaneSnapshot{SchemaVersion: 2}
+	snapshot := ControlPlaneSnapshot{SchemaVersion: 3}
 	if current := r.providers.current.Load(); current != nil {
 		for _, item := range *current {
 			snapshot.Providers = append(snapshot.Providers, item)
@@ -85,6 +88,11 @@ func (r *Router) controlPlaneSnapshot() ControlPlaneSnapshot {
 	if current := r.adminState.current.Load(); current != nil {
 		snapshot.AdminState = append(json.RawMessage(nil), (*current)...)
 	}
+	if r.catalog != nil {
+		if payload, err := json.Marshal(r.catalog.Current(context.Background())); err == nil {
+			snapshot.ModelCatalog = payload
+		}
+	}
 	sort.Slice(snapshot.Providers, func(i, j int) bool { return snapshot.Providers[i].ID < snapshot.Providers[j].ID })
 	sort.Slice(snapshot.Credentials, func(i, j int) bool {
 		return snapshot.Credentials[i].Credential.ID < snapshot.Credentials[j].Credential.ID
@@ -96,6 +104,14 @@ func (r *Router) controlPlaneSnapshot() ControlPlaneSnapshot {
 }
 
 func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error {
+	var catalog modelcatalog.Catalog
+	if snapshot.SchemaVersion >= 3 {
+		parsed, err := modelcatalog.Parse(string(snapshot.ModelCatalog))
+		if err != nil {
+			return fmt.Errorf("invalid persisted model catalog: %w", err)
+		}
+		catalog = parsed
+	}
 	providers := make(map[string]ManagedProvider, len(snapshot.Providers))
 	for _, item := range snapshot.Providers {
 		normalized, err := normalizeManagedProvider(item)
@@ -160,6 +176,9 @@ func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error 
 		adminState := append(json.RawMessage(nil), snapshot.AdminState...)
 		r.adminState.current.Store(&adminState)
 	}
+	if snapshot.SchemaVersion >= 3 && r.catalog != nil {
+		r.catalog.SetAuthoritative(catalog)
+	}
 	endpoints := make([]Endpoint, 0, len(deployments))
 	for _, deployment := range deployments {
 		managed := providers[deployment.ProviderID]
@@ -221,8 +240,11 @@ func (r *Router) UpdateAdminState(ctx context.Context, payload json.RawMessage) 
 }
 
 func (r *Router) beginControlMutation(ctx context.Context) (ControlPlaneSnapshot, func(), error) {
-	if r == nil || r.controlPlane == nil || r.controlPlane.store == nil {
+	if r == nil {
 		return ControlPlaneSnapshot{}, func() {}, nil
+	}
+	if r.controlPlane == nil || r.controlPlane.store == nil {
+		return r.controlPlaneSnapshot(), func() {}, nil
 	}
 	r.controlPlane.mu.Lock()
 	if err := r.refreshControlPlaneLocked(ctx, true); err != nil {

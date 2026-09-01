@@ -20,6 +20,7 @@ type RegistryStore interface {
 // synchronization between gateway replicas.
 type Registry struct {
 	current         atomic.Pointer[Catalog]
+	authoritative   atomic.Bool
 	store           RegistryStore
 	refreshInterval time.Duration
 	nextRefresh     atomic.Int64
@@ -46,10 +47,31 @@ func (r *Registry) Current(ctx context.Context) Catalog {
 		catalog, _ := Parse("")
 		return catalog
 	}
-	if r.store != nil && time.Now().UnixNano() >= r.nextRefresh.Load() {
+	if !r.authoritative.Load() && r.store != nil && time.Now().UnixNano() >= r.nextRefresh.Load() {
 		r.refresh(ctx)
 	}
 	return *r.current.Load()
+}
+
+// SetAuthoritative switches the registry to a control-plane-owned snapshot.
+// Once enabled, the legacy registry store can no longer overwrite a catalog
+// that was committed as part of a versioned control-plane transaction.
+func (r *Registry) SetAuthoritative(catalog Catalog) {
+	if r == nil {
+		return
+	}
+	r.authoritative.Store(true)
+	r.current.Store(&catalog)
+}
+
+// ReplaceLocal updates the in-process snapshot without touching the legacy
+// registry store. It is used while applying or rolling back a control-plane
+// transaction whose durable write is handled by the control-plane store.
+func (r *Registry) ReplaceLocal(catalog Catalog) {
+	if r == nil {
+		return
+	}
+	r.current.Store(&catalog)
 }
 
 func (r *Registry) Update(ctx context.Context, catalog Catalog) error {

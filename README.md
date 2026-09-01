@@ -174,7 +174,10 @@ The Providers & Models workspace adds independent provider endpoint CRUD,
 AES-GCM encrypted write-only credentials, runtime deployment CRUD, public model
 groups, priority fallback, weighted/adaptive routing, connection tests, and
 provider model discovery. A credential secret is accepted only when created or
-rotated; list and mutation responses contain metadata only. Set a stable
+rotated; list and mutation responses contain metadata only.
+The guided Model Onboarding route performs a server-side dry run and an
+optimistic atomic apply, so catalog, deployment, and model-group changes cannot
+be partially published. Set a stable
 `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` in managed environments. Without it, the
 gateway generates an ephemeral process key suitable only for local runtime
 management. Set `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` to persist providers,
@@ -183,7 +186,9 @@ scope attachments, managed tag policies, projects/access groups, MCP servers/too
 logging destinations as one versioned JSONB snapshot. Logging bearer secrets
 use domain-separated AES-GCM encryption and are never returned by the API. The
 gateway seeds an empty store from `PROVIDERS_JSON`, then treats
-PostgreSQL as the source of truth. Every mutation uses an optimistic revision,
+PostgreSQL as the source of truth. The runtime model catalog is stored in the
+same snapshot; an existing Redis catalog is imported once when a legacy
+installation first starts with control-plane persistence. Every mutation uses an optimistic revision,
 is committed before the API reports success, and is rolled back in memory when
 persistence fails. Replicas poll the durable revision (one second by default),
 while Redis carries the same revision marker for cross-replica observability.
@@ -337,9 +342,11 @@ uses deployment ID first, then managed provider ID, provider type, and `*`; a
 deployment-specific price therefore overrides a provider-wide price. The Admin
 UI uses `(provider_id, public model)` as its stable identity and keeps deployment
 IDs as availability metadata rather than creating duplicate model rows.
-Runtime catalog updates are stored in Redis without a TTL. Because pricing is
-operational state rather than disposable cache data, the bundled Redis chart
-enables AOF-backed persistent storage by default.
+With `PROVIDER_CONTROL_PLANE_POSTGRES_DSN`, runtime catalog updates are part of
+the same versioned PostgreSQL snapshot as deployments and model groups. Redis
+is retained for caches and revision hints, but is not the catalog source of
+truth. Without a control-plane store, Redis remains the backward-compatible
+runtime catalog store and the bundled chart enables AOF-backed persistence.
 
 The gateway derives required capabilities from each request (`chat`,
 `responses`, `embeddings`, `stream`, `tools`, and `structured_output`) and excludes catalog
@@ -359,13 +366,23 @@ quote.
 
 Administrators can replace the active catalog without restarting gateway pods
 through `GET` and `PUT /admin/v1/model-catalog`. The PUT body uses the same
-versioned schema as `MODEL_CATALOG_JSON`. With Redis configured, the validated
-document is shared by all replicas and picked up within one second; without
-Redis the update is process-local for development. Priced runtime entries must
+versioned schema as `MODEL_CATALOG_JSON`. With PostgreSQL configured, the validated
+document is committed under optimistic revision control and shared by all
+replicas; without PostgreSQL the registry falls back to Redis or process-local
+development state. Priced runtime entries must
 declare a three-letter currency. The router sends billing the exact selected
 version, pricing key, rates, and currency, and reserve pins that snapshot for
-commit. If Redis is unavailable, an update fails and the last valid catalog
-remains active.
+commit. If the durable write is unavailable, an update fails and the last valid
+catalog remains active.
+
+The Model Onboarding UI uses `POST /admin/v1/model-onboarding/plan` as a
+non-mutating server-side validation pass. It then sends the identical catalog,
+deployment and model-group set plus the returned `expected_revision` to
+`POST /admin/v1/model-onboarding/apply`. Apply revalidates all references and
+commits the three resources in one control-plane write. Concurrent edits return
+`409 revision_conflict`; persistence errors restore the complete previous
+runtime snapshot. Providers and encrypted credentials remain independently
+managed prerequisites so their lifecycle can be shared by many deployments.
 
 Runtime pricing fields are accepted by billing only on lifecycle calls carrying
 the scoped `BILLING_SHARED_SECRET`. This secret is independent from the client

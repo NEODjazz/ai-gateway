@@ -290,6 +290,9 @@ func NewWithError(cfg Config) (Provider, error) {
 	router.adminState.current.Store(&emptyAdminState)
 	router.deploymentHealth = newDeploymentHealthRegistry()
 	if cfg.ControlPlaneStore != nil {
+		// Read a legacy Redis-backed runtime catalog once before the control
+		// plane becomes its authoritative, versioned owner.
+		registry.SetAuthoritative(registry.Current(context.Background()))
 		refresh := cfg.ControlPlaneRefresh
 		if refresh <= 0 {
 			refresh = DefaultControlPlaneRefreshInterval

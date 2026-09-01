@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.31
+  version: 0.1.32
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1517,7 +1517,7 @@ paths:
       operationId: replaceRuntimeModelCatalog
       tags: [Models]
       summary: Atomically replace the active runtime model catalog
-      description: Replicas synchronize the validated catalog through Redis. Priced entries require an explicit currency.
+      description: Replicas synchronize the validated catalog through the versioned control-plane snapshot. Priced entries require an explicit currency.
       requestBody:
         required: true
         content:
@@ -1532,6 +1532,35 @@ paths:
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/model-onboarding/plan:
+    post:
+      operationId: planModelOnboarding
+      tags: [Models]
+      summary: Validate a model onboarding transaction without changing runtime state
+      description: Returns the current control-plane revision and normalized catalog, deployment, and model-group changes. Providers and credentials must already exist.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelOnboardingInput'}}}}
+      responses:
+        '200': {description: Validated non-mutating plan, content: {application/json: {schema: {$ref: '#/components/schemas/ModelOnboardingPlan'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/model-onboarding/apply:
+    post:
+      operationId: applyModelOnboarding
+      tags: [Models]
+      summary: Atomically commit a previously validated model onboarding transaction
+      description: Revalidates the complete input and commits catalog, deployments, and model groups in one optimistic control-plane revision. A stale expected_revision returns 409 and changes nothing.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelOnboardingApply'}}}}
+      responses:
+        '200': {description: Committed plan with the new control-plane revision, content: {application/json: {schema: {$ref: '#/components/schemas/ModelOnboardingPlan'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '409': {$ref: '#/components/responses/Conflict'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/audit/events:
     get:
@@ -1709,6 +1738,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Resource already exists or the optimistic control-plane revision is stale
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
     NotFound:
       description: Requested managed resource was not found
       content:
@@ -1789,6 +1824,47 @@ components:
         offset: {type: integer, minimum: 0}
         version: {type: string}
         unknown_model_policy: {type: string, enum: [legacy, deny]}
+    ModelOnboardingInput:
+      type: object
+      additionalProperties: false
+      required: [catalog, deployments, model_groups]
+      properties:
+        catalog: {$ref: '#/components/schemas/ModelCatalog'}
+        deployments:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items: {$ref: '#/components/schemas/ModelDeploymentInput'}
+        model_groups:
+          type: array
+          maxItems: 128
+          items: {$ref: '#/components/schemas/ModelGroup'}
+    ModelOnboardingApply:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, catalog, deployments, model_groups]
+      properties:
+        expected_revision: {type: integer, format: int64, minimum: 0}
+        catalog: {$ref: '#/components/schemas/ModelCatalog'}
+        deployments:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items: {$ref: '#/components/schemas/ModelDeploymentInput'}
+        model_groups:
+          type: array
+          maxItems: 128
+          items: {$ref: '#/components/schemas/ModelGroup'}
+    ModelOnboardingPlan:
+      type: object
+      additionalProperties: false
+      required: [revision, catalog_version, deployments, model_groups, changes]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        catalog_version: {type: string, minLength: 1, maxLength: 128}
+        deployments: {type: array, items: {$ref: '#/components/schemas/ModelDeployment'}}
+        model_groups: {type: array, items: {$ref: '#/components/schemas/ModelGroup'}}
+        changes: {type: array, items: {type: string, maxLength: 512}}
     BudgetPolicyInput:
       type: object
       additionalProperties: false

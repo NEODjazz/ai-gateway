@@ -179,7 +179,7 @@ Endpoints первоначально загружаются из `PROVIDERS_JSON
 по возрастанию `priority`. Если задан
 `PROVIDER_CONTROL_PLANE_POSTGRES_DSN`, пустое persistent-состояние атомарно
 инициализируется этой конфигурацией, после чего PostgreSQL становится source of
-truth для Providers, encrypted Credentials, Deployments, Model Groups,
+truth для Providers, encrypted Credentials, runtime Model Catalog, Deployments, Model Groups,
 Guardrail Policies and scoped attachments, Projects/Access Groups, MCP Servers/Toolsets, Agent/Tool
 Policy templates и Logging Destinations.
 Изменение сначала сохраняет versioned JSONB snapshot с optimistic revision и

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modelcatalog"
 )
 
 type memoryControlPlaneStore struct {
@@ -159,5 +160,147 @@ func TestLegacyControlPlaneSnapshotPreservesConfiguredGuardrails(t *testing.T) {
 	policy, found := runtime.(*Router).GetGuardrailPolicy("legacy")
 	if !found || !policy.DLP {
 		t.Fatalf("legacy snapshot removed configured guardrail: %+v found=%v", policy, found)
+	}
+}
+
+func TestLegacyControlPlaneSnapshotImportsRuntimeCatalogOnNextMutation(t *testing.T) {
+	legacyCatalog, _ := modelcatalog.Parse(`{"version":"legacy-redis","models":[{"provider":"p","model":"m"}]}`)
+	registry := modelcatalog.NewRegistry(legacyCatalog, nil, time.Second)
+	store := &memoryControlPlaneStore{found: true, snapshot: ControlPlaneSnapshot{SchemaVersion: 2, Revision: 1}}
+	runtime, err := NewWithError(Config{CredentialEncryptionKey: []byte("stable-key"), CatalogRegistry: registry, ControlPlaneStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := runtime.(*Router)
+	if current := router.catalog.Current(context.Background()); current.Version != "legacy-redis" {
+		t.Fatalf("legacy catalog was not preserved: %+v", current)
+	}
+	if _, err := router.CreateProvider(ManagedProvider{ID: "managed", Type: "demo", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	persisted := cloneControlPlaneSnapshot(store.snapshot)
+	store.mu.Unlock()
+	if persisted.SchemaVersion != 3 {
+		t.Fatalf("schema version = %d", persisted.SchemaVersion)
+	}
+	catalog, err := modelcatalog.Parse(string(persisted.ModelCatalog))
+	if err != nil || catalog.Version != "legacy-redis" {
+		t.Fatalf("legacy catalog was not migrated: catalog=%+v err=%v", catalog, err)
+	}
+}
+
+func TestModelOnboardingPlansAndCommitsOneControlPlaneRevision(t *testing.T) {
+	store := &memoryControlPlaneStore{}
+	runtime, err := NewWithError(Config{CredentialEncryptionKey: []byte("stable-key"), ControlPlaneStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := runtime.(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "managed", Type: "demo", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	initialCatalog, _ := modelcatalog.Parse(`{"version":"before","models":[]}`)
+	if _, err := router.UpdateModelCatalog(context.Background(), initialCatalog); err != nil {
+		t.Fatal(err)
+	}
+	nextCatalog, _ := modelcatalog.Parse(`{"version":"onboard-v1","models":[{"provider":"managed","model":"public","capabilities":["chat"]}]}`)
+	input := ModelOnboardingInput{
+		Catalog:     nextCatalog,
+		Deployments: []ModelDeployment{{ID: "managed-public", ProviderID: "managed", UpstreamModel: "upstream", Models: []string{"public"}, Capabilities: []string{"chat"}, Weight: 1, Enabled: true}},
+		ModelGroups: []ModelGroup{{ID: "public", DeploymentIDs: []string{"managed-public"}, Strategy: "weighted", Enabled: true}},
+	}
+	plan, err := router.PlanModelOnboarding(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRevision := plan.Revision
+	if current := router.catalog.Current(context.Background()); current.Version != "before" {
+		t.Fatalf("plan mutated catalog: %+v", current)
+	}
+	if deployments := router.ListModelDeployments(context.Background()); len(deployments) != 0 {
+		t.Fatalf("plan mutated deployments: %+v", deployments)
+	}
+	result, err := router.ApplyModelOnboarding(context.Background(), plan.Revision, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Revision != beforeRevision+1 {
+		t.Fatalf("apply revision = %d, want %d", result.Revision, beforeRevision+1)
+	}
+	if current := router.catalog.Current(context.Background()); current.Version != "onboard-v1" {
+		t.Fatalf("catalog was not committed: %+v", current)
+	}
+	if groups := router.ListModelGroups(context.Background()); len(groups) != 1 || groups[0].ID != "public" {
+		t.Fatalf("model group was not committed: %+v", groups)
+	}
+
+	replicaProvider, err := NewWithError(Config{CredentialEncryptionKey: []byte("stable-key"), ControlPlaneStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replica := replicaProvider.(*Router)
+	if current := replica.catalog.Current(context.Background()); current.Version != "onboard-v1" {
+		t.Fatalf("replica did not restore catalog: %+v", current)
+	}
+	if models := replica.Models(); len(models) != 1 || models[0].ID != "public" {
+		t.Fatalf("replica did not restore routable model: %+v", models)
+	}
+}
+
+func TestModelOnboardingRejectsStalePlanAndRollsBackFailedPersistence(t *testing.T) {
+	store := &memoryControlPlaneStore{}
+	runtime, err := NewWithError(Config{CredentialEncryptionKey: []byte("stable-key"), ControlPlaneStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := runtime.(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "managed", Type: "demo", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateModelDeployment(ModelDeployment{ID: "existing", ProviderID: "managed", Models: []string{"existing"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateModelGroup(ModelGroup{ID: "existing", DeploymentIDs: []string{"existing"}, Strategy: "weighted", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	initialCatalog, _ := modelcatalog.Parse(`{"version":"before","models":[]}`)
+	if _, err := router.UpdateModelCatalog(context.Background(), initialCatalog); err != nil {
+		t.Fatal(err)
+	}
+	nextCatalog, _ := modelcatalog.Parse(`{"version":"after","models":[{"provider":"managed","model":"public"}]}`)
+	input := ModelOnboardingInput{Catalog: nextCatalog, Deployments: []ModelDeployment{{ID: "deployment", ProviderID: "managed", Models: []string{"public"}, Enabled: true}}}
+	plan, err := router.PlanModelOnboarding(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.UpdateProvider("managed", ManagedProvider{Type: "demo", Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.ApplyModelOnboarding(context.Background(), plan.Revision, input); !errors.Is(err, ErrControlPlaneConflict) {
+		t.Fatalf("stale apply error = %v", err)
+	}
+	if current := router.catalog.Current(context.Background()); current.Version != "before" {
+		t.Fatalf("stale plan changed catalog: %+v", current)
+	}
+
+	plan, err = router.PlanModelOnboarding(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	store.saveErr = errors.New("postgres unavailable")
+	store.mu.Unlock()
+	if _, err := router.ApplyModelOnboarding(context.Background(), plan.Revision, input); err == nil {
+		t.Fatal("expected persistence failure")
+	}
+	if current := router.catalog.Current(context.Background()); current.Version != "before" {
+		t.Fatalf("failed apply leaked catalog: %+v", current)
+	}
+	if deployments := router.ListModelDeployments(context.Background()); len(deployments) != 1 || deployments[0].ID != "existing" {
+		t.Fatalf("failed apply leaked deployments: %+v", deployments)
+	}
+	if groups := router.ListModelGroups(context.Background()); len(groups) != 1 || groups[0].ID != "existing" {
+		t.Fatalf("failed apply corrupted existing groups: %+v", groups)
 	}
 }

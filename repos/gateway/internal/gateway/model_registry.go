@@ -1,12 +1,14 @@
 package gateway
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"sort"
 	"strings"
 
 	"ai-gateway-gateway/internal/modelcatalog"
+	"ai-gateway-gateway/internal/provider"
 )
 
 func (h Handler) WithModelRegistry(registry *modelcatalog.Registry) Handler {
@@ -117,8 +119,18 @@ func (h Handler) PutModelCatalog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
 	}
-	if err := h.models.Update(r.Context(), catalog); err != nil {
+	var updateErr error
+	if controller, available := h.provider.(provider.ModelCatalogController); available {
+		_, updateErr = controller.UpdateModelCatalog(r.Context(), catalog)
+	} else {
+		updateErr = h.models.Update(r.Context(), catalog)
+	}
+	if updateErr != nil {
 		h.auditOutcome(r.Context(), audit, event, "failed")
+		if errors.Is(updateErr, provider.ErrControlPlaneConflict) {
+			writeError(w, http.StatusConflict, "revision_conflict", "control plane changed; refresh and retry")
+			return
+		}
 		writeError(w, http.StatusServiceUnavailable, "model_registry_unavailable", "model registry is unavailable")
 		return
 	}

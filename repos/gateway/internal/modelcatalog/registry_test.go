@@ -53,3 +53,17 @@ func TestRegistryFallsBackToInitialCatalogWithoutStore(t *testing.T) {
 		t.Fatalf("catalog=%+v", got)
 	}
 }
+
+func TestAuthoritativeCatalogIgnoresLegacyRegistryUpdates(t *testing.T) {
+	legacy, _ := Parse(`{"version":"legacy","models":[{"provider":"p","model":"old"}]}`)
+	committed, _ := Parse(`{"version":"control-plane","models":[{"provider":"p","model":"new"}]}`)
+	store := &memoryRegistryStore{value: []byte(`{"version":"legacy","models":[{"provider":"p","model":"old"}]}`)}
+	registry := NewRegistry(legacy, store, time.Nanosecond)
+	registry.SetAuthoritative(committed)
+	store.mu.Lock()
+	store.value = []byte(`{"version":"stale-redis","models":[]}`)
+	store.mu.Unlock()
+	if got := registry.Current(context.Background()); got.Version != "control-plane" {
+		t.Fatalf("legacy store overwrote authoritative catalog: %+v", got)
+	}
+}

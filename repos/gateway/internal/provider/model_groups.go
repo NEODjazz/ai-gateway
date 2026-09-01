@@ -115,6 +115,14 @@ func (r *Router) DeleteModelGroup(id string) error {
 }
 
 func (r *Router) normalizeModelGroup(input ModelGroup) (ModelGroup, error) {
+	deployments := r.deployments.current.Load()
+	if deployments == nil {
+		return ModelGroup{}, ErrInvalidModelGroup
+	}
+	return normalizeModelGroupAgainst(input, *deployments)
+}
+
+func normalizeModelGroupAgainst(input ModelGroup, deployments map[string]ModelDeployment) (ModelGroup, error) {
 	input.ID = strings.TrimSpace(input.ID)
 	input.Strategy = strings.ToLower(strings.TrimSpace(input.Strategy))
 	if input.Strategy == "" {
@@ -123,14 +131,13 @@ func (r *Router) normalizeModelGroup(input ModelGroup) (ModelGroup, error) {
 	if input.ID == "" || len(input.ID) > 256 || len(input.DeploymentIDs) == 0 || len(input.DeploymentIDs) > 128 || (input.Strategy != "weighted" && input.Strategy != "adaptive") {
 		return ModelGroup{}, ErrInvalidModelGroup
 	}
-	deployments := r.deployments.current.Load()
 	seen := map[string]bool{}
 	for index, id := range input.DeploymentIDs {
 		id = strings.TrimSpace(id)
 		if id == "" || len(id) > 128 || seen[id] {
 			return ModelGroup{}, ErrInvalidModelGroup
 		}
-		if _, found := (*deployments)[id]; !found {
+		if _, found := deployments[id]; !found {
 			return ModelGroup{}, ErrInvalidModelGroup
 		}
 		seen[id] = true
