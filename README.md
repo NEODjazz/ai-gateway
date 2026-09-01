@@ -402,6 +402,9 @@ disable/re-enable a key, rotate it atomically, revoke it, open its metadata-only
 request history, and assign a key-scoped budget from the console. The gateway
 key-list API exposes bounded server-side pagination, ownership/status filters,
 and allowlisted sorting; team and organization scopes include member-owned keys.
+The console sends those parameters to the server with a debounced alias search
+and uses the returned total for page navigation. Budget sorting is explicitly
+limited to the current page until the cross-service budget projection is indexed.
 The gateway
 receives only the opaque key ID, alias, tags and policy (never the plaintext
 token or lookup hash), filters `/v1/models`, enforces model grants before the
