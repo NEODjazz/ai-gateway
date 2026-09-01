@@ -2,12 +2,14 @@ package gateway
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -62,6 +64,7 @@ type KeyBudgetProjection struct {
 
 type BudgetManagementClient interface {
 	List(context.Context, ManagementAudit) ([]ManagedBudgetPolicy, error)
+	ListSummaries(context.Context, ManagementAudit) ([]BudgetSummary, error)
 	Get(context.Context, ManagementAudit, int64) (ManagedBudgetPolicy, error)
 	Create(context.Context, ManagementAudit, BudgetPolicySpec) (ManagedBudgetPolicy, error)
 	Update(context.Context, ManagementAudit, int64, BudgetPolicySpec) (ManagedBudgetPolicy, error)
@@ -88,6 +91,20 @@ func (c *RemoteBudgetManagementClient) List(ctx context.Context, audit Managemen
 	}
 	err := c.call(ctx, http.MethodGet, "/internal/v1/budgets", audit, nil, &response)
 	return response.Data, err
+}
+func (c *RemoteBudgetManagementClient) ListSummaries(ctx context.Context, audit ManagementAudit) ([]BudgetSummary, error) {
+	var response struct {
+		Summaries map[string]BudgetSummary `json:"summaries"`
+	}
+	if err := c.call(ctx, http.MethodGet, "/internal/v1/budgets?expand=summaries", audit, nil, &response); err != nil {
+		return nil, err
+	}
+	result := make([]BudgetSummary, 0, len(response.Summaries))
+	for _, summary := range response.Summaries {
+		result = append(result, summary)
+	}
+	slices.SortFunc(result, func(a, b BudgetSummary) int { return cmp.Compare(a.Policy.ID, b.Policy.ID) })
+	return result, nil
 }
 func (c *RemoteBudgetManagementClient) Get(ctx context.Context, audit ManagementAudit, id int64) (ManagedBudgetPolicy, error) {
 	var v ManagedBudgetPolicy
@@ -177,6 +194,26 @@ func (h Handler) budgetAdmin(w http.ResponseWriter, r *http.Request) (Management
 func (h Handler) ListBudgets(w http.ResponseWriter, r *http.Request) {
 	audit, ok := h.budgetAdmin(w, r)
 	if !ok {
+		return
+	}
+	expand := strings.TrimSpace(r.URL.Query().Get("expand"))
+	if expand != "" && expand != "summaries" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid budget expansion")
+		return
+	}
+	if expand == "summaries" {
+		summaries, err := h.budgets.ListSummaries(r.Context(), audit)
+		if err != nil {
+			writeBudgetManagementFailure(w, err)
+			return
+		}
+		policies := make([]ManagedBudgetPolicy, 0, len(summaries))
+		byID := make(map[string]BudgetSummary, len(summaries))
+		for _, summary := range summaries {
+			policies = append(policies, summary.Policy)
+			byID[strconv.FormatInt(summary.Policy.ID, 10)] = summary
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": policies, "summaries": byID})
 		return
 	}
 	v, err := h.budgets.List(r.Context(), audit)

@@ -64,3 +64,9 @@ virtual keys, non-revoked impact and per-key budget projections. Create and edit
 forms select configured projects, models and MCP toolsets while retaining an
 explicit custom-grant path for wildcard policies. Deletion remains unavailable
 until every non-revoked key assignment is removed.
+
+Budgets use a dedicated management page rather than generic CRUD. It presents
+live cost and token progress, reset timestamps, risk/exhaustion state, explicit
+currency, scope filtering, configurable columns and virtual-key-style actions.
+Create/edit loads the target from the selected configured registry and omits an
+unused optional limit instead of serializing it as zero.

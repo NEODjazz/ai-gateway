@@ -16,6 +16,7 @@ type budgetPolicy struct {
 	ScopeType string
 	ScopeID   string
 	Period    string
+	Currency  string
 	MaxCost   float64
 	MaxTokens int64
 }
@@ -248,7 +249,7 @@ func (e *BudgetExceededError) Unwrap() error { return ErrBudgetExceeded }
 
 func applicableBudgetPolicies(ctx context.Context, tx pgx.Tx, event BillingEvent) ([]budgetPolicy, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT id, scope_type, scope_id, period,
+		SELECT id, scope_type, scope_id, period, currency,
 		       COALESCE(max_cost, 0)::float8, COALESCE(max_tokens, 0)
 		FROM billing_budget_policies
 		WHERE enabled AND currency=$1 AND (
@@ -271,7 +272,7 @@ func applicableBudgetPolicies(ctx context.Context, tx pgx.Tx, event BillingEvent
 	var policies []budgetPolicy
 	for rows.Next() {
 		var policy budgetPolicy
-		if err := rows.Scan(&policy.ID, &policy.ScopeType, &policy.ScopeID, &policy.Period, &policy.MaxCost, &policy.MaxTokens); err != nil {
+		if err := rows.Scan(&policy.ID, &policy.ScopeType, &policy.ScopeID, &policy.Period, &policy.Currency, &policy.MaxCost, &policy.MaxTokens); err != nil {
 			return nil, err
 		}
 		policies = append(policies, policy)
@@ -329,6 +330,7 @@ func budgetUsageForPolicy(ctx context.Context, query budgetUsageQuerier, policy 
 		WHERE created_at >= $1
 		  AND (state='committed' OR (state='reserved' AND reservation_expires_at > now()))
 		  AND request_id <> $4
+		  AND currency=$5
 		  AND CASE $2
 			WHEN 'global' THEN true
 			WHEN 'key' THEN credential_id=$3
@@ -339,7 +341,7 @@ func budgetUsageForPolicy(ctx context.Context, query budgetUsageQuerier, policy 
 			WHEN 'provider' THEN provider_name=$3 OR provider_type=$3
 			WHEN 'tag' THEN $3 = ANY(tags)
 			ELSE false
-		  END`, start, policy.ScopeType, policy.ScopeID, excludedRequestID).Scan(&cost, &tokens)
+		  END`, start, policy.ScopeType, policy.ScopeID, excludedRequestID, policy.Currency).Scan(&cost, &tokens)
 	return cost, tokens, err
 }
 

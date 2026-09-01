@@ -269,10 +269,13 @@ applies to each key, including committed-or-reserved usage, remaining cost or
 tokens, and reset time. These policies are shown together because enforcement
 applies all of them; route-, provider-, model-, and request-tag budgets remain
 request-time constraints and are not misrepresented as key-only limits.
-Catalog entries can be created, edited, and removed; budgets can be created,
-edited, and disabled. The budget form resolves organizations, users, teams, virtual keys,
-models, providers, and tags from their configured registries instead of
-requiring operators to copy opaque IDs. Every mutation uses
+Catalog entries can be created, edited, and removed. The dedicated Budgets
+console creates, edits, filters, and soft-disables policies while showing live
+cost/token utilization, risk state, remaining reset window, and currency for
+each policy without combining currencies. Its form resolves organizations,
+users, teams, virtual keys, models, providers, and tags from their configured
+registries instead of requiring operators to copy opaque IDs. The list uses one
+bounded `expand=summaries` request rather than an N+1 summary fan-out. Every mutation uses
 the same authenticated admin API and append-only audit path as direct API
 clients. The UI has no CDN or runtime package dependency and is protected by a
 strict same-origin CSP. Before a credential is stored, `GET /admin/v1/session`
@@ -970,8 +973,8 @@ tenant-scoped Responses affinity, plus an admin-RBAC virtual-key management API.
 It also has an opt-in, credential-scoped semantic cache for constrained text-only
 chat requests, credential-level function/MCP tool ACLs, and bounded multimodal
 image input with explicit vision routing and fail-closed binary AV scanning.
-Admin RBAC also exposes CRUD for global/organization/key/user/team/model/provider/tag budget policies and a current-window
-spend summary at `/admin/v1/budgets`; gateway-to-billing calls use a separate
+Admin RBAC also exposes CRUD for global/organization/key/user/team/model/provider/tag budget policies and currency-isolated current-window
+summaries through `/admin/v1/budgets?expand=summaries`; gateway-to-billing calls use a separate
 `BILLING_MANAGEMENT_SHARED_SECRET`, never the client Bearer token.
 
 ## License

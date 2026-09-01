@@ -20,6 +20,9 @@ type fakeBudgetManager struct {
 func (f *fakeBudgetManager) ListBudgetPolicies(context.Context) ([]modules.ManagedBudgetPolicy, error) {
 	return []modules.ManagedBudgetPolicy{{ID: 1}}, nil
 }
+func (f *fakeBudgetManager) ListBudgetSummaries(context.Context, time.Time) ([]modules.BudgetSummary, error) {
+	return []modules.BudgetSummary{{Policy: modules.ManagedBudgetPolicy{ID: 1, Currency: "USD"}, UsedCost: 2}}, nil
+}
 func (f *fakeBudgetManager) GetBudgetPolicy(context.Context, int64) (modules.ManagedBudgetPolicy, bool, error) {
 	return modules.ManagedBudgetPolicy{ID: 1}, true, nil
 }
@@ -48,6 +51,25 @@ func TestBudgetManagementRequiresScopedSecret(t *testing.T) {
 	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/internal/v1/budgets", nil))
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d", response.Code)
+	}
+}
+
+func TestBudgetManagementListExpandsSummaries(t *testing.T) {
+	mux := http.NewServeMux()
+	registerBudgetManagement(mux, &fakeBudgetManager{}, nil, "secret")
+	request := httptest.NewRequest(http.MethodGet, "/internal/v1/budgets?expand=summaries", nil)
+	request.Header.Set("X-Management-Token", "secret")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"summaries":{"1"`) || !strings.Contains(response.Body.String(), `"used_cost":2`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	invalid := httptest.NewRequest(http.MethodGet, "/internal/v1/budgets?expand=secrets", nil)
+	invalid.Header.Set("X-Management-Token", "secret")
+	invalidResponse := httptest.NewRecorder()
+	mux.ServeHTTP(invalidResponse, invalid)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid expansion status=%d", invalidResponse.Code)
 	}
 }
 

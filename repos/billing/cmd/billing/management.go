@@ -47,6 +47,26 @@ func (h budgetManagementHandler) list(w http.ResponseWriter, r *http.Request) {
 	if !h.authorize(w, r) {
 		return
 	}
+	expand := strings.TrimSpace(r.URL.Query().Get("expand"))
+	if expand != "" && expand != "summaries" {
+		http.Error(w, "invalid budget expansion", http.StatusBadRequest)
+		return
+	}
+	if expand == "summaries" {
+		summaries, err := h.manager.ListBudgetSummaries(r.Context(), h.now())
+		if err != nil {
+			writeBudgetFailure(w, err)
+			return
+		}
+		policies := make([]modules.ManagedBudgetPolicy, 0, len(summaries))
+		byID := make(map[string]modules.BudgetSummary, len(summaries))
+		for _, summary := range summaries {
+			policies = append(policies, summary.Policy)
+			byID[strconv.FormatInt(summary.Policy.ID, 10)] = summary
+		}
+		writeBudgetJSON(w, http.StatusOK, map[string]any{"data": policies, "summaries": byID})
+		return
+	}
 	policies, err := h.manager.ListBudgetPolicies(r.Context())
 	if err != nil {
 		writeBudgetFailure(w, err)

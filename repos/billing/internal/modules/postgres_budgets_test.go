@@ -302,12 +302,31 @@ func TestPostgresBudgetManagementLifecycleAndSummary(t *testing.T) {
 	if err := checker.Apply(ctx, budgetTestEvent("managed-request-"+suffix, team, 25)); err != nil {
 		t.Fatal(err)
 	}
+	foreignCurrency := budgetTestEvent("managed-eur-request-"+suffix, team, 40)
+	foreignCurrency.Currency = "EUR"
+	if err := checker.Apply(ctx, foreignCurrency); err != nil {
+		t.Fatal(err)
+	}
 	summary, found, err := checker.BudgetSummary(ctx, created.ID, time.Now())
 	if err != nil || !found {
 		t.Fatalf("summary found=%v err=%v", found, err)
 	}
 	if summary.UsedTokens != 25 || summary.RemainingTokens == nil || *summary.RemainingTokens != 75 {
 		t.Fatalf("summary=%+v", summary)
+	}
+	summaries, err := checker.ListBudgetSummaries(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed *BudgetSummary
+	for index := range summaries {
+		if summaries[index].Policy.ID == created.ID {
+			listed = &summaries[index]
+			break
+		}
+	}
+	if listed == nil || listed.UsedTokens != 25 || listed.RemainingTokens == nil || *listed.RemainingTokens != 75 {
+		t.Fatalf("listed summary=%+v", listed)
 	}
 	projections, err := checker.KeyBudgetProjections(ctx, []KeyBudgetSubject{{KeyID: "key-" + team, TeamID: team}}, time.Now())
 	if err != nil || len(projections) != 1 || len(projections[0].Policies) != 1 || projections[0].Policies[0].UsedTokens != 25 || projections[0].Policies[0].RemainingTokens == nil || *projections[0].Policies[0].RemainingTokens != 75 {

@@ -56,6 +56,7 @@ type KeyBudgetProjection struct {
 
 type BudgetManager interface {
 	ListBudgetPolicies(context.Context) ([]ManagedBudgetPolicy, error)
+	ListBudgetSummaries(context.Context, time.Time) ([]BudgetSummary, error)
 	GetBudgetPolicy(context.Context, int64) (ManagedBudgetPolicy, bool, error)
 	CreateBudgetPolicy(context.Context, BudgetPolicySpec) (ManagedBudgetPolicy, error)
 	UpdateBudgetPolicy(context.Context, int64, BudgetPolicySpec) (ManagedBudgetPolicy, bool, error)
@@ -88,6 +89,54 @@ func (c *PostgresBudgetPolicyChecker) ListBudgetPolicies(ctx context.Context) ([
 			return nil, err
 		}
 		result = append(result, policy)
+	}
+	return result, rows.Err()
+}
+
+func (c *PostgresBudgetPolicyChecker) ListBudgetSummaries(ctx context.Context, now time.Time) ([]BudgetSummary, error) {
+	if err := c.managementReady(); err != nil {
+		return nil, err
+	}
+	now = now.UTC()
+	rows, err := c.pool.Query(ctx, `
+		SELECT p.id,p.scope_type,p.scope_id,p.period,p.currency,p.max_cost::float8,p.max_tokens,
+		       p.enabled,p.created_at,p.updated_at,
+		       COALESCE(SUM(CASE WHEN r.state='committed' THEN r.actual_cost ELSE r.reserved_cost END),0)::float8,
+		       COALESCE(SUM(CASE WHEN r.state='committed' THEN r.actual_tokens ELSE r.reserved_tokens END),0)
+		FROM billing_budget_policies p
+		LEFT JOIN billing_budget_reservations r ON
+		     r.currency=p.currency
+		 AND r.created_at >= CASE p.period WHEN 'hour' THEN $1::timestamptz WHEN 'week' THEN $3::timestamptz WHEN 'month' THEN $4::timestamptz ELSE $2::timestamptz END
+		 AND (r.state='committed' OR (r.state='reserved' AND r.reservation_expires_at > $5::timestamptz))
+		 AND CASE p.scope_type
+		       WHEN 'global' THEN true
+		       WHEN 'key' THEN r.credential_id=p.scope_id
+		       WHEN 'user' THEN r.user_id=p.scope_id
+		       WHEN 'team' THEN r.team_id=p.scope_id
+		       WHEN 'organization' THEN r.organization_id=p.scope_id
+		       WHEN 'model' THEN r.model=p.scope_id
+		       WHEN 'provider' THEN r.provider_name=p.scope_id OR r.provider_type=p.scope_id
+		       WHEN 'tag' THEN p.scope_id=ANY(r.tags)
+		       ELSE false
+		     END
+		GROUP BY p.id,p.scope_type,p.scope_id,p.period,p.currency,p.max_cost,p.max_tokens,
+		         p.enabled,p.created_at,p.updated_at
+		ORDER BY p.id`, budgetPeriodStart(now, "hour"), budgetPeriodStart(now, "day"), budgetPeriodStart(now, "week"), budgetPeriodStart(now, "month"), now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]BudgetSummary, 0)
+	for rows.Next() {
+		var policy ManagedBudgetPolicy
+		var usedCost float64
+		var usedTokens int64
+		if err := rows.Scan(&policy.ID, &policy.ScopeType, &policy.ScopeID, &policy.Period, &policy.Currency,
+			&policy.MaxCost, &policy.MaxTokens, &policy.Enabled, &policy.CreatedAt, &policy.UpdatedAt,
+			&usedCost, &usedTokens); err != nil {
+			return nil, err
+		}
+		result = append(result, budgetSummaryForUsage(policy, usedCost, usedTokens, now))
 	}
 	return result, rows.Err()
 }
@@ -152,11 +201,15 @@ func (c *PostgresBudgetPolicyChecker) BudgetSummary(ctx context.Context, id int6
 	if err != nil || !found {
 		return BudgetSummary{}, found, err
 	}
-	usagePolicy := budgetPolicy{ID: policy.ID, ScopeType: policy.ScopeType, ScopeID: policy.ScopeID, Period: policy.Period}
+	usagePolicy := budgetPolicy{ID: policy.ID, ScopeType: policy.ScopeType, ScopeID: policy.ScopeID, Period: policy.Period, Currency: policy.Currency}
 	cost, tokens, err := budgetUsageForPolicy(ctx, c.pool, usagePolicy, "", now.UTC())
 	if err != nil {
 		return BudgetSummary{}, false, err
 	}
+	return budgetSummaryForUsage(policy, cost, tokens, now.UTC()), true, nil
+}
+
+func budgetSummaryForUsage(policy ManagedBudgetPolicy, cost float64, tokens int64, now time.Time) BudgetSummary {
 	start := budgetPeriodStart(now.UTC(), policy.Period)
 	result := BudgetSummary{Policy: policy, WindowStart: start, WindowEnd: budgetPeriodEnd(start, policy.Period), UsedCost: cost, UsedTokens: tokens}
 	if policy.MaxCost != nil {
@@ -167,7 +220,7 @@ func (c *PostgresBudgetPolicyChecker) BudgetSummary(ctx context.Context, id int6
 		remaining := max(int64(0), *policy.MaxTokens-tokens)
 		result.RemainingTokens = &remaining
 	}
-	return result, true, nil
+	return result
 }
 
 func (c *PostgresBudgetPolicyChecker) KeyBudgetProjections(ctx context.Context, subjects []KeyBudgetSubject, now time.Time) ([]KeyBudgetProjection, error) {
@@ -187,7 +240,8 @@ func (c *PostgresBudgetPolicyChecker) KeyBudgetProjections(ctx context.Context, 
 		       COALESCE(SUM(CASE WHEN r.state='committed' THEN r.actual_tokens ELSE r.reserved_tokens END),0)
 		FROM billing_budget_policies p
 		LEFT JOIN billing_budget_reservations r ON
-		     r.created_at >= CASE p.period WHEN 'hour' THEN $5::timestamptz WHEN 'week' THEN $7::timestamptz WHEN 'month' THEN $8::timestamptz ELSE $6::timestamptz END
+		     r.currency=p.currency
+		 AND r.created_at >= CASE p.period WHEN 'hour' THEN $5::timestamptz WHEN 'week' THEN $7::timestamptz WHEN 'month' THEN $8::timestamptz ELSE $6::timestamptz END
 		 AND (r.state='committed' OR (r.state='reserved' AND r.reservation_expires_at > $9::timestamptz))
 		 AND CASE p.scope_type
 		       WHEN 'global' THEN true

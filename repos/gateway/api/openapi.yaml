@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.39
+  version: 0.1.40
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1267,7 +1267,12 @@ paths:
     get:
       operationId: listBudgets
       tags: [Budgets]
-      summary: List budget policies
+      summary: List budget policies, optionally with currency-isolated live summaries
+      parameters:
+        - name: expand
+          in: query
+          schema: {type: string, enum: [summaries]}
+          description: Include current-window usage, remaining capacity, and reset timestamps keyed by budget ID.
       responses:
         '200':
           description: Budget policies
@@ -1278,6 +1283,9 @@ paths:
                 required: [data]
                 properties:
                   data: {type: array, items: {$ref: '#/components/schemas/BudgetPolicy'}}
+                  summaries:
+                    type: object
+                    additionalProperties: {$ref: '#/components/schemas/BudgetSummary'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}

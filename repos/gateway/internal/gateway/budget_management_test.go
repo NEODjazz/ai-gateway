@@ -22,6 +22,9 @@ type recordingBudgetClient struct {
 func (c *recordingBudgetClient) List(context.Context, ManagementAudit) ([]ManagedBudgetPolicy, error) {
 	return []ManagedBudgetPolicy{{ID: 1}}, nil
 }
+func (c *recordingBudgetClient) ListSummaries(context.Context, ManagementAudit) ([]BudgetSummary, error) {
+	return []BudgetSummary{{Policy: ManagedBudgetPolicy{ID: 1, Currency: "USD"}, UsedCost: 2}}, nil
+}
 func (c *recordingBudgetClient) Get(context.Context, ManagementAudit, int64) (ManagedBudgetPolicy, error) {
 	return ManagedBudgetPolicy{ID: 1}, nil
 }
@@ -69,10 +72,29 @@ func TestAdminBudgetRejectsInvalidIDAndUnknownField(t *testing.T) {
 	}
 }
 
+func TestAdminBudgetListExpandsSummaries(t *testing.T) {
+	client := &recordingBudgetClient{}
+	handler := NewHandler(modulesPipeline("admin"), modelsProvider{}).WithBudgetManagement(client)
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/v1/budgets?expand=summaries", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"summaries":{"1"`) || !strings.Contains(response.Body.String(), `"used_cost":2`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	invalid := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(invalid, httptest.NewRequest(http.MethodGet, "/admin/v1/budgets?expand=secrets", nil))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid expansion status=%d", invalid.Code)
+	}
+}
+
 func TestRemoteBudgetManagementUsesOnlyScopedSecret(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "" || r.Header.Get("X-Management-Token") != "billing-secret" || r.Header.Get("X-Actor-ID") != "admin" {
 			t.Fatalf("headers=%v", r.Header)
+		}
+		if r.URL.Query().Get("expand") == "summaries" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"summaries": map[string]BudgetSummary{"2": {Policy: ManagedBudgetPolicy{ID: 2}}, "1": {Policy: ManagedBudgetPolicy{ID: 1}}}})
+			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
 	}))
@@ -80,6 +102,10 @@ func TestRemoteBudgetManagementUsesOnlyScopedSecret(t *testing.T) {
 	client := NewRemoteBudgetManagementClient(server.URL, "billing-secret")
 	if _, err := client.List(context.Background(), ManagementAudit{ActorID: "admin"}); err != nil {
 		t.Fatal(err)
+	}
+	summaries, err := client.ListSummaries(context.Background(), ManagementAudit{ActorID: "admin"})
+	if err != nil || len(summaries) != 2 || summaries[0].Policy.ID != 1 || summaries[1].Policy.ID != 2 {
+		t.Fatalf("summaries=%+v err=%v", summaries, err)
 	}
 }
 

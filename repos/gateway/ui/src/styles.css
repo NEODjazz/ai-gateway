@@ -200,6 +200,12 @@ textarea { resize: vertical; }
 .access-group-details { margin-top: 24px; padding: 22px; }
 .access-group-details h2 { margin: 0 0 16px; font-size: 18px; }
 .access-group-enabled { margin-left: 188px; }
+.budget-usage-cell { min-width: 150px; display: grid; gap: 6px; }
+.budget-progress { height: 6px; overflow: hidden; border-radius: 999px; background: var(--border); }
+.budget-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.budget-progress > span.risk { background: #d97706; }
+.budget-progress > span.exhausted { background: #dc2626; }
+.table-filter-select select { min-width: 132px; }
 .credential-form-error, .credential-form-actions { margin-left: 188px; }
 .model-group-stats { margin-top: 2px; }
 .model-group-form-modal { width: min(900px, 100%); }
