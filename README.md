@@ -202,6 +202,9 @@ fingerprint over bounded 7/30/90-day windows. Requests can also be grouped by
 session or distributed trace; group spend remains separated by currency. Its
 detail contract contains operational
 metadata, token counts, cost, cache state, and a bounded failure class only.
+The selected request/audit tab, request view, time window, applied filters, and
+request-detail ID are represented in the `/ui/logs` query string so diagnostic
+views survive refresh and can be shared without copying prompt or response data.
 It also exposes non-secret credential tags, streaming time-to-first-token, retry and fallback counts, cache
 kind, organization scope, and whether token counts came from the provider or
 the bounded estimator. Estimated counts are never presented as exact provider

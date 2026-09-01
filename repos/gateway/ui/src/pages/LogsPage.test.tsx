@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
 import { LogsPage } from "./LogsPage";
 
@@ -19,7 +20,7 @@ describe("LogsPage", () => {
       if (path.includes("audit/events")) return json({ data: [{ id: 7, occurred_at: "2026-08-28T11:00:00Z", action: "provider.update", target_type: "provider", target_id: "azure", actor_id: "admin", outcome: "succeeded", details: { changed: true } }] });
       return json({ data: [] });
     });
-    sessionStorage.setItem("ai-gateway.admin-token", "token"); render(<AuthProvider><LogsPage /></AuthProvider>);
+    sessionStorage.setItem("ai-gateway.admin-token", "token"); render(<MemoryRouter initialEntries={["/logs"]}><AuthProvider><LogsPage /></AuthProvider></MemoryRouter>);
     expect(await screen.findByText("req-1")).toBeInTheDocument();
     expect(screen.getByText("Estimated")).toBeInTheDocument();
     expect(screen.getByText("semantic")).toBeInTheDocument();
@@ -38,5 +39,26 @@ describe("LogsPage", () => {
     await userEvent.click(screen.getByRole("menuitem", { name: "Details" }));
     const details = await screen.findByRole("dialog", { name: "Audit log details" });
     expect(within(details).getByText(/changed/)).toBeInTheDocument();
+  });
+
+  it("restores a shareable request-log view and opens request details from the URL", async () => {
+    const requested: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = String(input);
+      requested.push(path);
+      if (path.includes("request-logs/settings")) return json({ content_stored: false });
+      if (path.includes("request-logs/req-deep")) return json({ request_id: "req-deep", status: "error", failure_class: "upstream" });
+      if (path.includes("request-logs/groups")) return json({ data: [{ group_id: "session-1", requests: 2, errors: 1, models: ["gpt"], providers: ["azure"], total_tokens: 20, cache_hits: 1, latency_ms: 100, cost: 0.2, currency: "USD", started_at: "2026-08-28T10:00:00Z", ended_at: "2026-08-28T11:00:00Z" }] });
+      return json({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter initialEntries={["/logs?view=sessions&days=30&team_id=team-1&log=req-deep"]}><AuthProvider><LogsPage /></AuthProvider></MemoryRouter>);
+
+    expect(await screen.findByRole("tab", { name: "Sessions" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByText("session-1")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Request details" })).toHaveTextContent("req-deep");
+    expect(requested.some((path) => path.includes("request-logs/groups?") && path.includes("dimension=session") && path.includes("days=30") && path.includes("team_id=team-1"))).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Request details" })).not.toBeInTheDocument());
   });
 });

@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
 import { GuardrailsPage } from "./GuardrailsPage";
 import { OrganizationsPage, TeamsPage } from "./IdentityAssociationPages";
@@ -10,7 +11,7 @@ import { resourceConfigs } from "./resourceConfigs";
 
 function renderAuthenticated(node: React.ReactNode) {
   sessionStorage.setItem("ai-gateway.admin-token", "token");
-  render(<AuthProvider>{node}</AuthProvider>);
+  render(<MemoryRouter><AuthProvider>{node}</AuthProvider></MemoryRouter>);
 }
 const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
 
