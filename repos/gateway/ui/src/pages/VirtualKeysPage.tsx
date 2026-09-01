@@ -47,9 +47,10 @@ function userLabel(user: User) { return [user.name || user.email || user.id, use
 function budgetFor(row: VirtualKey, budgets: Budget[]) {
   return budgets.filter((budget) => budget.enabled).map((budget) => {
     let score = 0;
-    if (budget.scope_type === "key" && budget.scope_id === row.id) score = 4;
-    else if (budget.scope_type === "user" && budget.scope_id === row.user_id) score = 3;
-    else if (budget.scope_type === "team" && budget.scope_id === row.team_id) score = 2;
+    if (budget.scope_type === "key" && budget.scope_id === row.id) score = 5;
+    else if (budget.scope_type === "user" && budget.scope_id === row.user_id) score = 4;
+    else if (budget.scope_type === "team" && budget.scope_id === row.team_id) score = 3;
+    else if (budget.scope_type === "organization" && budget.scope_id === row.organization_id) score = 2;
     else if (budget.scope_type === "global") score = 1;
     return { budget, score };
   }).filter((item) => item.score).sort((a, b) => b.score - a.score || a.budget.id - b.budget.id)[0]?.budget;

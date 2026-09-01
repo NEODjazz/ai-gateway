@@ -96,8 +96,8 @@ BILLING_RESERVATION_TTL_SECONDS=900
 BILLING_DEFAULT_RESERVE_OUTPUT_TOKENS=1024
 ```
 
-Limits and quotas are enforced atomically for `global`, `key`, `user`, `team`,
-`model`, `provider`, and credential `tag` scopes. A request with multiple tags
+Limits and quotas are enforced atomically for `global`, `organization`, `key`,
+`user`, `team`, `model`, `provider`, and credential `tag` scopes. A request with multiple tags
 consumes every matching tag budget. Tags are snapshotted in the reservation so
 retries, fallback, commit, and summary use the same billing identity. A request
 first reserves its estimated input plus maximum output allowance, then replaces
@@ -107,6 +107,8 @@ budget. Repeating the same `request_id` is idempotent; reusing it for another
 billing identity or after the lifecycle is finalized returns HTTP 409. During
 provider failover, an active reservation is atomically moved to the new
 provider/model scope instead of being counted twice or bypassing that scope.
+The organization is snapshotted as well, so changing key ownership while a
+request is in flight cannot move its reservation to another budget.
 
 Policies are stored in `billing_budget_policies`. For example:
 
@@ -189,6 +191,8 @@ migrations/postgres/002_billing_outbox.sql
 migrations/postgres/004_budgets.sql
 migrations/postgres/005_pricing_snapshots.sql
 migrations/postgres/006_management_audit.sql
+migrations/postgres/007_tag_budgets.sql
+migrations/postgres/008_organization_budgets.sql
 ```
 
 `management_audit_events` is an append-only management journal queried through

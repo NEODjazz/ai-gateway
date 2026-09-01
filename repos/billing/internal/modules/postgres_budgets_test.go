@@ -160,6 +160,35 @@ func TestPostgresBudgetReservationsAreAtomicAndLifecycleAware(t *testing.T) {
 		t.Fatalf("cancel did not release cost budget: %v", err)
 	}
 
+	organization := "organization-" + suffix
+	if _, err := pool.Exec(ctx, `INSERT INTO billing_budget_policies(scope_type,scope_id,period,currency,max_tokens) VALUES('organization',$1,'day','USD',5)`, organization); err != nil {
+		t.Fatal(err)
+	}
+	organizationFirst := budgetTestEvent("organization-first-"+suffix, "organization-team-"+suffix, 3)
+	organizationFirst.OrganizationID = organization
+	if err := checker.Apply(ctx, organizationFirst); err != nil {
+		t.Fatalf("organization reservation failed: %v", err)
+	}
+	var storedOrganization string
+	if err := pool.QueryRow(ctx, `SELECT organization_id FROM billing_budget_reservations WHERE request_id=$1`, organizationFirst.RequestID).Scan(&storedOrganization); err != nil || storedOrganization != organization {
+		t.Fatalf("stored organization=%q err=%v", storedOrganization, err)
+	}
+	organizationRetry := budgetTestEvent(organizationFirst.RequestID, "organization-team-"+suffix, 3)
+	organizationRetry.OrganizationID = "changed-organization"
+	if err := checker.Apply(ctx, organizationRetry); err != nil || organizationRetry.OrganizationID != organization {
+		t.Fatalf("organization snapshot was not preserved: organization=%q err=%v", organizationRetry.OrganizationID, err)
+	}
+	organizationOver := budgetTestEvent("organization-over-"+suffix, "organization-team-"+suffix, 3)
+	organizationOver.OrganizationID = organization
+	if err := checker.Apply(ctx, organizationOver); !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("organization budget was not enforced: %v", err)
+	}
+	otherOrganization := budgetTestEvent("organization-other-"+suffix, "organization-team-"+suffix, 3)
+	otherOrganization.OrganizationID = "other-" + organization
+	if err := checker.Apply(ctx, otherOrganization); err != nil {
+		t.Fatalf("organization budget leaked across organizations: %v", err)
+	}
+
 	tagA, tagB := "tag-a-"+suffix, "tag-b-"+suffix
 	if _, err := pool.Exec(ctx, `INSERT INTO billing_budget_policies(scope_type,scope_id,period,currency,max_tokens) VALUES('tag',$1,'day','USD',5),('tag',$2,'day','USD',10)`, tagA, tagB); err != nil {
 		t.Fatal(err)
@@ -297,7 +326,7 @@ func TestPostgresBudgetManagementLifecycleAndSummary(t *testing.T) {
 
 func applyBudgetTestMigration(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	for _, name := range []string{"004_budgets.sql", "005_pricing_snapshots.sql", "006_management_audit.sql", "007_tag_budgets.sql"} {
+	for _, name := range []string{"004_budgets.sql", "005_pricing_snapshots.sql", "006_management_audit.sql", "007_tag_budgets.sql", "008_organization_budgets.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
 			t.Fatal(err)

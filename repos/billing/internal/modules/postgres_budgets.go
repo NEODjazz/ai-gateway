@@ -30,6 +30,7 @@ type budgetReservation struct {
 	State           string
 	Owner           string
 	Tags            []string
+	OrganizationID  string
 	ProviderName    string
 	ProviderType    string
 	Model           string
@@ -65,7 +66,7 @@ func (c *PostgresBudgetPolicyChecker) Ready(ctx context.Context) error {
 	if err := c.pool.Ping(ctx); err != nil {
 		return errors.New("billing policy postgres is unavailable")
 	}
-	var policies, reservations, pricingSnapshots, tagSnapshots bool
+	var policies, reservations, pricingSnapshots, tagSnapshots, organizationSnapshots bool
 	if err := c.pool.QueryRow(ctx, `
 		SELECT to_regclass('public.billing_budget_policies') IS NOT NULL,
 		       to_regclass('public.billing_budget_reservations') IS NOT NULL,
@@ -74,7 +75,10 @@ func (c *PostgresBudgetPolicyChecker) Ready(ctx context.Context) error {
 		                 AND column_name='catalog_version'),
 		       EXISTS (SELECT 1 FROM information_schema.columns
 		               WHERE table_schema='public' AND table_name='billing_budget_reservations'
-		                 AND column_name='tags')`).Scan(&policies, &reservations, &pricingSnapshots, &tagSnapshots); err != nil || !policies || !reservations || !pricingSnapshots || !tagSnapshots {
+		                 AND column_name='tags'),
+		       EXISTS (SELECT 1 FROM information_schema.columns
+		               WHERE table_schema='public' AND table_name='billing_budget_reservations'
+		                 AND column_name='organization_id')`).Scan(&policies, &reservations, &pricingSnapshots, &tagSnapshots, &organizationSnapshots); err != nil || !policies || !reservations || !pricingSnapshots || !tagSnapshots || !organizationSnapshots {
 		return errors.New("billing budget migration is not applied")
 	}
 	return nil
@@ -115,9 +119,10 @@ func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event *BillingE
 		return fmt.Errorf("%w: request_id belongs to another billing identity", ErrBillingConflict)
 	}
 	if found {
-		// Tag-scoped budgets must use the identity snapshot captured by the
+		// Tag- and organization-scoped budgets must use the identity snapshot captured by the
 		// original reservation, including during retries, fallbacks and commit.
 		event.Tags = append([]string(nil), reservation.Tags...)
+		event.OrganizationID = reservation.OrganizationID
 	}
 	if found && (event.Phase == "commit" || (event.Phase == "reserve" && samePricingRoute(reservation, *event))) {
 		applyReservationPricing(event, reservation)
@@ -151,13 +156,13 @@ func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event *BillingE
 		}
 		_, err = tx.Exec(ctx, `
 			INSERT INTO billing_budget_reservations
-			(request_id, owner_key, credential_id, user_id, team_id, tags, provider_name,
+			(request_id, owner_key, credential_id, user_id, team_id, organization_id, tags, provider_name,
 			 provider_type, model, currency, state, reserved_cost, reserved_tokens,
 			 catalog_version, pricing_key, input_cost_per_1m, output_cost_per_1m,
 			 reservation_expires_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'reserved',$11,$12,$13,$14,$15,$16,$17)`,
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'reserved',$12,$13,$14,$15,$16,$17,$18)`,
 			event.RequestID, reservationOwner(*event), event.APIKeyFingerprint, event.UserID,
-			event.TeamID, budgetTags(*event), budgetProviderName(*event), budgetProviderType(*event), event.Model,
+			event.TeamID, event.OrganizationID, budgetTags(*event), budgetProviderName(*event), budgetProviderType(*event), event.Model,
 			event.Currency, event.Cost, event.TotalTokens, event.CatalogVersion, event.PricingKey,
 			event.InputCostPer1M, event.OutputCostPer1M, time.Now().UTC().Add(c.ttl))
 	case "commit":
@@ -178,13 +183,13 @@ func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event *BillingE
 			}
 			_, err = tx.Exec(ctx, `
 				INSERT INTO billing_budget_reservations
-				(request_id, owner_key, credential_id, user_id, team_id, tags, provider_name,
+				(request_id, owner_key, credential_id, user_id, team_id, organization_id, tags, provider_name,
 				 provider_type, model, currency, state, actual_cost, actual_tokens,
 				 catalog_version, pricing_key, input_cost_per_1m, output_cost_per_1m,
 				 reservation_expires_at)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'committed',$11,$12,$13,$14,$15,$16,now())`,
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'committed',$12,$13,$14,$15,$16,$17,now())`,
 				event.RequestID, reservationOwner(*event), event.APIKeyFingerprint, event.UserID,
-				event.TeamID, budgetTags(*event), budgetProviderName(*event), budgetProviderType(*event), event.Model,
+				event.TeamID, event.OrganizationID, budgetTags(*event), budgetProviderName(*event), budgetProviderType(*event), event.Model,
 				event.Currency, event.Cost, event.TotalTokens, event.CatalogVersion, event.PricingKey,
 				event.InputCostPer1M, event.OutputCostPer1M)
 		}
@@ -200,11 +205,11 @@ func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event *BillingE
 		} else if !found {
 			_, err = tx.Exec(ctx, `
 				INSERT INTO billing_budget_reservations
-				(request_id, owner_key, credential_id, user_id, team_id, tags, provider_name,
+				(request_id, owner_key, credential_id, user_id, team_id, organization_id, tags, provider_name,
 				 provider_type, model, currency, state, reservation_expires_at)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'canceled',now())`,
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'canceled',now())`,
 				event.RequestID, reservationOwner(*event), event.APIKeyFingerprint, event.UserID,
-				event.TeamID, budgetTags(*event), budgetProviderName(*event), budgetProviderType(*event), event.Model, event.Currency)
+				event.TeamID, event.OrganizationID, budgetTags(*event), budgetProviderName(*event), budgetProviderType(*event), event.Model, event.Currency)
 		}
 	}
 	if err != nil {
@@ -250,12 +255,13 @@ func applicableBudgetPolicies(ctx context.Context, tx pgx.Tx, event BillingEvent
 			OR (scope_type='key' AND scope_id=$2)
 			OR (scope_type='user' AND scope_id=$3)
 			OR (scope_type='team' AND scope_id=$4)
-			OR (scope_type='model' AND scope_id=$5)
-			OR (scope_type='provider' AND scope_id = ANY($6))
-			OR (scope_type='tag' AND scope_id = ANY($7))
+			OR (scope_type='organization' AND scope_id=$5)
+			OR (scope_type='model' AND scope_id=$6)
+			OR (scope_type='provider' AND scope_id = ANY($7))
+			OR (scope_type='tag' AND scope_id = ANY($8))
 		)
 		ORDER BY id
-		FOR UPDATE`, event.Currency, event.APIKeyFingerprint, event.UserID, event.TeamID,
+		FOR UPDATE`, event.Currency, event.APIKeyFingerprint, event.UserID, event.TeamID, event.OrganizationID,
 		event.Model, []string{budgetProviderName(event), budgetProviderType(event)}, budgetTags(event))
 	if err != nil {
 		return nil, err
@@ -275,10 +281,10 @@ func applicableBudgetPolicies(ctx context.Context, tx pgx.Tx, event BillingEvent
 func reservationState(ctx context.Context, tx pgx.Tx, requestID string) (budgetReservation, bool, error) {
 	var reservation budgetReservation
 	err := tx.QueryRow(ctx, `
-		SELECT state, owner_key, tags, provider_name, provider_type, model, currency,
+		SELECT state, owner_key, tags, organization_id, provider_name, provider_type, model, currency,
 		       catalog_version, pricing_key, input_cost_per_1m::float8, output_cost_per_1m::float8
 		FROM billing_budget_reservations WHERE request_id=$1 FOR UPDATE`, requestID).Scan(
-		&reservation.State, &reservation.Owner, &reservation.Tags, &reservation.ProviderName, &reservation.ProviderType,
+		&reservation.State, &reservation.Owner, &reservation.Tags, &reservation.OrganizationID, &reservation.ProviderName, &reservation.ProviderType,
 		&reservation.Model, &reservation.Currency, &reservation.CatalogVersion, &reservation.PricingKey,
 		&reservation.InputCostPer1M, &reservation.OutputCostPer1M)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -327,6 +333,7 @@ func budgetUsageForPolicy(ctx context.Context, query budgetUsageQuerier, policy 
 			WHEN 'key' THEN credential_id=$3
 			WHEN 'user' THEN user_id=$3
 			WHEN 'team' THEN team_id=$3
+			WHEN 'organization' THEN organization_id=$3
 			WHEN 'model' THEN model=$3
 			WHEN 'provider' THEN provider_name=$3 OR provider_type=$3
 			WHEN 'tag' THEN $3 = ANY(tags)

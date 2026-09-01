@@ -112,6 +112,25 @@ describe("management pages", () => {
     expect(save?.[1]?.body).toContain('"period":"hour"');
   });
 
+  it("creates an organization budget from configured organizations", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input) === "/admin/v1/budgets") return json({ data: [] });
+      if (String(input) === "/admin/v1/organizations?limit=500") return json({ data: [{ id: "org-a", name: "Acme" }] });
+      return json({ id: 42, scope_type: "organization", scope_id: "org-a" });
+    });
+    renderAuthenticated(<ResourcePage config={resourceConfigs.budgets} />);
+    await screen.findByText("No records found.");
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await userEvent.selectOptions(screen.getByLabelText("Scope type"), "organization");
+    await userEvent.selectOptions(screen.getByLabelText("Scope"), await screen.findByRole("option", { name: "org-a — Acme" }));
+    await userEvent.type(screen.getByLabelText("Maximum tokens"), "5000");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === "/admin/v1/budgets" && call[1]?.method === "POST")).toBe(true));
+    const save = fetchMock.mock.calls.find((call) => call[0] === "/admin/v1/budgets" && call[1]?.method === "POST");
+    expect(save?.[1]?.body).toContain('"scope_type":"organization"');
+    expect(save?.[1]?.body).toContain('"scope_id":"org-a"');
+  });
+
   it("assigns a user to a team with roles", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ data: [] }));
     renderAuthenticated(<TeamsPage />); await screen.findByText("No records found.");

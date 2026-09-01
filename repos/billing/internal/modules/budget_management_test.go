@@ -14,6 +14,10 @@ func TestNormalizeBudgetPolicySpec(t *testing.T) {
 	if spec.ScopeType != "team" || spec.ScopeID != "team-1" || spec.Period != "month" || spec.Currency != "USD" || spec.Enabled == nil || !*spec.Enabled {
 		t.Fatalf("spec=%+v", spec)
 	}
+	organizationSpec, err := normalizeBudgetPolicySpec(BudgetPolicySpec{ScopeType: " ORGANIZATION ", ScopeID: " org-1 ", Period: "DAY", MaxCost: &cost})
+	if err != nil || organizationSpec.ScopeType != "organization" || organizationSpec.ScopeID != "org-1" {
+		t.Fatalf("organization spec=%+v err=%v", organizationSpec, err)
+	}
 	tagSpec, err := normalizeBudgetPolicySpec(BudgetPolicySpec{ScopeType: " TAG ", ScopeID: " production ", Period: "DAY", MaxCost: &cost})
 	if err != nil || tagSpec.ScopeType != "tag" || tagSpec.ScopeID != "production" {
 		t.Fatalf("tag spec=%+v err=%v", tagSpec, err)

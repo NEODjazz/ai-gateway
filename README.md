@@ -221,7 +221,7 @@ requests through the same authenticated inference path as external clients.
 Virtual-key tokens are shown once after creation or rotation and are cleared
 from the page when that dialog closes; list responses contain metadata only.
 Catalog entries can be created, edited, and removed; budgets can be created,
-edited, and disabled. The budget form resolves users, teams, virtual keys,
+edited, and disabled. The budget form resolves organizations, users, teams, virtual keys,
 models, providers, and tags from their configured registries instead of
 requiring operators to copy opaque IDs. Every mutation uses
 the same authenticated admin API and append-only audit path as direct API
@@ -851,7 +851,7 @@ tenant-scoped Responses affinity, plus an admin-RBAC virtual-key management API.
 It also has an opt-in, credential-scoped semantic cache for constrained text-only
 chat requests, credential-level function/MCP tool ACLs, and bounded multimodal
 image input with explicit vision routing and fail-closed binary AV scanning.
-Admin RBAC also exposes CRUD for global/key/user/team/model/provider/tag budget policies and a current-window
+Admin RBAC also exposes CRUD for global/organization/key/user/team/model/provider/tag budget policies and a current-window
 spend summary at `/admin/v1/budgets`; gateway-to-billing calls use a separate
 `BILLING_MANAGEMENT_SHARED_SECRET`, never the client Bearer token.
 
