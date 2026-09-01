@@ -21,8 +21,8 @@ func TestAdminModelGroupLifecyclePublishesPublicModel(t *testing.T) {
 	if create.Code != http.StatusCreated {
 		t.Fatalf("group create failed: %d %s", create.Code, create.Body.String())
 	}
-	if !strings.Contains(create.Body.String(), `"retry_policy":{"rate_limit":2}`) {
-		t.Fatalf("retry policy missing from response: %s", create.Body.String())
+	if !strings.Contains(create.Body.String(), `"deployment_ids":["primary","fallback"]`) || !strings.Contains(create.Body.String(), `"retry_policy":{"rate_limit":2}`) {
+		t.Fatalf("ordered membership or retry policy missing from response: %s", create.Body.String())
 	}
 	models := httptest.NewRecorder()
 	handler.ServeHTTP(models, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
@@ -35,8 +35,8 @@ func TestAdminModelGroupLifecyclePublishesPublicModel(t *testing.T) {
 		t.Fatalf("referenced deployment delete was not blocked: %d %s", blockedDelete.Code, blockedDelete.Body.String())
 	}
 	update := httptest.NewRecorder()
-	handler.ServeHTTP(update, httptest.NewRequest(http.MethodPut, "/admin/v1/model-groups/public-chat", strings.NewReader(`{"deployment_ids":["fallback"],"strategy":"adaptive","enabled":true}`)))
-	if update.Code != http.StatusOK || !strings.Contains(update.Body.String(), `"strategy":"adaptive"`) {
+	handler.ServeHTTP(update, httptest.NewRequest(http.MethodPut, "/admin/v1/model-groups/public-chat", strings.NewReader(`{"deployment_ids":["fallback","primary"],"strategy":"adaptive","enabled":true}`)))
+	if update.Code != http.StatusOK || !strings.Contains(update.Body.String(), `"deployment_ids":["fallback","primary"]`) || !strings.Contains(update.Body.String(), `"strategy":"adaptive"`) {
 		t.Fatalf("group update failed: %d %s", update.Code, update.Body.String())
 	}
 	remove := httptest.NewRecorder()

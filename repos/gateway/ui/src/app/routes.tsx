@@ -17,6 +17,7 @@ import { RouterSettingsPage } from "../pages/RouterSettingsPage";
 import { VirtualKeysPage } from "../pages/VirtualKeysPage";
 import { ProvidersPage } from "../pages/ProvidersPage";
 import { CredentialsPage } from "../pages/CredentialsPage";
+import { ModelGroupsPage } from "../pages/ModelGroupsPage";
 import { resourceConfigs } from "../pages/resourceConfigs";
 import { useAuth, type ConsoleCapability } from "../auth/AuthContext";
 
@@ -48,7 +49,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/providers", title: "Providers", group: "Manage", element: <ProvidersPage />, available: true },
   { path: "/credentials", title: "Credentials", group: "Manage", element: <CredentialsPage />, available: true },
   { path: "/deployments", title: "Deployments", group: "Manage", element: <DeploymentsPage />, available: true },
-  { path: "/model-groups", title: "Model groups", group: "Manage", element: <ResourcePage config={resourceConfigs.modelGroups} />, available: true },
+  { path: "/model-groups", title: "Model groups", group: "Manage", element: <ModelGroupsPage />, available: true },
 
   { path: "/organizations", title: "Organizations", group: "Access Control", element: <OrganizationsPage />, available: true },
   { path: "/teams", title: "Teams", group: "Access Control", element: <TeamsPage />, available: true, capability: "team_directory" },

@@ -552,6 +552,14 @@ configuration can still use endpoint-specific `model_aliases`, for example
 `{"fast":"deployment-gpt-5-mini"}`. `capabilities` can restrict an endpoint to `chat`,
 `responses`, `embeddings`, `rerank`, `vision`, `mcp`, and/or `stream`.
 
+The Model Groups page exposes the same routing model without requiring operators
+to remember deployment IDs: deployments are selected from a searchable multi-select,
+membership order can be changed explicitly, and each member shows its provider,
+upstream model, fallback priority, weight, runtime state and latest health result.
+Health reads are batched by 200 deployments and active checks by 50, matching the
+admin API limits. Group retry overrides are limited to transient failure classes;
+empty values continue to use each deployment's default.
+
 Chat Completions and Responses accept OpenAI-style image parts for endpoints
 that explicitly declare `vision`, implement a vision-capable adapter, and enable
 AV. OpenAI-compatible endpoints preserve the original blocks, Anthropic receives
