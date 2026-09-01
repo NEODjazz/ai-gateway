@@ -57,6 +57,55 @@ type affinityResponseClient struct {
 
 type splitStreamingProvider struct{}
 
+type scriptedStreamingProvider struct {
+	chatCalls           int
+	responseCalls       int
+	failChatBeforeWrite int
+	failRespBeforeWrite int
+	failChatAfterWrite  bool
+	failRespAfterWrite  bool
+}
+
+func (p *scriptedStreamingProvider) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	return openai.ChatCompletionResponse{}, nil
+}
+
+func (p *scriptedStreamingProvider) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {
+	return openai.ResponseResponse{}, nil
+}
+
+func (p *scriptedStreamingProvider) StreamChatCompletions(_ context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+	p.chatCalls++
+	if p.chatCalls <= p.failChatBeforeWrite {
+		return openai.ChatCompletionResponse{}, statusError("scripted", 503)
+	}
+	payload := fmt.Sprintf(`{"id":"chat-scripted","model":%q,"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}`, request.Model)
+	if err := write(payload); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	if p.failChatAfterWrite {
+		return openai.ChatCompletionResponse{}, statusError("scripted", 503)
+	}
+	return openai.ChatCompletionResponse{
+		ID: "chat-scripted", Model: request.Model,
+		Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}},
+	}, nil
+}
+
+func (p *scriptedStreamingProvider) StreamResponses(_ context.Context, request openai.ResponseRequest, write ResponseStreamWriter) (openai.ResponseResponse, error) {
+	p.responseCalls++
+	if p.responseCalls <= p.failRespBeforeWrite {
+		return openai.ResponseResponse{}, statusError("scripted", 503)
+	}
+	if err := write("response.output_text.delta", `{"type":"response.output_text.delta","response_id":"resp-scripted","output_index":0,"delta":"ok"}`); err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	if p.failRespAfterWrite {
+		return openai.ResponseResponse{}, statusError("scripted", 503)
+	}
+	return openai.ResponseResponse{ID: "resp-scripted", Object: "response", Status: "completed", Model: request.Model, OutputText: "ok"}, nil
+}
+
 func (splitStreamingProvider) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	return openai.ChatCompletionResponse{}, nil
 }
@@ -627,12 +676,131 @@ func TestStreamingAdmissionRejectsBeforeStreamStarts(t *testing.T) {
 	}
 }
 
+func TestStreamChatRetriesAndFallsBackOnlyBeforeFirstChunk(t *testing.T) {
+	primary := &scriptedStreamingProvider{failChatBeforeWrite: 2}
+	secondary := &scriptedStreamingProvider{}
+	telemetry := &attemptMetadataModule{}
+	router := Router{
+		endpoints: []Endpoint{
+			{Name: "primary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"chat", "stream"}, MaxRetries: 1, Provider: primary},
+			{Name: "secondary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"chat", "stream"}, Provider: secondary},
+		},
+		modules: modules.NewPipeline([]modules.Module{telemetry}), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+
+	writes := 0
+	_, streamed, err := router.StreamChatCompletions(context.Background(), modules.RequestContext{
+		Request: openai.ChatCompletionRequest{Model: "model", Stream: true},
+	}, func(string) error {
+		writes++
+		return nil
+	})
+	if err != nil || !streamed {
+		t.Fatalf("expected successful fallback stream, streamed=%v err=%v", streamed, err)
+	}
+	if primary.chatCalls != 2 || secondary.chatCalls != 1 || writes != 1 {
+		t.Fatalf("unexpected attempts: primary=%d secondary=%d writes=%d", primary.chatCalls, secondary.chatCalls, writes)
+	}
+	if telemetry.metadata["provider.retry_count"] != "1" || telemetry.metadata["provider.fallback_count"] != "1" {
+		t.Fatalf("unexpected retry metadata: %+v", telemetry.metadata)
+	}
+	if _, found := telemetry.metadata["provider.first_token_latency_ms"]; !found {
+		t.Fatalf("missing TTFT metadata: %+v", telemetry.metadata)
+	}
+}
+
+func TestStreamChatDoesNotFallbackAfterFirstChunk(t *testing.T) {
+	primary := &scriptedStreamingProvider{failChatAfterWrite: true}
+	secondary := &scriptedStreamingProvider{}
+	router := Router{
+		endpoints: []Endpoint{
+			{Name: "primary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"chat", "stream"}, MaxRetries: 2, Provider: primary},
+			{Name: "secondary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"chat", "stream"}, Provider: secondary},
+		},
+		modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+
+	writes := 0
+	_, streamed, err := router.StreamChatCompletions(context.Background(), modules.RequestContext{
+		Request: openai.ChatCompletionRequest{Model: "model", Stream: true},
+	}, func(string) error {
+		writes++
+		return nil
+	})
+	if err == nil || !streamed {
+		t.Fatalf("expected terminal partial-stream error, streamed=%v err=%v", streamed, err)
+	}
+	if primary.chatCalls != 1 || secondary.chatCalls != 0 || writes != 1 {
+		t.Fatalf("partial response was regenerated: primary=%d secondary=%d writes=%d", primary.chatCalls, secondary.chatCalls, writes)
+	}
+}
+
+func TestStreamResponsesFallsBackBeforeFirstEvent(t *testing.T) {
+	primary := &scriptedStreamingProvider{failRespBeforeWrite: 1}
+	secondary := &scriptedStreamingProvider{}
+	telemetry := &attemptMetadataModule{}
+	router := Router{
+		endpoints: []Endpoint{
+			{Name: "primary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"responses", "stream"}, Provider: primary},
+			{Name: "secondary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"responses", "stream"}, Provider: secondary},
+		},
+		modules: modules.NewPipeline([]modules.Module{telemetry}), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	request := openai.ResponseRequest{Model: "model", Stream: true, Input: "hello"}
+
+	writes := 0
+	_, streamed, err := router.StreamResponses(context.Background(), modules.RequestContext{
+		Request: openai.ChatCompletionRequest{Model: request.Model}, ResponseRequest: &request,
+	}, func(string, string) error {
+		writes++
+		return nil
+	})
+	if err != nil || !streamed {
+		t.Fatalf("expected successful response fallback, streamed=%v err=%v", streamed, err)
+	}
+	if primary.responseCalls != 1 || secondary.responseCalls != 1 || writes != 1 {
+		t.Fatalf("unexpected attempts: primary=%d secondary=%d writes=%d", primary.responseCalls, secondary.responseCalls, writes)
+	}
+	if telemetry.metadata["provider.retry_count"] != "0" || telemetry.metadata["provider.fallback_count"] != "1" {
+		t.Fatalf("unexpected retry metadata: %+v", telemetry.metadata)
+	}
+}
+
+func TestStreamResponsesDoesNotFallbackAfterFirstEvent(t *testing.T) {
+	primary := &scriptedStreamingProvider{failRespAfterWrite: true}
+	secondary := &scriptedStreamingProvider{}
+	router := Router{
+		endpoints: []Endpoint{
+			{Name: "primary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"responses", "stream"}, MaxRetries: 2, Provider: primary},
+			{Name: "secondary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"responses", "stream"}, Provider: secondary},
+		},
+		modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	request := openai.ResponseRequest{Model: "model", Stream: true, Input: "hello"}
+
+	writes := 0
+	_, streamed, err := router.StreamResponses(context.Background(), modules.RequestContext{
+		Request: openai.ChatCompletionRequest{Model: request.Model}, ResponseRequest: &request,
+	}, func(string, string) error {
+		writes++
+		return nil
+	})
+	if err == nil || !streamed {
+		t.Fatalf("expected terminal partial-stream error, streamed=%v err=%v", streamed, err)
+	}
+	if primary.responseCalls != 1 || secondary.responseCalls != 0 || writes != 1 {
+		t.Fatalf("partial response was regenerated: primary=%d secondary=%d writes=%d", primary.responseCalls, secondary.responseCalls, writes)
+	}
+}
+
 func TestRouterObservesEveryProviderRetryAndCacheOperation(t *testing.T) {
 	observer := &recordingProviderObserver{}
+	telemetry := &attemptMetadataModule{}
 	primary := &countingProvider{err: statusError("primary", 503)}
 	secondary := &countingProvider{content: "fallback"}
 	router := Router{
 		health: newEndpointHealthTracker(), observer: observer,
+		modules: modules.NewPipeline([]modules.Module{telemetry}),
 		endpoints: []Endpoint{
 			{Name: "primary", Type: "openai", Models: []string{"model"}, MaxRetries: 1, Provider: primary},
 			{Name: "secondary", Type: "openai", Models: []string{"model"}, Provider: secondary},
@@ -646,6 +814,9 @@ func TestRouterObservesEveryProviderRetryAndCacheOperation(t *testing.T) {
 	}
 	if observer.cacheCalls == 0 {
 		t.Fatal("cache-disabled outcome was not observed")
+	}
+	if telemetry.metadata["provider.retry_count"] != "1" || telemetry.metadata["provider.fallback_count"] != "1" {
+		t.Fatalf("unexpected retry metadata: %+v", telemetry.metadata)
 	}
 }
 
@@ -755,7 +926,7 @@ func TestRouterPublishesAttemptMetadataToPostModules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if telemetry.metadata["provider.status"] != "ok" || telemetry.metadata["provider.latency_ms"] == "" {
+	if telemetry.metadata["provider.status"] != "ok" || telemetry.metadata["provider.latency_ms"] == "" || telemetry.metadata["provider.retry_count"] != "0" || telemetry.metadata["provider.fallback_count"] != "0" {
 		t.Fatalf("missing attempt metadata: %+v", telemetry.metadata)
 	}
 }

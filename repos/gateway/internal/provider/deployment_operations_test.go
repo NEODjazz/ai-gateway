@@ -51,7 +51,7 @@ func TestProviderCallHonorsDeploymentRequestTimeout(t *testing.T) {
 	router := Router{health: newEndpointHealthTracker(), adaptive: newAdaptiveRouter(0.5)}
 	endpoint := Endpoint{Name: "slow", Type: "test", Provider: deadlineProbeClient{}, RequestTimeout: 10 * time.Millisecond}
 	started := time.Now()
-	_, err := router.callChat(context.Background(), endpoint, openai.ChatCompletionRequest{Model: "model"})
+	_, _, err := router.callChat(context.Background(), endpoint, openai.ChatCompletionRequest{Model: "model"})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected deadline exceeded, got %v", err)
 	}

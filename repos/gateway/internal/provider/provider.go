@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -325,6 +326,8 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 	var errs []error
 	var lastAttempt *modules.RequestContext
 	mirrored := false
+	totalRetries := 0
+	fallbackCount := 0
 	for _, endpoint := range candidates {
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
@@ -348,6 +351,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 				attemptCtx.Metadata["provider.cache.status"] = "hit"
 				attemptCtx.Metadata["provider.status"] = "ok"
 				attemptCtx.Metadata["provider.latency_ms"] = "0"
+				setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 				response.Usage = openai.Usage{}
 				attemptCtx.Response = &response
 				if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
@@ -379,6 +383,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 						attemptCtx.Metadata["provider.cache.kind"] = "semantic"
 						attemptCtx.Metadata["provider.status"] = "ok"
 						attemptCtx.Metadata["provider.latency_ms"] = "0"
+						setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 						cached.Usage = openai.Usage{}
 						attemptCtx.Response = &cached
 						if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
@@ -397,8 +402,10 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			r.mirrorChat(ctx, req.RequestID, attemptCtx.Request, request.Model, requiredChatCapabilities(request, false)...)
 			mirrored = true
 		}
-		response, err := r.callChat(ctx, endpoint, attemptCtx.Request)
+		response, retries, err := r.callChat(ctx, endpoint, attemptCtx.Request)
+		totalRetries += retries
 		setAttemptMetadata(&attemptCtx, started, err)
+		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
 			attemptCtx.Metadata["provider.cache.status"] = "miss"
 			if payload, marshalErr := json.Marshal(response); marshalErr == nil {
@@ -431,6 +438,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			r.modules.RunFailure(ctx, lastAttempt, joined)
 			return openai.ChatCompletionResponse{}, joined
 		}
+		fallbackCount++
 	}
 
 	joined := errors.Join(errs...)
@@ -451,6 +459,8 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 	var errs []error
 	var lastAttempt *modules.RequestContext
 	mirrored := false
+	totalRetries := 0
+	fallbackCount := 0
 	for _, endpoint := range candidates {
 		streamingProvider, ok := endpoint.Provider.(StreamingClient)
 		if !ok {
@@ -480,27 +490,57 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		started := time.Now()
 		release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
 		if err != nil {
+			setAttemptMetadata(&attemptCtx, started, err)
+			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 			errs = append(errs, fmt.Errorf("%s/%s admission failed: %w", endpoint.Type, endpoint.Name, err))
+			fallbackCount++
 			continue
 		}
 		if err := r.health.permit(ctx, endpoint); err != nil {
 			release()
+			setAttemptMetadata(&attemptCtx, started, err)
+			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 			errs = append(errs, fmt.Errorf("%s/%s circuit denied call: %w", endpoint.Type, endpoint.Name, err))
+			fallbackCount++
 			continue
 		}
-		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "chat.stream")
-		response, err := streamingProvider.StreamChatCompletions(providerCtx, attemptCtx.Request, deanonymizingChatStreamWriter(attemptCtx.AnonymizationValues, write))
-		finishProviderCall(err)
+		var response openai.ChatCompletionResponse
+		streamStarted := false
+		firstTokenLatency := time.Duration(0)
+		for retry := 0; ; retry++ {
+			tracker := newStreamAttemptTracker(started)
+			providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "chat.stream")
+			response, err = streamingProvider.StreamChatCompletions(providerCtx, attemptCtx.Request, deanonymizingChatStreamWriter(attemptCtx.AnonymizationValues, tracker.chatWriter(write)))
+			finishProviderCall(err)
+			streamStarted, firstTokenLatency = tracker.state()
+			if err == nil || errors.Is(err, ErrStreamingUnsupported) || streamStarted || ctx.Err() != nil || retry >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
+				break
+			}
+			totalRetries++
+		}
 		release()
 		setAttemptMetadata(&attemptCtx, started, err)
+		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
+		if streamStarted {
+			setFirstTokenLatency(&attemptCtx, firstTokenLatency)
+		}
 		if errors.Is(err, ErrStreamingUnsupported) {
 			r.health.success(ctx, endpoint)
+			fallbackCount++
 			continue
 		}
 		if err != nil {
-			r.health.failure(ctx, endpoint, err)
-			r.modules.RunFailure(ctx, &attemptCtx, err)
-			return openai.ChatCompletionResponse{}, true, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err)
+			if ctx.Err() == nil {
+				r.health.failure(ctx, endpoint, err)
+			}
+			wrapped := fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err)
+			if streamStarted || ctx.Err() != nil || !tryNextEndpoint(err) {
+				r.modules.RunFailure(ctx, &attemptCtx, wrapped)
+				return openai.ChatCompletionResponse{}, streamStarted, wrapped
+			}
+			errs = append(errs, wrapped)
+			fallbackCount++
+			continue
 		}
 		r.health.success(ctx, endpoint)
 
@@ -539,6 +579,8 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 	var errs []error
 	var lastAttempt *modules.RequestContext
 	mirrored := false
+	totalRetries := 0
+	fallbackCount := 0
 	for _, endpoint := range candidates {
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
@@ -562,6 +604,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 				attemptCtx.Metadata["provider.cache.status"] = "hit"
 				attemptCtx.Metadata["provider.status"] = "ok"
 				attemptCtx.Metadata["provider.latency_ms"] = "0"
+				setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 				response.Usage = openai.ResponseUsage{}
 				attemptCtx.ResponsesResponse = &response
 				if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
@@ -578,8 +621,10 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, false)...)
 			mirrored = true
 		}
-		response, err := r.callResponses(ctx, endpoint, *attemptCtx.ResponseRequest)
+		response, retries, err := r.callResponses(ctx, endpoint, *attemptCtx.ResponseRequest)
+		totalRetries += retries
 		setAttemptMetadata(&attemptCtx, started, err)
+		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
 			attemptCtx.Metadata["provider.cache.status"] = "miss"
 			if payload, marshalErr := json.Marshal(response); marshalErr == nil {
@@ -603,6 +648,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			r.modules.RunFailure(ctx, lastAttempt, joined)
 			return openai.ResponseResponse{}, joined
 		}
+		fallbackCount++
 	}
 
 	joined := errors.Join(errs...)
@@ -625,6 +671,8 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 	var errs []error
 	var lastAttempt *modules.RequestContext
 	mirrored := false
+	totalRetries := 0
+	fallbackCount := 0
 	for _, endpoint := range candidates {
 		client, ok := endpoint.Provider.(EmbeddingClient)
 		if !ok {
@@ -650,8 +698,10 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 			r.mirrorEmbeddings(ctx, req.RequestID, *attemptCtx.EmbeddingRequest, request.Model)
 			mirrored = true
 		}
-		response, err := r.callEmbeddings(ctx, endpoint, client, *attemptCtx.EmbeddingRequest)
+		response, retries, err := r.callEmbeddings(ctx, endpoint, client, *attemptCtx.EmbeddingRequest)
+		totalRetries += retries
 		setAttemptMetadata(&attemptCtx, started, err)
+		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
 			mergeEmbeddingUsage(&response, attemptCtx.Usage)
 			attemptCtx.EmbeddingResponse = &response
@@ -666,6 +716,7 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 			r.modules.RunFailure(ctx, lastAttempt, joined)
 			return openai.EmbeddingResponse{}, joined
 		}
+		fallbackCount++
 	}
 	if len(errs) == 0 {
 		errs = append(errs, errors.New("no selected endpoint implements embeddings"))
@@ -689,6 +740,8 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 	var errs []error
 	var lastAttempt *modules.RequestContext
 	mirrored := false
+	totalRetries := 0
+	fallbackCount := 0
 	for _, endpoint := range candidates {
 		client, ok := endpoint.Provider.(RerankClient)
 		if !ok {
@@ -713,8 +766,10 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 			r.mirrorRerank(ctx, req.RequestID, *attemptCtx.RerankRequest, request.Model)
 			mirrored = true
 		}
-		response, err := r.callRerank(ctx, endpoint, client, *attemptCtx.RerankRequest)
+		response, retries, err := r.callRerank(ctx, endpoint, client, *attemptCtx.RerankRequest)
+		totalRetries += retries
 		setAttemptMetadata(&attemptCtx, started, err)
+		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
 			if validationErr := validateRerankResponse(response, len(request.Documents)); validationErr != nil {
 				err = validationErr
@@ -737,6 +792,7 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 			r.modules.RunFailure(ctx, lastAttempt, joined)
 			return openai.RerankResponse{}, joined
 		}
+		fallbackCount++
 	}
 	if len(errs) == 0 {
 		errs = append(errs, errors.New("no selected endpoint implements rerank"))
@@ -781,6 +837,8 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 	var errs []error
 	var lastAttempt *modules.RequestContext
 	mirrored := false
+	totalRetries := 0
+	fallbackCount := 0
 	for _, endpoint := range candidates {
 		streamingProvider, ok := endpoint.Provider.(StreamingResponseClient)
 		if !ok {
@@ -810,27 +868,57 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		started := time.Now()
 		release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
 		if err != nil {
+			setAttemptMetadata(&attemptCtx, started, err)
+			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 			errs = append(errs, fmt.Errorf("%s/%s admission failed: %w", endpoint.Type, endpoint.Name, err))
+			fallbackCount++
 			continue
 		}
 		if err := r.health.permit(ctx, endpoint); err != nil {
 			release()
+			setAttemptMetadata(&attemptCtx, started, err)
+			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 			errs = append(errs, fmt.Errorf("%s/%s circuit denied call: %w", endpoint.Type, endpoint.Name, err))
+			fallbackCount++
 			continue
 		}
-		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "responses.stream")
-		response, err := streamingProvider.StreamResponses(providerCtx, *attemptCtx.ResponseRequest, deanonymizingResponseStreamWriter(attemptCtx.AnonymizationValues, write))
-		finishProviderCall(err)
+		var response openai.ResponseResponse
+		streamStarted := false
+		firstTokenLatency := time.Duration(0)
+		for retry := 0; ; retry++ {
+			tracker := newStreamAttemptTracker(started)
+			providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "responses.stream")
+			response, err = streamingProvider.StreamResponses(providerCtx, *attemptCtx.ResponseRequest, deanonymizingResponseStreamWriter(attemptCtx.AnonymizationValues, tracker.responseWriter(write)))
+			finishProviderCall(err)
+			streamStarted, firstTokenLatency = tracker.state()
+			if err == nil || errors.Is(err, ErrStreamingUnsupported) || streamStarted || ctx.Err() != nil || retry >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
+				break
+			}
+			totalRetries++
+		}
 		release()
 		setAttemptMetadata(&attemptCtx, started, err)
+		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
+		if streamStarted {
+			setFirstTokenLatency(&attemptCtx, firstTokenLatency)
+		}
 		if errors.Is(err, ErrStreamingUnsupported) {
 			r.health.success(ctx, endpoint)
+			fallbackCount++
 			continue
 		}
 		if err != nil {
-			r.health.failure(ctx, endpoint, err)
-			r.modules.RunFailure(ctx, &attemptCtx, err)
-			return openai.ResponseResponse{}, true, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err)
+			if ctx.Err() == nil {
+				r.health.failure(ctx, endpoint, err)
+			}
+			wrapped := fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err)
+			if streamStarted || ctx.Err() != nil || !tryNextEndpoint(err) {
+				r.modules.RunFailure(ctx, &attemptCtx, wrapped)
+				return openai.ResponseResponse{}, streamStarted, wrapped
+			}
+			errs = append(errs, wrapped)
+			fallbackCount++
+			continue
 		}
 		r.health.success(ctx, endpoint)
 
@@ -994,14 +1082,14 @@ func boolString(value bool) string {
 	return "false"
 }
 
-func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, int, error) {
 	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
 	if err != nil {
-		return openai.ChatCompletionResponse{}, err
+		return openai.ChatCompletionResponse{}, 0, err
 	}
 	defer release()
 	if err := r.health.permit(ctx, endpoint); err != nil {
-		return openai.ChatCompletionResponse{}, err
+		return openai.ChatCompletionResponse{}, 0, err
 	}
 	var response openai.ChatCompletionResponse
 	err = nil
@@ -1011,24 +1099,25 @@ func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.
 		finishProviderCall(err)
 		if err == nil {
 			r.health.success(ctx, endpoint)
-			return response, nil
+			return response, attempt, nil
 		}
 		if ctx.Err() != nil || attempt >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
-			break
+			r.health.failure(ctx, endpoint, err)
+			return openai.ChatCompletionResponse{}, attempt, err
 		}
 	}
-	r.health.failure(ctx, endpoint, err)
-	return openai.ChatCompletionResponse{}, err
+	return openai.ChatCompletionResponse{}, endpointMaxRetries(endpoint), err
+
 }
 
-func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request openai.ResponseRequest) (openai.ResponseResponse, error) {
+func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request openai.ResponseRequest) (openai.ResponseResponse, int, error) {
 	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
 	if err != nil {
-		return openai.ResponseResponse{}, err
+		return openai.ResponseResponse{}, 0, err
 	}
 	defer release()
 	if err := r.health.permit(ctx, endpoint); err != nil {
-		return openai.ResponseResponse{}, err
+		return openai.ResponseResponse{}, 0, err
 	}
 	var response openai.ResponseResponse
 	err = nil
@@ -1038,24 +1127,24 @@ func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request op
 		finishProviderCall(err)
 		if err == nil {
 			r.health.success(ctx, endpoint)
-			return response, nil
+			return response, attempt, nil
 		}
 		if ctx.Err() != nil || attempt >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
-			break
+			r.health.failure(ctx, endpoint, err)
+			return openai.ResponseResponse{}, attempt, err
 		}
 	}
-	r.health.failure(ctx, endpoint, err)
-	return openai.ResponseResponse{}, err
+	return openai.ResponseResponse{}, endpointMaxRetries(endpoint), err
 }
 
-func (r Router) callEmbeddings(ctx context.Context, endpoint Endpoint, client EmbeddingClient, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
+func (r Router) callEmbeddings(ctx context.Context, endpoint Endpoint, client EmbeddingClient, request openai.EmbeddingRequest) (openai.EmbeddingResponse, int, error) {
 	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
 	if err != nil {
-		return openai.EmbeddingResponse{}, err
+		return openai.EmbeddingResponse{}, 0, err
 	}
 	defer release()
 	if err := r.health.permit(ctx, endpoint); err != nil {
-		return openai.EmbeddingResponse{}, err
+		return openai.EmbeddingResponse{}, 0, err
 	}
 	var response openai.EmbeddingResponse
 	err = nil
@@ -1065,24 +1154,24 @@ func (r Router) callEmbeddings(ctx context.Context, endpoint Endpoint, client Em
 		finishProviderCall(err)
 		if err == nil {
 			r.health.success(ctx, endpoint)
-			return response, nil
+			return response, attempt, nil
 		}
 		if ctx.Err() != nil || attempt >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
-			break
+			r.health.failure(ctx, endpoint, err)
+			return openai.EmbeddingResponse{}, attempt, err
 		}
 	}
-	r.health.failure(ctx, endpoint, err)
-	return openai.EmbeddingResponse{}, err
+	return openai.EmbeddingResponse{}, endpointMaxRetries(endpoint), err
 }
 
-func (r Router) callRerank(ctx context.Context, endpoint Endpoint, client RerankClient, request openai.RerankRequest) (openai.RerankResponse, error) {
+func (r Router) callRerank(ctx context.Context, endpoint Endpoint, client RerankClient, request openai.RerankRequest) (openai.RerankResponse, int, error) {
 	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
 	if err != nil {
-		return openai.RerankResponse{}, err
+		return openai.RerankResponse{}, 0, err
 	}
 	defer release()
 	if err := r.health.permit(ctx, endpoint); err != nil {
-		return openai.RerankResponse{}, err
+		return openai.RerankResponse{}, 0, err
 	}
 	var response openai.RerankResponse
 	for attempt := 0; attempt <= endpointMaxRetries(endpoint); attempt++ {
@@ -1091,14 +1180,70 @@ func (r Router) callRerank(ctx context.Context, endpoint Endpoint, client Rerank
 		finish(err)
 		if err == nil {
 			r.health.success(ctx, endpoint)
-			return response, nil
+			return response, attempt, nil
 		}
 		if ctx.Err() != nil || attempt >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
-			break
+			r.health.failure(ctx, endpoint, err)
+			return openai.RerankResponse{}, attempt, err
 		}
 	}
-	r.health.failure(ctx, endpoint, err)
-	return openai.RerankResponse{}, err
+	return openai.RerankResponse{}, endpointMaxRetries(endpoint), err
+}
+
+type streamAttemptTracker struct {
+	mu                sync.Mutex
+	started           time.Time
+	writeAttempted    bool
+	firstTokenLatency time.Duration
+}
+
+func newStreamAttemptTracker(started time.Time) *streamAttemptTracker {
+	return &streamAttemptTracker{started: started}
+}
+
+func (t *streamAttemptTracker) beforeWrite() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.writeAttempted {
+		return
+	}
+	t.writeAttempted = true
+	t.firstTokenLatency = time.Since(t.started)
+}
+
+func (t *streamAttemptTracker) state() (bool, time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.writeAttempted, t.firstTokenLatency
+}
+
+func (t *streamAttemptTracker) chatWriter(write ChatCompletionStreamWriter) ChatCompletionStreamWriter {
+	return func(payload string) error {
+		t.beforeWrite()
+		return write(payload)
+	}
+}
+
+func (t *streamAttemptTracker) responseWriter(write ResponseStreamWriter) ResponseStreamWriter {
+	return func(event, payload string) error {
+		t.beforeWrite()
+		return write(event, payload)
+	}
+}
+
+func setAttemptCounters(req *modules.RequestContext, retries, fallbacks int) {
+	if req.Metadata == nil {
+		req.Metadata = map[string]string{}
+	}
+	req.Metadata["provider.retry_count"] = strconv.Itoa(retries)
+	req.Metadata["provider.fallback_count"] = strconv.Itoa(fallbacks)
+}
+
+func setFirstTokenLatency(req *modules.RequestContext, latency time.Duration) {
+	if req.Metadata == nil {
+		req.Metadata = map[string]string{}
+	}
+	req.Metadata["provider.first_token_latency_ms"] = strconv.FormatInt(latency.Milliseconds(), 10)
 }
 
 func (r Router) startProviderCall(ctx context.Context, endpoint Endpoint, operation string) (context.Context, func(error)) {
