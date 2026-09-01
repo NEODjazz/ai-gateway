@@ -560,6 +560,15 @@ Health reads are batched by 200 deployments and active checks by 50, matching th
 admin API limits. Group retry overrides are limited to transient failure classes;
 empty values continue to use each deployment's default.
 
+`GET /admin/v1/model-groups/{id}/routing-settings` returns the complete group,
+its ordered deployments, and the current control-plane revision. The Router
+Settings page preserves that revision and submits the complete plan to the
+corresponding `PUT` endpoint. Group membership, strategy, retry overrides,
+deployment priority and operational retry/cooldown settings are validated first
+and then persisted in one optimistic transaction. A stale revision, invalid
+member, or persistence failure leaves every affected object unchanged. Model
+Groups links directly to this workspace with `?group=<public-model>`.
+
 Chat Completions and Responses accept OpenAI-style image parts for endpoints
 that explicitly declare `vision`, implement a vision-capable adapter, and enable
 AV. OpenAI-compatible endpoints preserve the original blocks, Anthropic receives

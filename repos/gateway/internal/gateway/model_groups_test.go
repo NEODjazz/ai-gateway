@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,5 +53,42 @@ func TestAdminModelGroupRejectsUnknownDeployment(t *testing.T) {
 	Routes(NewHandler(modulesPipeline("admin"), runtime)).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/admin/v1/model-groups", strings.NewReader(`{"id":"invalid","deployment_ids":["missing"],"strategy":"weighted","enabled":true}`)))
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("unknown deployment accepted: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAdminModelGroupRoutingSettingsAreReadAndUpdatedAtomically(t *testing.T) {
+	runtime := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{
+		{Name: "primary", Type: "demo", Models: []string{"public"}, Priority: 0, Weight: 2},
+		{Name: "fallback", Type: "demo", Models: []string{"public"}, Priority: 1, Weight: 1},
+	}})
+	controller := runtime.(provider.ModelGroupController)
+	if _, err := controller.CreateModelGroup(provider.ModelGroup{ID: "public", DeploymentIDs: []string{"primary", "fallback"}, Strategy: "weighted", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
+	get := httptest.NewRecorder()
+	handler.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/admin/v1/model-groups/public/routing-settings", nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("routing settings get failed: %d %s", get.Code, get.Body.String())
+	}
+	var settings provider.ModelGroupRoutingSettings
+	if err := json.Unmarshal(get.Body.Bytes(), &settings); err != nil {
+		t.Fatal(err)
+	}
+	updateBody := `{"expected_revision":0,"deployment_ids":["fallback","primary"],"strategy":"adaptive","retry_policy":{"rate_limit":2},"enabled":true,"deployments":[{"id":"fallback","priority":0,"weight":3,"request_timeout_ms":2000},{"id":"primary","priority":1,"weight":1,"max_retries":2}]}`
+	update := httptest.NewRecorder()
+	handler.ServeHTTP(update, httptest.NewRequest(http.MethodPut, "/admin/v1/model-groups/public/routing-settings", strings.NewReader(updateBody)))
+	if update.Code != http.StatusOK || !strings.Contains(update.Body.String(), `"deployment_ids":["fallback","primary"]`) || !strings.Contains(update.Body.String(), `"strategy":"adaptive"`) {
+		t.Fatalf("routing settings update failed: %d %s", update.Code, update.Body.String())
+	}
+	missingRevision := httptest.NewRecorder()
+	handler.ServeHTTP(missingRevision, httptest.NewRequest(http.MethodPut, "/admin/v1/model-groups/public/routing-settings", strings.NewReader(`{"deployment_ids":["primary"],"strategy":"weighted","enabled":true,"deployments":[]}`)))
+	if missingRevision.Code != http.StatusBadRequest {
+		t.Fatalf("missing revision accepted: %d %s", missingRevision.Code, missingRevision.Body.String())
+	}
+	stale := httptest.NewRecorder()
+	handler.ServeHTTP(stale, httptest.NewRequest(http.MethodPut, "/admin/v1/model-groups/public/routing-settings", strings.NewReader(strings.Replace(updateBody, `"expected_revision":0`, `"expected_revision":1`, 1))))
+	if stale.Code != http.StatusConflict || !strings.Contains(stale.Body.String(), "revision_conflict") {
+		t.Fatalf("stale routing update accepted: %d %s", stale.Code, stale.Body.String())
 	}
 }

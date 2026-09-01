@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.35
+  version: 0.1.36
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -868,6 +868,33 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '404': {$ref: '#/components/responses/NotFound'}
+  /admin/v1/model-groups/{id}/routing-settings:
+    get:
+      operationId: getModelGroupRoutingSettings
+      tags: [Model groups]
+      summary: Read a complete model-group routing plan and its control-plane revision
+      parameters: [{$ref: '#/components/parameters/ModelDeploymentID'}]
+      responses:
+        '200': {description: Versioned routing plan, content: {application/json: {schema: {$ref: '#/components/schemas/ModelGroupRoutingSettings'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    put:
+      operationId: updateModelGroupRoutingSettings
+      tags: [Model groups]
+      summary: Atomically update a model group and the operational settings of its deployments
+      description: The complete plan is validated before one optimistic control-plane commit. A stale expected_revision or persistence failure changes neither the group nor any deployment.
+      parameters: [{$ref: '#/components/parameters/ModelDeploymentID'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelGroupRoutingUpdate'}}}}
+      responses:
+        '200': {description: Committed versioned routing plan, content: {application/json: {schema: {$ref: '#/components/schemas/ModelGroupRoutingSettings'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/guardrail-policies:
     get:
       operationId: listGuardrailPolicies
@@ -2804,6 +2831,40 @@ components:
         unavailable: {type: integer, minimum: 0, maximum: 10}
         rate_limit: {type: integer, minimum: 0, maximum: 10}
         unknown: {type: integer, minimum: 0, maximum: 10}
+    DeploymentRoutingSettings:
+      type: object
+      additionalProperties: false
+      required: [id, priority, weight]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 128}
+        priority: {type: integer, minimum: 0}
+        weight: {type: integer, minimum: 0}
+        request_timeout_ms: {type: integer, minimum: 0, maximum: 600000}
+        max_retries: {type: integer, minimum: 0, maximum: 10}
+        cooldown_after_failures: {type: integer, minimum: 0, maximum: 100}
+        cooldown_seconds: {type: integer, minimum: 0, maximum: 86400}
+        max_parallel_requests: {type: integer, minimum: 0, maximum: 100000}
+        queue_capacity: {type: integer, minimum: 0, maximum: 100000}
+        queue_timeout_ms: {type: integer, minimum: 0, maximum: 600000}
+    ModelGroupRoutingUpdate:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, deployment_ids, strategy, enabled, deployments]
+      properties:
+        expected_revision: {type: integer, format: int64, minimum: 0}
+        deployment_ids: {type: array, minItems: 1, maxItems: 128, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128}}
+        strategy: {type: string, enum: [weighted, adaptive]}
+        retry_policy: {$ref: '#/components/schemas/RetryPolicy'}
+        enabled: {type: boolean}
+        deployments: {type: array, minItems: 1, maxItems: 128, uniqueItems: true, items: {$ref: '#/components/schemas/DeploymentRoutingSettings'}}
+    ModelGroupRoutingSettings:
+      type: object
+      additionalProperties: false
+      required: [revision, model_group, deployments]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        model_group: {$ref: '#/components/schemas/ModelGroup'}
+        deployments: {type: array, minItems: 1, maxItems: 128, items: {$ref: '#/components/schemas/ModelDeployment'}}
     ModelDeploymentInput:
       type: object
       additionalProperties: false

@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
 import { ModelGroupsPage } from "./ModelGroupsPage";
 
@@ -16,6 +17,11 @@ const checks = [
   { deployment_id: "fallback", status: "unavailable", latency_ms: 500, checked_at: "2026-09-02T10:00:00Z", failure_class: "timeout" }
 ];
 
+function LocationProbe() {
+  const location = useLocation();
+  return <span data-testid="location">{location.pathname}{location.search}</span>;
+}
+
 describe("ModelGroupsPage", () => {
   it("shows route topology, runs bounded health checks and saves membership order and retry policy", async () => {
     const group = { id: "public-chat", deployment_ids: ["primary", "fallback"], strategy: "weighted", retry_policy: { timeout: 1 }, enabled: true };
@@ -29,7 +35,7 @@ describe("ModelGroupsPage", () => {
       return response({});
     });
     sessionStorage.setItem("ai-gateway.admin-token", "token");
-    render(<AuthProvider><ModelGroupsPage /></AuthProvider>);
+    render(<MemoryRouter><AuthProvider><ModelGroupsPage /><LocationProbe /></AuthProvider></MemoryRouter>);
 
     expect(await screen.findByText("1/2")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/health?ids=primary%2Cfallback"))).toBe(true);
@@ -54,6 +60,9 @@ describe("ModelGroupsPage", () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-groups/public-chat" && options?.method === "PUT")).toBe(true));
     const update = fetchMock.mock.calls.find(([path, options]) => String(path) === "/admin/v1/model-groups/public-chat" && options?.method === "PUT")!;
     expect(JSON.parse(String(update[1]?.body))).toMatchObject({ deployment_ids: ["fallback", "primary"], retry_policy: { timeout: 1, rate_limit: 2 } });
+    await userEvent.click(screen.getByRole("button", { name: "Actions for public-chat" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Configure routing" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/router-settings?group=public-chat");
   });
 
   it("creates a group with searchable multi-select deployments", async () => {
@@ -66,7 +75,7 @@ describe("ModelGroupsPage", () => {
       return response({});
     });
     sessionStorage.setItem("ai-gateway.admin-token", "token");
-    render(<AuthProvider><ModelGroupsPage /></AuthProvider>);
+    render(<MemoryRouter><AuthProvider><ModelGroupsPage /></AuthProvider></MemoryRouter>);
 
     await userEvent.click(await screen.findByRole("button", { name: "Create Model Group" }));
     const form = await screen.findByRole("dialog", { name: "Create model group" });

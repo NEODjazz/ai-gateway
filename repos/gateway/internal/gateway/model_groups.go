@@ -14,6 +14,11 @@ func (h Handler) modelGroupController() (provider.ModelGroupController, bool) {
 	return controller, ok && controller != nil
 }
 
+func (h Handler) modelGroupRoutingController() (provider.ModelGroupRoutingController, bool) {
+	controller, ok := h.provider.(provider.ModelGroupRoutingController)
+	return controller, ok && controller != nil
+}
+
 func (h Handler) ListModelGroups(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.authorizeAdmin(w, r); !ok {
 		return
@@ -32,6 +37,60 @@ func (h Handler) CreateModelGroup(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) UpdateModelGroup(w http.ResponseWriter, r *http.Request) {
 	h.mutateModelGroup(w, r, r.PathValue("id"), "model_group.update")
+}
+
+func (h Handler) GetModelGroupRouting(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeAdmin(w, r); !ok {
+		return
+	}
+	controller, ok := h.modelGroupRoutingController()
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "model group routing management is unavailable")
+		return
+	}
+	settings, err := controller.GetModelGroupRouting(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeModelGroupRoutingError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (h Handler) UpdateModelGroupRouting(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.authorizeAdmin(w, r)
+	if !ok {
+		return
+	}
+	controller, ok := h.modelGroupRoutingController()
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "model group routing management is unavailable")
+		return
+	}
+	var payload struct {
+		ExpectedRevision *int64 `json:"expected_revision"`
+		provider.ModelGroupRoutingInput
+	}
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 128<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil || decoder.Decode(&struct{}{}) != io.EOF || payload.ExpectedRevision == nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid model group routing settings")
+		return
+	}
+	id := r.PathValue("id")
+	audit := managementAudit(req)
+	event := AuditEvent{Action: "model_group.routing.update", TargetType: "model_group", TargetID: id}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	settings, err := controller.UpdateModelGroupRouting(r.Context(), id, provider.ModelGroupRoutingUpdate{ExpectedRevision: *payload.ExpectedRevision, ModelGroupRoutingInput: payload.ModelGroupRoutingInput})
+	if err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeModelGroupRoutingError(w, err)
+		return
+	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
+	writeJSON(w, http.StatusOK, settings)
 }
 
 func (h Handler) mutateModelGroup(w http.ResponseWriter, r *http.Request, id, action string) {
@@ -123,5 +182,18 @@ func writeModelGroupError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "revision_conflict", "control plane changed; retry the request")
 	default:
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "model group management failed")
+	}
+}
+
+func writeModelGroupRoutingError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, provider.ErrModelGroupNotFound), errors.Is(err, provider.ErrDeploymentNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "model group or deployment not found")
+	case errors.Is(err, provider.ErrInvalidModelGroup), errors.Is(err, provider.ErrInvalidDeployment):
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid model group routing settings")
+	case errors.Is(err, provider.ErrControlPlaneConflict):
+		writeError(w, http.StatusConflict, "revision_conflict", "control plane changed; refresh routing settings and retry")
+	default:
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "model group routing management failed")
 	}
 }

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { PageHeader } from "../components/PageHeader";
@@ -10,6 +11,7 @@ type Deployment = {
   cooldown_after_failures?: number; cooldown_seconds?: number; max_parallel_requests?: number; queue_capacity?: number;
   queue_timeout_ms?: number; enabled: boolean;
 };
+type RoutingSettings = { revision: number; model_group: ModelGroup; deployments: Deployment[] };
 
 const failureClasses = ["timeout", "unavailable", "rate_limit", "unknown"] as const;
 
@@ -19,22 +21,25 @@ function records<T>(payload: unknown): T[] {
   return Array.isArray(data) ? data as T[] : [];
 }
 
-function deploymentPayload(row: Deployment) {
+function routingDeploymentPayload(row: Deployment) {
   return {
-    provider_id: row.provider_id, credential_id: row.credential_id || "", upstream_model: row.upstream_model || "",
-    models: row.models || [], capabilities: row.capabilities || [], priority: Number(row.priority || 0), weight: Number(row.weight || 1),
-    guardrail_policy: row.guardrail_policy || "", request_timeout_ms: Number(row.request_timeout_ms || 0), max_retries: Number(row.max_retries || 0),
+    id: row.id, priority: Number(row.priority || 0), weight: Number(row.weight || 1),
+    request_timeout_ms: Number(row.request_timeout_ms || 0), max_retries: Number(row.max_retries || 0),
     cooldown_after_failures: Number(row.cooldown_after_failures || 0), cooldown_seconds: Number(row.cooldown_seconds || 0),
     max_parallel_requests: Number(row.max_parallel_requests || 0), queue_capacity: Number(row.queue_capacity || 0),
-    queue_timeout_ms: Number(row.queue_timeout_ms || 0), enabled: row.enabled
+    queue_timeout_ms: Number(row.queue_timeout_ms || 0)
   };
 }
 
 export function RouterSettingsPage() {
   const { client } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedGroup = searchParams.get("group") || "";
   const [groups, setGroups] = useState<ModelGroup[]>([]);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [selectedID, setSelectedID] = useState("");
+  const selectedIDRef = useRef(requestedGroup);
+  const [revision, setRevision] = useState(0);
   const [draft, setDraft] = useState<ModelGroup>();
   const [deploymentDrafts, setDeploymentDrafts] = useState<Record<string, Deployment>>({});
   const [simulation, setSimulation] = useState<unknown>();
@@ -43,13 +48,15 @@ export function RouterSettingsPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  const selectGroup = useCallback((id: string, sourceGroups: ModelGroup[], sourceDeployments: Deployment[]) => {
-    const group = sourceGroups.find((item) => item.id === id);
-    setSelectedID(id); setSimulation(undefined); setNotice("");
-    if (!group) { setDraft(undefined); setDeploymentDrafts({}); return; }
-    setDraft({ ...group, deployment_ids: [...group.deployment_ids], retry_policy: { ...(group.retry_policy || {}) } });
-    setDeploymentDrafts(Object.fromEntries(sourceDeployments.map((item) => [item.id, { ...item }])));
-  }, []);
+  const hydrateGroup = useCallback(async (id: string, sourceDeployments: Deployment[]) => {
+    if (!id) { setDraft(undefined); setDeploymentDrafts({}); setRevision(0); return; }
+    const settings = await client.request<RoutingSettings>(`/admin/v1/model-groups/${encodeURIComponent(id)}/routing-settings`);
+    setRevision(settings.revision);
+    setDraft({ ...settings.model_group, deployment_ids: [...settings.model_group.deployment_ids], retry_policy: { ...(settings.model_group.retry_policy || {}) } });
+    const next = Object.fromEntries(sourceDeployments.map((item) => [item.id, { ...item }]));
+    for (const deployment of settings.deployments) next[deployment.id] = { ...next[deployment.id], ...deployment };
+    setDeploymentDrafts(next);
+  }, [client]);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -60,11 +67,22 @@ export function RouterSettingsPage() {
       const nextGroups = records<ModelGroup>(groupPayload);
       const nextDeployments = records<Deployment>(deploymentPayloadValue);
       setGroups(nextGroups); setDeployments(nextDeployments);
-      selectGroup(selectedID && nextGroups.some((item) => item.id === selectedID) ? selectedID : nextGroups[0]?.id || "", nextGroups, nextDeployments);
+      const preferred = selectedIDRef.current || requestedGroup;
+      const nextID = preferred && nextGroups.some((item) => item.id === preferred) ? preferred : nextGroups[0]?.id || "";
+      selectedIDRef.current = nextID; setSelectedID(nextID); setSimulation(undefined); setNotice("");
+      if (nextID && nextID !== requestedGroup) setSearchParams({ group: nextID }, { replace: true });
+      await hydrateGroup(nextID, nextDeployments);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load router settings"); }
     finally { setLoading(false); }
-  }, [client, selectGroup, selectedID]);
+  }, [client, hydrateGroup, requestedGroup, setSearchParams]);
   useEffect(() => { void load(); }, [load]);
+
+  async function selectGroup(id: string) {
+    selectedIDRef.current = id; setSelectedID(id); setSearchParams({ group: id }, { replace: true }); setSimulation(undefined); setNotice(""); setLoading(true); setError("");
+    try { await hydrateGroup(id, deployments); }
+    catch (cause) { setDraft(undefined); setError(cause instanceof Error ? cause.message : "Could not load router settings"); }
+    finally { setLoading(false); }
+  }
 
   const selectedDeployments = useMemo(() => (draft?.deployment_ids || []).map((id) => deploymentDrafts[id]).filter(Boolean), [draft, deploymentDrafts]);
 
@@ -99,20 +117,23 @@ export function RouterSettingsPage() {
     if (!draft || !draft.deployment_ids.length) { setError("Select at least one deployment"); return; }
     setBusy(true); setError(""); setNotice("");
     try {
-      await Promise.all(selectedDeployments.map((row) => client.request(`/admin/v1/model-deployments/${encodeURIComponent(row.id)}`, { method: "PUT", body: deploymentPayload(row) })));
-      await client.request(`/admin/v1/model-groups/${encodeURIComponent(draft.id)}`, { method: "PUT", body: { deployment_ids: draft.deployment_ids, strategy: draft.strategy, retry_policy: draft.retry_policy, enabled: draft.enabled } });
-      setNotice("Router settings saved. Deployment priorities are shared anywhere those deployments are reused.");
+      const settings = await client.request<RoutingSettings>(`/admin/v1/model-groups/${encodeURIComponent(draft.id)}/routing-settings`, { method: "PUT", body: { expected_revision: revision, deployment_ids: draft.deployment_ids, strategy: draft.strategy, retry_policy: draft.retry_policy, enabled: draft.enabled, deployments: selectedDeployments.map(routingDeploymentPayload) } });
+      setRevision(settings.revision);
+      setDraft({ ...settings.model_group, deployment_ids: [...settings.model_group.deployment_ids], retry_policy: { ...(settings.model_group.retry_policy || {}) } });
+      setDeploymentDrafts((current) => ({ ...current, ...Object.fromEntries(settings.deployments.map((row) => [row.id, { ...current[row.id], ...row }])) }));
+      setNotice(`Routing plan committed atomically at control-plane revision ${settings.revision}. Deployment priorities are shared anywhere those deployments are reused.`);
       setSimulation(await client.request("/admin/v1/routing/simulate", { method: "POST", body: { model: draft.id, capabilities: [] } }));
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save router settings"); }
     finally { setBusy(false); }
   }
 
-  return <><PageHeader eyebrow="Traffic management" title="Router settings" description="Manage fallback membership, weighted or adaptive routing, safe retry classes, timeouts and circuit cooldowns." actions={<><button className="secondary" onClick={() => void load()}>Refresh</button><button disabled={busy || !draft} onClick={() => void save()}>{busy ? "Saving…" : "Save and simulate"}</button></>} />
+  return <><PageHeader eyebrow="Traffic management" title="Router settings" description="Manage fallback membership, weighted or adaptive routing, safe retry classes, timeouts and circuit cooldowns as one atomic routing plan." actions={<><Link className="button-link secondary" to="/model-groups">Model groups</Link><button className="secondary" onClick={() => void load()}>Refresh</button><button disabled={busy || !draft} onClick={() => void save()}>{busy ? "Saving…" : "Save and simulate"}</button></>} />
     {error && <ErrorState message={error} retry={() => void load()} />}{notice && <div className="operation-result" role="status">{notice}</div>}
     {loading ? <LoadingState /> : !groups.length ? <div className="state-card">Create a model group before configuring routing.</div> : draft && <>
       <section className="form-card router-summary">
-        <div className="form-grid"><label>Model group<select aria-label="Model group" value={selectedID} onChange={(event) => selectGroup(event.target.value, groups, deployments)}>{groups.map((group) => <option key={group.id}>{group.id}</option>)}</select></label>
+        <div className="form-grid"><label>Model group<select aria-label="Model group" value={selectedID} onChange={(event) => void selectGroup(event.target.value)}>{groups.map((group) => <option key={group.id}>{group.id}</option>)}</select></label>
           <label>Strategy<select value={draft.strategy} onChange={(event) => setDraft({ ...draft, strategy: event.target.value })}><option value="weighted">Weighted</option><option value="adaptive">Adaptive</option></select></label></div>
+        <p className="muted">Loaded from control-plane revision {revision}. Saving uses optimistic concurrency and changes nothing if this revision is stale.</p>
         <label className="checkbox-line"><input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /> Routing group enabled</label>
         <h2>Retry policy by failure class</h2><p className="muted">Only transient failures are configurable. Authentication, invalid requests and content-policy failures are never retried.</p>
         <div className="retry-grid">{failureClasses.map((failure) => <label key={failure}>{failure.replace("_", " ")}<input aria-label={`Retries ${failure}`} type="number" min="0" max="10" value={draft.retry_policy?.[failure] ?? ""} placeholder="Deployment default" onChange={(event) => { const next = { ...(draft.retry_policy || {}) }; if (event.target.value === "") delete next[failure]; else next[failure] = Number(event.target.value); setDraft({ ...draft, retry_policy: next }); }} /></label>)}</div>
