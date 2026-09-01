@@ -955,7 +955,7 @@ func TestRouterExactCacheIsTenantScopedAndRunsPostModulesOnHit(t *testing.T) {
 	if err := request("tenant-a"); err != nil {
 		t.Fatal(err)
 	}
-	if telemetry.metadata["provider.cache.status"] != "hit" || upstream.calls != 1 {
+	if telemetry.metadata["provider.cache.status"] != "hit" || telemetry.metadata["provider.cache.kind"] != "exact" || upstream.calls != 1 {
 		t.Fatalf("expected tenant cache hit and post-module execution, calls=%d metadata=%v", upstream.calls, telemetry.metadata)
 	}
 	if err := request("tenant-b"); err != nil {

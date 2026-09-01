@@ -155,7 +155,15 @@ ClickHouse:
 migrations/clickhouse/001_usage_events.sql
 migrations/clickhouse/002_usage_catalog.sql
 migrations/clickhouse/003_usage_identity.sql
+migrations/clickhouse/004_usage_sessions.sql
+migrations/clickhouse/005_usage_observability.sql
 ```
+
+Final usage events retain normalized provider/deployment identity, organization
+and session scope, end-to-end latency and streaming TTFT, retry/fallback counts,
+cache status/type, and whether token usage came from the provider or the bounded
+gateway estimator. Estimated usage is explicitly marked and must not be treated
+as exact provider metering.
 
 Billing uses an explicit `reserve`, `commit`, and `cancel` lifecycle. Events are
 identified by `request_id:phase`. With `BILLING_DURABLE_OUTBOX_ENABLED=true`,

@@ -349,6 +349,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 		if payload, found, cacheErr := r.cacheGet(ctx, cacheKey); found {
 			if response, ok := decodeCached[openai.ChatCompletionResponse](payload); ok {
 				attemptCtx.Metadata["provider.cache.status"] = "hit"
+				attemptCtx.Metadata["provider.cache.kind"] = "exact"
 				attemptCtx.Metadata["provider.status"] = "ok"
 				attemptCtx.Metadata["provider.latency_ms"] = "0"
 				setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
@@ -602,6 +603,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		if payload, found, cacheErr := r.cacheGet(ctx, cacheKey); found {
 			if response, ok := decodeCached[openai.ResponseResponse](payload); ok {
 				attemptCtx.Metadata["provider.cache.status"] = "hit"
+				attemptCtx.Metadata["provider.cache.kind"] = "exact"
 				attemptCtx.Metadata["provider.status"] = "ok"
 				attemptCtx.Metadata["provider.latency_ms"] = "0"
 				setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)

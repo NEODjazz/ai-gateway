@@ -3,6 +3,7 @@ package modules
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"ai-gateway-gateway/internal/openai"
@@ -14,6 +15,7 @@ type UsageRequest struct {
 	CredentialID          string   `json:"credential_id,omitempty"`
 	UserID                string   `json:"user_id,omitempty"`
 	TeamID                string   `json:"team_id,omitempty"`
+	OrganizationID        string   `json:"organization_id,omitempty"`
 	Roles                 []string `json:"roles,omitempty"`
 	Provider              string   `json:"provider,omitempty"`
 	ProviderID            string   `json:"provider_id,omitempty"`
@@ -27,7 +29,12 @@ type UsageRequest struct {
 	Error                 string   `json:"error,omitempty"`
 	FailureClass          string   `json:"failure_class,omitempty"`
 	LatencyMS             string   `json:"latency_ms,omitempty"`
+	FirstTokenLatencyMS   string   `json:"first_token_latency_ms,omitempty"`
+	RetryCount            int      `json:"retry_count"`
+	FallbackCount         int      `json:"fallback_count"`
 	CacheStatus           string   `json:"cache_status,omitempty"`
+	CacheKind             string   `json:"cache_kind,omitempty"`
+	UsageEstimated        bool     `json:"usage_estimated"`
 	PromptTokensEstimated int      `json:"prompt_tokens_estimated"`
 	InputTokens           int      `json:"input_tokens"`
 	OutputTokens          int      `json:"output_tokens"`
@@ -107,6 +114,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		CredentialID:          req.CredentialID,
 		UserID:                req.UserID,
 		TeamID:                req.TeamID,
+		OrganizationID:        req.OrganizationID,
 		Roles:                 append([]string(nil), req.Roles...),
 		Provider:              req.Request.Provider,
 		ProviderID:            metadataValue(req.Metadata, "provider.id"),
@@ -119,7 +127,12 @@ func billingRequest(req *RequestContext) UsageRequest {
 		Error:                 metadataValue(req.Metadata, "provider.error"),
 		FailureClass:          metadataValue(req.Metadata, "provider.failure_class"),
 		LatencyMS:             metadataValue(req.Metadata, "provider.latency_ms"),
+		FirstTokenLatencyMS:   metadataValue(req.Metadata, "provider.first_token_latency_ms"),
+		RetryCount:            metadataIntValue(req.Metadata, "provider.retry_count"),
+		FallbackCount:         metadataIntValue(req.Metadata, "provider.fallback_count"),
 		CacheStatus:           metadataValue(req.Metadata, "provider.cache.status"),
+		CacheKind:             metadataValue(req.Metadata, "provider.cache.kind"),
+		UsageEstimated:        true,
 		PromptTokensEstimated: estimateRequestTokens(req),
 		CatalogVersion:        metadataValue(req.Metadata, "model_catalog.version"),
 		PricingKey:            metadataValue(req.Metadata, "model_catalog.pricing_key"),
@@ -155,6 +168,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = req.Response.Usage.CompletionTokens
 		request.TotalTokens = req.Response.Usage.TotalTokens
 		request.UpstreamModel = req.Response.Model
+		request.UsageEstimated = request.TotalTokens == 0
 	}
 	if req.ResponsesResponse != nil {
 		request.Phase = "commit"
@@ -162,6 +176,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = req.ResponsesResponse.Usage.OutputTokens
 		request.TotalTokens = req.ResponsesResponse.Usage.TotalTokens
 		request.UpstreamModel = req.ResponsesResponse.Model
+		request.UsageEstimated = request.TotalTokens == 0
 	}
 	if req.EmbeddingResponse != nil {
 		request.Phase = "commit"
@@ -169,6 +184,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = 0
 		request.TotalTokens = req.EmbeddingResponse.Usage.TotalTokens
 		request.UpstreamModel = req.EmbeddingResponse.Model
+		request.UsageEstimated = request.TotalTokens == 0
 	}
 	if req.RerankResponse != nil {
 		request.Phase = "commit"
@@ -183,6 +199,10 @@ func billingRequest(req *RequestContext) UsageRequest {
 				request.InputTokens = request.TotalTokens
 			}
 		}
+		request.UsageEstimated = request.TotalTokens == 0
+	}
+	if request.CacheStatus == "hit" {
+		request.UsageEstimated = false
 	}
 	if request.TotalTokens == 0 && request.CacheStatus != "hit" {
 		request.InputTokens = request.PromptTokensEstimated
@@ -231,4 +251,9 @@ func metadataValue(metadata map[string]string, key string) string {
 		return ""
 	}
 	return metadata[key]
+}
+
+func metadataIntValue(metadata map[string]string, key string) int {
+	value, _ := strconv.Atoi(metadataValue(metadata, key))
+	return value
 }

@@ -125,7 +125,10 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 		}
 	}
 	promptTokens := estimatePromptTokens(req)
-	inputTokens, outputTokens, totalTokens := usageTokens(req, promptTokens)
+	inputTokens, outputTokens, totalTokens, usageEstimated := usageTokens(req, promptTokens)
+	if phase == "cancel" {
+		usageEstimated = false
+	}
 
 	req.Usage = &openai.Usage{
 		PromptTokens:     inputTokens,
@@ -140,6 +143,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	req.Metadata["billing.input_tokens"] = strconv.Itoa(inputTokens)
 	req.Metadata["billing.output_tokens"] = strconv.Itoa(outputTokens)
 	req.Metadata["billing.total_tokens"] = strconv.Itoa(totalTokens)
+	req.Metadata["billing.usage_estimated"] = strconv.FormatBool(usageEstimated)
 
 	eventOutputTokens, eventTotalTokens := outputTokens, totalTokens
 	if phase == "reserve" && eventOutputTokens == 0 {
@@ -147,7 +151,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 		eventTotalTokens = inputTokens + eventOutputTokens
 		req.Metadata["billing.reserved_output_tokens"] = strconv.Itoa(eventOutputTokens)
 	}
-	event, err := m.event(req, promptTokens, inputTokens, eventOutputTokens, eventTotalTokens)
+	event, err := m.event(req, promptTokens, inputTokens, eventOutputTokens, eventTotalTokens, usageEstimated)
 	pricingErr := err
 	if pricingErr != nil && phase == "reserve" {
 		return err
@@ -219,7 +223,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	return nil
 }
 
-func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens int, outputTokens int, totalTokens int) (BillingEvent, error) {
+func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens int, outputTokens int, totalTokens int, usageEstimated bool) (BillingEvent, error) {
 	model := req.Request.Model
 	providerName := req.Request.Provider
 	apiType := req.APIType
@@ -251,6 +255,7 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		SessionID:             req.SessionID,
 		UserID:                req.UserID,
 		TeamID:                req.TeamID,
+		OrganizationID:        req.OrganizationID,
 		Roles:                 append([]string(nil), req.Roles...),
 		APIKeyFingerprint:     req.CredentialID,
 		Provider:              providerName,
@@ -264,7 +269,12 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		Status:                metadataDefault(req, "provider.status", "ok"),
 		FailureClass:          metadata(req, "provider.failure_class"),
 		LatencyMS:             metadataInt(req, "provider.latency_ms"),
+		FirstTokenLatencyMS:   metadataInt(req, "provider.first_token_latency_ms"),
+		RetryCount:            metadataInt(req, "provider.retry_count"),
+		FallbackCount:         metadataInt(req, "provider.fallback_count"),
 		CacheStatus:           metadata(req, "provider.cache.status"),
+		CacheKind:             metadata(req, "provider.cache.kind"),
+		UsageEstimated:        usageEstimated,
 		PromptTokensEstimated: promptTokens,
 		InputTokens:           inputTokens,
 		OutputTokens:          outputTokens,
@@ -341,20 +351,20 @@ func estimatePromptTokens(req *RequestContext) int {
 	return promptTokens
 }
 
-func usageTokens(req *RequestContext, fallbackPromptTokens int) (int, int, int) {
+func usageTokens(req *RequestContext, fallbackPromptTokens int) (int, int, int, bool) {
 	if metadata(req, "provider.cache.status") == "hit" {
-		return 0, 0, 0
+		return 0, 0, 0, false
 	}
 	if req.Usage != nil && req.Usage.TotalTokens > 0 {
-		return req.Usage.PromptTokens, req.Usage.CompletionTokens, req.Usage.TotalTokens
+		return req.Usage.PromptTokens, req.Usage.CompletionTokens, req.Usage.TotalTokens, metadataBool(req, "usage.estimated")
 	}
 	if req.Response != nil && req.Response.Usage.TotalTokens > 0 {
-		return req.Response.Usage.PromptTokens, req.Response.Usage.CompletionTokens, req.Response.Usage.TotalTokens
+		return req.Response.Usage.PromptTokens, req.Response.Usage.CompletionTokens, req.Response.Usage.TotalTokens, false
 	}
 	if req.ResponsesResponse != nil && req.ResponsesResponse.Usage.TotalTokens > 0 {
-		return req.ResponsesResponse.Usage.InputTokens, req.ResponsesResponse.Usage.OutputTokens, req.ResponsesResponse.Usage.TotalTokens
+		return req.ResponsesResponse.Usage.InputTokens, req.ResponsesResponse.Usage.OutputTokens, req.ResponsesResponse.Usage.TotalTokens, false
 	}
-	return fallbackPromptTokens, 0, fallbackPromptTokens
+	return fallbackPromptTokens, 0, fallbackPromptTokens, true
 }
 
 func textFromAny(value any) string {
@@ -405,4 +415,9 @@ func metadataInt(req *RequestContext, key string) int {
 	value := metadata(req, key)
 	parsed, _ := strconv.Atoi(value)
 	return parsed
+}
+
+func metadataBool(req *RequestContext, key string) bool {
+	value, _ := strconv.ParseBool(metadata(req, key))
+	return value
 }

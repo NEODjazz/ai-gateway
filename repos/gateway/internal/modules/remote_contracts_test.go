@@ -126,6 +126,9 @@ func TestRemoteBillingReceivesCredentialIDButNotBearer(t *testing.T) {
 		if body["team_id"] != "team-1" {
 			t.Fatalf("unexpected team id: %v", body["team_id"])
 		}
+		if body["organization_id"] != "org-1" {
+			t.Fatalf("unexpected organization id: %v", body["organization_id"])
+		}
 		if body["phase"] != "reserve" {
 			t.Fatalf("expected reserve phase, got %v", body["phase"])
 		}
@@ -138,6 +141,7 @@ func TestRemoteBillingReceivesCredentialIDButNotBearer(t *testing.T) {
 	}))
 	defer server.Close()
 	req := sensitiveContext()
+	req.OrganizationID = "org-1"
 	if err := NewRemoteBillingModule(true, server.URL).Handle(context.Background(), &req); err != nil {
 		t.Fatal(err)
 	}
@@ -184,14 +188,36 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	req.Metadata["model_catalog.output_cost_per_1m"] = "3"
 	req.Metadata["model_catalog.currency"] = "USD"
 	req.Metadata["provider.id"] = "azure-open-ai"
+	req.Metadata["provider.first_token_latency_ms"] = "87"
+	req.Metadata["provider.retry_count"] = "2"
+	req.Metadata["provider.fallback_count"] = "1"
+	req.Metadata["provider.cache.kind"] = "semantic"
 	req.Request.Model = "gpt-5.6-luna"
-	req.Response = &openai.ChatCompletionResponse{Model: "gpt-5.6-luna-2026-07-09"}
+	req.Response = &openai.ChatCompletionResponse{Model: "gpt-5.6-luna-2026-07-09", Usage: openai.Usage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11}}
 	request := billingRequest(&req)
 	if request.CatalogVersion != "runtime-v2" || request.PricingKey != "endpoint/model" || request.InputCostPer1M != "1.5" || request.Currency != "USD" {
 		t.Fatalf("pricing snapshot=%+v", request)
 	}
 	if request.ProviderID != "azure-open-ai" || request.Model != "gpt-5.6-luna" || request.UpstreamModel != "gpt-5.6-luna-2026-07-09" {
 		t.Fatalf("usage identity=%+v", request)
+	}
+	if request.FirstTokenLatencyMS != "87" || request.RetryCount != 2 || request.FallbackCount != 1 || request.CacheKind != "semantic" || request.UsageEstimated {
+		t.Fatalf("usage observability=%+v", request)
+	}
+}
+
+func TestRemoteBillingMarksFallbackTokenCountAsEstimated(t *testing.T) {
+	req := sensitiveContext()
+	req.Metadata = map[string]string{}
+	req.Response = &openai.ChatCompletionResponse{Model: "model-without-usage"}
+	request := billingRequest(&req)
+	if !request.UsageEstimated || request.TotalTokens != request.PromptTokensEstimated {
+		t.Fatalf("expected explicitly estimated usage, got %+v", request)
+	}
+	req.Metadata["provider.cache.status"] = "hit"
+	request = billingRequest(&req)
+	if request.UsageEstimated || request.TotalTokens != 0 {
+		t.Fatalf("cache hit must be exact zero upstream usage, got %+v", request)
 	}
 }
 

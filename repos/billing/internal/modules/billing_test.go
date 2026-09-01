@@ -65,9 +65,11 @@ func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 		Currency:         "USD",
 	})
 	req := RequestContext{
-		CredentialID: "safe-fingerprint",
-		UserID:       "user-1",
-		Roles:        []string{"developer"},
+		CredentialID:   "safe-fingerprint",
+		UserID:         "user-1",
+		TeamID:         "team-1",
+		OrganizationID: "org-1",
+		Roles:          []string{"developer"},
 		Request: openai.ChatCompletionRequest{
 			Provider: "ollama",
 			Model:    "test-model",
@@ -84,12 +86,16 @@ func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 			},
 		},
 		Metadata: map[string]string{
-			"provider.id":            "ollama",
-			"request.id":             "req-1",
-			"provider.endpoint.name": "ollama-local",
-			"provider.endpoint.type": "ollama",
-			"provider.latency_ms":    "123",
-			"provider.status":        "ok",
+			"provider.id":                     "ollama",
+			"request.id":                      "req-1",
+			"provider.endpoint.name":          "ollama-local",
+			"provider.endpoint.type":          "ollama",
+			"provider.latency_ms":             "123",
+			"provider.first_token_latency_ms": "45",
+			"provider.retry_count":            "2",
+			"provider.fallback_count":         "1",
+			"provider.cache.status":           "miss",
+			"provider.status":                 "ok",
 		},
 	}
 
@@ -118,6 +124,9 @@ func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 	}
 	if event.APIKeyFingerprint != "safe-fingerprint" {
 		t.Fatalf("unexpected api key fingerprint: %s", event.APIKeyFingerprint)
+	}
+	if event.OrganizationID != "org-1" || event.FirstTokenLatencyMS != 45 || event.RetryCount != 2 || event.FallbackCount != 1 || event.UsageEstimated {
+		t.Fatalf("unexpected usage observability: %+v", event)
 	}
 	if _, err := time.Parse(time.RFC3339, event.Timestamp); err != nil {
 		t.Fatalf("expected RFC 3339 timestamp, got %q: %v", event.Timestamp, err)
@@ -233,6 +242,25 @@ func TestBillingEstimatesMultipartMessageContent(t *testing.T) {
 	}
 	if req.Usage == nil || req.Usage.PromptTokens != 2 {
 		t.Fatalf("expected two prompt tokens from text part, got %+v", req.Usage)
+	}
+	if req.BillingEvent == nil || !req.BillingEvent.UsageEstimated || req.Metadata["billing.usage_estimated"] != "true" {
+		t.Fatalf("estimated usage was not identified: event=%+v metadata=%+v", req.BillingEvent, req.Metadata)
+	}
+}
+
+func TestBillingPreservesUpstreamEstimatedUsageFlag(t *testing.T) {
+	module := NewBillingModuleWithPricing(true, PricingConfig{Currency: "USD"})
+	req := RequestContext{
+		BillingPhase: "commit",
+		Request:      openai.ChatCompletionRequest{Model: "model"},
+		Usage:        &openai.Usage{PromptTokens: 4, TotalTokens: 4},
+		Metadata:     map[string]string{"usage.estimated": "true"},
+	}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.BillingEvent == nil || !req.BillingEvent.UsageEstimated {
+		t.Fatalf("estimated flag was lost: %+v", req.BillingEvent)
 	}
 }
 

@@ -19,6 +19,7 @@ type RequestContext struct {
 	APIType               string                         `json:"api_type,omitempty"`
 	UserID                string                         `json:"user_id,omitempty"`
 	TeamID                string                         `json:"team_id,omitempty"`
+	OrganizationID        string                         `json:"organization_id,omitempty"`
 	Roles                 []string                       `json:"roles,omitempty"`
 	Request               openai.ChatCompletionRequest   `json:"request"`
 	ResponseRequest       *openai.ResponseRequest        `json:"response_request,omitempty"`
@@ -36,6 +37,7 @@ type BillingEvent struct {
 	SessionID             string   `json:"session_id,omitempty"`
 	UserID                string   `json:"user_id,omitempty"`
 	TeamID                string   `json:"team_id,omitempty"`
+	OrganizationID        string   `json:"organization_id,omitempty"`
 	Roles                 []string `json:"roles,omitempty"`
 	APIKeyFingerprint     string   `json:"api_key_fingerprint,omitempty"`
 	Provider              string   `json:"provider,omitempty"`
@@ -50,7 +52,12 @@ type BillingEvent struct {
 	Error                 string   `json:"error,omitempty"`
 	FailureClass          string   `json:"failure_class,omitempty"`
 	LatencyMS             int      `json:"latency_ms,omitempty"`
+	FirstTokenLatencyMS   int      `json:"first_token_latency_ms,omitempty"`
+	RetryCount            int      `json:"retry_count"`
+	FallbackCount         int      `json:"fallback_count"`
 	CacheStatus           string   `json:"cache_status,omitempty"`
+	CacheKind             string   `json:"cache_kind,omitempty"`
+	UsageEstimated        bool     `json:"usage_estimated"`
 	PromptTokensEstimated int      `json:"prompt_tokens_estimated"`
 	InputTokens           int      `json:"input_tokens"`
 	OutputTokens          int      `json:"output_tokens"`

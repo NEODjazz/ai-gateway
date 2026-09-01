@@ -196,6 +196,10 @@ The Request Logs view provides a bounded, cursor-paginated explorer over the
 same final outcomes with filters for request, status, model, endpoint, user,
 team, and credential fingerprint. Its detail contract contains operational
 metadata, token counts, cost, cache state, and a bounded failure class only.
+It also exposes streaming time-to-first-token, retry and fallback counts, cache
+kind, organization scope, and whether token counts came from the provider or
+the bounded estimator. Estimated counts are never presented as exact provider
+metering.
 Prompts, responses, bearer credentials, upstream URLs, and raw provider error
 strings are excluded. Content storage is disabled and the effective 730-day
 ClickHouse retention plus the 90-day maximum query window are shown in the UI.

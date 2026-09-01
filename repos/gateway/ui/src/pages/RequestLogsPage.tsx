@@ -19,10 +19,15 @@ type RequestLog = Row & {
   provider_endpoint_name?: string;
   provider_endpoint_type?: string;
   cache_status?: string;
+  cache_kind?: string;
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
   latency_ms: number;
+  first_token_latency_ms: number;
+  retry_count: number;
+  fallback_count: number;
+  usage_estimated: boolean;
   cost: number;
   currency: string;
 };
@@ -32,7 +37,9 @@ type Cursor = { before: string; requestID: string } | null;
 const requestLogColumns = [
   { key: "timestamp", label: "Time" }, { key: "request_id", label: "Request" }, { key: "session_id", label: "Session" }, { key: "status", label: "Status" },
   { key: "model", label: "Public model" }, { key: "upstream_model", label: "Upstream model" }, { key: "provider_id", label: "Provider" },
-  { key: "cache_status", label: "Cache" }, { key: "total_tokens", label: "Tokens" }, { key: "latency_ms", label: "Latency" }, { key: "cost", label: "Cost" }, { key: "currency", label: "Currency" }
+  { key: "cache_status", label: "Cache" }, { key: "cache_kind", label: "Cache type" }, { key: "total_tokens", label: "Tokens" },
+  { key: "usage_estimated", label: "Token source" }, { key: "latency_ms", label: "Latency" }, { key: "first_token_latency_ms", label: "TTFT" },
+  { key: "retry_count", label: "Retries" }, { key: "fallback_count", label: "Fallbacks" }, { key: "cost", label: "Cost" }, { key: "currency", label: "Currency" }
 ];
 function RefreshIcon() { return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
 
@@ -83,8 +90,13 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
     { key: "upstream_model", label: "Upstream model" },
     { key: "provider_id", label: "Provider", render: (_: unknown, row: Row) => String(row.provider_id || row.provider || row.provider_endpoint_name || "—") },
     { key: "cache_status", label: "Cache", render: cacheStatus },
+    { key: "cache_kind", label: "Cache type", render: (value: unknown) => String(value || "—") },
     { key: "total_tokens", label: "Tokens" },
+    { key: "usage_estimated", label: "Token source", render: (value: unknown) => value ? <span className="status disabled">Estimated</span> : <span className="status enabled">Provider</span> },
     { key: "latency_ms", label: "Latency", render: (value: unknown) => `${Number(value || 0).toLocaleString("en-US")} ms` },
+    { key: "first_token_latency_ms", label: "TTFT", render: (value: unknown) => Number(value || 0) > 0 ? `${Number(value).toLocaleString("en-US")} ms` : "—" },
+    { key: "retry_count", label: "Retries" },
+    { key: "fallback_count", label: "Fallbacks" },
     { key: "cost", label: "Cost", render: (value: unknown, row: Row) => formatCost(Number(value || 0), String(row.currency || "USD")) },
     { key: "currency", label: "Currency" }
   ];

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"ai-gateway-billing/internal/modules"
 	"ai-gateway-billing/internal/openai"
@@ -57,6 +58,7 @@ func main() {
 			CredentialID:          request.CredentialID,
 			UserID:                request.UserID,
 			TeamID:                request.TeamID,
+			OrganizationID:        request.OrganizationID,
 			Roles:                 request.Roles,
 			PromptTokensEstimated: request.PromptTokensEstimated,
 			PostResponse:          request.Phase == "commit",
@@ -79,7 +81,12 @@ func main() {
 				"provider.error":                   request.Error,
 				"provider.failure_class":           request.FailureClass,
 				"provider.latency_ms":              request.LatencyMS,
+				"provider.first_token_latency_ms":  request.FirstTokenLatencyMS,
+				"provider.retry_count":             strconv.Itoa(request.RetryCount),
+				"provider.fallback_count":          strconv.Itoa(request.FallbackCount),
 				"provider.cache.status":            request.CacheStatus,
+				"provider.cache.kind":              request.CacheKind,
+				"usage.estimated":                  strconv.FormatBool(request.UsageEstimated),
 				"model_catalog.version":            request.CatalogVersion,
 				"model_catalog.pricing_key":        request.PricingKey,
 				"model_catalog.input_cost_per_1m":  request.InputCostPer1M,
@@ -126,6 +133,7 @@ type usageRequest struct {
 	CredentialID          string   `json:"credential_id,omitempty"`
 	UserID                string   `json:"user_id,omitempty"`
 	TeamID                string   `json:"team_id,omitempty"`
+	OrganizationID        string   `json:"organization_id,omitempty"`
 	Roles                 []string `json:"roles,omitempty"`
 	Provider              string   `json:"provider,omitempty"`
 	ProviderID            string   `json:"provider_id,omitempty"`
@@ -139,7 +147,12 @@ type usageRequest struct {
 	Error                 string   `json:"error,omitempty"`
 	FailureClass          string   `json:"failure_class,omitempty"`
 	LatencyMS             string   `json:"latency_ms,omitempty"`
+	FirstTokenLatencyMS   string   `json:"first_token_latency_ms,omitempty"`
+	RetryCount            int      `json:"retry_count"`
+	FallbackCount         int      `json:"fallback_count"`
 	CacheStatus           string   `json:"cache_status,omitempty"`
+	CacheKind             string   `json:"cache_kind,omitempty"`
+	UsageEstimated        bool     `json:"usage_estimated"`
 	PromptTokensEstimated int      `json:"prompt_tokens_estimated"`
 	InputTokens           int      `json:"input_tokens"`
 	OutputTokens          int      `json:"output_tokens"`

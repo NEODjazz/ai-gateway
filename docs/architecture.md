@@ -122,6 +122,11 @@ sequenceDiagram
 
 Неуспешная попытка обязательного модуля или provider добавляется в агрегированную ошибку router, после чего router может перейти к следующему совместимому endpoint. Content rejection и budget rejection являются terminal: provider не вызывается, fallback не выполняется, клиент получает соответственно `451` или `429 budget_exceeded`. Если остальные кандидаты закончились, клиент получает `502 provider_failed`.
 
+Для streaming router повторяет вызов того же endpoint или переходит к fallback
+только до первой попытки записи SSE-события клиенту. После первого chunk/event
+ошибка завершает текущий stream и не запускает повторную генерацию. В usage
+metadata фиксируются суммарные retry/fallback counters и TTFT до первой записи.
+
 ### Required и optional
 
 Каждый модуль реализует базовый контракт:
@@ -297,7 +302,7 @@ Helm chart передает anonymizer переменную `REDIS_ADDR` и от
 - Runtime model registry атомарно заменяется через admin API и синхронизируется между gateway replicas через Redis. Router передает billing выбранный pricing snapshot, поэтому обновление capabilities/prices не требует рестарта и не меняет цену in-flight reservation.
 - Management mutations используют fail-closed PostgreSQL audit preflight: append-only `attempted` фиксируется до side effect, затем добавляется `succeeded` или `failed`. Журнал не содержит Bearer/API keys или тела inference-запросов и читается только через admin RBAC.
 - Shadow endpoints исключены из primary/fallback routing и model listing. Асинхронная mirror-копия создается после guardrails/anonymization, имеет собственные admission/timeout, не запускает billing, не меняет circuit health и отбрасывает ответ.
-- Если provider вернул usage, commit использует его; иначе фактический output остается нулевым. Reservation при этом защищает лимит до commit/cancel/TTL.
+- Если provider вернул usage, commit использует его как точный. Если usage отсутствует, billing сохраняет bounded input estimate, оставляет output нулевым и явно устанавливает `usage_estimated=true`; cache hit сохраняет точный нулевой provider usage. Usage event также содержит organization/session scope, TTFT, retry/fallback counters и cache kind. Reservation при этом защищает лимит до commit/cancel/TTL.
 - Tariffs и financial transactions пока не реализованы и fail closed при включении.
 
 Локальный `docker-compose.yml` поднимает Redis, ClickHouse и PostgreSQL, но не микросервисы.
