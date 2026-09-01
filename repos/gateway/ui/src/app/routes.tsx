@@ -21,6 +21,7 @@ import { ModelGroupsPage } from "../pages/ModelGroupsPage";
 import { AccessGroupsPage } from "../pages/AccessGroupsPage";
 import { BudgetsPage } from "../pages/BudgetsPage";
 import { LoggingPage } from "../pages/LoggingPage";
+import { CachePage } from "../pages/CachePage";
 import { resourceConfigs } from "../pages/resourceConfigs";
 import { useAuth, type ConsoleCapability } from "../auth/AuthContext";
 
@@ -75,7 +76,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/budgets", title: "Budgets", group: "Govern", element: <BudgetsPage />, available: true },
   { path: "/policies", title: "Policies", group: "Govern", element: <ResourcePage config={resourceConfigs.policyAttachments} />, available: true },
   { path: "/tag-management", title: "Tag management", group: "Govern", element: <ResourcePage config={resourceConfigs.tags} />, available: true },
-  { path: "/cache", title: "Caching", group: "System", element: <EndpointPage eyebrow="Performance" title="Cache diagnostics" description="Exact and semantic cache counters and bounded configuration metadata." path="/admin/v1/cache/diagnostics" />, available: true },
+  { path: "/cache", title: "Caching", group: "System", element: <CachePage />, available: true },
   { path: "/logging", title: "Logging & alerts", group: "System", element: <LoggingPage />, available: true },
   { path: "/router-settings", title: "Router settings", group: "System", element: <RouterSettingsPage />, available: true },
   { path: "/api-reference", title: "API reference", group: "System", element: <CapabilityPage title="API reference" description="The embedded OpenAPI and Swagger UI are available at /docs/." status="Open /docs/ in a new tab for the interactive contract." available />, available: true, capability: "api_docs" },

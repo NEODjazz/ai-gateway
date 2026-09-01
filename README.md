@@ -462,6 +462,13 @@ deterministic subset by request ID; `mirror_timeout_ms` (default `5000`) bounds
 each detached asynchronous call. Mirroring starts only when a primary provider
 call is actually needed, so exact/semantic cache hits are not duplicated.
 
+The Caching console turns `/admin/v1/cache/diagnostics` into separate exact and
+semantic current-replica health cards with hit ratio, hits, misses, writes,
+errors, TTL/capacity metadata, and operation/result counters. It deliberately
+does not combine proxy cache hits with provider-reported prompt-cache tokens;
+the latter remain in Usage and request Logs. Runtime cache settings stay
+deployment-managed and are read-only in the console.
+
 The shadow receives a deep-cloned provider DTO after required DLP, AV, and
 anonymization modules have completed. It receives neither client Bearer/API
 keys nor the deanonymization map. Shadow responses are discarded, are not

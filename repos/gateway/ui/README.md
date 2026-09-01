@@ -75,3 +75,8 @@ Logging & Alerts is a dedicated callback workspace with current-replica delivery
 content-boundary disclosure, searchable/configurable columns and Test/Edit/Delete
 actions. Probe latency is shown without sending inference content. Bearer
 secrets are write-only: an empty edit preserves the existing encrypted value.
+
+Caching replaces the raw diagnostics payload with current-replica exact and
+semantic health cards plus an operation/result table. The page explains the
+boundary between gateway response-cache hits and provider prompt-cache tokens,
+and keeps TTL/capacity/Redis configuration read-only and deployment-managed.

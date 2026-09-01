@@ -249,6 +249,10 @@ team membership само по себе не разделяет cache entries. Д
 user message и exact-matched system/developer context. Tools, tool results,
 assistant history, structured output и multimodal content всегда обходят semantic cache. Embedder
 использует отдельный service credential; клиентский bearer ему не передаётся.
+Admin UI показывает exact и semantic cache раздельно: process-local hit/miss/
+write/error counters и bounded runtime configuration. Provider prompt-cache
+tokens не смешиваются с proxy cache и остаются billing/usage метрикой. UI не
+изменяет cache/Redis настройки: они управляются deployment configuration.
 
 ```mermaid
 flowchart TD

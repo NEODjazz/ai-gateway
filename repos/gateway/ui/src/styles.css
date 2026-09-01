@@ -207,6 +207,15 @@ textarea { resize: vertical; }
 .budget-progress > span.exhausted { background: #dc2626; }
 .table-filter-select select { min-width: 132px; }
 .logging-safety, .logging-probe-result { margin-bottom: 18px; }
+.cache-boundary { margin-bottom: 18px; }
+.cache-kind-grid { align-items: stretch; margin-bottom: 24px; }
+.cache-kind-card { padding: 22px; }
+.cache-kind-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.cache-kind-heading h2 { margin: 0 0 5px; }
+.cache-kind-heading p { margin: 0; color: var(--muted); }
+.cache-kind-ratio { display: flex; align-items: baseline; gap: 8px; margin: 22px 0; }
+.cache-kind-ratio strong { font-size: 30px; }
+.cache-kind-ratio span { color: var(--muted); }
 .credential-form-error, .credential-form-actions { margin-left: 188px; }
 .model-group-stats { margin-top: 2px; }
 .model-group-form-modal { width: min(900px, 100%); }
