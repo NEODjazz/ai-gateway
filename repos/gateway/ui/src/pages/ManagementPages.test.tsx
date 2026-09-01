@@ -93,13 +93,14 @@ describe("management pages", () => {
   it("creates a tag-scoped budget with the full reset-period set", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       if (String(input) === "/admin/v1/budgets") return json({ data: [] });
+      if (String(input) === "/admin/v1/tags") return json({ data: [{ name: "production", description: "Production traffic", enabled: true }] });
       return json({ id: 41, scope_type: "tag", scope_id: "production" });
     });
     renderAuthenticated(<ResourcePage config={resourceConfigs.budgets} />);
     await screen.findByText("No records found.");
     await userEvent.click(screen.getByRole("button", { name: "Add" }));
     await userEvent.selectOptions(screen.getByLabelText("Scope type"), "tag");
-    await userEvent.type(screen.getByLabelText("Scope ID"), "production");
+    await userEvent.selectOptions(screen.getByLabelText("Scope"), await screen.findByRole("option", { name: "production — Production traffic" }));
     await userEvent.selectOptions(screen.getByLabelText("Reset period"), "hour");
     await userEvent.clear(screen.getByLabelText("Maximum tokens"));
     await userEvent.type(screen.getByLabelText("Maximum tokens"), "1000");

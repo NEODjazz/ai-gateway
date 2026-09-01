@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Row } from "./DataTable";
 
 export type FieldReference = {
-  path: string;
+  path?: string;
   collectionKey?: string;
   valueKey?: string;
   labelKeys?: string[];
   filter?: { fieldKey: string; recordKey: string };
   enabledOnly?: boolean;
+  staticOptions?: Array<{ value: string; label: string }>;
 };
 
 export type Field = {
@@ -18,6 +19,7 @@ export type Field = {
   placeholder?: string;
   options?: string[];
   reference?: FieldReference;
+  referenceBy?: { fieldKey: string; values: Record<string, FieldReference> };
   defaultValue?: unknown;
   readOnlyOnEdit?: boolean;
   visibleWhen?: { fieldKey: string; equals: string };
@@ -60,29 +62,35 @@ export function ResourceForm({ title, fields, initial, loadOptions, onClose, onS
   useEffect(() => {
     setValues(Object.fromEntries(fields.map((field) => [field.key, inputValue(field, initial?.[field.key] ?? field.defaultValue)])));
   }, [fields, initial]);
-  const references = useMemo(() => fields.filter((field) => field.reference), [fields]);
+  const referenceSelectorValues = fields.map((field) => field.referenceBy ? String(values[field.referenceBy.fieldKey] || "") : "").join("\0");
+  const references = useMemo(() => fields.flatMap((field) => {
+    const reference = field.reference || field.referenceBy?.values[String(values[field.referenceBy.fieldKey] || "")];
+    return reference?.path ? [{ field, reference }] : [];
+  }), [fields, referenceSelectorValues]);
   useEffect(() => {
     if (!loadOptions || !references.length) return;
     let active = true;
     setReferenceError("");
-    Promise.all(references.map(async (field) => [field.key, recordsFrom(await loadOptions(field.reference!.path), field.reference!.collectionKey)] as const))
+    Promise.all(references.map(async ({ field, reference }) => [field.key, recordsFrom(await loadOptions(reference.path!), reference.collectionKey)] as const))
       .then((entries) => { if (active) setReferenceRows(Object.fromEntries(entries)); })
       .catch((cause) => { if (active) setReferenceError(cause instanceof Error ? cause.message : "Could not load available options"); });
     return () => { active = false; };
   }, [loadOptions, references]);
   function optionsFor(field: Field) {
-    const reference = field.reference;
+    const reference = field.reference || field.referenceBy?.values[String(values[field.referenceBy.fieldKey] || "")];
     if (!reference) return (field.options || []).map((value) => ({ value, label: value }));
     const valueKey = reference.valueKey || "id";
     const filter = reference.filter;
     const seen = new Set<string>();
-    const options = (referenceRows[field.key] || []).filter((row) => (!reference.enabledOnly || row.enabled !== false) && (!filter || !values[filter.fieldKey] || String(row[filter.recordKey] || "") === String(values[filter.fieldKey]))).flatMap((row) => {
+    const options = [...(reference.staticOptions || [])];
+    for (const option of options) seen.add(option.value);
+    options.push(...(referenceRows[field.key] || []).filter((row) => (!reference.enabledOnly || row.enabled !== false) && (!filter || !values[filter.fieldKey] || String(row[filter.recordKey] || "") === String(values[filter.fieldKey]))).flatMap((row) => {
       const value = String(row[valueKey] || "");
       if (!value || seen.has(value)) return [];
       seen.add(value);
       const details = (reference.labelKeys || []).map((key) => String(row[key] || "")).filter((item) => item && item !== value);
       return [{ value, label: details.length ? `${value} — ${details.join(" · ")}` : value }];
-    });
+    }));
     for (const value of selectedValues(values[field.key])) if (!seen.has(value)) options.push({ value, label: `${value} — unavailable` });
     return options;
   }
@@ -90,6 +98,7 @@ export function ResourceForm({ title, fields, initial, loadOptions, onClose, onS
     setValues((current) => {
       const next = { ...current, [key]: value };
       for (const field of fields) if (field.reference?.filter?.fieldKey === key) next[field.key] = "";
+      for (const field of fields) if (field.referenceBy?.fieldKey === key) next[field.key] = "";
       for (const cleared of fields.find((field) => field.key === key)?.clears || []) next[cleared] = "";
       return next;
     });

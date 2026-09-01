@@ -53,6 +53,23 @@ describe("ResourceForm", () => {
     expect(submit).toHaveBeenCalledWith({ provider_id: "azure", credential_id: "azure-key", models: ["gpt-5", "llama3"] });
   });
 
+  it("switches a reference dropdown from another field and clears the previous selection", async () => {
+    const submit = vi.fn().mockResolvedValue(undefined);
+    const loadOptions = vi.fn(async (path: string) => path === "/tags" ? { data: [{ name: "production", description: "Production traffic", enabled: true }] } : { data: [] });
+    render(<ResourceForm title="Add budget" fields={[
+      { key: "scope_type", label: "Scope type", type: "select", options: ["global", "tag"], defaultValue: "global" },
+      { key: "scope_id", label: "Scope", type: "reference", referenceBy: { fieldKey: "scope_type", values: { global: { staticOptions: [{ value: "*", label: "All traffic (*)" }] }, tag: { path: "/tags", valueKey: "name", labelKeys: ["description"], enabledOnly: true } } } }
+    ]} loadOptions={loadOptions} onClose={() => {}} onSubmit={submit} />);
+
+    await userEvent.selectOptions(screen.getByLabelText("Scope"), "*");
+    await userEvent.selectOptions(screen.getByLabelText("Scope type"), "tag");
+    expect(screen.getByLabelText("Scope")).toHaveValue("");
+    await userEvent.selectOptions(screen.getByLabelText("Scope"), await screen.findByRole("option", { name: "production — Production traffic" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(loadOptions).toHaveBeenCalledWith("/tags");
+    expect(submit).toHaveBeenCalledWith({ scope_type: "tag", scope_id: "production" });
+  });
+
   it("closes from the accessible close button", async () => {
     const close = vi.fn();
     render(<ResourceForm title="Edit resource" fields={[]} onClose={close} onSubmit={async () => {}} />);

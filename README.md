@@ -221,7 +221,9 @@ requests through the same authenticated inference path as external clients.
 Virtual-key tokens are shown once after creation or rotation and are cleared
 from the page when that dialog closes; list responses contain metadata only.
 Catalog entries can be created, edited, and removed; budgets can be created,
-edited, and disabled. Every mutation uses
+edited, and disabled. The budget form resolves users, teams, virtual keys,
+models, providers, and tags from their configured registries instead of
+requiring operators to copy opaque IDs. Every mutation uses
 the same authenticated admin API and append-only audit path as direct API
 clients. The UI has no CDN or runtime package dependency and is protected by a
 strict same-origin CSP. Sign in with a bearer credential carrying the `admin`
