@@ -199,7 +199,8 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	req.Metadata["provider.retry_count"] = "2"
 	req.Metadata["provider.fallback_count"] = "1"
 	req.Metadata["provider.cache.kind"] = "semantic"
-	req.Request.Model = "gpt-5.6-luna"
+	req.Metadata["provider.original_model"] = "gpt-5.6-luna"
+	req.Request.Model = "fallback-group"
 	req.Response = &openai.ChatCompletionResponse{Model: "gpt-5.6-luna-2026-07-09", Usage: openai.Usage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11, PromptTokensDetails: &openai.PromptTokenDetails{CachedTokens: 6, CacheCreationTokens: 2}}}
 	request := billingRequest(&req)
 	if request.CatalogVersion != "runtime-v2" || request.PricingKey != "endpoint/model" || request.InputCostPer1M != "1.5" || request.Currency != "USD" {

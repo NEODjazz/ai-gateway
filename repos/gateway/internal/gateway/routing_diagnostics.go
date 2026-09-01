@@ -33,7 +33,7 @@ func (h Handler) SimulateRouting(w http.ResponseWriter, r *http.Request) {
 	var input provider.RoutingSimulationRequest
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 32<<10))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil || strings.TrimSpace(input.Model) == "" || len(input.Model) > 256 || len(input.Provider) > 128 || input.MaxOutputTokens < 0 || len(input.Capabilities) > 32 || !validRoutingCapabilities(input.Capabilities) {
+	if err := decoder.Decode(&input); err != nil || strings.TrimSpace(input.Model) == "" || len(input.Model) > 256 || len(input.Provider) > 128 || input.MaxOutputTokens < 0 || len(input.Capabilities) > 32 || !validRoutingCapabilities(input.Capabilities) || !validRoutingFailureClass(input.FailureClass) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid routing simulation")
 		return
 	}
@@ -42,6 +42,15 @@ func (h Handler) SimulateRouting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, controller.SimulateRouting(r.Context(), input))
+}
+
+func validRoutingFailureClass(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "", "unknown", "authentication", "rate_limit", "timeout", "unavailable", "context_length", "content_policy", "client_request", "post_processing":
+		return true
+	default:
+		return false
+	}
 }
 
 func validRoutingCapabilities(values []string) bool {

@@ -3,6 +3,9 @@ package provider
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -43,6 +46,21 @@ func TestEndpointHealthCooldownAndRecovery(t *testing.T) {
 	health.success(ctx, endpoint)
 	if err := health.permit(ctx, endpoint); err != nil {
 		t.Fatalf("success did not close circuit: %v", err)
+	}
+}
+
+func TestResponseStatusErrorClassifiesTypedFallbackFailures(t *testing.T) {
+	for _, test := range []struct {
+		code  string
+		class FailureClass
+	}{
+		{code: "context_length_exceeded", class: FailureContextLength},
+		{code: "content_policy_violation", class: FailureContentPolicy},
+	} {
+		response := &http.Response{StatusCode: http.StatusBadRequest, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"` + test.code + `"}}`))}
+		if class := failureClass(responseStatusError("provider", response)); class != test.class {
+			t.Fatalf("code %q classified as %q", test.code, class)
+		}
 	}
 }
 

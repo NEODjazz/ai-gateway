@@ -168,7 +168,7 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateChatTokens(request)) {
 		return
 	}
-	if !h.applyPolicyAttachments(w, &reqCtx, request.Model) {
+	if !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
 	if stream {
@@ -253,7 +253,7 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateResponseTokens(request)) {
 		return
 	}
-	if !h.applyPolicyAttachments(w, &reqCtx, request.Model) {
+	if !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
 	if request.Stream {
@@ -338,7 +338,7 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateEmbeddingTokens(request)) {
 		return
 	}
-	if !h.applyPolicyAttachments(w, &reqCtx, request.Model) {
+	if !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
 	embeddingProvider, ok := h.provider.(provider.EmbeddingProvider)
@@ -379,7 +379,7 @@ func (h Handler) Rerank(w http.ResponseWriter, r *http.Request) {
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateRerankTokens(request)) {
 		return
 	}
-	if !h.applyPolicyAttachments(w, &reqCtx, request.Model) {
+	if !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
 	rerankProvider, ok := h.provider.(provider.RerankProvider)
@@ -479,17 +479,30 @@ func writeProviderFailure(w http.ResponseWriter, err error) {
 		return
 	}
 	var providerErr *provider.Error
-	if errors.As(err, &providerErr) && providerErr.Class == provider.FailureClientRequest {
-		code := providerErr.UpstreamCode
-		if code == "" {
-			code = "provider_invalid_request"
+	if errors.As(err, &providerErr) {
+		switch providerErr.Class {
+		case provider.FailureClientRequest:
+			code := providerErr.UpstreamCode
+			if code == "" {
+				code = "provider_invalid_request"
+			}
+			message := "provider rejected the request"
+			if providerErr.Param != "" {
+				message = "provider rejected parameter " + providerErr.Param
+			}
+			writeProviderParameterError(w, providerErr.StatusCode, code, message, providerErr.Param)
+			return
+		case provider.FailureContextLength:
+			code := providerErr.UpstreamCode
+			if code == "" {
+				code = "context_length_exceeded"
+			}
+			writeProviderParameterError(w, http.StatusBadRequest, code, "request exceeds the model context window", providerErr.Param)
+			return
+		case provider.FailureContentPolicy:
+			writeError(w, http.StatusUnavailableForLegalReasons, "provider_content_policy", "upstream provider rejected the request under its content policy")
+			return
 		}
-		message := "provider rejected the request"
-		if providerErr.Param != "" {
-			message = "provider rejected parameter " + providerErr.Param
-		}
-		writeProviderParameterError(w, providerErr.StatusCode, code, message, providerErr.Param)
-		return
 	}
 	writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
 }

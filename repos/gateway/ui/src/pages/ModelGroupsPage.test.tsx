@@ -24,7 +24,7 @@ function LocationProbe() {
 
 describe("ModelGroupsPage", () => {
   it("shows route topology, runs bounded health checks and saves membership order and retry policy", async () => {
-    const group = { id: "public-chat", deployment_ids: ["primary", "fallback"], strategy: "weighted", retry_policy: { timeout: 1 }, enabled: true };
+    const group = { id: "public-chat", deployment_ids: ["primary", "fallback"], strategy: "weighted", retry_policy: { timeout: 1 }, fallbacks: { general: ["safe-chat"] }, enabled: true };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const path = String(input);
       if (path === "/admin/v1/model-groups" && !options?.method) return response({ data: [group] });
@@ -59,7 +59,7 @@ describe("ModelGroupsPage", () => {
     await userEvent.click(within(form).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-groups/public-chat" && options?.method === "PUT")).toBe(true));
     const update = fetchMock.mock.calls.find(([path, options]) => String(path) === "/admin/v1/model-groups/public-chat" && options?.method === "PUT")!;
-    expect(JSON.parse(String(update[1]?.body))).toMatchObject({ deployment_ids: ["fallback", "primary"], retry_policy: { timeout: 1, rate_limit: 2 } });
+    expect(JSON.parse(String(update[1]?.body))).toMatchObject({ deployment_ids: ["fallback", "primary"], retry_policy: { timeout: 1, rate_limit: 2 }, fallbacks: { general: ["safe-chat"] } });
     await userEvent.click(screen.getByRole("button", { name: "Actions for public-chat" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Configure routing" }));
     expect(screen.getByTestId("location")).toHaveTextContent("/router-settings?group=public-chat");
@@ -91,6 +91,6 @@ describe("ModelGroupsPage", () => {
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-groups" && options?.method === "POST")).toBe(true));
     const create = fetchMock.mock.calls.find(([path, options]) => String(path) === "/admin/v1/model-groups" && options?.method === "POST")!;
-    expect(JSON.parse(String(create[1]?.body))).toEqual({ id: "public-fast", deployment_ids: ["primary", "fallback"], strategy: "adaptive", retry_policy: { unavailable: 3 }, enabled: true });
+    expect(JSON.parse(String(create[1]?.body))).toEqual({ id: "public-fast", deployment_ids: ["primary", "fallback"], strategy: "adaptive", retry_policy: { unavailable: 3 }, fallbacks: {}, enabled: true });
   });
 });

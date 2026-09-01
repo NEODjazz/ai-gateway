@@ -26,6 +26,7 @@ type embeddingTestClient struct {
 	err    error
 	calls  int
 	inputs []string
+	model  string
 }
 
 type rerankTestClient struct {
@@ -197,6 +198,7 @@ func (p *embeddingTestClient) Responses(context.Context, openai.ResponseRequest)
 }
 func (p *embeddingTestClient) Embeddings(_ context.Context, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
 	p.calls++
+	p.model = request.Model
 	p.inputs, _ = openai.EmbeddingInputStrings(request.Input)
 	if p.err != nil {
 		return openai.EmbeddingResponse{}, p.err

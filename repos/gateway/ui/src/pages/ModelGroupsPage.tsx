@@ -8,13 +8,13 @@ import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
 import type { Row } from "../components/DataTable";
 
-type ModelGroup = Row & { id: string; deployment_ids: string[]; strategy: "weighted" | "adaptive"; retry_policy?: Record<string, number>; enabled: boolean };
+type ModelGroup = Row & { id: string; deployment_ids: string[]; strategy: "weighted" | "adaptive"; retry_policy?: Record<string, number>; fallbacks?: Record<string, string[]>; enabled: boolean };
 type Deployment = Row & { id: string; provider_id: string; upstream_model?: string; priority: number; weight: number; enabled: boolean; runtime_state?: string };
 type HealthCheck = { deployment_id: string; status: string; latency_ms: number; checked_at: string; failure_class?: string };
-type GroupDraft = { id: string; deployment_ids: string[]; strategy: "weighted" | "adaptive"; retry_policy: Record<string, number>; enabled: boolean };
+type GroupDraft = { id: string; deployment_ids: string[]; strategy: "weighted" | "adaptive"; retry_policy: Record<string, number>; fallbacks: Record<string, string[]>; enabled: boolean };
 
 const failureClasses = ["timeout", "unavailable", "rate_limit", "unknown"] as const;
-const emptyDraft: GroupDraft = { id: "", deployment_ids: [], strategy: "weighted", retry_policy: {}, enabled: true };
+const emptyDraft: GroupDraft = { id: "", deployment_ids: [], strategy: "weighted", retry_policy: {}, fallbacks: {}, enabled: true };
 
 function records<T>(payload: unknown): T[] {
   if (Array.isArray(payload)) return payload as T[];
@@ -33,6 +33,11 @@ function retrySummary(policy?: Record<string, number>) {
   return entries.length ? entries.join(" · ") : "Deployment defaults";
 }
 
+function fallbackSummary(fallbacks?: Record<string, string[]>) {
+  const entries = Object.entries(fallbacks || {}).filter(([, targets]) => targets.length).map(([type, targets]) => `${type.replace("_", " ")}: ${targets.join(" → ")}`);
+  return entries.length ? entries.join(" · ") : "No cross-model fallback";
+}
+
 function DeploymentSelector({ deployments, value, onChange }: { deployments: Deployment[]; value: string[]; onChange: (value: string[]) => void }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -45,7 +50,7 @@ function DeploymentSelector({ deployments, value, onChange }: { deployments: Dep
 }
 
 function GroupForm({ initial, deployments, onClose, onSave }: { initial?: ModelGroup; deployments: Deployment[]; onClose: () => void; onSave: (value: GroupDraft) => Promise<void> }) {
-  const [draft, setDraft] = useState<GroupDraft>(initial ? { id: initial.id, deployment_ids: [...initial.deployment_ids], strategy: initial.strategy, retry_policy: { ...(initial.retry_policy || {}) }, enabled: initial.enabled } : { ...emptyDraft, deployment_ids: [], retry_policy: {} });
+  const [draft, setDraft] = useState<GroupDraft>(initial ? { id: initial.id, deployment_ids: [...initial.deployment_ids], strategy: initial.strategy, retry_policy: { ...(initial.retry_policy || {}) }, fallbacks: Object.fromEntries(Object.entries(initial.fallbacks || {}).map(([type, targets]) => [type, [...targets]])), enabled: initial.enabled } : { ...emptyDraft, deployment_ids: [], retry_policy: {}, fallbacks: {} });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const selected = draft.deployment_ids.map((id) => deployments.find((deployment) => deployment.id === id)).filter((value): value is Deployment => Boolean(value));
@@ -127,11 +132,11 @@ export function ModelGroupsPage() {
 
   const rows = useMemo(() => groups.map((group) => {
     const members = group.deployment_ids.map((id) => deployments.find((deployment) => deployment.id === id)).filter((value): value is Deployment => Boolean(value));
-    return { ...group, deployments: `${members.length} · ${members.map((deployment) => deployment.id).join(", ")}`, available: `${members.filter((deployment) => deployment.enabled && latest[deployment.id]?.status === "available").length}/${members.length}`, retry: retrySummary(group.retry_policy) };
+    return { ...group, deployments: `${members.length} · ${members.map((deployment) => deployment.id).join(", ")}`, available: `${members.filter((deployment) => deployment.enabled && latest[deployment.id]?.status === "available").length}/${members.length}`, retry: retrySummary(group.retry_policy), fallback: fallbackSummary(group.fallbacks) };
   }), [deployments, groups, latest]);
   const columns = [
     { key: "id", label: "Public model" }, { key: "deployments", label: "Deployments" }, { key: "strategy", label: "Strategy" },
-    { key: "available", label: "Healthy" }, { key: "retry", label: "Retry policy" },
+    { key: "available", label: "Healthy" }, { key: "retry", label: "Retry policy" }, { key: "fallback", label: "Fallback chains" },
     { key: "enabled", label: "Status", render: (value: unknown) => <span className={`status ${value ? "enabled" : "disabled"}`}>{value ? "Enabled" : "Disabled"}</span> }
   ];
   const enabled = groups.filter((group) => group.enabled).length;
@@ -141,8 +146,8 @@ export function ModelGroupsPage() {
   return <><PageHeader eyebrow="Routing" title="Model groups" description="Manage public model aliases, ordered deployment membership, routing strategy, safe retries and live route health." />
     <div className="usage-stats-grid model-group-stats"><StatCard label="Model groups" value={groups.length} /><StatCard label="Enabled" value={enabled} /><StatCard label="Healthy routes" value={healthy} /><StatCard label="Deployments" value={deployments.length} /></div>
     {error && <ErrorState message={error} retry={() => void load()} />}
-    {loading ? <LoadingState /> : <ManagedDataTable rows={rows} columns={columns} primaryAction={<button onClick={() => setEditing(null)}>Create Model Group</button>} onRefresh={load} searchPlaceholder="Search model groups" defaultHidden={["retry"]} actions={(row) => { const group = groups.find((item) => item.id === row.id)!; return <ActionsMenu label={`Actions for ${group.id}`} items={[{ label: "Routing details", onSelect: () => setDetail(group) }, { label: "Configure routing", onSelect: () => navigate(`/router-settings?group=${encodeURIComponent(group.id)}`) }, { label: "Run health checks", onSelect: () => runChecks(group), disabled: busy }, { label: "Edit", onSelect: () => setEditing(group) }, { label: "Delete", tone: "danger", onSelect: () => remove(group) }]} />; }} />}
+    {loading ? <LoadingState /> : <ManagedDataTable rows={rows} columns={columns} primaryAction={<button onClick={() => setEditing(null)}>Create Model Group</button>} onRefresh={load} searchPlaceholder="Search model groups" defaultHidden={["retry", "fallback"]} actions={(row) => { const group = groups.find((item) => item.id === row.id)!; return <ActionsMenu label={`Actions for ${group.id}`} items={[{ label: "Routing details", onSelect: () => setDetail(group) }, { label: "Configure routing", onSelect: () => navigate(`/router-settings?group=${encodeURIComponent(group.id)}`) }, { label: "Run health checks", onSelect: () => runChecks(group), disabled: busy }, { label: "Edit", onSelect: () => setEditing(group) }, { label: "Delete", tone: "danger", onSelect: () => remove(group) }]} />; }} />}
     {editing !== undefined && <GroupForm initial={editing || undefined} deployments={deployments} onClose={() => setEditing(undefined)} onSave={save} />}
-    {detail && <div className="modal-backdrop" role="presentation"><section className="modal model-group-detail" role="dialog" aria-modal="true" aria-label="Model group routing details"><div className="modal-heading"><div><h2>{detail.id}</h2><span className={`status ${detail.enabled ? "enabled" : "disabled"}`}>{detail.enabled ? "Enabled" : "Disabled"}</span></div><button className="icon-button" aria-label="Close routing details" onClick={() => setDetail(undefined)}>×</button></div><dl className="detail-grid"><div><dt>Strategy</dt><dd>{detail.strategy}</dd></div><div><dt>Retry policy</dt><dd>{retrySummary(detail.retry_policy)}</dd></div></dl><h3>Effective route topology</h3><p className="muted">Rows preserve group membership order. Priority defines fallback tiers and weight distributes traffic inside each tier.</p><div className="table-card"><div className="table-scroll"><table><thead><tr><th>Order</th><th>Deployment</th><th>Provider / upstream</th><th>Priority</th><th>Weight</th><th>Runtime</th><th>Last health</th><th>Latency</th></tr></thead><tbody>{detailMembers.map((deployment, index) => { const health = latest[deployment.id]; return <tr key={deployment.id}><td>{index + 1}</td><td><strong>{deployment.id}</strong></td><td>{deployment.provider_id}<br/><span className="muted">{deployment.upstream_model || "—"}</span></td><td>{deployment.priority}</td><td>{deployment.weight}</td><td><span className={`status ${deployment.enabled && deployment.runtime_state === "available" ? "enabled" : "disabled"}`}>{deployment.enabled ? deployment.runtime_state || "enabled" : "paused"}</span></td><td>{health ? <span className={`status ${health.status === "available" ? "enabled" : "disabled"}`}>{health.status}</span> : <span className="muted">Not checked</span>}</td><td>{health ? `${health.latency_ms} ms` : "—"}</td></tr>; })}</tbody></table></div></div><div className="modal-actions"><button className="secondary" onClick={() => { setEditing(detail); setDetail(undefined); }}>Edit group</button><button className="secondary" onClick={() => navigate(`/router-settings?group=${encodeURIComponent(detail.id)}`)}>Configure routing</button><button disabled={busy} onClick={() => void runChecks(detail)}>{busy ? "Checking…" : "Run health checks"}</button></div></section></div>}
+    {detail && <div className="modal-backdrop" role="presentation"><section className="modal model-group-detail" role="dialog" aria-modal="true" aria-label="Model group routing details"><div className="modal-heading"><div><h2>{detail.id}</h2><span className={`status ${detail.enabled ? "enabled" : "disabled"}`}>{detail.enabled ? "Enabled" : "Disabled"}</span></div><button className="icon-button" aria-label="Close routing details" onClick={() => setDetail(undefined)}>×</button></div><dl className="detail-grid"><div><dt>Strategy</dt><dd>{detail.strategy}</dd></div><div><dt>Retry policy</dt><dd>{retrySummary(detail.retry_policy)}</dd></div><div><dt>Fallback chains</dt><dd>{fallbackSummary(detail.fallbacks)}</dd></div></dl><h3>Effective route topology</h3><p className="muted">Rows preserve group membership order. Priority defines fallback tiers and weight distributes traffic inside each tier.</p><div className="table-card"><div className="table-scroll"><table><thead><tr><th>Order</th><th>Deployment</th><th>Provider / upstream</th><th>Priority</th><th>Weight</th><th>Runtime</th><th>Last health</th><th>Latency</th></tr></thead><tbody>{detailMembers.map((deployment, index) => { const health = latest[deployment.id]; return <tr key={deployment.id}><td>{index + 1}</td><td><strong>{deployment.id}</strong></td><td>{deployment.provider_id}<br/><span className="muted">{deployment.upstream_model || "—"}</span></td><td>{deployment.priority}</td><td>{deployment.weight}</td><td><span className={`status ${deployment.enabled && deployment.runtime_state === "available" ? "enabled" : "disabled"}`}>{deployment.enabled ? deployment.runtime_state || "enabled" : "paused"}</span></td><td>{health ? <span className={`status ${health.status === "available" ? "enabled" : "disabled"}`}>{health.status}</span> : <span className="muted">Not checked</span>}</td><td>{health ? `${health.latency_ms} ms` : "—"}</td></tr>; })}</tbody></table></div></div><div className="modal-actions"><button className="secondary" onClick={() => { setEditing(detail); setDetail(undefined); }}>Edit group</button><button className="secondary" onClick={() => navigate(`/router-settings?group=${encodeURIComponent(detail.id)}`)}>Configure routing</button><button disabled={busy} onClick={() => void runChecks(detail)}>{busy ? "Checking…" : "Run health checks"}</button></div></section></div>}
   </>;
 }

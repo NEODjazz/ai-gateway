@@ -25,6 +25,7 @@ type ModelGroupRoutingInput struct {
 	DeploymentIDs []string                    `json:"deployment_ids"`
 	Strategy      string                      `json:"strategy"`
 	RetryPolicy   map[string]int              `json:"retry_policy,omitempty"`
+	Fallbacks     map[string][]string         `json:"fallbacks,omitempty"`
 	Enabled       bool                        `json:"enabled"`
 	Deployments   []DeploymentRoutingSettings `json:"deployments"`
 }
@@ -119,12 +120,15 @@ func (r *Router) UpdateModelGroupRouting(ctx context.Context, id string, input M
 		nextDeployments[settings.ID] = deployment
 		endpoints[settings.ID] = endpoint
 	}
-	group, err := normalizeModelGroupAgainst(ModelGroup{ID: id, DeploymentIDs: input.DeploymentIDs, Strategy: input.Strategy, RetryPolicy: input.RetryPolicy, Enabled: input.Enabled}, nextDeployments)
+	group, err := normalizeModelGroupAgainst(ModelGroup{ID: id, DeploymentIDs: input.DeploymentIDs, Strategy: input.Strategy, RetryPolicy: input.RetryPolicy, Fallbacks: input.Fallbacks, Enabled: input.Enabled}, nextDeployments)
 	if err != nil {
 		return ModelGroupRoutingSettings{}, err
 	}
 	nextGroups := cloneModelGroups(*currentGroups)
 	nextGroups[id] = group
+	if err := validateModelGroupGraph(nextGroups); err != nil {
+		return ModelGroupRoutingSettings{}, err
+	}
 	r.deployments.current.Store(&nextDeployments)
 	r.modelGroups.current.Store(&nextGroups)
 	for _, deploymentID := range group.DeploymentIDs {
@@ -149,6 +153,7 @@ func (r *Router) modelGroupRoutingLocked(id string) (ModelGroupRoutingSettings, 
 	group := (*groups)[id]
 	group.DeploymentIDs = append([]string(nil), group.DeploymentIDs...)
 	group.RetryPolicy = cloneRetryPolicy(group.RetryPolicy)
+	group.Fallbacks = cloneFallbacks(group.Fallbacks)
 	result := ModelGroupRoutingSettings{Revision: r.controlPlaneRevision(), ModelGroup: group}
 	for _, deploymentID := range group.DeploymentIDs {
 		deployment, found := (*deployments)[deploymentID]

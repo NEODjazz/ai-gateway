@@ -131,6 +131,9 @@ type Endpoint struct {
 	Provider              Client
 	BaseURL               string
 	CredentialID          string
+	RoutingModel          string
+	FallbackType          string
+	FallbackStage         int
 }
 
 type Router struct {
@@ -321,7 +324,7 @@ func NewWithError(cfg Config) (Provider, error) {
 
 func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
 	request := req.Request
-	candidates := r.candidates(ctx, request, requiredChatCapabilities(request, false)...)
+	candidates := r.routeCandidates(ctx, req, request, requiredChatCapabilities(request, false)...)
 	if len(candidates) == 0 {
 		return openai.ChatCompletionResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -331,18 +334,31 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 	mirrored := false
 	totalRetries := 0
 	fallbackCount := 0
-	for _, endpoint := range candidates {
+	progress := newRouteProgress(candidates)
+	if progress.initialFailure != nil {
+		errs = append(errs, progress.initialFailure)
+		fallbackCount = 1
+	}
+	for candidateIndex, endpoint := range candidates {
+		if !progress.allows(endpoint) {
+			continue
+		}
+		progress.enter(endpoint)
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
-			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
+			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
+			errs = append(errs, err)
+			progress.fail(err)
 			continue
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
 				return openai.ChatCompletionResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
-			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
+			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			errs = append(errs, wrapped)
+			progress.fail(err)
 			continue
 		}
 
@@ -437,7 +453,8 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			return response, nil
 		}
 		errs = append(errs, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err))
-		if ctx.Err() != nil || !tryNextEndpoint(err) {
+		progress.fail(err)
+		if ctx.Err() != nil || !progress.hasNext(candidates[candidateIndex+1:]) {
 			joined := errors.Join(errs...)
 			r.modules.RunFailure(ctx, lastAttempt, joined)
 			return openai.ChatCompletionResponse{}, joined
@@ -455,7 +472,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestContext, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, bool, error) {
 	request := req.Request
 	request.Stream = true
-	candidates := r.candidates(ctx, request, requiredChatCapabilities(request, true)...)
+	candidates := r.routeCandidates(ctx, req, request, requiredChatCapabilities(request, true)...)
 	if len(candidates) == 0 {
 		return openai.ChatCompletionResponse{}, false, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -465,16 +482,27 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 	mirrored := false
 	totalRetries := 0
 	fallbackCount := 0
-	for _, endpoint := range candidates {
+	progress := newRouteProgress(candidates)
+	if progress.initialFailure != nil {
+		errs = append(errs, progress.initialFailure)
+		fallbackCount = 1
+	}
+	for candidateIndex, endpoint := range candidates {
+		if !progress.allows(endpoint) {
+			continue
+		}
 		streamingProvider, ok := endpoint.Provider.(StreamingClient)
 		if !ok {
 			continue
 		}
+		progress.enter(endpoint)
 
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
-			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
+			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
+			errs = append(errs, err)
+			progress.fail(err)
 			continue
 		}
 		attemptCtx.Request.Stream = true
@@ -482,7 +510,9 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			if terminalModuleError(err) || ctx.Err() != nil {
 				return openai.ChatCompletionResponse{}, false, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
-			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
+			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			errs = append(errs, wrapped)
+			progress.fail(err)
 			continue
 		}
 		lastAttempt = &attemptCtx
@@ -497,6 +527,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			setAttemptMetadata(&attemptCtx, started, err)
 			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 			errs = append(errs, fmt.Errorf("%s/%s admission failed: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
 			fallbackCount++
 			continue
 		}
@@ -505,6 +536,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			setAttemptMetadata(&attemptCtx, started, err)
 			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 			errs = append(errs, fmt.Errorf("%s/%s circuit denied call: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
 			fallbackCount++
 			continue
 		}
@@ -530,6 +562,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		}
 		if errors.Is(err, ErrStreamingUnsupported) {
 			r.health.success(ctx, endpoint)
+			progress.fail(err)
 			fallbackCount++
 			continue
 		}
@@ -538,7 +571,8 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 				r.health.failure(ctx, endpoint, err)
 			}
 			wrapped := fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err)
-			if streamStarted || ctx.Err() != nil || !tryNextEndpoint(err) {
+			progress.fail(err)
+			if streamStarted || ctx.Err() != nil || !progress.hasNext(candidates[candidateIndex+1:]) {
 				r.modules.RunFailure(ctx, &attemptCtx, wrapped)
 				return openai.ChatCompletionResponse{}, streamStarted, wrapped
 			}
@@ -585,18 +619,31 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 	mirrored := false
 	totalRetries := 0
 	fallbackCount := 0
-	for _, endpoint := range candidates {
+	progress := newRouteProgress(candidates)
+	if progress.initialFailure != nil {
+		errs = append(errs, progress.initialFailure)
+		fallbackCount = 1
+	}
+	for candidateIndex, endpoint := range candidates {
+		if !progress.allows(endpoint) {
+			continue
+		}
+		progress.enter(endpoint)
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
-			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
+			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
+			errs = append(errs, err)
+			progress.fail(err)
 			continue
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
 				return openai.ResponseResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
-			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
+			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			errs = append(errs, wrapped)
+			progress.fail(err)
 			continue
 		}
 
@@ -648,7 +695,8 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			return response, nil
 		}
 		errs = append(errs, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err))
-		if ctx.Err() != nil || !tryNextEndpoint(err) {
+		progress.fail(err)
+		if ctx.Err() != nil || !progress.hasNext(candidates[candidateIndex+1:]) {
 			joined := errors.Join(errs...)
 			r.modules.RunFailure(ctx, lastAttempt, joined)
 			return openai.ResponseResponse{}, joined
@@ -668,7 +716,7 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 		return openai.EmbeddingResponse{}, errors.New("missing embedding request")
 	}
 	request := *req.EmbeddingRequest
-	candidates := r.candidates(ctx, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "embeddings")
+	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "embeddings")
 	if len(candidates) == 0 {
 		return openai.EmbeddingResponse{}, fmt.Errorf("no embedding endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -678,22 +726,35 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 	mirrored := false
 	totalRetries := 0
 	fallbackCount := 0
-	for _, endpoint := range candidates {
+	progress := newRouteProgress(candidates)
+	if progress.initialFailure != nil {
+		errs = append(errs, progress.initialFailure)
+		fallbackCount = 1
+	}
+	for candidateIndex, endpoint := range candidates {
+		if !progress.allows(endpoint) {
+			continue
+		}
 		client, ok := endpoint.Provider.(EmbeddingClient)
 		if !ok {
 			continue
 		}
+		progress.enter(endpoint)
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
-			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
+			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
+			errs = append(errs, err)
+			progress.fail(err)
 			continue
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
 				return openai.EmbeddingResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
-			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
+			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			errs = append(errs, wrapped)
+			progress.fail(err)
 			continue
 		}
 
@@ -716,7 +777,8 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 			return response, nil
 		}
 		errs = append(errs, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err))
-		if ctx.Err() != nil || !tryNextEndpoint(err) {
+		progress.fail(err)
+		if ctx.Err() != nil || !progress.hasNext(candidates[candidateIndex+1:]) {
 			joined := errors.Join(errs...)
 			r.modules.RunFailure(ctx, lastAttempt, joined)
 			return openai.EmbeddingResponse{}, joined
@@ -738,7 +800,7 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 		return openai.RerankResponse{}, errors.New("missing rerank request")
 	}
 	request := *req.RerankRequest
-	candidates := r.candidates(ctx, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "rerank")
+	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "rerank")
 	if len(candidates) == 0 {
 		return openai.RerankResponse{}, fmt.Errorf("no rerank endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -747,22 +809,35 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 	mirrored := false
 	totalRetries := 0
 	fallbackCount := 0
-	for _, endpoint := range candidates {
+	progress := newRouteProgress(candidates)
+	if progress.initialFailure != nil {
+		errs = append(errs, progress.initialFailure)
+		fallbackCount = 1
+	}
+	for candidateIndex, endpoint := range candidates {
+		if !progress.allows(endpoint) {
+			continue
+		}
 		client, ok := endpoint.Provider.(RerankClient)
 		if !ok {
 			continue
 		}
+		progress.enter(endpoint)
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
-			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
+			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
+			errs = append(errs, err)
+			progress.fail(err)
 			continue
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
 				return openai.RerankResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
-			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
+			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			errs = append(errs, wrapped)
+			progress.fail(err)
 			continue
 		}
 		started := time.Now()
@@ -792,7 +867,8 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 			}
 		}
 		errs = append(errs, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err))
-		if ctx.Err() != nil || !tryNextEndpoint(err) {
+		progress.fail(err)
+		if ctx.Err() != nil || !progress.hasNext(candidates[candidateIndex+1:]) {
 			joined := errors.Join(errs...)
 			r.modules.RunFailure(ctx, lastAttempt, joined)
 			return openai.RerankResponse{}, joined
@@ -844,16 +920,27 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 	mirrored := false
 	totalRetries := 0
 	fallbackCount := 0
-	for _, endpoint := range candidates {
+	progress := newRouteProgress(candidates)
+	if progress.initialFailure != nil {
+		errs = append(errs, progress.initialFailure)
+		fallbackCount = 1
+	}
+	for candidateIndex, endpoint := range candidates {
+		if !progress.allows(endpoint) {
+			continue
+		}
 		streamingProvider, ok := endpoint.Provider.(StreamingResponseClient)
 		if !ok {
 			continue
 		}
+		progress.enter(endpoint)
 
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
-			errs = append(errs, fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy))
+			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
+			errs = append(errs, err)
+			progress.fail(err)
 			continue
 		}
 		attemptCtx.ResponseRequest.Stream = true
@@ -861,7 +948,9 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			if terminalModuleError(err) || ctx.Err() != nil {
 				return openai.ResponseResponse{}, false, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
-			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
+			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			errs = append(errs, wrapped)
+			progress.fail(err)
 			continue
 		}
 		lastAttempt = &attemptCtx
@@ -876,6 +965,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			setAttemptMetadata(&attemptCtx, started, err)
 			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 			errs = append(errs, fmt.Errorf("%s/%s admission failed: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
 			fallbackCount++
 			continue
 		}
@@ -884,6 +974,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			setAttemptMetadata(&attemptCtx, started, err)
 			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 			errs = append(errs, fmt.Errorf("%s/%s circuit denied call: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
 			fallbackCount++
 			continue
 		}
@@ -909,6 +1000,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		}
 		if errors.Is(err, ErrStreamingUnsupported) {
 			r.health.success(ctx, endpoint)
+			progress.fail(err)
 			fallbackCount++
 			continue
 		}
@@ -917,7 +1009,8 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 				r.health.failure(ctx, endpoint, err)
 			}
 			wrapped := fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err)
-			if streamStarted || ctx.Err() != nil || !tryNextEndpoint(err) {
+			progress.fail(err)
+			if streamStarted || ctx.Err() != nil || !progress.hasNext(candidates[candidateIndex+1:]) {
 				r.modules.RunFailure(ctx, &attemptCtx, wrapped)
 				return openai.ResponseResponse{}, streamStarted, wrapped
 			}
@@ -1032,6 +1125,23 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		attemptCtx.Metadata["provider.guardrail.attached_policies"] = names
 		attemptCtx.Metadata["provider.guardrail.policy"] = combinePolicyNames(attemptCtx.Metadata["provider.guardrail.policy"], names)
 	}
+	originalModel := attemptCtx.Request.Model
+	routingModel := endpointRoutingModel(endpoint, originalModel)
+	if routingModel != originalModel {
+		attemptCtx.Request.Model = routingModel
+		if attemptCtx.ResponseRequest != nil {
+			attemptCtx.ResponseRequest.Model = routingModel
+		}
+		if attemptCtx.EmbeddingRequest != nil {
+			attemptCtx.EmbeddingRequest.Model = routingModel
+		}
+		if attemptCtx.RerankRequest != nil {
+			attemptCtx.RerankRequest.Model = routingModel
+		}
+		attemptCtx.Metadata["provider.original_model"] = originalModel
+		attemptCtx.Metadata["provider.routed_model"] = routingModel
+		attemptCtx.Metadata["provider.fallback_type"] = endpoint.FallbackType
+	}
 	requestedModel := attemptCtx.Request.Model
 	if upstreamModel, found := endpoint.ModelAliases[requestedModel]; found {
 		attemptCtx.Request.Model = upstreamModel
@@ -1051,6 +1161,7 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 }
 
 func (r Router) applyCatalogPricing(ctx context.Context, req *modules.RequestContext, endpoint Endpoint, requestedModel string) {
+	requestedModel = endpointRoutingModel(endpoint, requestedModel)
 	models := []string{requestedModel}
 	if upstream, found := endpoint.ModelAliases[requestedModel]; found {
 		models = append(models, upstream)
@@ -1355,6 +1466,10 @@ func mergeEmbeddingUsage(response *openai.EmbeddingResponse, usage *openai.Usage
 }
 
 func (r Router) candidates(ctx context.Context, request openai.ChatCompletionRequest, capabilities ...string) []Endpoint {
+	return r.candidatesWithCounter(ctx, request, r.routeCounter, capabilities...)
+}
+
+func (r Router) candidatesWithCounter(ctx context.Context, request openai.ChatCompletionRequest, counter *atomic.Uint64, capabilities ...string) []Endpoint {
 	catalog := r.catalog.Current(ctx)
 	requestedProvider := strings.TrimSpace(request.Provider)
 	filterByProvider := requestedProvider != ""
@@ -1418,12 +1533,14 @@ func (r Router) candidates(ctx context.Context, request openai.ChatCompletionReq
 	if grouped {
 		groupRouter := r
 		groupRouter.routingStrategy = group.Strategy
+		groupRouter.routeCounter = counter
 		ordered := groupRouter.weightedOrder(candidates)
 		for index := range ordered {
 			ordered[index].RetryPolicy = cloneRetryPolicy(group.RetryPolicy)
 		}
 		return ordered
 	}
+	r.routeCounter = counter
 	return r.weightedOrder(candidates)
 }
 
@@ -1436,7 +1553,7 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 	if chatRequest.MaxTokens == nil {
 		chatRequest.MaxTokens = request.MaxTokens
 	}
-	candidates := r.candidates(ctx, chatRequest, capabilities...)
+	candidates := r.routeCandidates(ctx, req, chatRequest, capabilities...)
 	if r.affinity == nil || request.PreviousResponse == "" {
 		return candidates, nil
 	}
@@ -1454,7 +1571,15 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 	}
 	for _, endpoint := range candidates {
 		if endpoint.Name == endpointName {
-			return []Endpoint{endpoint}, nil
+			pinned := endpoint
+			pinned.FallbackStage = 0
+			selected := []Endpoint{pinned}
+			for _, fallback := range candidates {
+				if fallback.FallbackStage > 0 {
+					selected = append(selected, fallback)
+				}
+			}
+			return selected, nil
 		}
 	}
 	return nil, fmt.Errorf("responses session endpoint %q is unavailable for previous_response_id", endpointName)

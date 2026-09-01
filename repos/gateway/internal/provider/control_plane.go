@@ -77,6 +77,8 @@ func (r *Router) controlPlaneSnapshot() ControlPlaneSnapshot {
 	if current := r.modelGroups.current.Load(); current != nil {
 		for _, item := range *current {
 			item.DeploymentIDs = append([]string(nil), item.DeploymentIDs...)
+			item.RetryPolicy = cloneRetryPolicy(item.RetryPolicy)
+			item.Fallbacks = cloneFallbacks(item.Fallbacks)
 			snapshot.ModelGroups = append(snapshot.ModelGroups, item)
 		}
 	}
@@ -157,7 +159,14 @@ func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error 
 				return fmt.Errorf("persisted model group %q references unknown deployment", item.ID)
 			}
 		}
-		groups[item.ID] = item
+		normalized, err := normalizeModelGroupAgainst(item, deployments)
+		if err != nil {
+			return fmt.Errorf("invalid persisted model group %q", item.ID)
+		}
+		groups[item.ID] = normalized
+	}
+	if err := validateModelGroupGraph(groups); err != nil {
+		return fmt.Errorf("invalid persisted model group fallback graph: %w", err)
 	}
 	previousEndpoints := map[string]Endpoint{}
 	for _, endpoint := range r.configuredEndpoints() {

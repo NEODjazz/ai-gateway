@@ -82,7 +82,7 @@ func TestModelGroupRoutingUpdateIsAtomicAndRevisionGuarded(t *testing.T) {
 }
 
 func resultInput(settings ModelGroupRoutingSettings) ModelGroupRoutingInput {
-	result := ModelGroupRoutingInput{DeploymentIDs: append([]string(nil), settings.ModelGroup.DeploymentIDs...), Strategy: settings.ModelGroup.Strategy, RetryPolicy: cloneRetryPolicy(settings.ModelGroup.RetryPolicy), Enabled: settings.ModelGroup.Enabled}
+	result := ModelGroupRoutingInput{DeploymentIDs: append([]string(nil), settings.ModelGroup.DeploymentIDs...), Strategy: settings.ModelGroup.Strategy, RetryPolicy: cloneRetryPolicy(settings.ModelGroup.RetryPolicy), Fallbacks: cloneFallbacks(settings.ModelGroup.Fallbacks), Enabled: settings.ModelGroup.Enabled}
 	for _, deployment := range settings.Deployments {
 		result.Deployments = append(result.Deployments, DeploymentRoutingSettings{ID: deployment.ID, Priority: deployment.Priority, Weight: deployment.Weight, RequestTimeoutMS: deployment.RequestTimeoutMS, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, CooldownSeconds: deployment.CooldownSeconds, MaxParallelRequests: deployment.MaxParallelRequests, QueueCapacity: deployment.QueueCapacity, QueueTimeoutMS: deployment.QueueTimeoutMS})
 	}

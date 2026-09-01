@@ -176,6 +176,8 @@ func writeModelGroupError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "not_found", "model group not found")
 	case errors.Is(err, provider.ErrModelGroupExists):
 		writeError(w, http.StatusConflict, "already_exists", "model group already exists")
+	case errors.Is(err, provider.ErrModelGroupInUse):
+		writeError(w, http.StatusConflict, "in_use", "model group is used by a fallback chain")
 	case errors.Is(err, provider.ErrInvalidModelGroup):
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid model group")
 	case errors.Is(err, provider.ErrControlPlaneConflict):

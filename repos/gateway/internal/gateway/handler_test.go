@@ -494,6 +494,29 @@ func TestProviderClientRequestPreservesSafeStatusAndParameter(t *testing.T) {
 	}
 }
 
+func TestProviderTypedFallbackErrorsRemainNormalizedAfterExhaustion(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		class  provider.FailureClass
+		status int
+		code   string
+	}{
+		{name: "context", class: provider.FailureContextLength, status: http.StatusBadRequest, code: "context_length_exceeded"},
+		{name: "content policy", class: provider.FailureContentPolicy, status: http.StatusUnavailableForLegalReasons, code: "provider_content_policy"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			writeProviderFailure(recorder, &provider.Error{Class: test.class, Provider: "secret-provider", Err: errors.New("raw upstream secret")})
+			if recorder.Code != test.status || !strings.Contains(recorder.Body.String(), `"code":"`+test.code+`"`) {
+				t.Fatalf("unexpected response: status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if strings.Contains(recorder.Body.String(), "secret-provider") || strings.Contains(recorder.Body.String(), "raw upstream secret") {
+				t.Fatalf("provider detail leaked: %s", recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestProviderContentRejectionReturns451WithoutDetails(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	writeProviderFailure(recorder, errors.Join(errors.New("dlp policy name=secret-policy"), modules.ErrContentRejected))

@@ -4,7 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { PageHeader } from "../components/PageHeader";
 
-type ModelGroup = { id: string; deployment_ids: string[]; strategy: string; retry_policy?: Record<string, number>; enabled: boolean };
+type ModelGroup = { id: string; deployment_ids: string[]; strategy: string; retry_policy?: Record<string, number>; fallbacks?: Record<string, string[]>; enabled: boolean };
 type Deployment = {
   id: string; provider_id: string; credential_id?: string; upstream_model?: string; models: string[]; capabilities?: string[];
   priority: number; weight: number; guardrail_policy?: string; request_timeout_ms?: number; max_retries?: number;
@@ -14,6 +14,8 @@ type Deployment = {
 type RoutingSettings = { revision: number; model_group: ModelGroup; deployments: Deployment[] };
 
 const failureClasses = ["timeout", "unavailable", "rate_limit", "unknown"] as const;
+const fallbackTypes = ["general", "context_window", "content_policy"] as const;
+const fallbackLabels: Record<(typeof fallbackTypes)[number], string> = { general: "General provider failure", context_window: "Context window exceeded", content_policy: "Upstream content policy" };
 
 function records<T>(payload: unknown): T[] {
   if (Array.isArray(payload)) return payload as T[];
@@ -31,6 +33,19 @@ function routingDeploymentPayload(row: Deployment) {
   };
 }
 
+function FallbackChainEditor({ type, groups, source, value, onChange }: { type: (typeof fallbackTypes)[number]; groups: ModelGroup[]; source: string; value: string[]; onChange: (value: string[]) => void }) {
+  const available = groups.filter((group) => group.id !== source && !value.includes(group.id));
+  function move(index: number, direction: -1 | 1) {
+    const target = index + direction;
+    if (target < 0 || target >= value.length) return;
+    const next = [...value]; [next[index], next[target]] = [next[target], next[index]]; onChange(next);
+  }
+  return <div className="notice-card fallback-chain-editor"><h3>{fallbackLabels[type]}</h3><p className="muted">{type === "general" ? "Timeout, rate limit, unavailable or unknown provider failure." : type === "context_window" ? "Only a normalized context-length error activates this chain." : "Explicit upstream policy fallback. Gateway guardrail rejection remains terminal."}</p>
+    {value.length > 0 && <ol className="route-preview">{value.map((target, index) => <li key={target}><strong>{target}</strong><span className="inline-actions"><button type="button" className="text-button" aria-label={`Move ${type} fallback ${target} up`} disabled={index === 0} onClick={() => move(index, -1)}>↑</button><button type="button" className="text-button" aria-label={`Move ${type} fallback ${target} down`} disabled={index === value.length - 1} onClick={() => move(index, 1)}>↓</button><button type="button" className="text-button" aria-label={`Remove ${type} fallback ${target}`} onClick={() => onChange(value.filter((item) => item !== target))}>Remove</button></span></li>)}</ol>}
+    <select aria-label={`${type} fallback model group`} value="" onChange={(event) => { if (event.target.value) onChange([...value, event.target.value]); }}><option value="">Add model group…</option>{available.map((group) => <option key={group.id} value={group.id}>{group.id}</option>)}</select>
+  </div>;
+}
+
 export function RouterSettingsPage() {
   const { client } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -43,6 +58,7 @@ export function RouterSettingsPage() {
   const [draft, setDraft] = useState<ModelGroup>();
   const [deploymentDrafts, setDeploymentDrafts] = useState<Record<string, Deployment>>({});
   const [simulation, setSimulation] = useState<unknown>();
+  const [simulationFailure, setSimulationFailure] = useState("unavailable");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -52,7 +68,7 @@ export function RouterSettingsPage() {
     if (!id) { setDraft(undefined); setDeploymentDrafts({}); setRevision(0); return; }
     const settings = await client.request<RoutingSettings>(`/admin/v1/model-groups/${encodeURIComponent(id)}/routing-settings`);
     setRevision(settings.revision);
-    setDraft({ ...settings.model_group, deployment_ids: [...settings.model_group.deployment_ids], retry_policy: { ...(settings.model_group.retry_policy || {}) } });
+    setDraft({ ...settings.model_group, deployment_ids: [...settings.model_group.deployment_ids], retry_policy: { ...(settings.model_group.retry_policy || {}) }, fallbacks: Object.fromEntries(Object.entries(settings.model_group.fallbacks || {}).map(([type, targets]) => [type, [...targets]])) });
     const next = Object.fromEntries(sourceDeployments.map((item) => [item.id, { ...item }]));
     for (const deployment of settings.deployments) next[deployment.id] = { ...next[deployment.id], ...deployment };
     setDeploymentDrafts(next);
@@ -106,10 +122,16 @@ export function RouterSettingsPage() {
   function updateDeployment(id: string, patch: Partial<Deployment>) {
     setDeploymentDrafts((current) => ({ ...current, [id]: { ...current[id], ...patch } }));
   }
+  function updateFallback(type: string, targets: string[]) {
+    if (!draft) return;
+    const fallbacks = { ...(draft.fallbacks || {}) };
+    if (targets.length) fallbacks[type] = targets; else delete fallbacks[type];
+    setDraft({ ...draft, fallbacks });
+  }
   async function simulate() {
     if (!draft) return;
     setBusy(true); setError("");
-    try { setSimulation(await client.request("/admin/v1/routing/simulate", { method: "POST", body: { model: draft.id, capabilities: [] } })); }
+    try { setSimulation(await client.request("/admin/v1/routing/simulate", { method: "POST", body: { model: draft.id, capabilities: [], failure_class: simulationFailure } })); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Routing simulation failed"); }
     finally { setBusy(false); }
   }
@@ -117,12 +139,12 @@ export function RouterSettingsPage() {
     if (!draft || !draft.deployment_ids.length) { setError("Select at least one deployment"); return; }
     setBusy(true); setError(""); setNotice("");
     try {
-      const settings = await client.request<RoutingSettings>(`/admin/v1/model-groups/${encodeURIComponent(draft.id)}/routing-settings`, { method: "PUT", body: { expected_revision: revision, deployment_ids: draft.deployment_ids, strategy: draft.strategy, retry_policy: draft.retry_policy, enabled: draft.enabled, deployments: selectedDeployments.map(routingDeploymentPayload) } });
+      const settings = await client.request<RoutingSettings>(`/admin/v1/model-groups/${encodeURIComponent(draft.id)}/routing-settings`, { method: "PUT", body: { expected_revision: revision, deployment_ids: draft.deployment_ids, strategy: draft.strategy, retry_policy: draft.retry_policy, fallbacks: draft.fallbacks, enabled: draft.enabled, deployments: selectedDeployments.map(routingDeploymentPayload) } });
       setRevision(settings.revision);
-      setDraft({ ...settings.model_group, deployment_ids: [...settings.model_group.deployment_ids], retry_policy: { ...(settings.model_group.retry_policy || {}) } });
+      setDraft({ ...settings.model_group, deployment_ids: [...settings.model_group.deployment_ids], retry_policy: { ...(settings.model_group.retry_policy || {}) }, fallbacks: Object.fromEntries(Object.entries(settings.model_group.fallbacks || {}).map(([type, targets]) => [type, [...targets]])) });
       setDeploymentDrafts((current) => ({ ...current, ...Object.fromEntries(settings.deployments.map((row) => [row.id, { ...current[row.id], ...row }])) }));
       setNotice(`Routing plan committed atomically at control-plane revision ${settings.revision}. Deployment priorities are shared anywhere those deployments are reused.`);
-      setSimulation(await client.request("/admin/v1/routing/simulate", { method: "POST", body: { model: draft.id, capabilities: [] } }));
+      setSimulation(await client.request("/admin/v1/routing/simulate", { method: "POST", body: { model: draft.id, capabilities: [], failure_class: simulationFailure } }));
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save router settings"); }
     finally { setBusy(false); }
   }
@@ -138,9 +160,10 @@ export function RouterSettingsPage() {
         <h2>Retry policy by failure class</h2><p className="muted">Only transient failures are configurable. Authentication, invalid requests and content-policy failures are never retried.</p>
         <div className="retry-grid">{failureClasses.map((failure) => <label key={failure}>{failure.replace("_", " ")}<input aria-label={`Retries ${failure}`} type="number" min="0" max="10" value={draft.retry_policy?.[failure] ?? ""} placeholder="Deployment default" onChange={(event) => { const next = { ...(draft.retry_policy || {}) }; if (event.target.value === "") delete next[failure]; else next[failure] = Number(event.target.value); setDraft({ ...draft, retry_policy: next }); }} /></label>)}</div>
       </section>
+      <section className="section-block"><h2>Cross-model fallback chains</h2><p>Targets are logical model groups and are tried in order. Cycles, self-references and missing groups are rejected atomically. A key or tag must grant access to each target before it can be used.</p><div className="split-grid">{fallbackTypes.map((type) => <FallbackChainEditor key={type} type={type} groups={groups} source={draft.id} value={draft.fallbacks?.[type] || []} onChange={(targets) => updateFallback(type, targets)} />)}</div></section>
       <section className="section-block"><h2>Fallback membership and order</h2><p>Moving a deployment also assigns sequential priority. This priority is global for that deployment.</p><div className="deployment-picker">{deployments.map((row) => <label className="checkbox-line" key={row.id}><input type="checkbox" checked={draft.deployment_ids.includes(row.id)} onChange={(event) => toggleDeployment(row.id, event.target.checked)} /> <strong>{row.id}</strong><span className="muted">{row.provider_id} · {row.upstream_model || row.models.join(", ")}</span></label>)}</div></section>
       <section className="section-block table-card"><div className="table-scroll"><table><thead><tr><th>Order</th><th>Deployment</th><th>Priority</th><th>Weight</th><th>Retries</th><th>Timeout, ms</th><th>Failures</th><th>Cooldown, s</th></tr></thead><tbody>{selectedDeployments.map((row, index) => <tr key={row.id}><td><div className="inline-actions"><button aria-label={`Move ${row.id} up`} className="text-button" disabled={index === 0} onClick={() => move(row.id, -1)}>↑</button><button aria-label={`Move ${row.id} down`} className="text-button" disabled={index === selectedDeployments.length - 1} onClick={() => move(row.id, 1)}>↓</button></div></td><td><strong>{row.id}</strong><br/><span className="muted">{row.provider_id}</span></td>{(["priority", "weight", "max_retries", "request_timeout_ms", "cooldown_after_failures", "cooldown_seconds"] as const).map((field) => <td key={field}><input aria-label={`${field} ${row.id}`} type="number" min="0" value={row[field] ?? 0} onChange={(event) => updateDeployment(row.id, { [field]: Number(event.target.value) })} /></td>)}</tr>)}</tbody></table></div></section>
-      <section className="section-block split-grid"><div className="notice-card"><h2>Route preview</h2><ol className="route-preview">{selectedDeployments.map((row) => <li key={row.id}><strong>{row.id}</strong><span>priority {row.priority}, weight {row.weight}</span></li>)}</ol><button className="secondary" disabled={busy} onClick={() => void simulate()}>Simulate current saved route</button></div><div className="json-card"><h2>Runtime simulation</h2><pre>{simulation === undefined ? "Save or run a simulation to inspect the effective candidate order." : JSON.stringify(simulation, null, 2)}</pre></div></section>
+      <section className="section-block split-grid"><div className="notice-card"><h2>Route preview</h2><ol className="route-preview">{selectedDeployments.map((row) => <li key={row.id}><strong>{row.id}</strong><span>priority {row.priority}, weight {row.weight}</span></li>)}</ol><label>Simulated failure<select aria-label="Simulated failure" value={simulationFailure} onChange={(event) => setSimulationFailure(event.target.value)}><option value="unavailable">Provider unavailable</option><option value="timeout">Timeout</option><option value="rate_limit">Rate limit</option><option value="context_length">Context length</option><option value="content_policy">Upstream content policy</option><option value="client_request">Invalid client request</option><option value="authentication">Provider authentication</option></select></label><button className="secondary" disabled={busy} onClick={() => void simulate()}>Simulate saved fallback</button></div><div className="json-card"><h2>Runtime simulation</h2><pre>{simulation === undefined ? "Save or run a simulation to inspect primary and fallback stages." : JSON.stringify(simulation, null, 2)}</pre></div></section>
     </>}
   </>;
 }

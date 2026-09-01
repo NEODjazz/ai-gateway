@@ -165,6 +165,16 @@ func (r *Router) planModelOnboardingLocked(input ModelOnboardingInput) (ModelOnb
 		seenGroups[group.ID] = true
 		normalizedGroups = append(normalizedGroups, group)
 	}
+	nextGroups := map[string]ModelGroup{}
+	if currentGroups := r.modelGroups.current.Load(); currentGroups != nil {
+		nextGroups = cloneModelGroups(*currentGroups)
+	}
+	for _, group := range normalizedGroups {
+		nextGroups[group.ID] = group
+	}
+	if err := validateModelGroupGraph(nextGroups); err != nil {
+		return ModelOnboardingPlan{}, ErrInvalidModelOnboarding
+	}
 	sort.Slice(normalizedDeployments, func(i, j int) bool { return normalizedDeployments[i].ID < normalizedDeployments[j].ID })
 	sort.Slice(normalizedGroups, func(i, j int) bool { return normalizedGroups[i].ID < normalizedGroups[j].ID })
 	revision := int64(0)

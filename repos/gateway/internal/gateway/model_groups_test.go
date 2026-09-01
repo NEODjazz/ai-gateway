@@ -92,3 +92,31 @@ func TestAdminModelGroupRoutingSettingsAreReadAndUpdatedAtomically(t *testing.T)
 		t.Fatalf("stale routing update accepted: %d %s", stale.Code, stale.Body.String())
 	}
 }
+
+func TestModelGroupFallbackGraphAPIRejectsCyclesAndReferencedDeletes(t *testing.T) {
+	runtime := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{
+		{Name: "primary", Type: "demo", Models: []string{"primary"}, Weight: 1},
+		{Name: "general", Type: "demo", Models: []string{"general"}, Weight: 1},
+	}})
+	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
+	for _, body := range []string{
+		`{"id":"general","deployment_ids":["general"],"strategy":"weighted","enabled":true}`,
+		`{"id":"primary","deployment_ids":["primary"],"strategy":"weighted","fallbacks":{"general":["general"]},"enabled":true}`,
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/admin/v1/model-groups", strings.NewReader(body)))
+		if response.Code != http.StatusCreated {
+			t.Fatalf("create fallback graph: %d %s", response.Code, response.Body.String())
+		}
+	}
+	cycle := httptest.NewRecorder()
+	handler.ServeHTTP(cycle, httptest.NewRequest(http.MethodPut, "/admin/v1/model-groups/general", strings.NewReader(`{"deployment_ids":["general"],"strategy":"weighted","fallbacks":{"general":["primary"]},"enabled":true}`)))
+	if cycle.Code != http.StatusBadRequest {
+		t.Fatalf("cycle was accepted: %d %s", cycle.Code, cycle.Body.String())
+	}
+	remove := httptest.NewRecorder()
+	handler.ServeHTTP(remove, httptest.NewRequest(http.MethodDelete, "/admin/v1/model-groups/general", nil))
+	if remove.Code != http.StatusConflict || !strings.Contains(remove.Body.String(), `"code":"in_use"`) {
+		t.Fatalf("referenced group delete was accepted: %d %s", remove.Code, remove.Body.String())
+	}
+}

@@ -569,6 +569,28 @@ and then persisted in one optimistic transaction. A stale revision, invalid
 member, or persistence failure leaves every affected object unchanged. Model
 Groups links directly to this workspace with `?group=<public-model>`.
 
+Each model group may also define ordered cross-model fallback chains for
+`general`, `context_window`, and `content_policy`. General fallback is limited
+to normalized timeout, rate-limit, unavailable, and unknown provider failures;
+client validation, client/provider authentication, post-processing, budget,
+and gateway guardrail failures remain terminal. Context-window and upstream
+content-policy fallbacks run only when explicitly configured for that class.
+The graph rejects missing targets, self-references, duplicates, and cycles, and
+a referenced target cannot be deleted. A chain is stored in the same atomic,
+revision-guarded routing transaction as group membership and deployment
+settings.
+
+Before inference, the HTTP policy layer intersects every possible fallback
+target with the virtual key's model grants and all managed tag constraints.
+Unauthorized targets are omitted from the route. Guardrail attachments for the
+primary and every authorized target are combined conservatively, so changing
+models cannot bypass a stricter policy. The original public model remains the
+billing/logging identity; the concrete endpoint and upstream model identify the
+route that actually served it. Routing simulation accepts a normalized
+`failure_class` and returns primary and fallback stages with the trigger that
+selected them. Streaming can switch groups only before the first SSE payload is
+written.
+
 Chat Completions and Responses accept OpenAI-style image parts for endpoints
 that explicitly declare `vision`, implement a vision-capable adapter, and enable
 AV. OpenAI-compatible endpoints preserve the original blocks, Anthropic receives

@@ -218,6 +218,9 @@ func billingRequest(req *RequestContext) UsageRequest {
 		}
 		request.UsageEstimated = request.TotalTokens == 0
 	}
+	if originalModel := metadataValue(req.Metadata, "provider.original_model"); originalModel != "" {
+		request.Model = originalModel
+	}
 	if request.CacheStatus == "hit" {
 		request.UsageEstimated = false
 	}

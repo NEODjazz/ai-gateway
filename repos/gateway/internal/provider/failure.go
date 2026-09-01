@@ -19,6 +19,7 @@ const (
 	FailureRateLimit      FailureClass = "rate_limit"
 	FailureTimeout        FailureClass = "timeout"
 	FailureUnavailable    FailureClass = "unavailable"
+	FailureContextLength  FailureClass = "context_length"
 	FailureContentPolicy  FailureClass = "content_policy"
 	FailureClientRequest  FailureClass = "client_request"
 	FailurePostProcessing FailureClass = "post_processing"
@@ -87,6 +88,12 @@ func responseStatusError(provider string, response *http.Response) error {
 	}
 	if safeUpstreamIdentifier.MatchString(strings.TrimSpace(body.Error.Code)) {
 		providerErr.UpstreamCode = strings.TrimSpace(body.Error.Code)
+		switch strings.ToLower(providerErr.UpstreamCode) {
+		case "context_length_exceeded", "context_window_exceeded":
+			providerErr.Class = FailureContextLength
+		case "content_policy_violation", "content_filter":
+			providerErr.Class = FailureContentPolicy
+		}
 	}
 	if safeUpstreamIdentifier.MatchString(strings.TrimSpace(body.Error.Param)) {
 		providerErr.Param = strings.TrimSpace(body.Error.Param)
@@ -150,7 +157,7 @@ func endpointMaxRetries(endpoint Endpoint) int {
 
 func tryNextEndpoint(err error) bool {
 	switch failureClass(err) {
-	case FailureClientRequest, FailureContentPolicy, FailurePostProcessing:
+	case FailureClientRequest, FailureContextLength, FailureContentPolicy, FailurePostProcessing:
 		return false
 	default:
 		return true
