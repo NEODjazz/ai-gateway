@@ -14,6 +14,7 @@ type RequestLog = Row & {
   trace_id?: string;
   tags?: string[];
   status: string;
+  failure_class?: string;
   model?: string;
   upstream_model?: string;
   provider?: string;
@@ -44,9 +45,9 @@ type GroupedRequestLog = Row & {
   id: string; group_id: string; requests: number; errors: number; models: string[]; providers: string[];
   total_tokens: number; cache_hits: number; latency_ms: number; cost: number; currency: string; started_at: string; ended_at: string;
 };
-const emptyFilters = { request_id: "", session_id: "", trace_id: "", status: "", model: "", provider: "", tag: "", cache_status: "", organization_id: "", team_id: "", user_id: "", credential_id: "" };
+const emptyFilters = { request_id: "", session_id: "", trace_id: "", status: "", failure_class: "", model: "", provider: "", tag: "", cache_status: "", min_cost: "", max_cost: "", organization_id: "", team_id: "", user_id: "", credential_id: "" };
 const requestLogColumns = [
-  { key: "timestamp", label: "Time" }, { key: "request_id", label: "Request" }, { key: "session_id", label: "Session" }, { key: "trace_id", label: "Trace" }, { key: "tags", label: "Tags" }, { key: "status", label: "Status" },
+  { key: "timestamp", label: "Time" }, { key: "request_id", label: "Request" }, { key: "session_id", label: "Session" }, { key: "trace_id", label: "Trace" }, { key: "tags", label: "Tags" }, { key: "status", label: "Status" }, { key: "failure_class", label: "Failure class" },
   { key: "model", label: "Public model" }, { key: "upstream_model", label: "Upstream model" }, { key: "provider_id", label: "Provider" },
   { key: "cache_status", label: "Cache" }, { key: "cache_kind", label: "Cache type" }, { key: "total_tokens", label: "Tokens" },
   { key: "usage_estimated", label: "Token source" }, { key: "latency_ms", label: "Latency" }, { key: "first_token_latency_ms", label: "TTFT" },
@@ -161,6 +162,12 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
     try { setDetail(await client.request(`/admin/v1/request-logs/${encodeURIComponent(row.request_id)}`)); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load request details"); }
   }
+  function showGroupRequests(row: GroupedRequestLog) {
+    const unassignedPrefix = "Unassigned · ";
+    const requestID = row.group_id.startsWith(unassignedPrefix) ? row.group_id.slice(unassignedPrefix.length) : "";
+    setFilters((current) => ({ ...current, request_id: requestID, session_id: !requestID && view === "sessions" ? row.group_id : "", trace_id: !requestID && view === "traces" ? row.group_id : "" }));
+    setView("requests");
+  }
   const columns = [
     { key: "timestamp", label: "Time", render: formatTimestamp },
     { key: "request_id", label: "Request" },
@@ -168,6 +175,7 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
     { key: "trace_id", label: "Trace" },
     { key: "tags", label: "Tags" },
     { key: "status", label: "Status" },
+    { key: "failure_class", label: "Failure class", render: (value: unknown) => String(value || "—") },
     { key: "model", label: "Public model" },
     { key: "upstream_model", label: "Upstream model" },
     { key: "provider_id", label: "Provider", render: (_: unknown, row: Row) => String(row.provider_id || row.provider || row.provider_endpoint_name || "—") },
@@ -216,7 +224,7 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
     {error && <ErrorState message={error} retry={() => void load()} />}
     {loading && !hasRows ? <LoadingState /> : view === "requests"
       ? <DataTable rows={rows} columns={columns.filter((column) => visibleColumns.has(column.key))} actions={(row) => <ActionsMenu label={`Actions for ${String(row.request_id)}`} items={[{ label: "Details", onSelect: () => showDetail(row as RequestLog) }]} />} />
-      : <DataTable rows={groupRows} columns={groupedColumns} />}
+      : <DataTable rows={groupRows} columns={groupedColumns} actions={(row) => <ActionsMenu label={`Actions for ${String(row.group_id)}`} items={[{ label: "View requests", onSelect: () => showGroupRequests(row as GroupedRequestLog) }]} />} />}
     {activeCursor && <button className="secondary load-more" onClick={() => void load(true, activeCursor)}>Load older</button>}
     {filtersOpen && <div className="modal-backdrop" role="presentation">
       <form className="modal compact-modal" role="dialog" aria-modal="true" aria-label="Filter request logs" onSubmit={apply}>
@@ -225,10 +233,13 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
           <label>Session ID<input value={filters.session_id} onChange={(event) => setFilters((current) => ({ ...current, session_id: event.target.value }))} /></label>
           <label>Trace ID<input value={filters.trace_id} onChange={(event) => setFilters((current) => ({ ...current, trace_id: event.target.value }))} /></label>
           <label>Status<select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="">All statuses</option><option value="ok">Success</option><option value="error">Error</option></select></label>
+          <label>Failure class<input value={filters.failure_class} onChange={(event) => setFilters((current) => ({ ...current, failure_class: event.target.value }))} /></label>
           <label>Cache<select value={filters.cache_status} onChange={(event) => setFilters((current) => ({ ...current, cache_status: event.target.value }))}><option value="">All requests</option><option value="hit">Hit</option><option value="miss">Miss</option><option value="error">Error</option></select></label>
           <label>Model<input value={filters.model} onChange={(event) => setFilters((current) => ({ ...current, model: event.target.value }))} /></label>
           <label>Provider<input value={filters.provider} onChange={(event) => setFilters((current) => ({ ...current, provider: event.target.value }))} /></label>
           <label>Tag<input value={filters.tag} onChange={(event) => setFilters((current) => ({ ...current, tag: event.target.value }))} /></label>
+          <label>Minimum cost<input type="number" min="0" step="any" value={filters.min_cost} onChange={(event) => setFilters((current) => ({ ...current, min_cost: event.target.value }))} /></label>
+          <label>Maximum cost<input type="number" min="0" step="any" value={filters.max_cost} onChange={(event) => setFilters((current) => ({ ...current, max_cost: event.target.value }))} /></label>
           <label>Organization<select value={filters.organization_id} onChange={(event) => setFilters((current) => ({ ...current, organization_id: event.target.value }))}><option value="">All organizations</option>{organizations.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select></label>
           <label>Team<select value={filters.team_id} onChange={(event) => setFilters((current) => ({ ...current, team_id: event.target.value }))}><option value="">All teams</option>{teams.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select></label>
           <label>User<select value={filters.user_id} onChange={(event) => setFilters((current) => ({ ...current, user_id: event.target.value }))}><option value="">All users</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name || item.email || item.id}</option>)}</select></label>

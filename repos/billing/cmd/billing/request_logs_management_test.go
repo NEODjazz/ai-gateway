@@ -65,11 +65,11 @@ func TestRequestLogManagementRequiresSecretAndValidatesFilters(t *testing.T) {
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized status=%d", unauthorized.Code)
 	}
-	request := httptest.NewRequest(http.MethodGet, "/internal/v1/request-logs?days=14&limit=25&team_id=team-a&organization_id=org-a&trace_id=0123456789abcdef0123456789abcdef&tag=production&cache_status=hit", nil)
+	request := httptest.NewRequest(http.MethodGet, "/internal/v1/request-logs?days=14&limit=25&team_id=team-a&organization_id=org-a&trace_id=0123456789abcdef0123456789abcdef&tag=production&cache_status=hit&failure_class=upstream&min_cost=0.01&max_cost=1.5", nil)
 	request.Header.Set("X-Management-Token", "management-secret")
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || reporter.filter.Days != 14 || reporter.filter.Limit != 25 || reporter.filter.TeamID != "team-a" || reporter.filter.OrganizationID != "org-a" || reporter.filter.TraceID != "0123456789abcdef0123456789abcdef" || reporter.filter.Tag != "production" || reporter.filter.CacheStatus != "hit" {
+	if response.Code != http.StatusOK || reporter.filter.Days != 14 || reporter.filter.Limit != 25 || reporter.filter.TeamID != "team-a" || reporter.filter.OrganizationID != "org-a" || reporter.filter.TraceID != "0123456789abcdef0123456789abcdef" || reporter.filter.Tag != "production" || reporter.filter.CacheStatus != "hit" || reporter.filter.FailureClass != "upstream" || reporter.filter.MinCost == nil || *reporter.filter.MinCost != 0.01 || reporter.filter.MaxCost == nil || *reporter.filter.MaxCost != 1.5 {
 		t.Fatalf("status=%d filter=%+v body=%s", response.Code, reporter.filter, response.Body.String())
 	}
 	invalid := httptest.NewRequest(http.MethodGet, "/internal/v1/request-logs?days=0", nil)
@@ -85,5 +85,12 @@ func TestRequestLogManagementRequiresSecretAndValidatesFilters(t *testing.T) {
 	mux.ServeHTTP(invalidTraceResponse, invalidTrace)
 	if invalidTraceResponse.Code != http.StatusBadRequest {
 		t.Fatalf("invalid trace status=%d", invalidTraceResponse.Code)
+	}
+	invalidCost := httptest.NewRequest(http.MethodGet, "/internal/v1/request-logs?min_cost=2&max_cost=1", nil)
+	invalidCost.Header.Set("X-Management-Token", "management-secret")
+	invalidCostResponse := httptest.NewRecorder()
+	mux.ServeHTTP(invalidCostResponse, invalidCost)
+	if invalidCostResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid cost status=%d", invalidCostResponse.Code)
 	}
 }

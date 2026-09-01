@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.22
+  version: 0.1.23
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1327,6 +1327,9 @@ paths:
         - {name: organization_id, in: query, schema: {type: string, maxLength: 256}}
         - {name: credential_id, in: query, schema: {type: string, maxLength: 256}}
         - {name: cache_status, in: query, schema: {type: string, enum: [hit, miss, error]}}
+        - {name: failure_class, in: query, schema: {type: string, maxLength: 256}}
+        - {name: min_cost, in: query, schema: {type: number, minimum: 0}}
+        - {name: max_cost, in: query, schema: {type: number, minimum: 0}}
       responses:
         '200':
           description: Request log page ordered newest first
@@ -1362,6 +1365,9 @@ paths:
         - {name: organization_id, in: query, schema: {type: string, maxLength: 256}}
         - {name: credential_id, in: query, schema: {type: string, maxLength: 256}}
         - {name: cache_status, in: query, schema: {type: string, enum: [hit, miss, error]}}
+        - {name: failure_class, in: query, schema: {type: string, maxLength: 256}}
+        - {name: min_cost, in: query, schema: {type: number, minimum: 0}}
+        - {name: max_cost, in: query, schema: {type: number, minimum: 0}}
       responses:
         '200': {description: Session or trace aggregate page ordered by latest request, content: {application/json: {schema: {$ref: '#/components/schemas/RequestLogGroupPage'}}}}
         '400': {$ref: '#/components/responses/InvalidRequest'}

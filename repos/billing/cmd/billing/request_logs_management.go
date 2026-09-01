@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -93,7 +94,7 @@ func parseRequestLogFilter(r *http.Request, includeCursor bool) (modules.Request
 	filter := modules.RequestLogFilter{Days: days, Limit: limit}
 	for name, target := range map[string]*string{
 		"request_id": &filter.RequestID, "session_id": &filter.SessionID, "trace_id": &filter.TraceID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider, "tag": &filter.Tag,
-		"user_id": &filter.UserID, "team_id": &filter.TeamID, "organization_id": &filter.OrganizationID, "credential_id": &filter.CredentialID, "cache_status": &filter.CacheStatus,
+		"user_id": &filter.UserID, "team_id": &filter.TeamID, "organization_id": &filter.OrganizationID, "credential_id": &filter.CredentialID, "cache_status": &filter.CacheStatus, "failure_class": &filter.FailureClass,
 	} {
 		*target = strings.TrimSpace(r.URL.Query().Get(name))
 		if len(*target) > 256 {
@@ -101,6 +102,20 @@ func parseRequestLogFilter(r *http.Request, includeCursor bool) (modules.Request
 		}
 	}
 	if filter.CacheStatus != "" && filter.CacheStatus != "hit" && filter.CacheStatus != "miss" && filter.CacheStatus != "error" {
+		return modules.RequestLogFilter{}, errors.New("invalid request log filter")
+	}
+	for name, target := range map[string]**float64{"min_cost": &filter.MinCost, "max_cost": &filter.MaxCost} {
+		raw := strings.TrimSpace(r.URL.Query().Get(name))
+		if raw == "" {
+			continue
+		}
+		value, parseErr := strconv.ParseFloat(raw, 64)
+		if parseErr != nil || value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return modules.RequestLogFilter{}, errors.New("invalid request log filter")
+		}
+		*target = &value
+	}
+	if filter.MinCost != nil && filter.MaxCost != nil && *filter.MinCost > *filter.MaxCost {
 		return modules.RequestLogFilter{}, errors.New("invalid request log filter")
 	}
 	if filter.TraceID != "" {

@@ -46,7 +46,9 @@ closed if a required scanner is unavailable.
 Request-log session and trace views are aggregated in ClickHouse across the
 complete selected time window, rather than from the current browser page.
 Aggregation remains metadata-only and keeps spend in separate currency groups;
-the cursor consists of the last request time, group ID, and currency.
+the cursor consists of the last request time, group ID, and currency. Request
+and group views accept bounded minimum/maximum cost and failure-class filters,
+and the UI can drill from a session or trace aggregate into its request rows.
 
 Usage reports expose currency-safe totals and daily trends plus breakdowns by
 model, provider, tag, non-secret virtual-key ID, user, team, and organization.

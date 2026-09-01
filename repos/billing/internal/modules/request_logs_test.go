@@ -10,9 +10,10 @@ import (
 )
 
 func TestClickHouseRequestLogsUseParametersAndBoundPagination(t *testing.T) {
+	minCost, maxCost := 0.01, 0.2
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("query")
-		if strings.Contains(query, "req' OR 1=1") || strings.Contains(query, "production' OR 1=1") || !strings.Contains(query, "request_id = {request_id:String}") || !strings.Contains(query, "trace_id = {trace_id:String}") || !strings.Contains(query, "has(tags, {tag:String})") || !strings.Contains(query, "LIMIT 3") || !strings.Contains(query, "first_token_latency_ms") || !strings.Contains(query, "usage_estimated") {
+		if strings.Contains(query, "req' OR 1=1") || strings.Contains(query, "production' OR 1=1") || !strings.Contains(query, "request_id = {request_id:String}") || !strings.Contains(query, "trace_id = {trace_id:String}") || !strings.Contains(query, "has(tags, {tag:String})") || !strings.Contains(query, "failure_class = {failure_class:String}") || !strings.Contains(query, "usage.cost >= {min_cost:Float64}") || !strings.Contains(query, "usage.cost <= {max_cost:Float64}") || !strings.Contains(query, "LIMIT 3") || !strings.Contains(query, "first_token_latency_ms") || !strings.Contains(query, "usage_estimated") {
 			t.Fatalf("unsafe request log query: %s", query)
 		}
 		if r.URL.Query().Get("param_request_id") != "req' OR 1=1" {
@@ -24,6 +25,9 @@ func TestClickHouseRequestLogsUseParametersAndBoundPagination(t *testing.T) {
 		if r.URL.Query().Get("param_tag") != "production' OR 1=1" {
 			t.Fatalf("tag was not bound as a parameter: %s", r.URL.RawQuery)
 		}
+		if r.URL.Query().Get("param_failure_class") != "upstream" || r.URL.Query().Get("param_min_cost") != "0.01" || r.URL.Query().Get("param_max_cost") != "0.2" {
+			t.Fatalf("cost/failure filters were not bound: %s", r.URL.RawQuery)
+		}
 		_, _ = w.Write([]byte(
 			`{"timestamp":"2026-08-25T12:00:00Z","request_id":"r3","trace_id":"0123456789abcdef0123456789abcdef","organization_id":"org-1","tags":["production"],"status":"ok","api_type":"chat_completions","phase":"commit","latency_ms":40,"first_token_latency_ms":12,"retry_count":2,"fallback_count":1,"cache_status":"miss","cache_kind":"exact","input_tokens":1,"output_tokens":2,"total_tokens":3,"usage_estimated":true,"cost":0.1,"currency":"USD","content_stored":false}` + "\n" +
 				`{"timestamp":"2026-08-25T11:59:00Z","request_id":"r2","status":"error","failure_class":"upstream","api_type":"chat_completions","phase":"cancel","latency_ms":5,"input_tokens":0,"output_tokens":0,"total_tokens":0,"cost":0,"currency":"USD","content_stored":false}` + "\n" +
@@ -34,7 +38,7 @@ func TestClickHouseRequestLogsUseParametersAndBoundPagination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := reporter.ListRequestLogs(context.Background(), RequestLogFilter{Days: 7, Limit: 2, RequestID: "req' OR 1=1", TraceID: "0123456789abcdef0123456789abcdef", Tag: "production' OR 1=1", Before: time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC), BeforeRequestID: "cursor-request"})
+	page, err := reporter.ListRequestLogs(context.Background(), RequestLogFilter{Days: 7, Limit: 2, RequestID: "req' OR 1=1", TraceID: "0123456789abcdef0123456789abcdef", Tag: "production' OR 1=1", FailureClass: "upstream", MinCost: &minCost, MaxCost: &maxCost, Before: time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC), BeforeRequestID: "cursor-request"})
 	if err != nil || len(page.Data) != 2 || page.NextBefore != "2026-08-25T11:59:00Z" || page.NextRequestID != "r2" || page.Data[1].FailureClass != "upstream" || page.Data[0].ContentStored || page.Data[0].TraceID != "0123456789abcdef0123456789abcdef" || len(page.Data[0].Tags) != 1 || page.Data[0].Tags[0] != "production" || page.Data[0].FirstTokenLatencyMS != 12 || page.Data[0].RetryCount != 2 || page.Data[0].FallbackCount != 1 || !page.Data[0].UsageEstimated || page.Data[0].OrganizationID != "org-1" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
@@ -57,14 +61,15 @@ func TestClickHouseRequestLogDetailAndSettings(t *testing.T) {
 }
 
 func TestClickHouseRequestLogGroupsAreServerAggregatedAndCursorPaginated(t *testing.T) {
+	minCost, maxCost := 0.01, 0.2
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("query")
-		for _, expected := range []string{"if(session_id = ''", "countIf(status = 'error')", "groupUniqArray(", "countIf(cache_status = 'hit')", "sum(usage.cost)", "GROUP BY group_id,currency", "before_group_id:String", "LIMIT 3"} {
+		for _, expected := range []string{"if(session_id = ''", "countIf(status = 'error')", "groupUniqArray(", "countIf(cache_status = 'hit')", "sum(usage.cost)", "usage.cost >= {min_cost:Float64}", "usage.cost <= {max_cost:Float64}", "GROUP BY group_id,currency", "before_group_id:String", "LIMIT 3"} {
 			if !strings.Contains(query, expected) {
 				t.Fatalf("group query missing %q: %s", expected, query)
 			}
 		}
-		if r.URL.Query().Get("param_tag") != "production' OR 1=1" || r.URL.Query().Get("param_before_group_id") != "session-3" || r.URL.Query().Get("param_before_currency") != "USD" {
+		if r.URL.Query().Get("param_tag") != "production' OR 1=1" || r.URL.Query().Get("param_min_cost") != "0.01" || r.URL.Query().Get("param_max_cost") != "0.2" || r.URL.Query().Get("param_before_group_id") != "session-3" || r.URL.Query().Get("param_before_currency") != "USD" {
 			t.Fatalf("group parameters were not bound: %s", r.URL.RawQuery)
 		}
 		_, _ = w.Write([]byte(
@@ -78,7 +83,7 @@ func TestClickHouseRequestLogGroupsAreServerAggregatedAndCursorPaginated(t *test
 		t.Fatal(err)
 	}
 	page, err := reporter.ListRequestLogGroups(context.Background(), RequestLogGroupFilter{
-		RequestLogFilter: RequestLogFilter{Days: 7, Limit: 2, Tag: "production' OR 1=1", Before: time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC)},
+		RequestLogFilter: RequestLogFilter{Days: 7, Limit: 2, Tag: "production' OR 1=1", MinCost: &minCost, MaxCost: &maxCost, Before: time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC)},
 		Dimension:        "session", BeforeGroupID: "session-3", BeforeCurrency: "USD",
 	})
 	if err != nil || len(page.Data) != 2 || page.Data[0].Requests != 3 || page.Data[0].CacheHits != 2 || page.NextBefore != "2026-08-25T11:00:00Z" || page.NextBeforeGroupID != "session-1" || page.NextBeforeCurrency != "USD" {
@@ -103,5 +108,9 @@ func TestRequestLogFilterBounds(t *testing.T) {
 	}
 	if _, err := ParseRequestLogLimit("201", 100); err == nil {
 		t.Fatal("unbounded request log page accepted")
+	}
+	minCost, maxCost := 2.0, 1.0
+	if _, err := reporter.ListRequestLogs(context.Background(), RequestLogFilter{Days: 7, Limit: 10, MinCost: &minCost, MaxCost: &maxCost}); err == nil {
+		t.Fatal("inverted cost range accepted")
 	}
 }

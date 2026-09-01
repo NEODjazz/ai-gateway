@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -33,6 +34,9 @@ type RequestLogFilter struct {
 	OrganizationID  string
 	CredentialID    string
 	CacheStatus     string
+	FailureClass    string
+	MinCost         *float64
+	MaxCost         *float64
 }
 
 type RequestLog struct {
@@ -120,7 +124,7 @@ type RequestLogReporter interface {
 }
 
 func (r *ClickHouseUsageReporter) ListRequestLogGroups(ctx context.Context, filter RequestLogGroupFilter) (RequestLogGroupPage, error) {
-	if r == nil || r.client == nil || filter.Days < 1 || filter.Days > 90 || filter.Limit < 1 || filter.Limit > 200 {
+	if r == nil || r.client == nil || !validRequestLogFilter(filter.RequestLogFilter) {
 		return RequestLogGroupPage{}, errors.New("invalid request log group filter")
 	}
 	dimension := ""
@@ -189,14 +193,14 @@ func (r *ClickHouseUsageReporter) RequestLogSettings() RequestLogSettings {
 }
 
 func (r *ClickHouseUsageReporter) ListRequestLogs(ctx context.Context, filter RequestLogFilter) (RequestLogPage, error) {
-	if r == nil || r.client == nil || filter.Days < 1 || filter.Days > 90 || filter.Limit < 1 || filter.Limit > 200 {
+	if r == nil || r.client == nil || !validRequestLogFilter(filter) {
 		return RequestLogPage{}, errors.New("invalid request log filter")
 	}
 	params, where, err := requestLogQuery(filter, true)
 	if err != nil {
 		return RequestLogPage{}, err
 	}
-	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s ORDER BY parseDateTimeBestEffort(timestamp) DESC,request_id DESC LIMIT %d FORMAT JSONEachRow", requestLogColumns(), r.table, strings.Join(where, " AND "), filter.Limit+1)
+	query := fmt.Sprintf("SELECT %s FROM %s AS usage WHERE %s ORDER BY parseDateTimeBestEffort(timestamp) DESC,request_id DESC LIMIT %d FORMAT JSONEachRow", requestLogColumns(), r.table, strings.Join(where, " AND "), filter.Limit+1)
 	params.Set("query", query)
 	rows, err := r.queryRequestLogs(ctx, params)
 	if err != nil {
@@ -209,6 +213,18 @@ func (r *ClickHouseUsageReporter) ListRequestLogs(ctx context.Context, filter Re
 		page.NextRequestID = page.Data[len(page.Data)-1].RequestID
 	}
 	return page, nil
+}
+
+func validRequestLogFilter(filter RequestLogFilter) bool {
+	if filter.Days < 1 || filter.Days > 90 || filter.Limit < 1 || filter.Limit > 200 {
+		return false
+	}
+	for _, value := range []*float64{filter.MinCost, filter.MaxCost} {
+		if value != nil && (*value < 0 || math.IsNaN(*value) || math.IsInf(*value, 0)) {
+			return false
+		}
+	}
+	return filter.MinCost == nil || filter.MaxCost == nil || *filter.MinCost <= *filter.MaxCost
 }
 
 func requestLogQuery(filter RequestLogFilter, includeCursor bool) (url.Values, []string, error) {
@@ -236,6 +252,15 @@ func requestLogQuery(filter RequestLogFilter, includeCursor bool) (url.Values, [
 	addStringFilter("organization_id", "organization_id", filter.OrganizationID)
 	addStringFilter("api_key_fingerprint", "credential_id", filter.CredentialID)
 	addStringFilter("cache_status", "cache_status", filter.CacheStatus)
+	addStringFilter("failure_class", "failure_class", filter.FailureClass)
+	if filter.MinCost != nil {
+		where = append(where, "usage.cost >= {min_cost:Float64}")
+		params.Set("param_min_cost", strconv.FormatFloat(*filter.MinCost, 'g', -1, 64))
+	}
+	if filter.MaxCost != nil {
+		where = append(where, "usage.cost <= {max_cost:Float64}")
+		params.Set("param_max_cost", strconv.FormatFloat(*filter.MaxCost, 'g', -1, 64))
+	}
 	if includeCursor && !filter.Before.IsZero() {
 		if filter.BeforeRequestID == "" {
 			return nil, nil, errors.New("before request id is required with before timestamp")

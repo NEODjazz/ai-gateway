@@ -189,4 +189,28 @@ describe("management pages", () => {
     await userEvent.click(screen.getByRole("menuitem", { name: "Details" }));
     expect(await screen.findAllByText(/gpt-versioned/)).toHaveLength(2);
   });
+
+  it("applies spend and failure filters and drills into a server-aggregated session", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/organizations") || url.includes("/teams") || url.includes("/users")) return json({ data: [] });
+      if (url.includes("/settings")) return json({ content_stored: false, retention_days: 730 });
+      if (url.includes("/request-logs/groups?")) return json({ data: [{ group_id: "session-cost", requests: 2, errors: 1, models: ["gpt"], providers: ["azure"], total_tokens: 20, cache_hits: 1, latency_ms: 100, cost: 0.25, currency: "USD", started_at: "2026-08-27T10:00:00Z", ended_at: "2026-08-27T11:00:00Z" }] });
+      return json({ data: [{ request_id: "req-cost", session_id: "session-cost", timestamp: "2026-08-27T11:00:00Z", status: "error", failure_class: "upstream", input_tokens: 0, output_tokens: 0, total_tokens: 0, latency_ms: 100, cost: 0.25, currency: "USD" }] });
+    });
+    renderAuthenticated(<RequestLogsPage />);
+    expect(await screen.findByText("req-cost")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Filter" }));
+    await userEvent.type(screen.getByLabelText("Failure class"), "upstream");
+    await userEvent.type(screen.getByLabelText("Minimum cost"), "0.1");
+    await userEvent.type(screen.getByLabelText("Maximum cost"), "1.5");
+    await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("failure_class=upstream") && String(call[0]).includes("min_cost=0.1") && String(call[0]).includes("max_cost=1.5"))).toBe(true));
+    await userEvent.click(screen.getByRole("tab", { name: "Sessions" }));
+    expect(await screen.findByText("session-cost")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for session-cost" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "View requests" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/request-logs?") && String(call[0]).includes("session_id=session-cost"))).toBe(true));
+    expect(screen.getByRole("tab", { name: "Requests" })).toHaveAttribute("aria-selected", "true");
+  });
 });

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -28,6 +29,9 @@ type RequestLogFilter struct {
 	OrganizationID  string
 	CredentialID    string
 	CacheStatus     string
+	FailureClass    string
+	MinCost         *float64
+	MaxCost         *float64
 }
 
 type RequestLog struct {
@@ -140,10 +144,16 @@ func (c *RemoteBudgetManagementClient) ListRequestLogs(ctx context.Context, audi
 
 func requestLogQuery(filter RequestLogFilter) url.Values {
 	query := url.Values{"days": {strconv.Itoa(filter.Days)}, "limit": {strconv.Itoa(filter.Limit)}}
-	for key, value := range map[string]string{"request_id": filter.RequestID, "session_id": filter.SessionID, "trace_id": filter.TraceID, "status": filter.Status, "model": filter.Model, "provider": filter.Provider, "tag": filter.Tag, "user_id": filter.UserID, "team_id": filter.TeamID, "organization_id": filter.OrganizationID, "credential_id": filter.CredentialID, "cache_status": filter.CacheStatus} {
+	for key, value := range map[string]string{"request_id": filter.RequestID, "session_id": filter.SessionID, "trace_id": filter.TraceID, "status": filter.Status, "model": filter.Model, "provider": filter.Provider, "tag": filter.Tag, "user_id": filter.UserID, "team_id": filter.TeamID, "organization_id": filter.OrganizationID, "credential_id": filter.CredentialID, "cache_status": filter.CacheStatus, "failure_class": filter.FailureClass} {
 		if value != "" {
 			query.Set(key, value)
 		}
+	}
+	if filter.MinCost != nil {
+		query.Set("min_cost", strconv.FormatFloat(*filter.MinCost, 'g', -1, 64))
+	}
+	if filter.MaxCost != nil {
+		query.Set("max_cost", strconv.FormatFloat(*filter.MaxCost, 'g', -1, 64))
 	}
 	return query
 }
@@ -280,7 +290,7 @@ func parseRequestLogFilter(r *http.Request, includeCursor bool) (RequestLogFilte
 		return RequestLogFilter{}, errors.New("days must be 1-90 and limit must be 1-200")
 	}
 	filter := RequestLogFilter{Days: days, Limit: limit}
-	for name, target := range map[string]*string{"request_id": &filter.RequestID, "session_id": &filter.SessionID, "trace_id": &filter.TraceID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider, "tag": &filter.Tag, "user_id": &filter.UserID, "team_id": &filter.TeamID, "organization_id": &filter.OrganizationID, "credential_id": &filter.CredentialID, "cache_status": &filter.CacheStatus} {
+	for name, target := range map[string]*string{"request_id": &filter.RequestID, "session_id": &filter.SessionID, "trace_id": &filter.TraceID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider, "tag": &filter.Tag, "user_id": &filter.UserID, "team_id": &filter.TeamID, "organization_id": &filter.OrganizationID, "credential_id": &filter.CredentialID, "cache_status": &filter.CacheStatus, "failure_class": &filter.FailureClass} {
 		*target = strings.TrimSpace(r.URL.Query().Get(name))
 		if len(*target) > 256 {
 			return RequestLogFilter{}, errors.New("request log filters must not exceed 256 characters")
@@ -291,6 +301,20 @@ func parseRequestLogFilter(r *http.Request, includeCursor bool) (RequestLogFilte
 	}
 	if filter.CacheStatus != "" && filter.CacheStatus != "hit" && filter.CacheStatus != "miss" && filter.CacheStatus != "error" {
 		return RequestLogFilter{}, errors.New("cache status must be hit, miss, or error")
+	}
+	for name, target := range map[string]**float64{"min_cost": &filter.MinCost, "max_cost": &filter.MaxCost} {
+		raw := strings.TrimSpace(r.URL.Query().Get(name))
+		if raw == "" {
+			continue
+		}
+		value, parseErr := strconv.ParseFloat(raw, 64)
+		if parseErr != nil || value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return RequestLogFilter{}, errors.New("cost filters must be finite non-negative numbers")
+		}
+		*target = &value
+	}
+	if filter.MinCost != nil && filter.MaxCost != nil && *filter.MinCost > *filter.MaxCost {
+		return RequestLogFilter{}, errors.New("min cost must not exceed max cost")
 	}
 	if filter.TraceID != "" {
 		if len(filter.TraceID) != 32 {
