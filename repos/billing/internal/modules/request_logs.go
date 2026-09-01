@@ -28,7 +28,9 @@ type RequestLogFilter struct {
 	Provider        string
 	UserID          string
 	TeamID          string
+	OrganizationID  string
 	CredentialID    string
+	CacheStatus     string
 }
 
 type RequestLog struct {
@@ -107,7 +109,9 @@ func (r *ClickHouseUsageReporter) ListRequestLogs(ctx context.Context, filter Re
 	addStringFilter(canonicalUsageProviderExpression, "provider", filter.Provider)
 	addStringFilter("user_id", "user_id", filter.UserID)
 	addStringFilter("team_id", "team_id", filter.TeamID)
+	addStringFilter("organization_id", "organization_id", filter.OrganizationID)
 	addStringFilter("api_key_fingerprint", "credential_id", filter.CredentialID)
+	addStringFilter("cache_status", "cache_status", filter.CacheStatus)
 	if !filter.Before.IsZero() {
 		if filter.BeforeRequestID == "" {
 			return RequestLogPage{}, errors.New("before request id is required with before timestamp")

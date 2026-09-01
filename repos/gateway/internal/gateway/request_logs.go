@@ -22,7 +22,9 @@ type RequestLogFilter struct {
 	Provider        string
 	UserID          string
 	TeamID          string
+	OrganizationID  string
 	CredentialID    string
+	CacheStatus     string
 }
 
 type RequestLog struct {
@@ -31,6 +33,7 @@ type RequestLog struct {
 	SessionID            string   `json:"session_id,omitempty"`
 	UserID               string   `json:"user_id,omitempty"`
 	TeamID               string   `json:"team_id,omitempty"`
+	OrganizationID       string   `json:"organization_id,omitempty"`
 	Roles                []string `json:"roles,omitempty"`
 	CredentialID         string   `json:"credential_id,omitempty"`
 	Provider             string   `json:"provider,omitempty"`
@@ -44,10 +47,15 @@ type RequestLog struct {
 	Status               string   `json:"status"`
 	FailureClass         string   `json:"failure_class,omitempty"`
 	LatencyMS            uint32   `json:"latency_ms"`
+	FirstTokenLatencyMS  uint32   `json:"first_token_latency_ms"`
+	RetryCount           uint16   `json:"retry_count"`
+	FallbackCount        uint16   `json:"fallback_count"`
 	CacheStatus          string   `json:"cache_status,omitempty"`
+	CacheKind            string   `json:"cache_kind,omitempty"`
 	InputTokens          uint32   `json:"input_tokens"`
 	OutputTokens         uint32   `json:"output_tokens"`
 	TotalTokens          uint32   `json:"total_tokens"`
+	UsageEstimated       bool     `json:"usage_estimated"`
 	Cost                 float64  `json:"cost"`
 	Currency             string   `json:"currency"`
 	ContentStored        bool     `json:"content_stored"`
@@ -73,7 +81,7 @@ type RequestLogClient interface {
 
 func (c *RemoteBudgetManagementClient) ListRequestLogs(ctx context.Context, audit ManagementAudit, filter RequestLogFilter) (RequestLogPage, error) {
 	query := url.Values{"days": {strconv.Itoa(filter.Days)}, "limit": {strconv.Itoa(filter.Limit)}}
-	for key, value := range map[string]string{"request_id": filter.RequestID, "session_id": filter.SessionID, "status": filter.Status, "model": filter.Model, "provider": filter.Provider, "user_id": filter.UserID, "team_id": filter.TeamID, "credential_id": filter.CredentialID} {
+	for key, value := range map[string]string{"request_id": filter.RequestID, "session_id": filter.SessionID, "status": filter.Status, "model": filter.Model, "provider": filter.Provider, "user_id": filter.UserID, "team_id": filter.TeamID, "organization_id": filter.OrganizationID, "credential_id": filter.CredentialID, "cache_status": filter.CacheStatus} {
 		if value != "" {
 			query.Set(key, value)
 		}
@@ -172,7 +180,7 @@ func requestLogFilter(r *http.Request) (RequestLogFilter, error) {
 		return RequestLogFilter{}, errors.New("days must be 1-90 and limit must be 1-200")
 	}
 	filter := RequestLogFilter{Days: days, Limit: limit}
-	for name, target := range map[string]*string{"request_id": &filter.RequestID, "session_id": &filter.SessionID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider, "user_id": &filter.UserID, "team_id": &filter.TeamID, "credential_id": &filter.CredentialID} {
+	for name, target := range map[string]*string{"request_id": &filter.RequestID, "session_id": &filter.SessionID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider, "user_id": &filter.UserID, "team_id": &filter.TeamID, "organization_id": &filter.OrganizationID, "credential_id": &filter.CredentialID, "cache_status": &filter.CacheStatus} {
 		*target = strings.TrimSpace(r.URL.Query().Get(name))
 		if len(*target) > 256 {
 			return RequestLogFilter{}, errors.New("request log filters must not exceed 256 characters")
@@ -180,6 +188,9 @@ func requestLogFilter(r *http.Request) (RequestLogFilter, error) {
 	}
 	if filter.Status != "" && filter.Status != "ok" && filter.Status != "error" {
 		return RequestLogFilter{}, errors.New("status must be ok or error")
+	}
+	if filter.CacheStatus != "" && filter.CacheStatus != "hit" && filter.CacheStatus != "miss" && filter.CacheStatus != "error" {
+		return RequestLogFilter{}, errors.New("cache status must be hit, miss, or error")
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("before")); raw != "" {
 		filter.Before, err = time.Parse(time.RFC3339Nano, raw)

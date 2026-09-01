@@ -50,13 +50,17 @@ func (h requestLogManagementHandler) list(w http.ResponseWriter, r *http.Request
 	filter := modules.RequestLogFilter{Days: days, Limit: limit}
 	for name, target := range map[string]*string{
 		"request_id": &filter.RequestID, "session_id": &filter.SessionID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider,
-		"user_id": &filter.UserID, "team_id": &filter.TeamID, "credential_id": &filter.CredentialID,
+		"user_id": &filter.UserID, "team_id": &filter.TeamID, "organization_id": &filter.OrganizationID, "credential_id": &filter.CredentialID, "cache_status": &filter.CacheStatus,
 	} {
 		*target = strings.TrimSpace(r.URL.Query().Get(name))
 		if len(*target) > 256 {
 			http.Error(w, "invalid request log filter", http.StatusBadRequest)
 			return
 		}
+	}
+	if filter.CacheStatus != "" && filter.CacheStatus != "hit" && filter.CacheStatus != "miss" && filter.CacheStatus != "error" {
+		http.Error(w, "invalid request log filter", http.StatusBadRequest)
+		return
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("before")); raw != "" {
 		filter.Before, err = time.Parse(time.RFC3339Nano, raw)

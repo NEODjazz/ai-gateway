@@ -194,7 +194,8 @@ bounded 7/30/90-day window and breaks requests, tokens, latency, and spend down
 by day, model, and provider. Costs remain separated by currency.
 The Request Logs view provides a bounded, cursor-paginated explorer over the
 same final outcomes with filters for request, status, model, endpoint, user,
-team, and credential fingerprint. Its detail contract contains operational
+team, organization, cache outcome, and credential fingerprint over bounded
+7/30/90-day windows. Its detail contract contains operational
 metadata, token counts, cost, cache state, and a bounded failure class only.
 It also exposes streaming time-to-first-token, retry and fallback counts, cache
 kind, organization scope, and whether token counts came from the provider or

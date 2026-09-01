@@ -34,6 +34,8 @@ type RequestLog = Row & {
 
 type LogsResponse = { data?: RequestLog[]; next_before?: string; next_request_id?: string };
 type Cursor = { before: string; requestID: string } | null;
+type IdentityOption = { id: string; name?: string; email?: string };
+const emptyFilters = { request_id: "", session_id: "", status: "", model: "", provider: "", cache_status: "", organization_id: "", team_id: "", user_id: "", credential_id: "" };
 const requestLogColumns = [
   { key: "timestamp", label: "Time" }, { key: "request_id", label: "Request" }, { key: "session_id", label: "Session" }, { key: "status", label: "Status" },
   { key: "model", label: "Public model" }, { key: "upstream_model", label: "Upstream model" }, { key: "provider_id", label: "Provider" },
@@ -52,7 +54,12 @@ function cacheStatus(value: unknown): ReactNode {
 export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
   const { client } = useAuth();
   const [rows, setRows] = useState<RequestLog[]>([]);
-  const [filters, setFilters] = useState({ request_id: "", session_id: "", status: "", model: "", provider: "" });
+  const [filters, setFilters] = useState(emptyFilters);
+  const [days, setDays] = useState("7");
+  const [liveTail, setLiveTail] = useState(false);
+  const [organizations, setOrganizations] = useState<IdentityOption[]>([]);
+  const [teams, setTeams] = useState<IdentityOption[]>([]);
+  const [users, setUsers] = useState<IdentityOption[]>([]);
   const [nextCursor, setNextCursor] = useState<Cursor>(null);
   const [detail, setDetail] = useState<unknown>();
   const [settings, setSettings] = useState<unknown>();
@@ -62,7 +69,7 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
   const [visibleColumns, setVisibleColumns] = useState(() => new Set(requestLogColumns.map((column) => column.key)));
   const load = useCallback(async (append = false, requestedCursor: Cursor = null) => {
     setLoading(true); setError("");
-    const query = new URLSearchParams({ limit: "50" });
+    const query = new URLSearchParams({ limit: "50", days });
     for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
     if (append && requestedCursor) {
       query.set("before", requestedCursor.before);
@@ -74,8 +81,25 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
       setNextCursor(response.next_before && response.next_request_id ? { before: response.next_before, requestID: response.next_request_id } : null);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load request logs"); }
     finally { setLoading(false); }
-  }, [client, filters]);
-  useEffect(() => { void load(); client.request("/admin/v1/request-logs/settings").then(setSettings).catch(() => undefined); }, []); // Initial request intentionally uses empty filters.
+  }, [client, days, filters]);
+  useEffect(() => {
+    client.request("/admin/v1/request-logs/settings").then(setSettings).catch(() => undefined);
+    const loadOptions = async (path: string, setter: (rows: IdentityOption[]) => void) => {
+      try {
+        const response = await client.request<{ data?: IdentityOption[] }>(`${path}?limit=500`);
+        setter(response.data || []);
+      } catch { setter([]); }
+    };
+    void loadOptions("/admin/v1/organizations", setOrganizations);
+    void loadOptions("/admin/v1/teams", setTeams);
+    void loadOptions("/admin/v1/users", setUsers);
+  }, []);
+  useEffect(() => { void load(); }, [days]); // Time-window changes reset the cursor and refresh immediately.
+  useEffect(() => {
+    if (!liveTail) return;
+    const timer = window.setInterval(() => { void load(false); }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [liveTail, load]);
   async function apply(event: FormEvent) { event.preventDefault(); setFiltersOpen(false); await load(false); }
   async function showDetail(row: RequestLog) {
     try { setDetail(await client.request(`/admin/v1/request-logs/${encodeURIComponent(row.request_id)}`)); }
@@ -100,5 +124,5 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
     { key: "cost", label: "Cost", render: (value: unknown, row: Row) => formatCost(Number(value || 0), String(row.currency || "USD")) },
     { key: "currency", label: "Currency" }
   ];
-  return <>{!embedded && <PageHeader eyebrow="Observability" title="Request logs" description="Cursor-paginated final outcomes and session identity without prompts, responses or raw provider errors." />}<div className="key-toolbar"><span /><div className="key-toolbar-right"><label className="key-search"><span className="sr-only">Search request logs</span><input aria-label="Search request logs" placeholder="Search by request ID" value={filters.request_id} onChange={(event) => setFilters((current) => ({ ...current, request_id: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") void load(false); }} /></label><ColumnsMenu columns={requestLogColumns} visible={visibleColumns} onChange={setVisibleColumns} /><button className="secondary" onClick={() => setFiltersOpen(true)}>Filter{Object.entries(filters).some(([key, value]) => key !== "request_id" && value) ? " (active)" : ""}</button><button className="secondary icon-only-button" aria-label="Refresh request logs" onClick={() => void load(false)}><RefreshIcon /></button></div></div>{settings !== undefined && <div className="operation-result">Privacy settings: {JSON.stringify(settings)}</div>}{error && <ErrorState message={error} retry={() => void load()} />}{loading && !rows.length ? <LoadingState /> : <DataTable rows={rows} columns={columns.filter((column) => visibleColumns.has(column.key))} actions={(row) => <ActionsMenu label={`Actions for ${String(row.request_id)}`} items={[{ label: "Details", onSelect: () => showDetail(row as RequestLog) }]} />} />}{nextCursor && <button className="secondary load-more" onClick={() => void load(true, nextCursor)}>Load older</button>}{filtersOpen && <div className="modal-backdrop" role="presentation"><form className="modal compact-modal" role="dialog" aria-modal="true" aria-label="Filter request logs" onSubmit={apply}><div className="modal-heading"><h2>Filter request logs</h2><button type="button" className="icon-button" aria-label="Close filters" onClick={() => setFiltersOpen(false)}>×</button></div><div className="form-grid">{Object.keys(filters).map((key) => <label key={key}>{key.replaceAll("_", " ")}<input value={filters[key as keyof typeof filters]} onChange={(event) => setFilters((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div><div className="modal-actions"><button type="button" className="secondary" onClick={() => setFilters({ request_id: "", session_id: "", status: "", model: "", provider: "" })}>Reset filters</button><button>Apply filters</button></div></form></div>}{detail !== undefined && <div className="modal-backdrop" role="presentation"><section className="modal" role="dialog" aria-modal="true" aria-label="Request details"><div className="modal-heading"><h2>Request details</h2><button className="icon-button" aria-label="Close" onClick={() => setDetail(undefined)}>×</button></div><pre>{JSON.stringify(detail, null, 2)}</pre></section></div>}</>;
+  return <>{!embedded && <PageHeader eyebrow="Observability" title="Request logs" description="Cursor-paginated final outcomes and session identity without prompts, responses or raw provider errors." />}<div className="key-toolbar"><div className="key-toolbar-right"><label>Window<select aria-label="Request log window" value={days} onChange={(event) => setDays(event.target.value)}><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option></select></label><label><input type="checkbox" checked={liveTail} onChange={(event) => setLiveTail(event.target.checked)} /> Live tail</label>{liveTail && <span className="status enabled">Every 15s</span>}</div><div className="key-toolbar-right"><label className="key-search"><span className="sr-only">Search request logs</span><input aria-label="Search request logs" placeholder="Search by request ID" value={filters.request_id} onChange={(event) => setFilters((current) => ({ ...current, request_id: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") void load(false); }} /></label><ColumnsMenu columns={requestLogColumns} visible={visibleColumns} onChange={setVisibleColumns} /><button className="secondary" onClick={() => setFiltersOpen(true)}>Filter{Object.entries(filters).some(([key, value]) => key !== "request_id" && value) ? " (active)" : ""}</button><button className="secondary icon-only-button" aria-label="Refresh request logs" onClick={() => void load(false)}><RefreshIcon /></button></div></div>{settings !== undefined && <div className="operation-result">Privacy settings: {JSON.stringify(settings)}</div>}{error && <ErrorState message={error} retry={() => void load()} />}{loading && !rows.length ? <LoadingState /> : <DataTable rows={rows} columns={columns.filter((column) => visibleColumns.has(column.key))} actions={(row) => <ActionsMenu label={`Actions for ${String(row.request_id)}`} items={[{ label: "Details", onSelect: () => showDetail(row as RequestLog) }]} />} />}{nextCursor && <button className="secondary load-more" onClick={() => void load(true, nextCursor)}>Load older</button>}{filtersOpen && <div className="modal-backdrop" role="presentation"><form className="modal compact-modal" role="dialog" aria-modal="true" aria-label="Filter request logs" onSubmit={apply}><div className="modal-heading"><h2>Filter request logs</h2><button type="button" className="icon-button" aria-label="Close filters" onClick={() => setFiltersOpen(false)}>×</button></div><div className="form-grid"><label>Session ID<input value={filters.session_id} onChange={(event) => setFilters((current) => ({ ...current, session_id: event.target.value }))} /></label><label>Status<select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="">All statuses</option><option value="ok">Success</option><option value="error">Error</option></select></label><label>Cache<select value={filters.cache_status} onChange={(event) => setFilters((current) => ({ ...current, cache_status: event.target.value }))}><option value="">All requests</option><option value="hit">Hit</option><option value="miss">Miss</option><option value="error">Error</option></select></label><label>Model<input value={filters.model} onChange={(event) => setFilters((current) => ({ ...current, model: event.target.value }))} /></label><label>Provider<input value={filters.provider} onChange={(event) => setFilters((current) => ({ ...current, provider: event.target.value }))} /></label><label>Organization<select value={filters.organization_id} onChange={(event) => setFilters((current) => ({ ...current, organization_id: event.target.value }))}><option value="">All organizations</option>{organizations.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select></label><label>Team<select value={filters.team_id} onChange={(event) => setFilters((current) => ({ ...current, team_id: event.target.value }))}><option value="">All teams</option>{teams.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select></label><label>User<select value={filters.user_id} onChange={(event) => setFilters((current) => ({ ...current, user_id: event.target.value }))}><option value="">All users</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name || item.email || item.id}</option>)}</select></label><label>Credential ID<input value={filters.credential_id} onChange={(event) => setFilters((current) => ({ ...current, credential_id: event.target.value }))} /></label></div><div className="modal-actions"><button type="button" className="secondary" onClick={() => setFilters(emptyFilters)}>Reset filters</button><button>Apply filters</button></div></form></div>}{detail !== undefined && <div className="modal-backdrop" role="presentation"><section className="modal" role="dialog" aria-modal="true" aria-label="Request details"><div className="modal-heading"><h2>Request details</h2><button className="icon-button" aria-label="Close" onClick={() => setDetail(undefined)}>×</button></div><pre>{JSON.stringify(detail, null, 2)}</pre></section></div>}</>;
 }
