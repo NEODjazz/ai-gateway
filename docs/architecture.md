@@ -151,7 +151,7 @@ Auth находится в gateway-level pipeline и выполняется од
 
 ### Межсервисные границы данных
 
-- `auth`: получает `{token}`, ищет persistent key по HMAC-SHA256 и возвращает `user_id`, `team_id`, policy и непрозрачный `credential_id`; после auth gateway очищает bearer из request context.
+- `auth`: получает `{token}`, ищет persistent key по HMAC-SHA256 и возвращает `user_id`, `team_id`, policy, безопасные alias/tags и непрозрачный `credential_id`; после auth gateway очищает bearer из request context. Plaintext token и lookup hash не возвращаются.
 - `dlp`: получает только `request_id` и текстовую проекцию запроса.
 - `av`: получает `request_id`, текстовую проекцию и отдельные base64 image attachments без bearer/identity; декодирует и сканирует каждый payload через ICAP с исходным media type.
 - `anonymizer`: получает только текстовую проекцию messages/input/instructions; image URL/base64 удаляются до вызова и восстанавливаются неизменными после ответа.
@@ -180,7 +180,7 @@ Endpoints первоначально загружаются из `PROVIDERS_JSON
 `PROVIDER_CONTROL_PLANE_POSTGRES_DSN`, пустое persistent-состояние атомарно
 инициализируется этой конфигурацией, после чего PostgreSQL становится source of
 truth для Providers, encrypted Credentials, Deployments, Model Groups,
-Guardrail Policies, Projects/Access Groups, MCP Servers/Toolsets, Agent/Tool
+Guardrail Policies and scoped attachments, Projects/Access Groups, MCP Servers/Toolsets, Agent/Tool
 Policy templates и Logging Destinations.
 Изменение сначала сохраняет versioned JSONB snapshot с optimistic revision и
 только затем считается успешным. При ошибке runtime snapshot откатывается.
@@ -282,7 +282,13 @@ marker и `av_enabled=true`. Поддерживаются только inline ba
 с проверкой magic signature; remote URL запрещены. Лимиты: 8 файлов, 8 MiB на
 файл, 16 MiB decoded total и 24 MiB на JSON body.
 
-Включение проверок задается на каждом provider endpoint через `dlp_enabled` и `av_enabled`. Это означает, что failover endpoint должен иметь эквивалентную security policy, если обход проверки недопустим.
+Проверки могут задаваться на provider endpoint через `dlp_enabled`/`av_enabled`
+либо через durable policy attachment. Attachment сопоставляет запрос по team,
+opaque key ID или alias, public model и key tags; все заполненные измерения
+должны совпасть, trailing `*` означает prefix wildcard. Совпавшие policies
+объединяются с endpoint policy операцией OR. Поэтому scoped policy нельзя
+обойти failover-ом на endpoint без локального guardrail. Отсутствующая,
+disabled или недоступная обязательная policy блокирует запрос.
 
 ## Данные и хранилища
 

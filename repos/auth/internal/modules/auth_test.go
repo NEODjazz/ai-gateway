@@ -56,6 +56,18 @@ func TestAuthModuleAcceptsJWT(t *testing.T) {
 	}
 }
 
+func TestStoredVirtualKeyPropagatesAliasAndTags(t *testing.T) {
+	store := &fakeVirtualKeyStore{found: true, key: StoredVirtualKey{ID: "vk-1", Alias: "clinical-prod", Tags: []string{"hipaa"}, TeamID: "care-a"}}
+	module := NewAuthModuleWithStore(true, store, "hash-secret", false)
+	req := RequestContext{APIKey: "plaintext-token"}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.CredentialID != "vk-1" || req.CredentialAlias != "clinical-prod" || len(req.Tags) != 1 || req.Tags[0] != "hipaa" {
+		t.Fatalf("stored key matching metadata was not propagated: %+v", req)
+	}
+}
+
 func TestAuthModuleRejectsExpiredJWT(t *testing.T) {
 	secret := "test-secret"
 	token := testJWT(t, secret, map[string]any{

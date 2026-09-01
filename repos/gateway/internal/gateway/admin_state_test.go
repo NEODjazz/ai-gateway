@@ -56,6 +56,9 @@ func TestAdminStatePersistsEncryptedAndRestores(t *testing.T) {
 		if _, err := access.PutProject("project-a", Project{Name: "Project A", Enabled: true}); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := access.PutPolicyAttachment("global", PolicyAttachment{PolicyName: "strict", Scope: "*"}); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := mcp.PutServer("server-a", MCPServer{Label: "Server A", ServerURL: "https://mcp.example.test", Transport: "sse", Tools: []string{"mcp:server-a:*"}, Enabled: true}); err != nil {
 			t.Fatal(err)
 		}
@@ -77,8 +80,8 @@ func TestAdminStatePersistsEncryptedAndRestores(t *testing.T) {
 	}
 
 	_, restoredAccess, restoredMCP, restoredAgents, restoredLogging := newTestAdminRuntime(t, controller)
-	if len(restoredAccess.Projects()) != 1 || len(restoredMCP.Servers()) != 1 || len(restoredAgents.ToolPolicies()) != 1 {
-		t.Fatalf("state was not restored: projects=%d servers=%d policies=%d", len(restoredAccess.Projects()), len(restoredMCP.Servers()), len(restoredAgents.ToolPolicies()))
+	if len(restoredAccess.Projects()) != 1 || len(restoredAccess.PolicyAttachments()) != 1 || len(restoredMCP.Servers()) != 1 || len(restoredAgents.ToolPolicies()) != 1 {
+		t.Fatalf("state was not restored: projects=%d attachments=%d servers=%d policies=%d", len(restoredAccess.Projects()), len(restoredAccess.PolicyAttachments()), len(restoredMCP.Servers()), len(restoredAgents.ToolPolicies()))
 	}
 	restoredLogging.mu.RLock()
 	secret := restoredLogging.destinations["logs-a"].secret

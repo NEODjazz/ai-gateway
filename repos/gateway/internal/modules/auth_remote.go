@@ -12,15 +12,17 @@ type AuthRequest struct {
 }
 
 type AuthResponse struct {
-	UserID         string   `json:"user_id"`
-	Roles          []string `json:"roles,omitempty"`
-	CredentialID   string   `json:"credential_id,omitempty"`
-	TeamID         string   `json:"team_id,omitempty"`
-	OrganizationID string   `json:"organization_id,omitempty"`
-	AllowedModels  []string `json:"allowed_models,omitempty"`
-	AllowedTools   []string `json:"allowed_tools,omitempty"`
-	RateLimitRPM   int      `json:"rate_limit_rpm,omitempty"`
-	RateLimitTPM   int      `json:"rate_limit_tpm,omitempty"`
+	UserID          string   `json:"user_id"`
+	Roles           []string `json:"roles,omitempty"`
+	CredentialID    string   `json:"credential_id,omitempty"`
+	CredentialAlias string   `json:"credential_alias,omitempty"`
+	TeamID          string   `json:"team_id,omitempty"`
+	OrganizationID  string   `json:"organization_id,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
+	AllowedModels   []string `json:"allowed_models,omitempty"`
+	AllowedTools    []string `json:"allowed_tools,omitempty"`
+	RateLimitRPM    int      `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM    int      `json:"rate_limit_tpm,omitempty"`
 }
 
 type RemoteAuthModule struct {
@@ -47,8 +49,10 @@ func (m RemoteAuthModule) Handle(ctx context.Context, req *RequestContext) error
 	req.UserID = response.UserID
 	req.Roles = append([]string(nil), response.Roles...)
 	req.CredentialID = response.CredentialID
+	req.CredentialAlias = response.CredentialAlias
 	req.TeamID = response.TeamID
 	req.OrganizationID = response.OrganizationID
+	req.Tags = append([]string(nil), response.Tags...)
 	req.AllowedModels = append([]string(nil), response.AllowedModels...)
 	req.AllowedTools = append([]string(nil), response.AllowedTools...)
 	req.RateLimitRPM = response.RateLimitRPM

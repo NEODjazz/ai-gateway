@@ -56,7 +56,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/guardrails", title: "Guardrails", group: "Govern", element: <GuardrailsPage />, available: true },
   { path: "/guardrails-monitor", title: "Guardrail monitor", group: "Govern", element: <EndpointPage eyebrow="Compliance" title="Guardrail monitor" description="Metadata-only check outcomes held in bounded runtime memory." path="/admin/v1/guardrails/monitor" />, available: true },
   { path: "/budgets", title: "Budgets", group: "Govern", element: <ResourcePage config={resourceConfigs.budgets} />, available: true },
-  { path: "/policies", title: "Policies", group: "Govern", element: unavailable("Policies", "Cross-resource policy attachments are not yet part of the gateway API."), available: false },
+  { path: "/policies", title: "Policies", group: "Govern", element: <ResourcePage config={resourceConfigs.policyAttachments} />, available: true },
   { path: "/tag-management", title: "Tag management", group: "Govern", element: unavailable("Tag management", "Tags are accepted on resources; a central validation and cost-allocation registry is planned."), available: false },
   { path: "/cache", title: "Caching", group: "System", element: <EndpointPage eyebrow="Performance" title="Cache diagnostics" description="Exact and semantic cache counters and bounded configuration metadata." path="/admin/v1/cache/diagnostics" />, available: true },
   { path: "/logging", title: "Logging & alerts", group: "System", element: <ResourcePage config={resourceConfigs.logging} />, available: true },

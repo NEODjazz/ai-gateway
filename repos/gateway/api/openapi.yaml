@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.15
+  version: 0.1.16
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -815,6 +815,39 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/policy-attachments:
+    get:
+      operationId: listPolicyAttachments
+      tags: [Guardrails]
+      summary: List durable guardrail policy attachments
+      responses:
+        '200': {description: Policy attachments, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/PolicyAttachment'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/policy-attachments/{id}:
+    parameters: [{$ref: '#/components/parameters/AccessEntryID'}]
+    put:
+      operationId: putPolicyAttachment
+      tags: [Guardrails]
+      summary: Attach an enabled guardrail policy to request identity and model scopes
+      description: Every configured scope dimension must match. A trailing asterisk performs prefix matching; scope `*` applies globally.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PolicyAttachmentInput'}}}}
+      responses:
+        '200': {description: Policy attachment saved, content: {application/json: {schema: {$ref: '#/components/schemas/PolicyAttachment'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    delete:
+      operationId: deletePolicyAttachment
+      tags: [Guardrails]
+      summary: Delete a policy attachment
+      responses:
+        '204': {description: Policy attachment deleted}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
   /admin/v1/compliance/check:
     post:
       operationId: checkCompliance
@@ -2492,6 +2525,23 @@ components:
         - type: object
           required: [name]
           properties: {name: {type: string}}
+    PolicyAttachmentInput:
+      type: object
+      additionalProperties: false
+      required: [policy_name, scope]
+      properties:
+        policy_name: {type: string, minLength: 1, maxLength: 128}
+        scope: {type: string, enum: ['*', specific, '']}
+        teams: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+        keys: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+        models: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+        tags: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+    PolicyAttachment:
+      allOf:
+        - {$ref: '#/components/schemas/PolicyAttachmentInput'}
+        - type: object
+          required: [id]
+          properties: {id: {type: string}}
     ComplianceCheckInput:
       type: object
       additionalProperties: false

@@ -161,6 +161,9 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateChatTokens(request)) {
 		return
 	}
+	if !h.applyPolicyAttachments(w, &reqCtx, request.Model) {
+		return
+	}
 	if stream {
 		streamStarted := false
 		writeStreamPayload := func(payload string) error {
@@ -241,6 +244,9 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateResponseTokens(request)) {
+		return
+	}
+	if !h.applyPolicyAttachments(w, &reqCtx, request.Model) {
 		return
 	}
 	if request.Stream {
@@ -325,6 +331,9 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateEmbeddingTokens(request)) {
 		return
 	}
+	if !h.applyPolicyAttachments(w, &reqCtx, request.Model) {
+		return
+	}
 	embeddingProvider, ok := h.provider.(provider.EmbeddingProvider)
 	if !ok {
 		writeError(w, http.StatusBadGateway, "provider_failed", "embeddings are not supported by the configured provider")
@@ -361,6 +370,9 @@ func (h Handler) Rerank(w http.ResponseWriter, r *http.Request) {
 	}
 	reqCtx.APIKey = ""
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateRerankTokens(request)) {
+		return
+	}
+	if !h.applyPolicyAttachments(w, &reqCtx, request.Model) {
 		return
 	}
 	rerankProvider, ok := h.provider.(provider.RerankProvider)
@@ -438,6 +450,10 @@ func decodeInferenceRequest(w http.ResponseWriter, r *http.Request, target any) 
 func writeProviderFailure(w http.ResponseWriter, err error) {
 	if errors.Is(err, modules.ErrContentRejected) {
 		writeError(w, http.StatusUnavailableForLegalReasons, "content_rejected", "content rejected")
+		return
+	}
+	if errors.Is(err, modules.ErrGuardrailUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "guardrail_unavailable", "required content policy service is unavailable")
 		return
 	}
 	if errors.Is(err, modules.ErrBudgetExceeded) {

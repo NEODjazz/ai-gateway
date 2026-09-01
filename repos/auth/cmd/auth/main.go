@@ -44,15 +44,17 @@ func main() {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(authResponse{
-			UserID:         ctx.UserID,
-			Roles:          ctx.Roles,
-			CredentialID:   ctx.CredentialID,
-			TeamID:         ctx.TeamID,
-			OrganizationID: ctx.OrganizationID,
-			AllowedModels:  ctx.AllowedModels,
-			AllowedTools:   ctx.AllowedTools,
-			RateLimitRPM:   ctx.RateLimitRPM,
-			RateLimitTPM:   ctx.RateLimitTPM,
+			UserID:          ctx.UserID,
+			Roles:           ctx.Roles,
+			CredentialID:    ctx.CredentialID,
+			CredentialAlias: ctx.CredentialAlias,
+			TeamID:          ctx.TeamID,
+			OrganizationID:  ctx.OrganizationID,
+			Tags:            ctx.Tags,
+			AllowedModels:   ctx.AllowedModels,
+			AllowedTools:    ctx.AllowedTools,
+			RateLimitRPM:    ctx.RateLimitRPM,
+			RateLimitTPM:    ctx.RateLimitTPM,
 		})
 	})
 	registerManagementRoutes(http.DefaultServeMux, &module, os.Getenv("MANAGEMENT_SHARED_SECRET"))
@@ -66,13 +68,15 @@ type authRequest struct {
 }
 
 type authResponse struct {
-	UserID         string   `json:"user_id"`
-	Roles          []string `json:"roles,omitempty"`
-	CredentialID   string   `json:"credential_id,omitempty"`
-	TeamID         string   `json:"team_id,omitempty"`
-	OrganizationID string   `json:"organization_id,omitempty"`
-	AllowedModels  []string `json:"allowed_models,omitempty"`
-	AllowedTools   []string `json:"allowed_tools,omitempty"`
-	RateLimitRPM   int      `json:"rate_limit_rpm,omitempty"`
-	RateLimitTPM   int      `json:"rate_limit_tpm,omitempty"`
+	UserID          string   `json:"user_id"`
+	Roles           []string `json:"roles,omitempty"`
+	CredentialID    string   `json:"credential_id,omitempty"`
+	CredentialAlias string   `json:"credential_alias,omitempty"`
+	TeamID          string   `json:"team_id,omitempty"`
+	OrganizationID  string   `json:"organization_id,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
+	AllowedModels   []string `json:"allowed_models,omitempty"`
+	AllowedTools    []string `json:"allowed_tools,omitempty"`
+	RateLimitRPM    int      `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM    int      `json:"rate_limit_tpm,omitempty"`
 }

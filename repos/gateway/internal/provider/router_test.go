@@ -1190,6 +1190,31 @@ func TestRouterResolvesNamedGuardrailPolicy(t *testing.T) {
 	}
 }
 
+func TestProviderAttemptContextCombinesAttachedAndDeploymentGuardrails(t *testing.T) {
+	req := modules.RequestContext{Metadata: map[string]string{
+		"policy.guardrail.required":  "true",
+		"policy.guardrail.names":     "strict",
+		"policy.modules.dlp.enabled": "true",
+		"policy.modules.av.enabled":  "false",
+	}}
+	attempt := providerAttemptContext(req, Endpoint{Name: "endpoint", ProviderID: "provider", Type: "demo", AVEnabled: true})
+	if attempt.Metadata["provider.modules.dlp.enabled"] != "true" || attempt.Metadata["provider.modules.av.enabled"] != "true" {
+		t.Fatalf("attached and deployment guardrails were not combined: %+v", attempt.Metadata)
+	}
+	if attempt.Metadata["provider.guardrail.attached_policies"] != "strict" {
+		t.Fatalf("attached policy identity was lost: %+v", attempt.Metadata)
+	}
+	if attempt.Metadata["provider.guardrail.policy"] != "strict" {
+		t.Fatalf("attached policy was not exposed to guardrail observability: %+v", attempt.Metadata)
+	}
+}
+
+func TestGuardrailUnavailableIsTerminalAcrossFallbacks(t *testing.T) {
+	if !terminalModuleError(errors.Join(errors.New("scanner failed"), modules.ErrGuardrailUnavailable)) {
+		t.Fatal("required guardrail unavailability must not fall through to another endpoint")
+	}
+}
+
 func TestRouterSkipsEndpointWithUnknownGuardrailPolicy(t *testing.T) {
 	endpointModule := &metadataModule{key: "provider.endpoint.name"}
 	router := New(Config{

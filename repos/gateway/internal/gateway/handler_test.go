@@ -504,6 +504,18 @@ func TestProviderContentRejectionReturns451WithoutDetails(t *testing.T) {
 	}
 }
 
+func TestProviderGuardrailUnavailableReturns503WithoutDetails(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeProviderFailure(recorder, errors.Join(errors.New("http://internal-dlp/scan secret detail"), modules.ErrGuardrailUnavailable))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", recorder.Code)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"code":"guardrail_unavailable"`) || strings.Contains(body, "internal-dlp") || strings.Contains(body, "secret detail") {
+		t.Fatalf("unexpected guardrail unavailable response: %s", body)
+	}
+}
+
 func TestProviderBillingConflictReturns409(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	writeProviderFailure(recorder, modules.ErrBillingConflict)

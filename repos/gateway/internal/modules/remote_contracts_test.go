@@ -25,7 +25,7 @@ func TestRemoteAuthIsTheOnlyModuleReceivingBearerToken(t *testing.T) {
 		if request.Token != token {
 			t.Fatalf("auth did not receive token: %q", request.Token)
 		}
-		_ = json.NewEncoder(w).Encode(AuthResponse{UserID: "user-1", TeamID: "team-1", OrganizationID: "org-1", CredentialID: "fingerprint", AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp.weather.*"}, RateLimitRPM: 5, RateLimitTPM: 100})
+		_ = json.NewEncoder(w).Encode(AuthResponse{UserID: "user-1", TeamID: "team-1", OrganizationID: "org-1", CredentialID: "fingerprint", CredentialAlias: "clinical-prod", Tags: []string{"hipaa"}, AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp.weather.*"}, RateLimitRPM: 5, RateLimitTPM: 100})
 	}))
 	defer server.Close()
 
@@ -35,6 +35,9 @@ func TestRemoteAuthIsTheOnlyModuleReceivingBearerToken(t *testing.T) {
 	}
 	if req.CredentialID != "fingerprint" {
 		t.Fatalf("unexpected credential id: %q", req.CredentialID)
+	}
+	if req.CredentialAlias != "clinical-prod" || len(req.Tags) != 1 || req.Tags[0] != "hipaa" {
+		t.Fatalf("credential policy matching metadata was not propagated: %+v", req)
 	}
 	if req.APIKey != "" {
 		t.Fatal("auth did not clear bearer token after successful authorization")

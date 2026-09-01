@@ -34,6 +34,7 @@ type adminStateSnapshot struct {
 	SchemaVersion       int                           `json:"schema_version"`
 	Projects            []Project                     `json:"projects,omitempty"`
 	AccessGroups        []AccessGroup                 `json:"access_groups,omitempty"`
+	PolicyAttachments   []PolicyAttachment            `json:"policy_attachments,omitempty"`
 	MCPServers          []MCPServer                   `json:"mcp_servers,omitempty"`
 	MCPToolsets         []MCPToolset                  `json:"mcp_toolsets,omitempty"`
 	ToolPolicies        []ToolPolicy                  `json:"tool_policies,omitempty"`
@@ -155,7 +156,7 @@ func (r *AdminStateRuntime) marshal() (json.RawMessage, error) {
 }
 
 func (r *AdminStateRuntime) snapshot() (adminStateSnapshot, error) {
-	snapshot := adminStateSnapshot{SchemaVersion: adminStateSchemaVersion, Projects: r.access.Projects(), AccessGroups: r.access.Groups(), MCPServers: r.mcp.Servers(), MCPToolsets: r.mcp.Toolsets(), ToolPolicies: r.agents.ToolPolicies(), AgentProfiles: r.agents.AgentProfiles()}
+	snapshot := adminStateSnapshot{SchemaVersion: adminStateSchemaVersion, Projects: r.access.Projects(), AccessGroups: r.access.Groups(), PolicyAttachments: r.access.PolicyAttachments(), MCPServers: r.mcp.Servers(), MCPToolsets: r.mcp.Toolsets(), ToolPolicies: r.agents.ToolPolicies(), AgentProfiles: r.agents.AgentProfiles()}
 	r.logging.mu.RLock()
 	defer r.logging.mu.RUnlock()
 	for _, entry := range r.logging.destinations {
@@ -181,6 +182,11 @@ func (r *AdminStateRuntime) apply(snapshot adminStateSnapshot) error {
 	}
 	for _, item := range snapshot.AccessGroups {
 		if _, err := access.PutGroup(item.ID, item); err != nil {
+			return err
+		}
+	}
+	for _, item := range snapshot.PolicyAttachments {
+		if _, err := access.PutPolicyAttachment(item.ID, item); err != nil {
 			return err
 		}
 	}
@@ -228,7 +234,7 @@ func (r *AdminStateRuntime) apply(snapshot adminStateSnapshot) error {
 		loggingEntries[validated.ID] = loggingDestinationEntry{destination: validated, secret: secret}
 	}
 	r.access.mu.Lock()
-	r.access.projects, r.access.groups = access.projects, access.groups
+	r.access.projects, r.access.groups, r.access.attachments = access.projects, access.groups, access.attachments
 	r.access.mu.Unlock()
 	r.mcp.mu.Lock()
 	r.mcp.servers, r.mcp.toolsets = mcp.servers, mcp.toolsets
@@ -243,7 +249,7 @@ func (r *AdminStateRuntime) apply(snapshot adminStateSnapshot) error {
 }
 
 func isDurableAdminStateRoute(path string) bool {
-	prefixes := []string{"/admin/v1/guardrail-policies", "/admin/v1/logging/destinations", "/admin/v1/tool-policies", "/admin/v1/agent-profiles", "/admin/v1/mcp/servers", "/admin/v1/mcp/toolsets", "/admin/v1/projects", "/admin/v1/access-groups"}
+	prefixes := []string{"/admin/v1/guardrail-policies", "/admin/v1/policy-attachments", "/admin/v1/logging/destinations", "/admin/v1/tool-policies", "/admin/v1/agent-profiles", "/admin/v1/mcp/servers", "/admin/v1/mcp/toolsets", "/admin/v1/projects", "/admin/v1/access-groups"}
 	for _, prefix := range prefixes {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true

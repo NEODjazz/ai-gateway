@@ -1,6 +1,9 @@
 package gateway
 
 import (
+	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/provider"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -31,6 +34,73 @@ func TestAccessRegistryProjectsAndPermissionTemplates(t *testing.T) {
 	}
 	if err := registry.DeleteProject("payments"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPolicyAttachmentMatchingRequiresEveryConfiguredDimension(t *testing.T) {
+	registry := NewAccessRegistry()
+	_, err := registry.PutPolicyAttachment("healthcare", PolicyAttachment{
+		PolicyName: "strict", Scope: "specific", Teams: []string{"care-*"}, Keys: []string{"clinical-*"}, Models: []string{"gpt-5.*"}, Tags: []string{"hipaa"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched := registry.MatchingPolicyAttachments(PolicyMatchContext{TeamID: "care-a", CredentialID: "vk-1", CredentialAlias: "clinical-prod", Model: "gpt-5.6", Tags: []string{"hipaa"}})
+	if len(matched) != 1 || matched[0].PolicyName != "strict" {
+		t.Fatalf("expected attachment match, got %+v", matched)
+	}
+	if got := registry.MatchingPolicyAttachments(PolicyMatchContext{TeamID: "care-a", CredentialAlias: "clinical-prod", Model: "gpt-5.6", Tags: []string{"public"}}); len(got) != 0 {
+		t.Fatalf("attachment matched without the required tag: %+v", got)
+	}
+	if _, err := registry.PutPolicyAttachment("invalid-global", PolicyAttachment{PolicyName: "strict", Scope: "*", Teams: []string{"care-a"}}); err == nil {
+		t.Fatal("global attachment with specific selectors was accepted")
+	}
+}
+
+func TestPolicyAttachmentsAdminAPIAndRequestEvaluation(t *testing.T) {
+	runtime := provider.New(provider.Config{GuardrailPolicies: map[string]config.GuardrailPolicyConfig{"strict": {DLP: true}}})
+	registry := NewAccessRegistry()
+	audit := &recordingAuditClient{}
+	handler := NewHandler(modulesPipeline("admin"), runtime).WithAccessRegistry(registry).WithAudit(audit)
+	router := Routes(handler)
+
+	put := httptest.NewRecorder()
+	router.ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/admin/v1/policy-attachments/clinical", strings.NewReader(`{"policy_name":"strict","scope":"specific","teams":["care-*"],"models":["gpt-5.*"]}`)))
+	if put.Code != http.StatusOK {
+		t.Fatalf("put attachment status=%d body=%s", put.Code, put.Body.String())
+	}
+
+	req := modules.RequestContext{TeamID: "care-a"}
+	if !handler.applyPolicyAttachments(httptest.NewRecorder(), &req, "gpt-5.6") {
+		t.Fatal("matching policy attachment was rejected")
+	}
+	if req.Metadata["policy.guardrail.required"] != "true" || req.Metadata["policy.modules.dlp.enabled"] != "true" || req.Metadata["policy.guardrail.names"] != "strict" {
+		t.Fatalf("policy was not materialized into request metadata: %+v", req.Metadata)
+	}
+
+	list := httptest.NewRecorder()
+	router.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/admin/v1/policy-attachments", nil))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"policy_name":"strict"`) {
+		t.Fatalf("list attachments status=%d body=%s", list.Code, list.Body.String())
+	}
+
+	remove := httptest.NewRecorder()
+	router.ServeHTTP(remove, httptest.NewRequest(http.MethodDelete, "/admin/v1/policy-attachments/clinical", nil))
+	if remove.Code != http.StatusNoContent || len(registry.PolicyAttachments()) != 0 {
+		t.Fatalf("delete attachment status=%d body=%s", remove.Code, remove.Body.String())
+	}
+}
+
+func TestModelAuthorizationPrecedesPolicyAttachmentResolution(t *testing.T) {
+	registry := NewAccessRegistry()
+	if _, err := registry.PutPolicyAttachment("global", PolicyAttachment{PolicyName: "missing", Scope: "*"}); err != nil {
+		t.Fatal(err)
+	}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"allowed"}}}), &chatProvider{}).WithAccessRegistry(registry))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"blocked","messages":[{"role":"user","content":"hello"}]}`)))
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":"model_not_allowed"`) {
+		t.Fatalf("policy resolution changed authorization semantics: status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

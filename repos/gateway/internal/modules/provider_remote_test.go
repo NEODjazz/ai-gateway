@@ -99,6 +99,18 @@ func TestRemoteModuleRejectsAllowedFalse(t *testing.T) {
 	}
 }
 
+func TestAttachedPolicyFailsClosedWhenOptionalScannerIsUnavailable(t *testing.T) {
+	module := NewProviderRemoteModule("dlp", false, "")
+	req := RequestContext{Metadata: map[string]string{
+		"provider.modules.dlp.enabled": "true",
+		"policy.guardrail.required":    "true",
+	}}
+	err := NewPipeline([]Module{module}).Run(context.Background(), &req)
+	if !errors.Is(err, ErrGuardrailUnavailable) {
+		t.Fatalf("expected attached policy to fail closed, got %v", err)
+	}
+}
+
 func TestOptionalAVFailsClosedForImageWhenScannerUnavailable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "unavailable", http.StatusBadGateway)

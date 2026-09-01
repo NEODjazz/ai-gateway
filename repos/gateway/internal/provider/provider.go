@@ -945,7 +945,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 }
 
 func terminalModuleError(err error) bool {
-	return errors.Is(err, modules.ErrContentRejected) || errors.Is(err, modules.ErrBudgetExceeded) || errors.Is(err, modules.ErrBillingConflict)
+	return errors.Is(err, modules.ErrContentRejected) || errors.Is(err, modules.ErrGuardrailUnavailable) || errors.Is(err, modules.ErrBudgetExceeded) || errors.Is(err, modules.ErrBillingConflict)
 }
 
 func (r Router) Models() []openai.Model {
@@ -1019,6 +1019,16 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 	for key, value := range providerMetadata(endpoint) {
 		attemptCtx.Metadata[key] = value
 	}
+	if attemptCtx.Metadata["policy.modules.dlp.enabled"] == "true" {
+		attemptCtx.Metadata["provider.modules.dlp.enabled"] = "true"
+	}
+	if attemptCtx.Metadata["policy.modules.av.enabled"] == "true" {
+		attemptCtx.Metadata["provider.modules.av.enabled"] = "true"
+	}
+	if names := attemptCtx.Metadata["policy.guardrail.names"]; names != "" {
+		attemptCtx.Metadata["provider.guardrail.attached_policies"] = names
+		attemptCtx.Metadata["provider.guardrail.policy"] = combinePolicyNames(attemptCtx.Metadata["provider.guardrail.policy"], names)
+	}
 	requestedModel := attemptCtx.Request.Model
 	if upstreamModel, found := endpoint.ModelAliases[requestedModel]; found {
 		attemptCtx.Request.Model = upstreamModel
@@ -1063,6 +1073,26 @@ func cloneMetadata(metadata map[string]string) map[string]string {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func combinePolicyNames(values ...string) string {
+	seen := map[string]struct{}{}
+	names := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, name := range strings.Split(value, ",") {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			if _, found := seen[name]; found {
+				continue
+			}
+			seen[name] = struct{}{}
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return strings.Join(names, ",")
 }
 
 func providerMetadata(endpoint Endpoint) map[string]string {

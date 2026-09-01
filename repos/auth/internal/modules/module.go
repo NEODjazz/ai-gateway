@@ -12,8 +12,10 @@ import (
 type RequestContext struct {
 	APIKey              string                         `json:"api_key,omitempty"`
 	CredentialID        string                         `json:"credential_id,omitempty"`
+	CredentialAlias     string                         `json:"credential_alias,omitempty"`
 	TeamID              string                         `json:"team_id,omitempty"`
 	OrganizationID      string                         `json:"organization_id,omitempty"`
+	Tags                []string                       `json:"tags,omitempty"`
 	AllowedModels       []string                       `json:"allowed_models,omitempty"`
 	AllowedTools        []string                       `json:"allowed_tools,omitempty"`
 	RateLimitRPM        int                            `json:"rate_limit_rpm,omitempty"`

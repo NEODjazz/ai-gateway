@@ -178,8 +178,8 @@ rotated; list and mutation responses contain metadata only. Set a stable
 `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` in managed environments. Without it, the
 gateway generates an ephemeral process key suitable only for local runtime
 management. Set `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` to persist providers,
-encrypted credentials, deployments, model groups, guardrail policies,
-projects/access groups, MCP servers/toolsets, agent/tool-policy templates, and
+encrypted credentials, deployments, model groups, guardrail policies and their
+scope attachments, projects/access groups, MCP servers/toolsets, agent/tool-policy templates, and
 logging destinations as one versioned JSONB snapshot. Logging bearer secrets
 use domain-separated AES-GCM encryption and are never returned by the API. The
 gateway seeds an empty store from `PROVIDERS_JSON`, then treats
@@ -385,8 +385,9 @@ Managed keys include an alias, description and tags plus `team_id`, `roles`,
 `allowed_models`, `allowed_tools`, `rate_limit_rpm`, `rate_limit_tpm` and expiry.
 Admins can update policy without changing the bearer secret, temporarily
 disable/re-enable a key, rotate it atomically, revoke it, open its metadata-only
-request history, and assign a key-scoped budget from the console. The gateway receives only the key
-fingerprint and policy, filters `/v1/models`, enforces model grants before the
+request history, and assign a key-scoped budget from the console. The gateway
+receives only the opaque key ID, alias, tags and policy (never the plaintext
+token or lookup hash), filters `/v1/models`, enforces model grants before the
 provider call, and applies the rate-limit policy through a replaceable atomic
 store interface. If `REDIS_ADDR` is configured, RPM/TPM admission is performed
 atomically in Redis; otherwise the gateway uses the process-local implementation.
@@ -403,11 +404,18 @@ configured by operators. Admins can change model bindings, capabilities,
 priority, weight, guardrail policy and enabled state atomically; new routing
 decisions observe the update immediately. The API returns provider type and
 bounded health signals but never base URLs, API keys or secret references.
-These overrides are process-local runtime state and are intentionally reset from
-the operator-owned Helm/environment configuration when a gateway pod restarts.
+When the control-plane DSN is configured, these overrides are part of the
+versioned durable snapshot and are refreshed across replicas. Without that
+store they remain process-local runtime state.
 
 Guardrail policies are also hot runtime state: each named policy enables DLP,
-AV, or both and can be attached to a model deployment. The Compliance
+AV, or both. A policy can be selected by a model deployment or activated by a
+durable policy attachment. Attachments support global scope or an intersection
+of team ID, virtual-key ID/alias, public model and key-tag selectors; exact and
+trailing-`*` prefix patterns are supported. Matching attachments are combined,
+so every requested check runs even when the chosen deployment has no guardrail
+configured. A missing, disabled or unavailable attached policy fails closed.
+The Compliance
 Playground sends a bounded text projection directly to those internal scanners,
 never invokes a model, never echoes the submitted text, and reports
 `content_stored: false`. A rejected scanner produces an explicit deny decision;
@@ -419,8 +427,7 @@ secret fields, and rejects URLs containing user info, query parameters, or
 fragments. Toolsets group exact or prefix-wildcard tool identifiers; virtual
 keys receive them through `allowed_tools` grants such as `toolset:weather`.
 Disabled toolsets stop authorizing immediately. Registry changes are audited
-and are process-local runtime state, so operator configuration remains the
-source of truth after a pod restart.
+and use the same durable admin-state snapshot when configured.
 
 Customer Insights joins scoped metadata-only usage with the already enforced
 budget and virtual-key policies for a user, team, or key ID. ClickHouse scope
@@ -453,7 +460,9 @@ shutdown.
 Named guardrail profiles are configured
 with `GUARDRAIL_POLICIES_JSON` (Helm: `gateway.guardrailPolicies`) and selected
 per endpoint with `guardrail_policy`; an endpoint referencing an unknown profile
-is skipped instead of running without the intended DLP/AV controls.
+is skipped instead of running without the intended DLP/AV controls. Runtime
+attachments are managed through `/admin/v1/policy-attachments` or the Policies
+page and are stored in the versioned control-plane snapshot.
 
 Model groups can be managed at runtime as a public model name plus an ordered
 set of deployment IDs. `priority` defines fallback tiers; endpoints at the same

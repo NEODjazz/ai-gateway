@@ -40,7 +40,7 @@ func (m ProviderRemoteModule) Handle(ctx context.Context, req *RequestContext) e
 		return nil
 	}
 	if strings.TrimSpace(m.endpoint) == "" {
-		return errors.New("remote module url is empty")
+		return m.policyError(req, errors.New("remote module url is empty"))
 	}
 	request := ScanRequest{
 		RequestID: req.RequestID,
@@ -58,12 +58,19 @@ func (m ProviderRemoteModule) Handle(ctx context.Context, req *RequestContext) e
 		if m.name == "av" && len(request.Attachments) > 0 && !errors.Is(err, ErrContentRejected) {
 			return errors.Join(ErrGuardrailUnavailable, err)
 		}
-		return err
+		return m.policyError(req, err)
 	}
 	if !response.Allowed {
 		return ErrContentRejected
 	}
 	return nil
+}
+
+func (m ProviderRemoteModule) policyError(req *RequestContext, err error) error {
+	if metadataBool(req.Metadata, "policy.guardrail.required") {
+		return errors.Join(ErrGuardrailUnavailable, err)
+	}
+	return err
 }
 
 type ScanRequest struct {

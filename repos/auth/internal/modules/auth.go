@@ -206,6 +206,8 @@ func applyStoredVirtualKey(req *RequestContext, key StoredVirtualKey) {
 	req.RateLimitRPM = key.RateLimitRPM
 	req.RateLimitTPM = key.RateLimitTPM
 	req.CredentialID = key.ID
+	req.CredentialAlias = key.Alias
+	req.Tags = append([]string(nil), key.Tags...)
 	req.APIKey = ""
 }
 
