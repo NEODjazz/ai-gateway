@@ -57,3 +57,10 @@ model grants and enabled Access Groups. The key table exposes assignments as a
 selectable column. Group grants are runtime policy, not descriptive UI metadata:
 gateway unions the selected groups and intersects that result with the key's
 direct model/tool grants, failing closed for missing or disabled assignments.
+
+Access Groups use dedicated `/access-groups` and `/access-groups/:id` routes.
+The detail view shows current model/tool grants, project ownership, attached
+virtual keys, non-revoked impact and per-key budget projections. Create and edit
+forms select configured projects, models and MCP toolsets while retaining an
+explicit custom-grant path for wildcard policies. Deletion remains unavailable
+until every non-revoked key assignment is removed.

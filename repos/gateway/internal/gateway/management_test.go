@@ -39,6 +39,7 @@ type recordingManagementClient struct {
 	updates  int
 	disabled *bool
 	filter   VirtualKeyListFilter
+	page     *VirtualKeyPage
 }
 
 func (c *recordingManagementClient) ListVirtualKeys(_ context.Context, audit ManagementAudit, _ int) ([]VirtualKeyMetadata, error) {
@@ -47,6 +48,9 @@ func (c *recordingManagementClient) ListVirtualKeys(_ context.Context, audit Man
 }
 func (c *recordingManagementClient) ListVirtualKeysPage(_ context.Context, audit ManagementAudit, filter VirtualKeyListFilter) (VirtualKeyPage, error) {
 	c.audit, c.filter = audit, filter
+	if c.page != nil {
+		return *c.page, nil
+	}
 	return VirtualKeyPage{Data: []VirtualKeyMetadata{{ID: "vk_safe123", UserID: "user-1", RotationFamily: "vk_safe123"}}, Total: 27, Limit: filter.Limit, Offset: filter.Offset}, nil
 }
 
@@ -167,14 +171,14 @@ func TestAdminVirtualKeyCreateAllowsOrganizationOwnerWithoutUser(t *testing.T) {
 func TestAdminVirtualKeyListReturnsSafeMetadata(t *testing.T) {
 	client := &recordingManagementClient{}
 	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithManagement(client)
-	request := httptest.NewRequest(http.MethodGet, "/admin/v1/keys?limit=25&offset=25&search=prod&organization_id=org-1&team_id=team-1&user_id=user-1&key_id=safe&status=active&sort_by=alias&sort_order=asc", nil)
+	request := httptest.NewRequest(http.MethodGet, "/admin/v1/keys?limit=25&offset=25&search=prod&organization_id=org-1&team_id=team-1&user_id=user-1&key_id=safe&access_group_id=platform&status=non_revoked&sort_by=alias&sort_order=asc", nil)
 	request.Header.Set("Authorization", "Bearer admin-key")
 	response := httptest.NewRecorder()
 	Routes(handler).ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"vk_safe123"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	if client.filter.Offset != 25 || client.filter.Search != "prod" || client.filter.OrganizationID != "org-1" || client.filter.SortBy != "alias" || client.filter.SortOrder != "asc" || !strings.Contains(response.Body.String(), `"total":27`) {
+	if client.filter.Offset != 25 || client.filter.Search != "prod" || client.filter.OrganizationID != "org-1" || client.filter.AccessGroupID != "platform" || client.filter.Status != "non_revoked" || client.filter.SortBy != "alias" || client.filter.SortOrder != "asc" || !strings.Contains(response.Body.String(), `"total":27`) {
 		t.Fatalf("list filter was not propagated: filter=%+v body=%s", client.filter, response.Body.String())
 	}
 	for _, forbidden := range []string{"token_hash", `"token"`} {
@@ -187,6 +191,12 @@ func TestAdminVirtualKeyListReturnsSafeMetadata(t *testing.T) {
 	Routes(handler).ServeHTTP(invalidResponse, invalid)
 	if invalidResponse.Code != http.StatusBadRequest {
 		t.Fatalf("invalid sort was accepted: %d", invalidResponse.Code)
+	}
+	invalidGroup := httptest.NewRequest(http.MethodGet, "/admin/v1/keys?access_group_id=bad/group", nil)
+	invalidGroupResponse := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(invalidGroupResponse, invalidGroup)
+	if invalidGroupResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid access group filter was accepted: %d", invalidGroupResponse.Code)
 	}
 }
 
@@ -263,7 +273,7 @@ func TestRemoteManagementClientUsesScopedSecretNotClientBearer(t *testing.T) {
 
 func TestRemoteManagementClientListsMetadataWithoutRequestBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Query().Get("limit") != "25" || r.URL.Query().Get("offset") != "50" || r.URL.Query().Get("search") != "prod" || r.URL.Query().Get("organization_id") != "org-1" || r.URL.Query().Get("team_id") != "team-1" || r.URL.Query().Get("user_id") != "user-1" || r.URL.Query().Get("key_id") != "safe" || r.URL.Query().Get("status") != "active" || r.URL.Query().Get("sort_by") != "alias" || r.URL.Query().Get("sort_order") != "asc" || r.ContentLength > 0 {
+		if r.Method != http.MethodGet || r.URL.Query().Get("limit") != "25" || r.URL.Query().Get("offset") != "50" || r.URL.Query().Get("search") != "prod" || r.URL.Query().Get("organization_id") != "org-1" || r.URL.Query().Get("team_id") != "team-1" || r.URL.Query().Get("user_id") != "user-1" || r.URL.Query().Get("key_id") != "safe" || r.URL.Query().Get("access_group_id") != "platform" || r.URL.Query().Get("status") != "non_revoked" || r.URL.Query().Get("sort_by") != "alias" || r.URL.Query().Get("sort_order") != "asc" || r.ContentLength > 0 {
 			t.Fatalf("unexpected list request: method=%s url=%s content_length=%d", r.Method, r.URL.String(), r.ContentLength)
 		}
 		if r.Header.Get("Authorization") != "" || r.Header.Get("X-Management-Token") != "internal-secret" {
@@ -273,7 +283,7 @@ func TestRemoteManagementClientListsMetadataWithoutRequestBody(t *testing.T) {
 	}))
 	defer server.Close()
 	client := NewRemoteManagementClient(server.URL, "internal-secret")
-	page, err := client.ListVirtualKeysPage(context.Background(), ManagementAudit{RequestID: "req-list", ActorID: "admin-user", CredentialID: "fingerprint"}, VirtualKeyListFilter{Limit: 25, Offset: 50, Search: "prod", OrganizationID: "org-1", TeamID: "team-1", UserID: "user-1", KeyID: "safe", Status: "active", SortBy: "alias", SortOrder: "asc"})
+	page, err := client.ListVirtualKeysPage(context.Background(), ManagementAudit{RequestID: "req-list", ActorID: "admin-user", CredentialID: "fingerprint"}, VirtualKeyListFilter{Limit: 25, Offset: 50, Search: "prod", OrganizationID: "org-1", TeamID: "team-1", UserID: "user-1", KeyID: "safe", AccessGroupID: "platform", Status: "non_revoked", SortBy: "alias", SortOrder: "asc"})
 	if err != nil || len(page.Data) != 1 || page.Data[0].ID != "vk_safe123" || page.Total != 73 {
 		t.Fatalf("unexpected page=%+v err=%v", page, err)
 	}

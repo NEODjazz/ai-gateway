@@ -18,10 +18,11 @@ import { VirtualKeysPage } from "../pages/VirtualKeysPage";
 import { ProvidersPage } from "../pages/ProvidersPage";
 import { CredentialsPage } from "../pages/CredentialsPage";
 import { ModelGroupsPage } from "../pages/ModelGroupsPage";
+import { AccessGroupsPage } from "../pages/AccessGroupsPage";
 import { resourceConfigs } from "../pages/resourceConfigs";
 import { useAuth, type ConsoleCapability } from "../auth/AuthContext";
 
-export type AppRoute = { path: string; title: string; group: "Monitor" | "Manage" | "Access Control" | "AI Hub" | "Govern" | "System"; element: ReactNode; available: boolean; capability?: ConsoleCapability };
+export type AppRoute = { path: string; title: string; group: "Monitor" | "Manage" | "Access Control" | "AI Hub" | "Govern" | "System"; element: ReactNode; available: boolean; capability?: ConsoleCapability; navigation?: boolean };
 
 const readOnly = (title: string, description: string, path: string, columns: ResourceConfig["columns"]): ReactNode => <ResourcePage config={{ eyebrow: "Operations", title, description, listPath: path, columns }} />;
 const unavailable = (title: string, description: string): ReactNode => <CapabilityPage title={title} description={description} />;
@@ -54,7 +55,8 @@ export const appRoutes: AppRoute[] = [
   { path: "/organizations", title: "Organizations", group: "Access Control", element: <OrganizationsPage />, available: true },
   { path: "/teams", title: "Teams", group: "Access Control", element: <TeamsPage />, available: true, capability: "team_directory" },
   { path: "/users", title: "Users", group: "Access Control", element: <UsersPage />, available: true, capability: "team_directory" },
-  { path: "/access-groups", title: "Access groups", group: "Access Control", element: <ResourcePage config={resourceConfigs.accessGroups} />, available: true },
+  { path: "/access-groups", title: "Access groups", group: "Access Control", element: <AccessGroupsPage />, available: true },
+  { path: "/access-groups/:id", title: "Access group details", group: "Access Control", element: <AccessGroupsPage />, available: true, navigation: false },
   { path: "/projects", title: "Projects", group: "Access Control", element: <ResourcePage config={resourceConfigs.projects} />, available: true },
 
   { path: "/ai-hub", title: "AI Hub", group: "AI Hub", element: readOnly("AI Hub", "Catalog entries joined with safe runtime availability.", "/admin/v1/ai-hub/models", [{ key: "model", label: "Model" }, { key: "provider", label: "Provider" }, { key: "capabilities", label: "Capabilities" }, { key: "deployments", label: "Deployments" }, { key: "available", label: "Available" }]), available: true },

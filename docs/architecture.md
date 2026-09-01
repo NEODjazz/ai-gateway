@@ -177,6 +177,11 @@ versioned admin-state snapshot перед model/tool authorization. Grants вс�
 direct grants ключа. Пустая групповая grant dimension ничего не разрешает,
 missing/disabled assignment блокирует запрос, а тот же effective model policy
 применяется к `/v1/models` и cross-model fallback targets.
+Management lookup поддерживает индексируемый exact-фильтр по access-group ID.
+Перед обычным удалением группы gateway запрашивает наличие non-revoked ключей и
+возвращает conflict при существующих ссылках. Это защищает operator workflow от
+случайного отключения назначенных ключей, а runtime fail-closed остаётся
+последней линией защиты при рассинхронизации состояния.
 
 HTTP-ответы модулей декодируются в типизированные DTO, поэтому удаленный сервис не может перезаписать identity, routing metadata или исходный запрос целиком.
 

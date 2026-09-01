@@ -115,6 +115,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPut, "/admin/v1/projects/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutProject) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/projects/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteProject) }},
 	{RouteContract{http.MethodGet, "/admin/v1/access-groups"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListAccessGroups) }},
+	{RouteContract{http.MethodGet, "/admin/v1/access-groups/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetAccessGroup) }},
 	{RouteContract{http.MethodPut, "/admin/v1/access-groups/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutAccessGroup) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/access-groups/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteAccessGroup) }},
 	{RouteContract{http.MethodGet, "/admin/v1/audit/events"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListAuditEvents) }},

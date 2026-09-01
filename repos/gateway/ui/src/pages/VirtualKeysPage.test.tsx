@@ -48,6 +48,15 @@ function mockAPI(keyRows: unknown[] = [key], userRows: unknown[] = [{ id: "user-
 function renderPage() { sessionStorage.setItem("ai-gateway.admin-token", "token"); render(<AuthProvider><VirtualKeysPage /></AuthProvider>); }
 
 describe("VirtualKeysPage", () => {
+  afterEach(() => { vi.restoreAllMocks(); sessionStorage.clear(); window.history.replaceState({}, "", "/"); });
+
+  it("opens a key deep link from access-group details", async () => {
+    window.history.replaceState({}, "", "/ui/api-keys?key_id=vk_alpha");
+    const fetchMock = mockAPI(); renderPage();
+    expect(await screen.findByText("production")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([path]) => String(path).includes("key_id=vk_alpha"))).toBe(true);
+  });
+
   it("renders searchable, sortable keys with icon refresh and resettable filters", async () => {
     const fetchMock = mockAPI(); renderPage();
     expect(await screen.findByText("production")).toBeInTheDocument();

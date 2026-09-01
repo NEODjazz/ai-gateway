@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -95,6 +96,19 @@ func (r *AccessRegistry) Groups() []AccessGroup {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
+}
+
+func (r *AccessRegistry) Group(id string) (AccessGroup, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, found := r.groups[strings.TrimSpace(id)]
+	if !found {
+		return AccessGroup{}, false
+	}
+	item.AllowedModels = append([]string(nil), item.AllowedModels...)
+	item.AllowedTools = append([]string(nil), item.AllowedTools...)
+	item.Tags = append([]string(nil), item.Tags...)
+	return item, true
 }
 
 // ResolveAccessGroups returns the union of grants from every assigned group.
@@ -375,6 +389,21 @@ func (h Handler) ListAccessGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"data": h.access.Groups()})
 }
+func (h Handler) GetAccessGroup(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeAdmin(w, r); !ok {
+		return
+	}
+	if h.access == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "access registry is unavailable")
+		return
+	}
+	group, found := h.access.Group(r.PathValue("id"))
+	if !found {
+		writeError(w, http.StatusNotFound, "not_found", "access group was not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, group)
+}
 func (h Handler) ListPolicyAttachments(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.authorizeAdmin(w, r); !ok {
 		return
@@ -475,7 +504,50 @@ func (h Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	h.deleteAccessEntry(w, r, "project", func(id string) error { return h.access.DeleteProject(id) })
 }
 func (h Handler) DeleteAccessGroup(w http.ResponseWriter, r *http.Request) {
-	h.deleteAccessEntry(w, r, "access_group", func(id string) error { return h.access.DeleteGroup(id) })
+	req, ok := h.authorizeAdmin(w, r)
+	if !ok {
+		return
+	}
+	if h.access == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "access registry is unavailable")
+		return
+	}
+	id := r.PathValue("id")
+	if _, found := h.access.Group(id); !found {
+		writeError(w, http.StatusNotFound, "not_found", "access group was not found")
+		return
+	}
+	pager, ok := h.management.(interface {
+		ListVirtualKeysPage(context.Context, ManagementAudit, VirtualKeyListFilter) (VirtualKeyPage, error)
+	})
+	if !ok || pager == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "virtual key reference check is unavailable")
+		return
+	}
+	audit := managementAudit(req)
+	event := AuditEvent{Action: "access_group.delete", TargetType: "access_group", TargetID: id}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	page, err := pager.ListVirtualKeysPage(r.Context(), audit, VirtualKeyListFilter{Limit: 1, AccessGroupID: id, Status: "non_revoked"})
+	if err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeManagementFailure(w, err)
+		return
+	}
+	if page.Total != 0 {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeError(w, http.StatusConflict, "access_group_in_use", "remove the access group from all non-revoked virtual keys before deleting it")
+		return
+	}
+	if err := h.access.DeleteGroup(id); err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeError(w, http.StatusNotFound, "not_found", "access group was not found")
+		return
+	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
+	w.WriteHeader(http.StatusNoContent)
 }
 func (h Handler) DeletePolicyAttachment(w http.ResponseWriter, r *http.Request) {
 	h.deleteAccessEntry(w, r, "policy_attachment", func(id string) error { return h.access.DeletePolicyAttachment(id) })

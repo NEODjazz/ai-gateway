@@ -256,6 +256,11 @@ grants. An assigned group with no grant for a dimension grants nothing in that
 dimension; explicit `*` is required for unrestricted access. Missing or disabled
 assigned groups fail closed, `/v1/models` applies the effective model policy,
 and fallback targets are checked against it before routing.
+The Access Groups console provides route-based list and detail views with
+configured project/model/tool selectors, attached-key pagination, safe budget
+projections and a non-revoked reference count. Normal deletion is rejected while
+any non-revoked key still references the group, preventing an accidental policy
+outage; operators must remove assignments or revoke those keys first.
 The virtual-key table joins the 30-day usage projection by non-secret key ID,
 showing spend per currency and optional request/token columns without combining currencies.
 For the returned server page, `expand=financials` performs one scoped billing

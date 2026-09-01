@@ -37,6 +37,9 @@ Migration `007_organizations.sql` adds organizations, and
 organization, team, or user. Migration `009_virtual_key_access_groups.sql`
 stores bounded access-group assignments; auth propagates only their opaque IDs
 and gateway resolves the current grants at request time.
+The metadata list accepts an exact `access_group_id` filter and the
+`non_revoked` lifecycle status used by the gateway's referential delete check.
+Both remain metadata-only and never expose bearer tokens or token hashes.
 
 `AUTH_STATIC_KEY_FALLBACK_ENABLED` controls migration fallback to
 `AUTH_VIRTUAL_KEYS_JSON`. `AUTH_DEMO_KEYS_ENABLED` controls the two built-in demo

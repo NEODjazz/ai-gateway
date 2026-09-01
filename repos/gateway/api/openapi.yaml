@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.38
+  version: 0.1.39
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -311,7 +311,8 @@ paths:
         - {name: team_id, in: query, description: Includes team-owned keys and keys owned by team members., schema: {type: string, maxLength: 256}}
         - {name: user_id, in: query, schema: {type: string, maxLength: 256}}
         - {name: key_id, in: query, description: Case-insensitive key ID substring., schema: {type: string, maxLength: 256}}
-        - {name: status, in: query, schema: {type: string, enum: [active, disabled, revoked, expired]}}
+        - {name: access_group_id, in: query, description: Exact assigned access-group ID., schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$'}}
+        - {name: status, in: query, schema: {type: string, enum: [active, disabled, revoked, expired, non_revoked]}}
         - {name: sort_by, in: query, schema: {type: string, enum: [key, alias, organization, team, user, created, status], default: created}}
         - {name: sort_order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
         - {name: expand, in: query, description: Include billing-backed financial projections for the returned page., schema: {type: string, const: financials}}
@@ -1228,11 +1229,21 @@ paths:
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/access-groups/{id}:
     parameters: [{$ref: '#/components/parameters/AccessEntryID'}]
+    get:
+      operationId: getAccessGroup
+      tags: [Projects and access]
+      summary: Get an access-group permission template
+      responses:
+        '200': {description: Access group, content: {application/json: {schema: {$ref: '#/components/schemas/AccessGroup'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
     put:
       operationId: putAccessGroup
       tags: [Projects and access]
       summary: Create or update a virtual-key permission template
-      description: Applying a template in the UI copies its grants into a key; existing keys do not inherit later template changes.
+      description: Virtual keys store this group's ID and evaluate its current grants at request time. Updating or disabling a group therefore affects every assigned key immediately.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccessGroupInput'}}}}
       responses:
         '200': {description: Access group saved, content: {application/json: {schema: {$ref: '#/components/schemas/AccessGroup'}}}}
@@ -1243,12 +1254,15 @@ paths:
     delete:
       operationId: deleteAccessGroup
       tags: [Projects and access]
-      summary: Delete an access-group template
+      summary: Delete an unused access-group template
+      description: Deletion is rejected while any non-revoked virtual key references the group.
       responses:
         '204': {description: Access group deleted}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Access group is referenced by a non-revoked virtual key}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/budgets:
     get:
       operationId: listBudgets

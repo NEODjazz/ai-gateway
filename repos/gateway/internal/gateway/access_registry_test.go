@@ -23,6 +23,15 @@ func TestAccessRegistryProjectsAndPermissionTemplates(t *testing.T) {
 	if err != nil || len(group.AllowedModels) != 1 {
 		t.Fatalf("unexpected access group: %#v err=%v", group, err)
 	}
+	loaded, found := registry.Group("payments-read")
+	if !found || len(loaded.AllowedModels) != 1 {
+		t.Fatalf("group lookup failed: group=%+v found=%t", loaded, found)
+	}
+	loaded.AllowedModels[0] = "mutated"
+	loaded, _ = registry.Group("payments-read")
+	if loaded.AllowedModels[0] != "gpt-*" {
+		t.Fatal("group lookup leaked mutable registry state")
+	}
 	if _, err := registry.PutProject("payments", Project{Name: "Payments", Enabled: false}); !errors.Is(err, errAccessEntryInUse) {
 		t.Fatalf("referenced project was disabled: %v", err)
 	}
@@ -251,7 +260,8 @@ func TestAccessRegistryRejectsMissingOrDisabledProject(t *testing.T) {
 
 func TestAccessRegistryAdminAPI(t *testing.T) {
 	audit := &recordingAuditClient{}
-	handler := NewHandler(modulesPipeline("admin"), nil).WithAccessRegistry(NewAccessRegistry()).WithAudit(audit)
+	keys := &recordingManagementClient{}
+	handler := NewHandler(modulesPipeline("admin"), nil).WithAccessRegistry(NewAccessRegistry()).WithManagement(keys).WithAudit(audit)
 	router := Routes(handler)
 
 	putProject := httptest.NewRecorder()
@@ -274,10 +284,26 @@ func TestAccessRegistryAdminAPI(t *testing.T) {
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"allowed_models":["gpt-*"]`) || strings.Contains(strings.ToLower(list.Body.String()), "secret") {
 		t.Fatalf("unsafe access group response: status=%d body=%s", list.Code, list.Body.String())
 	}
+	detail := httptest.NewRecorder()
+	router.ServeHTTP(detail, httptest.NewRequest(http.MethodGet, "/admin/v1/access-groups/payments-read", nil))
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"id":"payments-read"`) {
+		t.Fatalf("access group detail failed: status=%d body=%s", detail.Code, detail.Body.String())
+	}
 
 	deleteProject := httptest.NewRecorder()
 	router.ServeHTTP(deleteProject, httptest.NewRequest(http.MethodDelete, "/admin/v1/projects/payments", nil))
 	if deleteProject.Code != http.StatusConflict {
 		t.Fatalf("expected conflict, got status=%d body=%s", deleteProject.Code, deleteProject.Body.String())
+	}
+	deleteGroup := httptest.NewRecorder()
+	router.ServeHTTP(deleteGroup, httptest.NewRequest(http.MethodDelete, "/admin/v1/access-groups/payments-read", nil))
+	if deleteGroup.Code != http.StatusConflict || keys.filter.AccessGroupID != "payments-read" || keys.filter.Status != "non_revoked" || !strings.Contains(deleteGroup.Body.String(), `"code":"access_group_in_use"`) {
+		t.Fatalf("referenced group deletion was not blocked: status=%d filter=%+v body=%s", deleteGroup.Code, keys.filter, deleteGroup.Body.String())
+	}
+	keys.page = &VirtualKeyPage{Data: []VirtualKeyMetadata{}, Total: 0, Limit: 1}
+	deleteGroup = httptest.NewRecorder()
+	router.ServeHTTP(deleteGroup, httptest.NewRequest(http.MethodDelete, "/admin/v1/access-groups/payments-read", nil))
+	if deleteGroup.Code != http.StatusNoContent {
+		t.Fatalf("unused group deletion failed: status=%d body=%s", deleteGroup.Code, deleteGroup.Body.String())
 	}
 }

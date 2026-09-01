@@ -1,8 +1,9 @@
-import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { ActionsMenu, type ActionMenuItem } from "../components/ActionsMenu";
 import { ColumnsMenu, type ColumnChoice } from "../components/ColumnsMenu";
+import { ChipMultiSelect } from "../components/ChipMultiSelect";
 import { PageHeader } from "../components/PageHeader";
 import { formatCost, formatTimestamp } from "../format";
 
@@ -98,17 +99,6 @@ function existingPolicyPayload(row: VirtualKey) {
 function RefreshIcon() { return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
 function FilterIcon() { return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h16l-6 7v5l-4 2v-7L4 5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" /></svg>; }
 
-function ChipMultiSelect({ label, options, value, onChange }: { label: string; options: Array<{ value: string; label: string; description?: string }>; value: string[]; onChange: (values: string[]) => void }) {
-	const [query, setQuery] = useState(""); const [open, setOpen] = useState(false);
-	const inputID = useId(); const listID = `${inputID}-options`; const search = query.trim().toLowerCase(); const singular = label.endsWith("s") ? label.slice(0, -1).toLowerCase() : label.toLowerCase();
-	const available = options.filter((option) => !value.includes(option.value) && `${option.label} ${option.value} ${option.description || ""}`.toLowerCase().includes(search));
-	function select(selected: string) { onChange([...value, selected]); setQuery(""); setOpen(true); }
-	return <div className="key-model-field"><span id={inputID}>{label}</span><div className="model-multi-select" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
-		<div className="model-multi-control" onClick={() => setOpen(true)}>{value.map((selected) => <span className="model-chip" key={selected}>{selected}<button type="button" aria-label={`Remove ${singular} ${selected}`} onClick={(event) => { event.stopPropagation(); onChange(value.filter((item) => item !== selected)); }}>×</button></span>)}<input aria-labelledby={inputID} aria-label={label} role="combobox" aria-expanded={open} aria-controls={listID} placeholder={value.length ? `Select another ${singular}…` : `Search and select ${label.toLowerCase()}…`} value={query} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onKeyDown={(event) => { if (event.key === "Enter" && available[0]) { event.preventDefault(); select(available[0].value); } else if (event.key === "Backspace" && !query && value.length) onChange(value.slice(0, -1)); else if (event.key === "Escape") setOpen(false); }} /></div>
-		{open && <div className="model-multi-options" id={listID} role="listbox" aria-label={`Available ${label.toLowerCase()}`}>{available.length ? available.map((option) => <button type="button" role="option" aria-selected="false" key={option.value} onMouseDown={(event) => event.preventDefault()} onClick={() => select(option.value)}><strong>{option.label}</strong>{option.label !== option.value && <small>{option.value}</small>}{option.description && <small>{option.description}</small>}</button>) : <span>{options.length ? `No more matching ${label.toLowerCase()}` : `No configured ${label.toLowerCase()}`}</span>}</div>}
-	</div></div>;
-}
-
 function KeyForm({ initial, users, teams, organizations, accessGroups, models, onClose, onSubmit }: { initial?: VirtualKey; users: User[]; teams: Team[]; organizations: Organization[]; accessGroups: AccessGroup[]; models: string[]; onClose: () => void; onSubmit: (value: FormState) => Promise<void> }) {
 	const initialOrganization = initial?.organization_id || organizations.find((organization) => organization.team_ids?.includes(initial?.team_id || ""))?.id || "";
 	const [value, setValue] = useState<FormState>(() => initial ? { alias: initial.alias || "", description: initial.description || "", organization: initialOrganization, team_id: initial.team_id || "", user_id: initial.user_id || "", roles: (initial.roles || []).join(", "), access_group_ids: initial.access_group_ids || [], allowed_models: initial.allowed_models || [], allowed_tools: (initial.allowed_tools || []).join(", "), rate_limit_rpm: String(initial.rate_limit_rpm || ""), rate_limit_tpm: String(initial.rate_limit_tpm || ""), expires_at: initial.expires_at ? initial.expires_at.slice(0, 16) : "" } : emptyForm);
@@ -146,7 +136,7 @@ function FilterModal({ value, organizations, teams, users, onChange, onClose }: 
 export function VirtualKeysPage() {
   const { client } = useAuth();
   const [keys, setKeys] = useState<VirtualKey[]>([]); const [users, setUsers] = useState<User[]>([]); const [teams, setTeams] = useState<Team[]>([]); const [organizations, setOrganizations] = useState<Organization[]>([]); const [accessGroups, setAccessGroups] = useState<AccessGroup[]>([]); const [models, setModels] = useState<string[]>([]); const [financials, setFinancials] = useState<Record<string, KeyBudgetProjection>>({}); const [usage, setUsage] = useState<KeyUsage[]>([]);
-	const [search, setSearch] = useState(""); const [filters, setFilters] = useState(emptyFilter); const [filterOpen, setFilterOpen] = useState(false); const [form, setForm] = useState<"create" | VirtualKey>(); const [issued, setIssued] = useState<IssuedKey>(); const [copied, setCopied] = useState(false); const [copyError, setCopyError] = useState("");
+	const [search, setSearch] = useState(""); const [filters, setFilters] = useState(() => ({ ...emptyFilter, key: new URLSearchParams(window.location.search).get("key_id") || "" })); const [filterOpen, setFilterOpen] = useState(false); const [form, setForm] = useState<"create" | VirtualKey>(); const [issued, setIssued] = useState<IssuedKey>(); const [copied, setCopied] = useState(false); const [copyError, setCopyError] = useState("");
 	const [sort, setSort] = useState<SortKey>("created"); const [direction, setDirection] = useState<"asc" | "desc">("desc"); const [loading, setLoading] = useState(true); const [error, setError] = useState("");
   const [page, setPage] = useState(0); const [total, setTotal] = useState(0); const [pageSizeOption, setPageSizeOption] = useState("25"); const [customPageSize, setCustomPageSize] = useState("25");
   const [visibleColumns, setVisibleColumns] = useState(() => new Set(defaultKeyColumns));

@@ -41,6 +41,7 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 		query.TeamID = r.URL.Query().Get("team_id")
 		query.UserID = r.URL.Query().Get("user_id")
 		query.KeyID = r.URL.Query().Get("key_id")
+		query.AccessGroupID = r.URL.Query().Get("access_group_id")
 		query.Status = r.URL.Query().Get("status")
 		query.SortBy = r.URL.Query().Get("sort_by")
 		query.SortOrder = r.URL.Query().Get("sort_order")
