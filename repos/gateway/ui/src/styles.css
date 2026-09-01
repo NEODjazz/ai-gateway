@@ -206,6 +206,7 @@ textarea { resize: vertical; }
 .budget-progress > span.risk { background: #d97706; }
 .budget-progress > span.exhausted { background: #dc2626; }
 .table-filter-select select { min-width: 132px; }
+.logging-safety, .logging-probe-result { margin-bottom: 18px; }
 .credential-form-error, .credential-form-actions { margin-left: 188px; }
 .model-group-stats { margin-top: 2px; }
 .model-group-form-modal { width: min(900px, 100%); }

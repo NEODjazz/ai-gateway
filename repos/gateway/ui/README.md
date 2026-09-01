@@ -70,3 +70,8 @@ live cost and token progress, reset timestamps, risk/exhaustion state, explicit
 currency, scope filtering, configurable columns and virtual-key-style actions.
 Create/edit loads the target from the selected configured registry and omits an
 unused optional limit instead of serializing it as zero.
+
+Logging & Alerts is a dedicated callback workspace with current-replica delivery counters,
+content-boundary disclosure, searchable/configurable columns and Test/Edit/Delete
+actions. Probe latency is shown without sending inference content. Bearer
+secrets are write-only: an empty edit preserves the existing encrypted value.

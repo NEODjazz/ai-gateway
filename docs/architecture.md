@@ -203,6 +203,9 @@ Policy templates и Logging Destinations.
 Bearer secrets для logging destinations шифруются отдельным domain-separated
 ключом. Любая неуспешная admin-state запись откатывает локальную мутацию, а
 конкурирующая запись другой реплики возвращает `409 revision_conflict`.
+UI показывает только metadata destinations и process-local counters очереди
+`queued/delivered/failed/dropped`. Test отправляет фиксированный probe без
+prompt/response content и требует append-only audit preflight до внешнего HTTP-вызова.
 
 Gateway также раздаёт встроенный `/ui/` control-plane console без внешних CDN.
 UI является недоверенным статическим клиентом: bearer хранится только в

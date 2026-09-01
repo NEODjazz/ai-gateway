@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,6 +69,9 @@ func TestLoggingDestinationAdminAPIHidesSecretAndProbes(t *testing.T) {
 	if probe.Code != http.StatusOK || !strings.Contains(probe.Body.String(), `"content_sent":false`) {
 		t.Fatalf("probe status=%d body=%s", probe.Code, probe.Body.String())
 	}
+	if len(audit.events) != 4 || audit.events[2].Action != "logging_destination.test" || audit.events[2].Outcome != "attempted" || audit.events[3].Outcome != "succeeded" {
+		t.Fatalf("probe audit=%+v", audit.events)
+	}
 }
 
 func TestLoggingDestinationRejectsUnsafeURL(t *testing.T) {
@@ -76,5 +80,31 @@ func TestLoggingDestinationRejectsUnsafeURL(t *testing.T) {
 		if _, err := registry.Put("unsafe", LoggingDestination{Name: "Unsafe", Type: "webhook", URL: endpoint, EventTypes: []string{"request_outcome"}}, ""); err == nil {
 			t.Fatalf("unsafe URL accepted: %s", endpoint)
 		}
+	}
+}
+
+func TestLoggingDestinationProbeFailsClosedOnAuditAndRecordsDeliveryFailure(t *testing.T) {
+	requests := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer server.Close()
+	registry := NewLoggingRegistry(server.Client())
+	if _, err := registry.Put("security", LoggingDestination{Name: "Security", Type: "webhook", URL: server.URL, EventTypes: []string{"request_outcome"}, Enabled: true}, ""); err != nil {
+		t.Fatal(err)
+	}
+	audit := &recordingAuditClient{appendErr: errors.New("audit unavailable")}
+	router := Routes(NewHandler(modulesPipeline("admin"), nil).WithLoggingRegistry(registry).WithAudit(audit))
+	blocked := httptest.NewRecorder()
+	router.ServeHTTP(blocked, httptest.NewRequest(http.MethodPost, "/admin/v1/logging/destinations/security/test", nil))
+	if blocked.Code != http.StatusServiceUnavailable || requests != 0 {
+		t.Fatalf("audit preflight did not block probe: status=%d requests=%d", blocked.Code, requests)
+	}
+	audit.appendErr = nil
+	failed := httptest.NewRecorder()
+	router.ServeHTTP(failed, httptest.NewRequest(http.MethodPost, "/admin/v1/logging/destinations/security/test", nil))
+	if failed.Code != http.StatusBadGateway || requests != 1 || len(audit.events) != 2 || audit.events[0].Outcome != "attempted" || audit.events[1].Outcome != "failed" {
+		t.Fatalf("failed probe status=%d requests=%d audit=%+v", failed.Code, requests, audit.events)
 	}
 }

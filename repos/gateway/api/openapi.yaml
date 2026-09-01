@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.40
+  version: 0.1.41
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1072,6 +1072,7 @@ paths:
         '403': {$ref: '#/components/responses/AdminRequired'}
         '404': {$ref: '#/components/responses/NotFound'}
         '502': {description: Destination rejected the probe or was unreachable}
+        '503': {description: Append-only audit preflight or logging management is unavailable}
   /admin/v1/tool-policies:
     get:
       operationId: listToolPolicies

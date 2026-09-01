@@ -197,6 +197,10 @@ encrypted credentials, deployments, model groups, guardrail policies and their
 scope attachments, managed tag policies, projects/access groups, MCP servers/toolsets, agent/tool-policy templates, and
 logging destinations as one versioned JSONB snapshot. Logging bearer secrets
 use domain-separated AES-GCM encryption and are never returned by the API. The
+dedicated Logging & Alerts console exposes queue/delivery/failure/drop counters,
+configured callback metadata and auditable fixed-content probes. Editing with
+an empty secret preserves the encrypted value; probes never contain prompts or
+responses and fail closed when the audit preflight is unavailable. The
 gateway seeds an empty store from `PROVIDERS_JSON`, then treats
 PostgreSQL as the source of truth. The runtime model catalog is stored in the
 same snapshot; an existing Redis catalog is imported once when a legacy
