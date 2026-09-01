@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.16
+  version: 0.1.17
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1276,12 +1276,15 @@ paths:
         - {name: before_request_id, in: query, schema: {type: string, maxLength: 256}}
         - {name: request_id, in: query, schema: {type: string, maxLength: 256}}
         - {name: session_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: trace_id, in: query, schema: {type: string, pattern: '^[0-9a-fA-F]{32}$'}}
         - {name: status, in: query, schema: {type: string, enum: [ok, error]}}
         - {name: model, in: query, schema: {type: string, maxLength: 256}}
         - {name: provider, in: query, schema: {type: string, maxLength: 256}}
         - {name: user_id, in: query, schema: {type: string, maxLength: 256}}
         - {name: team_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: organization_id, in: query, schema: {type: string, maxLength: 256}}
         - {name: credential_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: cache_status, in: query, schema: {type: string, enum: [hit, miss, error]}}
       responses:
         '200':
           description: Request log page ordered newest first
@@ -1711,8 +1714,10 @@ components:
         timestamp: {type: string, format: date-time}
         request_id: {type: string}
         session_id: {type: string, maxLength: 128}
+        trace_id: {type: string, pattern: '^[0-9a-f]{32}$', description: OpenTelemetry trace identifier shared by all events in one distributed trace}
         user_id: {type: string}
         team_id: {type: string}
+        organization_id: {type: string}
         roles: {type: array, items: {type: string}}
         credential_id: {type: string, description: Non-secret credential identifier or fingerprint}
         provider: {type: string}
@@ -1726,10 +1731,15 @@ components:
         status: {type: string, enum: [ok, error]}
         failure_class: {type: string, description: Bounded failure category; raw provider errors are excluded}
         latency_ms: {type: integer, minimum: 0}
+        first_token_latency_ms: {type: integer, minimum: 0}
+        retry_count: {type: integer, minimum: 0}
+        fallback_count: {type: integer, minimum: 0}
         cache_status: {type: string}
+        cache_kind: {type: string}
         input_tokens: {type: integer, minimum: 0}
         output_tokens: {type: integer, minimum: 0}
         total_tokens: {type: integer, minimum: 0}
+        usage_estimated: {type: boolean}
         cost: {type: number, minimum: 0}
         currency: {type: string}
         content_stored: {type: boolean, const: false}

@@ -23,6 +23,7 @@ type RequestLogFilter struct {
 	BeforeRequestID string
 	RequestID       string
 	SessionID       string
+	TraceID         string
 	Status          string
 	Model           string
 	Provider        string
@@ -37,6 +38,7 @@ type RequestLog struct {
 	Timestamp            string   `json:"timestamp"`
 	RequestID            string   `json:"request_id"`
 	SessionID            string   `json:"session_id,omitempty"`
+	TraceID              string   `json:"trace_id,omitempty"`
 	UserID               string   `json:"user_id,omitempty"`
 	TeamID               string   `json:"team_id,omitempty"`
 	OrganizationID       string   `json:"organization_id,omitempty"`
@@ -104,6 +106,7 @@ func (r *ClickHouseUsageReporter) ListRequestLogs(ctx context.Context, filter Re
 	}
 	addStringFilter("request_id", "request_id", filter.RequestID)
 	addStringFilter("session_id", "session_id", filter.SessionID)
+	addStringFilter("trace_id", "trace_id", filter.TraceID)
 	addStringFilter("status", "status", filter.Status)
 	addStringFilter(canonicalUsageModelExpression, "model", filter.Model)
 	addStringFilter(canonicalUsageProviderExpression, "provider", filter.Provider)
@@ -157,7 +160,7 @@ func (r *ClickHouseUsageReporter) GetRequestLog(ctx context.Context, requestID s
 var ErrRequestLogNotFound = errors.New("request log not found")
 
 func requestLogColumns() string {
-	return "timestamp,request_id,session_id,user_id,team_id,organization_id,roles,api_key_fingerprint AS credential_id,provider,provider_id,provider_endpoint_name,provider_endpoint_type,model,upstream_model,api_type,phase,status,failure_class,latency_ms,first_token_latency_ms,retry_count,fallback_count,cache_status,cache_kind,input_tokens,output_tokens,total_tokens,usage_estimated,cost,currency,false AS content_stored"
+	return "timestamp,request_id,session_id,trace_id,user_id,team_id,organization_id,roles,api_key_fingerprint AS credential_id,provider,provider_id,provider_endpoint_name,provider_endpoint_type,model,upstream_model,api_type,phase,status,failure_class,latency_ms,first_token_latency_ms,retry_count,fallback_count,cache_status,cache_kind,input_tokens,output_tokens,total_tokens,usage_estimated,cost,currency,false AS content_stored"
 }
 
 func (r *ClickHouseUsageReporter) queryRequestLogs(ctx context.Context, params url.Values) ([]RequestLog, error) {

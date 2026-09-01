@@ -193,9 +193,11 @@ The Usage & Spend view reads final request outcomes from ClickHouse for a
 bounded 7/30/90-day window and breaks requests, tokens, latency, and spend down
 by day, model, and provider. Costs remain separated by currency.
 The Request Logs view provides a bounded, cursor-paginated explorer over the
-same final outcomes with filters for request, status, model, endpoint, user,
-team, organization, cache outcome, and credential fingerprint over bounded
-7/30/90-day windows. Its detail contract contains operational
+same final outcomes with filters for request, session, OpenTelemetry trace,
+status, model, endpoint, user, team, organization, cache outcome, and credential
+fingerprint over bounded 7/30/90-day windows. Requests can also be grouped by
+session or distributed trace; group spend remains separated by currency. Its
+detail contract contains operational
 metadata, token counts, cost, cache state, and a bounded failure class only.
 It also exposes streaming time-to-first-token, retry and fallback counts, cache
 kind, organization scope, and whether token counts came from the provider or
@@ -452,10 +454,12 @@ with the same ID, trace/span IDs, status, normalized path, and duration.
 
 Set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to a full OTLP/HTTP traces URL such as
 `http://otel-collector:4318/v1/traces`. `OTEL_TRACE_SAMPLE_RATIO` accepts a value
-from `0` to `1`; an empty endpoint disables exporting. Incoming W3C trace context
-is continued, remote modules and provider HTTP calls propagate it, and gateway,
-module, provider-attempt, and HTTP client spans are flushed during graceful
-shutdown.
+from `0` to `1`; an empty endpoint disables exporting but the in-process SDK
+still creates correlation trace IDs. Incoming W3C trace context is continued,
+remote modules and provider HTTP calls propagate it, and gateway, module,
+provider-attempt, and HTTP client spans are flushed during graceful shutdown.
+Final billing outcomes persist the same metadata-only `trace_id` in ClickHouse;
+prompt, response, credential, and raw provider error content remain excluded.
 
 Named guardrail profiles are configured
 with `GUARDRAIL_POLICIES_JSON` (Helm: `gateway.guardrailPolicies`) and selected

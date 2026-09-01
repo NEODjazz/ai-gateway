@@ -29,15 +29,22 @@ func Setup(ctx context.Context, cfg Config) (Shutdown, error) {
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{}, propagation.Baggage{},
 	))
+	if cfg.SampleRatio < 0 || cfg.SampleRatio > 1 {
+		return nil, errors.New("OTEL_TRACE_SAMPLE_RATIO must be between 0 and 1")
+	}
 	if strings.TrimSpace(cfg.Endpoint) == "" {
-		otel.SetTracerProvider(trace.NewNoopTracerProvider())
-		return func(context.Context) error { return nil }, nil
+		provider := sdktrace.NewTracerProvider(
+			sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SampleRatio))),
+		)
+		otel.SetTracerProvider(provider)
+		return func(shutdownCtx context.Context) error {
+			err := provider.Shutdown(shutdownCtx)
+			otel.SetTracerProvider(trace.NewNoopTracerProvider())
+			return err
+		}, nil
 	}
 	if err := validateEndpoint(cfg.Endpoint); err != nil {
 		return nil, err
-	}
-	if cfg.SampleRatio < 0 || cfg.SampleRatio > 1 {
-		return nil, errors.New("OTEL_TRACE_SAMPLE_RATIO must be between 0 and 1")
 	}
 	if strings.TrimSpace(cfg.ServiceName) == "" {
 		cfg.ServiceName = "ai-gateway"

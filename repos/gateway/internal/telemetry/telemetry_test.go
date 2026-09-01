@@ -51,3 +51,20 @@ func TestSetupRejectsUnsafeConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupCreatesTraceIDsWithoutExporter(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	shutdown, err := Setup(context.Background(), Config{SampleRatio: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = shutdown(context.Background())
+		otel.SetTracerProvider(previousProvider)
+	}()
+	_, span := otel.Tracer("test").Start(context.Background(), "local-correlation")
+	defer span.End()
+	if !span.SpanContext().IsValid() {
+		t.Fatal("local telemetry did not create a trace id")
+	}
+}

@@ -7,11 +7,13 @@ import (
 	"strings"
 
 	"ai-gateway-gateway/internal/openai"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type UsageRequest struct {
 	RequestID             string   `json:"request_id,omitempty"`
 	SessionID             string   `json:"session_id,omitempty"`
+	TraceID               string   `json:"trace_id,omitempty"`
 	CredentialID          string   `json:"credential_id,omitempty"`
 	UserID                string   `json:"user_id,omitempty"`
 	TeamID                string   `json:"team_id,omitempty"`
@@ -90,6 +92,9 @@ func (m RemoteBillingModule) HandleFailure(ctx context.Context, req *RequestCont
 
 func (m RemoteBillingModule) send(ctx context.Context, req *RequestContext, phase string) error {
 	request := billingRequest(req)
+	if spanContext := trace.SpanContextFromContext(ctx); spanContext.IsValid() {
+		request.TraceID = spanContext.TraceID().String()
+	}
 	request.Phase = phase
 	response, err := callRemoteWithHeaders[UsageRequest, UsageResponse](ctx, m.client, m.endpoint, request, map[string]string{"X-Service-Token": m.secret})
 	if err != nil {

@@ -157,10 +157,11 @@ migrations/clickhouse/002_usage_catalog.sql
 migrations/clickhouse/003_usage_identity.sql
 migrations/clickhouse/004_usage_sessions.sql
 migrations/clickhouse/005_usage_observability.sql
+migrations/clickhouse/006_usage_traces.sql
 ```
 
-Final usage events retain normalized provider/deployment identity, organization
-and session scope, end-to-end latency and streaming TTFT, retry/fallback counts,
+Final usage events retain normalized provider/deployment identity, organization,
+session and OpenTelemetry trace scope, end-to-end latency and streaming TTFT, retry/fallback counts,
 cache status/type, and whether token usage came from the provider or the bounded
 gateway estimator. Estimated usage is explicitly marked and must not be treated
 as exact provider metering.

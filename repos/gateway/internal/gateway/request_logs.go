@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/url"
@@ -17,6 +18,7 @@ type RequestLogFilter struct {
 	BeforeRequestID string
 	RequestID       string
 	SessionID       string
+	TraceID         string
 	Status          string
 	Model           string
 	Provider        string
@@ -31,6 +33,7 @@ type RequestLog struct {
 	Timestamp            string   `json:"timestamp"`
 	RequestID            string   `json:"request_id"`
 	SessionID            string   `json:"session_id,omitempty"`
+	TraceID              string   `json:"trace_id,omitempty"`
 	UserID               string   `json:"user_id,omitempty"`
 	TeamID               string   `json:"team_id,omitempty"`
 	OrganizationID       string   `json:"organization_id,omitempty"`
@@ -81,7 +84,7 @@ type RequestLogClient interface {
 
 func (c *RemoteBudgetManagementClient) ListRequestLogs(ctx context.Context, audit ManagementAudit, filter RequestLogFilter) (RequestLogPage, error) {
 	query := url.Values{"days": {strconv.Itoa(filter.Days)}, "limit": {strconv.Itoa(filter.Limit)}}
-	for key, value := range map[string]string{"request_id": filter.RequestID, "session_id": filter.SessionID, "status": filter.Status, "model": filter.Model, "provider": filter.Provider, "user_id": filter.UserID, "team_id": filter.TeamID, "organization_id": filter.OrganizationID, "credential_id": filter.CredentialID, "cache_status": filter.CacheStatus} {
+	for key, value := range map[string]string{"request_id": filter.RequestID, "session_id": filter.SessionID, "trace_id": filter.TraceID, "status": filter.Status, "model": filter.Model, "provider": filter.Provider, "user_id": filter.UserID, "team_id": filter.TeamID, "organization_id": filter.OrganizationID, "credential_id": filter.CredentialID, "cache_status": filter.CacheStatus} {
 		if value != "" {
 			query.Set(key, value)
 		}
@@ -180,7 +183,7 @@ func requestLogFilter(r *http.Request) (RequestLogFilter, error) {
 		return RequestLogFilter{}, errors.New("days must be 1-90 and limit must be 1-200")
 	}
 	filter := RequestLogFilter{Days: days, Limit: limit}
-	for name, target := range map[string]*string{"request_id": &filter.RequestID, "session_id": &filter.SessionID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider, "user_id": &filter.UserID, "team_id": &filter.TeamID, "organization_id": &filter.OrganizationID, "credential_id": &filter.CredentialID, "cache_status": &filter.CacheStatus} {
+	for name, target := range map[string]*string{"request_id": &filter.RequestID, "session_id": &filter.SessionID, "trace_id": &filter.TraceID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider, "user_id": &filter.UserID, "team_id": &filter.TeamID, "organization_id": &filter.OrganizationID, "credential_id": &filter.CredentialID, "cache_status": &filter.CacheStatus} {
 		*target = strings.TrimSpace(r.URL.Query().Get(name))
 		if len(*target) > 256 {
 			return RequestLogFilter{}, errors.New("request log filters must not exceed 256 characters")
@@ -191,6 +194,14 @@ func requestLogFilter(r *http.Request) (RequestLogFilter, error) {
 	}
 	if filter.CacheStatus != "" && filter.CacheStatus != "hit" && filter.CacheStatus != "miss" && filter.CacheStatus != "error" {
 		return RequestLogFilter{}, errors.New("cache status must be hit, miss, or error")
+	}
+	if filter.TraceID != "" {
+		if len(filter.TraceID) != 32 {
+			return RequestLogFilter{}, errors.New("trace id must be 32 hexadecimal characters")
+		}
+		if _, err := hex.DecodeString(filter.TraceID); err != nil {
+			return RequestLogFilter{}, errors.New("trace id must be 32 hexadecimal characters")
+		}
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("before")); raw != "" {
 		filter.Before, err = time.Parse(time.RFC3339Nano, raw)

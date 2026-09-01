@@ -89,3 +89,6 @@ data:
         ADD COLUMN IF NOT EXISTS cache_kind LowCardinality(String) AFTER cache_status;
     ALTER TABLE ai_gateway.usage_events
         ADD COLUMN IF NOT EXISTS usage_estimated Bool AFTER total_tokens;
+  006_usage_traces.sql: |
+    ALTER TABLE ai_gateway.usage_events
+        ADD COLUMN IF NOT EXISTS trace_id String AFTER session_id;

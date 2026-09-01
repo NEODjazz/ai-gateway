@@ -287,8 +287,14 @@ func TestRemoteModulesPropagateW3CTraceContext(t *testing.T) {
 	}()
 
 	var traceparent string
+	var payloadTraceID string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		traceparent = r.Header.Get("traceparent")
+		var request UsageRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		payloadTraceID = request.TraceID
 		_ = json.NewEncoder(w).Encode(UsageResponse{})
 	}))
 	defer server.Close()
@@ -299,6 +305,9 @@ func TestRemoteModulesPropagateW3CTraceContext(t *testing.T) {
 	}
 	if !strings.HasPrefix(traceparent, "00-") {
 		t.Fatalf("remote request did not carry W3C trace context: %q", traceparent)
+	}
+	if fields := strings.Split(traceparent, "-"); len(fields) != 4 || payloadTraceID != fields[1] {
+		t.Fatalf("billing trace id %q does not match traceparent %q", payloadTraceID, traceparent)
 	}
 }
 

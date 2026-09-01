@@ -253,6 +253,7 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 	return BillingEvent{
 		RequestID:             requestID(req),
 		SessionID:             req.SessionID,
+		TraceID:               req.TraceID,
 		UserID:                req.UserID,
 		TeamID:                req.TeamID,
 		OrganizationID:        req.OrganizationID,
