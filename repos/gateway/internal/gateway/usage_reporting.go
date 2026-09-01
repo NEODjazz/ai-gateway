@@ -45,11 +45,15 @@ type UsageReport struct {
 }
 
 type UsageReportQuery struct {
-	From     time.Time
-	To       time.Time
-	Model    string
-	Provider string
-	Tag      string
+	From          time.Time
+	To            time.Time
+	ScopeType     string
+	ScopeID       string
+	Model         string
+	UpstreamModel string
+	Provider      string
+	Endpoint      string
+	Tag           string
 }
 
 type UsageManagementClient interface {
@@ -79,11 +83,21 @@ func (c *RemoteBudgetManagementClient) ScopedUsageReport(ctx context.Context, au
 
 func (c *RemoteBudgetManagementClient) FilteredUsageReport(ctx context.Context, audit ManagementAudit, query UsageReportQuery) (UsageReport, error) {
 	values := url.Values{"from": {query.From.UTC().Format(time.RFC3339)}, "to": {query.To.UTC().Format(time.RFC3339)}}
+	if query.ScopeType != "" {
+		values.Set("scope_type", query.ScopeType)
+		values.Set("scope_id", query.ScopeID)
+	}
 	if query.Model != "" {
 		values.Set("model", query.Model)
 	}
+	if query.UpstreamModel != "" {
+		values.Set("upstream_model", query.UpstreamModel)
+	}
 	if query.Provider != "" {
 		values.Set("provider", query.Provider)
+	}
+	if query.Endpoint != "" {
+		values.Set("endpoint", query.Endpoint)
 	}
 	if query.Tag != "" {
 		values.Set("tag", query.Tag)
@@ -118,7 +132,7 @@ func (h Handler) GetUsageReport(w http.ResponseWriter, r *http.Request) {
 	}
 	query, filtered, valid := usageReportFilter(r, days)
 	if !valid {
-		writeError(w, http.StatusBadRequest, "invalid_request", "from/to must be RFC3339 dates within a 90 day range; model/provider/tag must be at most 256 characters")
+		writeError(w, http.StatusBadRequest, "invalid_request", "from/to must be RFC3339 dates within a 90 day range; dimension filters and scope IDs must be at most 256 characters")
 		return
 	}
 	var report UsageReport
@@ -142,11 +156,16 @@ func (h Handler) GetUsageReport(w http.ResponseWriter, r *http.Request) {
 
 func usageReportFilter(r *http.Request, days int) (UsageReportQuery, bool, bool) {
 	model := strings.TrimSpace(r.URL.Query().Get("model"))
+	upstreamModel := strings.TrimSpace(r.URL.Query().Get("upstream_model"))
 	providerID := strings.TrimSpace(r.URL.Query().Get("provider"))
+	endpoint := strings.TrimSpace(r.URL.Query().Get("endpoint"))
 	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	scopeType := strings.TrimSpace(r.URL.Query().Get("scope_type"))
+	scopeID := strings.TrimSpace(r.URL.Query().Get("scope_id"))
 	fromRaw, toRaw := strings.TrimSpace(r.URL.Query().Get("from")), strings.TrimSpace(r.URL.Query().Get("to"))
-	filtered := model != "" || providerID != "" || tag != "" || fromRaw != "" || toRaw != ""
-	if len(model) > 256 || len(providerID) > 256 || len(tag) > 256 || (fromRaw == "") != (toRaw == "") {
+	filtered := model != "" || upstreamModel != "" || providerID != "" || endpoint != "" || tag != "" || scopeType != "" || scopeID != "" || fromRaw != "" || toRaw != ""
+	validScope := scopeType == "" || scopeType == "key" || scopeType == "user" || scopeType == "team" || scopeType == "organization"
+	if len(model) > 256 || len(upstreamModel) > 256 || len(providerID) > 256 || len(endpoint) > 256 || len(tag) > 256 || len(scopeID) > 256 || (fromRaw == "") != (toRaw == "") || (scopeType == "") != (scopeID == "") || !validScope {
 		return UsageReportQuery{}, filtered, false
 	}
 	to := time.Now().UTC()
@@ -165,7 +184,7 @@ func usageReportFilter(r *http.Request, days int) (UsageReportQuery, bool, bool)
 	if !to.After(from) || to.Sub(from) > 90*24*time.Hour {
 		return UsageReportQuery{}, filtered, false
 	}
-	return UsageReportQuery{From: from.UTC(), To: to.UTC(), Model: model, Provider: providerID, Tag: tag}, filtered, true
+	return UsageReportQuery{From: from.UTC(), To: to.UTC(), ScopeType: scopeType, ScopeID: scopeID, Model: model, UpstreamModel: upstreamModel, Provider: providerID, Endpoint: endpoint, Tag: tag}, filtered, true
 }
 
 func (h Handler) GetCustomerUsageReport(w http.ResponseWriter, r *http.Request) {
@@ -179,8 +198,8 @@ func (h Handler) GetCustomerUsageReport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	scopeType, scopeID := strings.TrimSpace(r.PathValue("scope_type")), strings.TrimSpace(r.PathValue("scope_id"))
-	if (scopeType != "key" && scopeType != "user" && scopeType != "team") || scopeID == "" || len(scopeID) > 256 {
-		writeError(w, http.StatusBadRequest, "invalid_request", "scope must be key, user, or team with a non-empty ID")
+	if (scopeType != "key" && scopeType != "user" && scopeType != "team" && scopeType != "organization") || scopeID == "" || len(scopeID) > 256 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "scope must be key, user, team, or organization with a non-empty ID")
 		return
 	}
 	days := 30

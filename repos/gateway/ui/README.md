@@ -36,4 +36,7 @@ placed in the URL or returned by the log APIs.
 Usage keeps public models, concrete upstream models, logical providers, and
 routed endpoints as separate dimensions. This makes alias behavior and routing
 decisions visible without creating duplicate catalog records or attributing a
-deployment name to the provider column.
+deployment name to the provider column. Each dimension row has an Inspect action
+that loads currency-safe totals and daily activity from the server using the
+current period and filters; owner drill-downs use non-secret key fingerprints or
+configured organization, team, and user IDs.

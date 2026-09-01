@@ -178,6 +178,7 @@ textarea { resize: vertical; }
 .usage-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .usage-chart-card { padding: 18px; border: 1px solid #d7dfe5; border-radius: 11px; background: white; box-shadow: 0 7px 20px rgba(49, 65, 77, .05); }
 .usage-chart-card h2 { margin: 0 0 16px; font-size: 17px; }
+.usage-detail-modal { width: min(1080px, 100%); }
 .usage-bars { display: grid; gap: 10px; }
 .usage-bar-row { display: grid; grid-template-columns: minmax(105px, auto) minmax(90px, 1fr) minmax(70px, auto); align-items: center; gap: 10px; font-size: 12px; }
 .usage-bar-row > span { color: #667683; }

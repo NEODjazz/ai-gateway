@@ -40,14 +40,14 @@ func TestClickHouseUsageReporterBuildsBoundedReport(t *testing.T) {
 func TestClickHouseUsageReporterParameterizesDimensionFilters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("query")
-		if !strings.Contains(query, "= {model:String}") || !strings.Contains(query, "= {provider:String}") || !strings.Contains(query, "has(tags, {tag:String})") || r.URL.Query().Get("param_model") != "model' OR 1=1" || r.URL.Query().Get("param_provider") != "provider/x" || r.URL.Query().Get("param_tag") != "production' OR 1=1" || strings.Contains(query, "model' OR 1=1") || strings.Contains(query, "production' OR 1=1") {
+		if !strings.Contains(query, "= {model:String}") || !strings.Contains(query, "upstream_model = {upstream_model:String}") || !strings.Contains(query, "= {provider:String}") || !strings.Contains(query, "provider_endpoint_name = {endpoint:String}") || !strings.Contains(query, "has(tags, {tag:String})") || r.URL.Query().Get("param_model") != "model' OR 1=1" || r.URL.Query().Get("param_upstream_model") != "upstream/model" || r.URL.Query().Get("param_provider") != "provider/x" || r.URL.Query().Get("param_endpoint") != "endpoint/a" || r.URL.Query().Get("param_tag") != "production' OR 1=1" || strings.Contains(query, "model' OR 1=1") || strings.Contains(query, "production' OR 1=1") {
 			t.Fatalf("filters were not safely parameterized: query=%q params=%v", query, r.URL.Query())
 		}
 	}))
 	defer server.Close()
 	reporter, _ := NewClickHouseUsageReporter(Settings{UsageEventsEnabled: true, ClickHouseURL: server.URL, ClickHouseDatabase: "db", ClickHouseUsageEventsTable: "events"})
 	from := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := reporter.ReportQuery(context.Background(), UsageReportQuery{From: from, To: from.Add(24 * time.Hour), Model: "model' OR 1=1", Provider: "provider/x", Tag: "production' OR 1=1"}); err != nil {
+	if _, err := reporter.ReportQuery(context.Background(), UsageReportQuery{From: from, To: from.Add(24 * time.Hour), Model: "model' OR 1=1", UpstreamModel: "upstream/model", Provider: "provider/x", Endpoint: "endpoint/a", Tag: "production' OR 1=1"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -79,6 +79,20 @@ func TestClickHouseUsageReporterUsesParameterizedScope(t *testing.T) {
 	}
 	if _, err := reporter.ReportScoped(context.Background(), 7, UsageScope{Type: "provider", ID: "x"}); err == nil {
 		t.Fatal("unsupported customer scope accepted")
+	}
+}
+
+func TestClickHouseUsageReporterSupportsOrganizationScope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		if !strings.Contains(query, "organization_id = {scope_id:String}") || r.URL.Query().Get("param_scope_id") != "org-a" {
+			t.Fatalf("organization scope was not parameterized: query=%q params=%v", query, r.URL.Query())
+		}
+	}))
+	defer server.Close()
+	reporter, _ := NewClickHouseUsageReporter(Settings{UsageEventsEnabled: true, ClickHouseURL: server.URL, ClickHouseDatabase: "db", ClickHouseUsageEventsTable: "events"})
+	if _, err := reporter.ReportScoped(context.Background(), 7, UsageScope{Type: "organization", ID: "org-a"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

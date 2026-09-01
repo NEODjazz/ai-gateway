@@ -30,6 +30,11 @@ describe("operational pages", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Upstream models" })); expect(screen.getByText("gpt-5.6-2026-07-09")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Providers" })); expect(screen.getByText("azure-open-ai")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Endpoints" })); expect(screen.getByText("azure-primary")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for azure-primary" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Inspect" }));
+    expect(await screen.findByRole("dialog", { name: "Usage details" })).toHaveTextContent("Endpoint: azure-primary");
+    await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("endpoint=azure-primary"));
+    await userEvent.click(screen.getByRole("button", { name: "Close usage details" }));
     await userEvent.click(screen.getByRole("tab", { name: "Tags" })); expect(screen.getByText("production")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Virtual keys" })); expect(screen.getByText("key-1")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Users" })); expect(screen.getByText("user-1")).toBeInTheDocument();

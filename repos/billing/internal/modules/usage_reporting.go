@@ -57,12 +57,14 @@ type UsageScope struct {
 }
 
 type UsageReportQuery struct {
-	From     time.Time
-	To       time.Time
-	Scope    UsageScope
-	Model    string
-	Provider string
-	Tag      string
+	From          time.Time
+	To            time.Time
+	Scope         UsageScope
+	Model         string
+	UpstreamModel string
+	Provider      string
+	Endpoint      string
+	Tag           string
 }
 
 type FilteredUsageReporter interface {
@@ -106,7 +108,7 @@ func (r *ClickHouseUsageReporter) Report(ctx context.Context, days int) (UsageRe
 }
 
 func (r *ClickHouseUsageReporter) ReportScoped(ctx context.Context, days int, scope UsageScope) (UsageReport, error) {
-	if (scope.Type != "key" && scope.Type != "user" && scope.Type != "team") || strings.TrimSpace(scope.ID) == "" || len(scope.ID) > 256 {
+	if (scope.Type != "key" && scope.Type != "user" && scope.Type != "team" && scope.Type != "organization") || strings.TrimSpace(scope.ID) == "" || len(scope.ID) > 256 {
 		return UsageReport{}, errors.New("invalid usage scope")
 	}
 	to := r.now().UTC()
@@ -114,15 +116,15 @@ func (r *ClickHouseUsageReporter) ReportScoped(ctx context.Context, days int, sc
 }
 
 func (r *ClickHouseUsageReporter) ReportQuery(ctx context.Context, query UsageReportQuery) (UsageReport, error) {
-	if r == nil || r.client == nil || !query.To.After(query.From) || query.To.Sub(query.From) > 90*24*time.Hour || len(query.Model) > 256 || len(query.Provider) > 256 || len(query.Tag) > 256 {
+	if r == nil || r.client == nil || !query.To.After(query.From) || query.To.Sub(query.From) > 90*24*time.Hour || len(query.Model) > 256 || len(query.UpstreamModel) > 256 || len(query.Provider) > 256 || len(query.Endpoint) > 256 || len(query.Tag) > 256 {
 		return UsageReport{}, errors.New("invalid usage report query")
 	}
-	if query.Scope.Type != "" && ((query.Scope.Type != "key" && query.Scope.Type != "user" && query.Scope.Type != "team") || strings.TrimSpace(query.Scope.ID) == "" || len(query.Scope.ID) > 256) {
+	if query.Scope.Type != "" && ((query.Scope.Type != "key" && query.Scope.Type != "user" && query.Scope.Type != "team" && query.Scope.Type != "organization") || strings.TrimSpace(query.Scope.ID) == "" || len(query.Scope.ID) > 256) {
 		return UsageReport{}, errors.New("invalid usage scope")
 	}
 	days := int(query.To.Sub(query.From).Hours()/24 + 0.999999)
 	report := UsageReport{Days: days, From: query.From.UTC(), To: query.To.UTC(), Totals: []UsageAggregate{}, Daily: []UsageAggregate{}, ByModel: []UsageAggregate{}, ByUpstreamModel: []UsageAggregate{}, ByProvider: []UsageAggregate{}, ByEndpoint: []UsageAggregate{}, ByTag: []UsageAggregate{}, ByKey: []UsageAggregate{}, ByUser: []UsageAggregate{}, ByTeam: []UsageAggregate{}, ByOrganization: []UsageAggregate{}}
-	statement := usageReportQuery(r.table, query.Scope.Type, query.Model != "", query.Provider != "", query.Tag != "")
+	statement := usageReportQuery(r.table, query.Scope.Type, query.Model != "", query.UpstreamModel != "", query.Provider != "", query.Endpoint != "", query.Tag != "")
 	parameters := url.Values{"output_format_json_quote_64bit_integers": {"0"}, "query": {statement}, "param_from": {strconv.FormatInt(query.From.UTC().Unix(), 10)}, "param_to": {strconv.FormatInt(query.To.UTC().Unix(), 10)}}
 	if query.Scope.Type != "" {
 		parameters.Set("param_scope_id", query.Scope.ID)
@@ -130,8 +132,14 @@ func (r *ClickHouseUsageReporter) ReportQuery(ctx context.Context, query UsageRe
 	if query.Model != "" {
 		parameters.Set("param_model", query.Model)
 	}
+	if query.UpstreamModel != "" {
+		parameters.Set("param_upstream_model", query.UpstreamModel)
+	}
 	if query.Provider != "" {
 		parameters.Set("param_provider", query.Provider)
+	}
+	if query.Endpoint != "" {
+		parameters.Set("param_endpoint", query.Endpoint)
 	}
 	if query.Tag != "" {
 		parameters.Set("param_tag", query.Tag)
@@ -193,17 +201,23 @@ func (r *ClickHouseUsageReporter) ReportQuery(ctx context.Context, query UsageRe
 	return report, nil
 }
 
-func usageReportQuery(table string, scopeType string, filterModel, filterProvider, filterTag bool) string {
+func usageReportQuery(table string, scopeType string, filterModel, filterUpstreamModel, filterProvider, filterEndpoint, filterTag bool) string {
 	where := "timestamp_unix >= {from:UInt64} AND timestamp_unix < {to:UInt64} AND phase IN ('commit','cancel')"
-	columns := map[string]string{"key": "api_key_fingerprint", "user": "user_id", "team": "team_id"}
+	columns := map[string]string{"key": "api_key_fingerprint", "user": "user_id", "team": "team_id", "organization": "organization_id"}
 	if column := columns[scopeType]; column != "" {
 		where += " AND " + column + " = {scope_id:String}"
 	}
 	if filterModel {
 		where += " AND " + canonicalUsageModelExpression + " = {model:String}"
 	}
+	if filterUpstreamModel {
+		where += " AND upstream_model = {upstream_model:String}"
+	}
 	if filterProvider {
 		where += " AND " + canonicalUsageProviderExpression + " = {provider:String}"
+	}
+	if filterEndpoint {
+		where += " AND provider_endpoint_name = {endpoint:String}"
 	}
 	if filterTag {
 		where += " AND has(tags, {tag:String})"

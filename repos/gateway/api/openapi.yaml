@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.28
+  version: 0.1.29
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1275,7 +1275,7 @@ paths:
       operationId: getUsageReport
       tags: [Usage]
       summary: Get aggregated usage and spend
-      description: Returns final request outcomes aggregated by currency, day, model, provider, and credential tag. Mixed currencies are never summed together.
+      description: Returns final request outcomes aggregated by currency, day, public or upstream model, provider, endpoint, credential tag, and customer scope. Mixed currencies are never summed together.
       parameters:
         - name: days
           in: query
@@ -1291,12 +1291,26 @@ paths:
         - name: model
           in: query
           schema: {type: string, maxLength: 256}
+        - name: upstream_model
+          in: query
+          schema: {type: string, maxLength: 256}
         - name: provider
+          in: query
+          schema: {type: string, maxLength: 256}
+        - name: endpoint
           in: query
           schema: {type: string, maxLength: 256}
         - name: tag
           in: query
           schema: {type: string, maxLength: 256}
+        - name: scope_type
+          in: query
+          description: Customer dimension to filter; must be provided together with `scope_id`.
+          schema: {type: string, enum: [key, user, team, organization]}
+        - name: scope_id
+          in: query
+          description: Non-secret virtual-key fingerprint or configured customer ID.
+          schema: {type: string, minLength: 1, maxLength: 256}
       responses:
         '200':
           description: Usage and spend report
@@ -1312,9 +1326,9 @@ paths:
       operationId: getCustomerUsageReport
       tags: [Customers]
       summary: Get usage and spend for one customer scope
-      description: Aggregates metadata-only final outcomes for a user, team, or non-secret virtual-key ID. Scope values are passed to ClickHouse as typed parameters.
+      description: Aggregates metadata-only final outcomes for an organization, user, team, or non-secret virtual-key ID. Scope values are passed to ClickHouse as typed parameters.
       parameters:
-        - {name: scope_type, in: path, required: true, schema: {type: string, enum: [key, user, team]}}
+        - {name: scope_type, in: path, required: true, schema: {type: string, enum: [key, user, team, organization]}}
         - {name: scope_id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 256}}
         - {name: days, in: query, schema: {type: integer, minimum: 1, maximum: 90, default: 30}}
       responses:

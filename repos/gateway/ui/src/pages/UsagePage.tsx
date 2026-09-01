@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext";
+import { ActionsMenu } from "../components/ActionsMenu";
 import { ManagedDataTable } from "../components/ManagedDataTable";
+import type { Row } from "../components/DataTable";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
@@ -17,6 +19,7 @@ type UsageReport = {
 };
 type UsageFilters = { window: string; from: string; to: string; model: string; provider: string; tag: string };
 type UsageView = "overview" | "models" | "upstream-models" | "providers" | "endpoints" | "tags" | "keys" | "users" | "teams" | "organizations";
+type UsageDrilldown = { view: Exclude<UsageView, "overview">; name: string };
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
 const defaultFilters: UsageFilters = { window: "30", from: "", to: "", model: "", provider: "", tag: "" };
@@ -24,6 +27,18 @@ const usageViews: { id: UsageView; label: string }[] = [
   { id: "overview", label: "Overview" }, { id: "models", label: "Public models" }, { id: "upstream-models", label: "Upstream models" }, { id: "providers", label: "Providers" }, { id: "endpoints", label: "Endpoints" }, { id: "tags", label: "Tags" },
   { id: "keys", label: "Virtual keys" }, { id: "users", label: "Users" }, { id: "teams", label: "Teams" }, { id: "organizations", label: "Organizations" }
 ];
+const drilldownParameters: Record<Exclude<UsageView, "overview">, { parameter: string; label: string }> = {
+  models: { parameter: "model", label: "Public model" },
+  "upstream-models": { parameter: "upstream_model", label: "Upstream model" },
+  providers: { parameter: "provider", label: "Provider" },
+  endpoints: { parameter: "endpoint", label: "Endpoint" },
+  tags: { parameter: "tag", label: "Tag" },
+  keys: { parameter: "scope_type", label: "Virtual key" },
+  users: { parameter: "scope_type", label: "User" },
+  teams: { parameter: "scope_type", label: "Team" },
+  organizations: { parameter: "scope_type", label: "Organization" }
+};
+const scopeTypes: Partial<Record<Exclude<UsageView, "overview">, string>> = { keys: "key", users: "user", teams: "team", organizations: "organization" };
 
 function totalsFor(report: UsageReport) {
   const requests = report.totals.reduce((sum, row) => sum + row.requests, 0);
@@ -81,6 +96,9 @@ export function UsagePage() {
   const [view, setView] = useState<UsageView>("overview");
   const [report, setReport] = useState<UsageReport | null>(null);
   const [error, setError] = useState("");
+  const [drilldown, setDrilldown] = useState<UsageDrilldown>();
+  const [drilldownReport, setDrilldownReport] = useState<UsageReport | null>(null);
+  const [drilldownError, setDrilldownError] = useState("");
   const load = useCallback(async () => {
     setReport(null); setError("");
     try { setReport(await client.request<UsageReport>(`/admin/v1/usage/report?${queryFor(filters)}`)); }
@@ -88,9 +106,19 @@ export function UsagePage() {
   }, [client, filters]);
   useEffect(() => { void load(); }, [load]);
   const totals = report ? totalsFor(report) : { requests: 0, errors: 0, successful: 0, tokens: 0, cacheHits: 0, weightedLatency: 0, spend: formatCost(0, "USD") };
+  const drilldownTotals = drilldownReport ? totalsFor(drilldownReport) : null;
   const daily = report?.daily || [];
   const requestDaily = useMemo(() => aggregateDailyActivity(daily), [daily]);
   function apply(event: FormEvent) { event.preventDefault(); if (draft.window === "custom" && (!draft.from || !draft.to)) return; setFilters(draft); }
+  async function inspectDimension(selectedView: Exclude<UsageView, "overview">, name: string) {
+    setDrilldown({ view: selectedView, name }); setDrilldownReport(null); setDrilldownError("");
+    const query = queryFor(filters);
+    const scopeType = scopeTypes[selectedView];
+    if (scopeType) { query.set("scope_type", scopeType); query.set("scope_id", name); }
+    else query.set(drilldownParameters[selectedView].parameter, name);
+    try { setDrilldownReport(await client.request<UsageReport>(`/admin/v1/usage/report?${query}`)); }
+    catch (cause) { setDrilldownError(cause instanceof Error ? cause.message : "Could not load usage details"); }
+  }
   function exportCSV() {
     if (!report) return;
     const lines = ["dimension,type,requests,errors,input_tokens,output_tokens,total_tokens,cache_hits,avg_latency_ms,cost,currency"];
@@ -100,6 +128,7 @@ export function UsagePage() {
   return <><PageHeader eyebrow="Analytics" title="Usage & spend" description="Gateway activity, spend, token and reliability trends without combining currencies." actions={<button className="secondary" disabled={!report} onClick={exportCSV}>Export CSV</button>} />
     <form className="usage-filter-bar" onSubmit={apply}><label>Period<select aria-label="Window" value={draft.window} onChange={(event) => setDraft({ ...draft, window: event.target.value })}><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option><option value="custom">Custom</option></select></label>{draft.window === "custom" && <><label>From<input aria-label="Usage from" type="date" required value={draft.from} onChange={(event) => setDraft({ ...draft, from: event.target.value })} /></label><label>To<input aria-label="Usage to" type="date" required value={draft.to} onChange={(event) => setDraft({ ...draft, to: event.target.value })} /></label></>}<label>Model<input aria-label="Usage model" placeholder="All models" value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} /></label><label>Provider<input aria-label="Usage provider" placeholder="All providers" value={draft.provider} onChange={(event) => setDraft({ ...draft, provider: event.target.value })} /></label><label>Tag<input aria-label="Usage tag" placeholder="All tags" value={draft.tag} onChange={(event) => setDraft({ ...draft, tag: event.target.value })} /></label><button>Apply</button><button type="button" className="secondary" onClick={() => { setDraft(defaultFilters); setFilters(defaultFilters); }}>Reset</button></form>
     <div className="page-tabs" role="tablist" aria-label="Usage views">{usageViews.map((item) => <button role="tab" aria-selected={view === item.id} className={view === item.id ? "active" : ""} key={item.id} onClick={() => setView(item.id)}>{item.label}</button>)}</div>
-    {error ? <ErrorState message={error} retry={() => void load()} /> : !report ? <LoadingState /> : view === "overview" ? <><div className="usage-stats-grid"><StatCard label="Total requests" value={number.format(totals.requests)} /><StatCard label="Successful" value={number.format(totals.successful)} /><StatCard label="Failed" value={number.format(totals.errors)} /><StatCard label="Total tokens" value={number.format(totals.tokens)} /><StatCard label="Total spend" value={totals.spend} /><StatCard label="Cache hits" value={number.format(totals.cacheHits)} /><StatCard label="Average latency" value={number.format(totals.weightedLatency)} detail="ms" /></div><div className="usage-chart-grid"><UsageBars title="Spend per day" rows={daily} value={(row) => row.cost} format={(value, row) => formatCost(value, row.currency)} /><UsageBars title="Requests per day" rows={requestDaily} value={(row) => row.requests} format={(value) => number.format(value)} /><UsageBars title="Tokens per day" rows={requestDaily} value={(row) => row.total_tokens} format={(value) => number.format(value)} /><UsageBars title="Failed requests per day" rows={requestDaily} value={(row) => row.errors} format={(value) => number.format(value)} /></div></> : <ManagedDataTable rows={usageRows(view === "models" ? report.by_model || [] : view === "upstream-models" ? report.by_upstream_model || [] : view === "providers" ? report.by_provider || [] : view === "endpoints" ? report.by_endpoint || [] : view === "tags" ? report.by_tag || [] : view === "keys" ? report.by_key || [] : view === "users" ? report.by_user || [] : view === "teams" ? report.by_team || [] : report.by_organization || [])} columns={usageColumns} rowKey="_identity" defaultHidden={["input_tokens", "output_tokens", "cost_per_request_display", "currency"]} onRefresh={load} searchPlaceholder={`Search ${view}`} />}
+    {error ? <ErrorState message={error} retry={() => void load()} /> : !report ? <LoadingState /> : view === "overview" ? <><div className="usage-stats-grid"><StatCard label="Total requests" value={number.format(totals.requests)} /><StatCard label="Successful" value={number.format(totals.successful)} /><StatCard label="Failed" value={number.format(totals.errors)} /><StatCard label="Total tokens" value={number.format(totals.tokens)} /><StatCard label="Total spend" value={totals.spend} /><StatCard label="Cache hits" value={number.format(totals.cacheHits)} /><StatCard label="Average latency" value={number.format(totals.weightedLatency)} detail="ms" /></div><div className="usage-chart-grid"><UsageBars title="Spend per day" rows={daily} value={(row) => row.cost} format={(value, row) => formatCost(value, row.currency)} /><UsageBars title="Requests per day" rows={requestDaily} value={(row) => row.requests} format={(value) => number.format(value)} /><UsageBars title="Tokens per day" rows={requestDaily} value={(row) => row.total_tokens} format={(value) => number.format(value)} /><UsageBars title="Failed requests per day" rows={requestDaily} value={(row) => row.errors} format={(value) => number.format(value)} /></div></> : <ManagedDataTable rows={usageRows(view === "models" ? report.by_model || [] : view === "upstream-models" ? report.by_upstream_model || [] : view === "providers" ? report.by_provider || [] : view === "endpoints" ? report.by_endpoint || [] : view === "tags" ? report.by_tag || [] : view === "keys" ? report.by_key || [] : view === "users" ? report.by_user || [] : view === "teams" ? report.by_team || [] : report.by_organization || [])} columns={usageColumns} rowKey="_identity" defaultHidden={["input_tokens", "output_tokens", "cost_per_request_display", "currency"]} onRefresh={load} searchPlaceholder={`Search ${view}`} actions={(row: Row) => <ActionsMenu label={`Actions for ${String(row.name)}`} items={[{ label: "Inspect", onSelect: () => inspectDimension(view, String(row.name)), disabled: row.name === "Unassigned" || row.name === "Untagged" }]} />} />}
+    {drilldown && <div className="modal-backdrop" role="presentation"><section className="modal usage-detail-modal" role="dialog" aria-modal="true" aria-label="Usage details"><div className="modal-heading"><div><h2>{drilldownParameters[drilldown.view].label}: {drilldown.name}</h2><span className="muted">Server-filtered activity for the selected period and active filters.</span></div><button className="icon-button" aria-label="Close usage details" onClick={() => setDrilldown(undefined)}>×</button></div>{drilldownError ? <ErrorState message={drilldownError} /> : !drilldownReport || !drilldownTotals ? <LoadingState /> : <><div className="usage-stats-grid"><StatCard label="Requests" value={number.format(drilldownTotals.requests)} /><StatCard label="Successful" value={number.format(drilldownTotals.successful)} /><StatCard label="Failed" value={number.format(drilldownTotals.errors)} /><StatCard label="Tokens" value={number.format(drilldownTotals.tokens)} /><StatCard label="Spend" value={drilldownTotals.spend} /><StatCard label="Cache hits" value={number.format(drilldownTotals.cacheHits)} /><StatCard label="Average latency" value={number.format(drilldownTotals.weightedLatency)} detail="ms" /></div><div className="usage-chart-grid"><UsageBars title="Spend per day" rows={drilldownReport.daily || []} value={(row) => row.cost} format={(value, row) => formatCost(value, row.currency)} /><UsageBars title="Requests per day" rows={aggregateDailyActivity(drilldownReport.daily || [])} value={(row) => row.requests} format={(value) => number.format(value)} /></div></>}</section></div>}
   </>;
 }

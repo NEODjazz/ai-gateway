@@ -51,4 +51,6 @@ and group views accept bounded minimum/maximum cost and failure-class filters,
 and the UI can drill from a session or trace aggregate into its request rows.
 
 Usage reports expose currency-safe totals and daily trends plus breakdowns by
-model, provider, tag, non-secret virtual-key ID, user, team, and organization.
+public and upstream model, provider, endpoint, tag, non-secret virtual-key ID,
+user, team, and organization. The report endpoint accepts bounded, typed
+filters for each dimension so the UI drill-down is calculated in ClickHouse.

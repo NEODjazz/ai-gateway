@@ -196,7 +196,9 @@ and virtual-key tag. Public aliases are not merged with provider model names, an
 provider totals are not confused with deployment/endpoint totals. Every tagged request is attributed
 to each of its tags; untagged traffic is grouped as `Untagged`. Costs remain
 separated by currency, and model/provider/tag filters use typed ClickHouse
-parameters.
+parameters. Every dimension row in the UI can open a server-filtered drill-down
+for the active period; upstream model, endpoint, virtual-key fingerprint, user,
+team, and organization filters are also parameterized and bounded.
 The Request Logs view provides a bounded, cursor-paginated explorer over the
 same final outcomes with filters for request, session, OpenTelemetry trace,
 status, model, endpoint, tag, user, team, organization, cache outcome, and credential

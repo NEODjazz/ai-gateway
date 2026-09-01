@@ -69,6 +69,19 @@ func TestUsageManagementSupportsScopedCustomerReport(t *testing.T) {
 	}
 }
 
+func TestUsageManagementSupportsOrganizationScope(t *testing.T) {
+	reporter := &fakeUsageReporter{}
+	mux := http.NewServeMux()
+	registerUsageManagement(mux, reporter, nil, "secret")
+	request := httptest.NewRequest(http.MethodGet, "/internal/v1/usage/report?days=14&scope_type=organization&scope_id=org-a", nil)
+	request.Header.Set("X-Management-Token", "secret")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || reporter.scope.Type != "organization" || reporter.scope.ID != "org-a" {
+		t.Fatalf("status=%d scope=%+v body=%s", response.Code, reporter.scope, response.Body.String())
+	}
+}
+
 func TestUsageManagementForwardsTagFilter(t *testing.T) {
 	reporter := &fakeUsageReporter{}
 	mux := http.NewServeMux()
@@ -78,6 +91,19 @@ func TestUsageManagementForwardsTagFilter(t *testing.T) {
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || reporter.query.Tag != "production" {
+		t.Fatalf("status=%d query=%+v body=%s", response.Code, reporter.query, response.Body.String())
+	}
+}
+
+func TestUsageManagementForwardsDrillDownFilters(t *testing.T) {
+	reporter := &fakeUsageReporter{}
+	mux := http.NewServeMux()
+	registerUsageManagement(mux, reporter, nil, "secret")
+	request := httptest.NewRequest(http.MethodGet, "/internal/v1/usage/report?from=2026-08-01T00:00:00Z&to=2026-08-02T00:00:00Z&upstream_model=gpt-5.6&endpoint=azure-primary&scope_type=organization&scope_id=org-a", nil)
+	request.Header.Set("X-Management-Token", "secret")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || reporter.query.UpstreamModel != "gpt-5.6" || reporter.query.Endpoint != "azure-primary" || reporter.query.Scope.Type != "organization" || reporter.query.Scope.ID != "org-a" {
 		t.Fatalf("status=%d query=%+v body=%s", response.Code, reporter.query, response.Body.String())
 	}
 }

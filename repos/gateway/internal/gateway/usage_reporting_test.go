@@ -53,6 +53,11 @@ func TestCustomerUsageReportValidatesAndForwardsScope(t *testing.T) {
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("invalid status=%d body=%s", invalid.Code, invalid.Body.String())
 	}
+	organization := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(organization, httptest.NewRequest(http.MethodGet, "/admin/v1/customers/organization/org-a/usage?days=7", nil))
+	if organization.Code != http.StatusOK || client.scopeType != "organization" || client.scopeID != "org-a" {
+		t.Fatalf("organization status=%d client=%+v body=%s", organization.Code, client, organization.Body.String())
+	}
 }
 
 func TestAdminUsageReportRequiresAdminAndBoundsRange(t *testing.T) {
@@ -77,8 +82,8 @@ func TestAdminUsageReportForwardsBoundedDateAndDimensionFilters(t *testing.T) {
 	client := &recordingUsageClient{}
 	handler := Routes(NewHandler(modulesPipeline("admin"), modelsProvider{}).WithUsageReporting(client))
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/v1/usage/report?from=2026-08-01T00:00:00Z&to=2026-08-10T00:00:00Z&model=gpt-5&provider=azure&tag=production", nil))
-	if response.Code != http.StatusOK || client.query.Model != "gpt-5" || client.query.Provider != "azure" || client.query.Tag != "production" || !strings.Contains(response.Body.String(), `"cache_hits":1`) || !strings.Contains(response.Body.String(), `"cost_per_request":0.25`) {
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/v1/usage/report?from=2026-08-01T00:00:00Z&to=2026-08-10T00:00:00Z&model=gpt-5&upstream_model=gpt-5.6&provider=azure&endpoint=azure-primary&tag=production&scope_type=organization&scope_id=org-a", nil))
+	if response.Code != http.StatusOK || client.query.Model != "gpt-5" || client.query.UpstreamModel != "gpt-5.6" || client.query.Provider != "azure" || client.query.Endpoint != "azure-primary" || client.query.Tag != "production" || client.query.ScopeType != "organization" || client.query.ScopeID != "org-a" || !strings.Contains(response.Body.String(), `"cache_hits":1`) || !strings.Contains(response.Body.String(), `"cost_per_request":0.25`) {
 		t.Fatalf("filtered report was not forwarded: status=%d query=%+v body=%s", response.Code, client.query, response.Body.String())
 	}
 	invalid := httptest.NewRecorder()
@@ -146,7 +151,7 @@ func TestRemoteScopedUsageReportUsesEncodedScope(t *testing.T) {
 
 func TestRemoteFilteredUsageReportUsesEncodedDimensions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("from") != "2026-08-01T00:00:00Z" || r.URL.Query().Get("to") != "2026-08-02T00:00:00Z" || r.URL.Query().Get("model") != "model/a" || r.URL.Query().Get("provider") != "azure openai" || r.Header.Get("X-Management-Token") != "billing-secret" {
+		if r.URL.Query().Get("from") != "2026-08-01T00:00:00Z" || r.URL.Query().Get("to") != "2026-08-02T00:00:00Z" || r.URL.Query().Get("model") != "model/a" || r.URL.Query().Get("upstream_model") != "upstream/a" || r.URL.Query().Get("provider") != "azure openai" || r.URL.Query().Get("endpoint") != "endpoint/a" || r.URL.Query().Get("scope_type") != "team" || r.URL.Query().Get("scope_id") != "team/a" || r.Header.Get("X-Management-Token") != "billing-secret" {
 			t.Fatalf("request=%s headers=%v", r.URL.String(), r.Header)
 		}
 		_ = json.NewEncoder(w).Encode(UsageReport{Days: 1})
@@ -154,7 +159,7 @@ func TestRemoteFilteredUsageReportUsesEncodedDimensions(t *testing.T) {
 	defer server.Close()
 	client := NewRemoteBudgetManagementClient(server.URL, "billing-secret")
 	from := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	report, err := client.FilteredUsageReport(context.Background(), ManagementAudit{ActorID: "admin"}, UsageReportQuery{From: from, To: from.Add(24 * time.Hour), Model: "model/a", Provider: "azure openai", Tag: "production"})
+	report, err := client.FilteredUsageReport(context.Background(), ManagementAudit{ActorID: "admin"}, UsageReportQuery{From: from, To: from.Add(24 * time.Hour), ScopeType: "team", ScopeID: "team/a", Model: "model/a", UpstreamModel: "upstream/a", Provider: "azure openai", Endpoint: "endpoint/a", Tag: "production"})
 	if err != nil || report.Days != 1 {
 		t.Fatalf("report=%+v err=%v", report, err)
 	}
