@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMCPRegistryValidatesSafeMetadata(t *testing.T) {
@@ -66,5 +67,61 @@ func TestMCPRegistryAdminAPIExcludesCredentials(t *testing.T) {
 	body := list.Body.String()
 	if list.Code != http.StatusOK || !strings.Contains(body, `"id":"weather"`) || strings.Contains(body, "header") || strings.Contains(body, "api_key") || strings.Contains(body, "secret") {
 		t.Fatalf("unsafe MCP response: status=%d body=%s", list.Code, body)
+	}
+}
+
+func TestMCPRegistryReferencesProtectDeletes(t *testing.T) {
+	registry := NewMCPRegistry()
+	if _, err := registry.PutServer("weather", MCPServer{Label: "Weather", ServerURL: "https://mcp.example.test", Transport: "streamable-http", Tools: []string{"mcp:weather@https://mcp.example.test"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.PutToolset("weather-read", MCPToolset{Name: "Weather read", Tools: []string{"mcp:weather@https://mcp.example.test"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	access := NewAccessRegistry()
+	if _, err := access.PutGroup("operators", AccessGroup{Name: "Operators", AllowedTools: []string{"toolset:weather-read"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	management := &recordingManagementClient{page: &VirtualKeyPage{Data: []VirtualKeyMetadata{{ID: "vk-weather", AllowedTools: []string{"toolset:weather-read"}}}, Total: 1, Limit: 500}}
+	handler := NewHandler(modulesPipeline("admin"), nil).WithMCPRegistry(registry).WithAccessRegistry(access).WithManagement(management)
+	router := Routes(handler)
+
+	servers := httptest.NewRecorder()
+	router.ServeHTTP(servers, httptest.NewRequest(http.MethodGet, "/admin/v1/mcp/servers?expand=references", nil))
+	if servers.Code != http.StatusOK || !strings.Contains(servers.Body.String(), `"toolset_ids":["weather-read"]`) {
+		t.Fatalf("server references status=%d body=%s", servers.Code, servers.Body.String())
+	}
+	toolsets := httptest.NewRecorder()
+	router.ServeHTTP(toolsets, httptest.NewRequest(http.MethodGet, "/admin/v1/mcp/toolsets?expand=references", nil))
+	body := toolsets.Body.String()
+	if toolsets.Code != http.StatusOK || !strings.Contains(body, `"access_group_ids":["operators"]`) || !strings.Contains(body, `"virtual_key_ids":["vk-weather"]`) {
+		t.Fatalf("toolset references status=%d body=%s", toolsets.Code, body)
+	}
+
+	blockedServer := httptest.NewRecorder()
+	router.ServeHTTP(blockedServer, httptest.NewRequest(http.MethodDelete, "/admin/v1/mcp/servers/weather", nil))
+	if blockedServer.Code != http.StatusConflict {
+		t.Fatalf("referenced server delete status=%d body=%s", blockedServer.Code, blockedServer.Body.String())
+	}
+	blockedToolset := httptest.NewRecorder()
+	router.ServeHTTP(blockedToolset, httptest.NewRequest(http.MethodDelete, "/admin/v1/mcp/toolsets/weather-read", nil))
+	if blockedToolset.Code != http.StatusConflict {
+		t.Fatalf("referenced toolset delete status=%d body=%s", blockedToolset.Code, blockedToolset.Body.String())
+	}
+
+	if err := access.DeleteGroup("operators"); err != nil {
+		t.Fatal(err)
+	}
+	revokedAt := time.Now()
+	management.page = &VirtualKeyPage{Data: []VirtualKeyMetadata{{ID: "vk-revoked", AllowedTools: []string{"toolset:weather-read"}, RevokedAt: &revokedAt}}, Total: 1, Limit: 500}
+	deletedToolset := httptest.NewRecorder()
+	router.ServeHTTP(deletedToolset, httptest.NewRequest(http.MethodDelete, "/admin/v1/mcp/toolsets/weather-read", nil))
+	if deletedToolset.Code != http.StatusNoContent {
+		t.Fatalf("unreferenced toolset delete status=%d body=%s", deletedToolset.Code, deletedToolset.Body.String())
+	}
+	deletedServer := httptest.NewRecorder()
+	router.ServeHTTP(deletedServer, httptest.NewRequest(http.MethodDelete, "/admin/v1/mcp/servers/weather", nil))
+	if deletedServer.Code != http.StatusNoContent {
+		t.Fatalf("unreferenced server delete status=%d body=%s", deletedServer.Code, deletedServer.Body.String())
 	}
 }

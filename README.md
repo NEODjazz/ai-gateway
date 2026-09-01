@@ -533,7 +533,11 @@ secret fields, and rejects URLs containing user info, query parameters, or
 fragments. Toolsets group exact or prefix-wildcard tool identifiers; virtual
 keys receive them through `allowed_tools` grants such as `toolset:weather`.
 Disabled toolsets stop authorizing immediately. Registry changes are audited
-and use the same durable admin-state snapshot when configured.
+and use the same durable admin-state snapshot when configured. The management
+API can expand server and toolset references. Server deletion is rejected while
+a toolset consumes one of its grants; toolset deletion enumerates the complete
+non-revoked virtual-key directory plus Access Groups and fails closed while an assignment
+exists or the directory cannot prove a complete result.
 
 Customer Insights joins scoped metadata-only usage with the already enforced
 budget and virtual-key policies for a user, team, or key ID. ClickHouse scope

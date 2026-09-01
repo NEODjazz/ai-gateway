@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.41
+  version: 0.1.42
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1144,8 +1144,10 @@ paths:
       tags: [MCP]
       summary: List registered MCP server metadata
       description: Credentials and request headers are not accepted or returned.
+      parameters:
+        - {name: expand, in: query, schema: {type: string, enum: [references]}, description: Include dependent toolset IDs}
       responses:
-        '200': {description: MCP servers, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/MCPServer'}}}}}}}
+        '200': {description: MCP servers, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/MCPServer'}}, references: {type: object, additionalProperties: {$ref: '#/components/schemas/MCPServerReferences'}}}}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
@@ -1162,13 +1164,27 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    delete:
+      operationId: deleteMCPServer
+      tags: [MCP]
+      summary: Delete an MCP server not referenced by a toolset
+      parameters: [{$ref: '#/components/parameters/MCPEntryID'}]
+      responses:
+        '204': {description: MCP server deleted}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/mcp/toolsets:
     get:
       operationId: listMCPToolsets
       tags: [MCP]
       summary: List MCP tool permission bundles
+      parameters:
+        - {name: expand, in: query, schema: {type: string, enum: [references]}, description: Include access-group and virtual-key assignments}
       responses:
-        '200': {description: MCP toolsets, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/MCPToolset'}}}}}}}
+        '200': {description: MCP toolsets, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/MCPToolset'}}, references: {type: object, additionalProperties: {$ref: '#/components/schemas/MCPToolsetReferences'}}}}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
@@ -1184,6 +1200,18 @@ paths:
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    delete:
+      operationId: deleteMCPToolset
+      tags: [MCP]
+      summary: Delete an MCP toolset without access-group or virtual-key assignments
+      parameters: [{$ref: '#/components/parameters/MCPEntryID'}]
+      responses:
+        '204': {description: MCP toolset deleted}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/projects:
     get:
@@ -3222,7 +3250,7 @@ components:
         description: {type: string, maxLength: 1024}
         server_url: {type: string, format: uri, pattern: '^https://[^?#]+$'}
         transport: {type: string, enum: [streamable-http, sse]}
-        tools: {type: array, maxItems: 256, items: {type: string, minLength: 1, maxLength: 512}}
+        tools: {type: array, maxItems: 256, description: Exact or trailing-wildcard canonical connector grants, items: {type: string, minLength: 1, maxLength: 512}}
         enabled: {type: boolean}
     MCPServer:
       allOf:
@@ -3230,6 +3258,12 @@ components:
         - type: object
           required: [id]
           properties: {id: {type: string}}
+    MCPServerReferences:
+      type: object
+      additionalProperties: false
+      required: [toolset_ids]
+      properties:
+        toolset_ids: {type: array, items: {type: string}}
     MCPToolsetInput:
       type: object
       additionalProperties: false
@@ -3237,7 +3271,7 @@ components:
       properties:
         name: {type: string, minLength: 1, maxLength: 256}
         description: {type: string, maxLength: 1024}
-        tools: {type: array, maxItems: 256, items: {type: string, minLength: 1, maxLength: 512}}
+        tools: {type: array, maxItems: 256, description: Connector grants selected from registered MCP server metadata, items: {type: string, minLength: 1, maxLength: 512}}
         enabled: {type: boolean}
     MCPToolset:
       allOf:
@@ -3245,6 +3279,13 @@ components:
         - type: object
           required: [id]
           properties: {id: {type: string}}
+    MCPToolsetReferences:
+      type: object
+      additionalProperties: false
+      required: [access_group_ids, virtual_key_ids]
+      properties:
+        access_group_ids: {type: array, items: {type: string}}
+        virtual_key_ids: {type: array, items: {type: string}}
     ProjectInput:
       type: object
       additionalProperties: false

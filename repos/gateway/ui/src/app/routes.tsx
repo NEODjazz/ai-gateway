@@ -22,6 +22,7 @@ import { AccessGroupsPage } from "../pages/AccessGroupsPage";
 import { BudgetsPage } from "../pages/BudgetsPage";
 import { LoggingPage } from "../pages/LoggingPage";
 import { CachePage } from "../pages/CachePage";
+import { MCPServersPage, MCPToolsetsPage } from "../pages/MCPPages";
 import { resourceConfigs } from "../pages/resourceConfigs";
 import { useAuth, type ConsoleCapability } from "../auth/AuthContext";
 
@@ -64,8 +65,8 @@ export const appRoutes: AppRoute[] = [
 
   { path: "/ai-hub", title: "AI Hub", group: "AI Hub", element: readOnly("AI Hub", "Catalog entries joined with safe runtime availability.", "/admin/v1/ai-hub/models", [{ key: "model", label: "Model" }, { key: "provider", label: "Provider" }, { key: "capabilities", label: "Capabilities" }, { key: "deployments", label: "Deployments" }, { key: "available", label: "Available" }]), available: true },
   { path: "/cost-optimization", title: "Cost optimization", group: "AI Hub", element: readOnly("Cost optimization", "Deterministic catalog and availability recommendations.", "/admin/v1/cost-optimization/recommendations", [{ key: "type", label: "Type" }, { key: "model", label: "Model" }, { key: "current_provider", label: "Current provider" }, { key: "recommended_provider", label: "Recommended provider" }, { key: "estimated_savings_percent", label: "Savings, %" }, { key: "summary", label: "Summary" }]), available: true },
-  { path: "/mcp-servers", title: "MCP servers", group: "AI Hub", element: <ResourcePage config={resourceConfigs.mcpServers} />, available: true },
-  { path: "/mcp-toolsets", title: "MCP toolsets", group: "AI Hub", element: <ResourcePage config={resourceConfigs.mcpToolsets} />, available: true },
+  { path: "/mcp-servers", title: "MCP servers", group: "AI Hub", element: <MCPServersPage />, available: true },
+  { path: "/mcp-toolsets", title: "MCP toolsets", group: "AI Hub", element: <MCPToolsetsPage />, available: true },
   { path: "/tool-policies", title: "Tool policies", group: "AI Hub", element: <ResourcePage config={resourceConfigs.toolPolicies} />, available: true },
   { path: "/agents", title: "Agent profiles", group: "AI Hub", element: <ResourcePage config={resourceConfigs.agents} />, available: true },
   { path: "/search-tools", title: "Search tools", group: "AI Hub", element: unavailable("Search tools", "A managed search-tool registry requires a dedicated execution adapter and credential boundary."), available: false },

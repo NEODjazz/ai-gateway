@@ -169,6 +169,14 @@ exact/wildcard grants до provider pipeline. URL привязан к grant, п�
 и тот же label нельзя перенаправить на другой MCP server. MCP routing требует
 одновременно явной capability `mcp` и adapter, который реализует MCP
 passthrough; legacy empty capabilities не считаются opt-in.
+MCP Servers хранят только безопасные HTTPS metadata и допустимые canonical
+connector grants, а Toolsets группируют эти grants для повторного назначения.
+`expand=references` строит impact по связанным toolsets, Access Groups и полной
+пагинированной выборке non-revoked virtual keys. Delete выполняется fail-closed: сервер с
+зависимым toolset и toolset с любым назначением не удаляются. Gateway не делает
+отдельный health/discovery вызов к произвольному MCP URL: в текущей архитектуре
+upstream MCP transport и его credentials принадлежат provider adapter, поэтому
+такой probe без отдельной egress/credential политики создал бы новую SSRF-границу.
 
 Virtual key может содержать `access_group_ids`. Auth хранит и передает только
 идентификаторы назначений; актуальные Access Groups разрешаются gateway из

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -27,13 +28,26 @@ type MCPToolset struct {
 	Tools       []string `json:"tools"`
 	Enabled     bool     `json:"enabled"`
 }
+
+type MCPServerReferences struct {
+	ToolsetIDs []string `json:"toolset_ids"`
+}
+
+type MCPToolsetReferences struct {
+	AccessGroupIDs []string `json:"access_group_ids"`
+	VirtualKeyIDs  []string `json:"virtual_key_ids"`
+}
 type MCPRegistry struct {
 	mu       sync.RWMutex
 	servers  map[string]MCPServer
 	toolsets map[string]MCPToolset
 }
 
-var errInvalidMCPRegistryEntry = errors.New("invalid MCP registry entry")
+var (
+	errInvalidMCPRegistryEntry = errors.New("invalid MCP registry entry")
+	errMCPRegistryNotFound     = errors.New("MCP registry entry not found")
+	errMCPRegistryInUse        = errors.New("MCP registry entry is in use")
+)
 
 func NewMCPRegistry() *MCPRegistry {
 	return &MCPRegistry{servers: map[string]MCPServer{}, toolsets: map[string]MCPToolset{}}
@@ -94,6 +108,54 @@ func (r *MCPRegistry) PutToolset(id string, toolset MCPToolset) (MCPToolset, err
 	r.toolsets[id] = toolset
 	r.mu.Unlock()
 	return toolset, nil
+}
+
+func (r *MCPRegistry) ServerReferences(id string) (MCPServerReferences, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.serverReferencesLocked(id)
+}
+
+func (r *MCPRegistry) serverReferencesLocked(id string) (MCPServerReferences, bool) {
+	server, ok := r.servers[id]
+	if !ok {
+		return MCPServerReferences{}, false
+	}
+	result := MCPServerReferences{ToolsetIDs: []string{}}
+	for toolsetID, toolset := range r.toolsets {
+		for _, identifier := range toolset.Tools {
+			if toolAllowed(identifier, server.Tools) {
+				result.ToolsetIDs = append(result.ToolsetIDs, toolsetID)
+				break
+			}
+		}
+	}
+	sort.Strings(result.ToolsetIDs)
+	return result, true
+}
+
+func (r *MCPRegistry) DeleteServer(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	references, exists := r.serverReferencesLocked(id)
+	if !exists {
+		return errMCPRegistryNotFound
+	}
+	if len(references.ToolsetIDs) != 0 {
+		return errMCPRegistryInUse
+	}
+	delete(r.servers, id)
+	return nil
+}
+
+func (r *MCPRegistry) DeleteToolset(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.toolsets[id]; !ok {
+		return false
+	}
+	delete(r.toolsets, id)
+	return true
 }
 func (r *MCPRegistry) ToolsetAllows(id, identifier string) bool {
 	r.mu.RLock()
@@ -169,17 +231,47 @@ func (h Handler) ListMCPServers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "MCP registry is unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": h.mcp.Servers()})
+	expand := strings.TrimSpace(r.URL.Query().Get("expand"))
+	if !allowedValue(expand, "", "references") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "expand must be references")
+		return
+	}
+	servers := h.mcp.Servers()
+	response := map[string]any{"data": servers}
+	if expand == "references" {
+		references := make(map[string]MCPServerReferences, len(servers))
+		for _, server := range servers {
+			references[server.ID], _ = h.mcp.ServerReferences(server.ID)
+		}
+		response["references"] = references
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 func (h Handler) ListMCPToolsets(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.authorizeAdmin(w, r); !ok {
+	req, ok := h.authorizeAdmin(w, r)
+	if !ok {
 		return
 	}
 	if h.mcp == nil {
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "MCP registry is unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": h.mcp.Toolsets()})
+	expand := strings.TrimSpace(r.URL.Query().Get("expand"))
+	if !allowedValue(expand, "", "references") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "expand must be references")
+		return
+	}
+	toolsets := h.mcp.Toolsets()
+	response := map[string]any{"data": toolsets}
+	if expand == "references" {
+		references, err := h.mcpToolsetReferences(r.Context(), managementAudit(req), toolsets)
+		if err != nil {
+			writeManagementFailure(w, err)
+			return
+		}
+		response["references"] = references
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 func (h Handler) UpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.authorizeAdmin(w, r)
@@ -250,6 +342,180 @@ func (h Handler) UpdateMCPToolset(w http.ResponseWriter, r *http.Request) {
 	}
 	h.auditOutcome(r.Context(), audit, event, "succeeded")
 	writeJSON(w, http.StatusOK, saved)
+}
+
+func (h Handler) DeleteMCPServer(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.authorizeAdmin(w, r)
+	if !ok {
+		return
+	}
+	if h.mcp == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "MCP registry is unavailable")
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if !validMCPID(id) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid MCP server ID")
+		return
+	}
+	references, exists := h.mcp.ServerReferences(id)
+	if !exists {
+		writeError(w, http.StatusNotFound, "not_found", "MCP server not found")
+		return
+	}
+	event := AuditEvent{Action: "mcp_server.delete", TargetType: "mcp_server", TargetID: id}
+	audit := managementAudit(req)
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	if len(references.ToolsetIDs) != 0 {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeError(w, http.StatusConflict, "resource_in_use", "MCP server is referenced by one or more toolsets")
+		return
+	}
+	if err := h.mcp.DeleteServer(id); err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		if errors.Is(err, errMCPRegistryInUse) {
+			writeError(w, http.StatusConflict, "resource_in_use", "MCP server is referenced by one or more toolsets")
+			return
+		}
+		writeError(w, http.StatusNotFound, "not_found", "MCP server not found")
+		return
+	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h Handler) DeleteMCPToolset(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.authorizeAdmin(w, r)
+	if !ok {
+		return
+	}
+	if h.mcp == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "MCP registry is unavailable")
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if !validMCPID(id) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid MCP toolset ID")
+		return
+	}
+	toolsets := h.mcp.Toolsets()
+	found := false
+	for _, toolset := range toolsets {
+		if toolset.ID == id {
+			toolsets = []MCPToolset{toolset}
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "not_found", "MCP toolset not found")
+		return
+	}
+	event := AuditEvent{Action: "mcp_toolset.delete", TargetType: "mcp_toolset", TargetID: id}
+	audit := managementAudit(req)
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	references, err := h.mcpToolsetReferences(r.Context(), audit, toolsets)
+	if err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeManagementFailure(w, err)
+		return
+	}
+	reference := references[id]
+	if len(reference.AccessGroupIDs) != 0 || len(reference.VirtualKeyIDs) != 0 {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeError(w, http.StatusConflict, "resource_in_use", "MCP toolset is assigned to virtual keys or access groups")
+		return
+	}
+	h.mcp.DeleteToolset(id)
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h Handler) mcpToolsetReferences(ctx context.Context, audit ManagementAudit, toolsets []MCPToolset) (map[string]MCPToolsetReferences, error) {
+	result := make(map[string]MCPToolsetReferences, len(toolsets))
+	for _, toolset := range toolsets {
+		result[toolset.ID] = MCPToolsetReferences{AccessGroupIDs: []string{}, VirtualKeyIDs: []string{}}
+	}
+	if h.access != nil {
+		for _, group := range h.access.Groups() {
+			for _, grant := range group.AllowedTools {
+				id := strings.TrimPrefix(grant, "toolset:")
+				if grant != "toolset:"+id {
+					continue
+				}
+				reference, exists := result[id]
+				if exists {
+					reference.AccessGroupIDs = append(reference.AccessGroupIDs, group.ID)
+					result[id] = reference
+				}
+			}
+		}
+	}
+	keys, err := h.allVirtualKeys(ctx, audit)
+	if err != nil {
+		return nil, err
+	}
+	for _, key := range keys {
+		if key.RevokedAt != nil {
+			continue
+		}
+		for _, grant := range key.AllowedTools {
+			id := strings.TrimPrefix(grant, "toolset:")
+			if grant != "toolset:"+id {
+				continue
+			}
+			reference, exists := result[id]
+			if exists {
+				reference.VirtualKeyIDs = append(reference.VirtualKeyIDs, key.ID)
+				result[id] = reference
+			}
+		}
+	}
+	for id, reference := range result {
+		reference.AccessGroupIDs = uniqueStrings(reference.AccessGroupIDs)
+		reference.VirtualKeyIDs = uniqueStrings(reference.VirtualKeyIDs)
+		sort.Strings(reference.AccessGroupIDs)
+		sort.Strings(reference.VirtualKeyIDs)
+		result[id] = reference
+	}
+	return result, nil
+}
+
+func (h Handler) allVirtualKeys(ctx context.Context, audit ManagementAudit) ([]VirtualKeyMetadata, error) {
+	if h.management == nil {
+		return nil, errors.New("management service is not configured")
+	}
+	if pager, ok := h.management.(interface {
+		ListVirtualKeysPage(context.Context, ManagementAudit, VirtualKeyListFilter) (VirtualKeyPage, error)
+	}); ok {
+		const pageSize = 500
+		result := []VirtualKeyMetadata{}
+		for offset := 0; ; {
+			page, err := pager.ListVirtualKeysPage(ctx, audit, VirtualKeyListFilter{Limit: pageSize, Offset: offset, SortBy: "key", SortOrder: "asc"})
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, page.Data...)
+			if len(page.Data) == 0 || offset+len(page.Data) >= page.Total {
+				return result, nil
+			}
+			offset += len(page.Data)
+		}
+	}
+	keys, err := h.management.ListVirtualKeys(ctx, audit, 500)
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 500 {
+		return nil, errors.New("management service cannot prove complete virtual-key references")
+	}
+	return keys, nil
 }
 func decodeMCPJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 128<<10))

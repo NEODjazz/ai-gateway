@@ -216,6 +216,13 @@ textarea { resize: vertical; }
 .cache-kind-ratio { display: flex; align-items: baseline; gap: 8px; margin: 22px 0; }
 .cache-kind-ratio strong { font-size: 30px; }
 .cache-kind-ratio span { color: var(--muted); }
+
+.mcp-suggestion { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .8rem 1rem; border: 1px dashed #d7dfe5; border-radius: 12px; background: #fafbfc; }
+.mcp-suggestion span { display: grid; gap: .35rem; min-width: 0; }
+.mcp-suggestion code { overflow-wrap: anywhere; color: var(--muted); }
+.mcp-boundary { margin: 1rem 0 1.25rem; }
+.mcp-impact { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.mcp-impact p { margin: .35rem 0 0; overflow-wrap: anywhere; }
 .credential-form-error, .credential-form-actions { margin-left: 188px; }
 .model-group-stats { margin-top: 2px; }
 .model-group-form-modal { width: min(900px, 100%); }

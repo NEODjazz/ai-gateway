@@ -80,3 +80,12 @@ Caching replaces the raw diagnostics payload with current-replica exact and
 semantic health cards plus an operation/result table. The page explains the
 boundary between gateway response-cache hits and provider prompt-cache tokens,
 and keeps TTL/capacity/Redis configuration read-only and deployment-managed.
+
+MCP Servers and MCP Toolsets use dedicated management pages rather than generic
+CSV CRUD forms. Server creation suggests the canonical
+`mcp:<server-label>@<https-url>` grant, toolsets select grants from configured
+servers, and both tables expose reference counts. Assignment details identify
+Access Groups and non-secret virtual-key IDs. Delete actions are protected by
+server-to-toolset and toolset-to-key/group impact checks. The console does not
+collect MCP OAuth tokens or claim direct network health because MCP execution
+remains provider-mediated in this gateway architecture.
