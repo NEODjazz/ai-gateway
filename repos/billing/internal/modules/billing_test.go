@@ -85,6 +85,10 @@ func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 				PromptTokens:     12,
 				CompletionTokens: 8,
 				TotalTokens:      20,
+				PromptTokensDetails: &openai.PromptTokenDetails{
+					CachedTokens:        7,
+					CacheCreationTokens: 3,
+				},
 			},
 		},
 		Metadata: map[string]string{
@@ -118,7 +122,7 @@ func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 	if event.ProviderID != "ollama" || event.Model != "test-model" || event.UpstreamModel != "test-model-2026-08-01" {
 		t.Fatalf("unexpected canonical usage identity: %+v", event)
 	}
-	if event.InputTokens != 12 || event.OutputTokens != 8 || event.TotalTokens != 20 {
+	if event.InputTokens != 12 || event.OutputTokens != 8 || event.TotalTokens != 20 || event.CacheReadInputTokens != 7 || event.CacheWriteInputTokens != 3 {
 		t.Fatalf("unexpected tokens: %+v", event)
 	}
 	if math.Abs(event.Cost-0.0028) > 0.0000001 {

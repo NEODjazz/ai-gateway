@@ -199,6 +199,9 @@ separated by currency, and model/provider/tag filters use typed ClickHouse
 parameters. Every dimension row in the UI can open a server-filtered drill-down
 for the active period; upstream model, endpoint, virtual-key fingerprint, user,
 team, and organization filters are also parameterized and bounded.
+Provider-reported prompt-cache usage is retained separately as cache-read and
+cache-write input tokens in Usage and Logs; these counters do not replace total
+tokens and are not inferred from gateway cache hits.
 The Request Logs view provides a bounded, cursor-paginated explorer over the
 same final outcomes with filters for request, session, OpenTelemetry trace,
 status, model, endpoint, tag, user, team, organization, cache outcome, and credential
@@ -206,7 +209,8 @@ fingerprint over bounded 7/30/90-day windows. Requests can also be grouped by
 session or distributed trace; an explicit RFC3339 custom window up to 90 days is
 available for incident investigations, and group spend remains separated by currency. Its
 detail contract contains operational
-metadata, token counts, cost, cache state, and a bounded failure class only.
+metadata, token counts (including provider-reported cache read/write input
+tokens), cost, cache state, and a bounded failure class only.
 The selected request/audit tab, request view, time window, applied filters, and
 request-detail ID are represented in the `/ui/logs` query string so diagnostic
 views survive refresh and can be shared without copying prompt or response data.

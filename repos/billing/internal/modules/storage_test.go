@@ -45,20 +45,22 @@ func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 	})
 
 	err := writer.WriteUsageEvent(context.Background(), BillingEvent{
-		RequestID:       "req-1",
-		UserID:          "user-1",
-		TeamID:          "team-1",
-		Tags:            []string{"production", "cost-center-a"},
-		Provider:        "ollama",
-		Model:           "test-model",
-		Timestamp:       "2026-06-25T10:30:00Z",
-		InputTokens:     10,
-		OutputTokens:    5,
-		TotalTokens:     15,
-		CatalogVersion:  "catalog-v1",
-		PricingKey:      "ollama/test-model",
-		InputCostPer1M:  1,
-		OutputCostPer1M: 2,
+		RequestID:             "req-1",
+		UserID:                "user-1",
+		TeamID:                "team-1",
+		Tags:                  []string{"production", "cost-center-a"},
+		Provider:              "ollama",
+		Model:                 "test-model",
+		Timestamp:             "2026-06-25T10:30:00Z",
+		InputTokens:           10,
+		OutputTokens:          5,
+		TotalTokens:           15,
+		CacheReadInputTokens:  7,
+		CacheWriteInputTokens: 3,
+		CatalogVersion:        "catalog-v1",
+		PricingKey:            "ollama/test-model",
+		InputCostPer1M:        1,
+		OutputCostPer1M:       2,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +74,7 @@ func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 	if receivedEvent.Timestamp != "2026-06-25T10:30:00Z" {
 		t.Fatalf("unexpected timestamp: %+v", receivedEvent)
 	}
-	if receivedEvent.TeamID != "team-1" || len(receivedEvent.Tags) != 2 || receivedEvent.Tags[0] != "production" || receivedEvent.CatalogVersion != "catalog-v1" || receivedEvent.PricingKey != "ollama/test-model" {
+	if receivedEvent.TeamID != "team-1" || len(receivedEvent.Tags) != 2 || receivedEvent.Tags[0] != "production" || receivedEvent.CacheReadInputTokens != 7 || receivedEvent.CacheWriteInputTokens != 3 || receivedEvent.CatalogVersion != "catalog-v1" || receivedEvent.PricingKey != "ollama/test-model" {
 		t.Fatalf("pricing audit fields were not serialized: %+v", receivedEvent)
 	}
 }

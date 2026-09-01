@@ -54,3 +54,5 @@ Usage reports expose currency-safe totals and daily trends plus breakdowns by
 public and upstream model, provider, endpoint, tag, non-secret virtual-key ID,
 user, team, and organization. The report endpoint accepts bounded, typed
 filters for each dimension so the UI drill-down is calculated in ClickHouse.
+Provider prompt-cache read and write tokens are carried as separate counters in
+usage reports and request logs, independently from gateway cache-hit counts.

@@ -42,6 +42,8 @@ type UsageRequest struct {
 	InputTokens           int      `json:"input_tokens"`
 	OutputTokens          int      `json:"output_tokens"`
 	TotalTokens           int      `json:"total_tokens"`
+	CacheReadInputTokens  int      `json:"cache_read_input_tokens"`
+	CacheWriteInputTokens int      `json:"cache_write_input_tokens"`
 	CatalogVersion        string   `json:"catalog_version,omitempty"`
 	PricingKey            string   `json:"pricing_key,omitempty"`
 	InputCostPer1M        string   `json:"input_cost_per_1m,omitempty"`
@@ -176,6 +178,10 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.TotalTokens = req.Response.Usage.TotalTokens
 		request.UpstreamModel = req.Response.Model
 		request.UsageEstimated = request.TotalTokens == 0
+		if details := req.Response.Usage.PromptTokensDetails; details != nil {
+			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
+			request.CacheWriteInputTokens = nonNegative(firstNonZero(details.CacheWriteTokens, details.CacheCreationTokens))
+		}
 	}
 	if req.ResponsesResponse != nil {
 		request.Phase = "commit"
@@ -184,6 +190,10 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.TotalTokens = req.ResponsesResponse.Usage.TotalTokens
 		request.UpstreamModel = req.ResponsesResponse.Model
 		request.UsageEstimated = request.TotalTokens == 0
+		if details := req.ResponsesResponse.Usage.InputTokensDetails; details != nil {
+			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
+			request.CacheWriteInputTokens = nonNegative(firstNonZero(details.CacheWriteTokens, details.CacheCreationTokens))
+		}
 	}
 	if req.EmbeddingResponse != nil {
 		request.Phase = "commit"
@@ -216,6 +226,22 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.TotalTokens = request.PromptTokensEstimated
 	}
 	return request
+}
+
+func nonNegative(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func firstNonZero(values ...int) int {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func requestedOutputTokens(req *RequestContext) int {

@@ -200,7 +200,7 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	req.Metadata["provider.fallback_count"] = "1"
 	req.Metadata["provider.cache.kind"] = "semantic"
 	req.Request.Model = "gpt-5.6-luna"
-	req.Response = &openai.ChatCompletionResponse{Model: "gpt-5.6-luna-2026-07-09", Usage: openai.Usage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11}}
+	req.Response = &openai.ChatCompletionResponse{Model: "gpt-5.6-luna-2026-07-09", Usage: openai.Usage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11, PromptTokensDetails: &openai.PromptTokenDetails{CachedTokens: 6, CacheCreationTokens: 2}}}
 	request := billingRequest(&req)
 	if request.CatalogVersion != "runtime-v2" || request.PricingKey != "endpoint/model" || request.InputCostPer1M != "1.5" || request.Currency != "USD" {
 		t.Fatalf("pricing snapshot=%+v", request)
@@ -210,6 +210,9 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	}
 	if request.FirstTokenLatencyMS != "87" || request.RetryCount != 2 || request.FallbackCount != 1 || request.CacheKind != "semantic" || request.UsageEstimated {
 		t.Fatalf("usage observability=%+v", request)
+	}
+	if request.CacheReadInputTokens != 6 || request.CacheWriteInputTokens != 2 {
+		t.Fatalf("cache token usage=%+v", request)
 	}
 }
 

@@ -37,39 +37,41 @@ type RequestLogFilter struct {
 }
 
 type RequestLog struct {
-	Timestamp            string   `json:"timestamp"`
-	RequestID            string   `json:"request_id"`
-	SessionID            string   `json:"session_id,omitempty"`
-	TraceID              string   `json:"trace_id,omitempty"`
-	UserID               string   `json:"user_id,omitempty"`
-	TeamID               string   `json:"team_id,omitempty"`
-	OrganizationID       string   `json:"organization_id,omitempty"`
-	Roles                []string `json:"roles,omitempty"`
-	Tags                 []string `json:"tags,omitempty"`
-	CredentialID         string   `json:"credential_id,omitempty"`
-	Provider             string   `json:"provider,omitempty"`
-	ProviderID           string   `json:"provider_id,omitempty"`
-	ProviderEndpointName string   `json:"provider_endpoint_name,omitempty"`
-	ProviderEndpointType string   `json:"provider_endpoint_type,omitempty"`
-	Model                string   `json:"model,omitempty"`
-	UpstreamModel        string   `json:"upstream_model,omitempty"`
-	APIType              string   `json:"api_type"`
-	Phase                string   `json:"phase"`
-	Status               string   `json:"status"`
-	FailureClass         string   `json:"failure_class,omitempty"`
-	LatencyMS            uint32   `json:"latency_ms"`
-	FirstTokenLatencyMS  uint32   `json:"first_token_latency_ms"`
-	RetryCount           uint16   `json:"retry_count"`
-	FallbackCount        uint16   `json:"fallback_count"`
-	CacheStatus          string   `json:"cache_status,omitempty"`
-	CacheKind            string   `json:"cache_kind,omitempty"`
-	InputTokens          uint32   `json:"input_tokens"`
-	OutputTokens         uint32   `json:"output_tokens"`
-	TotalTokens          uint32   `json:"total_tokens"`
-	UsageEstimated       bool     `json:"usage_estimated"`
-	Cost                 float64  `json:"cost"`
-	Currency             string   `json:"currency"`
-	ContentStored        bool     `json:"content_stored"`
+	Timestamp             string   `json:"timestamp"`
+	RequestID             string   `json:"request_id"`
+	SessionID             string   `json:"session_id,omitempty"`
+	TraceID               string   `json:"trace_id,omitempty"`
+	UserID                string   `json:"user_id,omitempty"`
+	TeamID                string   `json:"team_id,omitempty"`
+	OrganizationID        string   `json:"organization_id,omitempty"`
+	Roles                 []string `json:"roles,omitempty"`
+	Tags                  []string `json:"tags,omitempty"`
+	CredentialID          string   `json:"credential_id,omitempty"`
+	Provider              string   `json:"provider,omitempty"`
+	ProviderID            string   `json:"provider_id,omitempty"`
+	ProviderEndpointName  string   `json:"provider_endpoint_name,omitempty"`
+	ProviderEndpointType  string   `json:"provider_endpoint_type,omitempty"`
+	Model                 string   `json:"model,omitempty"`
+	UpstreamModel         string   `json:"upstream_model,omitempty"`
+	APIType               string   `json:"api_type"`
+	Phase                 string   `json:"phase"`
+	Status                string   `json:"status"`
+	FailureClass          string   `json:"failure_class,omitempty"`
+	LatencyMS             uint32   `json:"latency_ms"`
+	FirstTokenLatencyMS   uint32   `json:"first_token_latency_ms"`
+	RetryCount            uint16   `json:"retry_count"`
+	FallbackCount         uint16   `json:"fallback_count"`
+	CacheStatus           string   `json:"cache_status,omitempty"`
+	CacheKind             string   `json:"cache_kind,omitempty"`
+	InputTokens           uint32   `json:"input_tokens"`
+	OutputTokens          uint32   `json:"output_tokens"`
+	TotalTokens           uint32   `json:"total_tokens"`
+	CacheReadInputTokens  uint32   `json:"cache_read_input_tokens"`
+	CacheWriteInputTokens uint32   `json:"cache_write_input_tokens"`
+	UsageEstimated        bool     `json:"usage_estimated"`
+	Cost                  float64  `json:"cost"`
+	Currency              string   `json:"currency"`
+	ContentStored         bool     `json:"content_stored"`
 }
 
 type RequestLogPage struct {
@@ -86,18 +88,20 @@ type RequestLogGroupFilter struct {
 }
 
 type RequestLogGroup struct {
-	GroupID     string   `json:"group_id"`
-	Requests    uint64   `json:"requests"`
-	Errors      uint64   `json:"errors"`
-	Models      []string `json:"models"`
-	Providers   []string `json:"providers"`
-	TotalTokens uint64   `json:"total_tokens"`
-	CacheHits   uint64   `json:"cache_hits"`
-	LatencyMS   float64  `json:"latency_ms"`
-	Cost        float64  `json:"cost"`
-	Currency    string   `json:"currency"`
-	StartedAt   string   `json:"started_at"`
-	EndedAt     string   `json:"ended_at"`
+	GroupID               string   `json:"group_id"`
+	Requests              uint64   `json:"requests"`
+	Errors                uint64   `json:"errors"`
+	Models                []string `json:"models"`
+	Providers             []string `json:"providers"`
+	TotalTokens           uint64   `json:"total_tokens"`
+	CacheReadInputTokens  uint64   `json:"cache_read_input_tokens"`
+	CacheWriteInputTokens uint64   `json:"cache_write_input_tokens"`
+	CacheHits             uint64   `json:"cache_hits"`
+	LatencyMS             float64  `json:"latency_ms"`
+	Cost                  float64  `json:"cost"`
+	Currency              string   `json:"currency"`
+	StartedAt             string   `json:"started_at"`
+	EndedAt               string   `json:"ended_at"`
 }
 
 type RequestLogGroupPage struct {

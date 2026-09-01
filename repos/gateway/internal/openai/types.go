@@ -106,9 +106,16 @@ type Choice struct {
 }
 
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens        int                 `json:"prompt_tokens"`
+	CompletionTokens    int                 `json:"completion_tokens"`
+	TotalTokens         int                 `json:"total_tokens"`
+	PromptTokensDetails *PromptTokenDetails `json:"prompt_tokens_details,omitempty"`
+}
+
+type PromptTokenDetails struct {
+	CachedTokens        int `json:"cached_tokens,omitempty"`
+	CacheWriteTokens    int `json:"cache_write_tokens,omitempty"`
+	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
 }
 
 type EmbeddingRequest struct {
@@ -323,9 +330,16 @@ type ResponseOutputContent struct {
 }
 
 type ResponseUsage struct {
-	InputTokens  int `json:"input_tokens,omitempty"`
-	OutputTokens int `json:"output_tokens,omitempty"`
-	TotalTokens  int `json:"total_tokens,omitempty"`
+	InputTokens        int                `json:"input_tokens,omitempty"`
+	OutputTokens       int                `json:"output_tokens,omitempty"`
+	TotalTokens        int                `json:"total_tokens,omitempty"`
+	InputTokensDetails *InputTokenDetails `json:"input_tokens_details,omitempty"`
+}
+
+type InputTokenDetails struct {
+	CachedTokens        int `json:"cached_tokens,omitempty"`
+	CacheWriteTokens    int `json:"cache_write_tokens,omitempty"`
+	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
 }
 
 type ModelsResponse struct {

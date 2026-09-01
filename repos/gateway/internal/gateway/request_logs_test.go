@@ -18,7 +18,7 @@ type recordingRequestLogClient struct {
 
 func (c *recordingRequestLogClient) ListRequestLogs(_ context.Context, audit ManagementAudit, filter RequestLogFilter) (RequestLogPage, error) {
 	c.audit, c.filter = audit, filter
-	return RequestLogPage{Data: []RequestLog{{RequestID: "req-1", SessionID: "session-1", TraceID: "0123456789abcdef0123456789abcdef", Timestamp: "2026-08-25T12:00:00Z", OrganizationID: "org-a", Tags: []string{"production"}, Status: "ok", APIType: "chat_completions", Phase: "commit", FirstTokenLatencyMS: 42, RetryCount: 2, FallbackCount: 1, CacheStatus: "hit", CacheKind: "semantic", UsageEstimated: true, Currency: "USD"}}}, nil
+	return RequestLogPage{Data: []RequestLog{{RequestID: "req-1", SessionID: "session-1", TraceID: "0123456789abcdef0123456789abcdef", Timestamp: "2026-08-25T12:00:00Z", OrganizationID: "org-a", Tags: []string{"production"}, Status: "ok", APIType: "chat_completions", Phase: "commit", FirstTokenLatencyMS: 42, RetryCount: 2, FallbackCount: 1, CacheStatus: "hit", CacheKind: "semantic", CacheReadInputTokens: 8, CacheWriteInputTokens: 3, UsageEstimated: true, Currency: "USD"}}}, nil
 }
 func (c *recordingRequestLogClient) ListRequestLogGroups(_ context.Context, audit ManagementAudit, filter RequestLogGroupFilter) (RequestLogGroupPage, error) {
 	c.audit, c.groupFilter = audit, filter
@@ -59,7 +59,7 @@ func TestAdminRequestLogsRequireAdminAndValidateFilters(t *testing.T) {
 	if response.Code != http.StatusOK || client.filter.Days != 14 || client.filter.From != time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) || client.filter.To != time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC) || client.filter.Limit != 25 || client.filter.Status != "error" || client.filter.TeamID != "team-a" || client.filter.OrganizationID != "org-a" || client.filter.SessionID != "session-1" || client.filter.TraceID != "0123456789abcdef0123456789abcdef" || client.filter.Tag != "production" || client.filter.CacheStatus != "hit" || client.filter.FailureClass != "upstream" || client.filter.MinCost == nil || *client.filter.MinCost != 0.01 || client.filter.MaxCost == nil || *client.filter.MaxCost != 1.5 || client.audit.RequestID != "req-admin" {
 		t.Fatalf("status=%d filter=%+v audit=%+v body=%s", response.Code, client.filter, client.audit, response.Body.String())
 	}
-	for _, expected := range []string{`"organization_id":"org-a"`, `"trace_id":"0123456789abcdef0123456789abcdef"`, `"tags":["production"]`, `"first_token_latency_ms":42`, `"retry_count":2`, `"fallback_count":1`, `"cache_kind":"semantic"`, `"usage_estimated":true`} {
+	for _, expected := range []string{`"organization_id":"org-a"`, `"trace_id":"0123456789abcdef0123456789abcdef"`, `"tags":["production"]`, `"first_token_latency_ms":42`, `"retry_count":2`, `"fallback_count":1`, `"cache_kind":"semantic"`, `"cache_read_input_tokens":8`, `"cache_write_input_tokens":3`, `"usage_estimated":true`} {
 		if !strings.Contains(response.Body.String(), expected) {
 			t.Fatalf("request log field %s was stripped: %s", expected, response.Body.String())
 		}

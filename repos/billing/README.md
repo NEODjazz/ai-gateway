@@ -131,6 +131,11 @@ GET /internal/v1/budgets/{id}/summary
 GET /internal/v1/usage/report?days=30
 ```
 
+Usage events and reports retain provider-reported `cache_read_input_tokens` and
+`cache_write_input_tokens`. Apply ClickHouse migration
+`008_usage_cache_tokens.sql` before deploying a billing binary that writes or
+queries these fields.
+
 `DELETE` is a soft disable. Summary includes committed usage and unexpired
 reservations, using the same period and scope calculation as enforcement.
 The usage report accepts a bounded 1–90 day range and aggregates final

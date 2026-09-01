@@ -63,6 +63,8 @@ func main() {
 			Roles:                 request.Roles,
 			Tags:                  request.Tags,
 			PromptTokensEstimated: request.PromptTokensEstimated,
+			CacheReadInputTokens:  request.CacheReadInputTokens,
+			CacheWriteInputTokens: request.CacheWriteInputTokens,
 			PostResponse:          request.Phase == "commit",
 			BillingPhase:          request.Phase,
 			APIType:               request.APIType,
@@ -161,6 +163,8 @@ type usageRequest struct {
 	InputTokens           int      `json:"input_tokens"`
 	OutputTokens          int      `json:"output_tokens"`
 	TotalTokens           int      `json:"total_tokens"`
+	CacheReadInputTokens  int      `json:"cache_read_input_tokens"`
+	CacheWriteInputTokens int      `json:"cache_write_input_tokens"`
 	CatalogVersion        string   `json:"catalog_version,omitempty"`
 	PricingKey            string   `json:"pricing_key,omitempty"`
 	InputCostPer1M        string   `json:"input_cost_per_1m,omitempty"`

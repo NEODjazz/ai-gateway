@@ -13,7 +13,7 @@ function authenticated(node: React.ReactNode) {
 
 describe("operational pages", () => {
   it("renders usage totals and changes the bounded window", async () => {
-    const aggregate = { currency: "USD", requests: 4, errors: 0, input_tokens: 8, output_tokens: 12, total_tokens: 20, cost: 0.00265, avg_latency_ms: 12, cache_hits: 0, cost_per_request: 0.0006625 };
+    const aggregate = { currency: "USD", requests: 4, errors: 0, input_tokens: 8, output_tokens: 12, total_tokens: 20, cache_read_input_tokens: 6, cache_write_input_tokens: 2, cost: 0.00265, avg_latency_ms: 12, cache_hits: 1, cost_per_request: 0.0006625 };
     const response = {
       totals: [aggregate], daily: [{ ...aggregate, date: "2026-08-28" }], by_model: [{ ...aggregate, name: "gpt" }],
       by_upstream_model: [{ ...aggregate, name: "gpt-5.6-2026-07-09" }], by_provider: [{ ...aggregate, name: "azure-open-ai" }],
@@ -26,6 +26,8 @@ describe("operational pages", () => {
     expect(await screen.findAllByText("$0.00265")).toHaveLength(2);
     expect(screen.getByText("Successful")).toBeInTheDocument();
     expect(screen.getByText("Spend per day")).toBeInTheDocument();
+    expect(screen.getByText("Cache read tokens")).toBeInTheDocument();
+    expect(screen.getByText("Cache write tokens")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Public models" })); expect(screen.getByText("gpt")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Upstream models" })); expect(screen.getByText("gpt-5.6-2026-07-09")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Providers" })); expect(screen.getByText("azure-open-ai")).toBeInTheDocument();
@@ -46,7 +48,7 @@ describe("operational pages", () => {
   });
 
   it("keeps spend separated by currency and weights latency by request count", async () => {
-    const base = { errors: 0, input_tokens: 0, output_tokens: 0, total_tokens: 10, cache_hits: 0, cost_per_request: 0 };
+    const base = { errors: 0, input_tokens: 0, output_tokens: 0, total_tokens: 10, cache_read_input_tokens: 0, cache_write_input_tokens: 0, cache_hits: 0, cost_per_request: 0 };
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
       totals: [
         { ...base, currency: "USD", requests: 1, cost: 1, avg_latency_ms: 100 },

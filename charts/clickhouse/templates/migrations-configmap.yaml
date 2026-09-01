@@ -95,3 +95,8 @@ data:
   007_usage_tags.sql: |
     ALTER TABLE ai_gateway.usage_events
         ADD COLUMN IF NOT EXISTS tags Array(String) AFTER roles;
+  008_usage_cache_tokens.sql: |
+    ALTER TABLE ai_gateway.usage_events
+        ADD COLUMN IF NOT EXISTS cache_read_input_tokens UInt32 AFTER total_tokens;
+    ALTER TABLE ai_gateway.usage_events
+        ADD COLUMN IF NOT EXISTS cache_write_input_tokens UInt32 AFTER cache_read_input_tokens;

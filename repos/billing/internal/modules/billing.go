@@ -281,6 +281,8 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		InputTokens:           inputTokens,
 		OutputTokens:          outputTokens,
 		TotalTokens:           totalTokens,
+		CacheReadInputTokens:  cacheReadInputTokens(req),
+		CacheWriteInputTokens: cacheWriteInputTokens(req),
 		Cost:                  pricingCost(inputTokens, outputTokens, pricing),
 		Currency:              pricing.Currency,
 		CatalogVersion:        pricing.CatalogVersion,
@@ -289,6 +291,37 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		OutputCostPer1M:       pricing.OutputCostPer1M,
 		Timestamp:             time.Now().UTC().Format(time.RFC3339),
 	}, pricingErr
+}
+
+func cacheReadInputTokens(req *RequestContext) int {
+	value := req.CacheReadInputTokens
+	if value == 0 && req.Response != nil && req.Response.Usage.PromptTokensDetails != nil {
+		value = req.Response.Usage.PromptTokensDetails.CachedTokens
+	}
+	if value == 0 && req.ResponsesResponse != nil && req.ResponsesResponse.Usage.InputTokensDetails != nil {
+		value = req.ResponsesResponse.Usage.InputTokensDetails.CachedTokens
+	}
+	return max(value, 0)
+}
+
+func cacheWriteInputTokens(req *RequestContext) int {
+	value := req.CacheWriteInputTokens
+	if value == 0 && req.Response != nil && req.Response.Usage.PromptTokensDetails != nil {
+		value = firstNonZero(req.Response.Usage.PromptTokensDetails.CacheWriteTokens, req.Response.Usage.PromptTokensDetails.CacheCreationTokens)
+	}
+	if value == 0 && req.ResponsesResponse != nil && req.ResponsesResponse.Usage.InputTokensDetails != nil {
+		value = firstNonZero(req.ResponsesResponse.Usage.InputTokensDetails.CacheWriteTokens, req.ResponsesResponse.Usage.InputTokensDetails.CacheCreationTokens)
+	}
+	return max(value, 0)
+}
+
+func firstNonZero(values ...int) int {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func upstreamModel(req *RequestContext) string {

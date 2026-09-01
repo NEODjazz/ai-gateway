@@ -40,3 +40,6 @@ deployment name to the provider column. Each dimension row has an Inspect action
 that loads currency-safe totals and daily activity from the server using the
 current period and filters; owner drill-downs use non-secret key fingerprints or
 configured organization, team, and user IDs.
+Overview cards, breakdown tables, drill-downs, CSV export, request rows, and
+session/trace aggregates expose provider-reported cache-read and cache-write
+input tokens separately from proxy cache hits.

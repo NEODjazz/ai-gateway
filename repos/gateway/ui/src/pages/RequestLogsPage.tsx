@@ -27,6 +27,8 @@ type RequestLog = Row & {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  cache_read_input_tokens: number;
+  cache_write_input_tokens: number;
   latency_ms: number;
   first_token_latency_ms: number;
   retry_count: number;
@@ -44,14 +46,14 @@ type IdentityOption = { id: string; name?: string; email?: string };
 type LogView = "requests" | "sessions" | "traces";
 type GroupedRequestLog = Row & {
   id: string; group_id: string; requests: number; errors: number; models: string[]; providers: string[];
-  total_tokens: number; cache_hits: number; latency_ms: number; cost: number; currency: string; started_at: string; ended_at: string;
+  total_tokens: number; cache_read_input_tokens: number; cache_write_input_tokens: number; cache_hits: number; latency_ms: number; cost: number; currency: string; started_at: string; ended_at: string;
 };
 const emptyFilters = { request_id: "", session_id: "", trace_id: "", status: "", failure_class: "", model: "", provider: "", tag: "", cache_status: "", min_cost: "", max_cost: "", organization_id: "", team_id: "", user_id: "", credential_id: "" };
 const filterKeys = Object.keys(emptyFilters) as (keyof typeof emptyFilters)[];
 const requestLogColumns = [
   { key: "timestamp", label: "Time" }, { key: "request_id", label: "Request" }, { key: "session_id", label: "Session" }, { key: "trace_id", label: "Trace" }, { key: "tags", label: "Tags" }, { key: "status", label: "Status" }, { key: "failure_class", label: "Failure class" },
   { key: "model", label: "Public model" }, { key: "upstream_model", label: "Upstream model" }, { key: "provider_id", label: "Provider" },
-  { key: "cache_status", label: "Cache" }, { key: "cache_kind", label: "Cache type" }, { key: "total_tokens", label: "Tokens" },
+  { key: "cache_status", label: "Cache" }, { key: "cache_kind", label: "Cache type" }, { key: "total_tokens", label: "Tokens" }, { key: "cache_read_input_tokens", label: "Cache read tokens" }, { key: "cache_write_input_tokens", label: "Cache write tokens" },
   { key: "usage_estimated", label: "Token source" }, { key: "latency_ms", label: "Latency" }, { key: "first_token_latency_ms", label: "TTFT" },
   { key: "retry_count", label: "Retries" }, { key: "fallback_count", label: "Fallbacks" }, { key: "cost", label: "Cost" }, { key: "currency", label: "Currency" }
 ];
@@ -80,11 +82,13 @@ export function groupRequestLogs(rows: RequestLog[], field: "session_id" | "trac
     const key = `${groupID}\0${currency}`;
     const current = groups.get(key) || {
       id: key, group_id: groupID, requests: 0, errors: 0, models: [], providers: [], total_tokens: 0,
-      cache_hits: 0, latency_ms: 0, latency_total: 0, cost: 0, currency, started_at: row.timestamp, ended_at: row.timestamp
+      cache_read_input_tokens: 0, cache_write_input_tokens: 0, cache_hits: 0, latency_ms: 0, latency_total: 0, cost: 0, currency, started_at: row.timestamp, ended_at: row.timestamp
     };
     current.requests += 1;
     current.errors += row.status === "error" ? 1 : 0;
     current.total_tokens += Number(row.total_tokens || 0);
+    current.cache_read_input_tokens += Number(row.cache_read_input_tokens || 0);
+    current.cache_write_input_tokens += Number(row.cache_write_input_tokens || 0);
     current.cache_hits += row.cache_status === "hit" ? 1 : 0;
     current.latency_total += Number(row.latency_ms || 0);
     current.latency_ms = current.latency_total / current.requests;
@@ -227,6 +231,8 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
     { key: "cache_status", label: "Cache", render: cacheStatus },
     { key: "cache_kind", label: "Cache type", render: (value: unknown) => String(value || "—") },
     { key: "total_tokens", label: "Tokens" },
+    { key: "cache_read_input_tokens", label: "Cache read tokens" },
+    { key: "cache_write_input_tokens", label: "Cache write tokens" },
     { key: "usage_estimated", label: "Token source", render: (value: unknown) => value ? <span className="status disabled">Estimated</span> : <span className="status enabled">Provider</span> },
     { key: "latency_ms", label: "Latency", render: (value: unknown) => `${Number(value || 0).toLocaleString("en-US")} ms` },
     { key: "first_token_latency_ms", label: "TTFT", render: (value: unknown) => Number(value || 0) > 0 ? `${Number(value).toLocaleString("en-US")} ms` : "—" },
@@ -237,7 +243,7 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
   ];
   const groupedColumns = [
     { key: "group_id", label: view === "sessions" ? "Session" : "Trace" }, { key: "requests", label: "Requests" }, { key: "errors", label: "Errors" },
-    { key: "models", label: "Models" }, { key: "providers", label: "Providers" }, { key: "total_tokens", label: "Tokens" }, { key: "cache_hits", label: "Cache hits" },
+    { key: "models", label: "Models" }, { key: "providers", label: "Providers" }, { key: "total_tokens", label: "Tokens" }, { key: "cache_read_input_tokens", label: "Cache read tokens" }, { key: "cache_write_input_tokens", label: "Cache write tokens" }, { key: "cache_hits", label: "Cache hits" },
     { key: "latency_ms", label: "Average latency", render: (value: unknown) => `${Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 1 })} ms` },
     { key: "cost", label: "Spend", render: (value: unknown, row: Row) => formatCost(Number(value || 0), String(row.currency || "USD")) }, { key: "currency", label: "Currency" },
     { key: "started_at", label: "Started", render: formatTimestamp }, { key: "ended_at", label: "Last request", render: formatTimestamp }

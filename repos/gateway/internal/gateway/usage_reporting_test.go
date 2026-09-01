@@ -104,8 +104,8 @@ func TestAdminUsageReportMergesDeploymentRowsByManagedProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &recordingUsageClient{report: UsageReport{ByProvider: []UsageAggregate{
-		{Name: "gpt-5.6-luna", Currency: "USD", Requests: 20, TotalTokens: 1944, AvgLatencyMS: 100},
-		{Name: "azure-open-ai", Currency: "USD", Requests: 2, TotalTokens: 58, Cost: 0.0008234, AvgLatencyMS: 200},
+		{Name: "gpt-5.6-luna", Currency: "USD", Requests: 20, TotalTokens: 1944, CacheReadInputTokens: 10, CacheWriteInputTokens: 2, AvgLatencyMS: 100},
+		{Name: "azure-open-ai", Currency: "USD", Requests: 2, TotalTokens: 58, CacheReadInputTokens: 3, CacheWriteInputTokens: 1, Cost: 0.0008234, AvgLatencyMS: 200},
 	}}}
 	handler := NewHandler(modulesPipeline("admin"), runtime).WithUsageReporting(client)
 	response := httptest.NewRecorder()
@@ -114,7 +114,7 @@ func TestAdminUsageReportMergesDeploymentRowsByManagedProvider(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if response.Code != http.StatusOK || len(report.ByProvider) != 1 || report.ByProvider[0].Name != "azure-open-ai" || report.ByProvider[0].Requests != 22 || report.ByProvider[0].TotalTokens != 2002 || report.ByProvider[0].AvgLatencyMS < 109 || report.ByProvider[0].AvgLatencyMS > 110 {
+	if response.Code != http.StatusOK || len(report.ByProvider) != 1 || report.ByProvider[0].Name != "azure-open-ai" || report.ByProvider[0].Requests != 22 || report.ByProvider[0].TotalTokens != 2002 || report.ByProvider[0].CacheReadInputTokens != 13 || report.ByProvider[0].CacheWriteInputTokens != 3 || report.ByProvider[0].AvgLatencyMS < 109 || report.ByProvider[0].AvgLatencyMS > 110 {
 		t.Fatalf("provider usage was not merged: status=%d report=%+v", response.Code, report)
 	}
 }

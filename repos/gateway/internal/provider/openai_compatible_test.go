@@ -48,6 +48,65 @@ func TestOpenAICompatibleForwardsMaxCompletionTokensWithoutLegacyParameters(t *t
 	}
 }
 
+func TestOpenAICompatiblePreservesChatCacheTokenDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"id":"chat-cache",
+			"object":"chat.completion",
+			"model":"cached-model",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{
+				"prompt_tokens":21,
+				"completion_tokens":3,
+				"total_tokens":24,
+				"prompt_tokens_details":{"cached_tokens":13,"cache_write_tokens":5}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	response, err := NewOpenAICompatible(server.URL, "", false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "cached-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Usage.PromptTokensDetails == nil {
+		t.Fatal("expected prompt token details")
+	}
+	if response.Usage.PromptTokensDetails.CachedTokens != 13 || response.Usage.PromptTokensDetails.CacheWriteTokens != 5 {
+		t.Fatalf("unexpected cache token details: %+v", response.Usage.PromptTokensDetails)
+	}
+}
+
+func TestOpenAICompatiblePreservesResponseCacheTokenDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"id":"resp-cache",
+			"object":"response",
+			"status":"completed",
+			"model":"cached-model",
+			"output":[],
+			"usage":{
+				"input_tokens":21,
+				"output_tokens":3,
+				"total_tokens":24,
+				"input_tokens_details":{"cached_tokens":13,"cache_creation_tokens":5}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	response, err := NewOpenAICompatible(server.URL, "", false).Responses(context.Background(), openai.ResponseRequest{Model: "cached-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Usage.InputTokensDetails == nil {
+		t.Fatal("expected input token details")
+	}
+	if response.Usage.InputTokensDetails.CachedTokens != 13 || response.Usage.InputTokensDetails.CacheCreationTokens != 5 {
+		t.Fatalf("unexpected cache token details: %+v", response.Usage.InputTokensDetails)
+	}
+}
+
 func TestOpenAICompatibleCapturesSafeUpstreamParameterError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

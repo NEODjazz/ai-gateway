@@ -66,8 +66,10 @@ type anthropicContent struct {
 }
 
 type anthropicUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 }
 
 func NewAnthropic(baseURL string, apiKey string, upstreamStream bool) Anthropic {
@@ -485,6 +487,7 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 	}
 	content := anthropicText(response)
 	toolCalls := anthropicToolCalls(response)
+	inputTokens := anthropicInputTokens(response.Usage)
 	return openai.ChatCompletionResponse{
 		ID:     response.ID,
 		Object: "chat.completion",
@@ -497,9 +500,13 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 			},
 		},
 		Usage: openai.Usage{
-			PromptTokens:     response.Usage.InputTokens,
+			PromptTokens:     inputTokens,
 			CompletionTokens: response.Usage.OutputTokens,
-			TotalTokens:      response.Usage.InputTokens + response.Usage.OutputTokens,
+			TotalTokens:      inputTokens + response.Usage.OutputTokens,
+			PromptTokensDetails: &openai.PromptTokenDetails{
+				CachedTokens:     response.Usage.CacheReadInputTokens,
+				CacheWriteTokens: response.Usage.CacheCreationInputTokens,
+			},
 		},
 	}
 }
@@ -526,6 +533,7 @@ func anthropicToResponse(response anthropicResponse, fallbackModel string) opena
 			Name: block.Name, Arguments: jsonArguments(block.Input),
 		})
 	}
+	inputTokens := anthropicInputTokens(response.Usage)
 	return openai.ResponseResponse{
 		ID:         response.ID,
 		Object:     "response",
@@ -535,11 +543,19 @@ func anthropicToResponse(response anthropicResponse, fallbackModel string) opena
 		OutputText: content,
 		Output:     output,
 		Usage: openai.ResponseUsage{
-			InputTokens:  response.Usage.InputTokens,
+			InputTokens:  inputTokens,
 			OutputTokens: response.Usage.OutputTokens,
-			TotalTokens:  response.Usage.InputTokens + response.Usage.OutputTokens,
+			TotalTokens:  inputTokens + response.Usage.OutputTokens,
+			InputTokensDetails: &openai.InputTokenDetails{
+				CachedTokens:     response.Usage.CacheReadInputTokens,
+				CacheWriteTokens: response.Usage.CacheCreationInputTokens,
+			},
 		},
 	}
+}
+
+func anthropicInputTokens(usage anthropicUsage) int {
+	return usage.InputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens
 }
 
 func anthropicToolCalls(response anthropicResponse) []openai.ToolCall {
@@ -610,7 +626,8 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			if streamEvent.Message.Model != "" {
 				response.Model = streamEvent.Message.Model
 			}
-			response.Usage.PromptTokens = streamEvent.Message.Usage.InputTokens
+			response.Usage.PromptTokens = anthropicInputTokens(streamEvent.Message.Usage)
+			response.Usage.PromptTokensDetails = &openai.PromptTokenDetails{CachedTokens: streamEvent.Message.Usage.CacheReadInputTokens, CacheWriteTokens: streamEvent.Message.Usage.CacheCreationInputTokens}
 		case "content_block_start":
 			if streamEvent.ContentBlock.Type == "tool_use" {
 				toolIndex := len(response.Choices[0].Message.ToolCalls)
@@ -697,7 +714,8 @@ func streamAnthropicResponses(body io.Reader, fallbackModel string, structured b
 		case "message_start":
 			response.ID = streamEvent.Message.ID
 			response.Model = streamEvent.Message.Model
-			response.Usage.InputTokens = streamEvent.Message.Usage.InputTokens
+			response.Usage.InputTokens = anthropicInputTokens(streamEvent.Message.Usage)
+			response.Usage.InputTokensDetails = &openai.InputTokenDetails{CachedTokens: streamEvent.Message.Usage.CacheReadInputTokens, CacheWriteTokens: streamEvent.Message.Usage.CacheCreationInputTokens}
 			response.CreatedAt = time.Now().UTC().Unix()
 			response.Status = "in_progress"
 			return write("response.created", responseEventPayload("response.created", response, "", ""))

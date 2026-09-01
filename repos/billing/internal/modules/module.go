@@ -15,6 +15,8 @@ type RequestContext struct {
 	SessionID             string                         `json:"session_id,omitempty"`
 	TraceID               string                         `json:"trace_id,omitempty"`
 	PromptTokensEstimated int                            `json:"prompt_tokens_estimated,omitempty"`
+	CacheReadInputTokens  int                            `json:"cache_read_input_tokens,omitempty"`
+	CacheWriteInputTokens int                            `json:"cache_write_input_tokens,omitempty"`
 	PostResponse          bool                           `json:"post_response,omitempty"`
 	BillingPhase          string                         `json:"billing_phase,omitempty"`
 	APIType               string                         `json:"api_type,omitempty"`
@@ -66,6 +68,8 @@ type BillingEvent struct {
 	InputTokens           int      `json:"input_tokens"`
 	OutputTokens          int      `json:"output_tokens"`
 	TotalTokens           int      `json:"total_tokens"`
+	CacheReadInputTokens  int      `json:"cache_read_input_tokens"`
+	CacheWriteInputTokens int      `json:"cache_write_input_tokens"`
 	Cost                  float64  `json:"cost"`
 	Currency              string   `json:"currency,omitempty"`
 	CatalogVersion        string   `json:"catalog_version,omitempty"`

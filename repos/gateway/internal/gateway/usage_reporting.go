@@ -13,18 +13,20 @@ import (
 )
 
 type UsageAggregate struct {
-	Date           string  `json:"date,omitempty"`
-	Name           string  `json:"name,omitempty"`
-	Currency       string  `json:"currency"`
-	Requests       uint64  `json:"requests"`
-	Errors         uint64  `json:"errors"`
-	InputTokens    uint64  `json:"input_tokens"`
-	OutputTokens   uint64  `json:"output_tokens"`
-	TotalTokens    uint64  `json:"total_tokens"`
-	Cost           float64 `json:"cost"`
-	AvgLatencyMS   float64 `json:"avg_latency_ms"`
-	CacheHits      uint64  `json:"cache_hits"`
-	CostPerRequest float64 `json:"cost_per_request"`
+	Date                  string  `json:"date,omitempty"`
+	Name                  string  `json:"name,omitempty"`
+	Currency              string  `json:"currency"`
+	Requests              uint64  `json:"requests"`
+	Errors                uint64  `json:"errors"`
+	InputTokens           uint64  `json:"input_tokens"`
+	OutputTokens          uint64  `json:"output_tokens"`
+	TotalTokens           uint64  `json:"total_tokens"`
+	CacheReadInputTokens  uint64  `json:"cache_read_input_tokens"`
+	CacheWriteInputTokens uint64  `json:"cache_write_input_tokens"`
+	Cost                  float64 `json:"cost"`
+	AvgLatencyMS          float64 `json:"avg_latency_ms"`
+	CacheHits             uint64  `json:"cache_hits"`
+	CostPerRequest        float64 `json:"cost_per_request"`
 }
 
 type UsageReport struct {
@@ -244,6 +246,8 @@ func (h Handler) normalizeUsageProviders(ctx context.Context, report UsageReport
 		current.InputTokens += item.InputTokens
 		current.OutputTokens += item.OutputTokens
 		current.TotalTokens += item.TotalTokens
+		current.CacheReadInputTokens += item.CacheReadInputTokens
+		current.CacheWriteInputTokens += item.CacheWriteInputTokens
 		current.CacheHits += item.CacheHits
 		current.Cost += item.Cost
 		if current.Requests > 0 {
