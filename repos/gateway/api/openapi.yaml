@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.18
+  version: 0.1.19
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1256,7 +1256,7 @@ paths:
       operationId: getUsageReport
       tags: [Usage]
       summary: Get aggregated usage and spend
-      description: Returns final request outcomes aggregated by currency, day, model, and provider. Mixed currencies are never summed together.
+      description: Returns final request outcomes aggregated by currency, day, model, provider, and credential tag. Mixed currencies are never summed together.
       parameters:
         - name: days
           in: query
@@ -1273,6 +1273,9 @@ paths:
           in: query
           schema: {type: string, maxLength: 256}
         - name: provider
+          in: query
+          schema: {type: string, maxLength: 256}
+        - name: tag
           in: query
           schema: {type: string, maxLength: 256}
       responses:
@@ -1318,6 +1321,7 @@ paths:
         - {name: status, in: query, schema: {type: string, enum: [ok, error]}}
         - {name: model, in: query, schema: {type: string, maxLength: 256}}
         - {name: provider, in: query, schema: {type: string, maxLength: 256}}
+        - {name: tag, in: query, schema: {type: string, maxLength: 256}}
         - {name: user_id, in: query, schema: {type: string, maxLength: 256}}
         - {name: team_id, in: query, schema: {type: string, maxLength: 256}}
         - {name: organization_id, in: query, schema: {type: string, maxLength: 256}}
@@ -1735,7 +1739,7 @@ components:
     UsageReport:
       type: object
       additionalProperties: false
-      required: [days, from, to, totals, daily, by_model, by_provider]
+      required: [days, from, to, totals, daily, by_model, by_provider, by_tag]
       properties:
         days: {type: integer, minimum: 1, maximum: 90}
         from: {type: string, format: date-time}
@@ -1744,6 +1748,7 @@ components:
         daily: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
         by_model: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
         by_provider: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
+        by_tag: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
     RequestLog:
       type: object
       additionalProperties: false
@@ -1757,6 +1762,7 @@ components:
         team_id: {type: string}
         organization_id: {type: string}
         roles: {type: array, items: {type: string}}
+        tags: {type: array, items: {type: string}, description: Non-secret virtual-key tags used for policy and cost attribution}
         credential_id: {type: string, description: Non-secret credential identifier or fingerprint}
         provider: {type: string}
         provider_id: {type: string, description: Canonical managed provider identifier}

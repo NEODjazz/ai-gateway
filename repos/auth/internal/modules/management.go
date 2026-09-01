@@ -206,6 +206,7 @@ func validateStoredVirtualKey(spec ManagedVirtualKey) (StoredVirtualKey, error) 
 	if spec.ExpiresAt != nil && !spec.ExpiresAt.After(time.Now()) {
 		return StoredVirtualKey{}, fmt.Errorf("%w: expires_at must be in the future", ErrInvalidVirtualKey)
 	}
+	spec.Tags = normalizePolicyStrings(spec.Tags)
 	return StoredVirtualKey{
 		Alias: spec.Alias, Description: spec.Description, Tags: append([]string(nil), spec.Tags...), UserID: spec.UserID, TeamID: spec.TeamID, OrganizationID: spec.OrganizationID,
 		Roles: append([]string(nil), spec.Roles...), AllowedModels: append([]string(nil), spec.AllowedModels...),
@@ -213,6 +214,20 @@ func validateStoredVirtualKey(spec ManagedVirtualKey) (StoredVirtualKey, error) 
 		RateLimitRPM: spec.RateLimitRPM, RateLimitTPM: spec.RateLimitTPM,
 		ExpiresAt: spec.ExpiresAt,
 	}, nil
+}
+
+func normalizePolicyStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func validPolicyStrings(values []string) bool {

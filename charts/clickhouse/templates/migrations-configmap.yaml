@@ -92,3 +92,6 @@ data:
   006_usage_traces.sql: |
     ALTER TABLE ai_gateway.usage_events
         ADD COLUMN IF NOT EXISTS trace_id String AFTER session_id;
+  007_usage_tags.sql: |
+    ALTER TABLE ai_gateway.usage_events
+        ADD COLUMN IF NOT EXISTS tags Array(String) AFTER roles;

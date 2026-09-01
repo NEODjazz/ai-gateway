@@ -22,6 +22,7 @@ type RequestContext struct {
 	TeamID                string                         `json:"team_id,omitempty"`
 	OrganizationID        string                         `json:"organization_id,omitempty"`
 	Roles                 []string                       `json:"roles,omitempty"`
+	Tags                  []string                       `json:"tags,omitempty"`
 	Request               openai.ChatCompletionRequest   `json:"request"`
 	ResponseRequest       *openai.ResponseRequest        `json:"response_request,omitempty"`
 	Response              *openai.ChatCompletionResponse `json:"response,omitempty"`
@@ -41,6 +42,7 @@ type BillingEvent struct {
 	TeamID                string   `json:"team_id,omitempty"`
 	OrganizationID        string   `json:"organization_id,omitempty"`
 	Roles                 []string `json:"roles,omitempty"`
+	Tags                  []string `json:"tags,omitempty"`
 	APIKeyFingerprint     string   `json:"api_key_fingerprint,omitempty"`
 	Provider              string   `json:"provider,omitempty"`
 	ProviderID            string   `json:"provider_id,omitempty"`

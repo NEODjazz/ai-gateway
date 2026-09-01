@@ -35,6 +35,7 @@ type UsageReport struct {
 	Daily      []UsageAggregate `json:"daily"`
 	ByModel    []UsageAggregate `json:"by_model"`
 	ByProvider []UsageAggregate `json:"by_provider"`
+	ByTag      []UsageAggregate `json:"by_tag"`
 }
 
 type UsageReportQuery struct {
@@ -42,6 +43,7 @@ type UsageReportQuery struct {
 	To       time.Time
 	Model    string
 	Provider string
+	Tag      string
 }
 
 type UsageManagementClient interface {
@@ -77,6 +79,9 @@ func (c *RemoteBudgetManagementClient) FilteredUsageReport(ctx context.Context, 
 	if query.Provider != "" {
 		values.Set("provider", query.Provider)
 	}
+	if query.Tag != "" {
+		values.Set("tag", query.Tag)
+	}
 	var report UsageReport
 	err := c.call(ctx, http.MethodGet, "/internal/v1/usage/report?"+values.Encode(), audit, nil, &report)
 	return report, err
@@ -107,7 +112,7 @@ func (h Handler) GetUsageReport(w http.ResponseWriter, r *http.Request) {
 	}
 	query, filtered, valid := usageReportFilter(r, days)
 	if !valid {
-		writeError(w, http.StatusBadRequest, "invalid_request", "from/to must be RFC3339 dates within a 90 day range; model/provider must be at most 256 characters")
+		writeError(w, http.StatusBadRequest, "invalid_request", "from/to must be RFC3339 dates within a 90 day range; model/provider/tag must be at most 256 characters")
 		return
 	}
 	var report UsageReport
@@ -132,9 +137,10 @@ func (h Handler) GetUsageReport(w http.ResponseWriter, r *http.Request) {
 func usageReportFilter(r *http.Request, days int) (UsageReportQuery, bool, bool) {
 	model := strings.TrimSpace(r.URL.Query().Get("model"))
 	providerID := strings.TrimSpace(r.URL.Query().Get("provider"))
+	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
 	fromRaw, toRaw := strings.TrimSpace(r.URL.Query().Get("from")), strings.TrimSpace(r.URL.Query().Get("to"))
-	filtered := model != "" || providerID != "" || fromRaw != "" || toRaw != ""
-	if len(model) > 256 || len(providerID) > 256 || (fromRaw == "") != (toRaw == "") {
+	filtered := model != "" || providerID != "" || tag != "" || fromRaw != "" || toRaw != ""
+	if len(model) > 256 || len(providerID) > 256 || len(tag) > 256 || (fromRaw == "") != (toRaw == "") {
 		return UsageReportQuery{}, filtered, false
 	}
 	to := time.Now().UTC()
@@ -153,7 +159,7 @@ func usageReportFilter(r *http.Request, days int) (UsageReportQuery, bool, bool)
 	if !to.After(from) || to.Sub(from) > 90*24*time.Hour {
 		return UsageReportQuery{}, filtered, false
 	}
-	return UsageReportQuery{From: from.UTC(), To: to.UTC(), Model: model, Provider: providerID}, filtered, true
+	return UsageReportQuery{From: from.UTC(), To: to.UTC(), Model: model, Provider: providerID, Tag: tag}, filtered, true
 }
 
 func (h Handler) GetCustomerUsageReport(w http.ResponseWriter, r *http.Request) {

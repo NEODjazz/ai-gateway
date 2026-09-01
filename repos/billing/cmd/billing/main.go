@@ -61,6 +61,7 @@ func main() {
 			TeamID:                request.TeamID,
 			OrganizationID:        request.OrganizationID,
 			Roles:                 request.Roles,
+			Tags:                  request.Tags,
 			PromptTokensEstimated: request.PromptTokensEstimated,
 			PostResponse:          request.Phase == "commit",
 			BillingPhase:          request.Phase,
@@ -137,6 +138,7 @@ type usageRequest struct {
 	TeamID                string   `json:"team_id,omitempty"`
 	OrganizationID        string   `json:"organization_id,omitempty"`
 	Roles                 []string `json:"roles,omitempty"`
+	Tags                  []string `json:"tags,omitempty"`
 	Provider              string   `json:"provider,omitempty"`
 	ProviderID            string   `json:"provider_id,omitempty"`
 	ProviderEndpointName  string   `json:"provider_endpoint_name,omitempty"`

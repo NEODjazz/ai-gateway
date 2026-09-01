@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -37,6 +38,7 @@ type UsageReport struct {
 	Daily      []UsageAggregate `json:"daily"`
 	ByModel    []UsageAggregate `json:"by_model"`
 	ByProvider []UsageAggregate `json:"by_provider"`
+	ByTag      []UsageAggregate `json:"by_tag"`
 }
 
 type UsageReporter interface {
@@ -54,6 +56,7 @@ type UsageReportQuery struct {
 	Scope    UsageScope
 	Model    string
 	Provider string
+	Tag      string
 }
 
 type FilteredUsageReporter interface {
@@ -105,16 +108,16 @@ func (r *ClickHouseUsageReporter) ReportScoped(ctx context.Context, days int, sc
 }
 
 func (r *ClickHouseUsageReporter) ReportQuery(ctx context.Context, query UsageReportQuery) (UsageReport, error) {
-	if r == nil || r.client == nil || !query.To.After(query.From) || query.To.Sub(query.From) > 90*24*time.Hour || len(query.Model) > 256 || len(query.Provider) > 256 {
+	if r == nil || r.client == nil || !query.To.After(query.From) || query.To.Sub(query.From) > 90*24*time.Hour || len(query.Model) > 256 || len(query.Provider) > 256 || len(query.Tag) > 256 {
 		return UsageReport{}, errors.New("invalid usage report query")
 	}
 	if query.Scope.Type != "" && ((query.Scope.Type != "key" && query.Scope.Type != "user" && query.Scope.Type != "team") || strings.TrimSpace(query.Scope.ID) == "" || len(query.Scope.ID) > 256) {
 		return UsageReport{}, errors.New("invalid usage scope")
 	}
 	days := int(query.To.Sub(query.From).Hours()/24 + 0.999999)
-	report := UsageReport{Days: days, From: query.From.UTC(), To: query.To.UTC(), Totals: []UsageAggregate{}, Daily: []UsageAggregate{}, ByModel: []UsageAggregate{}, ByProvider: []UsageAggregate{}}
-	statement := usageReportQuery(r.table, query.Scope.Type, query.Model != "", query.Provider != "")
-	parameters := url.Values{"output_format_json_quote_64bit_integers": {"0"}, "query": {statement}, "param_from": {query.From.UTC().Format(time.RFC3339)}, "param_to": {query.To.UTC().Format(time.RFC3339)}}
+	report := UsageReport{Days: days, From: query.From.UTC(), To: query.To.UTC(), Totals: []UsageAggregate{}, Daily: []UsageAggregate{}, ByModel: []UsageAggregate{}, ByProvider: []UsageAggregate{}, ByTag: []UsageAggregate{}}
+	statement := usageReportQuery(r.table, query.Scope.Type, query.Model != "", query.Provider != "", query.Tag != "")
+	parameters := url.Values{"output_format_json_quote_64bit_integers": {"0"}, "query": {statement}, "param_from": {strconv.FormatInt(query.From.UTC().Unix(), 10)}, "param_to": {strconv.FormatInt(query.To.UTC().Unix(), 10)}}
 	if query.Scope.Type != "" {
 		parameters.Set("param_scope_id", query.Scope.ID)
 	}
@@ -123,6 +126,9 @@ func (r *ClickHouseUsageReporter) ReportQuery(ctx context.Context, query UsageRe
 	}
 	if query.Provider != "" {
 		parameters.Set("param_provider", query.Provider)
+	}
+	if query.Tag != "" {
+		parameters.Set("param_tag", query.Tag)
 	}
 	requestURL := r.endpoint + "/?" + parameters.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, nil)
@@ -159,6 +165,8 @@ func (r *ClickHouseUsageReporter) ReportQuery(ctx context.Context, query UsageRe
 			report.ByModel = append(report.ByModel, row.UsageAggregate)
 		case "provider":
 			report.ByProvider = append(report.ByProvider, row.UsageAggregate)
+		case "tag":
+			report.ByTag = append(report.ByTag, row.UsageAggregate)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -167,8 +175,8 @@ func (r *ClickHouseUsageReporter) ReportQuery(ctx context.Context, query UsageRe
 	return report, nil
 }
 
-func usageReportQuery(table string, scopeType string, filterModel, filterProvider bool) string {
-	where := "timestamp_unix >= toUnixTimestamp({from:DateTime64}) AND timestamp_unix < toUnixTimestamp({to:DateTime64}) AND phase IN ('commit','cancel')"
+func usageReportQuery(table string, scopeType string, filterModel, filterProvider, filterTag bool) string {
+	where := "timestamp_unix >= {from:UInt64} AND timestamp_unix < {to:UInt64} AND phase IN ('commit','cancel')"
 	columns := map[string]string{"key": "credential_id", "user": "user_id", "team": "team_id"}
 	if column := columns[scopeType]; column != "" {
 		where += " AND " + column + " = {scope_id:String}"
@@ -179,12 +187,19 @@ func usageReportQuery(table string, scopeType string, filterModel, filterProvide
 	if filterProvider {
 		where += " AND " + canonicalUsageProviderExpression + " = {provider:String}"
 	}
-	metrics := "count() AS requests, countIf(status != 'ok') AS errors, sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens, sum(total_tokens) AS total_tokens, sum(cost) AS cost, avg(latency_ms) AS avg_latency_ms, countIf(cache_status = 'hit') AS cache_hits, if(count() = 0, 0, sum(cost) / count()) AS cost_per_request"
+	if filterTag {
+		where += " AND has(tags, {tag:String})"
+	}
+	// Qualify the source cost column because ClickHouse expands the `cost` result
+	// alias inside later expressions after ARRAY JOIN and otherwise reports a
+	// nested aggregate (sum(sum(cost))).
+	metrics := "count() AS requests, countIf(status != 'ok') AS errors, sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens, sum(total_tokens) AS total_tokens, sum(usage.cost) AS cost, avg(latency_ms) AS avg_latency_ms, countIf(cache_status = 'hit') AS cache_hits, if(count() = 0, 0, sum(usage.cost) / count()) AS cost_per_request"
 	return fmt.Sprintf(`
-SELECT 'total' AS kind, '' AS date, '' AS name, currency, %s FROM %s WHERE %s GROUP BY currency
-UNION ALL SELECT 'day' AS kind, toString(toDate(parseDateTimeBestEffort(timestamp))) AS date, '' AS name, currency, %s FROM %s WHERE %s GROUP BY date,currency
-UNION ALL SELECT 'model' AS kind, '' AS date, %s AS name, currency, %s FROM %s WHERE %s GROUP BY name,currency
-UNION ALL SELECT 'provider' AS kind, '' AS date, %s AS name, currency, %s FROM %s WHERE %s GROUP BY name,currency
+SELECT 'total' AS kind, '' AS date, '' AS name, currency, %s FROM %s AS usage WHERE %s GROUP BY currency
+UNION ALL SELECT 'day' AS kind, toString(toDate(parseDateTimeBestEffort(timestamp))) AS date, '' AS name, currency, %s FROM %s AS usage WHERE %s GROUP BY date,currency
+UNION ALL SELECT 'model' AS kind, '' AS date, %s AS name, currency, %s FROM %s AS usage WHERE %s GROUP BY name,currency
+UNION ALL SELECT 'provider' AS kind, '' AS date, %s AS name, currency, %s FROM %s AS usage WHERE %s GROUP BY name,currency
+UNION ALL SELECT 'tag' AS kind, '' AS date, tag AS name, currency, %s FROM %s AS usage ARRAY JOIN if(empty(tags), ['Untagged'], tags) AS tag WHERE %s GROUP BY name,currency
 ORDER BY kind,date,cost DESC,total_tokens DESC
-FORMAT JSONEachRow`, metrics, table, where, metrics, table, where, canonicalUsageModelExpression, metrics, table, where, canonicalUsageProviderExpression, metrics, table, where)
+FORMAT JSONEachRow`, metrics, table, where, metrics, table, where, canonicalUsageModelExpression, metrics, table, where, canonicalUsageProviderExpression, metrics, table, where, metrics, table, where)
 }

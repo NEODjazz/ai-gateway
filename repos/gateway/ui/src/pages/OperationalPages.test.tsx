@@ -14,7 +14,7 @@ function authenticated(node: React.ReactNode) {
 describe("operational pages", () => {
   it("renders usage totals and changes the bounded window", async () => {
     const aggregate = { currency: "USD", requests: 4, errors: 0, input_tokens: 8, output_tokens: 12, total_tokens: 20, cost: 0.00265, avg_latency_ms: 12, cache_hits: 0, cost_per_request: 0.0006625 };
-    const response = { totals: [aggregate], daily: [{ ...aggregate, date: "2026-08-28" }], by_model: [{ ...aggregate, name: "gpt" }], by_provider: [{ ...aggregate, name: "azure-open-ai" }] };
+    const response = { totals: [aggregate], daily: [{ ...aggregate, date: "2026-08-28" }], by_model: [{ ...aggregate, name: "gpt" }], by_provider: [{ ...aggregate, name: "azure-open-ai" }], by_tag: [{ ...aggregate, name: "production" }] };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
     authenticated(<UsagePage />);
     expect(await screen.findAllByText("$0.00265")).toHaveLength(2);
@@ -22,6 +22,7 @@ describe("operational pages", () => {
     expect(screen.getByText("Spend per day")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Models" })); expect(screen.getByText("gpt")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Providers" })); expect(screen.getByText("azure-open-ai")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Tags" })); expect(screen.getByText("production")).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Window"), "7");
     await userEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/admin/v1/usage/report?days=7", expect.anything()));
@@ -36,7 +37,8 @@ describe("operational pages", () => {
       ],
       daily: [],
       by_model: [],
-      by_provider: []
+      by_provider: [],
+      by_tag: []
     }), { status: 200 }));
     authenticated(<UsagePage />);
     expect(await screen.findByText("$1.00 · €2.00")).toBeInTheDocument();
@@ -45,16 +47,18 @@ describe("operational pages", () => {
   });
 
   it("applies LiteLLM-style model, provider and custom date filters", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ totals: [], daily: [], by_model: [], by_provider: [] }), { status: 200 }));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ totals: [], daily: [], by_model: [], by_provider: [], by_tag: [] }), { status: 200 }));
     authenticated(<UsagePage />); await screen.findByText("Spend per day");
     await userEvent.selectOptions(screen.getByLabelText("Window"), "custom");
     await userEvent.type(screen.getByLabelText("Usage from"), "2026-08-01");
     await userEvent.type(screen.getByLabelText("Usage to"), "2026-08-28");
     await userEvent.type(screen.getByLabelText("Usage model"), "gpt");
     await userEvent.type(screen.getByLabelText("Usage provider"), "azure");
+    await userEvent.type(screen.getByLabelText("Usage tag"), "production");
     await userEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("model=gpt"));
     expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("provider=azure");
+    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("tag=production");
     expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("from=2026-08-01T00%3A00%3A00.000Z");
   });
 

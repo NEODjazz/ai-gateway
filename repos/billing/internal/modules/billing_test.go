@@ -71,6 +71,7 @@ func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 		TeamID:         "team-1",
 		OrganizationID: "org-1",
 		Roles:          []string{"developer"},
+		Tags:           []string{"production", "cost-center-a"},
 		Request: openai.ChatCompletionRequest{
 			Provider: "ollama",
 			Model:    "test-model",
@@ -126,7 +127,7 @@ func TestBillingCollectsChatCompletionEvent(t *testing.T) {
 	if event.APIKeyFingerprint != "safe-fingerprint" {
 		t.Fatalf("unexpected api key fingerprint: %s", event.APIKeyFingerprint)
 	}
-	if event.OrganizationID != "org-1" || event.TraceID != "0123456789abcdef0123456789abcdef" || event.FirstTokenLatencyMS != 45 || event.RetryCount != 2 || event.FallbackCount != 1 || event.UsageEstimated {
+	if event.OrganizationID != "org-1" || len(event.Tags) != 2 || event.Tags[0] != "production" || event.TraceID != "0123456789abcdef0123456789abcdef" || event.FirstTokenLatencyMS != 45 || event.RetryCount != 2 || event.FallbackCount != 1 || event.UsageEstimated {
 		t.Fatalf("unexpected usage observability: %+v", event)
 	}
 	if _, err := time.Parse(time.RFC3339, event.Timestamp); err != nil {

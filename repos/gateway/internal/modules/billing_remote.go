@@ -19,6 +19,7 @@ type UsageRequest struct {
 	TeamID                string   `json:"team_id,omitempty"`
 	OrganizationID        string   `json:"organization_id,omitempty"`
 	Roles                 []string `json:"roles,omitempty"`
+	Tags                  []string `json:"tags,omitempty"`
 	Provider              string   `json:"provider,omitempty"`
 	ProviderID            string   `json:"provider_id,omitempty"`
 	ProviderEndpointName  string   `json:"provider_endpoint_name,omitempty"`
@@ -121,6 +122,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		TeamID:                req.TeamID,
 		OrganizationID:        req.OrganizationID,
 		Roles:                 append([]string(nil), req.Roles...),
+		Tags:                  append([]string(nil), req.Tags...),
 		Provider:              req.Request.Provider,
 		ProviderID:            metadataValue(req.Metadata, "provider.id"),
 		Model:                 req.Request.Model,

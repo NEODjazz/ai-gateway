@@ -132,6 +132,9 @@ func TestRemoteBillingReceivesCredentialIDButNotBearer(t *testing.T) {
 		if body["organization_id"] != "org-1" {
 			t.Fatalf("unexpected organization id: %v", body["organization_id"])
 		}
+		if tags, ok := body["tags"].([]any); !ok || len(tags) != 2 || tags[0] != "production" {
+			t.Fatalf("unexpected billing tags: %v", body["tags"])
+		}
 		if body["phase"] != "reserve" {
 			t.Fatalf("expected reserve phase, got %v", body["phase"])
 		}
@@ -145,6 +148,7 @@ func TestRemoteBillingReceivesCredentialIDButNotBearer(t *testing.T) {
 	defer server.Close()
 	req := sensitiveContext()
 	req.OrganizationID = "org-1"
+	req.Tags = []string{"production", "cost-center-a"}
 	if err := NewRemoteBillingModule(true, server.URL).Handle(context.Background(), &req); err != nil {
 		t.Fatal(err)
 	}

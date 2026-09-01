@@ -12,6 +12,7 @@ type RequestLog = Row & {
   request_id: string;
   session_id?: string;
   trace_id?: string;
+  tags?: string[];
   status: string;
   model?: string;
   upstream_model?: string;
@@ -43,7 +44,7 @@ type GroupedRequestLog = Row & {
 };
 const emptyFilters = { request_id: "", session_id: "", trace_id: "", status: "", model: "", provider: "", cache_status: "", organization_id: "", team_id: "", user_id: "", credential_id: "" };
 const requestLogColumns = [
-  { key: "timestamp", label: "Time" }, { key: "request_id", label: "Request" }, { key: "session_id", label: "Session" }, { key: "trace_id", label: "Trace" }, { key: "status", label: "Status" },
+  { key: "timestamp", label: "Time" }, { key: "request_id", label: "Request" }, { key: "session_id", label: "Session" }, { key: "trace_id", label: "Trace" }, { key: "tags", label: "Tags" }, { key: "status", label: "Status" },
   { key: "model", label: "Public model" }, { key: "upstream_model", label: "Upstream model" }, { key: "provider_id", label: "Provider" },
   { key: "cache_status", label: "Cache" }, { key: "cache_kind", label: "Cache type" }, { key: "total_tokens", label: "Tokens" },
   { key: "usage_estimated", label: "Token source" }, { key: "latency_ms", label: "Latency" }, { key: "first_token_latency_ms", label: "TTFT" },
@@ -146,6 +147,7 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
     { key: "request_id", label: "Request" },
     { key: "session_id", label: "Session" },
     { key: "trace_id", label: "Trace" },
+    { key: "tags", label: "Tags" },
     { key: "status", label: "Status" },
     { key: "model", label: "Public model" },
     { key: "upstream_model", label: "Upstream model" },

@@ -33,11 +33,11 @@ func TestRequestLogManagementRequiresSecretAndValidatesFilters(t *testing.T) {
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized status=%d", unauthorized.Code)
 	}
-	request := httptest.NewRequest(http.MethodGet, "/internal/v1/request-logs?days=14&limit=25&team_id=team-a&organization_id=org-a&trace_id=0123456789abcdef0123456789abcdef&cache_status=hit", nil)
+	request := httptest.NewRequest(http.MethodGet, "/internal/v1/request-logs?days=14&limit=25&team_id=team-a&organization_id=org-a&trace_id=0123456789abcdef0123456789abcdef&tag=production&cache_status=hit", nil)
 	request.Header.Set("X-Management-Token", "management-secret")
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || reporter.filter.Days != 14 || reporter.filter.Limit != 25 || reporter.filter.TeamID != "team-a" || reporter.filter.OrganizationID != "org-a" || reporter.filter.TraceID != "0123456789abcdef0123456789abcdef" || reporter.filter.CacheStatus != "hit" {
+	if response.Code != http.StatusOK || reporter.filter.Days != 14 || reporter.filter.Limit != 25 || reporter.filter.TeamID != "team-a" || reporter.filter.OrganizationID != "org-a" || reporter.filter.TraceID != "0123456789abcdef0123456789abcdef" || reporter.filter.Tag != "production" || reporter.filter.CacheStatus != "hit" {
 		t.Fatalf("status=%d filter=%+v body=%s", response.Code, reporter.filter, response.Body.String())
 	}
 	invalid := httptest.NewRequest(http.MethodGet, "/internal/v1/request-logs?days=0", nil)

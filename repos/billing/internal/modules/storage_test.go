@@ -48,6 +48,7 @@ func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 		RequestID:       "req-1",
 		UserID:          "user-1",
 		TeamID:          "team-1",
+		Tags:            []string{"production", "cost-center-a"},
 		Provider:        "ollama",
 		Model:           "test-model",
 		Timestamp:       "2026-06-25T10:30:00Z",
@@ -71,7 +72,7 @@ func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 	if receivedEvent.Timestamp != "2026-06-25T10:30:00Z" {
 		t.Fatalf("unexpected timestamp: %+v", receivedEvent)
 	}
-	if receivedEvent.TeamID != "team-1" || receivedEvent.CatalogVersion != "catalog-v1" || receivedEvent.PricingKey != "ollama/test-model" {
+	if receivedEvent.TeamID != "team-1" || len(receivedEvent.Tags) != 2 || receivedEvent.Tags[0] != "production" || receivedEvent.CatalogVersion != "catalog-v1" || receivedEvent.PricingKey != "ollama/test-model" {
 		t.Fatalf("pricing audit fields were not serialized: %+v", receivedEvent)
 	}
 }

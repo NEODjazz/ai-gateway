@@ -77,8 +77,8 @@ func TestAdminUsageReportForwardsBoundedDateAndDimensionFilters(t *testing.T) {
 	client := &recordingUsageClient{}
 	handler := Routes(NewHandler(modulesPipeline("admin"), modelsProvider{}).WithUsageReporting(client))
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/v1/usage/report?from=2026-08-01T00:00:00Z&to=2026-08-10T00:00:00Z&model=gpt-5&provider=azure", nil))
-	if response.Code != http.StatusOK || client.query.Model != "gpt-5" || client.query.Provider != "azure" || !strings.Contains(response.Body.String(), `"cache_hits":1`) || !strings.Contains(response.Body.String(), `"cost_per_request":0.25`) {
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/v1/usage/report?from=2026-08-01T00:00:00Z&to=2026-08-10T00:00:00Z&model=gpt-5&provider=azure&tag=production", nil))
+	if response.Code != http.StatusOK || client.query.Model != "gpt-5" || client.query.Provider != "azure" || client.query.Tag != "production" || !strings.Contains(response.Body.String(), `"cache_hits":1`) || !strings.Contains(response.Body.String(), `"cost_per_request":0.25`) {
 		t.Fatalf("filtered report was not forwarded: status=%d query=%+v body=%s", response.Code, client.query, response.Body.String())
 	}
 	invalid := httptest.NewRecorder()
@@ -154,7 +154,7 @@ func TestRemoteFilteredUsageReportUsesEncodedDimensions(t *testing.T) {
 	defer server.Close()
 	client := NewRemoteBudgetManagementClient(server.URL, "billing-secret")
 	from := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	report, err := client.FilteredUsageReport(context.Background(), ManagementAudit{ActorID: "admin"}, UsageReportQuery{From: from, To: from.Add(24 * time.Hour), Model: "model/a", Provider: "azure openai"})
+	report, err := client.FilteredUsageReport(context.Background(), ManagementAudit{ActorID: "admin"}, UsageReportQuery{From: from, To: from.Add(24 * time.Hour), Model: "model/a", Provider: "azure openai", Tag: "production"})
 	if err != nil || report.Days != 1 {
 		t.Fatalf("report=%+v err=%v", report, err)
 	}

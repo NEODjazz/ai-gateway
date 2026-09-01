@@ -191,15 +191,18 @@ Startup fails if PostgreSQL is unavailable, the persisted snapshot is invalid,
 or the stable encryption key cannot decrypt a credential or logging secret.
 The Usage & Spend view reads final request outcomes from ClickHouse for a
 bounded 7/30/90-day window and breaks requests, tokens, latency, and spend down
-by day, model, and provider. Costs remain separated by currency.
+by day, model, provider, and virtual-key tag. Every tagged request is attributed
+to each of its tags; untagged traffic is grouped as `Untagged`. Costs remain
+separated by currency, and model/provider/tag filters use typed ClickHouse
+parameters.
 The Request Logs view provides a bounded, cursor-paginated explorer over the
 same final outcomes with filters for request, session, OpenTelemetry trace,
-status, model, endpoint, user, team, organization, cache outcome, and credential
+status, model, endpoint, tag, user, team, organization, cache outcome, and credential
 fingerprint over bounded 7/30/90-day windows. Requests can also be grouped by
 session or distributed trace; group spend remains separated by currency. Its
 detail contract contains operational
 metadata, token counts, cost, cache state, and a bounded failure class only.
-It also exposes streaming time-to-first-token, retry and fallback counts, cache
+It also exposes non-secret credential tags, streaming time-to-first-token, retry and fallback counts, cache
 kind, organization scope, and whether token counts came from the provider or
 the bounded estimator. Estimated counts are never presented as exact provider
 metering.

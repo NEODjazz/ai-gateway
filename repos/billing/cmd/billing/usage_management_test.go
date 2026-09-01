@@ -13,6 +13,12 @@ import (
 type fakeUsageReporter struct {
 	days  int
 	scope modules.UsageScope
+	query modules.UsageReportQuery
+}
+
+func (f *fakeUsageReporter) ReportQuery(_ context.Context, query modules.UsageReportQuery) (modules.UsageReport, error) {
+	f.query = query
+	return modules.UsageReport{From: query.From, To: query.To}, nil
 }
 
 func (f *fakeUsageReporter) Report(_ context.Context, days int) (modules.UsageReport, error) {
@@ -60,5 +66,18 @@ func TestUsageManagementSupportsScopedCustomerReport(t *testing.T) {
 	mux.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || reporter.days != 14 || reporter.scope.Type != "team" || reporter.scope.ID != "team-a" {
 		t.Fatalf("status=%d days=%d scope=%+v body=%s", response.Code, reporter.days, reporter.scope, response.Body.String())
+	}
+}
+
+func TestUsageManagementForwardsTagFilter(t *testing.T) {
+	reporter := &fakeUsageReporter{}
+	mux := http.NewServeMux()
+	registerUsageManagement(mux, reporter, nil, "secret")
+	request := httptest.NewRequest(http.MethodGet, "/internal/v1/usage/report?from=2026-08-01T00:00:00Z&to=2026-08-02T00:00:00Z&tag=production", nil)
+	request.Header.Set("X-Management-Token", "secret")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || reporter.query.Tag != "production" {
+		t.Fatalf("status=%d query=%+v body=%s", response.Code, reporter.query, response.Body.String())
 	}
 }

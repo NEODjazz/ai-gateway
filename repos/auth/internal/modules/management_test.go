@@ -52,7 +52,7 @@ func TestCreateVirtualKeyReturnsSecretOnceAndPersistsOnlyHash(t *testing.T) {
 	module := NewAuthModuleWithStore(true, store, "hash-secret", false)
 	expires := time.Now().Add(time.Hour).UTC()
 	issued, err := module.CreateVirtualKey(context.Background(), ManagedVirtualKey{
-		UserID: "user-1", TeamID: "team-1", Roles: []string{"developer"},
+		UserID: "user-1", TeamID: "team-1", Roles: []string{"developer"}, Tags: []string{" production ", "production", "cost-center-a"},
 		AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp.weather.*"}, RateLimitRPM: 10, RateLimitTPM: 100, ExpiresAt: &expires,
 	})
 	if err != nil {
@@ -61,7 +61,7 @@ func TestCreateVirtualKeyReturnsSecretOnceAndPersistsOnlyHash(t *testing.T) {
 	if !strings.HasPrefix(issued.ID, "vk_") || !strings.HasPrefix(issued.Token, "sk-ag-") {
 		t.Fatalf("unexpected issued credential: %+v", issued)
 	}
-	if store.created.ID != issued.ID || store.created.UserID != "user-1" || store.created.TeamID != "team-1" || len(store.created.AllowedTools) != 1 {
+	if store.created.ID != issued.ID || store.created.UserID != "user-1" || store.created.TeamID != "team-1" || len(store.created.AllowedTools) != 1 || len(store.created.Tags) != 2 || store.created.Tags[0] != "production" {
 		t.Fatalf("policy was not persisted: %+v", store.created)
 	}
 	if store.createdHash == "" || store.createdHash == issued.Token || store.createdHash != credentialLookupHash(issued.Token, "hash-secret") {

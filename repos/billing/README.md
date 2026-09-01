@@ -130,7 +130,8 @@ GET /internal/v1/usage/report?days=30
 reservations, using the same period and scope calculation as enforcement.
 The usage report accepts a bounded 1–90 day range and aggregates final
 `commit`/`cancel` outcomes by currency, day, canonical public model, and managed
-provider. The upstream response model and deployment endpoint remain separate
+provider, and virtual-key tag. Untagged events appear as `Untagged`; a request
+with multiple tags is intentionally attributed to every tag. The upstream response model and deployment endpoint remain separate
 request-log dimensions and do not split usage totals.
 Currencies are never combined into a single spend total.
 The secret must not be shared with virtual-key management or client Bearer

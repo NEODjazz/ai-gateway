@@ -258,6 +258,7 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		TeamID:                req.TeamID,
 		OrganizationID:        req.OrganizationID,
 		Roles:                 append([]string(nil), req.Roles...),
+		Tags:                  append([]string(nil), req.Tags...),
 		APIKeyFingerprint:     req.CredentialID,
 		Provider:              providerName,
 		ProviderID:            metadata(req, "provider.id"),

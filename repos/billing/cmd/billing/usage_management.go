@@ -36,18 +36,18 @@ func registerUsageManagement(mux *http.ServeMux, reporter modules.UsageReporter,
 		var report modules.UsageReport
 		var err error
 		fromRaw, toRaw := strings.TrimSpace(r.URL.Query().Get("from")), strings.TrimSpace(r.URL.Query().Get("to"))
-		model, providerID := strings.TrimSpace(r.URL.Query().Get("model")), strings.TrimSpace(r.URL.Query().Get("provider"))
-		filtered := fromRaw != "" || toRaw != "" || model != "" || providerID != ""
+		model, providerID, tag := strings.TrimSpace(r.URL.Query().Get("model")), strings.TrimSpace(r.URL.Query().Get("provider")), strings.TrimSpace(r.URL.Query().Get("tag"))
+		filtered := fromRaw != "" || toRaw != "" || model != "" || providerID != "" || tag != ""
 		if filtered {
 			filteredReporter, ok := reporter.(modules.FilteredUsageReporter)
 			from, fromErr := time.Parse(time.RFC3339, fromRaw)
 			to, toErr := time.Parse(time.RFC3339, toRaw)
-			if !ok || fromErr != nil || toErr != nil || !to.After(from) || to.Sub(from) > 90*24*time.Hour || len(model) > 256 || len(providerID) > 256 || ((scopeType == "") != (scopeID == "")) {
+			if !ok || fromErr != nil || toErr != nil || !to.After(from) || to.Sub(from) > 90*24*time.Hour || len(model) > 256 || len(providerID) > 256 || len(tag) > 256 || ((scopeType == "") != (scopeID == "")) {
 				http.Error(w, "invalid usage filter", http.StatusBadRequest)
 				return
 			}
 			scope := modules.UsageScope{Type: scopeType, ID: scopeID}
-			report, err = filteredReporter.ReportQuery(r.Context(), modules.UsageReportQuery{From: from, To: to, Scope: scope, Model: model, Provider: providerID})
+			report, err = filteredReporter.ReportQuery(r.Context(), modules.UsageReportQuery{From: from, To: to, Scope: scope, Model: model, Provider: providerID, Tag: tag})
 		} else if scopeType == "" && scopeID == "" {
 			report, err = reporter.Report(r.Context(), days)
 		} else if scoped, ok := reporter.(modules.ScopedUsageReporter); ok && (scopeType == "key" || scopeType == "user" || scopeType == "team") && scopeID != "" && len(scopeID) <= 256 {
