@@ -204,3 +204,22 @@ func (r *Router) credentialSecret(id string) (string, error) {
 	}
 	return string(plaintext), nil
 }
+
+func (r *Router) providerCredentialSecret(providerID, credentialID string) (string, error) {
+	credentialID = strings.TrimSpace(credentialID)
+	if credentialID == "" {
+		return "", nil
+	}
+	providerID = strings.TrimSpace(providerID)
+	r.credentials.mu.RLock()
+	item, found := r.credentials.current[credentialID]
+	r.credentials.mu.RUnlock()
+	if !found || (item.ProviderID != "" && item.ProviderID != providerID) {
+		return "", ErrCredentialNotFound
+	}
+	plaintext, err := r.credentials.aead.Open(nil, item.Nonce, item.Ciphertext, []byte(credentialID))
+	if err != nil {
+		return "", errors.New("credential decryption failed")
+	}
+	return string(plaintext), nil
+}

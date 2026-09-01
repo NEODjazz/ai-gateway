@@ -56,7 +56,7 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 	if managed.Type == "demo" {
 		return []DiscoveredModel{{ID: "demo-model"}}, nil
 	}
-	secret, err := r.credentialSecret(strings.TrimSpace(credentialID))
+	secret, err := r.providerCredentialSecret(managed.ID, credentialID)
 	if err != nil {
 		return nil, err
 	}

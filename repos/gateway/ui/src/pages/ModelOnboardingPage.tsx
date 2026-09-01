@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { PageHeader } from "../components/PageHeader";
@@ -32,12 +33,15 @@ function safeID(value: string) {
 
 export function ModelOnboardingPage() {
   const { client } = useAuth();
+  const [searchParams] = useSearchParams();
+  const requestedProviderID = searchParams.get("provider_id") || "";
+  const requestedCredentialID = searchParams.get("credential_id") || "";
   const [providers, setProviders] = useState<Provider[]>([]);
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [catalog, setCatalog] = useState<Catalog>();
   const [groups, setGroups] = useState<ModelGroup[]>([]);
-  const [providerID, setProviderID] = useState("");
-  const [credentialID, setCredentialID] = useState("");
+  const [providerID, setProviderID] = useState(requestedProviderID);
+  const [credentialID, setCredentialID] = useState(requestedCredentialID);
   const [newProvider, setNewProvider] = useState({ id: "", type: "openai-compatible", base_url: "" });
   const [newCredential, setNewCredential] = useState({ id: "", description: "", secret: "" });
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -58,13 +62,15 @@ export function ModelOnboardingPage() {
         client.request<Catalog>("/admin/v1/model-catalog"), client.request("/admin/v1/model-groups")
       ]);
       const loadedProviders = records<Provider>(providerPayload);
-      setProviders(loadedProviders); setCredentials(records<Credential>(credentialPayload));
+      const loadedCredentials = records<Credential>(credentialPayload);
+      setProviders(loadedProviders); setCredentials(loadedCredentials);
       setCatalog(catalogPayload); setGroups(records<ModelGroup>(groupPayload));
-      if (!providerID && loadedProviders.length) setProviderID(loadedProviders[0].id);
+      setProviderID((current) => loadedProviders.some((provider) => provider.id === current) ? current : loadedProviders[0]?.id || "");
+      setCredentialID((current) => loadedCredentials.some((credential) => credential.id === current && (!credential.provider_id || credential.provider_id === (requestedProviderID || loadedProviders[0]?.id))) ? current : "");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load onboarding data"); }
     finally { setLoading(false); }
-  }, [client, providerID]);
-  useEffect(() => { void load(); }, []);
+  }, [client, requestedProviderID]);
+  useEffect(() => { void load(); }, [load]);
 
   const selectedProvider = providers.find((provider) => provider.id === providerID);
   const availableCredentials = credentials.filter((credential) => !credential.provider_id || credential.provider_id === providerID);

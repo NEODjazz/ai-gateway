@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
 import { ModelOnboardingPage } from "./ModelOnboardingPage";
 
@@ -28,10 +29,10 @@ describe("ModelOnboardingPage", () => {
       return json({ error: { message: `Unexpected ${path}` } }, 500);
     });
     sessionStorage.setItem("ai-gateway.admin-token", "token");
-    render(<AuthProvider><ModelOnboardingPage /></AuthProvider>);
+    render(<MemoryRouter initialEntries={["/model-onboarding?provider_id=azure&credential_id=azure-key"]}><AuthProvider><ModelOnboardingPage /></AuthProvider></MemoryRouter>);
 
     await screen.findByRole("option", { name: "azure — openai-compatible" });
-    await userEvent.selectOptions(screen.getByLabelText("Credential"), "azure-key");
+    expect(screen.getByLabelText("Credential")).toHaveValue("azure-key");
     await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
     expect(await screen.findByText("gpt-a")).toBeInTheDocument();
     await userEvent.click(screen.getAllByRole("checkbox")[0]);

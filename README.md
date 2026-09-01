@@ -173,8 +173,13 @@ management, budget policy management, and a read-only management audit view.
 The Providers & Models workspace adds independent provider endpoint CRUD,
 AES-GCM encrypted write-only credentials, runtime deployment CRUD, public model
 groups, priority fallback, weighted/adaptive routing, connection tests, and
-provider model discovery. A credential secret is accepted only when created or
-rotated; list and mutation responses contain metadata only.
+provider model discovery. The Providers route joins non-secret credential and
+deployment counts, lets the operator select a matching stored credential for a
+connection test or discovery, and passes that selection into Model Onboarding.
+The backend rejects credentials bound to a different provider. Probe results
+contain only status, latency and model count; discovery returns model identifiers
+without exposing the selected secret. A credential secret is accepted only when
+created or rotated; list and mutation responses contain metadata only.
 The guided Model Onboarding route performs a server-side dry run and an
 optimistic atomic apply, so catalog, deployment, and model-group changes cannot
 be partially published. Set a stable
