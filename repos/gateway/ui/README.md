@@ -89,3 +89,10 @@ Access Groups and non-secret virtual-key IDs. Delete actions are protected by
 server-to-toolset and toolset-to-key/group impact checks. The console does not
 collect MCP OAuth tokens or claim direct network health because MCP execution
 remains provider-mediated in this gateway architecture.
+
+Guardrail Monitor is a dedicated overview and module drill-down workspace. It
+uses server-side time, policy, source, outcome and DLP/AV filters; shows pass
+rate, blocked/unavailable evaluations, latency, policy impact and timeline
+buckets; and keeps event rows metadata-only. The page identifies whether the
+report comes from bounded Redis history shared across replicas or from the
+current-replica fallback, including retention saturation and store errors.

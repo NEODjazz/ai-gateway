@@ -39,6 +39,10 @@ gateway:
   # strict:
   #   dlp: true
   #   av: true
+  guardrailMonitor:
+    # Metadata-only evaluation history. Redis shares it across replicas.
+    capacity: 1000
+    ttlSeconds: 604800
   exactCache:
     # Disabled by default; bundled cache is process-local and tenant-scoped.
     ttlSeconds: 0

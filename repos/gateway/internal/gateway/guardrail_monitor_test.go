@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"ai-gateway-gateway/internal/modules"
 )
@@ -15,6 +16,38 @@ import (
 type monitoredGuardrailModule struct {
 	name string
 	err  error
+}
+
+type sharedGuardrailEventStore struct {
+	mu       sync.Mutex
+	events   []GuardrailEvent
+	readErr  error
+	writeErr error
+}
+
+func (s *sharedGuardrailEventStore) Append(_ context.Context, event GuardrailEvent, capacity int) error {
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append([]GuardrailEvent{event}, s.events...)
+	if len(s.events) > capacity {
+		s.events = s.events[:capacity]
+	}
+	return nil
+}
+
+func (s *sharedGuardrailEventStore) Recent(_ context.Context, limit int) ([]GuardrailEvent, error) {
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if limit > len(s.events) {
+		limit = len(s.events)
+	}
+	return append([]GuardrailEvent(nil), s.events[:limit]...), nil
 }
 
 func (m monitoredGuardrailModule) Name() string   { return m.name }
@@ -85,5 +118,59 @@ func TestGuardrailMonitorConcurrentRecording(t *testing.T) {
 	snapshot := monitor.Snapshot(50)
 	if snapshot.Summary.Total != 100 || len(snapshot.Events) != 50 {
 		t.Fatalf("unexpected concurrent snapshot: %+v", snapshot)
+	}
+}
+
+func TestGuardrailMonitorBuildsFilteredSharedReport(t *testing.T) {
+	store := &sharedGuardrailEventStore{}
+	first := NewGuardrailMonitorWithStore(10, store)
+	second := NewGuardrailMonitorWithStore(10, store)
+	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	second.now = func() time.Time { return now }
+	first.Record(GuardrailEvent{OccurredAt: now.Add(-2 * time.Hour), RequestID: "old", Policy: "baseline", Module: "dlp", Source: "inference", Outcome: "passed", DurationMS: 10})
+	first.Record(GuardrailEvent{OccurredAt: now.Add(-10 * time.Minute), RequestID: "blocked", Policy: "strict", Module: "av", Source: "inference", Outcome: "rejected", DurationMS: 20})
+	first.Record(GuardrailEvent{OccurredAt: now.Add(-5 * time.Minute), RequestID: "unavailable", Policy: "strict", Module: "dlp", Source: "compliance", Outcome: "unavailable", DurationMS: 40})
+
+	report := second.Report(context.Background(), GuardrailMonitorFilter{Window: "15m", Policy: "strict"}, 10)
+	if report.Scope != "shared_redis" || !report.StoreAvailable || report.RetainedEvents != 3 || report.FilteredSummary.Total != 2 || report.FilteredSummary.Rejected != 1 || report.FilteredSummary.Unavailable != 1 || report.FilteredSummary.AverageDurationMS != 30 {
+		t.Fatalf("unexpected shared report: %+v", report)
+	}
+	if report.Summary.Total != 0 {
+		t.Fatalf("second-replica process summary was polluted: %+v", report.Summary)
+	}
+	if len(report.Events) != 2 || report.Events[0].RequestID != "unavailable" || report.ByPolicy["strict"].Total != 2 || len(report.Timeline) != 2 {
+		t.Fatalf("unexpected filtered rows: %+v", report)
+	}
+
+	dlpOnly := second.Report(context.Background(), GuardrailMonitorFilter{Window: "24h", Module: "dlp", Source: "compliance"}, 10)
+	if dlpOnly.FilteredSummary.Total != 1 || len(dlpOnly.Events) != 1 || dlpOnly.Events[0].RequestID != "unavailable" {
+		t.Fatalf("module/source filter mismatch: %+v", dlpOnly)
+	}
+}
+
+func TestGuardrailMonitorFallsBackToCurrentReplicaWhenSharedStoreFails(t *testing.T) {
+	store := &sharedGuardrailEventStore{readErr: errors.New("redis unavailable"), writeErr: errors.New("redis unavailable")}
+	monitor := NewGuardrailMonitorWithStore(10, store)
+	monitor.Record(GuardrailEvent{RequestID: "local", Module: "dlp", Outcome: "passed"})
+	report := monitor.Report(context.Background(), GuardrailMonitorFilter{Window: "retained"}, 10)
+	if report.Scope != "current_replica" || report.StoreAvailable || report.StoreErrors != 2 || report.FilteredSummary.Total != 1 || len(report.Events) != 1 {
+		t.Fatalf("unexpected local fallback: %+v", report)
+	}
+}
+
+func TestGuardrailMonitorAdminAPIValidatesFilters(t *testing.T) {
+	monitor := NewGuardrailMonitor(10)
+	handler := Routes(NewHandler(modulesPipeline("admin"), nil).WithGuardrailMonitor(monitor))
+	for _, path := range []string{
+		"/admin/v1/guardrails/monitor?window=30d",
+		"/admin/v1/guardrails/monitor?module=unknown",
+		"/admin/v1/guardrails/monitor?outcome=blocked",
+		"/admin/v1/guardrails/monitor?source=browser",
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("invalid filter accepted: path=%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
 	}
 }

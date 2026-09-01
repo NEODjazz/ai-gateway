@@ -223,6 +223,19 @@ textarea { resize: vertical; }
 .mcp-boundary { margin: 1rem 0 1.25rem; }
 .mcp-impact { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
 .mcp-impact p { margin: .35rem 0 0; overflow-wrap: anywhere; }
+
+.guardrail-filter-bar { display: grid; grid-template-columns: repeat(4, minmax(145px, 1fr)) auto; gap: 12px; align-items: end; margin-bottom: 16px; }
+.guardrail-filter-bar label { display: grid; gap: 5px; color: #617280; font-size: 12px; font-weight: 700; }
+.guardrail-filter-bar select { width: 100%; }
+.guardrail-scope { margin-bottom: 20px; border-left: 4px solid #13a78c; }
+.guardrail-scope.fallback { border-left-color: #d19424; }
+.guardrail-timeline { height: 180px; display: flex; align-items: flex-end; gap: 8px; overflow-x: auto; padding: 18px 8px 4px; border: 1px solid #e0e5e9; border-radius: 12px; background: white; }
+.guardrail-timeline-column { height: 100%; min-width: 34px; flex: 1 0 34px; display: grid; grid-template-rows: 1fr auto; align-items: end; justify-items: center; gap: 6px; }
+.guardrail-timeline-column small { color: #778591; font-size: 10px; white-space: nowrap; }
+.guardrail-timeline-bar { position: relative; width: min(26px, 70%); min-height: 8px; overflow: hidden; border-radius: 6px 6px 2px 2px; background: #1bb497; }
+.guardrail-timeline-risk { position: absolute; inset: auto 0 0; background: #d64b55; }
+.guardrail-empty-timeline { margin: 0; }
+@media (max-width: 900px) { .guardrail-filter-bar { grid-template-columns: repeat(2, minmax(145px, 1fr)); } }
 .credential-form-error, .credential-form-actions { margin-left: 188px; }
 .model-group-stats { margin-top: 2px; }
 .model-group-form-modal { width: min(900px, 100%); }

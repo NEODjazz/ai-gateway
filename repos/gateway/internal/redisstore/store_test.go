@@ -48,6 +48,30 @@ func TestRedisCacheRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRedisBoundedListIsSharedNewestFirstAndTrimmed(t *testing.T) {
+	server := miniredis.RunT(t)
+	first := New(Config{Addr: server.Addr(), Prefix: "shared-list"})
+	second := New(Config{Addr: server.Addr(), Prefix: "shared-list"})
+	ctx := context.Background()
+	for _, value := range []string{"one", "two", "three"} {
+		if err := first.PushBounded(ctx, "guardrail-events", []byte(value), 2, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+	}
+	values, err := second.ListBounded(ctx, "guardrail-events", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 2 || string(values[0]) != "three" || string(values[1]) != "two" {
+		t.Fatalf("unexpected bounded list: %q", values)
+	}
+	for _, key := range server.Keys() {
+		if strings.Contains(key, "guardrail-events") {
+			t.Fatalf("list namespace leaked into Redis key: %q", key)
+		}
+	}
+}
+
 func TestRedisRateLimitIsAtomic(t *testing.T) {
 	store := integrationStore(t)
 	ctx := context.Background()

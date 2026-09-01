@@ -576,6 +576,16 @@ is skipped instead of running without the intended DLP/AV controls. Runtime
 attachments are managed through `/admin/v1/policy-attachments` or the Policies
 page and are stored in the versioned control-plane snapshot.
 
+Guardrail Monitor stores only bounded evaluation metadata: request ID, policy,
+module, source, outcome, duration and timestamp. Prompts, responses and raw
+scanner details are never retained. With `REDIS_ADDR`, the history is shared by
+gateway replicas; if Redis is unavailable the report explicitly falls back to
+the bounded current-replica buffer. Configure its maximum event count with
+`GUARDRAIL_MONITOR_CAPACITY` (Helm: `gateway.guardrailMonitor.capacity`, default
+1000) and Redis expiry with `GUARDRAIL_MONITOR_TTL_SECONDS` (Helm:
+`gateway.guardrailMonitor.ttlSeconds`, default seven days). Invalid values fail
+gateway startup instead of silently changing retention.
+
 Model groups can be managed at runtime as a public model name plus an ordered
 set of deployment IDs. `priority` defines fallback tiers; endpoints at the same
 priority use `weight` for weighted round-robin or adaptive EWMA ordering. Static

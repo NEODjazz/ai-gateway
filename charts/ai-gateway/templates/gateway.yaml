@@ -76,6 +76,10 @@ spec:
                 configMapKeyRef:
                   name: {{ include "ai-gateway.providerConfigName" . }}
                   key: guardrail-policies.json
+            - name: GUARDRAIL_MONITOR_CAPACITY
+              value: {{ .Values.gateway.guardrailMonitor.capacity | quote }}
+            - name: GUARDRAIL_MONITOR_TTL_SECONDS
+              value: {{ .Values.gateway.guardrailMonitor.ttlSeconds | quote }}
             - name: MODEL_CATALOG_JSON
               valueFrom:
                 configMapKeyRef:

@@ -72,10 +72,15 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("SEMANTIC_CACHE_EMBEDDING_API_KEY", "embedding-secret")
 	t.Setenv("SEMANTIC_CACHE_EMBEDDING_MODEL", "text-embedding")
 	t.Setenv("GUARDRAIL_POLICIES_JSON", `{"strict":{"dlp":true,"av":true}}`)
+	t.Setenv("GUARDRAIL_MONITOR_CAPACITY", "750")
+	t.Setenv("GUARDRAIL_MONITOR_TTL_SECONDS", "86400")
 	t.Setenv("PROVIDERS_JSON", `[{"name":"group-a","type":"demo","model_aliases":{"fast":"upstream-fast"},"weight":3,"capabilities":["chat"],"max_parallel_requests":4,"queue_capacity":8,"queue_timeout_ms":250,"shadow":true,"mirror_percentage":12.5,"mirror_timeout_ms":900}]`)
 	cfg := Load()
 	if cfg.Cache.TTLSeconds != 120 || cfg.Cache.MaxBytes != 2048 || !cfg.Provider.GuardrailPolicies["strict"].DLP || !cfg.Provider.GuardrailPolicies["strict"].AV {
 		t.Fatalf("unexpected cache/policy config: %+v", cfg)
+	}
+	if cfg.Guardrails.Capacity != 750 || cfg.Guardrails.TTL != 24*time.Hour {
+		t.Fatalf("unexpected guardrail monitor config: %+v", cfg.Guardrails)
 	}
 	if cfg.Redis.Addr != "redis:6379" || cfg.Redis.DB != 2 || cfg.Redis.Prefix != "tenant-gateway" {
 		t.Fatalf("unexpected redis config: %+v", cfg.Redis)
@@ -96,6 +101,26 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	endpoint := cfg.Provider.Endpoints[0]
 	if endpoint.ModelAliases["fast"] != "upstream-fast" || endpoint.Weight != 3 || len(endpoint.Capabilities) != 1 || endpoint.MaxParallelRequests != 4 || endpoint.QueueCapacity != 8 || endpoint.QueueTimeoutMS != 250 || !endpoint.Shadow || endpoint.MirrorPercentage != 12.5 || endpoint.MirrorTimeoutMS != 900 {
 		t.Fatalf("unexpected routing config: %+v", endpoint)
+	}
+}
+
+func TestLoadRejectsInvalidGuardrailMonitorConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		capacity string
+		ttl      string
+	}{
+		{name: "zero capacity", capacity: "0", ttl: "60"},
+		{name: "excessive capacity", capacity: "10001", ttl: "60"},
+		{name: "zero ttl", capacity: "100", ttl: "0"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("GUARDRAIL_MONITOR_CAPACITY", test.capacity)
+			t.Setenv("GUARDRAIL_MONITOR_TTL_SECONDS", test.ttl)
+			if cfg := Load(); cfg.InitErr == nil {
+				t.Fatal("invalid guardrail monitor configuration was accepted")
+			}
+		})
 	}
 }
 

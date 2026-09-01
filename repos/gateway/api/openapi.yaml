@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.42
+  version: 0.1.43
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1006,12 +1006,17 @@ paths:
     get:
       operationId: getGuardrailMonitor
       tags: [Guardrails]
-      summary: Inspect bounded runtime guardrail outcomes
-      description: Returns metadata-only in-memory outcomes since gateway start. Prompt text, scanner details and response content are never retained.
+      summary: Inspect bounded shared guardrail outcomes
+      description: Returns metadata-only outcomes from a shared bounded Redis history when configured, with an explicit current-replica fallback. Prompt text, scanner details and response content are never retained.
       parameters:
         - name: limit
           in: query
           schema: {type: integer, minimum: 1, maximum: 1000, default: 100}
+        - {name: window, in: query, schema: {type: string, enum: [retained, 15m, 1h, 24h], default: retained}}
+        - {name: module, in: query, schema: {type: string, enum: [dlp, av]}}
+        - {name: policy, in: query, schema: {type: string, maxLength: 128}}
+        - {name: outcome, in: query, schema: {type: string, enum: [passed, rejected, unavailable]}}
+        - {name: source, in: query, schema: {type: string, enum: [inference, compliance]}}
       responses:
         '200': {description: Guardrail monitoring snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/GuardrailMonitorSnapshot'}}}}
         '400': {$ref: '#/components/responses/InvalidRequest'}
@@ -3087,12 +3092,14 @@ components:
     GuardrailMonitorSummary:
       type: object
       additionalProperties: false
-      required: [total, passed, rejected, unavailable]
+      required: [total, passed, rejected, unavailable, duration_ms, average_duration_ms]
       properties:
         total: {type: integer, format: int64, minimum: 0}
         passed: {type: integer, format: int64, minimum: 0}
         rejected: {type: integer, format: int64, minimum: 0}
         unavailable: {type: integer, format: int64, minimum: 0}
+        duration_ms: {type: integer, format: int64, minimum: 0}
+        average_duration_ms: {type: number, minimum: 0}
     GuardrailMonitorEvent:
       type: object
       additionalProperties: false
@@ -3105,14 +3112,43 @@ components:
         source: {type: string, enum: [inference, compliance]}
         outcome: {type: string, enum: [passed, rejected, unavailable]}
         duration_ms: {type: integer, format: int64, minimum: 0}
+    GuardrailMonitorFilter:
+      type: object
+      additionalProperties: false
+      required: [window]
+      properties:
+        window: {type: string, enum: [retained, 15m, 1h, 24h]}
+        module: {type: string, enum: [dlp, av]}
+        policy: {type: string, maxLength: 128}
+        outcome: {type: string, enum: [passed, rejected, unavailable]}
+        source: {type: string, enum: [inference, compliance]}
+    GuardrailTimelineBucket:
+      type: object
+      additionalProperties: false
+      required: [started_at, summary]
+      properties:
+        started_at: {type: string, format: date-time}
+        summary: {$ref: '#/components/schemas/GuardrailMonitorSummary'}
     GuardrailMonitorSnapshot:
       type: object
       additionalProperties: false
-      required: [retention, summary, by_module, events, content_stored]
+      required: [retention, retained_events, retention_full, scope, store_available, store_errors, started_at, filters, summary, by_module, filtered_summary, filtered_by_module, by_policy, timeline, events, content_stored]
       properties:
         retention: {type: integer, minimum: 1, maximum: 10000}
+        retained_events: {type: integer, minimum: 0, maximum: 10000}
+        retention_full: {type: boolean}
+        scope: {type: string, enum: [shared_redis, current_replica]}
+        store_available: {type: boolean}
+        store_errors: {type: integer, format: int64, minimum: 0}
+        started_at: {type: string, format: date-time}
+        oldest_retained_at: {type: string, format: date-time}
+        filters: {$ref: '#/components/schemas/GuardrailMonitorFilter'}
         summary: {$ref: '#/components/schemas/GuardrailMonitorSummary'}
         by_module: {type: object, additionalProperties: {$ref: '#/components/schemas/GuardrailMonitorSummary'}}
+        filtered_summary: {$ref: '#/components/schemas/GuardrailMonitorSummary'}
+        filtered_by_module: {type: object, additionalProperties: {$ref: '#/components/schemas/GuardrailMonitorSummary'}}
+        by_policy: {type: object, additionalProperties: {$ref: '#/components/schemas/GuardrailMonitorSummary'}}
+        timeline: {type: array, maxItems: 10000, items: {$ref: '#/components/schemas/GuardrailTimelineBucket'}}
         events: {type: array, maxItems: 1000, items: {$ref: '#/components/schemas/GuardrailMonitorEvent'}}
         content_stored: {type: boolean, const: false}
     CacheKindDiagnostics:

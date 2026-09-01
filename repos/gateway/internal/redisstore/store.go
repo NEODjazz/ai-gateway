@@ -65,6 +65,45 @@ func (s *Store) Set(ctx context.Context, key string, value []byte, ttl time.Dura
 	return s.client.Set(ctx, s.cacheKey(key), value, ttl).Err()
 }
 
+var pushBoundedScript = redis.NewScript(`
+redis.call('LPUSH', KEYS[1], ARGV[1])
+redis.call('LTRIM', KEYS[1], 0, tonumber(ARGV[2]) - 1)
+if tonumber(ARGV[3]) > 0 then redis.call('PEXPIRE', KEYS[1], ARGV[3]) end
+return redis.call('LLEN', KEYS[1])
+`)
+
+// PushBounded prepends an opaque value to a namespaced bounded list. The
+// namespace is hashed before it becomes a Redis key so caller-controlled
+// labels cannot increase key cardinality or leak metadata.
+func (s *Store) PushBounded(ctx context.Context, namespace string, value []byte, limit int, ttl time.Duration) error {
+	if s == nil {
+		return errors.New("redis store is not configured")
+	}
+	if namespace == "" || len(value) == 0 || len(value) > 64<<10 || limit < 1 || limit > 10000 || ttl < 0 || (ttl > 0 && ttl < time.Millisecond) {
+		return errors.New("invalid bounded list entry")
+	}
+	return pushBoundedScript.Run(ctx, s.client, []string{s.listKey(namespace)}, value, limit, ttl.Milliseconds()).Err()
+}
+
+// ListBounded returns newest-first opaque values from a bounded list.
+func (s *Store) ListBounded(ctx context.Context, namespace string, limit int) ([][]byte, error) {
+	if s == nil {
+		return nil, errors.New("redis store is not configured")
+	}
+	if namespace == "" || limit < 1 || limit > 10000 {
+		return nil, errors.New("invalid bounded list query")
+	}
+	values, err := s.client.LRange(ctx, s.listKey(namespace), 0, int64(limit-1)).Result()
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, len(values))
+	for index, value := range values {
+		result[index] = []byte(value)
+	}
+	return result, nil
+}
+
 var fixedWindowScript = redis.NewScript(`
 local current_requests = tonumber(redis.call('GET', KEYS[1]) or '0')
 local current_tokens = tonumber(redis.call('GET', KEYS[2]) or '0')
@@ -208,6 +247,11 @@ func (s *Store) CircuitFailure(ctx context.Context, endpoint string, threshold i
 
 func (s *Store) cacheKey(key string) string {
 	return s.prefix + ":cache:" + key
+}
+
+func (s *Store) listKey(namespace string) string {
+	namespaceHash := sha256.Sum256([]byte(namespace))
+	return s.prefix + ":list:" + hex.EncodeToString(namespaceHash[:16])
 }
 
 func (s *Store) circuitKeys(endpoint string) (state, probe, failures string) {

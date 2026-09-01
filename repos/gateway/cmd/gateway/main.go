@@ -49,7 +49,7 @@ func main() {
 	gatewayPipeline := modules.NewPipelineWithObserver([]modules.Module{
 		modules.Auth(cfg.Modules.Auth.Required, cfg.Modules.Auth.URL),
 	}, metrics)
-	guardrailMonitor := gateway.NewGuardrailMonitor(200)
+	guardrailMonitor := gateway.NewGuardrailMonitorWithStore(cfg.Guardrails.Capacity, gateway.NewRedisGuardrailEventStore(redisStore, cfg.Guardrails.TTL))
 	loggingRegistry := gateway.NewLoggingRegistry(nil)
 	accessRegistry := gateway.NewAccessRegistry()
 	mcpRegistry := gateway.NewMCPRegistry()

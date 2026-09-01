@@ -25,7 +25,13 @@ type Config struct {
 	Management ManagementConfig
 	APIDocs    APIDocsConfig
 	AdminUI    AdminUIConfig
+	Guardrails GuardrailMonitorConfig
 	InitErr    error
+}
+
+type GuardrailMonitorConfig struct {
+	Capacity int
+	TTL      time.Duration
 }
 
 type APIDocsConfig struct {
@@ -144,7 +150,10 @@ func Load() Config {
 	semanticThreshold := envFloat("SEMANTIC_CACHE_THRESHOLD", 0.95)
 	semanticURL := strings.TrimSpace(os.Getenv("SEMANTIC_CACHE_EMBEDDING_URL"))
 	semanticModel := strings.TrimSpace(os.Getenv("SEMANTIC_CACHE_EMBEDDING_MODEL"))
+	guardrailMonitorCapacity := envInt("GUARDRAIL_MONITOR_CAPACITY", 1000)
+	guardrailMonitorTTLSeconds := envInt("GUARDRAIL_MONITOR_TTL_SECONDS", 604800)
 	var semanticErr error
+	var guardrailMonitorErr error
 	controlPlaneDSN := strings.TrimSpace(os.Getenv("PROVIDER_CONTROL_PLANE_POSTGRES_DSN"))
 	credentialKey := os.Getenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY")
 	var controlPlaneErr error
@@ -156,6 +165,12 @@ func Load() Config {
 	}
 	if semanticTTL > 0 && (semanticThreshold <= 0 || semanticThreshold > 1) {
 		semanticErr = errors.Join(semanticErr, errors.New("semantic cache threshold must be in (0,1]"))
+	}
+	if guardrailMonitorCapacity < 1 || guardrailMonitorCapacity > 10000 {
+		guardrailMonitorErr = errors.New("guardrail monitor capacity must be between 1 and 10000")
+	}
+	if guardrailMonitorTTLSeconds < 1 {
+		guardrailMonitorErr = errors.Join(guardrailMonitorErr, errors.New("guardrail monitor ttl must be positive"))
 	}
 	return Config{
 		HTTP: HTTPConfig{
@@ -207,7 +222,11 @@ func Load() Config {
 			TryItOutEnabled: envBool("API_DOCS_TRY_IT_OUT_ENABLED", false),
 		},
 		AdminUI: AdminUIConfig{Enabled: envBool("ADMIN_UI_ENABLED", true)},
-		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr),
+		Guardrails: GuardrailMonitorConfig{
+			Capacity: guardrailMonitorCapacity,
+			TTL:      time.Duration(guardrailMonitorTTLSeconds) * time.Second,
+		},
+		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr),
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
 				Required: envBool("AUTH_REQUIRED", true),

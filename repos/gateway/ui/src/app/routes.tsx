@@ -23,6 +23,7 @@ import { BudgetsPage } from "../pages/BudgetsPage";
 import { LoggingPage } from "../pages/LoggingPage";
 import { CachePage } from "../pages/CachePage";
 import { MCPServersPage, MCPToolsetsPage } from "../pages/MCPPages";
+import { GuardrailMonitorPage } from "../pages/GuardrailMonitorPage";
 import { resourceConfigs } from "../pages/resourceConfigs";
 import { useAuth, type ConsoleCapability } from "../auth/AuthContext";
 
@@ -73,7 +74,8 @@ export const appRoutes: AppRoute[] = [
   { path: "/skills", title: "Skills", group: "AI Hub", element: unavailable("Skills", "The gateway governs tool identities but does not store or execute skill content."), available: false },
 
   { path: "/guardrails", title: "Guardrails", group: "Govern", element: <GuardrailsPage />, available: true },
-  { path: "/guardrails-monitor", title: "Guardrail monitor", group: "Govern", element: <EndpointPage eyebrow="Compliance" title="Guardrail monitor" description="Metadata-only check outcomes held in bounded runtime memory." path="/admin/v1/guardrails/monitor" />, available: true },
+  { path: "/guardrails-monitor", title: "Guardrail monitor", group: "Govern", element: <GuardrailMonitorPage />, available: true },
+  { path: "/guardrails-monitor/:module", title: "Guardrail details", group: "Govern", element: <GuardrailMonitorPage />, available: true, navigation: false },
   { path: "/budgets", title: "Budgets", group: "Govern", element: <BudgetsPage />, available: true },
   { path: "/policies", title: "Policies", group: "Govern", element: <ResourcePage config={resourceConfigs.policyAttachments} />, available: true },
   { path: "/tag-management", title: "Tag management", group: "Govern", element: <ResourcePage config={resourceConfigs.tags} />, available: true },
