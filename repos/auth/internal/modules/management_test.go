@@ -58,7 +58,7 @@ func TestCreateVirtualKeyReturnsSecretOnceAndPersistsOnlyHash(t *testing.T) {
 	expires := time.Now().Add(time.Hour).UTC()
 	issued, err := module.CreateVirtualKey(context.Background(), ManagedVirtualKey{
 		UserID: "user-1", TeamID: "team-1", Roles: []string{"developer"}, Tags: []string{" production ", "production", "cost-center-a"},
-		AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp.weather.*"}, RateLimitRPM: 10, RateLimitTPM: 100, ExpiresAt: &expires,
+		AccessGroupIDs: []string{" platform ", "platform", "regulated"}, AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp.weather.*"}, RateLimitRPM: 10, RateLimitTPM: 100, ExpiresAt: &expires,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestCreateVirtualKeyReturnsSecretOnceAndPersistsOnlyHash(t *testing.T) {
 	if !strings.HasPrefix(issued.ID, "vk_") || !strings.HasPrefix(issued.Token, "sk-ag-") {
 		t.Fatalf("unexpected issued credential: %+v", issued)
 	}
-	if store.created.ID != issued.ID || store.created.UserID != "user-1" || store.created.TeamID != "team-1" || len(store.created.AllowedTools) != 1 || len(store.created.Tags) != 2 || store.created.Tags[0] != "production" {
+	if store.created.ID != issued.ID || store.created.UserID != "user-1" || store.created.TeamID != "team-1" || len(store.created.AllowedTools) != 1 || len(store.created.Tags) != 2 || store.created.Tags[0] != "production" || len(store.created.AccessGroupIDs) != 2 || store.created.AccessGroupIDs[0] != "platform" {
 		t.Fatalf("policy was not persisted: %+v", store.created)
 	}
 	if store.createdHash == "" || store.createdHash == issued.Token || store.createdHash != credentialLookupHash(issued.Token, "hash-secret") {
@@ -121,6 +121,9 @@ func TestManagedVirtualKeyValidation(t *testing.T) {
 	}
 	if _, err := module.CreateVirtualKey(context.Background(), ManagedVirtualKey{UserID: "user", RateLimitRPM: -1}); err == nil {
 		t.Fatal("negative rate limit was accepted")
+	}
+	if _, err := module.CreateVirtualKey(context.Background(), ManagedVirtualKey{UserID: "user", AccessGroupIDs: []string{""}}); err == nil {
+		t.Fatal("empty access-group id was accepted")
 	}
 }
 

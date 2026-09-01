@@ -20,6 +20,7 @@ type StoredVirtualKey struct {
 	TeamID         string
 	OrganizationID string
 	Roles          []string
+	AccessGroupIDs []string
 	AllowedModels  []string
 	AllowedTools   []string
 	RateLimitRPM   int
@@ -63,10 +64,10 @@ func (s *PostgresVirtualKeyStore) Lookup(ctx context.Context, tokenHash string) 
 		  AND NOT EXISTS (SELECT 1 FROM auth_teams t WHERE t.id=auth_virtual_keys.team_id AND t.status<>'active')
 		  AND NOT EXISTS (SELECT 1 FROM auth_organizations o WHERE o.id=auth_virtual_keys.organization_id AND o.status<>'active')
 		  AND (expires_at IS NULL OR expires_at > now())
-		RETURNING id, alias, tags, COALESCE(user_id, ''), COALESCE(team_id, ''), COALESCE(organization_id, ''), roles, allowed_models, allowed_tools,
+		RETURNING id, alias, tags, COALESCE(user_id, ''), COALESCE(team_id, ''), COALESCE(organization_id, ''), roles, access_group_ids, allowed_models, allowed_tools,
 		          rate_limit_rpm, rate_limit_tpm, rotation_family_id,
 		          COALESCE(rotated_from_id, ''), expires_at`, tokenHash).Scan(
-		&key.ID, &key.Alias, &key.Tags, &key.UserID, &key.TeamID, &key.OrganizationID, &key.Roles, &key.AllowedModels, &key.AllowedTools,
+		&key.ID, &key.Alias, &key.Tags, &key.UserID, &key.TeamID, &key.OrganizationID, &key.Roles, &key.AccessGroupIDs, &key.AllowedModels, &key.AllowedTools,
 		&key.RateLimitRPM, &key.RateLimitTPM, &key.RotationFamily,
 		&key.RotatedFromID, &key.ExpiresAt,
 	)
@@ -86,13 +87,14 @@ func (s *PostgresVirtualKeyStore) Ready(ctx context.Context) error {
 	if err := s.pool.Ping(ctx); err != nil {
 		return errors.New("auth postgres is unavailable")
 	}
-	var migrationExists, toolsColumnExists, metadataColumnExists, directoryTableExists, ownershipColumnExists bool
+	var migrationExists, toolsColumnExists, metadataColumnExists, directoryTableExists, ownershipColumnExists, accessGroupsColumnExists bool
 	if err := s.pool.QueryRow(ctx, `
 		SELECT to_regclass('public.auth_virtual_keys') IS NOT NULL,
 		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='allowed_tools'),
 		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='disabled_at'),
 		       to_regclass('public.auth_team_memberships') IS NOT NULL,
-		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='organization_id')`).Scan(&migrationExists, &toolsColumnExists, &metadataColumnExists, &directoryTableExists, &ownershipColumnExists); err != nil || !migrationExists || !toolsColumnExists || !metadataColumnExists || !directoryTableExists || !ownershipColumnExists {
+		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='organization_id'),
+		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='access_group_ids')`).Scan(&migrationExists, &toolsColumnExists, &metadataColumnExists, &directoryTableExists, &ownershipColumnExists, &accessGroupsColumnExists); err != nil || !migrationExists || !toolsColumnExists || !metadataColumnExists || !directoryTableExists || !ownershipColumnExists || !accessGroupsColumnExists {
 		return errors.New("auth virtual-key migration is not applied")
 	}
 	return nil
@@ -114,11 +116,11 @@ func (s *PostgresVirtualKeyStore) Create(ctx context.Context, key StoredVirtualK
 	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO auth_virtual_keys
-		(id, token_hash, alias, description, tags, user_id, team_id, organization_id, roles, allowed_models, allowed_tools, rate_limit_rpm,
+		(id, token_hash, alias, description, tags, user_id, team_id, organization_id, roles, access_group_ids, allowed_models, allowed_tools, rate_limit_rpm,
 		 rate_limit_tpm, rotation_family_id, rotated_from_id, expires_at)
-		VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,$10,$11,$12,$13,$14,NULLIF($15,''),$16)`,
-		key.ID, tokenHash, key.Alias, key.Description, nonNilStrings(key.Tags), key.UserID, key.TeamID, key.OrganizationID, nonNilStrings(key.Roles), nonNilStrings(key.AllowedModels),
-		nonNilStrings(key.AllowedTools), key.RateLimitRPM, key.RateLimitTPM, family, key.RotatedFromID, key.ExpiresAt)
+		VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,$10,$11,$12,$13,$14,$15,NULLIF($16,''),$17)`,
+		key.ID, tokenHash, key.Alias, key.Description, nonNilStrings(key.Tags), key.UserID, key.TeamID, key.OrganizationID, nonNilStrings(key.Roles), nonNilStrings(key.AccessGroupIDs),
+		nonNilStrings(key.AllowedModels), nonNilStrings(key.AllowedTools), key.RateLimitRPM, key.RateLimitTPM, family, key.RotatedFromID, key.ExpiresAt)
 	return err
 }
 
@@ -163,7 +165,7 @@ func (s *PostgresVirtualKeyStore) ListPage(ctx context.Context, query VirtualKey
 		return VirtualKeyPage{}, fmt.Errorf("count virtual keys: %w", err)
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, alias, description, tags, COALESCE(user_id, ''), COALESCE(team_id, ''), COALESCE(organization_id, ''), roles, allowed_models, allowed_tools,
+		SELECT id, alias, description, tags, COALESCE(user_id, ''), COALESCE(team_id, ''), COALESCE(organization_id, ''), roles, access_group_ids, allowed_models, allowed_tools,
 		       rate_limit_rpm, rate_limit_tpm, rotation_family_id,
 		       COALESCE(rotated_from_id, ''), COALESCE(rotated_to_id, ''),
 		       expires_at, revoked_at, disabled_at, last_used_at, created_at,
@@ -177,7 +179,7 @@ func (s *PostgresVirtualKeyStore) ListPage(ctx context.Context, query VirtualKey
 	for rows.Next() {
 		var key VirtualKeyMetadata
 		var statusRank int
-		if err := rows.Scan(&key.ID, &key.Alias, &key.Description, &key.Tags, &key.UserID, &key.TeamID, &key.OrganizationID, &key.Roles, &key.AllowedModels, &key.AllowedTools,
+		if err := rows.Scan(&key.ID, &key.Alias, &key.Description, &key.Tags, &key.UserID, &key.TeamID, &key.OrganizationID, &key.Roles, &key.AccessGroupIDs, &key.AllowedModels, &key.AllowedTools,
 			&key.RateLimitRPM, &key.RateLimitTPM, &key.RotationFamily, &key.RotatedFromID, &key.RotatedToID,
 			&key.ExpiresAt, &key.RevokedAt, &key.DisabledAt, &key.LastUsedAt, &key.CreatedAt, &statusRank); err != nil {
 			return VirtualKeyPage{}, fmt.Errorf("scan virtual key metadata: %w", err)
@@ -192,10 +194,10 @@ func (s *PostgresVirtualKeyStore) ListPage(ctx context.Context, query VirtualKey
 
 func (s *PostgresVirtualKeyStore) Update(ctx context.Context, id string, key StoredVirtualKey) (bool, error) {
 	result, err := s.pool.Exec(ctx, `UPDATE auth_virtual_keys SET alias=$2, description=$3, tags=$4, user_id=NULLIF($5,''),
-		team_id=NULLIF($6,''), organization_id=NULLIF($7,''), roles=$8, allowed_models=$9, allowed_tools=$10, rate_limit_rpm=$11,
-		rate_limit_tpm=$12, expires_at=$13 WHERE id=$1 AND revoked_at IS NULL`, id, key.Alias, key.Description,
-		nonNilStrings(key.Tags), key.UserID, key.TeamID, key.OrganizationID, nonNilStrings(key.Roles), nonNilStrings(key.AllowedModels),
-		nonNilStrings(key.AllowedTools), key.RateLimitRPM, key.RateLimitTPM, key.ExpiresAt)
+		team_id=NULLIF($6,''), organization_id=NULLIF($7,''), roles=$8, access_group_ids=$9, allowed_models=$10, allowed_tools=$11, rate_limit_rpm=$12,
+		rate_limit_tpm=$13, expires_at=$14 WHERE id=$1 AND revoked_at IS NULL`, id, key.Alias, key.Description,
+		nonNilStrings(key.Tags), key.UserID, key.TeamID, key.OrganizationID, nonNilStrings(key.Roles), nonNilStrings(key.AccessGroupIDs),
+		nonNilStrings(key.AllowedModels), nonNilStrings(key.AllowedTools), key.RateLimitRPM, key.RateLimitTPM, key.ExpiresAt)
 	return result.RowsAffected() == 1, err
 }
 
@@ -231,11 +233,11 @@ func (s *PostgresVirtualKeyStore) Rotate(ctx context.Context, oldID string, repl
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO auth_virtual_keys
-		(id, token_hash, alias, description, tags, user_id, team_id, organization_id, roles, allowed_models, allowed_tools, rate_limit_rpm,
+		(id, token_hash, alias, description, tags, user_id, team_id, organization_id, roles, access_group_ids, allowed_models, allowed_tools, rate_limit_rpm,
 		 rate_limit_tpm, rotation_family_id, rotated_from_id, expires_at)
-		VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,$10,$11,$12,$13,$14,$15,$16)`,
+		VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
 		replacement.ID, tokenHash, replacement.Alias, replacement.Description, nonNilStrings(replacement.Tags), replacement.UserID, replacement.TeamID, replacement.OrganizationID,
-		nonNilStrings(replacement.Roles), nonNilStrings(replacement.AllowedModels), nonNilStrings(replacement.AllowedTools), replacement.RateLimitRPM,
+		nonNilStrings(replacement.Roles), nonNilStrings(replacement.AccessGroupIDs), nonNilStrings(replacement.AllowedModels), nonNilStrings(replacement.AllowedTools), replacement.RateLimitRPM,
 		replacement.RateLimitTPM, family, oldID, replacement.ExpiresAt); err != nil {
 		return err
 	}

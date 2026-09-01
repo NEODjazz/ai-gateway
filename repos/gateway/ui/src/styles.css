@@ -156,7 +156,8 @@ textarea { resize: vertical; }
 .model-chip button { display: grid; place-items: center; width: 19px; height: 19px; padding: 0; border-radius: 50%; background: transparent; color: #176f5e; line-height: 1; }
 .model-chip button:hover { background: #c8e9e1; }
 .model-multi-options { position: absolute; z-index: 4; left: 0; right: 0; top: calc(100% + 5px); max-height: 220px; overflow: auto; display: grid; padding: 6px; border: 1px solid #cad4da; border-radius: 8px; background: white; box-shadow: 0 14px 35px rgba(29, 48, 63, .16); }
-.model-multi-options button { width: 100%; border-radius: 6px; background: white; color: #263846; padding: 9px 10px; text-align: left; font-weight: 500; }
+.model-multi-options button { width: 100%; display: grid; gap: 2px; border-radius: 6px; background: white; color: #263846; padding: 9px 10px; text-align: left; font-weight: 500; }
+.model-multi-options button small { color: #73818c; font-size: 11px; font-weight: 500; }
 .model-multi-options button:hover { background: #edf7f4; color: #087660; }
 .model-multi-options > span { padding: 9px 10px; color: #75838e; font-size: 13px; }
 .key-form-error, .key-form .modal-actions { margin-left: 188px; }

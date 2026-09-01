@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.37
+  version: 0.1.38
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -2607,6 +2607,12 @@ components:
         roles:
           type: array
           items: {type: string, minLength: 1}
+        access_group_ids:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          description: Assigned gateway access-group templates. Their grants are unioned together and intersected with the key's direct model and tool grants at request time.
+          items: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$'}
         allowed_models:
           type: array
           items: {type: string, minLength: 1}
@@ -2641,6 +2647,7 @@ components:
         team_id: {type: string}
         organization_id: {type: string}
         roles: {type: array, items: {type: string}}
+        access_group_ids: {type: array, items: {type: string}}
         allowed_models: {type: array, items: {type: string}}
         allowed_tools: {type: array, items: {type: string}}
         rate_limit_rpm: {type: integer, minimum: 0}

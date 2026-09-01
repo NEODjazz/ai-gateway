@@ -25,6 +25,7 @@ type ManagedVirtualKey struct {
 	TeamID         string     `json:"team_id,omitempty"`
 	OrganizationID string     `json:"organization_id,omitempty"`
 	Roles          []string   `json:"roles,omitempty"`
+	AccessGroupIDs []string   `json:"access_group_ids,omitempty"`
 	AllowedModels  []string   `json:"allowed_models,omitempty"`
 	AllowedTools   []string   `json:"allowed_tools,omitempty"`
 	RateLimitRPM   int        `json:"rate_limit_rpm,omitempty"`
@@ -47,6 +48,7 @@ type VirtualKeyMetadata struct {
 	TeamID         string     `json:"team_id,omitempty"`
 	OrganizationID string     `json:"organization_id,omitempty"`
 	Roles          []string   `json:"roles,omitempty"`
+	AccessGroupIDs []string   `json:"access_group_ids,omitempty"`
 	AllowedModels  []string   `json:"allowed_models,omitempty"`
 	AllowedTools   []string   `json:"allowed_tools,omitempty"`
 	RateLimitRPM   int        `json:"rate_limit_rpm,omitempty"`
@@ -318,6 +320,21 @@ func (h Handler) WithManagement(client ManagementClient) Handler {
 	return h
 }
 
+func (h Handler) validateVirtualKeyAccessGroups(w http.ResponseWriter, ids []string) bool {
+	if len(ids) == 0 {
+		return true
+	}
+	if h.access == nil {
+		writeError(w, http.StatusServiceUnavailable, "access_policy_unavailable", "access policy registry is not configured")
+		return false
+	}
+	if _, err := h.access.ResolveAccessGroups(ids); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "access_group_ids must reference enabled access groups")
+		return false
+	}
+	return true
+}
+
 func (h Handler) CreateVirtualKey(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.authorizeAdmin(w, r)
 	if !ok {
@@ -329,6 +346,9 @@ func (h Handler) CreateVirtualKey(w http.ResponseWriter, r *http.Request) {
 	}
 	spec, ok := decodeManagedVirtualKey(w, r)
 	if !ok {
+		return
+	}
+	if !h.validateVirtualKeyAccessGroups(w, spec.AccessGroupIDs) {
 		return
 	}
 	audit := managementAudit(req)
@@ -364,6 +384,9 @@ func (h Handler) RotateVirtualKey(w http.ResponseWriter, r *http.Request) {
 	}
 	spec, ok := decodeManagedVirtualKey(w, r)
 	if !ok {
+		return
+	}
+	if !h.validateVirtualKeyAccessGroups(w, spec.AccessGroupIDs) {
 		return
 	}
 	audit := managementAudit(req)
@@ -439,6 +462,9 @@ func (h Handler) mutateVirtualKeyPolicy(w http.ResponseWriter, r *http.Request) 
 	}
 	spec, ok := decodeManagedVirtualKey(w, r)
 	if !ok {
+		return
+	}
+	if !h.validateVirtualKeyAccessGroups(w, spec.AccessGroupIDs) {
 		return
 	}
 	audit := managementAudit(req)

@@ -39,6 +39,7 @@ type VirtualKey struct {
 	TeamID         string   `json:"team_id,omitempty"`
 	OrganizationID string   `json:"organization_id,omitempty"`
 	Roles          []string `json:"roles,omitempty"`
+	AccessGroupIDs []string `json:"access_group_ids,omitempty"`
 	AllowedModels  []string `json:"allowed_models,omitempty"`
 	AllowedTools   []string `json:"allowed_tools,omitempty"`
 	RateLimitRPM   int      `json:"rate_limit_rpm,omitempty"`
@@ -110,6 +111,7 @@ func (m AuthModule) Handle(_ context.Context, req *RequestContext) error {
 		req.TeamID = key.TeamID
 		req.OrganizationID = key.OrganizationID
 		req.Roles = append([]string(nil), key.Roles...)
+		req.AccessGroupIDs = append([]string(nil), key.AccessGroupIDs...)
 		req.AllowedModels = append([]string(nil), key.AllowedModels...)
 		req.AllowedTools = append([]string(nil), key.AllowedTools...)
 		req.RateLimitRPM = key.RateLimitRPM

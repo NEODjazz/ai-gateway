@@ -56,14 +56,14 @@ func TestAuthModuleAcceptsJWT(t *testing.T) {
 	}
 }
 
-func TestStoredVirtualKeyPropagatesAliasAndTags(t *testing.T) {
-	store := &fakeVirtualKeyStore{found: true, key: StoredVirtualKey{ID: "vk-1", Alias: "clinical-prod", Tags: []string{"hipaa"}, TeamID: "care-a"}}
+func TestStoredVirtualKeyPropagatesAliasTagsAndAccessGroups(t *testing.T) {
+	store := &fakeVirtualKeyStore{found: true, key: StoredVirtualKey{ID: "vk-1", Alias: "clinical-prod", Tags: []string{"hipaa"}, AccessGroupIDs: []string{"regulated"}, TeamID: "care-a"}}
 	module := NewAuthModuleWithStore(true, store, "hash-secret", false)
 	req := RequestContext{APIKey: "plaintext-token"}
 	if err := module.Handle(context.Background(), &req); err != nil {
 		t.Fatal(err)
 	}
-	if req.CredentialID != "vk-1" || req.CredentialAlias != "clinical-prod" || len(req.Tags) != 1 || req.Tags[0] != "hipaa" {
+	if req.CredentialID != "vk-1" || req.CredentialAlias != "clinical-prod" || len(req.Tags) != 1 || req.Tags[0] != "hipaa" || len(req.AccessGroupIDs) != 1 || req.AccessGroupIDs[0] != "regulated" {
 		t.Fatalf("stored key matching metadata was not propagated: %+v", req)
 	}
 }
@@ -100,7 +100,7 @@ func TestAuthModuleRejectsInvalidJWTSignature(t *testing.T) {
 func TestAuthModuleAppliesVirtualKeyPolicy(t *testing.T) {
 	module := NewAuthModuleWithVirtualKeys(true, []VirtualKey{{
 		Token: "tenant-secret", UserID: "user-7", TeamID: "team-blue",
-		Roles: []string{"developer"}, AllowedModels: []string{"gpt-5.*"}, AllowedTools: []string{"mcp.weather.*"},
+		Roles: []string{"developer"}, AccessGroupIDs: []string{"platform"}, AllowedModels: []string{"gpt-5.*"}, AllowedTools: []string{"mcp.weather.*"},
 		RateLimitRPM: 10, RateLimitTPM: 5000,
 	}})
 	req := RequestContext{APIKey: "tenant-secret"}
@@ -110,7 +110,7 @@ func TestAuthModuleAppliesVirtualKeyPolicy(t *testing.T) {
 	if req.UserID != "user-7" || req.TeamID != "team-blue" || req.RateLimitRPM != 10 || req.RateLimitTPM != 5000 {
 		t.Fatalf("unexpected virtual key policy: %+v", req)
 	}
-	if strings.Join(req.AllowedModels, ",") != "gpt-5.*" || strings.Join(req.AllowedTools, ",") != "mcp.weather.*" || req.APIKey != "" || req.CredentialID == "" {
+	if strings.Join(req.AccessGroupIDs, ",") != "platform" || strings.Join(req.AllowedModels, ",") != "gpt-5.*" || strings.Join(req.AllowedTools, ",") != "mcp.weather.*" || req.APIKey != "" || req.CredentialID == "" {
 		t.Fatalf("virtual key was not safely applied: %+v", req)
 	}
 	if stored := module.virtualKeys[req.CredentialID]; stored.Token != "" {

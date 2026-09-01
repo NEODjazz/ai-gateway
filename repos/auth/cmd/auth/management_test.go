@@ -59,7 +59,7 @@ func TestInternalManagementRequiresScopedSecretAndAuditIdentity(t *testing.T) {
 		t.Fatalf("missing audit identity was accepted: %d", missingAuditResponse.Code)
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/internal/v1/keys", strings.NewReader(`{"user_id":"user-1","roles":["developer"]}`))
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/keys", strings.NewReader(`{"user_id":"user-1","roles":["developer"],"access_group_ids":["platform"]}`))
 	request.Header.Set(managementTokenHeader, "internal-secret")
 	request.Header.Set("X-Request-ID", "req-1")
 	request.Header.Set("X-Actor-ID", "admin-user")
@@ -73,7 +73,7 @@ func TestInternalManagementRequiresScopedSecretAndAuditIdentity(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&issued); err != nil {
 		t.Fatal(err)
 	}
-	if issued.Token == "" || store.created.UserID != "user-1" {
+	if issued.Token == "" || store.created.UserID != "user-1" || len(store.created.AccessGroupIDs) != 1 || store.created.AccessGroupIDs[0] != "platform" {
 		t.Fatalf("key was not issued/persisted: issued=%+v stored=%+v", issued, store.created)
 	}
 }

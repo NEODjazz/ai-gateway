@@ -19,6 +19,7 @@ type AuthResponse struct {
 	TeamID          string   `json:"team_id,omitempty"`
 	OrganizationID  string   `json:"organization_id,omitempty"`
 	Tags            []string `json:"tags,omitempty"`
+	AccessGroupIDs  []string `json:"access_group_ids,omitempty"`
 	AllowedModels   []string `json:"allowed_models,omitempty"`
 	AllowedTools    []string `json:"allowed_tools,omitempty"`
 	RateLimitRPM    int      `json:"rate_limit_rpm,omitempty"`
@@ -53,6 +54,7 @@ func (m RemoteAuthModule) Handle(ctx context.Context, req *RequestContext) error
 	req.TeamID = response.TeamID
 	req.OrganizationID = response.OrganizationID
 	req.Tags = append([]string(nil), response.Tags...)
+	req.AccessGroupIDs = append([]string(nil), response.AccessGroupIDs...)
 	req.AllowedModels = append([]string(nil), response.AllowedModels...)
 	req.AllowedTools = append([]string(nil), response.AllowedTools...)
 	req.RateLimitRPM = response.RateLimitRPM

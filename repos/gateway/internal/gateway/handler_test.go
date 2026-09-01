@@ -22,11 +22,12 @@ import (
 type modelsProvider struct{}
 
 type accessPolicyModule struct {
-	models []string
-	tools  []string
-	tags   []string
-	rpm    int
-	tpm    int
+	models       []string
+	tools        []string
+	tags         []string
+	accessGroups []string
+	rpm          int
+	tpm          int
 }
 
 type countingAccessModule struct{ calls int }
@@ -58,6 +59,7 @@ func (m accessPolicyModule) Handle(_ context.Context, req *modules.RequestContex
 	req.AllowedModels = append([]string(nil), m.models...)
 	req.AllowedTools = append([]string(nil), m.tools...)
 	req.Tags = append([]string(nil), m.tags...)
+	req.AccessGroupIDs = append([]string(nil), m.accessGroups...)
 	req.RateLimitRPM = m.rpm
 	req.RateLimitTPM = m.tpm
 	return nil

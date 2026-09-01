@@ -116,8 +116,18 @@ func (h Handler) Models(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.APIKey = ""
+	if !h.prepareAccessGroups(w, &reqCtx) {
+		return
+	}
 
 	models := filterModels(h.provider.Models(), reqCtx.AllowedModels)
+	if reqCtx.AccessGroupsEvaluated {
+		if len(reqCtx.AccessGroupModels) == 0 {
+			models = nil
+		} else {
+			models = filterModels(models, reqCtx.AccessGroupModels)
+		}
+	}
 	if h.access != nil {
 		filtered := models[:0]
 		for _, model := range models {
@@ -157,6 +167,9 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.APIKey = ""
+	if !h.prepareAccessGroups(w, &reqCtx) {
+		return
+	}
 	if _, err := openai.ChatImageAttachments(reqCtx.Request.Messages); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
 		return
@@ -242,6 +255,9 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.APIKey = ""
+	if !h.prepareAccessGroups(w, &reqCtx) {
+		return
+	}
 	if _, err := openai.ResponseImageAttachments(reqCtx.ResponseRequest.Input); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
 		return
@@ -335,6 +351,9 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.APIKey = ""
+	if !h.prepareAccessGroups(w, &reqCtx) {
+		return
+	}
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateEmbeddingTokens(request)) {
 		return
 	}
@@ -376,6 +395,9 @@ func (h Handler) Rerank(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.APIKey = ""
+	if !h.prepareAccessGroups(w, &reqCtx) {
+		return
+	}
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateRerankTokens(request)) {
 		return
 	}

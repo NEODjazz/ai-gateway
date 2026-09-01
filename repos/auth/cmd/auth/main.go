@@ -51,6 +51,7 @@ func main() {
 			TeamID:          ctx.TeamID,
 			OrganizationID:  ctx.OrganizationID,
 			Tags:            ctx.Tags,
+			AccessGroupIDs:  ctx.AccessGroupIDs,
 			AllowedModels:   ctx.AllowedModels,
 			AllowedTools:    ctx.AllowedTools,
 			RateLimitRPM:    ctx.RateLimitRPM,
@@ -75,6 +76,7 @@ type authResponse struct {
 	TeamID          string   `json:"team_id,omitempty"`
 	OrganizationID  string   `json:"organization_id,omitempty"`
 	Tags            []string `json:"tags,omitempty"`
+	AccessGroupIDs  []string `json:"access_group_ids,omitempty"`
 	AllowedModels   []string `json:"allowed_models,omitempty"`
 	AllowedTools    []string `json:"allowed_tools,omitempty"`
 	RateLimitRPM    int      `json:"rate_limit_rpm,omitempty"`

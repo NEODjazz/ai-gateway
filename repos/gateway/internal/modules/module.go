@@ -22,6 +22,10 @@ type RequestContext struct {
 	TeamID                  string                         `json:"team_id,omitempty"`
 	OrganizationID          string                         `json:"organization_id,omitempty"`
 	Tags                    []string                       `json:"tags,omitempty"`
+	AccessGroupIDs          []string                       `json:"access_group_ids,omitempty"`
+	AccessGroupModels       []string                       `json:"-"`
+	AccessGroupTools        []string                       `json:"-"`
+	AccessGroupsEvaluated   bool                           `json:"-"`
 	AllowedModels           []string                       `json:"allowed_models,omitempty"`
 	AllowedFallbackModels   []string                       `json:"-"`
 	FallbackPolicyEvaluated bool                           `json:"-"`

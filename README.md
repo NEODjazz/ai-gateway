@@ -249,6 +249,13 @@ are not part of the response contract. The playground sends non-streaming chat
 requests through the same authenticated inference path as external clients.
 Virtual-key tokens are shown once after creation or rotation and are cleared
 from the page when that dialog closes; list responses contain metadata only.
+Virtual keys can also select one or more enabled Access Groups through the same
+searchable chip control used for models. Access-group model and tool grants are
+unioned across the selected groups, then intersected with the key's direct
+grants. An assigned group with no grant for a dimension grants nothing in that
+dimension; explicit `*` is required for unrestricted access. Missing or disabled
+assigned groups fail closed, `/v1/models` applies the effective model policy,
+and fallback targets are checked against it before routing.
 The virtual-key table joins the 30-day usage projection by non-secret key ID,
 showing spend per currency and optional request/token columns without combining currencies.
 For the returned server page, `expand=financials` performs one scoped billing
@@ -454,7 +461,8 @@ therefore required for every shadow endpoint.
 The auth service supports virtual keys through PostgreSQL management APIs and,
 for migration fallback, `AUTH_VIRTUAL_KEYS_JSON` (Helm: `auth.virtualKeys`).
 Managed keys include an alias, description and tags plus `team_id`, `roles`,
-`allowed_models`, `allowed_tools`, `rate_limit_rpm`, `rate_limit_tpm` and expiry.
+`access_group_ids`, `allowed_models`, `allowed_tools`, `rate_limit_rpm`,
+`rate_limit_tpm` and expiry.
 Admins can update policy without changing the bearer secret, temporarily
 disable/re-enable a key, rotate it atomically, revoke it, open its metadata-only
 request history, and assign a key-scoped budget from the console. The gateway

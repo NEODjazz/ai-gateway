@@ -3,10 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { AuthProvider } from "../auth/AuthContext";
 import { VirtualKeysPage } from "./VirtualKeysPage";
 
-const key = { id: "vk_alpha", alias: "production", description: "Production key", user_id: "user-1", team_id: "team-1", roles: ["operator"], allowed_models: ["gpt"], allowed_tools: ["search"], rate_limit_rpm: 60, rate_limit_tpm: 1200, tags: ["prod"], expires_at: "2026-09-27T10:00:00Z", created_at: "2026-08-27T10:00:00Z" };
+const key = { id: "vk_alpha", alias: "production", description: "Production key", user_id: "user-1", team_id: "team-1", roles: ["operator"], access_group_ids: ["platform"], allowed_models: ["gpt"], allowed_tools: ["search"], rate_limit_rpm: 60, rate_limit_tpm: 1200, tags: ["prod"], expires_at: "2026-09-27T10:00:00Z", created_at: "2026-08-27T10:00:00Z" };
 const json = (value: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } }));
 
-function mockAPI(keyRows: unknown[] = [key], userRows: unknown[] = [{ id: "user-1", name: "Alice", email: "alice@example.com", team_ids: ["team-1"], status: "active" }], teamRows: unknown[] = [{ id: "team-1", name: "Platform", status: "active" }], organizationRows: unknown[] = [{ id: "org-1", name: "Acme", team_ids: ["team-1"], status: "active" }]) {
+function mockAPI(keyRows: unknown[] = [key], userRows: unknown[] = [{ id: "user-1", name: "Alice", email: "alice@example.com", team_ids: ["team-1"], status: "active" }], teamRows: unknown[] = [{ id: "team-1", name: "Platform", status: "active" }], organizationRows: unknown[] = [{ id: "org-1", name: "Acme", team_ids: ["team-1"], status: "active" }], accessGroupRows: unknown[] = [{ id: "platform", name: "Platform access", project_id: "core", allowed_models: ["gpt"], allowed_tools: ["search"], enabled: true }]) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
     const path = String(input);
     if (path === "/admin/v1/keys" && options?.method === "POST") return json({ id: "vk_new", token: "sk-ag-secret-once" });
@@ -36,6 +36,7 @@ function mockAPI(keyRows: unknown[] = [key], userRows: unknown[] = [{ id: "user-
 		if (path.includes("/admin/v1/users")) return json({ data: userRows });
 		if (path.includes("/admin/v1/teams")) return json({ data: teamRows });
 		if (path.includes("/admin/v1/organizations")) return json({ data: organizationRows });
+    if (path === "/admin/v1/access-groups") return json({ data: accessGroupRows });
     if (path === "/v1/models") return json({ data: [{ id: "gpt" }, { id: "embed" }] });
     if (path === "/admin/v1/usage/report?days=30") return json({ by_key: [
       { name: "vk_alpha", currency: "USD", requests: 2, total_tokens: 120, cost: 12.5 },
@@ -108,6 +109,8 @@ describe("VirtualKeysPage", () => {
 		await userEvent.selectOptions(within(form).getByLabelText("Organization"), "org-1");
 		await userEvent.selectOptions(within(form).getByLabelText("Team"), "team-1");
 		expect(within(form).getByLabelText("User")).not.toBeRequired();
+		await userEvent.click(within(form).getByLabelText("Access groups"));
+		await userEvent.click(within(form).getByRole("option", { name: /Platform access/ }));
 		await userEvent.click(within(form).getByLabelText("Models"));
 		await userEvent.click(within(form).getByRole("option", { name: "gpt" }));
 		await userEvent.click(within(form).getByRole("option", { name: "embed" }));
@@ -122,6 +125,7 @@ describe("VirtualKeysPage", () => {
     const createCall = fetchMock.mock.calls.find(([path, options]) => path === "/admin/v1/keys" && options?.method === "POST")!;
     const body = JSON.parse(String(createCall[1]?.body));
 		expect(body).toMatchObject({ alias: "automation", team_id: "team-1" });
+		expect(body.access_group_ids).toEqual(["platform"]);
 		expect(body.allowed_models).toEqual(expect.arrayContaining(["gpt", "embed"]));
 		expect(body).not.toHaveProperty("user_id");
 		expect(body).not.toHaveProperty("organization");

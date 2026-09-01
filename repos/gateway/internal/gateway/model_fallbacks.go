@@ -19,6 +19,9 @@ func (h Handler) prepareModelFallbacks(w http.ResponseWriter, ctx context.Contex
 		if !modelAllowed(target, req.AllowedModels) {
 			continue
 		}
+		if req.AccessGroupsEvaluated && (len(req.AccessGroupModels) == 0 || !modelAllowed(target, req.AccessGroupModels)) {
+			continue
+		}
 		if h.access != nil {
 			if allowed, _ := h.access.TagModelAllowed(req.Tags, target); !allowed {
 				continue

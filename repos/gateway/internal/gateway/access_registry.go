@@ -28,6 +28,10 @@ type AccessGroup struct {
 	Tags          []string `json:"tags,omitempty"`
 	Enabled       bool     `json:"enabled"`
 }
+type AccessGroupPolicy struct {
+	AllowedModels []string
+	AllowedTools  []string
+}
 type PolicyAttachment struct {
 	ID         string   `json:"id"`
 	PolicyName string   `json:"policy_name"`
@@ -91,6 +95,36 @@ func (r *AccessRegistry) Groups() []AccessGroup {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
+}
+
+// ResolveAccessGroups returns the union of grants from every assigned group.
+// The resulting group grant is still intersected with the virtual key's own
+// grants by the request policy layer. A missing or disabled assigned group
+// fails closed so deleting a policy cannot silently broaden key access.
+func (r *AccessRegistry) ResolveAccessGroups(ids []string) (AccessGroupPolicy, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	policy := AccessGroupPolicy{}
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return AccessGroupPolicy{}, errInvalidAccessEntry
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		group, found := r.groups[id]
+		if !found || !group.Enabled {
+			return AccessGroupPolicy{}, errInvalidAccessEntry
+		}
+		policy.AllowedModels = append(policy.AllowedModels, group.AllowedModels...)
+		policy.AllowedTools = append(policy.AllowedTools, group.AllowedTools...)
+	}
+	policy.AllowedModels = uniqueStrings(policy.AllowedModels)
+	policy.AllowedTools = uniqueStrings(policy.AllowedTools)
+	return policy, nil
 }
 func (r *AccessRegistry) PolicyAttachments() []PolicyAttachment {
 	r.mu.RLock()

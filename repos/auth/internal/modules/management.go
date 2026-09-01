@@ -25,6 +25,7 @@ type ManagedVirtualKey struct {
 	TeamID         string     `json:"team_id,omitempty"`
 	OrganizationID string     `json:"organization_id,omitempty"`
 	Roles          []string   `json:"roles,omitempty"`
+	AccessGroupIDs []string   `json:"access_group_ids,omitempty"`
 	AllowedModels  []string   `json:"allowed_models,omitempty"`
 	AllowedTools   []string   `json:"allowed_tools,omitempty"`
 	RateLimitRPM   int        `json:"rate_limit_rpm,omitempty"`
@@ -49,6 +50,7 @@ type VirtualKeyMetadata struct {
 	TeamID         string     `json:"team_id,omitempty"`
 	OrganizationID string     `json:"organization_id,omitempty"`
 	Roles          []string   `json:"roles,omitempty"`
+	AccessGroupIDs []string   `json:"access_group_ids,omitempty"`
 	AllowedModels  []string   `json:"allowed_models,omitempty"`
 	AllowedTools   []string   `json:"allowed_tools,omitempty"`
 	RateLimitRPM   int        `json:"rate_limit_rpm,omitempty"`
@@ -251,7 +253,7 @@ func validateStoredVirtualKey(spec ManagedVirtualKey) (StoredVirtualKey, error) 
 	if (spec.UserID == "" && spec.TeamID == "" && spec.OrganizationID == "") || len(spec.UserID) > 256 || len(spec.TeamID) > 256 || len(spec.OrganizationID) > 256 {
 		return StoredVirtualKey{}, fmt.Errorf("%w: organization_id, team_id, or user_id is required", ErrInvalidVirtualKey)
 	}
-	if len(spec.Alias) > 128 || len(spec.Description) > 1024 || !validPolicyStrings(spec.Tags) || !validPolicyStrings(spec.Roles) || !validPolicyStrings(spec.AllowedModels) || !validPolicyStrings(spec.AllowedTools) {
+	if len(spec.Alias) > 128 || len(spec.Description) > 1024 || !validPolicyStrings(spec.Tags) || !validPolicyStrings(spec.Roles) || !validAccessGroupIDs(spec.AccessGroupIDs) || !validPolicyStrings(spec.AllowedModels) || !validPolicyStrings(spec.AllowedTools) {
 		return StoredVirtualKey{}, fmt.Errorf("%w: invalid metadata or grants", ErrInvalidVirtualKey)
 	}
 	if spec.RateLimitRPM < 0 || spec.RateLimitTPM < 0 {
@@ -261,9 +263,10 @@ func validateStoredVirtualKey(spec ManagedVirtualKey) (StoredVirtualKey, error) 
 		return StoredVirtualKey{}, fmt.Errorf("%w: expires_at must be in the future", ErrInvalidVirtualKey)
 	}
 	spec.Tags = normalizePolicyStrings(spec.Tags)
+	spec.AccessGroupIDs = normalizePolicyStrings(spec.AccessGroupIDs)
 	return StoredVirtualKey{
 		Alias: spec.Alias, Description: spec.Description, Tags: append([]string(nil), spec.Tags...), UserID: spec.UserID, TeamID: spec.TeamID, OrganizationID: spec.OrganizationID,
-		Roles: append([]string(nil), spec.Roles...), AllowedModels: append([]string(nil), spec.AllowedModels...),
+		Roles: append([]string(nil), spec.Roles...), AccessGroupIDs: append([]string(nil), spec.AccessGroupIDs...), AllowedModels: append([]string(nil), spec.AllowedModels...),
 		AllowedTools: append([]string(nil), spec.AllowedTools...),
 		RateLimitRPM: spec.RateLimitRPM, RateLimitTPM: spec.RateLimitTPM,
 		ExpiresAt: spec.ExpiresAt,
@@ -291,6 +294,24 @@ func validPolicyStrings(values []string) bool {
 	for _, value := range values {
 		if strings.TrimSpace(value) == "" || len(value) > 256 {
 			return false
+		}
+	}
+	return true
+}
+
+func validAccessGroupIDs(values []string) bool {
+	if len(values) > 64 {
+		return false
+	}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || len(value) > 128 {
+			return false
+		}
+		for _, char := range value {
+			if !(char >= 'a' && char <= 'z') && !(char >= 'A' && char <= 'Z') && !(char >= '0' && char <= '9') && char != '-' && char != '_' && char != '.' {
+				return false
+			}
 		}
 	}
 	return true

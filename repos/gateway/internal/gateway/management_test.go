@@ -103,8 +103,12 @@ func TestAdminVirtualKeyAPIRequiresAdminRole(t *testing.T) {
 
 func TestAdminVirtualKeyCreateReturnsOneTimeTokenAndAuditIdentity(t *testing.T) {
 	client := &recordingManagementClient{}
-	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithManagement(client)
-	request := httptest.NewRequest(http.MethodPost, "/admin/v1/keys", strings.NewReader(`{"user_id":"user-1","team_id":"team-1","allowed_models":["gpt-*"]}`))
+	registry := NewAccessRegistry()
+	if _, err := registry.PutGroup("platform", AccessGroup{Name: "Platform", AllowedModels: []string{"gpt-*"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithManagement(client).WithAccessRegistry(registry)
+	request := httptest.NewRequest(http.MethodPost, "/admin/v1/keys", strings.NewReader(`{"user_id":"user-1","team_id":"team-1","access_group_ids":["platform"],"allowed_models":["gpt-*"]}`))
 	request.Header.Set("Authorization", "Bearer client-secret")
 	request.Header.Set("X-Request-ID", "req-admin-1")
 	response := httptest.NewRecorder()
@@ -116,11 +120,35 @@ func TestAdminVirtualKeyCreateReturnsOneTimeTokenAndAuditIdentity(t *testing.T) 
 	if err := json.NewDecoder(response.Body).Decode(&issued); err != nil {
 		t.Fatal(err)
 	}
-	if issued.Token != "sk-ag-once" || client.spec.UserID != "user-1" || client.spec.TeamID != "team-1" {
+	if issued.Token != "sk-ag-once" || client.spec.UserID != "user-1" || client.spec.TeamID != "team-1" || len(client.spec.AccessGroupIDs) != 1 || client.spec.AccessGroupIDs[0] != "platform" {
 		t.Fatalf("unexpected issued key/spec: issued=%+v spec=%+v", issued, client.spec)
 	}
 	if client.audit.RequestID != "req-admin-1" || client.audit.ActorID != "admin-user" || client.audit.CredentialID != "admin-credential" {
 		t.Fatalf("missing audit identity: %+v", client.audit)
+	}
+}
+
+func TestAdminVirtualKeyMutationsRejectUnavailableAccessGroup(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "create", method: http.MethodPost, path: "/admin/v1/keys"},
+		{name: "update", method: http.MethodPut, path: "/admin/v1/keys/vk_safe123"},
+		{name: "rotate", method: http.MethodPost, path: "/admin/v1/keys/vk_safe123/rotate"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := &recordingManagementClient{}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithManagement(client).WithAccessRegistry(NewAccessRegistry())
+			request := httptest.NewRequest(test.method, test.path, strings.NewReader(`{"organization_id":"org-1","access_group_ids":["missing"]}`))
+			response := httptest.NewRecorder()
+			Routes(handler).ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest || client.creates+client.updates+client.rotates != 0 || !strings.Contains(response.Body.String(), "must reference enabled access groups") {
+				t.Fatalf("unavailable access group was accepted: status=%d client=%+v body=%s", response.Code, client, response.Body.String())
+			}
+		})
 	}
 }
 

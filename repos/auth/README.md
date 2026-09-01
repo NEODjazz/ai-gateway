@@ -34,7 +34,9 @@ Migration `006_identity_directory.sql` adds users, teams and scoped membership
 roles. A disabled directory user or team also disables its persistent keys.
 Migration `007_organizations.sql` adds organizations, and
 `008_virtual_key_ownership.sql` lets a managed key be owned directly by one
-organization, team, or user.
+organization, team, or user. Migration `009_virtual_key_access_groups.sql`
+stores bounded access-group assignments; auth propagates only their opaque IDs
+and gateway resolves the current grants at request time.
 
 `AUTH_STATIC_KEY_FALLBACK_ENABLED` controls migration fallback to
 `AUTH_VIRTUAL_KEYS_JSON`. `AUTH_DEMO_KEYS_ENABLED` controls the two built-in demo

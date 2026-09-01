@@ -148,6 +148,10 @@ func (h Handler) authorizeTools(w http.ResponseWriter, req modules.RequestContex
 			writeError(w, http.StatusForbidden, "tool_not_allowed", "credential is not allowed to use tool "+strconv.Quote(identifier))
 			return false
 		}
+		if req.AccessGroupsEvaluated && (len(req.AccessGroupTools) == 0 || !h.toolAllowed(identifier, req.AccessGroupTools)) {
+			writeError(w, http.StatusForbidden, "access_group_tool_not_allowed", "assigned access groups do not allow the requested tool")
+			return false
+		}
 	}
 	return true
 }
@@ -229,6 +233,10 @@ func (h Handler) authorizeAccess(w http.ResponseWriter, ctx context.Context, req
 		writeError(w, 403, "model_not_allowed", "credential is not allowed to use model "+strconv.Quote(model))
 		return false
 	}
+	if req.AccessGroupsEvaluated && (len(req.AccessGroupModels) == 0 || !modelAllowed(model, req.AccessGroupModels)) {
+		writeError(w, http.StatusForbidden, "access_group_model_not_allowed", "assigned access groups do not allow the requested model")
+		return false
+	}
 	if h.access != nil {
 		if allowed, _ := h.access.TagModelAllowed(req.Tags, model); !allowed {
 			writeError(w, http.StatusForbidden, "tag_model_not_allowed", "credential tags do not allow the requested model")
@@ -253,5 +261,24 @@ func (h Handler) authorizeAccess(w http.ResponseWriter, ctx context.Context, req
 		writeError(w, 429, "rate_limit_exceeded", "credential rate limit exceeded")
 		return false
 	}
+	return true
+}
+
+func (h Handler) prepareAccessGroups(w http.ResponseWriter, req *modules.RequestContext) bool {
+	if len(req.AccessGroupIDs) == 0 {
+		return true
+	}
+	if h.access == nil {
+		writeError(w, http.StatusServiceUnavailable, "access_policy_unavailable", "access-group policy is unavailable")
+		return false
+	}
+	policy, err := h.access.ResolveAccessGroups(req.AccessGroupIDs)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "access_group_not_allowed", "an assigned access group is missing or disabled")
+		return false
+	}
+	req.AccessGroupModels = append([]string(nil), policy.AllowedModels...)
+	req.AccessGroupTools = append([]string(nil), policy.AllowedTools...)
+	req.AccessGroupsEvaluated = true
 	return true
 }

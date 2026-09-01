@@ -170,6 +170,14 @@ exact/wildcard grants до provider pipeline. URL привязан к grant, п�
 одновременно явной capability `mcp` и adapter, который реализует MCP
 passthrough; legacy empty capabilities не считаются opt-in.
 
+Virtual key может содержать `access_group_ids`. Auth хранит и передает только
+идентификаторы назначений; актуальные Access Groups разрешаются gateway из
+versioned admin-state snapshot перед model/tool authorization. Grants всех
+назначенных enabled-групп объединяются, после чего отдельно пересекаются с
+direct grants ключа. Пустая групповая grant dimension ничего не разрешает,
+missing/disabled assignment блокирует запрос, а тот же effective model policy
+применяется к `/v1/models` и cross-model fallback targets.
+
 HTTP-ответы модулей декодируются в типизированные DTO, поэтому удаленный сервис не может перезаписать identity, routing metadata или исходный запрос целиком.
 
 ## Маршрутизация и failover

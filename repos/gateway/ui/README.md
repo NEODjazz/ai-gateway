@@ -51,3 +51,9 @@ configured organization, team, and user IDs.
 Overview cards, breakdown tables, drill-downs, CSV export, request rows, and
 session/trace aggregates expose provider-reported cache-read and cache-write
 input tokens separately from proxy cache hits.
+
+Virtual-key create/edit uses searchable chip multi-selects for both direct
+model grants and enabled Access Groups. The key table exposes assignments as a
+selectable column. Group grants are runtime policy, not descriptive UI metadata:
+gateway unions the selected groups and intersects that result with the key's
+direct model/tool grants, failing closed for missing or disabled assignments.

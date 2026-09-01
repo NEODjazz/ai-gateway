@@ -37,6 +37,68 @@ func TestAccessRegistryProjectsAndPermissionTemplates(t *testing.T) {
 	}
 }
 
+func TestAssignedAccessGroupsConstrainModelsAndTools(t *testing.T) {
+	registry := NewAccessRegistry()
+	if _, err := registry.PutGroup("safe", AccessGroup{Name: "Safe", AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"weather.*"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	policy := accessPolicyModule{models: []string{"*"}, tools: []string{"*"}, accessGroups: []string{"safe"}}
+	router := Routes(NewHandler(modules.NewPipeline([]modules.Module{policy}), &chatProvider{}).WithAccessRegistry(registry))
+
+	allowed := httptest.NewRecorder()
+	router.ServeHTTP(allowed, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.6","messages":[{"role":"user","content":"weather"}],"tools":[{"type":"function","function":{"name":"weather.current"}}]}`)))
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("group-authorized request rejected: status=%d body=%s", allowed.Code, allowed.Body.String())
+	}
+
+	blockedModel := httptest.NewRecorder()
+	router.ServeHTTP(blockedModel, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"claude","messages":[{"role":"user","content":"hello"}]}`)))
+	if blockedModel.Code != http.StatusForbidden || !strings.Contains(blockedModel.Body.String(), `"code":"access_group_model_not_allowed"`) {
+		t.Fatalf("group model grant was not enforced: status=%d body=%s", blockedModel.Code, blockedModel.Body.String())
+	}
+
+	blockedTool := httptest.NewRecorder()
+	router.ServeHTTP(blockedTool, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.6","messages":[{"role":"user","content":"mail"}],"tools":[{"type":"function","function":{"name":"mail.send"}}]}`)))
+	if blockedTool.Code != http.StatusForbidden || !strings.Contains(blockedTool.Body.String(), `"code":"access_group_tool_not_allowed"`) {
+		t.Fatalf("group tool grant was not enforced: status=%d body=%s", blockedTool.Code, blockedTool.Body.String())
+	}
+}
+
+func TestAssignedAccessGroupFailsClosedWhenMissingOrDisabled(t *testing.T) {
+	registry := NewAccessRegistry()
+	if _, err := registry.PutGroup("disabled-policy", AccessGroup{Name: "Disabled", AllowedModels: []string{"*"}, Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"ghost-policy", "disabled-policy"} {
+		router := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, accessGroups: []string{id}}}), &chatProvider{}).WithAccessRegistry(registry))
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.6","messages":[{"role":"user","content":"hello"}]}`)))
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":"access_group_not_allowed"`) || strings.Contains(response.Body.String(), id) {
+			t.Fatalf("assigned group %q did not fail closed safely: status=%d body=%s", id, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestAssignedAccessGroupFailsClosedWhenRegistryUnavailable(t *testing.T) {
+	router := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, accessGroups: []string{"safe"}}}), &chatProvider{}))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.6","messages":[{"role":"user","content":"hello"}]}`)))
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), `"code":"access_policy_unavailable"`) {
+		t.Fatalf("missing access registry did not fail closed: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestAssignedAccessGroupsFilterModelDiscovery(t *testing.T) {
+	registry := NewAccessRegistry()
+	_, _ = registry.PutGroup("models", AccessGroup{Name: "Models", AllowedModels: []string{"other-*"}, Enabled: true})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, accessGroups: []string{"models"}}}), modelsProvider{}).WithAccessRegistry(registry))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"data":[]`) {
+		t.Fatalf("group-restricted model was discoverable: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestPolicyAttachmentMatchingRequiresEveryConfiguredDimension(t *testing.T) {
 	registry := NewAccessRegistry()
 	_, err := registry.PutPolicyAttachment("healthcare", PolicyAttachment{
