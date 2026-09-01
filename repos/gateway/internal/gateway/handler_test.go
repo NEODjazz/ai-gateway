@@ -24,6 +24,7 @@ type modelsProvider struct{}
 type accessPolicyModule struct {
 	models []string
 	tools  []string
+	tags   []string
 	rpm    int
 	tpm    int
 }
@@ -56,6 +57,7 @@ func (m accessPolicyModule) Handle(_ context.Context, req *modules.RequestContex
 	req.CredentialID = "credential-1"
 	req.AllowedModels = append([]string(nil), m.models...)
 	req.AllowedTools = append([]string(nil), m.tools...)
+	req.Tags = append([]string(nil), m.tags...)
 	req.RateLimitRPM = m.rpm
 	req.RateLimitTPM = m.tpm
 	return nil

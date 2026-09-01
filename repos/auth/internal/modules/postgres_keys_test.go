@@ -93,7 +93,7 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	if err := store.Create(ctx, old, credentialLookupHash(oldToken, "pepper")); err != nil {
 		t.Fatal(err)
 	}
-	if found, ok, err := store.Lookup(ctx, credentialLookupHash(oldToken, "pepper")); err != nil || !ok || found.ID != oldID || len(found.AllowedTools) != 1 {
+	if found, ok, err := store.Lookup(ctx, credentialLookupHash(oldToken, "pepper")); err != nil || !ok || found.ID != oldID || found.Alias != "automation" || len(found.Tags) != 2 || found.Tags[0] != "ci" || found.Tags[1] != "prod" || len(found.AllowedTools) != 1 {
 		t.Fatalf("active key lookup failed: key=%+v ok=%v err=%v", found, ok, err)
 	}
 	old.RateLimitRPM = 15

@@ -117,10 +117,17 @@ func (h Handler) Models(w http.ResponseWriter, r *http.Request) {
 	}
 	reqCtx.APIKey = ""
 
-	writeJSON(w, http.StatusOK, openai.ModelsResponse{
-		Object: "list",
-		Data:   filterModels(h.provider.Models(), reqCtx.AllowedModels),
-	})
+	models := filterModels(h.provider.Models(), reqCtx.AllowedModels)
+	if h.access != nil {
+		filtered := models[:0]
+		for _, model := range models {
+			if allowed, _ := h.access.TagModelAllowed(reqCtx.Tags, model.ID); allowed {
+				filtered = append(filtered, model)
+			}
+		}
+		models = filtered
+	}
+	writeJSON(w, http.StatusOK, openai.ModelsResponse{Object: "list", Data: models})
 }
 
 func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {

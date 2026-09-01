@@ -37,6 +37,12 @@ type PolicyAttachment struct {
 	Models     []string `json:"models,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
 }
+type TagDefinition struct {
+	Name          string   `json:"name"`
+	Description   string   `json:"description,omitempty"`
+	AllowedModels []string `json:"allowed_models,omitempty"`
+	Enabled       bool     `json:"enabled"`
+}
 
 type PolicyMatchContext struct {
 	TeamID          string
@@ -51,6 +57,7 @@ type AccessRegistry struct {
 	projects    map[string]Project
 	groups      map[string]AccessGroup
 	attachments map[string]PolicyAttachment
+	tags        map[string]TagDefinition
 }
 
 var errInvalidAccessEntry = errors.New("invalid access registry entry")
@@ -58,7 +65,7 @@ var errAccessEntryInUse = errors.New("access registry entry is in use")
 var errAccessResponseWritten = errors.New("access registry response already written")
 
 func NewAccessRegistry() *AccessRegistry {
-	return &AccessRegistry{projects: map[string]Project{}, groups: map[string]AccessGroup{}, attachments: map[string]PolicyAttachment{}}
+	return &AccessRegistry{projects: map[string]Project{}, groups: map[string]AccessGroup{}, attachments: map[string]PolicyAttachment{}, tags: map[string]TagDefinition{}}
 }
 func (h Handler) WithAccessRegistry(registry *AccessRegistry) Handler { h.access = registry; return h }
 func (r *AccessRegistry) Projects() []Project {
@@ -94,6 +101,35 @@ func (r *AccessRegistry) PolicyAttachments() []PolicyAttachment {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
+}
+func (r *AccessRegistry) Tags() []TagDefinition {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make([]TagDefinition, 0, len(r.tags))
+	for _, item := range r.tags {
+		item.AllowedModels = append([]string(nil), item.AllowedModels...)
+		result = append(result, item)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result
+}
+
+// TagModelAllowed applies every registered tag constraint carried by a
+// credential. Unknown tags remain metadata-only for backward compatibility;
+// once registered, disabled tags deny access and model grants intersect.
+func (r *AccessRegistry) TagModelAllowed(tags []string, model string) (bool, string) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, name := range tags {
+		definition, ok := r.tags[name]
+		if !ok {
+			continue
+		}
+		if !definition.Enabled || (len(definition.AllowedModels) != 0 && !modelAllowed(model, definition.AllowedModels)) {
+			return false, name
+		}
+	}
+	return true, ""
 }
 
 func (r *AccessRegistry) MatchingPolicyAttachments(context PolicyMatchContext) []PolicyAttachment {
@@ -167,6 +203,30 @@ func (r *AccessRegistry) PutPolicyAttachment(id string, item PolicyAttachment) (
 	r.mu.Unlock()
 	return clonePolicyAttachment(item), nil
 }
+func (r *AccessRegistry) PutTag(name string, item TagDefinition) (TagDefinition, error) {
+	name = strings.TrimSpace(name)
+	item.Description = strings.TrimSpace(item.Description)
+	if !validTagName(name) || len(item.Description) > 1024 || !validAccessStrings(item.AllowedModels) {
+		return TagDefinition{}, errInvalidAccessEntry
+	}
+	item.Name = name
+	item.AllowedModels = uniqueStrings(item.AllowedModels)
+	r.mu.Lock()
+	r.tags[name] = item
+	r.mu.Unlock()
+	return item, nil
+}
+func validTagName(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, char := range value {
+		if !(char >= 'a' && char <= 'z') && !(char >= 'A' && char <= 'Z') && !(char >= '0' && char <= '9') && !strings.ContainsRune("-_./:", char) {
+			return false
+		}
+	}
+	return true
+}
 func (r *AccessRegistry) DeleteProject(id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -197,6 +257,15 @@ func (r *AccessRegistry) DeletePolicyAttachment(id string) error {
 		return errInvalidAccessEntry
 	}
 	delete(r.attachments, id)
+	return nil
+}
+func (r *AccessRegistry) DeleteTag(name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.tags[name]; !ok {
+		return errInvalidAccessEntry
+	}
+	delete(r.tags, name)
 	return nil
 }
 
@@ -282,6 +351,16 @@ func (h Handler) ListPolicyAttachments(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": h.access.PolicyAttachments()})
 }
+func (h Handler) ListTags(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeAdmin(w, r); !ok {
+		return
+	}
+	if h.access == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "tag registry is unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": h.access.Tags()})
+}
 func (h Handler) PutProject(w http.ResponseWriter, r *http.Request) {
 	var input Project
 	h.putAccessEntry(w, r, "project", func() (any, error) {
@@ -315,6 +394,15 @@ func (h Handler) PutPolicyAttachment(w http.ResponseWriter, r *http.Request) {
 			return nil, errInvalidAccessEntry
 		}
 		return h.access.PutPolicyAttachment(r.PathValue("id"), input)
+	})
+}
+func (h Handler) PutTag(w http.ResponseWriter, r *http.Request) {
+	var input TagDefinition
+	h.putAccessEntry(w, r, "tag", func() (any, error) {
+		if !decodeAccessJSON(w, r, &input) {
+			return nil, errAccessResponseWritten
+		}
+		return h.access.PutTag(r.PathValue("id"), input)
 	})
 }
 func (h Handler) putAccessEntry(w http.ResponseWriter, r *http.Request, targetType string, save func() (any, error)) {
@@ -357,6 +445,9 @@ func (h Handler) DeleteAccessGroup(w http.ResponseWriter, r *http.Request) {
 }
 func (h Handler) DeletePolicyAttachment(w http.ResponseWriter, r *http.Request) {
 	h.deleteAccessEntry(w, r, "policy_attachment", func(id string) error { return h.access.DeletePolicyAttachment(id) })
+}
+func (h Handler) DeleteTag(w http.ResponseWriter, r *http.Request) {
+	h.deleteAccessEntry(w, r, "tag", func(name string) error { return h.access.DeleteTag(name) })
 }
 func (h Handler) deleteAccessEntry(w http.ResponseWriter, r *http.Request, targetType string, remove func(string) error) {
 	req, ok := h.authorizeAdmin(w, r)

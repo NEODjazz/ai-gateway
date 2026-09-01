@@ -229,6 +229,12 @@ func (h Handler) authorizeAccess(w http.ResponseWriter, ctx context.Context, req
 		writeError(w, 403, "model_not_allowed", "credential is not allowed to use model "+strconv.Quote(model))
 		return false
 	}
+	if h.access != nil {
+		if allowed, _ := h.access.TagModelAllowed(req.Tags, model); !allowed {
+			writeError(w, http.StatusForbidden, "tag_model_not_allowed", "credential tags do not allow the requested model")
+			return false
+		}
+	}
 	key := req.CredentialID
 	if req.TeamID != "" {
 		key = "team:" + req.TeamID + ":credential:" + req.CredentialID

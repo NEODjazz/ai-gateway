@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.17
+  version: 0.1.18
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -20,6 +20,7 @@ tags:
   - name: Identity
   - name: Model deployments
   - name: Guardrails
+  - name: Tags
   - name: MCP
   - name: Projects and access
   - name: Caching and logging
@@ -845,6 +846,43 @@ paths:
       summary: Delete a policy attachment
       responses:
         '204': {description: Policy attachment deleted}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /admin/v1/tags:
+    get:
+      operationId: listTags
+      tags: [Tags]
+      summary: List durable credential-tag model policies
+      responses:
+        '200': {description: Managed tags, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/TagDefinition'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/tags/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[A-Za-z0-9_.:/-]{1,128}$'}
+    put:
+      operationId: putTag
+      tags: [Tags]
+      summary: Create or update a credential-tag model policy
+      description: Registered tag constraints intersect. Disabled tags deny tagged credentials; unregistered tags remain metadata-only for backward compatibility.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TagDefinitionInput'}}}}
+      responses:
+        '200': {description: Tag saved, content: {application/json: {schema: {$ref: '#/components/schemas/TagDefinition'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    delete:
+      operationId: deleteTag
+      tags: [Tags]
+      summary: Delete a managed tag policy
+      responses:
+        '204': {description: Tag policy deleted}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '404': {$ref: '#/components/responses/NotFound'}
@@ -2552,6 +2590,20 @@ components:
         - type: object
           required: [id]
           properties: {id: {type: string}}
+    TagDefinitionInput:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        description: {type: string, maxLength: 1024}
+        allowed_models: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+        enabled: {type: boolean}
+    TagDefinition:
+      allOf:
+        - {$ref: '#/components/schemas/TagDefinitionInput'}
+        - type: object
+          required: [name]
+          properties: {name: {type: string, pattern: '^[A-Za-z0-9_.:/-]{1,128}$'}}
     ComplianceCheckInput:
       type: object
       additionalProperties: false

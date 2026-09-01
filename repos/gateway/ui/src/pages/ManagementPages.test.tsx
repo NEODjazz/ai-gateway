@@ -69,6 +69,27 @@ describe("management pages", () => {
     expect(save?.[1]?.body).toContain('"models":["gpt-5.6"]');
   });
 
+  it("creates a managed tag with model restrictions", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/admin/v1/tags") return json({ data: [] });
+      if (url === "/admin/v1/model-catalog") return json({ models: [{ model: "gpt-5.6", provider: "azure" }, { model: "llama3.2:latest", provider: "ollama" }] });
+      if (url === "/admin/v1/tags/regulated") return json({ name: "regulated", allowed_models: ["gpt-5.6"], enabled: true });
+      return json({ data: [] });
+    });
+    renderAuthenticated(<ResourcePage config={resourceConfigs.tags} />);
+    await screen.findByText("No records found.");
+    await userEvent.click(screen.getByRole("button", { name: "Create Tag" }));
+    await userEvent.type(screen.getByLabelText("Tag name"), "regulated");
+    await userEvent.type(screen.getByLabelText("Description"), "Regulated workloads");
+    await userEvent.selectOptions(screen.getByLabelText("Allowed models"), "gpt-5.6");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === "/admin/v1/tags/regulated" && call[1]?.method === "PUT")).toBe(true));
+    const save = fetchMock.mock.calls.find((call) => call[0] === "/admin/v1/tags/regulated");
+    expect(save?.[1]?.body).toContain('"allowed_models":["gpt-5.6"]');
+    expect(save?.[1]?.body).toContain('"enabled":true');
+  });
+
   it("assigns a user to a team with roles", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ data: [] }));
     renderAuthenticated(<TeamsPage />); await screen.findByText("No records found.");

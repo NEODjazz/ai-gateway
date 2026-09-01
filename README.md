@@ -179,7 +179,7 @@ rotated; list and mutation responses contain metadata only. Set a stable
 gateway generates an ephemeral process key suitable only for local runtime
 management. Set `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` to persist providers,
 encrypted credentials, deployments, model groups, guardrail policies and their
-scope attachments, projects/access groups, MCP servers/toolsets, agent/tool-policy templates, and
+scope attachments, managed tag policies, projects/access groups, MCP servers/toolsets, agent/tool-policy templates, and
 logging destinations as one versioned JSONB snapshot. Logging bearer secrets
 use domain-separated AES-GCM encryption and are never returned by the API. The
 gateway seeds an empty store from `PROVIDERS_JSON`, then treats
@@ -206,6 +206,11 @@ metering.
 Prompts, responses, bearer credentials, upstream URLs, and raw provider error
 strings are excluded. Content storage is disabled and the effective 730-day
 ClickHouse retention plus the 90-day maximum query window are shown in the UI.
+Tag Management registers existing virtual-key tags as durable model policies.
+For a key carrying multiple managed tags, every enabled tag must allow the
+requested public model; disabled tags deny access, and `/v1/models` hides models
+that the tag intersection would reject. Unregistered legacy tags remain
+metadata-only so introducing the registry does not invalidate existing keys.
 Routing diagnostics expose circuit, adaptive EWMA, admission, guardrail, and
 shadow-routing state using endpoint names only; provider base URLs and secrets
 are not part of the response contract. The playground sends non-streaming chat

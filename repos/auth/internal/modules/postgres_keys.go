@@ -63,10 +63,10 @@ func (s *PostgresVirtualKeyStore) Lookup(ctx context.Context, tokenHash string) 
 		  AND NOT EXISTS (SELECT 1 FROM auth_teams t WHERE t.id=auth_virtual_keys.team_id AND t.status<>'active')
 		  AND NOT EXISTS (SELECT 1 FROM auth_organizations o WHERE o.id=auth_virtual_keys.organization_id AND o.status<>'active')
 		  AND (expires_at IS NULL OR expires_at > now())
-		RETURNING id, COALESCE(user_id, ''), COALESCE(team_id, ''), COALESCE(organization_id, ''), roles, allowed_models, allowed_tools,
+		RETURNING id, alias, tags, COALESCE(user_id, ''), COALESCE(team_id, ''), COALESCE(organization_id, ''), roles, allowed_models, allowed_tools,
 		          rate_limit_rpm, rate_limit_tpm, rotation_family_id,
 		          COALESCE(rotated_from_id, ''), expires_at`, tokenHash).Scan(
-		&key.ID, &key.UserID, &key.TeamID, &key.OrganizationID, &key.Roles, &key.AllowedModels, &key.AllowedTools,
+		&key.ID, &key.Alias, &key.Tags, &key.UserID, &key.TeamID, &key.OrganizationID, &key.Roles, &key.AllowedModels, &key.AllowedTools,
 		&key.RateLimitRPM, &key.RateLimitTPM, &key.RotationFamily,
 		&key.RotatedFromID, &key.ExpiresAt,
 	)

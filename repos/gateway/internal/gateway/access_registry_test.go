@@ -57,6 +57,78 @@ func TestPolicyAttachmentMatchingRequiresEveryConfiguredDimension(t *testing.T) 
 	}
 }
 
+func TestTagDefinitionsIntersectModelGrants(t *testing.T) {
+	registry := NewAccessRegistry()
+	tag, err := registry.PutTag("environment:prod", TagDefinition{Description: "Production traffic", AllowedModels: []string{"gpt-*", "gpt-*"}, Enabled: true})
+	if err != nil || len(tag.AllowedModels) != 1 {
+		t.Fatalf("unexpected tag: %+v err=%v", tag, err)
+	}
+	_, _ = registry.PutTag("regulated", TagDefinition{AllowedModels: []string{"gpt-5.*"}, Enabled: true})
+	if allowed, _ := registry.TagModelAllowed([]string{"environment:prod", "regulated"}, "gpt-5.6"); !allowed {
+		t.Fatal("intersection rejected a model allowed by every tag")
+	}
+	if allowed, name := registry.TagModelAllowed([]string{"environment:prod", "regulated"}, "gpt-4.1"); allowed || name != "regulated" {
+		t.Fatalf("intersection allowed a restricted model: allowed=%v tag=%q", allowed, name)
+	}
+	if allowed, _ := registry.TagModelAllowed([]string{"legacy-unregistered"}, "any-model"); !allowed {
+		t.Fatal("unregistered metadata tag broke backward compatibility")
+	}
+	_, _ = registry.PutTag("disabled", TagDefinition{Enabled: false})
+	if allowed, name := registry.TagModelAllowed([]string{"disabled"}, "gpt-5.6"); allowed || name != "disabled" {
+		t.Fatalf("disabled tag did not fail closed: allowed=%v tag=%q", allowed, name)
+	}
+}
+
+func TestTagManagementAPIAndInferenceEnforcement(t *testing.T) {
+	registry := NewAccessRegistry()
+	audit := &recordingAuditClient{}
+	adminRouter := Routes(NewHandler(modulesPipeline("admin"), &chatProvider{}).WithAccessRegistry(registry).WithAudit(audit))
+
+	put := httptest.NewRecorder()
+	adminRouter.ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/admin/v1/tags/regulated", strings.NewReader(`{"description":"Approved models","allowed_models":["gpt-*"],"enabled":true}`)))
+	if put.Code != http.StatusOK || !strings.Contains(put.Body.String(), `"name":"regulated"`) {
+		t.Fatalf("put tag status=%d body=%s", put.Code, put.Body.String())
+	}
+	list := httptest.NewRecorder()
+	adminRouter.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/admin/v1/tags", nil))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"allowed_models":["gpt-*"]`) {
+		t.Fatalf("list tags status=%d body=%s", list.Code, list.Body.String())
+	}
+	inferenceRouter := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tags: []string{"regulated"}}}), &chatProvider{}).WithAccessRegistry(registry))
+	blocked := httptest.NewRecorder()
+	inferenceRouter.ServeHTTP(blocked, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"claude","messages":[{"role":"user","content":"hello"}]}`)))
+	if blocked.Code != http.StatusForbidden || !strings.Contains(blocked.Body.String(), `"code":"tag_model_not_allowed"`) || strings.Contains(blocked.Body.String(), "regulated") {
+		t.Fatalf("tag policy was not safely enforced: status=%d body=%s", blocked.Code, blocked.Body.String())
+	}
+	allowed := httptest.NewRecorder()
+	inferenceRouter.ServeHTTP(allowed, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.6","messages":[{"role":"user","content":"hello"}]}`)))
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("allowed tagged request status=%d body=%s", allowed.Code, allowed.Body.String())
+	}
+	remove := httptest.NewRecorder()
+	adminRouter.ServeHTTP(remove, httptest.NewRequest(http.MethodDelete, "/admin/v1/tags/regulated", nil))
+	if remove.Code != http.StatusNoContent || len(registry.Tags()) != 0 {
+		t.Fatalf("delete tag status=%d body=%s", remove.Code, remove.Body.String())
+	}
+}
+
+func TestTagRestrictionsFilterModelDiscovery(t *testing.T) {
+	registry := NewAccessRegistry()
+	_, _ = registry.PutTag("regulated", TagDefinition{AllowedModels: []string{"gpt-*"}, Enabled: true})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tags: []string{"regulated"}}}), modelsProvider{}).WithAccessRegistry(registry))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"data":[]`) {
+		t.Fatalf("tag-restricted model was discoverable: status=%d body=%s", response.Code, response.Body.String())
+	}
+	_, _ = registry.PutTag("regulated", TagDefinition{AllowedModels: []string{"test-*"}, Enabled: true})
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"test-model"`) {
+		t.Fatalf("allowed tagged model was hidden: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestPolicyAttachmentsAdminAPIAndRequestEvaluation(t *testing.T) {
 	runtime := provider.New(provider.Config{GuardrailPolicies: map[string]config.GuardrailPolicyConfig{"strict": {DLP: true}}})
 	registry := NewAccessRegistry()
