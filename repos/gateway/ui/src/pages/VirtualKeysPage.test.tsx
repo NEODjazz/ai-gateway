@@ -19,6 +19,10 @@ function mockAPI(keyRows: unknown[] = [key], userRows: unknown[] = [{ id: "user-
 		if (path.includes("/admin/v1/organizations")) return json({ data: organizationRows });
     if (path === "/v1/models") return json({ data: [{ id: "gpt" }, { id: "embed" }] });
     if (path === "/admin/v1/budgets") return json({ data: [{ id: 7, scope_type: "key", scope_id: "vk_alpha", period: "month", currency: "USD", max_cost: 100, enabled: true }] });
+    if (path === "/admin/v1/usage/report?days=30") return json({ by_key: [
+      { name: "vk_alpha", currency: "USD", requests: 2, total_tokens: 120, cost: 12.5 },
+      { name: "vk_alpha", currency: "EUR", requests: 1, total_tokens: 30, cost: 3 }
+    ] });
     return json({});
   });
 }
@@ -29,14 +33,21 @@ describe("VirtualKeysPage", () => {
     const fetchMock = mockAPI(); renderPage();
     expect(await screen.findByText("production")).toBeInTheDocument();
     expect(screen.getByText("100 USD / month")).toBeInTheDocument();
+    expect(screen.getByText("€3.00 · $12.50")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create Virtual Key" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Columns" }));
     expect(screen.getByRole("menuitemcheckbox", { name: "Key" })).toHaveAttribute("aria-checked", "true");
     const descriptionColumn = screen.getByRole("menuitemcheckbox", { name: "Description" });
     expect(descriptionColumn).toHaveAttribute("aria-checked", "false");
     await userEvent.click(descriptionColumn);
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Requests (30d)" }));
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Tokens (30d)" }));
     expect(screen.getByRole("columnheader", { name: "Description" })).toBeInTheDocument();
     expect(screen.getByText("Production key")).toBeInTheDocument();
+    const keyRow = screen.getByText("production").closest("tr");
+    expect(keyRow).not.toBeNull();
+    expect(within(keyRow!).getByText("150")).toBeInTheDocument();
+    expect(within(keyRow!).getByText("3")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh virtual keys" })).toHaveTextContent("");
     for (const heading of ["Key", "Team", "User", "Created", "Budget"]) expect(screen.getByRole("button", { name: new RegExp(`^${heading}$`) })).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText("Search keys by alias"), "missing");
@@ -51,6 +62,7 @@ describe("VirtualKeysPage", () => {
     await userEvent.click(screen.getByRole("button", { name: /Budget/ }));
     await userEvent.click(screen.getByRole("button", { name: "Refresh virtual keys" }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([path]) => String(path).includes("/admin/v1/keys?")).length).toBeGreaterThan(1));
+    expect(fetchMock.mock.calls.some(([path]) => path === "/admin/v1/usage/report?days=30")).toBe(true);
   });
 
 	it("creates a team-owned key without requiring a user and uses the model multi-select", async () => {

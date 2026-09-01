@@ -220,6 +220,8 @@ are not part of the response contract. The playground sends non-streaming chat
 requests through the same authenticated inference path as external clients.
 Virtual-key tokens are shown once after creation or rotation and are cleared
 from the page when that dialog closes; list responses contain metadata only.
+The virtual-key table joins the 30-day usage projection by non-secret key ID,
+showing spend per currency and optional request/token columns without combining currencies.
 Catalog entries can be created, edited, and removed; budgets can be created,
 edited, and disabled. The budget form resolves organizations, users, teams, virtual keys,
 models, providers, and tags from their configured registries instead of
