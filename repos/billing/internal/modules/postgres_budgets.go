@@ -160,11 +160,12 @@ func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event *BillingE
 			 provider_type, model, currency, state, reserved_cost, reserved_tokens,
 			 catalog_version, pricing_key, input_cost_per_1m, output_cost_per_1m,
 			 reservation_expires_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'reserved',$12,$13,$14,$15,$16,$17,$18)`,
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'reserved',$12,$13,$14,$15,$16,$17,
+			        clock_timestamp() + ($18 * interval '1 millisecond'))`,
 			event.RequestID, reservationOwner(*event), event.APIKeyFingerprint, event.UserID,
 			event.TeamID, event.OrganizationID, budgetTags(*event), budgetProviderName(*event), budgetProviderType(*event), event.Model,
 			event.Currency, event.Cost, event.TotalTokens, event.CatalogVersion, event.PricingKey,
-			event.InputCostPer1M, event.OutputCostPer1M, time.Now().UTC().Add(c.ttl))
+			event.InputCostPer1M, event.OutputCostPer1M, c.ttl.Milliseconds())
 	case "commit":
 		if found && reservation.State == "committed" {
 			return tx.Commit(ctx)

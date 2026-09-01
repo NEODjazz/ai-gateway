@@ -12,10 +12,11 @@ import (
 )
 
 type recordingBudgetClient struct {
-	audit ManagementAudit
-	spec  BudgetPolicySpec
-	id    int64
-	calls int
+	audit    ManagementAudit
+	spec     BudgetPolicySpec
+	id       int64
+	calls    int
+	subjects []KeyBudgetSubject
 }
 
 func (c *recordingBudgetClient) List(context.Context, ManagementAudit) ([]ManagedBudgetPolicy, error) {
@@ -36,6 +37,10 @@ func (c *recordingBudgetClient) Update(context.Context, ManagementAudit, int64, 
 func (c *recordingBudgetClient) Disable(context.Context, ManagementAudit, int64) error { return nil }
 func (c *recordingBudgetClient) Summary(context.Context, ManagementAudit, int64) (BudgetSummary, error) {
 	return BudgetSummary{Policy: ManagedBudgetPolicy{ID: 1}}, nil
+}
+func (c *recordingBudgetClient) KeyProjections(_ context.Context, audit ManagementAudit, subjects []KeyBudgetSubject) ([]KeyBudgetProjection, error) {
+	c.audit, c.subjects = audit, subjects
+	return []KeyBudgetProjection{{KeyID: subjects[0].KeyID, Policies: []BudgetSummary{{Policy: ManagedBudgetPolicy{ID: 1, ScopeType: "team", ScopeID: subjects[0].TeamID}}}}}, nil
 }
 
 func TestAdminBudgetCreateRequiresAdminAndCarriesAudit(t *testing.T) {
@@ -75,6 +80,27 @@ func TestRemoteBudgetManagementUsesOnlyScopedSecret(t *testing.T) {
 	client := NewRemoteBudgetManagementClient(server.URL, "billing-secret")
 	if _, err := client.List(context.Background(), ManagementAudit{ActorID: "admin"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRemoteBudgetManagementProjectsKeysWithoutClientBearer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/internal/v1/budgets/key-projections" || r.Header.Get("Authorization") != "" || r.Header.Get("X-Management-Token") != "billing-secret" {
+			t.Fatalf("request=%s %s headers=%v", r.Method, r.URL.Path, r.Header)
+		}
+		var request struct {
+			Subjects []KeyBudgetSubject `json:"subjects"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Subjects) != 1 || request.Subjects[0].KeyID != "key-1" {
+			t.Fatalf("request=%+v err=%v", request, err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []KeyBudgetProjection{{KeyID: "key-1", Policies: []BudgetSummary{}}}})
+	}))
+	defer server.Close()
+	client := NewRemoteBudgetManagementClient(server.URL, "billing-secret")
+	result, err := client.KeyProjections(context.Background(), ManagementAudit{ActorID: "admin"}, []KeyBudgetSubject{{KeyID: "key-1"}})
+	if err != nil || len(result) != 1 || result[0].KeyID != "key-1" {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
 

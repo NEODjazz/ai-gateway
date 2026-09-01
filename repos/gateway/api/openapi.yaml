@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.25
+  version: 0.1.26
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -300,6 +300,7 @@ paths:
         - {name: status, in: query, schema: {type: string, enum: [active, disabled, revoked, expired]}}
         - {name: sort_by, in: query, schema: {type: string, enum: [key, alias, organization, team, user, created, status], default: created}}
         - {name: sort_order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
+        - {name: expand, in: query, description: Include billing-backed financial projections for the returned page., schema: {type: string, const: financials}}
       responses:
         '200':
           description: Safe virtual key metadata
@@ -315,6 +316,10 @@ paths:
                   total: {type: integer, minimum: 0}
                   limit: {type: integer, minimum: 1, maximum: 500}
                   offset: {type: integer, minimum: 0}
+                  financials:
+                    type: object
+                    description: Present only when expand=financials. Keys are non-secret virtual-key IDs.
+                    additionalProperties: {$ref: '#/components/schemas/KeyBudgetProjection'}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
@@ -1770,6 +1775,16 @@ components:
         remaining_cost: {type: number, minimum: 0}
         used_tokens: {type: integer, format: int64, minimum: 0}
         remaining_tokens: {type: integer, format: int64, minimum: 0}
+    KeyBudgetProjection:
+      type: object
+      additionalProperties: false
+      required: [key_id, policies]
+      description: All enabled identity policies that apply simultaneously to a virtual key. Route-, provider-, model-, and request-tag policies are evaluated only at request time.
+      properties:
+        key_id: {type: string}
+        policies:
+          type: array
+          items: {$ref: '#/components/schemas/BudgetSummary'}
     UsageAggregate:
       type: object
       additionalProperties: false

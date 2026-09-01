@@ -75,10 +75,11 @@ type VirtualKeyListFilter struct {
 }
 
 type VirtualKeyPage struct {
-	Data   []VirtualKeyMetadata `json:"data"`
-	Total  int                  `json:"total"`
-	Limit  int                  `json:"limit"`
-	Offset int                  `json:"offset"`
+	Data       []VirtualKeyMetadata           `json:"data"`
+	Total      int                            `json:"total"`
+	Limit      int                            `json:"limit"`
+	Offset     int                            `json:"offset"`
+	Financials map[string]KeyBudgetProjection `json:"financials,omitempty"`
 }
 
 type ManagementAudit struct {
@@ -235,28 +236,72 @@ func (h Handler) ListVirtualKeys(w http.ResponseWriter, r *http.Request) {
 	for name, target := range map[string]*string{"search": &filter.Search, "organization_id": &filter.OrganizationID, "team_id": &filter.TeamID, "user_id": &filter.UserID, "key_id": &filter.KeyID, "status": &filter.Status, "sort_by": &filter.SortBy, "sort_order": &filter.SortOrder} {
 		*target = strings.TrimSpace(r.URL.Query().Get(name))
 	}
+	expand := strings.TrimSpace(r.URL.Query().Get("expand"))
 	if len(filter.Search) > 128 || len(filter.OrganizationID) > 256 || len(filter.TeamID) > 256 || len(filter.UserID) > 256 || len(filter.KeyID) > 256 || !allowedValue(filter.Status, "", "active", "disabled", "revoked", "expired") || !allowedValue(filter.SortBy, "", "key", "alias", "organization", "team", "user", "created", "status") || !allowedValue(filter.SortOrder, "", "asc", "desc") {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid virtual key list filter")
 		return
 	}
+	if !allowedValue(expand, "", "financials") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "expand must be financials")
+		return
+	}
+	audit := managementAudit(req)
 	pager, supportsPage := h.management.(interface {
 		ListVirtualKeysPage(context.Context, ManagementAudit, VirtualKeyListFilter) (VirtualKeyPage, error)
 	})
 	if supportsPage {
-		page, err := pager.ListVirtualKeysPage(r.Context(), managementAudit(req), filter)
+		page, err := pager.ListVirtualKeysPage(r.Context(), audit, filter)
 		if err != nil {
 			writeManagementFailure(w, err)
+			return
+		}
+		if expand == "financials" && !h.expandKeyFinancials(w, r, audit, &page) {
 			return
 		}
 		writeJSON(w, http.StatusOK, page)
 		return
 	}
-	keys, err := h.management.ListVirtualKeys(r.Context(), managementAudit(req), filter.Limit)
+	keys, err := h.management.ListVirtualKeys(r.Context(), audit, filter.Limit)
 	if err != nil {
 		writeManagementFailure(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, VirtualKeyPage{Data: keys, Total: len(keys), Limit: filter.Limit, Offset: filter.Offset})
+	page := VirtualKeyPage{Data: keys, Total: len(keys), Limit: filter.Limit, Offset: filter.Offset}
+	if expand == "financials" && !h.expandKeyFinancials(w, r, audit, &page) {
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+func (h Handler) expandKeyFinancials(w http.ResponseWriter, r *http.Request, audit ManagementAudit, page *VirtualKeyPage) bool {
+	if len(page.Data) == 0 {
+		page.Financials = map[string]KeyBudgetProjection{}
+		return true
+	}
+	client, ok := h.budgets.(KeyBudgetProjectionClient)
+	if !ok || client == nil {
+		writeError(w, http.StatusServiceUnavailable, "budget_unavailable", "key budget projection is not configured")
+		return false
+	}
+	subjects := make([]KeyBudgetSubject, 0, len(page.Data))
+	for _, key := range page.Data {
+		subjects = append(subjects, KeyBudgetSubject{KeyID: key.ID, UserID: key.UserID, TeamID: key.TeamID, OrganizationID: key.OrganizationID})
+	}
+	projections, err := client.KeyProjections(r.Context(), audit, subjects)
+	if err != nil {
+		writeBudgetManagementFailure(w, err)
+		return false
+	}
+	page.Financials = make(map[string]KeyBudgetProjection, len(projections))
+	for _, projection := range projections {
+		page.Financials[projection.KeyID] = projection
+	}
+	for _, subject := range subjects {
+		if _, exists := page.Financials[subject.KeyID]; !exists {
+			page.Financials[subject.KeyID] = KeyBudgetProjection{KeyID: subject.KeyID, Policies: []BudgetSummary{}}
+		}
+	}
+	return true
 }
 
 func allowedValue(value string, allowed ...string) bool {

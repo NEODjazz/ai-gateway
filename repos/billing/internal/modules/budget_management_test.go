@@ -39,3 +39,26 @@ func TestBudgetPeriodEnd(t *testing.T) {
 		t.Fatalf("end=%v", got)
 	}
 }
+
+func TestProjectKeyBudgetsIncludesEveryApplicableIdentityPolicy(t *testing.T) {
+	summaries := []BudgetSummary{
+		{Policy: ManagedBudgetPolicy{ID: 1, ScopeType: "global", ScopeID: "*"}},
+		{Policy: ManagedBudgetPolicy{ID: 2, ScopeType: "organization", ScopeID: "org-1"}},
+		{Policy: ManagedBudgetPolicy{ID: 3, ScopeType: "team", ScopeID: "team-1"}},
+		{Policy: ManagedBudgetPolicy{ID: 4, ScopeType: "user", ScopeID: "user-1"}},
+		{Policy: ManagedBudgetPolicy{ID: 5, ScopeType: "key", ScopeID: "key-1"}},
+		{Policy: ManagedBudgetPolicy{ID: 6, ScopeType: "model", ScopeID: "gpt-5"}},
+	}
+	projections := projectKeyBudgets([]KeyBudgetSubject{{KeyID: "key-1", UserID: "user-1", TeamID: "team-1", OrganizationID: "org-1"}, {KeyID: "key-2"}}, summaries)
+	if len(projections) != 2 || len(projections[0].Policies) != 5 || len(projections[1].Policies) != 1 {
+		t.Fatalf("projections=%+v", projections)
+	}
+}
+
+func TestNormalizeKeyBudgetSubjectsRejectsUnsafeOrDuplicateInput(t *testing.T) {
+	for _, subjects := range [][]KeyBudgetSubject{nil, {{KeyID: ""}}, {{KeyID: "key-1"}, {KeyID: " key-1 "}}} {
+		if _, err := normalizeKeyBudgetSubjects(subjects); err == nil {
+			t.Fatalf("accepted subjects=%+v", subjects)
+		}
+	}
+}

@@ -69,6 +69,8 @@ td code { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .columns-menu-popover button:disabled { color: #536473; opacity: 1; cursor: default; }
 .column-check { color: #087660; font-weight: 800; }
 .tag-list { display: flex; gap: 5px; flex-wrap: wrap; }
+.budget-values { display: grid; gap: 4px; min-width: 170px; }
+.budget-values span { white-space: nowrap; }
 .tag { border-radius: 999px; background: #edf5f3; color: #237563; padding: 3px 7px; font-size: 12px; }
 .status { display: inline-flex; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 .status.enabled { color: #087660; background: #e4f6f1; }

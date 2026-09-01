@@ -29,14 +29,14 @@ function mockAPI(keyRows: unknown[] = [key], userRows: unknown[] = [{ id: "user-
 			const status = url.searchParams.get("status"); if (status) rows = rows.filter((row) => row.revoked_at ? status === "revoked" : row.disabled_at ? status === "disabled" : row.expires_at && new Date(row.expires_at) <= new Date() ? status === "expired" : status === "active");
 			const sortBy = url.searchParams.get("sort_by") || "created"; const direction = url.searchParams.get("sort_order") === "asc" ? 1 : -1;
 			rows.sort((left, right) => direction * String(sortBy === "key" ? left.id : sortBy === "team" ? left.team_id || "" : sortBy === "user" ? left.user_id || "" : sortBy === "alias" ? left.alias || "" : left.created_at).localeCompare(String(sortBy === "key" ? right.id : sortBy === "team" ? right.team_id || "" : sortBy === "user" ? right.user_id || "" : sortBy === "alias" ? right.alias || "" : right.created_at)));
-			const total = rows.length; const limit = Number(url.searchParams.get("limit") || 25); const offset = Number(url.searchParams.get("offset") || 0);
-			return json({ data: rows.slice(offset, offset + limit), total, limit, offset });
+			const total = rows.length; const limit = Number(url.searchParams.get("limit") || 25); const offset = Number(url.searchParams.get("offset") || 0); const pageRows = rows.slice(offset, offset + limit);
+			const financials = Object.fromEntries(pageRows.map((row) => [row.id, row.id === "vk_alpha" ? { key_id: row.id, policies: [{ policy: { id: 7, scope_type: "key", scope_id: "vk_alpha", period: "month", currency: "USD", max_cost: 100, enabled: true }, window_start: "2026-09-01T00:00:00Z", window_end: "2026-10-01T00:00:00Z", used_cost: 12.5, remaining_cost: 87.5, used_tokens: 150 }] } : { key_id: row.id, policies: [] }]));
+			return json({ data: pageRows, total, limit, offset, financials });
 		}
 		if (path.includes("/admin/v1/users")) return json({ data: userRows });
 		if (path.includes("/admin/v1/teams")) return json({ data: teamRows });
 		if (path.includes("/admin/v1/organizations")) return json({ data: organizationRows });
     if (path === "/v1/models") return json({ data: [{ id: "gpt" }, { id: "embed" }] });
-    if (path === "/admin/v1/budgets") return json({ data: [{ id: 7, scope_type: "key", scope_id: "vk_alpha", period: "month", currency: "USD", max_cost: 100, enabled: true }] });
     if (path === "/admin/v1/usage/report?days=30") return json({ by_key: [
       { name: "vk_alpha", currency: "USD", requests: 2, total_tokens: 120, cost: 12.5 },
       { name: "vk_alpha", currency: "EUR", requests: 1, total_tokens: 30, cost: 3 }
@@ -50,7 +50,7 @@ describe("VirtualKeysPage", () => {
   it("renders searchable, sortable keys with icon refresh and resettable filters", async () => {
     const fetchMock = mockAPI(); renderPage();
     expect(await screen.findByText("production")).toBeInTheDocument();
-    expect(screen.getByText("100 USD / month")).toBeInTheDocument();
+    expect(screen.getByText("key:vk_alpha · $100.00 / month")).toBeInTheDocument();
     expect(screen.getByText("€3.00 · $12.50")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create Virtual Key" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Columns" }));
@@ -60,14 +60,21 @@ describe("VirtualKeysPage", () => {
     await userEvent.click(descriptionColumn);
     await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Requests (30d)" }));
     await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Tokens (30d)" }));
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Budget used" }));
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Budget remaining" }));
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Budget reset" }));
     expect(screen.getByRole("columnheader", { name: "Description" })).toBeInTheDocument();
     expect(screen.getByText("Production key")).toBeInTheDocument();
     const keyRow = screen.getByText("production").closest("tr");
     expect(keyRow).not.toBeNull();
     expect(within(keyRow!).getByText("150")).toBeInTheDocument();
     expect(within(keyRow!).getByText("3")).toBeInTheDocument();
+    expect(within(keyRow!).getByText("key:vk_alpha · $12.50")).toBeInTheDocument();
+    expect(within(keyRow!).getByText("key:vk_alpha · $87.50")).toBeInTheDocument();
+    expect(within(keyRow!).getByText("2026-10-01 00:00:00 UTC")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh virtual keys" })).toHaveTextContent("");
-    for (const heading of ["Key", "Team", "User", "Created", "Budget"]) expect(screen.getByRole("button", { name: new RegExp(`^${heading}$`) })).toBeInTheDocument();
+    for (const heading of ["Key", "Team", "User", "Created"]) expect(screen.getByRole("button", { name: new RegExp(`^${heading}$`) })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Budgets" })).toHaveAttribute("title", expect.stringContaining("simultaneously"));
     await userEvent.type(screen.getByLabelText("Search keys by alias"), "missing");
     expect(await screen.findByText(/No virtual keys match/)).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("search=missing"))).toBe(true);
@@ -84,10 +91,11 @@ describe("VirtualKeysPage", () => {
     await userEvent.selectOptions(within(statusDialog).getByLabelText("Status"), "active");
     await userEvent.click(within(statusDialog).getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path).includes("status=active"))).toBe(true));
-    await userEvent.click(screen.getByRole("button", { name: /Budget/ }));
     await userEvent.click(screen.getByRole("button", { name: "Refresh virtual keys" }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([path]) => String(path).includes("/admin/v1/keys?")).length).toBeGreaterThan(1));
     expect(fetchMock.mock.calls.some(([path]) => path === "/admin/v1/usage/report?days=30")).toBe(true);
+    expect(fetchMock.mock.calls.some(([path]) => String(path).includes("expand=financials"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([path]) => path === "/admin/v1/budgets")).toBe(false);
   });
 
 	it("creates a team-owned key without requiring a user and uses the model multi-select", async () => {

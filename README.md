@@ -222,6 +222,12 @@ Virtual-key tokens are shown once after creation or rotation and are cleared
 from the page when that dialog closes; list responses contain metadata only.
 The virtual-key table joins the 30-day usage projection by non-secret key ID,
 showing spend per currency and optional request/token columns without combining currencies.
+For the returned server page, `expand=financials` performs one scoped billing
+request and returns every enabled global/organization/team/user/key budget that
+applies to each key, including committed-or-reserved usage, remaining cost or
+tokens, and reset time. These policies are shown together because enforcement
+applies all of them; route-, provider-, model-, and request-tag budgets remain
+request-time constraints and are not misrepresented as key-only limits.
 Catalog entries can be created, edited, and removed; budgets can be created,
 edited, and disabled. The budget form resolves organizations, users, teams, virtual keys,
 models, providers, and tags from their configured registries instead of
@@ -403,8 +409,9 @@ request history, and assign a key-scoped budget from the console. The gateway
 key-list API exposes bounded server-side pagination, ownership/status filters,
 and allowlisted sorting; team and organization scopes include member-owned keys.
 The console sends those parameters to the server with a debounced alias search
-and uses the returned total for page navigation. Budget sorting is explicitly
-limited to the current page until the cross-service budget projection is indexed.
+and uses the returned total for page navigation. Budget columns are intentionally
+not sorted: a key can have several simultaneously enforced policies in different
+currencies and dimensions, so one scalar ordering would be misleading.
 The gateway
 receives only the opaque key ID, alias, tags and policy (never the plaintext
 token or lookup hash), filters `/v1/models`, enforces model grants before the

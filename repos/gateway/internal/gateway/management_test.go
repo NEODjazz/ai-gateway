@@ -162,6 +162,27 @@ func TestAdminVirtualKeyListReturnsSafeMetadata(t *testing.T) {
 	}
 }
 
+func TestAdminVirtualKeyListExpandsBudgetFinancialsForReturnedPage(t *testing.T) {
+	keys := &recordingManagementClient{}
+	budgets := &recordingBudgetClient{}
+	handler := NewHandler(modulesPipeline("admin"), modelsProvider{}).WithManagement(keys).WithBudgetManagement(budgets)
+	request := httptest.NewRequest(http.MethodGet, "/admin/v1/keys?limit=25&expand=financials", nil)
+	request.Header.Set("X-Request-ID", "req-financials")
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || len(budgets.subjects) != 1 || budgets.subjects[0].KeyID != "vk_safe123" || budgets.subjects[0].UserID != "user-1" || !strings.Contains(response.Body.String(), `"financials":{"vk_safe123"`) {
+		t.Fatalf("status=%d subjects=%+v body=%s", response.Code, budgets.subjects, response.Body.String())
+	}
+	if budgets.audit.RequestID != "req-financials" {
+		t.Fatalf("audit=%+v", budgets.audit)
+	}
+	invalid := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(invalid, httptest.NewRequest(http.MethodGet, "/admin/v1/keys?expand=secrets", nil))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid expand status=%d", invalid.Code)
+	}
+}
+
 func TestAdminVirtualKeyAPIRejectsUnknownFieldsAndInvalidID(t *testing.T) {
 	client := &recordingManagementClient{}
 	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithManagement(client)

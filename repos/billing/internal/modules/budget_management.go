@@ -42,6 +42,18 @@ type BudgetSummary struct {
 	RemainingTokens *int64              `json:"remaining_tokens,omitempty"`
 }
 
+type KeyBudgetSubject struct {
+	KeyID          string `json:"key_id"`
+	UserID         string `json:"user_id,omitempty"`
+	TeamID         string `json:"team_id,omitempty"`
+	OrganizationID string `json:"organization_id,omitempty"`
+}
+
+type KeyBudgetProjection struct {
+	KeyID    string          `json:"key_id"`
+	Policies []BudgetSummary `json:"policies"`
+}
+
 type BudgetManager interface {
 	ListBudgetPolicies(context.Context) ([]ManagedBudgetPolicy, error)
 	GetBudgetPolicy(context.Context, int64) (ManagedBudgetPolicy, bool, error)
@@ -49,6 +61,7 @@ type BudgetManager interface {
 	UpdateBudgetPolicy(context.Context, int64, BudgetPolicySpec) (ManagedBudgetPolicy, bool, error)
 	DisableBudgetPolicy(context.Context, int64) (bool, error)
 	BudgetSummary(context.Context, int64, time.Time) (BudgetSummary, bool, error)
+	KeyBudgetProjections(context.Context, []KeyBudgetSubject, time.Time) ([]KeyBudgetProjection, error)
 }
 
 func (m BillingModule) BudgetManager() (BudgetManager, error) {
@@ -155,6 +168,134 @@ func (c *PostgresBudgetPolicyChecker) BudgetSummary(ctx context.Context, id int6
 		result.RemainingTokens = &remaining
 	}
 	return result, true, nil
+}
+
+func (c *PostgresBudgetPolicyChecker) KeyBudgetProjections(ctx context.Context, subjects []KeyBudgetSubject, now time.Time) ([]KeyBudgetProjection, error) {
+	if err := c.managementReady(); err != nil {
+		return nil, err
+	}
+	subjects, err := normalizeKeyBudgetSubjects(subjects)
+	if err != nil {
+		return nil, err
+	}
+	keyIDs, userIDs, teamIDs, organizationIDs := budgetSubjectIDs(subjects)
+	now = now.UTC()
+	rows, err := c.pool.Query(ctx, `
+		SELECT p.id,p.scope_type,p.scope_id,p.period,p.currency,p.max_cost::float8,p.max_tokens,
+		       p.enabled,p.created_at,p.updated_at,
+		       COALESCE(SUM(CASE WHEN r.state='committed' THEN r.actual_cost ELSE r.reserved_cost END),0)::float8,
+		       COALESCE(SUM(CASE WHEN r.state='committed' THEN r.actual_tokens ELSE r.reserved_tokens END),0)
+		FROM billing_budget_policies p
+		LEFT JOIN billing_budget_reservations r ON
+		     r.created_at >= CASE p.period WHEN 'hour' THEN $5::timestamptz WHEN 'week' THEN $7::timestamptz WHEN 'month' THEN $8::timestamptz ELSE $6::timestamptz END
+		 AND (r.state='committed' OR (r.state='reserved' AND r.reservation_expires_at > $9::timestamptz))
+		 AND CASE p.scope_type
+		       WHEN 'global' THEN true
+		       WHEN 'key' THEN r.credential_id=p.scope_id
+		       WHEN 'user' THEN r.user_id=p.scope_id
+		       WHEN 'team' THEN r.team_id=p.scope_id
+		       WHEN 'organization' THEN r.organization_id=p.scope_id
+		       ELSE false
+		     END
+		WHERE p.enabled AND (
+			p.scope_type='global'
+			OR (p.scope_type='key' AND p.scope_id=ANY($1))
+			OR (p.scope_type='user' AND p.scope_id=ANY($2))
+			OR (p.scope_type='team' AND p.scope_id=ANY($3))
+			OR (p.scope_type='organization' AND p.scope_id=ANY($4))
+		)
+		GROUP BY p.id,p.scope_type,p.scope_id,p.period,p.currency,p.max_cost,p.max_tokens,
+		         p.enabled,p.created_at,p.updated_at
+		ORDER BY p.id`, keyIDs, userIDs, teamIDs, organizationIDs,
+		budgetPeriodStart(now, "hour"), budgetPeriodStart(now, "day"), budgetPeriodStart(now, "week"), budgetPeriodStart(now, "month"), now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	summaries := make([]BudgetSummary, 0)
+	for rows.Next() {
+		var policy ManagedBudgetPolicy
+		var usedCost float64
+		var usedTokens int64
+		if err := rows.Scan(&policy.ID, &policy.ScopeType, &policy.ScopeID, &policy.Period, &policy.Currency,
+			&policy.MaxCost, &policy.MaxTokens, &policy.Enabled, &policy.CreatedAt, &policy.UpdatedAt,
+			&usedCost, &usedTokens); err != nil {
+			return nil, err
+		}
+		start := budgetPeriodStart(now, policy.Period)
+		summary := BudgetSummary{Policy: policy, WindowStart: start, WindowEnd: budgetPeriodEnd(start, policy.Period), UsedCost: usedCost, UsedTokens: usedTokens}
+		if policy.MaxCost != nil {
+			remaining := max(0, *policy.MaxCost-usedCost)
+			summary.RemainingCost = &remaining
+		}
+		if policy.MaxTokens != nil {
+			remaining := max(int64(0), *policy.MaxTokens-usedTokens)
+			summary.RemainingTokens = &remaining
+		}
+		summaries = append(summaries, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return projectKeyBudgets(subjects, summaries), nil
+}
+
+func normalizeKeyBudgetSubjects(subjects []KeyBudgetSubject) ([]KeyBudgetSubject, error) {
+	if len(subjects) == 0 || len(subjects) > 500 {
+		return nil, errors.New("invalid key budget subjects")
+	}
+	result := make([]KeyBudgetSubject, 0, len(subjects))
+	seen := make(map[string]struct{}, len(subjects))
+	for _, subject := range subjects {
+		subject.KeyID = strings.TrimSpace(subject.KeyID)
+		subject.UserID = strings.TrimSpace(subject.UserID)
+		subject.TeamID = strings.TrimSpace(subject.TeamID)
+		subject.OrganizationID = strings.TrimSpace(subject.OrganizationID)
+		if subject.KeyID == "" || len(subject.KeyID) > 256 || len(subject.UserID) > 256 || len(subject.TeamID) > 256 || len(subject.OrganizationID) > 256 {
+			return nil, errors.New("invalid key budget subject")
+		}
+		if _, exists := seen[subject.KeyID]; exists {
+			return nil, errors.New("invalid duplicate key budget subject")
+		}
+		seen[subject.KeyID] = struct{}{}
+		result = append(result, subject)
+	}
+	return result, nil
+}
+
+func budgetSubjectIDs(subjects []KeyBudgetSubject) (keys, users, teams, organizations []string) {
+	for _, subject := range subjects {
+		keys = append(keys, subject.KeyID)
+		if subject.UserID != "" {
+			users = append(users, subject.UserID)
+		}
+		if subject.TeamID != "" {
+			teams = append(teams, subject.TeamID)
+		}
+		if subject.OrganizationID != "" {
+			organizations = append(organizations, subject.OrganizationID)
+		}
+	}
+	return keys, users, teams, organizations
+}
+
+func projectKeyBudgets(subjects []KeyBudgetSubject, summaries []BudgetSummary) []KeyBudgetProjection {
+	result := make([]KeyBudgetProjection, 0, len(subjects))
+	for _, subject := range subjects {
+		projection := KeyBudgetProjection{KeyID: subject.KeyID, Policies: make([]BudgetSummary, 0)}
+		for _, summary := range summaries {
+			policy := summary.Policy
+			if policy.ScopeType == "global" ||
+				policy.ScopeType == "key" && policy.ScopeID == subject.KeyID ||
+				policy.ScopeType == "user" && policy.ScopeID == subject.UserID ||
+				policy.ScopeType == "team" && policy.ScopeID == subject.TeamID ||
+				policy.ScopeType == "organization" && policy.ScopeID == subject.OrganizationID {
+				projection.Policies = append(projection.Policies, summary)
+			}
+		}
+		result = append(result, projection)
+	}
+	return result
 }
 
 func (c *PostgresBudgetPolicyChecker) managementReady() error {

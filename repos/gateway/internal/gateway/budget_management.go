@@ -48,6 +48,18 @@ type BudgetSummary struct {
 	RemainingTokens *int64              `json:"remaining_tokens,omitempty"`
 }
 
+type KeyBudgetSubject struct {
+	KeyID          string `json:"key_id"`
+	UserID         string `json:"user_id,omitempty"`
+	TeamID         string `json:"team_id,omitempty"`
+	OrganizationID string `json:"organization_id,omitempty"`
+}
+
+type KeyBudgetProjection struct {
+	KeyID    string          `json:"key_id"`
+	Policies []BudgetSummary `json:"policies"`
+}
+
 type BudgetManagementClient interface {
 	List(context.Context, ManagementAudit) ([]ManagedBudgetPolicy, error)
 	Get(context.Context, ManagementAudit, int64) (ManagedBudgetPolicy, error)
@@ -55,6 +67,10 @@ type BudgetManagementClient interface {
 	Update(context.Context, ManagementAudit, int64, BudgetPolicySpec) (ManagedBudgetPolicy, error)
 	Disable(context.Context, ManagementAudit, int64) error
 	Summary(context.Context, ManagementAudit, int64) (BudgetSummary, error)
+}
+
+type KeyBudgetProjectionClient interface {
+	KeyProjections(context.Context, ManagementAudit, []KeyBudgetSubject) ([]KeyBudgetProjection, error)
 }
 
 type RemoteBudgetManagementClient struct {
@@ -95,6 +111,13 @@ func (c *RemoteBudgetManagementClient) Summary(ctx context.Context, audit Manage
 	var v BudgetSummary
 	err := c.call(ctx, http.MethodGet, budgetPath(id)+"/summary", audit, nil, &v)
 	return v, err
+}
+func (c *RemoteBudgetManagementClient) KeyProjections(ctx context.Context, audit ManagementAudit, subjects []KeyBudgetSubject) ([]KeyBudgetProjection, error) {
+	var response struct {
+		Data []KeyBudgetProjection `json:"data"`
+	}
+	err := c.call(ctx, http.MethodPost, "/internal/v1/budgets/key-projections", audit, map[string]any{"subjects": subjects}, &response)
+	return response.Data, err
 }
 func budgetPath(id int64) string {
 	return "/internal/v1/budgets/" + url.PathEscape(strconv.FormatInt(id, 10))

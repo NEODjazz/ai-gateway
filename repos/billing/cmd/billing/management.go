@@ -27,6 +27,7 @@ func registerBudgetManagement(mux *http.ServeMux, manager modules.BudgetManager,
 	mux.HandleFunc("PUT /internal/v1/budgets/{id}", h.update)
 	mux.HandleFunc("DELETE /internal/v1/budgets/{id}", h.disable)
 	mux.HandleFunc("GET /internal/v1/budgets/{id}/summary", h.summary)
+	mux.HandleFunc("POST /internal/v1/budgets/key-projections", h.keyProjections)
 }
 
 func (h budgetManagementHandler) authorize(w http.ResponseWriter, r *http.Request) bool {
@@ -152,6 +153,31 @@ func (h budgetManagementHandler) summary(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeBudgetJSON(w, http.StatusOK, summary)
+}
+
+func (h budgetManagementHandler) keyProjections(w http.ResponseWriter, r *http.Request) {
+	if !h.authorize(w, r) {
+		return
+	}
+	var request struct {
+		Subjects []modules.KeyBudgetSubject `json:"subjects"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 256<<10))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&request) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		http.Error(w, "invalid key budget projection request", http.StatusBadRequest)
+		return
+	}
+	if len(request.Subjects) == 0 || len(request.Subjects) > 500 {
+		http.Error(w, "invalid key budget projection request", http.StatusBadRequest)
+		return
+	}
+	projections, err := h.manager.KeyBudgetProjections(r.Context(), request.Subjects, h.now())
+	if err != nil {
+		writeBudgetFailure(w, err)
+		return
+	}
+	writeBudgetJSON(w, http.StatusOK, map[string]any{"data": projections})
 }
 
 func budgetID(w http.ResponseWriter, r *http.Request) (int64, bool) {

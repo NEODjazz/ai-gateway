@@ -309,6 +309,10 @@ func TestPostgresBudgetManagementLifecycleAndSummary(t *testing.T) {
 	if summary.UsedTokens != 25 || summary.RemainingTokens == nil || *summary.RemainingTokens != 75 {
 		t.Fatalf("summary=%+v", summary)
 	}
+	projections, err := checker.KeyBudgetProjections(ctx, []KeyBudgetSubject{{KeyID: "key-" + team, TeamID: team}}, time.Now())
+	if err != nil || len(projections) != 1 || len(projections[0].Policies) != 1 || projections[0].Policies[0].UsedTokens != 25 || projections[0].Policies[0].RemainingTokens == nil || *projections[0].Policies[0].RemainingTokens != 75 {
+		t.Fatalf("projections=%+v err=%v", projections, err)
+	}
 	enabled := true
 	maxTokens = 200
 	updated, found, err := checker.UpdateBudgetPolicy(ctx, created.ID, BudgetPolicySpec{ScopeType: "team", ScopeID: team, Period: "week", Currency: "EUR", MaxTokens: &maxTokens, Enabled: &enabled})
