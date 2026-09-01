@@ -72,6 +72,8 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/admin/v1/ai-hub/models"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetAIHubModels) }},
 	{RouteContract{http.MethodGet, "/admin/v1/cost-optimization/recommendations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetCostRecommendations) }},
 	{RouteContract{http.MethodGet, "/admin/v1/model-deployments"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListModelDeployments) }},
+	{RouteContract{http.MethodGet, "/admin/v1/model-deployments/health"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListLatestModelDeploymentHealth) }},
+	{RouteContract{http.MethodPost, "/admin/v1/model-deployments/health-checks"}, func(h Handler) http.Handler { return http.HandlerFunc(h.TestModelDeployments) }},
 	{RouteContract{http.MethodPost, "/admin/v1/model-deployments"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateModelDeployment) }},
 	{RouteContract{http.MethodPut, "/admin/v1/model-deployments/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateModelDeployment) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/model-deployments/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteModelDeployment) }},

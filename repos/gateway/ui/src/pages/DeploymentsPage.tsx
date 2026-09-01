@@ -71,11 +71,8 @@ export function DeploymentsPage() {
       const payload = await client.request<{ data: Deployment[]; total?: number }>(`/admin/v1/model-deployments?${params}`);
       const rows = records<Deployment>(payload); setTotal(payload.total ?? rows.length);
       setDeployments(rows);
-      const checks = await Promise.all(rows.map(async (row) => {
-        try { return records<HealthCheck>(await client.request(`/admin/v1/model-deployments/${encodeURIComponent(row.id)}/health?limit=1`))[0]; }
-        catch { return undefined; }
-      }));
-      setLatest(Object.fromEntries(rows.map((row, index) => [row.id, checks[index]])));
+      const checks = rows.length ? records<HealthCheck>(await client.request(`/admin/v1/model-deployments/health?ids=${encodeURIComponent(rows.map((row) => row.id).join(","))}`)) : [];
+      setLatest(Object.fromEntries(checks.map((check) => [check.deployment_id, check])));
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load deployments"); }
     finally { setLoading(false); }
   }, [client, limit, offset, order, providerFilter, search, sort, stateFilter]);
@@ -90,9 +87,11 @@ export function DeploymentsPage() {
     if (!ids.length) return;
     setBusy(true); setError("");
     try {
-      const results = await Promise.all(ids.map((id) => client.request<HealthCheck>(`/admin/v1/model-deployments/${encodeURIComponent(id)}/test`, { method: "POST", body: {} })));
+      const payload = await client.request<{ data?: HealthCheck[]; errors?: Array<{ deployment_id: string; error: string }> }>("/admin/v1/model-deployments/health-checks", { method: "POST", body: { deployment_ids: ids } });
+      const results = payload.data || [];
       setLatest((current) => ({ ...current, ...Object.fromEntries(results.map((check) => [check.deployment_id, check])) }));
       if (detail && ids.includes(detail.id)) await openDetails(detail);
+      if (payload.errors?.length) setError(`${payload.errors.length} health check(s) could not run`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Health check failed"); }
     finally { setBusy(false); }
   }

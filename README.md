@@ -384,6 +384,12 @@ commits the three resources in one control-plane write. Concurrent edits return
 runtime snapshot. Providers and encrypted credentials remain independently
 managed prerequisites so their lifecycle can be shared by many deployments.
 
+The Deployments view reads latest health state through one batch endpoint and
+runs selected checks through a server-side batch limited to 50 deployments and
+four concurrent upstream probes. This avoids browser-side N+1 requests and
+unbounded fan-out while retaining the existing 50-entry sanitized history per
+deployment. Probe payloads, credentials, and raw provider errors are not stored.
+
 Runtime pricing fields are accepted by billing only on lifecycle calls carrying
 the scoped `BILLING_SHARED_SECRET`. This secret is independent from the client
 Bearer token, `MANAGEMENT_SHARED_SECRET`, and

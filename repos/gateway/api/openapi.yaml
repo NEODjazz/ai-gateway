@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.32
+  version: 0.1.33
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -615,6 +615,32 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelDeploymentInput'}}}}
       responses:
         '201': {description: Runtime deployment created, content: {application/json: {schema: {$ref: '#/components/schemas/ModelDeployment'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/model-deployments/health:
+    get:
+      operationId: listLatestModelDeploymentHealth
+      tags: [Model deployments]
+      summary: List the latest retained health check for multiple deployments
+      parameters:
+        - {name: ids, in: query, description: Comma-separated known deployment IDs; omitted means all deployments., schema: {type: string, maxLength: 26000}}
+      responses:
+        '200': {description: Latest available health rows, content: {application/json: {schema: {$ref: '#/components/schemas/DeploymentHealthPage'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/model-deployments/health-checks:
+    post:
+      operationId: testModelDeployments
+      tags: [Model deployments]
+      summary: Run bounded concurrent health checks for multiple deployments
+      description: Runs at most 50 checks with server-side concurrency limited to four. Empty deployment_ids selects all enabled deployments within the same bound.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeploymentHealthBatchInput'}}}}
+      responses:
+        '200': {description: Completed checks and bounded per-deployment orchestration errors, content: {application/json: {schema: {$ref: '#/components/schemas/DeploymentHealthBatchResult'}}}}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
@@ -2805,6 +2831,32 @@ components:
         param: {type: string, pattern: '^[A-Za-z0-9_.-]{1,128}$'}
         latency_ms: {type: integer, format: int64, minimum: 0}
         checked_at: {type: string, format: date-time}
+    DeploymentHealthPage:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/DeploymentHealthCheck'}}
+    DeploymentHealthBatchInput:
+      type: object
+      additionalProperties: false
+      required: [deployment_ids]
+      properties:
+        deployment_ids: {type: array, maxItems: 50, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128}}
+    DeploymentHealthBatchError:
+      type: object
+      additionalProperties: false
+      required: [deployment_id, error]
+      properties:
+        deployment_id: {type: string, minLength: 1, maxLength: 128}
+        error: {type: string, maxLength: 256}
+    DeploymentHealthBatchResult:
+      type: object
+      additionalProperties: false
+      required: [data, errors]
+      properties:
+        data: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/DeploymentHealthCheck'}}
+        errors: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/DeploymentHealthBatchError'}}
     GuardrailPolicyInput:
       type: object
       additionalProperties: false

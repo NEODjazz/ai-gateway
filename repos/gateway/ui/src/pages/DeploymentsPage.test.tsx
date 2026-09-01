@@ -15,8 +15,7 @@ describe("DeploymentsPage", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const path = String(input);
       if (path.startsWith("/admin/v1/model-deployments?") && !options?.method) return response({ data: [deployment], total: 1 });
-      if (path.includes("/health")) return response({ data: [check] });
-      if (path.endsWith("/test")) return response(check);
+      if (path.includes("/health")) return response({ data: [check], errors: [] });
       if (path === "/admin/v1/model-deployments/azure-gpt" && options?.method === "PUT") return response({ ...deployment, enabled: false });
       return response({ data: [] });
     });
@@ -40,7 +39,9 @@ describe("DeploymentsPage", () => {
     expect(await screen.findByRole("dialog", { name: "Deployment details" })).toBeInTheDocument();
     expect(screen.getByText("2026-08-27 18:00:00 UTC")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Run health check" }));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path).endsWith("/test"))).toBe(true));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-deployments/health-checks" && options?.method === "POST")).toBe(true));
+    const healthCall = fetchMock.mock.calls.find(([path, options]) => String(path) === "/admin/v1/model-deployments/health-checks" && options?.method === "POST")!;
+    expect(JSON.parse(String(healthCall[1]?.body))).toEqual({ deployment_ids: ["azure-gpt"] });
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     await userEvent.click(screen.getByRole("button", { name: "Actions for azure-gpt" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Pause" }));

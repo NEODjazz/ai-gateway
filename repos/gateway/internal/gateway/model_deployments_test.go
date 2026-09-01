@@ -41,6 +41,26 @@ func TestAdminTestsDeploymentAndReturnsHealthHistory(t *testing.T) {
 	}
 }
 
+func TestAdminBatchTestsDeploymentsAndListsLatestHealth(t *testing.T) {
+	runtime := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "first", Type: "demo", Models: []string{"m1"}}, {Name: "second", Type: "demo", Models: []string{"m2"}}}})
+	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
+	batch := httptest.NewRecorder()
+	handler.ServeHTTP(batch, httptest.NewRequest(http.MethodPost, "/admin/v1/model-deployments/health-checks", strings.NewReader(`{"deployment_ids":["first","second"]}`)))
+	if batch.Code != http.StatusOK || !strings.Contains(batch.Body.String(), `"deployment_id":"first"`) || !strings.Contains(batch.Body.String(), `"deployment_id":"second"`) || !strings.Contains(batch.Body.String(), `"errors":[]`) {
+		t.Fatalf("unexpected batch checks: %d %s", batch.Code, batch.Body.String())
+	}
+	latest := httptest.NewRecorder()
+	handler.ServeHTTP(latest, httptest.NewRequest(http.MethodGet, "/admin/v1/model-deployments/health?ids=first,second", nil))
+	if latest.Code != http.StatusOK || strings.Count(latest.Body.String(), `"status":"available"`) != 2 {
+		t.Fatalf("unexpected latest checks: %d %s", latest.Code, latest.Body.String())
+	}
+	invalid := httptest.NewRecorder()
+	handler.ServeHTTP(invalid, httptest.NewRequest(http.MethodGet, "/admin/v1/model-deployments/health?ids=first,missing", nil))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("unknown deployment accepted: %d %s", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestAdminModelDeploymentLifecycle(t *testing.T) {
 	runtime := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "safe-endpoint", Type: "demo", Models: []string{"m1"}}}})
 	handler := NewHandler(modulesPipeline("admin"), runtime)
