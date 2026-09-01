@@ -13,6 +13,7 @@ go run ./cmd/gateway
 - `GET /healthz`
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
+- `GET /admin/v1/usage/report`
 - `GET /admin/v1/request-logs`
 - `GET /admin/v1/request-logs/groups?dimension=session|trace`
 - `GET /admin/v1/request-logs/{request_id}`
@@ -46,3 +47,6 @@ Request-log session and trace views are aggregated in ClickHouse across the
 complete selected time window, rather than from the current browser page.
 Aggregation remains metadata-only and keeps spend in separate currency groups;
 the cursor consists of the last request time, group ID, and currency.
+
+Usage reports expose currency-safe totals and daily trends plus breakdowns by
+model, provider, tag, non-secret virtual-key ID, user, team, and organization.

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.21
+  version: 0.1.22
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1770,7 +1770,7 @@ components:
     UsageReport:
       type: object
       additionalProperties: false
-      required: [days, from, to, totals, daily, by_model, by_provider, by_tag]
+      required: [days, from, to, totals, daily, by_model, by_provider, by_tag, by_key, by_user, by_team, by_organization]
       properties:
         days: {type: integer, minimum: 1, maximum: 90}
         from: {type: string, format: date-time}
@@ -1780,6 +1780,10 @@ components:
         by_model: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
         by_provider: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
         by_tag: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
+        by_key: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}, description: Usage by non-secret virtual-key ID or fingerprint}
+        by_user: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
+        by_team: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
+        by_organization: {type: array, items: {$ref: '#/components/schemas/UsageAggregate'}}
     RequestLog:
       type: object
       additionalProperties: false

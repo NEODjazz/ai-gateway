@@ -14,7 +14,12 @@ function authenticated(node: React.ReactNode) {
 describe("operational pages", () => {
   it("renders usage totals and changes the bounded window", async () => {
     const aggregate = { currency: "USD", requests: 4, errors: 0, input_tokens: 8, output_tokens: 12, total_tokens: 20, cost: 0.00265, avg_latency_ms: 12, cache_hits: 0, cost_per_request: 0.0006625 };
-    const response = { totals: [aggregate], daily: [{ ...aggregate, date: "2026-08-28" }], by_model: [{ ...aggregate, name: "gpt" }], by_provider: [{ ...aggregate, name: "azure-open-ai" }], by_tag: [{ ...aggregate, name: "production" }] };
+    const response = {
+      totals: [aggregate], daily: [{ ...aggregate, date: "2026-08-28" }], by_model: [{ ...aggregate, name: "gpt" }],
+      by_provider: [{ ...aggregate, name: "azure-open-ai" }], by_tag: [{ ...aggregate, name: "production" }],
+      by_key: [{ ...aggregate, name: "key-1" }], by_user: [{ ...aggregate, name: "user-1" }],
+      by_team: [{ ...aggregate, name: "team-1" }], by_organization: [{ ...aggregate, name: "org-1" }]
+    };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
     authenticated(<UsagePage />);
     expect(await screen.findAllByText("$0.00265")).toHaveLength(2);
@@ -23,6 +28,10 @@ describe("operational pages", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Models" })); expect(screen.getByText("gpt")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Providers" })); expect(screen.getByText("azure-open-ai")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Tags" })); expect(screen.getByText("production")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Virtual keys" })); expect(screen.getByText("key-1")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Users" })); expect(screen.getByText("user-1")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Teams" })); expect(screen.getByText("team-1")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Organizations" })); expect(screen.getByText("org-1")).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Window"), "7");
     await userEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/admin/v1/usage/report?days=7", expect.anything()));

@@ -28,14 +28,18 @@ type UsageAggregate struct {
 }
 
 type UsageReport struct {
-	Days       int              `json:"days"`
-	From       time.Time        `json:"from"`
-	To         time.Time        `json:"to"`
-	Totals     []UsageAggregate `json:"totals"`
-	Daily      []UsageAggregate `json:"daily"`
-	ByModel    []UsageAggregate `json:"by_model"`
-	ByProvider []UsageAggregate `json:"by_provider"`
-	ByTag      []UsageAggregate `json:"by_tag"`
+	Days           int              `json:"days"`
+	From           time.Time        `json:"from"`
+	To             time.Time        `json:"to"`
+	Totals         []UsageAggregate `json:"totals"`
+	Daily          []UsageAggregate `json:"daily"`
+	ByModel        []UsageAggregate `json:"by_model"`
+	ByProvider     []UsageAggregate `json:"by_provider"`
+	ByTag          []UsageAggregate `json:"by_tag"`
+	ByKey          []UsageAggregate `json:"by_key"`
+	ByUser         []UsageAggregate `json:"by_user"`
+	ByTeam         []UsageAggregate `json:"by_team"`
+	ByOrganization []UsageAggregate `json:"by_organization"`
 }
 
 type UsageReportQuery struct {

@@ -12,12 +12,16 @@ import (
 func TestClickHouseUsageReporterBuildsBoundedReport(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("query")
-		if !strings.Contains(query, "{from:UInt64}") || !strings.Contains(query, "{to:UInt64}") || r.URL.Query().Get("param_from") != "1785067200" || r.URL.Query().Get("param_to") != "1787659200" || !strings.Contains(query, "safe_db.safe_events AS usage") || !strings.Contains(query, "provider_id != ''") || !strings.Contains(query, "substring(pricing_key, position(pricing_key, '/') + 1)") || !strings.Contains(query, "startsWith(model, concat(provider_endpoint_name, '-'))") || !strings.Contains(query, "countIf(cache_status = 'hit')") || !strings.Contains(query, "ARRAY JOIN if(empty(tags), ['Untagged'], tags)") || !strings.Contains(query, "sum(usage.cost) AS cost") || strings.Contains(query, "sum(cost) / count()") || strings.Contains(query, "token_hash") {
+		if !strings.Contains(query, "{from:UInt64}") || !strings.Contains(query, "{to:UInt64}") || r.URL.Query().Get("param_from") != "1785067200" || r.URL.Query().Get("param_to") != "1787659200" || !strings.Contains(query, "safe_db.safe_events AS usage") || !strings.Contains(query, "provider_id != ''") || !strings.Contains(query, "substring(pricing_key, position(pricing_key, '/') + 1)") || !strings.Contains(query, "startsWith(model, concat(provider_endpoint_name, '-'))") || !strings.Contains(query, "countIf(cache_status = 'hit')") || !strings.Contains(query, "ARRAY JOIN if(empty(tags), ['Untagged'], tags)") || !strings.Contains(query, "'key' AS kind") || !strings.Contains(query, "'user' AS kind") || !strings.Contains(query, "'team' AS kind") || !strings.Contains(query, "'organization' AS kind") || !strings.Contains(query, "if(api_key_fingerprint = '', 'Unassigned', api_key_fingerprint)") || !strings.Contains(query, "sum(usage.cost) AS cost") || strings.Contains(query, "sum(cost) / count()") || strings.Contains(query, "token_hash") {
 			t.Fatalf("unsafe report query: %s", query)
 		}
 		_, _ = w.Write([]byte("{\"kind\":\"total\",\"date\":\"\",\"name\":\"\",\"currency\":\"USD\",\"requests\":2,\"errors\":1,\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15,\"cost\":0.25,\"avg_latency_ms\":12.5}\n" +
 			"{\"kind\":\"model\",\"date\":\"\",\"name\":\"m1\",\"currency\":\"USD\",\"requests\":2,\"errors\":1,\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15,\"cost\":0.25,\"avg_latency_ms\":12.5}\n" +
-			"{\"kind\":\"tag\",\"date\":\"\",\"name\":\"production\",\"currency\":\"USD\",\"requests\":2,\"errors\":1,\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15,\"cost\":0.25,\"avg_latency_ms\":12.5}\n"))
+			"{\"kind\":\"tag\",\"date\":\"\",\"name\":\"production\",\"currency\":\"USD\",\"requests\":2,\"errors\":1,\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15,\"cost\":0.25,\"avg_latency_ms\":12.5}\n" +
+			"{\"kind\":\"key\",\"date\":\"\",\"name\":\"key-1\",\"currency\":\"USD\",\"requests\":2,\"errors\":1,\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15,\"cost\":0.25,\"avg_latency_ms\":12.5}\n" +
+			"{\"kind\":\"user\",\"date\":\"\",\"name\":\"user-1\",\"currency\":\"USD\",\"requests\":2,\"errors\":1,\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15,\"cost\":0.25,\"avg_latency_ms\":12.5}\n" +
+			"{\"kind\":\"team\",\"date\":\"\",\"name\":\"team-1\",\"currency\":\"USD\",\"requests\":2,\"errors\":1,\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15,\"cost\":0.25,\"avg_latency_ms\":12.5}\n" +
+			"{\"kind\":\"organization\",\"date\":\"\",\"name\":\"org-1\",\"currency\":\"USD\",\"requests\":2,\"errors\":1,\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15,\"cost\":0.25,\"avg_latency_ms\":12.5}\n"))
 	}))
 	defer server.Close()
 	reporter, err := NewClickHouseUsageReporter(Settings{UsageEventsEnabled: true, ClickHouseURL: server.URL, ClickHouseDatabase: "safe_db", ClickHouseUsageEventsTable: "safe_events"})
@@ -26,7 +30,7 @@ func TestClickHouseUsageReporterBuildsBoundedReport(t *testing.T) {
 	}
 	reporter.now = func() time.Time { return time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC) }
 	report, err := reporter.Report(context.Background(), 30)
-	if err != nil || len(report.Totals) != 1 || report.Totals[0].TotalTokens != 15 || len(report.ByModel) != 1 || len(report.ByTag) != 1 || report.ByTag[0].Name != "production" {
+	if err != nil || len(report.Totals) != 1 || report.Totals[0].TotalTokens != 15 || len(report.ByModel) != 1 || len(report.ByTag) != 1 || report.ByTag[0].Name != "production" || len(report.ByKey) != 1 || report.ByKey[0].Name != "key-1" || len(report.ByUser) != 1 || len(report.ByTeam) != 1 || len(report.ByOrganization) != 1 {
 		t.Fatalf("report=%+v err=%v", report, err)
 	}
 }
@@ -73,5 +77,19 @@ func TestClickHouseUsageReporterUsesParameterizedScope(t *testing.T) {
 	}
 	if _, err := reporter.ReportScoped(context.Background(), 7, UsageScope{Type: "provider", ID: "x"}); err == nil {
 		t.Fatal("unsupported customer scope accepted")
+	}
+}
+
+func TestClickHouseUsageReporterUsesNonSecretKeyFingerprintScope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		if !strings.Contains(query, "api_key_fingerprint = {scope_id:String}") || strings.Contains(query, "credential_id = {scope_id:String}") || r.URL.Query().Get("param_scope_id") != "key-1" {
+			t.Fatalf("key scope did not use the ClickHouse fingerprint column: query=%q params=%v", query, r.URL.Query())
+		}
+	}))
+	defer server.Close()
+	reporter, _ := NewClickHouseUsageReporter(Settings{UsageEventsEnabled: true, ClickHouseURL: server.URL, ClickHouseDatabase: "db", ClickHouseUsageEventsTable: "events"})
+	if _, err := reporter.ReportScoped(context.Background(), 7, UsageScope{Type: "key", ID: "key-1"}); err != nil {
+		t.Fatal(err)
 	}
 }

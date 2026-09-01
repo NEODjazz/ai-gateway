@@ -31,14 +31,18 @@ type UsageAggregate struct {
 }
 
 type UsageReport struct {
-	Days       int              `json:"days"`
-	From       time.Time        `json:"from"`
-	To         time.Time        `json:"to"`
-	Totals     []UsageAggregate `json:"totals"`
-	Daily      []UsageAggregate `json:"daily"`
-	ByModel    []UsageAggregate `json:"by_model"`
-	ByProvider []UsageAggregate `json:"by_provider"`
-	ByTag      []UsageAggregate `json:"by_tag"`
+	Days           int              `json:"days"`
+	From           time.Time        `json:"from"`
+	To             time.Time        `json:"to"`
+	Totals         []UsageAggregate `json:"totals"`
+	Daily          []UsageAggregate `json:"daily"`
+	ByModel        []UsageAggregate `json:"by_model"`
+	ByProvider     []UsageAggregate `json:"by_provider"`
+	ByTag          []UsageAggregate `json:"by_tag"`
+	ByKey          []UsageAggregate `json:"by_key"`
+	ByUser         []UsageAggregate `json:"by_user"`
+	ByTeam         []UsageAggregate `json:"by_team"`
+	ByOrganization []UsageAggregate `json:"by_organization"`
 }
 
 type UsageReporter interface {
@@ -115,7 +119,7 @@ func (r *ClickHouseUsageReporter) ReportQuery(ctx context.Context, query UsageRe
 		return UsageReport{}, errors.New("invalid usage scope")
 	}
 	days := int(query.To.Sub(query.From).Hours()/24 + 0.999999)
-	report := UsageReport{Days: days, From: query.From.UTC(), To: query.To.UTC(), Totals: []UsageAggregate{}, Daily: []UsageAggregate{}, ByModel: []UsageAggregate{}, ByProvider: []UsageAggregate{}, ByTag: []UsageAggregate{}}
+	report := UsageReport{Days: days, From: query.From.UTC(), To: query.To.UTC(), Totals: []UsageAggregate{}, Daily: []UsageAggregate{}, ByModel: []UsageAggregate{}, ByProvider: []UsageAggregate{}, ByTag: []UsageAggregate{}, ByKey: []UsageAggregate{}, ByUser: []UsageAggregate{}, ByTeam: []UsageAggregate{}, ByOrganization: []UsageAggregate{}}
 	statement := usageReportQuery(r.table, query.Scope.Type, query.Model != "", query.Provider != "", query.Tag != "")
 	parameters := url.Values{"output_format_json_quote_64bit_integers": {"0"}, "query": {statement}, "param_from": {strconv.FormatInt(query.From.UTC().Unix(), 10)}, "param_to": {strconv.FormatInt(query.To.UTC().Unix(), 10)}}
 	if query.Scope.Type != "" {
@@ -167,6 +171,14 @@ func (r *ClickHouseUsageReporter) ReportQuery(ctx context.Context, query UsageRe
 			report.ByProvider = append(report.ByProvider, row.UsageAggregate)
 		case "tag":
 			report.ByTag = append(report.ByTag, row.UsageAggregate)
+		case "key":
+			report.ByKey = append(report.ByKey, row.UsageAggregate)
+		case "user":
+			report.ByUser = append(report.ByUser, row.UsageAggregate)
+		case "team":
+			report.ByTeam = append(report.ByTeam, row.UsageAggregate)
+		case "organization":
+			report.ByOrganization = append(report.ByOrganization, row.UsageAggregate)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -177,7 +189,7 @@ func (r *ClickHouseUsageReporter) ReportQuery(ctx context.Context, query UsageRe
 
 func usageReportQuery(table string, scopeType string, filterModel, filterProvider, filterTag bool) string {
 	where := "timestamp_unix >= {from:UInt64} AND timestamp_unix < {to:UInt64} AND phase IN ('commit','cancel')"
-	columns := map[string]string{"key": "credential_id", "user": "user_id", "team": "team_id"}
+	columns := map[string]string{"key": "api_key_fingerprint", "user": "user_id", "team": "team_id"}
 	if column := columns[scopeType]; column != "" {
 		where += " AND " + column + " = {scope_id:String}"
 	}
@@ -200,6 +212,10 @@ UNION ALL SELECT 'day' AS kind, toString(toDate(parseDateTimeBestEffort(timestam
 UNION ALL SELECT 'model' AS kind, '' AS date, %s AS name, currency, %s FROM %s AS usage WHERE %s GROUP BY name,currency
 UNION ALL SELECT 'provider' AS kind, '' AS date, %s AS name, currency, %s FROM %s AS usage WHERE %s GROUP BY name,currency
 UNION ALL SELECT 'tag' AS kind, '' AS date, tag AS name, currency, %s FROM %s AS usage ARRAY JOIN if(empty(tags), ['Untagged'], tags) AS tag WHERE %s GROUP BY name,currency
+UNION ALL SELECT 'key' AS kind, '' AS date, if(api_key_fingerprint = '', 'Unassigned', api_key_fingerprint) AS name, currency, %s FROM %s AS usage WHERE %s GROUP BY name,currency
+UNION ALL SELECT 'user' AS kind, '' AS date, if(user_id = '', 'Unassigned', user_id) AS name, currency, %s FROM %s AS usage WHERE %s GROUP BY name,currency
+UNION ALL SELECT 'team' AS kind, '' AS date, if(team_id = '', 'Unassigned', team_id) AS name, currency, %s FROM %s AS usage WHERE %s GROUP BY name,currency
+UNION ALL SELECT 'organization' AS kind, '' AS date, if(organization_id = '', 'Unassigned', organization_id) AS name, currency, %s FROM %s AS usage WHERE %s GROUP BY name,currency
 ORDER BY kind,date,cost DESC,total_tokens DESC
-FORMAT JSONEachRow`, metrics, table, where, metrics, table, where, canonicalUsageModelExpression, metrics, table, where, canonicalUsageProviderExpression, metrics, table, where, metrics, table, where)
+FORMAT JSONEachRow`, metrics, table, where, metrics, table, where, canonicalUsageModelExpression, metrics, table, where, canonicalUsageProviderExpression, metrics, table, where, metrics, table, where, metrics, table, where, metrics, table, where, metrics, table, where, metrics, table, where)
 }
