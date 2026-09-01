@@ -35,7 +35,7 @@ function recordsFrom(payload: unknown): Row[] {
   return [];
 }
 
-export function ResourcePage({ config }: { config: ResourceConfig }) {
+export function ResourcePage({ config, readOnly = false, allowCreate = true }: { config: ResourceConfig; readOnly?: boolean; allowCreate?: boolean }) {
   const { client } = useAuth();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,8 +61,8 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
     window.addEventListener("control-plane-conflict", refresh);
     return () => window.removeEventListener("control-plane-conflict", refresh);
   }, [load]);
-  const canCreate = Boolean(config.fields && (config.createPath || config.itemPath));
-  const actions = useMemo(() => config.fields || config.deletePath || config.operations?.length ? (row: Row) => {
+  const canCreate = !readOnly && allowCreate && Boolean(config.fields && (config.createPath || config.itemPath));
+  const actions = useMemo(() => !readOnly && (config.fields || config.deletePath || config.operations?.length) ? (row: Row) => {
     const id = String(row[idKey]);
     const items: ActionMenuItem[] = (config.operations || []).map((operation) => ({ label: operation.label, onSelect: async () => {
       setError(""); setOperationResult("");
@@ -77,7 +77,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
       try { await client.request(config.deletePath!(id), { method: "DELETE" }); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not delete record"); }
     }});
     return <ActionsMenu label={`Actions for ${id}`} items={items} />;
-  } : undefined, [client, config.deletePath, config.fields, config.operations, idKey, load]);
+  } : undefined, [client, config.deletePath, config.fields, config.operations, idKey, load, readOnly]);
   const createButton = canCreate ? <button onClick={() => setEditing(null)}>{config.createLabel || "Add"}</button> : undefined;
   return <><PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} actions={config.managedTable ? undefined : <><button className="secondary" onClick={() => void load()}>Refresh</button>{createButton}</>} />{error && <ErrorState message={error} retry={() => void load()} />}{operationResult && <div className="operation-result" role="status">{operationResult}</div>}{loading ? <LoadingState /> : config.managedTable ? <ManagedDataTable rows={rows} columns={config.columns} actions={actions} primaryAction={createButton} onRefresh={load} searchPlaceholder={`Search ${config.title.toLowerCase()}`} /> : <DataTable rows={rows} columns={config.columns} actions={actions} />}{editing !== undefined && config.fields && <ResourceForm title={`${editing ? "Edit" : "Add"} ${config.title}`} fields={config.fields} initial={editing || undefined} loadOptions={loadOptions} onClose={() => setEditing(undefined)} onSubmit={async (value) => {
     const isEdit = Boolean(editing);

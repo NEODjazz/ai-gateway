@@ -34,4 +34,12 @@ describe("APIClient", () => {
     await expect(new APIClient(() => "x").request("/resource")).rejects.toThrow("Retry");
     expect(listener).toHaveBeenCalledOnce();
   });
+
+  it("emits a session-expired event on unauthorized responses", async () => {
+    const listener = vi.fn();
+    window.addEventListener("control-plane-session-expired", listener, { once: true });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: { code: "unauthorized", message: "Expired" } }), { status: 401 }));
+    await expect(new APIClient(() => "x").request("/resource")).rejects.toThrow("Expired");
+    expect(listener).toHaveBeenCalledOnce();
+  });
 });

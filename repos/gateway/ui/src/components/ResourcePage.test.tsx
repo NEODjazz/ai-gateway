@@ -39,6 +39,24 @@ describe("ResourcePage", () => {
     expect(screen.getByLabelText("Rows per page")).toBeInTheDocument();
   });
 
+  it("keeps scoped directory views read-only", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ data: [{ id: "one", name: "One" }] }), { status: 200 }));
+    sessionStorage.setItem("ai-gateway.admin-token", "test-token");
+    render(<AuthProvider><ResourcePage config={{ ...config, managedTable: true }} readOnly /></AuthProvider>);
+    expect(await screen.findByText("One")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Actions for one" })).not.toBeInTheDocument();
+  });
+
+  it("can hide create while retaining scoped row actions", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ data: [{ id: "one", name: "One" }] }), { status: 200 }));
+    sessionStorage.setItem("ai-gateway.admin-token", "test-token");
+    render(<AuthProvider><ResourcePage config={{ ...config, managedTable: true }} allowCreate={false} /></AuthProvider>);
+    expect(await screen.findByText("One")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Actions for one" })).toBeInTheDocument();
+  });
+
   it("renders a bounded loading error and retries", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "Unavailable" } }), { status: 503 })).mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }));
     renderPage();

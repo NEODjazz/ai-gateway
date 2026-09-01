@@ -16,11 +16,21 @@ import { DeploymentsPage } from "../pages/DeploymentsPage";
 import { RouterSettingsPage } from "../pages/RouterSettingsPage";
 import { VirtualKeysPage } from "../pages/VirtualKeysPage";
 import { resourceConfigs } from "../pages/resourceConfigs";
+import { useAuth, type ConsoleCapability } from "../auth/AuthContext";
 
-export type AppRoute = { path: string; title: string; group: "Monitor" | "Manage" | "Access Control" | "AI Hub" | "Govern" | "System"; element: ReactNode; available: boolean };
+export type AppRoute = { path: string; title: string; group: "Monitor" | "Manage" | "Access Control" | "AI Hub" | "Govern" | "System"; element: ReactNode; available: boolean; capability?: ConsoleCapability };
 
 const readOnly = (title: string, description: string, path: string, columns: ResourceConfig["columns"]): ReactNode => <ResourcePage config={{ eyebrow: "Operations", title, description, listPath: path, columns }} />;
 const unavailable = (title: string, description: string): ReactNode => <CapabilityPage title={title} description={description} />;
+
+function UsersPage() {
+  const { hasCapability } = useAuth();
+  return <ResourcePage config={resourceConfigs.users} readOnly={!hasCapability("admin")} />;
+}
+
+export function routeCapability(route: AppRoute): ConsoleCapability {
+  return route.capability || "admin";
+}
 
 export const appRoutes: AppRoute[] = [
   { path: "/overview", title: "Overview", group: "Monitor", element: <OverviewPage />, available: true },
@@ -28,7 +38,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/customers", title: "Customer insights", group: "Monitor", element: <CustomerInsightsPage />, available: true },
   { path: "/logs", title: "Logs", group: "Monitor", element: <LogsPage />, available: true },
   { path: "/routing", title: "Routing diagnostics", group: "Monitor", element: <RoutingPage />, available: true },
-  { path: "/playground", title: "Playground", group: "Monitor", element: <PlaygroundPage />, available: true },
+  { path: "/playground", title: "Playground", group: "Monitor", element: <PlaygroundPage />, available: true, capability: "inference" },
 
   { path: "/api-keys", title: "Virtual keys", group: "Manage", element: <VirtualKeysPage />, available: true },
   { path: "/models", title: "Models", group: "Manage", element: <ModelCatalogPage />, available: true },
@@ -39,8 +49,8 @@ export const appRoutes: AppRoute[] = [
   { path: "/model-groups", title: "Model groups", group: "Manage", element: <ResourcePage config={resourceConfigs.modelGroups} />, available: true },
 
   { path: "/organizations", title: "Organizations", group: "Access Control", element: <OrganizationsPage />, available: true },
-  { path: "/teams", title: "Teams", group: "Access Control", element: <TeamsPage />, available: true },
-  { path: "/users", title: "Users", group: "Access Control", element: <ResourcePage config={resourceConfigs.users} />, available: true },
+  { path: "/teams", title: "Teams", group: "Access Control", element: <TeamsPage />, available: true, capability: "team_directory" },
+  { path: "/users", title: "Users", group: "Access Control", element: <UsersPage />, available: true, capability: "team_directory" },
   { path: "/access-groups", title: "Access groups", group: "Access Control", element: <ResourcePage config={resourceConfigs.accessGroups} />, available: true },
   { path: "/projects", title: "Projects", group: "Access Control", element: <ResourcePage config={resourceConfigs.projects} />, available: true },
 
@@ -61,6 +71,6 @@ export const appRoutes: AppRoute[] = [
   { path: "/cache", title: "Caching", group: "System", element: <EndpointPage eyebrow="Performance" title="Cache diagnostics" description="Exact and semantic cache counters and bounded configuration metadata." path="/admin/v1/cache/diagnostics" />, available: true },
   { path: "/logging", title: "Logging & alerts", group: "System", element: <ResourcePage config={resourceConfigs.logging} />, available: true },
   { path: "/router-settings", title: "Router settings", group: "System", element: <RouterSettingsPage />, available: true },
-  { path: "/api-reference", title: "API reference", group: "System", element: <CapabilityPage title="API reference" description="The embedded OpenAPI and Swagger UI are available at /docs/." status="Open /docs/ in a new tab for the interactive contract." available />, available: true },
+  { path: "/api-reference", title: "API reference", group: "System", element: <CapabilityPage title="API reference" description="The embedded OpenAPI and Swagger UI are available at /docs/." status="Open /docs/ in a new tab for the interactive contract." available />, available: true, capability: "api_docs" },
   { path: "/settings", title: "Settings", group: "System", element: <CapabilityPage title="Settings" description="Runtime settings remain environment-managed to preserve auditable deployment configuration." status="Environment-managed configuration" available />, available: true }
 ];

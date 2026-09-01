@@ -18,5 +18,8 @@ function AssociationForm({ kind }: { kind: "team-member" | "organization-team" }
   return <section className="section-block"><h2>{kind === "team-member" ? "Add team member" : "Assign team to organization"}</h2><form className="filter-card" onSubmit={submit}><label>{kind === "team-member" ? "Team ID" : "Organization ID"}<input required value={parent} onChange={(event) => setParent(event.target.value)} /></label><label>{kind === "team-member" ? "User ID" : "Team ID"}<input required value={child} onChange={(event) => setChild(event.target.value)} /></label>{kind === "team-member" && <label>Roles<input value={roles} onChange={(event) => setRoles(event.target.value)} /></label>}<button>Assign</button></form>{status && <div className="operation-result" role="status">{status}</div>}</section>;
 }
 
-export function TeamsPage() { return <><ResourcePage config={resourceConfigs.teams} /><AssociationForm kind="team-member" /></>; }
+export function TeamsPage() {
+  const { hasCapability } = useAuth();
+  return <><ResourcePage config={resourceConfigs.teams} allowCreate={hasCapability("admin")} /><AssociationForm kind="team-member" /></>;
+}
 export function OrganizationsPage() { return <><ResourcePage config={resourceConfigs.organizations} /><AssociationForm kind="organization-team" /></>; }

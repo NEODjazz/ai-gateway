@@ -34,6 +34,9 @@ export class APIClient {
       if (response.status === 409 && code === "revision_conflict") {
         window.dispatchEvent(new CustomEvent("control-plane-conflict"));
       }
+      if (response.status === 401) {
+        window.dispatchEvent(new CustomEvent("control-plane-session-expired"));
+      }
       throw new APIError(response.status, code, message);
     }
     if (response.status === 204) return undefined as T;

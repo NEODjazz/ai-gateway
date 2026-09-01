@@ -246,9 +246,14 @@ models, providers, and tags from their configured registries instead of
 requiring operators to copy opaque IDs. Every mutation uses
 the same authenticated admin API and append-only audit path as direct API
 clients. The UI has no CDN or runtime package dependency and is protected by a
-strict same-origin CSP. Sign in with a bearer credential carrying the `admin`
-role; the credential is stored only in the current tab's `sessionStorage` and
-is sent exclusively to the gateway's existing authenticated APIs.
+strict same-origin CSP. Before a credential is stored, `GET /admin/v1/session`
+validates it and returns only bounded identity, scope, and console-capability
+metadata. Navigation is filtered by those capabilities: global management pages
+require `admin`, team-directory pages also support the scoped `team_admin` role,
+and inference/API-reference pages remain available to otherwise valid gateway
+credentials. Backend RBAC remains authoritative for every request. The bearer
+credential is stored only in the current tab's `sessionStorage` and is sent
+exclusively to same-origin gateway APIs.
 
 The UI is enabled by default. Disable it with `ADMIN_UI_ENABLED=false` or Helm
 `gateway.adminUI.enabled=false`. Static UI pages are intentionally accessible

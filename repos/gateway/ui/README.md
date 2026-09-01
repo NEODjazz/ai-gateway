@@ -1,9 +1,17 @@
 # AI Gateway admin console
 
 The console is a route-based React application embedded in the gateway binary at
-`/ui/`. It deliberately uses only the gateway's documented admin APIs and keeps
-the admin bearer token in `sessionStorage`, so it is cleared when the browser tab
-is closed.
+`/ui/`. It deliberately uses only documented gateway APIs. A bearer credential
+is validated through `/admin/v1/session` before it is placed in
+`sessionStorage`, so invalid values never open the console and the credential is
+cleared when the browser tab closes.
+
+The session response contains bounded identity/scope metadata and explicit
+capabilities only. Global management routes require `admin`; the scoped team and
+user directory is available to `team_admin`; Playground and API Reference remain
+available to other authenticated credentials. Hidden navigation is a UX guard,
+while backend RBAC remains authoritative for every operation. The sidebar shows
+the authenticated user, roles, and optional team without exposing a token.
 
 ## Development
 

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.30
+  version: 0.1.31
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -279,6 +279,20 @@ paths:
         '429': {$ref: '#/components/responses/RateLimited'}
         '451': {$ref: '#/components/responses/ContentRejected'}
         '502': {$ref: '#/components/responses/ProviderFailed'}
+  /admin/v1/session:
+    get:
+      operationId: getAdminSession
+      tags: [Identity]
+      summary: Validate the current console credential
+      description: Returns bounded identity, scope, and UI capability metadata. The bearer token, provider credentials, prompts, and responses are never returned.
+      responses:
+        '200':
+          description: Authenticated console session
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminSession'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '502': {$ref: '#/components/responses/ModuleFailed'}
   /admin/v1/keys:
     get:
       operationId: listVirtualKeys
@@ -1702,6 +1716,23 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    AdminSession:
+      type: object
+      additionalProperties: false
+      required: [roles, allowed_models, allowed_tools, capabilities]
+      properties:
+        user_id: {type: string, maxLength: 256}
+        team_id: {type: string, maxLength: 256}
+        organization_id: {type: string, maxLength: 256}
+        credential_id: {type: string, maxLength: 256}
+        credential_alias: {type: string, maxLength: 256}
+        roles: {type: array, uniqueItems: true, items: {type: string, maxLength: 128}}
+        allowed_models: {type: array, uniqueItems: true, items: {type: string, maxLength: 256}}
+        allowed_tools: {type: array, uniqueItems: true, items: {type: string, maxLength: 256}}
+        capabilities:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [admin, api_docs, inference, team_directory]}
     AuditEvent:
       type: object
       additionalProperties: false

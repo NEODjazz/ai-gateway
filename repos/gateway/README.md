@@ -13,6 +13,7 @@ go run ./cmd/gateway
 - `GET /healthz`
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
+- `GET /admin/v1/session`
 - `GET /admin/v1/usage/report`
 - `GET /admin/v1/request-logs`
 - `GET /admin/v1/request-logs/groups?dimension=session|trace`
@@ -56,3 +57,6 @@ user, team, and organization. The report endpoint accepts bounded, typed
 filters for each dimension so the UI drill-down is calculated in ClickHouse.
 Provider prompt-cache read and write tokens are carried as separate counters in
 usage reports and request logs, independently from gateway cache-hit counts.
+The console session endpoint validates the bearer credential through the normal
+auth pipeline and returns only safe identity/scope metadata plus explicit UI
+capabilities. It never echoes the bearer token or provider credentials.

@@ -28,6 +28,9 @@ button:disabled { cursor: wait; opacity: .55; }
 .nav-dot { width: 7px; height: 7px; border-radius: 50%; background: #7b8b96; }
 .sidebar-footer { margin-top: auto; border-top: 1px solid #243541; padding: 16px 8px 0; display: grid; gap: 10px; }
 .sidebar-footer a { color: #a9bbc7; text-decoration: none; font-size: 14px; }
+.sidebar-account { min-width: 0; display: grid; gap: 2px; color: #eef6f8; }
+.sidebar-account strong, .sidebar-account small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-account small { color: #91a7b4; }
 .content { padding: 36px clamp(24px, 4vw, 64px) 64px; min-width: 0; }
 .page-header { display: flex; justify-content: space-between; gap: 28px; align-items: flex-start; margin-bottom: 26px; }
 .page-header h1 { font-size: 28px; line-height: 1.15; margin: 4px 0 8px; }

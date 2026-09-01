@@ -1,4 +1,4 @@
-import { appRoutes } from "./routes";
+import { appRoutes, routeCapability } from "./routes";
 
 describe("dashboard route manifest", () => {
   it("contains exactly 36 route-based pages", () => expect(appRoutes).toHaveLength(36));
@@ -23,5 +23,11 @@ describe("dashboard route manifest", () => {
   it("combines request and audit logs under Monitor", () => {
     expect(appRoutes.find((route) => route.path === "/logs")).toMatchObject({ title: "Logs", group: "Monitor", available: true });
     expect(appRoutes.some((route) => route.path === "/audit" || route.path === "/request-logs")).toBe(false);
+  });
+  it("limits non-admin navigation to explicitly supported capabilities", () => {
+    expect(routeCapability(appRoutes.find((route) => route.path === "/providers")!)).toBe("admin");
+    expect(routeCapability(appRoutes.find((route) => route.path === "/teams")!)).toBe("team_directory");
+    expect(routeCapability(appRoutes.find((route) => route.path === "/playground")!)).toBe("inference");
+    expect(routeCapability(appRoutes.find((route) => route.path === "/api-reference")!)).toBe("api_docs");
   });
 });
