@@ -119,6 +119,30 @@ func TestControlPlaneRollsBackMutationWhenPersistenceFails(t *testing.T) {
 	}
 }
 
+func TestControlPlaneRejectsDeploymentCredentialFromAnotherProvider(t *testing.T) {
+	store := &memoryControlPlaneStore{}
+	key := []byte("stable-provider-boundary-key")
+	runtime, err := NewWithError(Config{CredentialEncryptionKey: key, ControlPlaneStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := runtime.(*Router)
+	for _, item := range []ManagedProvider{{ID: "first", Type: "demo", Enabled: true}, {ID: "second", Type: "demo", Enabled: true}} {
+		if _, err := router.CreateProvider(item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "first-key", ProviderID: "first", Secret: "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	store.snapshot.Deployments = append(store.snapshot.Deployments, ModelDeployment{ID: "invalid", ProviderID: "second", CredentialID: "first-key", Models: []string{"model"}, Weight: 1, Enabled: true})
+	store.mu.Unlock()
+	if _, err := NewWithError(Config{CredentialEncryptionKey: key, ControlPlaneStore: store}); err == nil || !strings.Contains(err.Error(), "credential bound to another provider") {
+		t.Fatalf("invalid persisted credential/provider relationship was accepted: %v", err)
+	}
+}
+
 func TestControlPlaneSynchronizesAdminStateAndGuardrails(t *testing.T) {
 	store := &memoryControlPlaneStore{}
 	config := Config{CredentialEncryptionKey: []byte("stable-key"), ControlPlaneStore: store, ControlPlaneRefresh: time.Nanosecond}

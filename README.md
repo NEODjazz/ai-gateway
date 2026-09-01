@@ -178,8 +178,15 @@ deployment counts, lets the operator select a matching stored credential for a
 connection test or discovery, and passes that selection into Model Onboarding.
 The backend rejects credentials bound to a different provider. Probe results
 contain only status, latency and model count; discovery returns model identifiers
-without exposing the selected secret. A credential secret is accepted only when
-created or rotated; list and mutation responses contain metadata only.
+without exposing the selected secret. A credential secret is accepted only by
+credential write operations and is never returned; the UI supplies it only for
+creation or explicit rotation. List and mutation responses contain metadata only. The
+Credentials route separates metadata editing from an audited secret-rotation
+operation, shows non-secret provider/deployment relationships, and never
+repopulates secret fields. Metadata-only updates preserve the encrypted value.
+Provider-bound credentials can be used only by matching provider probes and
+deployments; shared credentials remain available as an explicit compatibility
+option.
 The guided Model Onboarding route performs a server-side dry run and an
 optimistic atomic apply, so catalog, deployment, and model-group changes cannot
 be partially published. Set a stable

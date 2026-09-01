@@ -34,6 +34,43 @@ func (h Handler) UpdateCredential(w http.ResponseWriter, r *http.Request) {
 	h.mutateCredential(w, r, r.PathValue("id"), "credential.update")
 }
 
+func (h Handler) RotateCredential(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.authorizeAdmin(w, r)
+	if !ok {
+		return
+	}
+	controller, ok := h.credentialController()
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "credential management is unavailable")
+		return
+	}
+	var input struct {
+		Secret string `json:"secret"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || decoder.Decode(&struct{}{}) != io.EOF || input.Secret == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid credential rotation")
+		return
+	}
+	id := r.PathValue("id")
+	audit := managementAudit(req)
+	event := AuditEvent{Action: "credential.rotate", TargetType: "credential", TargetID: id}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	saved, err := controller.RotateCredential(id, input.Secret)
+	input.Secret = ""
+	if err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeCredentialManagementError(w, err)
+		return
+	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
+	writeJSON(w, http.StatusOK, saved)
+}
+
 func (h Handler) mutateCredential(w http.ResponseWriter, r *http.Request, id, action string) {
 	req, ok := h.authorizeAdmin(w, r)
 	if !ok {

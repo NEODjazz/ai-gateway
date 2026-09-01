@@ -67,6 +67,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/admin/v1/credentials"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListCredentials) }},
 	{RouteContract{http.MethodPost, "/admin/v1/credentials"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateCredential) }},
 	{RouteContract{http.MethodPut, "/admin/v1/credentials/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateCredential) }},
+	{RouteContract{http.MethodPost, "/admin/v1/credentials/{id}/rotate"}, func(h Handler) http.Handler { return http.HandlerFunc(h.RotateCredential) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/credentials/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteCredential) }},
 	{RouteContract{http.MethodPut, "/admin/v1/model-catalog"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutModelCatalog) }},
 	{RouteContract{http.MethodGet, "/admin/v1/ai-hub/models"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetAIHubModels) }},

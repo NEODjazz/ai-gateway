@@ -188,6 +188,12 @@ textarea { resize: vertical; }
 .provider-discovery-heading { display: flex; justify-content: space-between; gap: 16px; margin-top: 18px; }
 .provider-model-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; max-height: 340px; overflow: auto; margin-top: 12px; padding: 10px; border: 1px solid #d7dfe5; border-radius: 9px; background: #fafbfc; }
 .provider-model-list code { padding: 8px 9px; overflow-wrap: anywhere; border-radius: 6px; background: white; color: #263846; }
+.credential-stats { margin-top: 2px; }
+.credential-form-modal { width: min(760px, 100%); }
+.credential-form { display: grid; gap: 14px; }
+.credential-form > label { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 18px; align-items: center; }
+.credential-write-only-notice { margin: 2px 0 0 188px; padding: 11px 12px; border: 1px solid #f0d8b9; border-radius: 8px; background: #fff7ec; color: #8b531f; font-size: 13px; }
+.credential-form-error, .credential-form-actions { margin-left: 188px; }
 .usage-bars { display: grid; gap: 10px; }
 .usage-bar-row { display: grid; grid-template-columns: minmax(105px, auto) minmax(90px, 1fr) minmax(70px, auto); align-items: center; gap: 10px; font-size: 12px; }
 .usage-bar-row > span { color: #667683; }
@@ -204,4 +210,4 @@ textarea { resize: vertical; }
 .muted { color: #89959e; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
 @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar { position: static; height: auto; } .sidebar nav { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 18px; } .content { padding: 24px 18px 48px; } .split-grid, .filter-card, .candidate-row, .retry-grid { grid-template-columns: 1fr; } .wizard-steps { grid-template-columns: repeat(2, 1fr); } .key-toolbar { align-items: stretch; flex-direction: column; } .key-toolbar-right { justify-content: flex-start; } }
-@media (max-width: 600px) { .sidebar nav { grid-template-columns: 1fr; } .page-header { flex-direction: column; } .form-grid, .provider-model-list { grid-template-columns: 1fr; } .span-2 { grid-column: auto; } .key-toolbar-right { align-items: stretch; flex-wrap: wrap; } .key-search { width: 100%; } .key-form > label, .key-model-field { grid-template-columns: 1fr; gap: 4px; } .key-form > label > span, .key-model-field > span { padding-top: 0; } .key-form-error, .key-form .modal-actions { margin-left: 0; } .key-pagination, .key-pagination-summary { align-items: stretch; flex-wrap: wrap; justify-content: flex-start; } .key-pagination-navigation { margin-left: auto; } }
+@media (max-width: 600px) { .sidebar nav { grid-template-columns: 1fr; } .page-header { flex-direction: column; } .form-grid, .provider-model-list { grid-template-columns: 1fr; } .span-2 { grid-column: auto; } .key-toolbar-right { align-items: stretch; flex-wrap: wrap; } .key-search { width: 100%; } .key-form > label, .key-model-field, .credential-form > label { grid-template-columns: 1fr; gap: 4px; } .key-form > label > span, .key-model-field > span { padding-top: 0; } .key-form-error, .key-form .modal-actions, .credential-write-only-notice, .credential-form-error, .credential-form-actions { margin-left: 0; } .key-pagination, .key-pagination-summary { align-items: stretch; flex-wrap: wrap; justify-content: flex-start; } .key-pagination-navigation { margin-left: auto; } }

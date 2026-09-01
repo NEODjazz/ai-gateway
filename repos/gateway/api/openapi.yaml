@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.34
+  version: 0.1.35
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -783,7 +783,7 @@ paths:
       operationId: createProviderCredential
       tags: [Provider credentials]
       summary: Store an encrypted provider credential
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderCredentialInput'}}}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderCredentialCreateInput'}}}}
       responses:
         '201': {description: Credential metadata, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderCredential'}}}}
         '400': {$ref: '#/components/responses/InvalidRequest'}
@@ -791,11 +791,11 @@ paths:
         '403': {$ref: '#/components/responses/AdminRequired'}
   /admin/v1/credentials/{id}:
     put:
-      operationId: rotateProviderCredential
+      operationId: updateProviderCredential
       tags: [Provider credentials]
-      summary: Replace an encrypted provider credential
+      summary: Update credential metadata and optionally replace its secret
       parameters: [{$ref: '#/components/parameters/ModelDeploymentID'}]
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderCredentialInput'}}}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderCredentialUpdateInput'}}}}
       responses:
         '200': {description: Credential metadata, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderCredential'}}}}
         '400': {$ref: '#/components/responses/InvalidRequest'}
@@ -809,6 +809,20 @@ paths:
       parameters: [{$ref: '#/components/parameters/ModelDeploymentID'}]
       responses:
         '204': {description: Credential deleted}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /admin/v1/credentials/{id}/rotate:
+    post:
+      operationId: rotateProviderCredential
+      tags: [Provider credentials]
+      summary: Rotate a credential secret while preserving metadata
+      parameters: [{$ref: '#/components/parameters/ModelDeploymentID'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderCredentialRotationInput'}}}}
+      responses:
+        '200': {description: Credential metadata, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderCredential'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '404': {$ref: '#/components/responses/NotFound'}
@@ -2720,7 +2734,7 @@ components:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, anthropic]}
         base_url: {type: string, format: uri, maxLength: 2048}
         enabled: {type: boolean}
-    ProviderCredentialInput:
+    ProviderCredentialCreateInput:
       type: object
       additionalProperties: false
       required: [id, secret]
@@ -2728,6 +2742,20 @@ components:
         id: {type: string, minLength: 1, maxLength: 128}
         provider_id: {type: string, maxLength: 128}
         description: {type: string, maxLength: 512}
+        secret: {type: string, minLength: 1, maxLength: 32768, writeOnly: true}
+    ProviderCredentialUpdateInput:
+      type: object
+      additionalProperties: false
+      properties:
+        id: {type: string, minLength: 1, maxLength: 128, description: Ignored when the credential ID is present in the path.}
+        provider_id: {type: string, maxLength: 128, description: Empty makes the credential explicitly shared. A bound credential cannot be rebound while used by a deployment for another provider.}
+        description: {type: string, maxLength: 512}
+        secret: {type: string, minLength: 1, maxLength: 32768, writeOnly: true, description: Omit to preserve the current encrypted secret. Prefer the dedicated rotation operation when replacing it.}
+    ProviderCredentialRotationInput:
+      type: object
+      additionalProperties: false
+      required: [secret]
+      properties:
         secret: {type: string, minLength: 1, maxLength: 32768, writeOnly: true}
     ProviderCredential:
       type: object

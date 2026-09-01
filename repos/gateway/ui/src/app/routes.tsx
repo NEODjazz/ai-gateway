@@ -16,6 +16,7 @@ import { DeploymentsPage } from "../pages/DeploymentsPage";
 import { RouterSettingsPage } from "../pages/RouterSettingsPage";
 import { VirtualKeysPage } from "../pages/VirtualKeysPage";
 import { ProvidersPage } from "../pages/ProvidersPage";
+import { CredentialsPage } from "../pages/CredentialsPage";
 import { resourceConfigs } from "../pages/resourceConfigs";
 import { useAuth, type ConsoleCapability } from "../auth/AuthContext";
 
@@ -45,7 +46,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/models", title: "Models", group: "Manage", element: <ModelCatalogPage />, available: true },
   { path: "/model-onboarding", title: "Model onboarding", group: "Manage", element: <ModelOnboardingPage />, available: true },
   { path: "/providers", title: "Providers", group: "Manage", element: <ProvidersPage />, available: true },
-  { path: "/credentials", title: "Credentials", group: "Manage", element: <ResourcePage config={resourceConfigs.credentials} />, available: true },
+  { path: "/credentials", title: "Credentials", group: "Manage", element: <CredentialsPage />, available: true },
   { path: "/deployments", title: "Deployments", group: "Manage", element: <DeploymentsPage />, available: true },
   { path: "/model-groups", title: "Model groups", group: "Manage", element: <ResourcePage config={resourceConfigs.modelGroups} />, available: true },
 

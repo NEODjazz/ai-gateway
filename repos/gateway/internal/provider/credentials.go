@@ -33,6 +33,7 @@ type CredentialController interface {
 	ListCredentials(context.Context) []Credential
 	CreateCredential(CredentialInput) (Credential, error)
 	UpdateCredential(string, CredentialInput) (Credential, error)
+	RotateCredential(string, string) (Credential, error)
 	DeleteCredential(string) error
 }
 
@@ -90,14 +91,18 @@ func (r *Router) ListCredentials(ctx context.Context) []Credential {
 }
 
 func (r *Router) CreateCredential(input CredentialInput) (Credential, error) {
-	return r.storeCredential("", input)
+	return r.storeCredential("", input, false)
 }
 
 func (r *Router) UpdateCredential(id string, input CredentialInput) (Credential, error) {
-	return r.storeCredential(strings.TrimSpace(id), input)
+	return r.storeCredential(strings.TrimSpace(id), input, false)
 }
 
-func (r *Router) storeCredential(id string, input CredentialInput) (Credential, error) {
+func (r *Router) RotateCredential(id, secret string) (Credential, error) {
+	return r.storeCredential(strings.TrimSpace(id), CredentialInput{Secret: secret}, true)
+}
+
+func (r *Router) storeCredential(id string, input CredentialInput, preserveMetadata bool) (Credential, error) {
 	previous, unlock, err := r.beginControlMutation(context.Background())
 	if err != nil {
 		return Credential{}, err
@@ -112,29 +117,48 @@ func (r *Router) storeCredential(id string, input CredentialInput) (Credential, 
 	if id != "" {
 		input.ID = id
 	}
-	if input.ID == "" || len(input.ID) > 128 || len(input.ProviderID) > 128 || len(input.Description) > 512 || input.Secret == "" || len(input.Secret) > 32<<10 {
+	if input.ID == "" || len(input.ID) > 128 || len(input.ProviderID) > 128 || len(input.Description) > 512 || len(input.Secret) > 32<<10 || (id == "" && input.Secret == "") || (preserveMetadata && input.Secret == "") {
 		return Credential{}, ErrInvalidCredential
 	}
 	if input.ProviderID != "" {
+		if r.providers == nil || r.providers.current.Load() == nil {
+			return Credential{}, ErrInvalidCredential
+		}
 		providers := r.providers.current.Load()
 		if _, found := (*providers)[input.ProviderID]; !found {
 			return Credential{}, ErrInvalidCredential
 		}
 	}
-	nonce := make([]byte, r.credentials.aead.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return Credential{}, err
-	}
-	ciphertext := r.credentials.aead.Seal(nil, nonce, []byte(input.Secret), []byte(input.ID))
-	r.credentials.mu.Lock()
+	r.credentials.mu.RLock()
 	existing, found := r.credentials.current[input.ID]
+	r.credentials.mu.RUnlock()
 	if id == "" && found {
-		r.credentials.mu.Unlock()
 		return Credential{}, ErrCredentialExists
 	}
 	if id != "" && !found {
-		r.credentials.mu.Unlock()
 		return Credential{}, ErrCredentialNotFound
+	}
+	if preserveMetadata {
+		input.ProviderID = existing.ProviderID
+		input.Description = existing.Description
+	}
+	if input.ProviderID != "" && r.deployments != nil {
+		if deployments := r.deployments.current.Load(); deployments != nil {
+			for _, deployment := range *deployments {
+				if deployment.CredentialID == input.ID && deployment.ProviderID != input.ProviderID {
+					return Credential{}, ErrInvalidCredential
+				}
+			}
+		}
+	}
+	nonce := append([]byte(nil), existing.Nonce...)
+	ciphertext := append([]byte(nil), existing.Ciphertext...)
+	if input.Secret != "" {
+		nonce = make([]byte, r.credentials.aead.NonceSize())
+		if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+			return Credential{}, err
+		}
+		ciphertext = r.credentials.aead.Seal(nil, nonce, []byte(input.Secret), []byte(input.ID))
 	}
 	now := time.Now().UTC()
 	created := now
@@ -142,6 +166,7 @@ func (r *Router) storeCredential(id string, input CredentialInput) (Credential, 
 		created = existing.CreatedAt
 	}
 	credential := Credential{ID: input.ID, ProviderID: input.ProviderID, Description: input.Description, CreatedAt: created, UpdatedAt: now}
+	r.credentials.mu.Lock()
 	r.credentials.current[input.ID] = encryptedCredential{Credential: credential, Nonce: nonce, Ciphertext: ciphertext}
 	r.credentials.mu.Unlock()
 	if id != "" {

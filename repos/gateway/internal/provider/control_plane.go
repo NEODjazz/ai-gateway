@@ -136,8 +136,14 @@ func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error 
 		if item.ID == "" || deployments[item.ID].ID != "" || providers[item.ProviderID].ID == "" {
 			return fmt.Errorf("invalid persisted deployment %q", item.ID)
 		}
-		if item.CredentialID != "" && credentials[item.CredentialID].ID == "" {
-			return fmt.Errorf("persisted deployment %q references unknown credential", item.ID)
+		if item.CredentialID != "" {
+			credential := credentials[item.CredentialID]
+			if credential.ID == "" {
+				return fmt.Errorf("persisted deployment %q references unknown credential", item.ID)
+			}
+			if credential.ProviderID != "" && credential.ProviderID != item.ProviderID {
+				return fmt.Errorf("persisted deployment %q references credential bound to another provider", item.ID)
+			}
 		}
 		deployments[item.ID] = item
 	}

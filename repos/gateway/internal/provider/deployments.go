@@ -315,7 +315,7 @@ func (r *Router) validateDeployment(deployment ModelDeployment) error {
 		return ErrInvalidDeployment
 	}
 	if deployment.CredentialID != "" {
-		if _, err := r.credentialSecret(deployment.CredentialID); err != nil {
+		if _, err := r.providerCredentialSecret(deployment.ProviderID, deployment.CredentialID); err != nil {
 			return ErrInvalidDeployment
 		}
 	}
@@ -354,7 +354,7 @@ func (r *Router) endpointForDeployment(deployment ModelDeployment) (Endpoint, er
 	if !found {
 		return Endpoint{}, ErrInvalidDeployment
 	}
-	secret, err := r.credentialSecret(deployment.CredentialID)
+	secret, err := r.providerCredentialSecret(deployment.ProviderID, deployment.CredentialID)
 	if err != nil {
 		return Endpoint{}, err
 	}
