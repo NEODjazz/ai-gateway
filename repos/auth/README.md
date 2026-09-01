@@ -51,8 +51,10 @@ and `POST /internal/v1/keys/{id}/{rotate|disable|enable}`. These endpoints requi
 headers. They should remain cluster-internal and are not a replacement for
 network policy. Create and rotate return the plaintext token once; PostgreSQL
 stores only its HMAC-SHA256 lookup value. The list operation returns policy and
-lifecycle metadata only. Its response
-type has no plaintext-token or token-hash field.
+lifecycle metadata only. It supports bounded offset pagination, alias/key search,
+ownership and lifecycle-status filters, and allowlisted sorting. Team and
+organization filters include member-owned keys through the directory relations.
+Its response type has no plaintext-token or token-hash field.
 
 Identity management uses `GET /internal/v1/{users|teams}`, `PUT
 /internal/v1/users/{id}`, `PUT /internal/v1/teams/{id}`, and `PUT

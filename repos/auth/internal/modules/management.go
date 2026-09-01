@@ -63,6 +63,26 @@ type VirtualKeyMetadata struct {
 	CreatedAt      time.Time  `json:"created_at"`
 }
 
+type VirtualKeyListQuery struct {
+	Limit          int
+	Offset         int
+	Search         string
+	OrganizationID string
+	TeamID         string
+	UserID         string
+	KeyID          string
+	Status         string
+	SortBy         string
+	SortOrder      string
+}
+
+type VirtualKeyPage struct {
+	Data   []VirtualKeyMetadata `json:"data"`
+	Total  int                  `json:"total"`
+	Limit  int                  `json:"limit"`
+	Offset int                  `json:"offset"`
+}
+
 var ErrVirtualKeyNotFound = errors.New("virtual key not found")
 var ErrInvalidVirtualKey = errors.New("invalid virtual key policy")
 
@@ -141,19 +161,53 @@ func (m AuthModule) SetVirtualKeyDisabled(ctx context.Context, id string, disabl
 }
 
 func (m AuthModule) ListVirtualKeys(ctx context.Context, limit int) ([]VirtualKeyMetadata, error) {
+	page, err := m.ListVirtualKeysPage(ctx, VirtualKeyListQuery{Limit: limit})
+	return page.Data, err
+}
+
+func (m AuthModule) ListVirtualKeysPage(ctx context.Context, query VirtualKeyListQuery) (VirtualKeyPage, error) {
 	if m.initErr != nil {
-		return nil, m.initErr
+		return VirtualKeyPage{}, m.initErr
+	}
+	query.Search = strings.TrimSpace(query.Search)
+	query.OrganizationID = strings.TrimSpace(query.OrganizationID)
+	query.TeamID = strings.TrimSpace(query.TeamID)
+	query.UserID = strings.TrimSpace(query.UserID)
+	query.KeyID = strings.TrimSpace(query.KeyID)
+	query.Status = strings.TrimSpace(query.Status)
+	query.SortBy = strings.TrimSpace(query.SortBy)
+	query.SortOrder = strings.TrimSpace(query.SortOrder)
+	if query.SortBy == "" {
+		query.SortBy = "created"
+	}
+	if query.SortOrder == "" {
+		query.SortOrder = "desc"
+	}
+	if query.Limit <= 0 || query.Limit > 500 || query.Offset < 0 || query.Offset > 1_000_000 || len(query.Search) > 128 || len(query.OrganizationID) > 256 || len(query.TeamID) > 256 || len(query.UserID) > 256 || len(query.KeyID) > 256 || !oneOf(query.Status, "", "active", "disabled", "revoked", "expired") || !oneOf(query.SortBy, "key", "alias", "organization", "team", "user", "created", "status") || !oneOf(query.SortOrder, "asc", "desc") {
+		return VirtualKeyPage{}, fmt.Errorf("%w: invalid virtual key list query", ErrInvalidVirtualKey)
+	}
+	if pager, ok := m.store.(interface {
+		ListPage(context.Context, VirtualKeyListQuery) (VirtualKeyPage, error)
+	}); ok && pager != nil {
+		return pager.ListPage(ctx, query)
 	}
 	lister, ok := m.store.(interface {
 		List(context.Context, int) ([]VirtualKeyMetadata, error)
 	})
-	if !ok || lister == nil {
-		return nil, errors.New("persistent virtual key listing is unavailable")
+	if !ok || lister == nil || query.Offset != 0 || query.Search != "" || query.OrganizationID != "" || query.TeamID != "" || query.UserID != "" || query.KeyID != "" || query.Status != "" || query.SortBy != "created" || query.SortOrder != "desc" {
+		return VirtualKeyPage{}, errors.New("persistent virtual key paginated listing is unavailable")
 	}
-	if limit <= 0 || limit > 500 {
-		return nil, fmt.Errorf("%w: limit must be between 1 and 500", ErrInvalidVirtualKey)
+	data, err := lister.List(ctx, query.Limit)
+	return VirtualKeyPage{Data: data, Total: len(data), Limit: query.Limit, Offset: query.Offset}, err
+}
+
+func oneOf(value string, allowed ...string) bool {
+	for _, candidate := range allowed {
+		if value == candidate {
+			return true
+		}
 	}
-	return lister.List(ctx, limit)
+	return false
 }
 
 func (m AuthModule) keyManager() (virtualKeyManager, error) {

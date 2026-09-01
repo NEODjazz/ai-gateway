@@ -123,35 +123,71 @@ func (s *PostgresVirtualKeyStore) Create(ctx context.Context, key StoredVirtualK
 }
 
 func (s *PostgresVirtualKeyStore) List(ctx context.Context, limit int) ([]VirtualKeyMetadata, error) {
+	page, err := s.ListPage(ctx, VirtualKeyListQuery{Limit: limit, SortBy: "created", SortOrder: "desc"})
+	return page.Data, err
+}
+
+func (s *PostgresVirtualKeyStore) ListPage(ctx context.Context, query VirtualKeyListQuery) (VirtualKeyPage, error) {
 	if s == nil || s.pool == nil {
-		return nil, errors.New("auth key store is not initialized")
+		return VirtualKeyPage{}, errors.New("auth key store is not initialized")
+	}
+	orderBy := map[string]string{
+		"key": "id", "alias": "alias", "organization": "organization_id", "team": "team_id",
+		"user": "user_id", "created": "created_at", "status": "status_rank",
+	}[query.SortBy]
+	if orderBy == "" {
+		return VirtualKeyPage{}, errors.New("invalid virtual key sort field")
+	}
+	order := "DESC"
+	if query.SortOrder == "asc" {
+		order = "ASC"
+	}
+	const filteredKeys = `
+		FROM auth_virtual_keys k
+		WHERE ($1='' OR k.alias ILIKE '%' || $1 || '%')
+		  AND ($2='' OR k.organization_id=$2
+		       OR EXISTS (SELECT 1 FROM auth_organization_teams ot WHERE ot.organization_id=$2 AND ot.team_id=k.team_id)
+		       OR EXISTS (SELECT 1 FROM auth_team_memberships tm JOIN auth_organization_teams ot ON ot.team_id=tm.team_id WHERE ot.organization_id=$2 AND tm.user_id=k.user_id))
+		  AND ($3='' OR k.team_id=$3 OR EXISTS (SELECT 1 FROM auth_team_memberships tm WHERE tm.team_id=$3 AND tm.user_id=k.user_id))
+		  AND ($4='' OR k.user_id=$4)
+		  AND ($5='' OR k.id ILIKE '%' || $5 || '%')
+		  AND ($6='' OR CASE $6
+		       WHEN 'active' THEN k.revoked_at IS NULL AND k.disabled_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())
+		       WHEN 'disabled' THEN k.revoked_at IS NULL AND k.disabled_at IS NOT NULL
+		       WHEN 'revoked' THEN k.revoked_at IS NOT NULL
+		       WHEN 'expired' THEN k.revoked_at IS NULL AND k.disabled_at IS NULL AND k.expires_at IS NOT NULL AND k.expires_at<=now()
+		       ELSE false END)`
+	args := []any{query.Search, query.OrganizationID, query.TeamID, query.UserID, query.KeyID, query.Status}
+	var total int
+	if err := s.pool.QueryRow(ctx, "SELECT count(*) "+filteredKeys, args...).Scan(&total); err != nil {
+		return VirtualKeyPage{}, fmt.Errorf("count virtual keys: %w", err)
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, alias, description, tags, COALESCE(user_id, ''), COALESCE(team_id, ''), COALESCE(organization_id, ''), roles, allowed_models, allowed_tools,
 		       rate_limit_rpm, rate_limit_tpm, rotation_family_id,
 		       COALESCE(rotated_from_id, ''), COALESCE(rotated_to_id, ''),
-		       expires_at, revoked_at, disabled_at, last_used_at, created_at
-		FROM auth_virtual_keys
-		ORDER BY created_at DESC, id DESC
-		LIMIT $1`, limit)
+		       expires_at, revoked_at, disabled_at, last_used_at, created_at,
+		       CASE WHEN revoked_at IS NOT NULL THEN 3 WHEN disabled_at IS NOT NULL THEN 2 WHEN expires_at IS NOT NULL AND expires_at<=now() THEN 1 ELSE 0 END AS status_rank
+		`+filteredKeys+" ORDER BY "+orderBy+" "+order+", id "+order+" LIMIT $7 OFFSET $8", append(args, query.Limit, query.Offset)...)
 	if err != nil {
-		return nil, fmt.Errorf("list virtual keys: %w", err)
+		return VirtualKeyPage{}, fmt.Errorf("list virtual keys: %w", err)
 	}
 	defer rows.Close()
 	keys := make([]VirtualKeyMetadata, 0)
 	for rows.Next() {
 		var key VirtualKeyMetadata
+		var statusRank int
 		if err := rows.Scan(&key.ID, &key.Alias, &key.Description, &key.Tags, &key.UserID, &key.TeamID, &key.OrganizationID, &key.Roles, &key.AllowedModels, &key.AllowedTools,
 			&key.RateLimitRPM, &key.RateLimitTPM, &key.RotationFamily, &key.RotatedFromID, &key.RotatedToID,
-			&key.ExpiresAt, &key.RevokedAt, &key.DisabledAt, &key.LastUsedAt, &key.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan virtual key metadata: %w", err)
+			&key.ExpiresAt, &key.RevokedAt, &key.DisabledAt, &key.LastUsedAt, &key.CreatedAt, &statusRank); err != nil {
+			return VirtualKeyPage{}, fmt.Errorf("scan virtual key metadata: %w", err)
 		}
 		keys = append(keys, key)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list virtual keys: %w", err)
+		return VirtualKeyPage{}, fmt.Errorf("list virtual keys: %w", err)
 	}
-	return keys, nil
+	return VirtualKeyPage{Data: keys, Total: total, Limit: query.Limit, Offset: query.Offset}, nil
 }
 
 func (s *PostgresVirtualKeyStore) Update(ctx context.Context, id string, key StoredVirtualKey) (bool, error) {

@@ -61,6 +61,26 @@ type VirtualKeyMetadata struct {
 	CreatedAt      time.Time  `json:"created_at"`
 }
 
+type VirtualKeyListFilter struct {
+	Limit          int
+	Offset         int
+	Search         string
+	OrganizationID string
+	TeamID         string
+	UserID         string
+	KeyID          string
+	Status         string
+	SortBy         string
+	SortOrder      string
+}
+
+type VirtualKeyPage struct {
+	Data   []VirtualKeyMetadata `json:"data"`
+	Total  int                  `json:"total"`
+	Limit  int                  `json:"limit"`
+	Offset int                  `json:"offset"`
+}
+
 type ManagementAudit struct {
 	RequestID    string
 	ActorID      string
@@ -104,10 +124,22 @@ func (c *RemoteManagementClient) CreateVirtualKey(ctx context.Context, audit Man
 }
 
 func (c *RemoteManagementClient) ListVirtualKeys(ctx context.Context, audit ManagementAudit, limit int) ([]VirtualKeyMetadata, error) {
-	result, err := managementCall[struct{}, struct {
-		Data []VirtualKeyMetadata `json:"data"`
-	}](ctx, c, http.MethodGet, "/internal/v1/keys?limit="+url.QueryEscape(fmt.Sprint(limit)), audit, struct{}{})
-	return result.Data, err
+	page, err := c.ListVirtualKeysPage(ctx, audit, VirtualKeyListFilter{Limit: limit})
+	return page.Data, err
+}
+
+func (c *RemoteManagementClient) ListVirtualKeysPage(ctx context.Context, audit ManagementAudit, filter VirtualKeyListFilter) (VirtualKeyPage, error) {
+	query := url.Values{}
+	query.Set("limit", strconv.Itoa(filter.Limit))
+	if filter.Offset != 0 {
+		query.Set("offset", strconv.Itoa(filter.Offset))
+	}
+	for key, value := range map[string]string{"search": filter.Search, "organization_id": filter.OrganizationID, "team_id": filter.TeamID, "user_id": filter.UserID, "key_id": filter.KeyID, "status": filter.Status, "sort_by": filter.SortBy, "sort_order": filter.SortOrder} {
+		if value != "" {
+			query.Set(key, value)
+		}
+	}
+	return managementCall[struct{}, VirtualKeyPage](ctx, c, http.MethodGet, "/internal/v1/keys?"+query.Encode(), audit, struct{}{})
 }
 
 func (c *RemoteManagementClient) RotateVirtualKey(ctx context.Context, audit ManagementAudit, id string, spec ManagedVirtualKey) (IssuedVirtualKey, error) {
@@ -183,21 +215,57 @@ func (h Handler) ListVirtualKeys(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "management service is not configured")
 		return
 	}
-	limit := 100
+	filter := VirtualKeyListFilter{Limit: 100}
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 500 {
 			writeError(w, http.StatusBadRequest, "invalid_request", "limit must be between 1 and 500")
 			return
 		}
-		limit = parsed
+		filter.Limit = parsed
 	}
-	keys, err := h.management.ListVirtualKeys(r.Context(), managementAudit(req), limit)
+	if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 || parsed > 1_000_000 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "offset must be between 0 and 1000000")
+			return
+		}
+		filter.Offset = parsed
+	}
+	for name, target := range map[string]*string{"search": &filter.Search, "organization_id": &filter.OrganizationID, "team_id": &filter.TeamID, "user_id": &filter.UserID, "key_id": &filter.KeyID, "status": &filter.Status, "sort_by": &filter.SortBy, "sort_order": &filter.SortOrder} {
+		*target = strings.TrimSpace(r.URL.Query().Get(name))
+	}
+	if len(filter.Search) > 128 || len(filter.OrganizationID) > 256 || len(filter.TeamID) > 256 || len(filter.UserID) > 256 || len(filter.KeyID) > 256 || !allowedValue(filter.Status, "", "active", "disabled", "revoked", "expired") || !allowedValue(filter.SortBy, "", "key", "alias", "organization", "team", "user", "created", "status") || !allowedValue(filter.SortOrder, "", "asc", "desc") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid virtual key list filter")
+		return
+	}
+	pager, supportsPage := h.management.(interface {
+		ListVirtualKeysPage(context.Context, ManagementAudit, VirtualKeyListFilter) (VirtualKeyPage, error)
+	})
+	if supportsPage {
+		page, err := pager.ListVirtualKeysPage(r.Context(), managementAudit(req), filter)
+		if err != nil {
+			writeManagementFailure(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, page)
+		return
+	}
+	keys, err := h.management.ListVirtualKeys(r.Context(), managementAudit(req), filter.Limit)
 	if err != nil {
 		writeManagementFailure(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": keys})
+	writeJSON(w, http.StatusOK, VirtualKeyPage{Data: keys, Total: len(keys), Limit: filter.Limit, Offset: filter.Offset})
+}
+
+func allowedValue(value string, allowed ...string) bool {
+	for _, candidate := range allowed {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func (h Handler) WithManagement(client ManagementClient) Handler {

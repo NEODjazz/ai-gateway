@@ -19,25 +19,41 @@ const managementTokenHeader = "X-Management-Token"
 func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sharedSecret string) {
 	registerIdentityDirectoryRoutes(mux, module, sharedSecret)
 	mux.HandleFunc("GET /internal/v1/keys", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
-		limit := 100
+		query := modules.VirtualKeyListQuery{Limit: 100}
 		if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 			parsed, err := strconv.Atoi(raw)
 			if err != nil || parsed < 1 || parsed > 500 {
 				http.Error(w, "invalid virtual key list limit", http.StatusBadRequest)
 				return
 			}
-			limit = parsed
+			query.Limit = parsed
 		}
-		keys, err := module.ListVirtualKeys(r.Context(), limit)
+		if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 0 || parsed > 1_000_000 {
+				http.Error(w, "invalid virtual key list offset", http.StatusBadRequest)
+				return
+			}
+			query.Offset = parsed
+		}
+		query.Search = r.URL.Query().Get("search")
+		query.OrganizationID = r.URL.Query().Get("organization_id")
+		query.TeamID = r.URL.Query().Get("team_id")
+		query.UserID = r.URL.Query().Get("user_id")
+		query.KeyID = r.URL.Query().Get("key_id")
+		query.Status = r.URL.Query().Get("status")
+		query.SortBy = r.URL.Query().Get("sort_by")
+		query.SortOrder = r.URL.Query().Get("sort_order")
+		page, err := module.ListVirtualKeysPage(r.Context(), query)
 		if errors.Is(err, modules.ErrInvalidVirtualKey) {
-			http.Error(w, "invalid virtual key list limit", http.StatusBadRequest)
+			http.Error(w, "invalid virtual key list query", http.StatusBadRequest)
 			return
 		}
 		if err != nil {
 			http.Error(w, "virtual key listing failed", http.StatusServiceUnavailable)
 			return
 		}
-		writeManagementJSON(w, http.StatusOK, map[string]any{"data": keys})
+		writeManagementJSON(w, http.StatusOK, page)
 	}))
 	mux.HandleFunc("POST /internal/v1/keys", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		spec, ok := decodeManagedVirtualKey(w, r)

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.24
+  version: 0.1.25
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -289,6 +289,17 @@ paths:
         - name: limit
           in: query
           schema: {type: integer, minimum: 1, maximum: 500, default: 100}
+        - name: offset
+          in: query
+          schema: {type: integer, minimum: 0, maximum: 1000000, default: 0}
+        - {name: search, in: query, description: Case-insensitive alias substring., schema: {type: string, maxLength: 128}}
+        - {name: organization_id, in: query, description: Includes directly owned keys and keys inherited through organization teams., schema: {type: string, maxLength: 256}}
+        - {name: team_id, in: query, description: Includes team-owned keys and keys owned by team members., schema: {type: string, maxLength: 256}}
+        - {name: user_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: key_id, in: query, description: Case-insensitive key ID substring., schema: {type: string, maxLength: 256}}
+        - {name: status, in: query, schema: {type: string, enum: [active, disabled, revoked, expired]}}
+        - {name: sort_by, in: query, schema: {type: string, enum: [key, alias, organization, team, user, created, status], default: created}}
+        - {name: sort_order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
       responses:
         '200':
           description: Safe virtual key metadata
@@ -296,11 +307,14 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total, limit, offset]
                 properties:
                   data:
                     type: array
                     items: {$ref: '#/components/schemas/VirtualKeyMetadata'}
+                  total: {type: integer, minimum: 0}
+                  limit: {type: integer, minimum: 1, maximum: 500}
+                  offset: {type: integer, minimum: 0}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}

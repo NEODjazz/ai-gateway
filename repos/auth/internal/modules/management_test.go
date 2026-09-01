@@ -16,6 +16,7 @@ type managementStore struct {
 	updatedID   string
 	disabledID  string
 	disabled    bool
+	listQuery   VirtualKeyListQuery
 }
 
 func (s *managementStore) Lookup(context.Context, string) (StoredVirtualKey, bool, error) {
@@ -37,6 +38,10 @@ func (s *managementStore) Rotate(_ context.Context, oldID string, replacement St
 }
 func (s *managementStore) List(context.Context, int) ([]VirtualKeyMetadata, error) {
 	return []VirtualKeyMetadata{{ID: "vk_safe123", UserID: "user-1", RotationFamily: "vk_safe123"}}, nil
+}
+func (s *managementStore) ListPage(_ context.Context, query VirtualKeyListQuery) (VirtualKeyPage, error) {
+	s.listQuery = query
+	return VirtualKeyPage{Data: []VirtualKeyMetadata{{ID: "vk_safe123", UserID: "user-1", RotationFamily: "vk_safe123"}}, Total: 17, Limit: query.Limit, Offset: query.Offset}, nil
 }
 func (s *managementStore) Update(_ context.Context, id string, key StoredVirtualKey) (bool, error) {
 	s.updatedID, s.created = id, key
@@ -120,12 +125,22 @@ func TestManagedVirtualKeyValidation(t *testing.T) {
 }
 
 func TestListVirtualKeysReturnsSafeMetadata(t *testing.T) {
-	module := NewAuthModuleWithStore(true, &managementStore{}, "hash-secret", false)
+	store := &managementStore{}
+	module := NewAuthModuleWithStore(true, store, "hash-secret", false)
 	keys, err := module.ListVirtualKeys(context.Background(), 100)
 	if err != nil || len(keys) != 1 || keys[0].ID != "vk_safe123" {
 		t.Fatalf("unexpected keys=%+v err=%v", keys, err)
 	}
 	if _, err := module.ListVirtualKeys(context.Background(), 0); !errors.Is(err, ErrInvalidVirtualKey) {
 		t.Fatalf("invalid limit error=%v", err)
+	}
+	page, err := module.ListVirtualKeysPage(context.Background(), VirtualKeyListQuery{Limit: 25, Offset: 50, Search: " prod ", OrganizationID: "org-1", TeamID: "team-1", UserID: "user-1", KeyID: "safe", Status: "active", SortBy: "alias", SortOrder: "asc"})
+	if err != nil || page.Total != 17 || store.listQuery.Search != "prod" || store.listQuery.Offset != 50 || store.listQuery.OrganizationID != "org-1" {
+		t.Fatalf("unexpected page=%+v query=%+v err=%v", page, store.listQuery, err)
+	}
+	for _, invalid := range []VirtualKeyListQuery{{Limit: 25, Offset: -1}, {Limit: 25, Status: "unknown"}, {Limit: 25, SortBy: "token_hash"}, {Limit: 25, SortOrder: "sideways"}} {
+		if _, err := module.ListVirtualKeysPage(context.Background(), invalid); !errors.Is(err, ErrInvalidVirtualKey) {
+			t.Fatalf("invalid query was accepted: %+v err=%v", invalid, err)
+		}
 	}
 }

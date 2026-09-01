@@ -400,6 +400,9 @@ Managed keys include an alias, description and tags plus `team_id`, `roles`,
 Admins can update policy without changing the bearer secret, temporarily
 disable/re-enable a key, rotate it atomically, revoke it, open its metadata-only
 request history, and assign a key-scoped budget from the console. The gateway
+key-list API exposes bounded server-side pagination, ownership/status filters,
+and allowlisted sorting; team and organization scopes include member-owned keys.
+The gateway
 receives only the opaque key ID, alias, tags and policy (never the plaintext
 token or lookup hash), filters `/v1/models`, enforces model grants before the
 provider call, and applies the rate-limit policy through a replaceable atomic

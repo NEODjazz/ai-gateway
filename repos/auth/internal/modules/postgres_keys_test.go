@@ -41,10 +41,10 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
-	oldID, newID, expiredID, organizationKeyID := "key-old-"+suffix, "key-new-"+suffix, "key-expired-"+suffix, "key-org-"+suffix
+	oldID, newID, expiredID, organizationKeyID, memberKeyID := "key-old-"+suffix, "key-new-"+suffix, "key-expired-"+suffix, "key-org-"+suffix, "key-member-"+suffix
 	directoryUserID, directoryTeamID, organizationID := "user-"+suffix, "team-"+suffix, "org-"+suffix
 	t.Cleanup(func() {
-		ids := []string{newID, oldID, expiredID, organizationKeyID}
+		ids := []string{newID, oldID, expiredID, organizationKeyID, memberKeyID}
 		_, _ = pool.Exec(context.Background(), `UPDATE auth_virtual_keys SET rotated_from_id=NULL,rotated_to_id=NULL WHERE id = ANY($1)`, ids)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_virtual_keys WHERE id = ANY($1)`, ids)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_organization_teams WHERE organization_id=$1`, organizationID)
@@ -87,6 +87,18 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	if found, ok, err := store.Lookup(ctx, credentialLookupHash(organizationToken, "pepper")); err != nil || !ok || found.OrganizationID != organizationID || found.UserID != "" {
 		t.Fatalf("organization-owned key lookup failed: key=%+v ok=%v err=%v", found, ok, err)
 	}
+	if err := store.Create(ctx, StoredVirtualKey{ID: memberKeyID, Alias: "platform-member", UserID: directoryUserID, Roles: []string{"developer"}}, credentialLookupHash("member-token-"+suffix, "pepper")); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []VirtualKeyListQuery{
+		{Limit: 10, TeamID: directoryTeamID, Search: "platform", SortBy: "alias", SortOrder: "asc"},
+		{Limit: 10, OrganizationID: organizationID, Search: "platform", SortBy: "created", SortOrder: "desc"},
+	} {
+		page, err := store.ListPage(ctx, query)
+		if err != nil || page.Total != 1 || len(page.Data) != 1 || page.Data[0].ID != memberKeyID {
+			t.Fatalf("membership-aware key page=%+v err=%v query=%+v", page, err, query)
+		}
+	}
 
 	oldToken := "old-token-" + suffix
 	old := StoredVirtualKey{ID: oldID, Alias: "automation", Description: "CI key", Tags: []string{"ci", "prod"}, UserID: "user-1", TeamID: "team-1", Roles: []string{"developer"}, AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp.weather.*"}, RateLimitRPM: 10}
@@ -121,6 +133,10 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	}
 	if _, ok, err := store.Lookup(ctx, credentialLookupHash(expiredToken, "pepper")); err != nil || ok {
 		t.Fatalf("expired key must not authorize: ok=%v err=%v", ok, err)
+	}
+	expiredPage, err := store.ListPage(ctx, VirtualKeyListQuery{Limit: 10, KeyID: expiredID, Status: "expired", SortBy: "status", SortOrder: "asc"})
+	if err != nil || expiredPage.Total != 1 || len(expiredPage.Data) != 1 || expiredPage.Data[0].ID != expiredID {
+		t.Fatalf("expired key filter page=%+v err=%v", expiredPage, err)
 	}
 
 	newToken := "new-token-" + suffix
