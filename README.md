@@ -201,7 +201,8 @@ The Request Logs view provides a bounded, cursor-paginated explorer over the
 same final outcomes with filters for request, session, OpenTelemetry trace,
 status, model, endpoint, tag, user, team, organization, cache outcome, and credential
 fingerprint over bounded 7/30/90-day windows. Requests can also be grouped by
-session or distributed trace; group spend remains separated by currency. Its
+session or distributed trace; an explicit RFC3339 custom window up to 90 days is
+available for incident investigations, and group spend remains separated by currency. Its
 detail contract contains operational
 metadata, token counts, cost, cache state, and a bounded failure class only.
 The selected request/audit tab, request view, time window, applied filters, and

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"ai-gateway-billing/internal/modules"
 )
@@ -92,5 +93,11 @@ func TestRequestLogManagementRequiresSecretAndValidatesFilters(t *testing.T) {
 	mux.ServeHTTP(invalidCostResponse, invalidCost)
 	if invalidCostResponse.Code != http.StatusBadRequest {
 		t.Fatalf("invalid cost status=%d", invalidCostResponse.Code)
+	}
+	custom := httptest.NewRequest(http.MethodGet, "/internal/v1/request-logs?from=2026-08-01T00%3A00%3A00Z&to=2026-08-02T00%3A00%3A00Z", nil)
+	custom.Header.Set("X-Management-Token", "management-secret")
+	mux.ServeHTTP(httptest.NewRecorder(), custom)
+	if reporter.filter.From != time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) || reporter.filter.To != time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC) {
+		t.Fatalf("custom range was not forwarded: %+v", reporter.filter)
 	}
 }

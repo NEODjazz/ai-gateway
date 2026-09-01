@@ -92,6 +92,19 @@ func parseRequestLogFilter(r *http.Request, includeCursor bool) (modules.Request
 		return modules.RequestLogFilter{}, errors.New("invalid request log filter")
 	}
 	filter := modules.RequestLogFilter{Days: days, Limit: limit}
+	fromRaw, toRaw := strings.TrimSpace(r.URL.Query().Get("from")), strings.TrimSpace(r.URL.Query().Get("to"))
+	if (fromRaw == "") != (toRaw == "") {
+		return modules.RequestLogFilter{}, errors.New("invalid request log filter")
+	}
+	if fromRaw != "" {
+		filter.From, err = time.Parse(time.RFC3339, fromRaw)
+		if err == nil {
+			filter.To, err = time.Parse(time.RFC3339, toRaw)
+		}
+		if err != nil || !filter.To.After(filter.From) || filter.To.Sub(filter.From) > 90*24*time.Hour {
+			return modules.RequestLogFilter{}, errors.New("invalid request log filter")
+		}
+	}
 	for name, target := range map[string]*string{
 		"request_id": &filter.RequestID, "session_id": &filter.SessionID, "trace_id": &filter.TraceID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider, "tag": &filter.Tag,
 		"user_id": &filter.UserID, "team_id": &filter.TeamID, "organization_id": &filter.OrganizationID, "credential_id": &filter.CredentialID, "cache_status": &filter.CacheStatus, "failure_class": &filter.FailureClass,

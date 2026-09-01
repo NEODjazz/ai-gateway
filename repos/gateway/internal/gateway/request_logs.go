@@ -14,6 +14,8 @@ import (
 
 type RequestLogFilter struct {
 	Days            int
+	From            time.Time
+	To              time.Time
 	Limit           int
 	Before          time.Time
 	BeforeRequestID string
@@ -144,6 +146,10 @@ func (c *RemoteBudgetManagementClient) ListRequestLogs(ctx context.Context, audi
 
 func requestLogQuery(filter RequestLogFilter) url.Values {
 	query := url.Values{"days": {strconv.Itoa(filter.Days)}, "limit": {strconv.Itoa(filter.Limit)}}
+	if !filter.From.IsZero() && !filter.To.IsZero() {
+		query.Set("from", filter.From.UTC().Format(time.RFC3339))
+		query.Set("to", filter.To.UTC().Format(time.RFC3339))
+	}
 	for key, value := range map[string]string{"request_id": filter.RequestID, "session_id": filter.SessionID, "trace_id": filter.TraceID, "status": filter.Status, "model": filter.Model, "provider": filter.Provider, "tag": filter.Tag, "user_id": filter.UserID, "team_id": filter.TeamID, "organization_id": filter.OrganizationID, "credential_id": filter.CredentialID, "cache_status": filter.CacheStatus, "failure_class": filter.FailureClass} {
 		if value != "" {
 			query.Set(key, value)
@@ -290,6 +296,19 @@ func parseRequestLogFilter(r *http.Request, includeCursor bool) (RequestLogFilte
 		return RequestLogFilter{}, errors.New("days must be 1-90 and limit must be 1-200")
 	}
 	filter := RequestLogFilter{Days: days, Limit: limit}
+	fromRaw, toRaw := strings.TrimSpace(r.URL.Query().Get("from")), strings.TrimSpace(r.URL.Query().Get("to"))
+	if (fromRaw == "") != (toRaw == "") {
+		return RequestLogFilter{}, errors.New("from and to must be provided together")
+	}
+	if fromRaw != "" {
+		filter.From, err = time.Parse(time.RFC3339, fromRaw)
+		if err == nil {
+			filter.To, err = time.Parse(time.RFC3339, toRaw)
+		}
+		if err != nil || !filter.To.After(filter.From) || filter.To.Sub(filter.From) > 90*24*time.Hour {
+			return RequestLogFilter{}, errors.New("from/to must be an RFC3339 range of at most 90 days")
+		}
+	}
 	for name, target := range map[string]*string{"request_id": &filter.RequestID, "session_id": &filter.SessionID, "trace_id": &filter.TraceID, "status": &filter.Status, "model": &filter.Model, "provider": &filter.Provider, "tag": &filter.Tag, "user_id": &filter.UserID, "team_id": &filter.TeamID, "organization_id": &filter.OrganizationID, "credential_id": &filter.CredentialID, "cache_status": &filter.CacheStatus, "failure_class": &filter.FailureClass} {
 		*target = strings.TrimSpace(r.URL.Query().Get(name))
 		if len(*target) > 256 {

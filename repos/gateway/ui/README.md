@@ -24,8 +24,8 @@ gateway APIs are fully interactive. Search tools and executable skill content ar
 visibly marked unavailable instead of showing mock data or pretending that
 persistence and enforcement exist.
 
-The Logs workspace combines request and audit events. Request-log view, time
-window, applied filters, and the selected request detail are URL state, so an
+The Logs workspace combines request and audit events. Request-log view, preset
+or custom date-time window (bounded to 90 days), applied filters, and the selected request detail are URL state, so an
 operator can share a diagnostic link or use browser back/forward without losing
 the investigation. For example,
 `/ui/logs?view=sessions&days=30&team_id=platform` restores the server-aggregated

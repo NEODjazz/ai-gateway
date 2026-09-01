@@ -63,6 +63,13 @@ function cacheStatus(value: unknown): ReactNode {
   return <span className={`status ${hit ? "enabled" : "disabled"}`}>{hit ? "Hit" : value[0].toUpperCase() + value.slice(1)}</span>;
 }
 
+function localDateTime(value: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+
 export function groupRequestLogs(rows: RequestLog[], field: "session_id" | "trace_id"): GroupedRequestLog[] {
   const groups = new Map<string, GroupedRequestLog & { latency_total: number }>();
   for (const row of rows) {
@@ -99,12 +106,18 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
   const filters = useMemo(() => Object.fromEntries(filterKeys.map((key) => [key, searchParams.get(key) || ""])) as typeof emptyFilters, [filterSignature]);
   const requestedDays = searchParams.get("days") || "7";
   const days = ["7", "30", "90"].includes(requestedDays) ? requestedDays : "7";
+  const rangeFrom = searchParams.get("from") || "";
+  const rangeTo = searchParams.get("to") || "";
+  const rangeSignature = `${rangeFrom}\u0000${rangeTo}\u0000${days}`;
   const requestedView = searchParams.get("view");
   const view: LogView = requestedView === "sessions" || requestedView === "traces" ? requestedView : "requests";
   const detailID = searchParams.get("log") || "";
   const [rows, setRows] = useState<RequestLog[]>([]);
   const [groupRows, setGroupRows] = useState<GroupedRequestLog[]>([]);
   const [draftFilters, setDraftFilters] = useState(filters);
+  const [windowDraft, setWindowDraft] = useState(rangeFrom && rangeTo ? "custom" : days);
+  const [fromDraft, setFromDraft] = useState(localDateTime(rangeFrom));
+  const [toDraft, setToDraft] = useState(localDateTime(rangeTo));
   const [liveTail, setLiveTail] = useState(false);
   const [organizations, setOrganizations] = useState<IdentityOption[]>([]);
   const [teams, setTeams] = useState<IdentityOption[]>([]);
@@ -128,6 +141,7 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
   const load = useCallback(async (append = false, requestedCursor: Cursor | GroupCursor = null) => {
     setLoading(true); setError("");
     const query = new URLSearchParams({ limit: "50", days });
+    if (rangeFrom && rangeTo) { query.set("from", rangeFrom); query.set("to", rangeTo); }
     for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
     try {
       if (view === "requests") {
@@ -154,7 +168,7 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
       }
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load request logs"); }
     finally { setLoading(false); }
-  }, [client, days, filters, view]);
+  }, [client, days, filters, rangeFrom, rangeTo, view]);
   useEffect(() => {
     client.request("/admin/v1/request-logs/settings").then(setSettings).catch(() => undefined);
     const loadOptions = async (path: string, setter: (rows: IdentityOption[]) => void) => {
@@ -169,6 +183,7 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
   }, []);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { setDraftFilters(filters); }, [filterSignature]);
+  useEffect(() => { setWindowDraft(rangeFrom && rangeTo ? "custom" : days); setFromDraft(localDateTime(rangeFrom)); setToDraft(localDateTime(rangeTo)); }, [rangeSignature]);
   useEffect(() => {
     if (!detailID) { setDetail(undefined); return; }
     let active = true;
@@ -186,6 +201,13 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
     updateQuery(Object.fromEntries(filterKeys.map((key) => [key, draftFilters[key]])));
   }
   function showDetail(row: RequestLog) { updateQuery({ log: row.request_id }); }
+  function applyWindow(event: FormEvent) {
+    event.preventDefault();
+    if (windowDraft !== "custom") { updateQuery({ days: windowDraft === "7" ? "" : windowDraft, from: "", to: "" }); return; }
+    const from = new Date(fromDraft); const to = new Date(toDraft);
+    if (!fromDraft || !toDraft || Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from || to.getTime() - from.getTime() > 90 * 24 * 60 * 60 * 1000) { setError("Custom log window must be a valid range of at most 90 days"); return; }
+    updateQuery({ days: "", from: from.toISOString(), to: to.toISOString() });
+  }
   function showGroupRequests(row: GroupedRequestLog) {
     const unassignedPrefix = "Unassigned · ";
     const requestID = row.group_id.startsWith(unassignedPrefix) ? row.group_id.slice(unassignedPrefix.length) : "";
@@ -230,11 +252,13 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
       <button role="tab" aria-selected={view === "traces"} className={view === "traces" ? "active" : ""} onClick={() => updateQuery({ view: "traces" })}>Traces</button>
     </div>
     <div className="key-toolbar">
-      <div className="key-toolbar-right">
-        <label>Window<select aria-label="Request log window" value={days} onChange={(event) => updateQuery({ days: event.target.value === "7" ? "" : event.target.value })}><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option></select></label>
+      <form className="key-toolbar-right" onSubmit={applyWindow}>
+        <label>Window<select aria-label="Request log window" value={windowDraft} onChange={(event) => setWindowDraft(event.target.value)}><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option><option value="custom">Custom</option></select></label>
+        {windowDraft === "custom" && <><label>From<input aria-label="Request logs from" type="datetime-local" required value={fromDraft} onChange={(event) => setFromDraft(event.target.value)} /></label><label>To<input aria-label="Request logs to" type="datetime-local" required value={toDraft} onChange={(event) => setToDraft(event.target.value)} /></label></>}
+        <button className="secondary">Apply window</button>
         <label><input type="checkbox" checked={liveTail} onChange={(event) => setLiveTail(event.target.checked)} /> Live tail</label>
         {liveTail && <span className="status enabled">Every 15s</span>}
-      </div>
+      </form>
       <div className="key-toolbar-right">
         <label className="key-search"><span className="sr-only">Search request logs</span><input aria-label="Search request logs" placeholder="Search by request ID" value={draftFilters.request_id} onChange={(event) => setDraftFilters((current) => ({ ...current, request_id: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") updateQuery({ request_id: draftFilters.request_id }); }} /></label>
         {view === "requests" && <ColumnsMenu columns={requestLogColumns} visible={visibleColumns} onChange={setVisibleColumns} />}

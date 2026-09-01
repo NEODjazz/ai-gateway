@@ -19,6 +19,8 @@ const requestLogRetentionDays = 730
 
 type RequestLogFilter struct {
 	Days            int
+	From            time.Time
+	To              time.Time
 	Limit           int
 	Before          time.Time
 	BeforeRequestID string
@@ -216,7 +218,8 @@ func (r *ClickHouseUsageReporter) ListRequestLogs(ctx context.Context, filter Re
 }
 
 func validRequestLogFilter(filter RequestLogFilter) bool {
-	if filter.Days < 1 || filter.Days > 90 || filter.Limit < 1 || filter.Limit > 200 {
+	customRange := !filter.From.IsZero() || !filter.To.IsZero()
+	if filter.Limit < 1 || filter.Limit > 200 || customRange && (filter.From.IsZero() || filter.To.IsZero() || !filter.To.After(filter.From) || filter.To.Sub(filter.From) > 90*24*time.Hour) || !customRange && (filter.Days < 1 || filter.Days > 90) {
 		return false
 	}
 	for _, value := range []*float64{filter.MinCost, filter.MaxCost} {
@@ -229,7 +232,14 @@ func validRequestLogFilter(filter RequestLogFilter) bool {
 
 func requestLogQuery(filter RequestLogFilter, includeCursor bool) (url.Values, []string, error) {
 	params := url.Values{"output_format_json_quote_64bit_integers": {"0"}}
-	where := []string{fmt.Sprintf("timestamp_unix >= toUnixTimestamp(now() - INTERVAL %d DAY)", filter.Days), "phase IN ('commit','cancel')"}
+	where := []string{"phase IN ('commit','cancel')"}
+	if !filter.From.IsZero() && !filter.To.IsZero() {
+		where = append(where, "timestamp_unix >= {from:UInt64}", "timestamp_unix < {to:UInt64}")
+		params.Set("param_from", strconv.FormatInt(filter.From.UTC().Unix(), 10))
+		params.Set("param_to", strconv.FormatInt(filter.To.UTC().Unix(), 10))
+	} else {
+		where = append(where, fmt.Sprintf("timestamp_unix >= toUnixTimestamp(now() - INTERVAL %d DAY)", filter.Days))
+	}
 	addStringFilter := func(column, name, value string) {
 		if value == "" {
 			return

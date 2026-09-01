@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.27
+  version: 0.1.28
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1331,6 +1331,8 @@ paths:
       description: Returns bounded metadata-only final outcomes. Prompts, responses, raw provider errors, credentials, and upstream URLs are never returned.
       parameters:
         - {name: days, in: query, schema: {type: integer, minimum: 1, maximum: 90, default: 7}}
+        - {name: from, in: query, description: Custom UTC window start; must be paired with to and span at most 90 days, schema: {type: string, format: date-time}}
+        - {name: to, in: query, description: Exclusive custom UTC window end, schema: {type: string, format: date-time}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
         - {name: before, in: query, schema: {type: string, format: date-time}}
         - {name: before_request_id, in: query, schema: {type: string, maxLength: 256}}
@@ -1368,6 +1370,8 @@ paths:
       parameters:
         - {name: dimension, in: query, required: true, schema: {type: string, enum: [session, trace]}}
         - {name: days, in: query, schema: {type: integer, minimum: 1, maximum: 90, default: 7}}
+        - {name: from, in: query, description: Custom UTC window start; must be paired with to and span at most 90 days, schema: {type: string, format: date-time}}
+        - {name: to, in: query, description: Exclusive custom UTC window end, schema: {type: string, format: date-time}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
         - {name: before, in: query, schema: {type: string, format: date-time}}
         - {name: before_group_id, in: query, schema: {type: string, maxLength: 256}}

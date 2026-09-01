@@ -26,6 +26,7 @@ describe("LogsPage", () => {
     expect(screen.getByText("semantic")).toBeInTheDocument();
     expect(screen.getByText("35 ms")).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Request log window"), "30");
+    await userEvent.click(screen.getByRole("button", { name: "Apply window" }));
     await waitFor(() => expect(requested.some((path) => path.includes("request-logs?") && path.includes("days=30"))).toBe(true));
     await userEvent.click(screen.getByRole("button", { name: "Filter" }));
     await userEvent.selectOptions(screen.getByLabelText("Organization"), "org-1");
@@ -52,12 +53,13 @@ describe("LogsPage", () => {
       return json({ data: [] });
     });
     sessionStorage.setItem("ai-gateway.admin-token", "token");
-    render(<MemoryRouter initialEntries={["/logs?view=sessions&days=30&team_id=team-1&log=req-deep"]}><AuthProvider><LogsPage /></AuthProvider></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/logs?view=sessions&from=2026-08-01T00%3A00%3A00Z&to=2026-08-02T00%3A00%3A00Z&team_id=team-1&log=req-deep"]}><AuthProvider><LogsPage /></AuthProvider></MemoryRouter>);
 
     expect(await screen.findByRole("tab", { name: "Sessions" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByText("session-1")).toBeInTheDocument();
     expect(await screen.findByRole("dialog", { name: "Request details" })).toHaveTextContent("req-deep");
-    expect(requested.some((path) => path.includes("request-logs/groups?") && path.includes("dimension=session") && path.includes("days=30") && path.includes("team_id=team-1"))).toBe(true);
+    expect(screen.getByLabelText("Request log window")).toHaveValue("custom");
+    expect(requested.some((path) => path.includes("request-logs/groups?") && path.includes("dimension=session") && path.includes("from=2026-08-01T00%3A00%3A00Z") && path.includes("team_id=team-1"))).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Request details" })).not.toBeInTheDocument());
   });
