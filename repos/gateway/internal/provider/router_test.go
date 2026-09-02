@@ -682,12 +682,20 @@ func TestStreamChatRetriesAndFallsBackOnlyBeforeFirstChunk(t *testing.T) {
 	primary := &scriptedStreamingProvider{failChatBeforeWrite: 2}
 	secondary := &scriptedStreamingProvider{}
 	telemetry := &attemptMetadataModule{}
+	var retryDelays []time.Duration
 	router := Router{
 		endpoints: []Endpoint{
 			{Name: "primary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"chat", "stream"}, MaxRetries: 1, Provider: primary},
 			{Name: "secondary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"chat", "stream"}, Provider: secondary},
 		},
 		modules: modules.NewPipeline([]modules.Module{telemetry}), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+		retry: retryScheduler{
+			wait: func(_ context.Context, delay time.Duration) error {
+				retryDelays = append(retryDelays, delay)
+				return nil
+			},
+			jitter: func(time.Duration) time.Duration { return 0 },
+		},
 	}
 
 	writes := 0
@@ -705,6 +713,9 @@ func TestStreamChatRetriesAndFallsBackOnlyBeforeFirstChunk(t *testing.T) {
 	}
 	if telemetry.metadata["provider.retry_count"] != "1" || telemetry.metadata["provider.fallback_count"] != "1" {
 		t.Fatalf("unexpected retry metadata: %+v", telemetry.metadata)
+	}
+	if len(retryDelays) != 1 || retryDelays[0] != retryInitialDelay {
+		t.Fatalf("stream retry delays=%v", retryDelays)
 	}
 	if _, found := telemetry.metadata["provider.first_token_latency_ms"]; !found {
 		t.Fatalf("missing TTFT metadata: %+v", telemetry.metadata)

@@ -120,7 +120,7 @@ func (p OpenAICompatible) Rerank(ctx context.Context, request openai.RerankReque
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.RerankResponse{}, statusError("openai-compatible", resp.StatusCode)
+		return openai.RerankResponse{}, responseStatusError("openai-compatible", resp)
 	}
 	var response openai.RerankResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&response); err != nil {
@@ -197,7 +197,7 @@ func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.Embeddi
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.EmbeddingResponse{}, statusError("openai-compatible", resp.StatusCode)
+		return openai.EmbeddingResponse{}, responseStatusError("openai-compatible", resp)
 	}
 	var response openai.EmbeddingResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
@@ -273,7 +273,7 @@ func (p OpenAICompatible) Responses(ctx context.Context, request openai.Response
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ResponseResponse{}, statusError("openai-compatible", resp.StatusCode)
+		return openai.ResponseResponse{}, responseStatusError("openai-compatible", resp)
 	}
 
 	var response openai.ResponseResponse
@@ -316,7 +316,7 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ResponseResponse{}, statusError("openai-compatible", resp.StatusCode)
+		return openai.ResponseResponse{}, responseStatusError("openai-compatible", resp)
 	}
 
 	return streamResponseData(resp.Body, request.Model, write)

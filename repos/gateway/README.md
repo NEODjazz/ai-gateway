@@ -51,6 +51,11 @@ the cursor consists of the last request time, group ID, and currency. Request
 and group views accept bounded minimum/maximum cost and failure-class filters,
 and the UI can drill from a session or trace aggregate into its request rows.
 
+Transient same-deployment retries use centralized, deadline-aware exponential
+backoff with bounded jitter. Provider `Retry-After-Ms` and `Retry-After` hints
+are preserved by every HTTP adapter and honored up to 60 seconds. Streaming is
+retried only before the first client-visible chunk or event.
+
 Usage reports expose currency-safe totals and daily trends plus breakdowns by
 public and upstream model, provider, endpoint, tag, non-secret virtual-key ID,
 user, team, and organization. The report endpoint accepts bounded, typed

@@ -160,7 +160,7 @@ func (p Anthropic) doMessages(ctx context.Context, request anthropicRequest, tar
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return statusError("anthropic", resp.StatusCode)
+		return responseStatusError("anthropic", resp)
 	}
 	return json.NewDecoder(resp.Body).Decode(target)
 }
@@ -183,7 +183,7 @@ func (p Anthropic) doMessagesStream(ctx context.Context, request anthropicReques
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
-		return nil, statusError("anthropic", resp.StatusCode)
+		return nil, responseStatusError("anthropic", resp)
 	}
 	return resp, nil
 }

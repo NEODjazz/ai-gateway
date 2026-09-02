@@ -441,6 +441,12 @@ Retries and cooldown are configured per endpoint with `max_retries`,
 `cooldown_after_failures`, and `cooldown_seconds`. Only transient failures are
 retried on the same endpoint; invalid requests and content-policy rejections are
 terminal, and post-response failures never trigger a second model generation.
+Before a retry, the router waits with exponential backoff starting at 200 ms,
+capped at 2 seconds, plus up to 100 ms of jitter. A provider `Retry-After-Ms` or
+`Retry-After` value (seconds or HTTP date) takes precedence when it is positive
+and no greater than 60 seconds. The next attempt is not started when the wait
+would consume the parent request deadline. Streaming calls use the same
+scheduler only before the first response chunk or event has been written.
 When Redis is configured, failure counters, `open_until`, and a single half-open
 probe lease are shared by every gateway replica. Without Redis the same circuit
 states remain process-local. A transient Redis error falls back to the local

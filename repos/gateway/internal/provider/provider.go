@@ -158,6 +158,7 @@ type Router struct {
 	guardrails       *guardrailRegistry
 	adminState       *adminStateRegistry
 	deploymentHealth *deploymentHealthRegistry
+	retry            retryScheduler
 }
 
 func New(cfg Config) Provider {
@@ -292,6 +293,7 @@ func NewWithError(cfg Config) (Provider, error) {
 	router.adminState = &adminStateRegistry{}
 	router.adminState.current.Store(&emptyAdminState)
 	router.deploymentHealth = newDeploymentHealthRegistry()
+	router.retry = newRetryScheduler()
 	if cfg.ControlPlaneStore != nil {
 		// Read a legacy Redis-backed runtime catalog once before the control
 		// plane becomes its authoritative, versioned owner.
@@ -550,6 +552,10 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			finishProviderCall(err)
 			streamStarted, firstTokenLatency = tracker.state()
 			if err == nil || errors.Is(err, ErrStreamingUnsupported) || streamStarted || ctx.Err() != nil || retry >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
+				break
+			}
+			if waitErr := r.retry.beforeRetry(ctx, err, retry); waitErr != nil {
+				err = waitErr
 				break
 			}
 			totalRetries++
@@ -990,6 +996,10 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			if err == nil || errors.Is(err, ErrStreamingUnsupported) || streamStarted || ctx.Err() != nil || retry >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
 				break
 			}
+			if waitErr := r.retry.beforeRetry(ctx, err, retry); waitErr != nil {
+				err = waitErr
+				break
+			}
 			totalRetries++
 		}
 		release()
@@ -1251,6 +1261,10 @@ func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.
 			r.health.failure(ctx, endpoint, err)
 			return openai.ChatCompletionResponse{}, attempt, err
 		}
+		if waitErr := r.retry.beforeRetry(ctx, err, attempt); waitErr != nil {
+			r.health.failure(ctx, endpoint, waitErr)
+			return openai.ChatCompletionResponse{}, attempt, waitErr
+		}
 	}
 	return openai.ChatCompletionResponse{}, endpointMaxRetries(endpoint), err
 
@@ -1279,6 +1293,10 @@ func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request op
 			r.health.failure(ctx, endpoint, err)
 			return openai.ResponseResponse{}, attempt, err
 		}
+		if waitErr := r.retry.beforeRetry(ctx, err, attempt); waitErr != nil {
+			r.health.failure(ctx, endpoint, waitErr)
+			return openai.ResponseResponse{}, attempt, waitErr
+		}
 	}
 	return openai.ResponseResponse{}, endpointMaxRetries(endpoint), err
 }
@@ -1306,6 +1324,10 @@ func (r Router) callEmbeddings(ctx context.Context, endpoint Endpoint, client Em
 			r.health.failure(ctx, endpoint, err)
 			return openai.EmbeddingResponse{}, attempt, err
 		}
+		if waitErr := r.retry.beforeRetry(ctx, err, attempt); waitErr != nil {
+			r.health.failure(ctx, endpoint, waitErr)
+			return openai.EmbeddingResponse{}, attempt, waitErr
+		}
 	}
 	return openai.EmbeddingResponse{}, endpointMaxRetries(endpoint), err
 }
@@ -1331,6 +1353,10 @@ func (r Router) callRerank(ctx context.Context, endpoint Endpoint, client Rerank
 		if ctx.Err() != nil || attempt >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
 			r.health.failure(ctx, endpoint, err)
 			return openai.RerankResponse{}, attempt, err
+		}
+		if waitErr := r.retry.beforeRetry(ctx, err, attempt); waitErr != nil {
+			r.health.failure(ctx, endpoint, waitErr)
+			return openai.RerankResponse{}, attempt, waitErr
 		}
 	}
 	return openai.RerankResponse{}, endpointMaxRetries(endpoint), err

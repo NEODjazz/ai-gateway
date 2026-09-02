@@ -126,6 +126,11 @@ sequenceDiagram
 только до первой попытки записи SSE-события клиенту. После первого chunk/event
 ошибка завершает текущий stream и не запускает повторную генерацию. В usage
 metadata фиксируются суммарные retry/fallback counters и TTFT до первой записи.
+Между повторными попытками единый scheduler применяет exponential backoff от
+200 ms до 2 s и jitter до 100 ms. Валидный provider `Retry-After-Ms` или
+`Retry-After` (секунды либо HTTP date) имеет приоритет в диапазоне до 60 s.
+Если ожидание исчерпает parent request deadline, следующая provider-попытка не
+запускается.
 
 ### Required и optional
 

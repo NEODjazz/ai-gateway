@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type FailureClass string
@@ -31,6 +33,7 @@ type Error struct {
 	StatusCode   int
 	UpstreamCode string
 	Param        string
+	RetryAfter   time.Duration
 	Err          error
 }
 
@@ -73,6 +76,10 @@ func responseStatusError(provider string, response *http.Response) error {
 	if !errors.As(err, &providerErr) {
 		return err
 	}
+	providerErr.RetryAfter = retryAfterFromHeaders(response.Header, time.Now())
+	if response.Body == nil {
+		return providerErr
+	}
 	payload, readErr := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
 	if readErr != nil || len(payload) > 64<<10 {
 		return err
@@ -99,6 +106,33 @@ func responseStatusError(provider string, response *http.Response) error {
 		providerErr.Param = strings.TrimSpace(body.Error.Param)
 	}
 	return providerErr
+}
+
+func retryAfterFromHeaders(headers http.Header, now time.Time) time.Duration {
+	if milliseconds := strings.TrimSpace(headers.Get("Retry-After-Ms")); milliseconds != "" {
+		if value, err := strconv.ParseFloat(milliseconds, 64); err == nil && value > 0 {
+			return time.Duration(value * float64(time.Millisecond))
+		}
+	}
+	value := strings.TrimSpace(headers.Get("Retry-After"))
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseFloat(value, 64); err == nil && seconds > 0 {
+		return time.Duration(seconds * float64(time.Second))
+	}
+	if retryAt, err := http.ParseTime(value); err == nil && retryAt.After(now) {
+		return retryAt.Sub(now)
+	}
+	return 0
+}
+
+func providerRetryAfter(err error) time.Duration {
+	var providerErr *Error
+	if errors.As(err, &providerErr) {
+		return providerErr.RetryAfter
+	}
+	return 0
 }
 
 func failureClass(err error) FailureClass {

@@ -102,7 +102,7 @@ func (e *openAIEmbedder) embed(ctx context.Context, text string) ([]float64, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, statusError("semantic-cache-embedder", response.StatusCode)
+		return nil, responseStatusError("semantic-cache-embedder", response)
 	}
 	var result openai.EmbeddingResponse
 	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&result); err != nil {

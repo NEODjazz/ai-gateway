@@ -115,7 +115,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ChatCompletionResponse{}, statusError("ollama", resp.StatusCode)
+		return openai.ChatCompletionResponse{}, responseStatusError("ollama", resp)
 	}
 
 	var ollamaResp ollamaChatResponse
@@ -164,7 +164,7 @@ func (p Ollama) Embeddings(ctx context.Context, request openai.EmbeddingRequest)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.EmbeddingResponse{}, statusError("ollama", resp.StatusCode)
+		return openai.EmbeddingResponse{}, responseStatusError("ollama", resp)
 	}
 	var upstream ollamaEmbeddingResponse
 	if err := json.NewDecoder(resp.Body).Decode(&upstream); err != nil {
@@ -210,7 +210,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ChatCompletionResponse{}, statusError("ollama", resp.StatusCode)
+		return openai.ChatCompletionResponse{}, responseStatusError("ollama", resp)
 	}
 
 	response := openai.ChatCompletionResponse{
@@ -382,7 +382,7 @@ func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ResponseResponse{}, statusError("ollama", resp.StatusCode)
+		return openai.ResponseResponse{}, responseStatusError("ollama", resp)
 	}
 
 	var response openai.ResponseResponse
@@ -422,7 +422,7 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ResponseResponse{}, statusError("ollama", resp.StatusCode)
+		return openai.ResponseResponse{}, responseStatusError("ollama", resp)
 	}
 
 	return streamResponseData(resp.Body, request.Model, write)
