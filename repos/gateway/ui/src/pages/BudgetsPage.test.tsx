@@ -8,9 +8,9 @@ const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JS
 const policy = { id: 7, scope_type: "team", scope_id: "platform", period: "month", currency: "USD", max_cost: 10, max_tokens: 10000, enabled: true, created_at: "2026-09-01T10:00:00Z", updated_at: "2026-09-01T11:00:00Z" };
 const expanded = { data: [policy], summaries: { "7": { policy, window_start: "2026-09-01T00:00:00Z", window_end: "2026-10-01T00:00:00Z", used_cost: 8, remaining_cost: 2, used_tokens: 8000, remaining_tokens: 2000 } } };
 
-function renderPage() {
+function renderPage(entry = "/budgets") {
   sessionStorage.setItem("ai-gateway.admin-token", "token");
-  return render(<MemoryRouter><AuthProvider><BudgetsPage /></AuthProvider></MemoryRouter>);
+  return render(<MemoryRouter initialEntries={[entry]}><AuthProvider><BudgetsPage /></AuthProvider></MemoryRouter>);
 }
 
 describe("BudgetsPage", () => {
@@ -81,5 +81,20 @@ describe("BudgetsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Actions for budget 7" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Disable" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => url === "/admin/v1/budgets/7" && options?.method === "DELETE")).toBe(true));
+  });
+
+  it("opens an edit form from a budget details deep link", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/admin/v1/session") return json({ roles: ["admin"], capabilities: ["admin"] });
+      if (url === "/admin/v1/budgets?expand=summaries") return json(expanded);
+      if (url === "/admin/v1/teams?limit=500") return json({ data: [{ id: "platform", name: "Platform", status: "active" }] });
+      return json({ data: [] });
+    });
+    renderPage("/budgets?budget_id=7&edit=1");
+    const form = await screen.findByRole("dialog", { name: "Edit budget" });
+    expect(within(form).getByLabelText("Budget scope type")).toHaveValue("team");
+    expect(within(form).getByLabelText("Budget scope")).toHaveValue("platform");
+    expect(within(form).getByLabelText("Budget maximum cost")).toHaveValue(10);
   });
 });

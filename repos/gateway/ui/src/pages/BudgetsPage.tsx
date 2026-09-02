@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { ActionsMenu } from "../components/ActionsMenu";
 import { ErrorState, LoadingState } from "../components/AsyncState";
@@ -95,6 +96,7 @@ function BudgetForm({ initial, loadTargets, onClose, onSave }: { initial?: Budge
 
 export function BudgetsPage() {
   const { client } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [policies, setPolicies] = useState<BudgetPolicy[]>([]);
   const [summaries, setSummaries] = useState<Record<string, BudgetSummary>>({});
   const [editing, setEditing] = useState<BudgetPolicy | null | undefined>(undefined);
@@ -108,6 +110,12 @@ export function BudgetsPage() {
     finally { setLoading(false); }
   }, [client]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (searchParams.get("edit") !== "1") return;
+    const id = Number(searchParams.get("budget_id"));
+    const policy = policies.find((item) => item.id === id);
+    if (policy) setEditing(policy);
+  }, [policies, searchParams]);
   const loadTargets = useCallback(async (scope: string) => {
     if (scope === "global") return [{ value: "*", label: "All gateway traffic (*)" }];
     const source = targetSources[scope];
@@ -119,12 +127,18 @@ export function BudgetsPage() {
       return [{ value, label: detail ? `${value} — ${detail}` : value }];
     });
   }, [client]);
+  function closeEditor() {
+    setEditing(undefined);
+    if (!searchParams.has("edit") && !searchParams.has("budget_id")) return;
+    const query = new URLSearchParams(searchParams); query.delete("edit"); query.delete("budget_id");
+    setSearchParams(query, { replace: true });
+  }
   async function save(draft: BudgetDraft) {
     const body: Record<string, unknown> = { scope_type: draft.scope_type, scope_id: draft.scope_id, period: draft.period, currency: draft.currency, enabled: draft.enabled };
     if (draft.max_cost) body.max_cost = Number(draft.max_cost);
     if (draft.max_tokens) body.max_tokens = Number(draft.max_tokens);
     await client.request(editing ? `/admin/v1/budgets/${editing.id}` : "/admin/v1/budgets", { method: editing ? "PUT" : "POST", body });
-    setEditing(undefined); await load();
+    closeEditor(); await load();
   }
   async function disable(policy: BudgetPolicy) {
     if (!window.confirm(`Disable budget ${policy.id} for ${policy.scope_type} ${policy.scope_id}?`)) return;
@@ -150,7 +164,7 @@ export function BudgetsPage() {
   return <><PageHeader eyebrow="Financial controls" title="Budgets" description="Live, currency-isolated spend and token controls by identity, route, provider, model, credential, or tag." />
     {error && <ErrorState message={error} retry={() => void load()} />}
     <div className="usage-stats-grid"><StatCard label="Active policies" value={policies.filter((policy) => policy.enabled).length} /><StatCard label="At risk" value={states.filter((state) => state === "At risk").length} /><StatCard label="Exhausted" value={states.filter((state) => state === "Exhausted").length} /><StatCard label="Currencies" value={currencies} /></div>
-    <ManagedDataTable rows={rows} columns={columns} defaultHidden={["currency", "updated"]} searchPlaceholder="Search budgets by ID or scope" onRefresh={load} primaryAction={<button onClick={() => setEditing(null)}>Create Budget</button>} toolbarExtra={<label className="table-filter-select"><span className="sr-only">Filter budgets by scope</span><select aria-label="Filter budgets by scope" value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)}><option value="all">All scopes</option>{scopeTypes.map((scope) => <option key={scope} value={scope}>{scope}</option>)}</select></label>} actions={(row) => { const policy = row._policy as BudgetPolicy; return <ActionsMenu label={`Actions for budget ${policy.id}`} items={[{ label: "Edit", onSelect: () => setEditing(policy) }, { label: "Disable", onSelect: () => disable(policy), disabled: !policy.enabled, tone: "danger" }]} />; }} />
-    {editing !== undefined && <BudgetForm initial={editing || undefined} loadTargets={loadTargets} onClose={() => setEditing(undefined)} onSave={save} />}
+    <ManagedDataTable rows={rows} columns={columns} defaultHidden={["currency", "updated"]} searchPlaceholder="Search budgets by ID or scope" onRefresh={load} primaryAction={<button onClick={() => setEditing(null)}>Create Budget</button>} toolbarExtra={<label className="table-filter-select"><span className="sr-only">Filter budgets by scope</span><select aria-label="Filter budgets by scope" value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)}><option value="all">All scopes</option>{scopeTypes.map((scope) => <option key={scope} value={scope}>{scope}</option>)}</select></label>} actions={(row) => { const policy = row._policy as BudgetPolicy; return <ActionsMenu label={`Actions for budget ${policy.id}`} items={[{ label: "Inspect", href: `/budgets/${policy.id}` }, { label: "Edit", onSelect: () => setEditing(policy) }, { label: "Disable", onSelect: () => disable(policy), disabled: !policy.enabled, tone: "danger" }]} />; }} />
+    {editing !== undefined && <BudgetForm initial={editing || undefined} loadTargets={loadTargets} onClose={closeEditor} onSave={save} />}
   </>;
 }

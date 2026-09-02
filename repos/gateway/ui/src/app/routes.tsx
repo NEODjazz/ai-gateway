@@ -36,6 +36,7 @@ const ProjectsPage = lazy(() => import("../pages/ProjectsPage").then((module) =>
 const ProjectDetailsPage = lazy(() => import("../pages/ProjectsPage").then((module) => ({ default: module.ProjectDetailsPage })));
 const GuardrailsPage = lazy(() => import("../pages/GuardrailsPage").then((module) => ({ default: module.GuardrailsPage })));
 const PoliciesPage = lazy(() => import("../pages/PoliciesPage").then((module) => ({ default: module.PoliciesPage })));
+const BudgetDetailsPage = lazy(() => import("../pages/BudgetDetailsPage").then((module) => ({ default: module.BudgetDetailsPage })));
 const deferred = (element: ReactNode) => <Suspense fallback={<LoadingState />}>{element}</Suspense>;
 
 const readOnly = (title: string, description: string, path: string, columns: ResourceConfig["columns"]): ReactNode => <ResourcePage config={{ eyebrow: "Operations", title, description, listPath: path, columns }} />;
@@ -90,6 +91,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/guardrails-monitor", title: "Guardrail monitor", group: "Govern", element: <GuardrailMonitorPage />, available: true },
   { path: "/guardrails-monitor/:module", title: "Guardrail details", group: "Govern", element: <GuardrailMonitorPage />, available: true, navigation: false },
   { path: "/budgets", title: "Budgets", group: "Govern", element: <BudgetsPage />, available: true },
+  { path: "/budgets/:id", title: "Budget details", group: "Govern", element: deferred(<BudgetDetailsPage />), available: true, navigation: false },
   { path: "/policies", title: "Policies", group: "Govern", element: deferred(<PoliciesPage />), available: true },
   { path: "/tag-management", title: "Tag management", group: "Govern", element: <ResourcePage config={resourceConfigs.tags} />, available: true },
   { path: "/cache", title: "Caching", group: "System", element: <CachePage />, available: true },

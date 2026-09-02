@@ -40,6 +40,11 @@ The internal `RequestContext` is not serialized between services. Each remote
 module has a minimal typed contract; only auth receives the client bearer token,
 which gateway clears before provider-level processing.
 
+The Budgets catalog expands current-window summaries in one bounded request.
+Budget rows link to a route-based details workspace that reads the authoritative
+policy and summary endpoints, preserves currency isolation, links identity
+scopes, and returns edits to the configured-target form.
+
 Guardrail policy definitions remain independent from their request scopes.
 Policy attachments can apply an enabled DLP/AV policy globally or to the
 intersection of configured team, virtual-key ID/alias, public model, and key-tag

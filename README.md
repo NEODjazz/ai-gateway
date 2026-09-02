@@ -293,7 +293,12 @@ cost/token utilization, risk state, remaining reset window, and currency for
 each policy without combining currencies. Its form resolves organizations,
 users, teams, virtual keys, models, providers, and tags from their configured
 registries instead of requiring operators to copy opaque IDs. The list uses one
-bounded `expand=summaries` request rather than an N+1 summary fan-out. Every mutation uses
+bounded `expand=summaries` request rather than an N+1 summary fan-out. Each row
+opens `/ui/budgets/{id}`, a route-based workspace backed by the authoritative
+policy and current-window summary endpoints. It shows currency-isolated cost and
+token headroom, exact window boundaries, the scoped identity link and audited
+edit/disable actions; detail edits return to the same configured-target form.
+Every mutation uses
 the same authenticated admin API and append-only audit path as direct API
 clients. The UI has no CDN or runtime package dependency and is protected by a
 strict same-origin CSP. Before a credential is stored, `GET /admin/v1/session`
