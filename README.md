@@ -621,7 +621,13 @@ policy-health joins, and a runtime simulator. The simulator calls
 `POST /admin/v1/policy-attachments/resolve`, which reuses the inference matcher
 and guardrail controller but invokes no provider, model, DLP, or AV service. It
 reports every matched attachment, effective modules, and missing or disabled
-policy references that would fail closed.
+policy references that would fail closed. Virtual-key details expose the same
+resolver in a Policies tab, prefilled with the immutable key ID, alias, owner
+team and credential tags; the operator selects the requested public model before
+evaluating the exact request path. Team details deep-link to the simulator with
+the team ID preselected. These contextual views intentionally do not present a
+single static policy list because model and tag dimensions can change the
+runtime result.
 
 Guardrail Monitor stores only bounded evaluation metadata: request ID, policy,
 module, source, outcome, duration and timestamp. Prompts, responses and raw

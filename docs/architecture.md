@@ -344,7 +344,11 @@ tags), не запускает provider или scanner и возвращает m
 effective policies/modules и fail-closed issues. Policies UI использует этот
 endpoint как simulator. Create/edit form допускает только поддерживаемый runtime
 wildcard — trailing `*` — и явно показывает, что dimensions соединяются AND, а
-значения внутри dimension — OR.
+значения внутри dimension — OR. Карточка virtual key использует этот же resolver
+с уже заполненными key ID, alias, team и credential tags; оператор добавляет
+public model и получает точный runtime result. Карточка team открывает simulator
+с заполненным team ID. Статический список «policies для identity» намеренно не
+показывается: model и tag dimensions могут изменить результат.
 
 UI управления guardrails намеренно отражает эту границу ответственности, а не
 каталог provider-specific plugins из LiteLLM. Он объединяет policy definition с

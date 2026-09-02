@@ -51,6 +51,10 @@ show matched attachments, cumulative DLP/AV requirements, and fail-closed
 missing/disabled-policy issues without invoking a provider or scanner. Its
 attachment editor supports configured values plus exact or trailing-asterisk
 patterns and displays the AND-across-dimensions scope semantics before save.
+Virtual-key details resolve policy impact with the key identity, owner team,
+credential tags and selected public model; team details open the same simulator
+with their identity context prefilled. The UI therefore shows a runtime result
+rather than an inaccurate context-free list of policies on an identity.
 The Guardrails UI presents these gateway-native policies as one workflow: joined
 deployment/attachment coverage, create/edit, detail inspection, policy-filtered
 monitoring and bounded multi-policy dry-run comparison. Unlike LiteLLM's

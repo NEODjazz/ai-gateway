@@ -20,6 +20,7 @@ describe("VirtualKeyDetailsPage", () => {
       if (path === "/admin/v1/users?limit=500") return json({ data: [{ id: "user-1", name: "Alice" }] });
       if (path === "/admin/v1/teams?limit=500" || path === "/admin/v1/organizations?limit=500") return json({ data: [] });
       if (path === "/admin/v1/access-groups") return json({ data: [{ id: "platform", name: "Platform access" }] });
+      if (path === "/admin/v1/policy-attachments/resolve" && init?.method === "POST") return json({ matched_attachments: [{ id: "prod-dlp", policy_name: "strict", scope: "specific", matched_via: ["key", "model", "tag"], policy_status: "enabled", dlp: true, av: false }], effective_policies: ["strict"], dlp: true, av: false, enforceable: true, issues: [] });
       if (path.endsWith("/rotate") && init?.method === "POST") return json({ id: "vk_alpha", token: "sk-rotated-once" });
       if (path.endsWith("/disable") && init?.method === "POST") { disabledAt = "2026-09-02T01:00:00Z"; return json({}); }
       return json({ error: { message: `unexpected ${init?.method || "GET"} ${path}` } }, 500);
@@ -30,6 +31,15 @@ describe("VirtualKeyDetailsPage", () => {
     expect(screen.getByText("Platform access")).toBeInTheDocument();
     expect(screen.getByText("$1.25")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("scope_type=key&scope_id=vk_alpha"))).toBe(true);
+
+    await userEvent.click(screen.getByRole("tab", { name: "Policies" }));
+    expect(screen.getByLabelText("Policy impact model")).toHaveValue("gpt-5");
+    await userEvent.click(screen.getByRole("button", { name: "Resolve policy impact" }));
+    const policyResult = await screen.findByLabelText("Policy resolution result");
+    expect(policyResult).toHaveTextContent("prod-dlp");
+    expect(policyResult).toHaveTextContent("Enforceable");
+    const resolutionCall = fetchMock.mock.calls.find(([path, init]) => path === "/admin/v1/policy-attachments/resolve" && init?.method === "POST")!;
+    expect(JSON.parse(String(resolutionCall[1]?.body))).toEqual({ credential_id: "vk_alpha", credential_alias: "production", model: "gpt-5", tags: ["prod"] });
 
     await userEvent.click(screen.getByRole("tab", { name: "Usage & budgets" }));
     expect(screen.getByText("key:vk_alpha")).toBeInTheDocument();

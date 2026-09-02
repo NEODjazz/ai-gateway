@@ -83,12 +83,12 @@ describe("PoliciesPage", () => {
       });
       return json({ error: { message: `unexpected ${init?.method || "GET"} ${url}` } }, 500);
     });
-    renderPage("/policies?view=simulator");
+    renderPage("/policies?view=simulator&team_id=care-a&credential_alias=clinical-prod&model=gpt-5.6&tag=hipaa");
     await screen.findByText("Runtime policy simulator");
-    await userEvent.type(screen.getByLabelText("Team ID"), "care-a");
-    await userEvent.type(screen.getByLabelText("Virtual key alias"), "clinical-prod");
-    await userEvent.type(screen.getByLabelText("Model"), "gpt-5.6");
-    await userEvent.type(screen.getByRole("combobox", { name: "Tags" }), "hipaa{enter}");
+    expect(screen.getByLabelText("Team ID")).toHaveValue("care-a");
+    expect(screen.getByLabelText("Virtual key alias")).toHaveValue("clinical-prod");
+    expect(screen.getByLabelText("Model")).toHaveValue("gpt-5.6");
+    expect(screen.getByRole("button", { name: "Remove tag hipaa" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Simulate" }));
     const result = await screen.findByLabelText("Policy resolution result");
     expect(result).toHaveTextContent("Fail closed");

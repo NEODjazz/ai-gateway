@@ -5,6 +5,7 @@ import { ActionsMenu } from "../components/ActionsMenu";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { ManagedDataTable } from "../components/ManagedDataTable";
 import { PageHeader } from "../components/PageHeader";
+import { PolicyResolutionResult, type PolicyResolution } from "../components/PolicyResolutionResult";
 import { StatCard } from "../components/StatCard";
 import type { Row } from "../components/DataTable";
 import { formatCost, formatTimestamp } from "../format";
@@ -21,7 +22,7 @@ type KeyBudgetProjection = { key_id: string; policies: BudgetSummary[] };
 type UsageAggregate = { date?: string; currency: string; requests: number; errors: number; input_tokens: number; output_tokens: number; total_tokens: number; cache_hits: number; cost: number; avg_latency_ms: number };
 type UsageReport = { totals: UsageAggregate[]; daily: UsageAggregate[] };
 type IssuedKey = { id: string; token: string; expires_at?: string };
-type Tab = "overview" | "usage" | "settings";
+type Tab = "overview" | "usage" | "policies" | "settings";
 
 function records<T>(payload: unknown): T[] {
   const data = payload && typeof payload === "object" ? (payload as { data?: unknown }).data : undefined;
@@ -50,6 +51,10 @@ function values(items: string[] | undefined, empty: string) {
   return <div className="tag-list">{items?.map((item) => <span className="tag" key={item}>{item}</span>)}{!items?.length && <span className="muted">{empty}</span>}</div>;
 }
 
+function initialPolicyModel(models?: string[]) {
+  return models?.find((model) => model && !model.includes("*")) || "";
+}
+
 export function VirtualKeyDetailsPage() {
   const { id = "" } = useParams();
   const { client } = useAuth();
@@ -62,6 +67,10 @@ export function VirtualKeyDetailsPage() {
   const [organizations, setOrganizations] = useState<DirectoryEntry[]>([]);
   const [accessGroups, setAccessGroups] = useState<DirectoryEntry[]>([]);
   const [tab, setTab] = useState<Tab>("overview");
+  const [policyModel, setPolicyModel] = useState("");
+  const [policyResolution, setPolicyResolution] = useState<PolicyResolution>();
+  const [policyError, setPolicyError] = useState("");
+  const [resolvingPolicies, setResolvingPolicies] = useState(false);
   const [issued, setIssued] = useState<IssuedKey>();
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
@@ -77,7 +86,8 @@ export function VirtualKeyDetailsPage() {
         client.request("/admin/v1/users?limit=500"), client.request("/admin/v1/teams?limit=500"),
         client.request("/admin/v1/organizations?limit=500"), client.request("/admin/v1/access-groups")
       ]);
-      setKey(records<VirtualKey>(keyPayload).find((item) => item.id === id));
+      const selectedKey = records<VirtualKey>(keyPayload).find((item) => item.id === id);
+      setKey(selectedKey); setPolicyModel((current) => current || initialPolicyModel(selectedKey?.allowed_models));
       setProjection(keyPayload.financials?.[id]); setUsage(usagePayload);
       setUsers(records<DirectoryEntry>(userPayload)); setTeams(records<DirectoryEntry>(teamPayload));
       setOrganizations(records<DirectoryEntry>(organizationPayload)); setAccessGroups(records<DirectoryEntry>(accessGroupPayload));
@@ -129,6 +139,32 @@ export function VirtualKeyDetailsPage() {
     try { await navigator.clipboard.writeText(issued.token); setCopied(true); }
     catch { setCopyError("Clipboard access failed. Copy the token manually before closing this window."); }
   }
+  async function resolvePolicies() {
+    if (!key) return;
+    setResolvingPolicies(true); setPolicyError(""); setPolicyResolution(undefined);
+    try {
+      setPolicyResolution(await client.request<PolicyResolution>("/admin/v1/policy-attachments/resolve", {
+        method: "POST",
+        body: {
+          team_id: key.team_id || undefined,
+          credential_id: key.id,
+          credential_alias: key.alias || undefined,
+          model: policyModel || undefined,
+          tags: key.tags?.length ? key.tags : undefined,
+        },
+      }));
+    } catch (cause) { setPolicyError(cause instanceof Error ? cause.message : "Could not resolve policy impact"); }
+    finally { setResolvingPolicies(false); }
+  }
+  function openPolicySimulator() {
+    if (!key) return;
+    const query = new URLSearchParams({ view: "simulator", credential_id: key.id });
+    if (key.alias) query.set("credential_alias", key.alias);
+    if (key.team_id) query.set("team_id", key.team_id);
+    if (policyModel) query.set("model", policyModel);
+    for (const tag of key.tags || []) query.append("tag", tag);
+    navigate(`/policies?${query.toString()}`);
+  }
 
   if (loading && !key) return <LoadingState />;
   if (error && !key) return <ErrorState message={error} retry={() => void load()} />;
@@ -143,9 +179,21 @@ export function VirtualKeyDetailsPage() {
   return <><PageHeader eyebrow="Access control" title={key.alias || key.id} description="Virtual-key ownership, effective grants, usage, budgets and lifecycle." actions={<div className="inline-actions"><button className="secondary" onClick={() => navigate("/api-keys")}>Back to virtual keys</button><ActionsMenu label={`Actions for ${key.alias || key.id}`} items={actionItems} /></div>} />
     {error && <ErrorState message={error} retry={() => void load()} />}
     <div className="usage-stats-grid"><StatCard label="Status" value={status} /><StatCard label="Requests (30d)" value={requests.toLocaleString()} detail={`${errors.toLocaleString()} failed`} /><StatCard label="Tokens (30d)" value={tokens.toLocaleString()} /><StatCard label="Spend (30d)" value={amounts(totals)} /></div>
-    <div className="page-tabs" role="tablist" aria-label="Virtual key details"><button role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button><button role="tab" aria-selected={tab === "usage"} className={tab === "usage" ? "active" : ""} onClick={() => setTab("usage")}>Usage & budgets</button><button role="tab" aria-selected={tab === "settings"} className={tab === "settings" ? "active" : ""} onClick={() => setTab("settings")}>Settings</button></div>
+    <div className="page-tabs" role="tablist" aria-label="Virtual key details"><button role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button><button role="tab" aria-selected={tab === "usage"} className={tab === "usage" ? "active" : ""} onClick={() => setTab("usage")}>Usage & budgets</button><button role="tab" aria-selected={tab === "policies"} className={tab === "policies" ? "active" : ""} onClick={() => setTab("policies")}>Policies</button><button role="tab" aria-selected={tab === "settings"} className={tab === "settings" ? "active" : ""} onClick={() => setTab("settings")}>Settings</button></div>
     {tab === "overview" && <><section className="table-card access-group-details"><h2>Identity and ownership</h2><dl className="detail-grid"><div><dt>Key ID</dt><dd><code>{key.id}</code></dd></div><div><dt>Owner</dt><dd>{ownerType}: {owner?.name || owner?.email || ownerID}<br/><span className="muted">{ownerID}</span></dd></div><div><dt>Created</dt><dd>{formatTimestamp(key.created_at)}</dd></div><div><dt>Expires</dt><dd>{key.expires_at ? formatTimestamp(key.expires_at) : "Never"}</dd></div><div><dt>Description</dt><dd>{key.description || "—"}</dd></div><div><dt>Lifecycle</dt><dd>{key.revoked_at ? `Revoked ${formatTimestamp(key.revoked_at)}` : key.disabled_at ? `Disabled ${formatTimestamp(key.disabled_at)}` : "Authorizing"}</dd></div></dl></section><section className="section-block split-grid"><div className="notice-card"><h2>Models</h2>{values(key.allowed_models, "No direct model grants")}</div><div className="notice-card"><h2>Tools</h2>{values(key.allowed_tools, "No direct tool grants")}</div><div className="notice-card"><h2>Access groups</h2>{values(key.access_group_ids?.map((groupID) => directories.groups.get(groupID)?.name || groupID), "No access groups")}</div><div className="notice-card"><h2>Roles and tags</h2>{values([...(key.roles || []), ...(key.tags || []).map((tag) => `tag:${tag}`)], "No roles or tags")}</div></section></>}
     {tab === "usage" && <><section className="section-block"><h2>Applicable budget policies</h2><p>Every enabled policy is enforced independently; currencies are never combined.</p><ManagedDataTable rows={budgetRows} columns={[{ key: "scope", label: "Scope" }, { key: "period", label: "Period" }, { key: "limit", label: "Limit" }, { key: "used", label: "Used" }, { key: "remaining", label: "Remaining" }, { key: "reset", label: "Reset" }, { key: "status", label: "Status" }]} searchPlaceholder="Search budget policies" onRefresh={load} /></section><section className="section-block"><h2>Daily activity</h2><p>Server-filtered activity for this key over the last 30 days.</p><ManagedDataTable rows={dailyRows} columns={[{ key: "date", label: "Date" }, { key: "requests", label: "Requests" }, { key: "errors", label: "Errors" }, { key: "tokens", label: "Tokens" }, { key: "spend", label: "Spend" }, { key: "latency", label: "Average latency" }]} searchPlaceholder="Search daily activity" onRefresh={load} /></section></>}
+    {tab === "policies" && <section className="policy-simulator">
+      <section className="notice-card policy-simulator-boundary"><h2>Policy impact for this key</h2><p>Policies are resolved from key identity, owner team, credential tags and the requested model. The result uses the production matcher without calling a provider or scanner.</p></section>
+      <section className="table-card policy-simulator-form">
+        <dl className="detail-grid"><div><dt>Virtual key</dt><dd>{key.alias || "—"}<br/><span className="muted">{key.id}</span></dd></div><div><dt>Owner team</dt><dd>{key.team_id || "None"}</dd></div><div><dt>Credential tags</dt><dd>{(key.tags || []).join(", ") || "None"}</dd></div><div><dt>Model context</dt><dd>{policyModel || "Not selected"}</dd></div></dl>
+        <label className="key-model-field">Requested public model<input list="key-policy-model-options" aria-label="Policy impact model" value={policyModel} onChange={(event) => { setPolicyModel(event.target.value); setPolicyResolution(undefined); }} placeholder="Select or enter a public model" /></label>
+        <datalist id="key-policy-model-options">{(key.allowed_models || []).map((model) => <option key={model} value={model} />)}</datalist>
+        {policyError && <p className="form-error" role="alert">{policyError}</p>}
+        <div className="modal-actions"><button className="secondary" onClick={openPolicySimulator}>Open full simulator</button><button disabled={resolvingPolicies} onClick={() => void resolvePolicies()}>{resolvingPolicies ? "Resolving…" : "Resolve policy impact"}</button></div>
+      </section>
+      {policyResolution && <PolicyResolutionResult result={policyResolution} />}
+      {!policyResolution && !policyError && <div className="table-card empty-state"><div><strong>No policy resolution yet</strong><p>Resolve with an empty model to inspect identity-wide and global attachments, or select a model for the exact request path.</p></div></div>}
+    </section>}
     {tab === "settings" && <section className="table-card access-group-details"><div className="modal-heading"><h2>Effective key settings</h2><button onClick={() => navigate(`/api-keys?key_id=${encodeURIComponent(key.id)}&edit=1`)}>Edit settings</button></div><dl className="detail-grid"><div><dt>RPM limit</dt><dd>{key.rate_limit_rpm || "Unlimited"}</dd></div><div><dt>TPM limit</dt><dd>{key.rate_limit_tpm || "Unlimited"}</dd></div><div><dt>Models</dt><dd>{(key.allowed_models || []).join(", ") || "None"}</dd></div><div><dt>Tools</dt><dd>{(key.allowed_tools || []).join(", ") || "None"}</dd></div><div><dt>Access groups</dt><dd>{(key.access_group_ids || []).join(", ") || "None"}</dd></div><div><dt>Roles</dt><dd>{(key.roles || []).join(", ") || "None"}</dd></div></dl></section>}
     {issued && <div className="modal-backdrop" role="presentation"><section className="modal issued-key-modal" role="dialog" aria-modal="true" aria-label="Virtual key rotated"><div className="modal-heading"><h2>Save this rotated key now</h2><button className="icon-button" aria-label="Close issued key" onClick={() => setIssued(undefined)}>×</button></div><p>This plaintext token is shown exactly once. It cannot be recovered after this window is closed.</p><label>Virtual key<input readOnly value={issued.token} onFocus={(event) => event.currentTarget.select()} /></label>{copyError && <p className="form-error" role="alert">{copyError}</p>}{copied && <div className="copy-confirmation" role="status"><span aria-hidden="true">✓</span> Copied to clipboard</div>}<div className="modal-actions"><button className="secondary" onClick={() => setIssued(undefined)}>Close</button><button onClick={() => void copyToken()}>{copied ? "Copy again" : "Copy"}</button></div></section></div>}
   </>;

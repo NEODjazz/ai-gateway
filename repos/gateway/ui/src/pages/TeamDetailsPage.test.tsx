@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
 import { useAuth } from "../auth/AuthContext";
 import { useEffect, type ReactNode } from "react";
@@ -10,8 +10,10 @@ const json = (payload: unknown, status = 200) => Promise.resolve(new Response(st
 
 function renderPage() {
   sessionStorage.setItem("ai-gateway.admin-token", "token");
-  return render(<MemoryRouter initialEntries={["/teams/platform"]}><AuthProvider><SessionGate><Routes><Route path="/teams/:id" element={<TeamDetailsPage />} /><Route path="/teams" element={<div>Teams list</div>} /></Routes></SessionGate></AuthProvider></MemoryRouter>);
+  return render(<MemoryRouter initialEntries={["/teams/platform"]}><AuthProvider><SessionGate><Routes><Route path="/teams/:id" element={<TeamDetailsPage />} /><Route path="/teams" element={<div>Teams list</div>} /><Route path="/policies" element={<LocationProbe />} /></Routes></SessionGate></AuthProvider></MemoryRouter>);
 }
+
+function LocationProbe() { const location = useLocation(); return <div>Policy route {location.search}</div>; }
 
 function SessionGate({ children }: { children: ReactNode }) {
   const { session, restoreSession } = useAuth();
@@ -22,9 +24,9 @@ function SessionGate({ children }: { children: ReactNode }) {
 describe("TeamDetailsPage", () => {
   afterEach(() => { vi.restoreAllMocks(); sessionStorage.clear(); });
 
-  it("shows scoped members and keys and adds a configured user", async () => {
+  it("shows scoped members and keys and opens the policy simulator with team context", async () => {
     const memberships = [{ team_id: "platform", user_id: "user-1", roles: ["team_admin"], created_at: "2026-09-01T10:00:00Z", updated_at: "2026-09-01T10:00:00Z" }];
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === "/admin/v1/session") return json({ roles: ["admin"], capabilities: ["admin", "team_directory"] });
       if (url.startsWith("/admin/v1/teams?")) return json({ data: [{ id: "platform", name: "Platform", description: "Core team", status: "active", member_count: memberships.length, created_at: "2026-08-01T10:00:00Z", updated_at: "2026-09-01T10:00:00Z" }] });
@@ -38,6 +40,24 @@ describe("TeamDetailsPage", () => {
     expect(await screen.findByRole("heading", { name: "Platform" })).toBeInTheDocument();
     expect(screen.getByText("owner@example.test")).toBeInTheDocument();
     expect(screen.getByText("automation")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Simulate policy impact" }));
+    expect(await screen.findByText("Policy route ?view=simulator&team_id=platform")).toBeInTheDocument();
+  });
+
+  it("adds a configured user to a scoped team", async () => {
+    const memberships = [{ team_id: "platform", user_id: "user-1", roles: ["team_admin"], created_at: "2026-09-01T10:00:00Z", updated_at: "2026-09-01T10:00:00Z" }];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/admin/v1/session") return json({ roles: ["admin"], capabilities: ["admin", "team_directory"] });
+      if (url.startsWith("/admin/v1/teams?")) return json({ data: [{ id: "platform", name: "Platform", status: "active", member_count: memberships.length, created_at: "2026-08-01T10:00:00Z", updated_at: "2026-09-01T10:00:00Z" }] });
+      if (url === "/admin/v1/teams/platform/members?limit=500") return json({ data: memberships });
+      if (url === "/admin/v1/users?limit=500") return json({ data: [{ id: "user-1", name: "Owner", status: "active" }, { id: "user-2", name: "Developer", email: "dev@example.test", status: "active" }] });
+      if (url.startsWith("/admin/v1/keys?")) return json({ data: [] });
+      if (url === "/admin/v1/teams/platform/members/user-2" && init?.method === "PUT") { memberships.push({ team_id: "platform", user_id: "user-2", roles: ["developer"], created_at: "2026-09-02T10:00:00Z", updated_at: "2026-09-02T10:00:00Z" }); return json(memberships[1]); }
+      return json({ error: { message: "unexpected request" } }, 500);
+    });
+    renderPage();
+    await screen.findByRole("heading", { name: "Platform" });
     await userEvent.click(screen.getByRole("button", { name: "Add member" }));
     await userEvent.selectOptions(screen.getByLabelText("Team member user"), "user-2");
     await userEvent.click(screen.getByRole("combobox", { name: "Team roles" }));
@@ -51,7 +71,7 @@ describe("TeamDetailsPage", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
-      if (url === "/admin/v1/session") return json({ roles: ["admin"], capabilities: ["admin", "team_directory"] });
+      if (url === "/admin/v1/session") return json({ roles: ["team_admin"], capabilities: ["team_directory"], team_id: "platform" });
       if (url.startsWith("/admin/v1/teams?")) return json({ data: [{ id: "platform", name: "Platform", status: "active", member_count: 1, created_at: "2026-08-01T10:00:00Z", updated_at: "2026-09-01T10:00:00Z" }] });
       if (url.endsWith("/members/user-1") && init?.method === "DELETE") return json({}, 204);
       if (url === "/admin/v1/teams/platform/members?limit=500") return json({ data: [{ team_id: "platform", user_id: "user-1", roles: ["member"], created_at: "2026-09-01T10:00:00Z", updated_at: "2026-09-01T10:00:00Z" }] });
@@ -61,6 +81,7 @@ describe("TeamDetailsPage", () => {
     });
     renderPage();
     await screen.findByText("Owner");
+    expect(screen.queryByRole("button", { name: "Simulate policy impact" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Actions for member user-1" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Remove" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/members/user-1") && init?.method === "DELETE")).toBe(true));
