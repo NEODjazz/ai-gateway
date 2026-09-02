@@ -274,30 +274,41 @@ func observabilityMiddleware(metrics *Metrics, next http.Handler) http.Handler {
 }
 
 func metricPath(path string) string {
-	switch path {
-	case "/healthz", "/readyz", "/metrics", "/openapi.yaml", "/v1/models", "/v1/chat/completions", "/v1/responses", "/v1/embeddings", "/v1/rerank":
+	if path == "/openapi.yaml" {
 		return path
-	default:
-		if path == "/docs" || strings.HasPrefix(path, "/docs/") {
-			return "/docs/{asset}"
-		}
-		if path == "/ui" || strings.HasPrefix(path, "/ui/") {
-			return "/ui/{asset}"
-		}
-		if strings.HasPrefix(path, "/admin/v1/keys") {
-			return "/admin/v1/keys/{operation}"
-		}
-		if strings.HasPrefix(path, "/admin/v1/budgets") {
-			return "/admin/v1/budgets/{operation}"
-		}
-		if strings.HasPrefix(path, "/admin/v1/model-catalog") {
-			return "/admin/v1/model-catalog"
-		}
-		if strings.HasPrefix(path, "/admin/v1/audit/events") {
-			return "/admin/v1/audit/events"
-		}
-		return "unmatched"
 	}
+	if path == "/docs" || strings.HasPrefix(path, "/docs/") {
+		return "/docs/{asset}"
+	}
+	if path == "/ui" || strings.HasPrefix(path, "/ui/") {
+		return "/ui/{asset}"
+	}
+	for _, route := range gatewayRoutes {
+		if metricRouteMatches(route.Path, path) {
+			return route.Path
+		}
+	}
+	return "unmatched"
+}
+
+func metricRouteMatches(pattern, path string) bool {
+	patternParts := strings.Split(strings.TrimPrefix(pattern, "/"), "/")
+	pathParts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(patternParts) != len(pathParts) {
+		return false
+	}
+	for index, part := range patternParts {
+		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
+			if pathParts[index] == "" {
+				return false
+			}
+			continue
+		}
+		if part != pathParts[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func isInfrastructurePath(path string) bool {

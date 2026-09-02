@@ -393,6 +393,32 @@ func TestRoutesExposePrometheusMetricsAndRequestID(t *testing.T) {
 	}
 }
 
+func TestMetricPathUsesBoundedRouteContracts(t *testing.T) {
+	for _, route := range gatewayRoutes {
+		parts := strings.Split(route.Path, "/")
+		for index, part := range parts {
+			if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
+				parts[index] = "sample"
+			}
+		}
+		path := strings.Join(parts, "/")
+		if got := metricPath(path); got != route.Path {
+			t.Errorf("metricPath(%q)=%q, want route contract %q", path, got, route.Path)
+		}
+	}
+	for _, test := range []struct{ path, want string }{
+		{"/admin/v1/policy-attachments/resolve", "/admin/v1/policy-attachments/resolve"},
+		{"/admin/v1/budgets/42", "/admin/v1/budgets/{id}"},
+		{"/admin/v1/budgets/42/summary", "/admin/v1/budgets/{id}/summary"},
+		{"/admin/v1/providers/private-name/discover-models", "/admin/v1/providers/{id}/discover-models"},
+		{"/admin/v1/not-a-route/private-value", "unmatched"},
+	} {
+		if got := metricPath(test.path); got != test.want {
+			t.Errorf("metricPath(%q)=%q, want %q", test.path, got, test.want)
+		}
+	}
+}
+
 func TestDetailedMetricsExposeOnlyBoundedOperationalLabels(t *testing.T) {
 	metrics := NewMetrics()
 	metrics.ObserveProvider("azure-a", "openai", "chat", "ok", 10*time.Millisecond)

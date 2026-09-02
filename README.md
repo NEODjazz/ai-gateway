@@ -601,7 +601,9 @@ of customer spend.
 
 `GET /metrics` exposes Prometheus-format HTTP, provider-attempt, cache,
 module, security, and billing lifecycle counters plus duration sums. Labels are
-bounded: unmatched URLs become `path="unmatched"`, results use a fixed enum, and
+bounded: every registered API uses its static `gatewayRoutes` contract (for
+example `/admin/v1/budgets/{id}/summary`), unmatched URLs become
+`path="unmatched"`, results use a fixed enum, and
 identity, prompt, arbitrary model names, and secrets are never metric labels.
 Every response carries `X-Request-ID`, and the gateway emits one JSON request log
 with the same ID, trace/span IDs, status, normalized path, and duration.

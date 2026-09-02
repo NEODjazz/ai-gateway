@@ -45,6 +45,10 @@ Budget rows link to a route-based details workspace that reads the authoritative
 policy and summary endpoints, preserves currency isolation, links identity
 scopes, and returns edits to the configured-target form.
 
+HTTP metric and request-log path labels are derived from the registered route
+contracts. Dynamic identities remain placeholders and unknown paths are labeled
+`unmatched`, keeping observability complete without unbounded tenant labels.
+
 Guardrail policy definitions remain independent from their request scopes.
 Policy attachments can apply an enabled DLP/AV policy globally or to the
 intersection of configured team, virtual-key ID/alias, public model, and key-tag
