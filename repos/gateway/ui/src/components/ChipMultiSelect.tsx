@@ -9,7 +9,7 @@ export function ChipMultiSelect({ label, options, value, onChange, allowCustom =
   const listID = `${labelID}-options`;
   const search = query.trim().toLowerCase();
   const customValue = query.trim();
-  const singular = label.endsWith("s") ? label.slice(0, -1).toLowerCase() : label.toLowerCase();
+  const singular = label.endsWith("ies") ? `${label.slice(0, -3)}y`.toLowerCase() : label.endsWith("s") ? label.slice(0, -1).toLowerCase() : label.toLowerCase();
   const available = useMemo(() => options.filter((option) => !value.includes(option.value) && `${option.label} ${option.value} ${option.description || ""}`.toLowerCase().includes(search)), [options, search, value]);
   const canAddCustom = allowCustom && customValue !== "" && !value.includes(customValue) && !options.some((option) => option.value === customValue);
 

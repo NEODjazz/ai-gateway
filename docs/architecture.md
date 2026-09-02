@@ -337,6 +337,15 @@ opaque key ID или alias, public model и key tags; все заполненн�
 обойти failover-ом на endpoint без локального guardrail. Отсутствующая,
 disabled или недоступная обязательная policy блокирует запрос.
 
+UI управления guardrails намеренно отражает эту границу ответственности, а не
+каталог provider-specific plugins из LiteLLM. Он объединяет policy definition с
+прямыми deployment references и scoped attachments, поддерживает create/edit и
+metadata-only detail view. Compliance comparison ограничен восемью enabled
+policies и выполняет независимый bounded dry-run для каждой: это позволяет
+сравнить решения и частичные ошибки, не сохраняя и не возвращая submitted text
+или raw scanner response. Фильтры Guardrail Monitor сериализуются в URL, поэтому
+переход из policy details воспроизводимо открывает соответствующий report.
+
 ## Данные и хранилища
 
 ### Anonymization state

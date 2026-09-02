@@ -27,12 +27,20 @@ describe("management pages", () => {
   });
 
   it("runs a metadata-only compliance check", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input).includes("compliance/check") ? json({ allowed: true, content_stored: false }) : json({ data: [] }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/admin/v1/guardrail-policies") return json({ data: [{ name: "strict", description: "DLP", dlp: true, av: false, enabled: true }] });
+      if (url.includes("compliance/check")) return json({ request_id: "compliance-safe", policy: "strict", allowed: true, checks: { dlp: "passed", av: "disabled" }, content_stored: false });
+      return json({ data: [] });
+    });
     renderAuthenticated(<GuardrailsPage />);
-    await userEvent.type(screen.getByLabelText("Policy"), "strict");
+    await screen.findByText("strict");
+    await userEvent.click(screen.getByRole("button", { name: "Test Guardrails" }));
+    await userEvent.type(screen.getByRole("combobox", { name: "Policies" }), "strict{enter}");
     await userEvent.type(screen.getByLabelText("Text projection"), "safe text");
-    await userEvent.click(screen.getByRole("button", { name: "Run compliance check" }));
-    expect(await screen.findByText(/"content_stored": false/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Test 1 policies" }));
+    expect(await screen.findByText("compliance-safe")).toBeInTheDocument();
+    expect(screen.getByLabelText("Guardrail test results")).toHaveTextContent("Content stored");
   });
 
   it("creates a scoped policy attachment from configured resources", async () => {

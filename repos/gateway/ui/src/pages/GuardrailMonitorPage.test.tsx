@@ -63,6 +63,22 @@ describe("GuardrailMonitorPage", () => {
     })).toBe(true));
   });
 
+  it("hydrates a shareable policy filter from the route query", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/admin/v1/guardrail-policies") return json(policies);
+      return json(report);
+    });
+    renderPage("/guardrails-monitor?policy=strict&window=1h&source=compliance");
+    expect(await screen.findByDisplayValue("strict")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Last hour")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Compliance playground")).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => {
+      const value = String(url);
+      return value.includes("/admin/v1/guardrails/monitor?") && value.includes("window=1h") && value.includes("policy=strict") && value.includes("source=compliance");
+    })).toBe(true));
+  });
+
   it("opens a route-based module drill-down with policy impact", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);

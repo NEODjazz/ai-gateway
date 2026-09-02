@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { ActionsMenu } from "../components/ActionsMenu";
 import { ErrorState, LoadingState } from "../components/AsyncState";
@@ -42,8 +42,17 @@ export function GuardrailMonitorPage() {
   const { client } = useAuth();
   const navigate = useNavigate();
   const { module } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const selectedModule = module === "dlp" || module === "av" ? module : undefined;
-  const [filters, setFilters] = useState<Filters>({ window: "retained" });
+  const [filters, setFilters] = useState<Filters>(() => {
+    const requestedWindow = searchParams.get("window");
+    const window = requestedWindow === "15m" || requestedWindow === "1h" || requestedWindow === "24h" ? requestedWindow : "retained";
+    const requestedSource = searchParams.get("source");
+    const requestedOutcome = searchParams.get("outcome");
+    const source = requestedSource === "inference" || requestedSource === "compliance" ? requestedSource : undefined;
+    const outcome = requestedOutcome === "passed" || requestedOutcome === "rejected" || requestedOutcome === "unavailable" ? requestedOutcome : undefined;
+    return { window, policy: searchParams.get("policy")?.slice(0, 128) || undefined, source, outcome };
+  });
   const [report, setReport] = useState<Report>();
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,13 +74,22 @@ export function GuardrailMonitorPage() {
   const moduleRows: Row[] = useMemo(() => ["dlp", "av"].map((name) => { const item = report?.filtered_by_module[name] || emptySummary; const activePolicies = policies.filter((policy) => policy.enabled && policy[name as "dlp" | "av"]).length; return { id: name, module: name.toUpperCase(), evaluations: item.total, rejected: item.rejected, unavailable: item.unavailable, failure_rate: `${percentage(item.rejected + item.unavailable, item.total).toFixed(1)}%`, average_latency: `${Math.round(item.average_duration_ms)} ms`, policies: activePolicies, status: status(item), _module: name }; }), [policies, report]);
   const eventRows: Row[] = (report?.events || []).map((event, index) => ({ id: `${event.request_id || "event"}-${event.occurred_at}-${index}`, occurred_at: formatTimestamp(event.occurred_at), request_id: event.request_id || "—", policy: event.policy || "No policy", module: event.module.toUpperCase(), source: event.source, outcome: event.outcome, duration: `${event.duration_ms} ms` }));
   const policyRows: Row[] = Object.entries(report?.by_policy || {}).map(([name, item]) => ({ id: name || "unassigned", policy: name || "No policy", evaluations: item.total, rejected: item.rejected, unavailable: item.unavailable, failure_rate: `${percentage(item.rejected + item.unavailable, item.total).toFixed(1)}%`, average_latency: `${Math.round(item.average_duration_ms)} ms` }));
+  function changeFilters(next: Filters) {
+    setFilters(next);
+    const query = new URLSearchParams();
+    if (next.window !== "retained") query.set("window", next.window);
+    if (next.policy) query.set("policy", next.policy);
+    if (next.source) query.set("source", next.source);
+    if (next.outcome) query.set("outcome", next.outcome);
+    setSearchParams(query, { replace: true });
+  }
   if (loading && !report) return <LoadingState />;
   if (error && !report) return <ErrorState message={error} retry={() => void load()} />;
   if (!report) return <ErrorState message="Guardrail report is unavailable" retry={() => void load()} />;
   const scopeText = report.scope === "shared_redis" ? "Shared Redis history across gateway replicas" : "Current-replica fallback; shared history is unavailable";
   return <><PageHeader eyebrow="Compliance" title={selectedModule ? `${selectedModule.toUpperCase()} guardrail` : "Guardrail monitor"} description={selectedModule ? "Filtered performance, policy impact and metadata-only evaluation events." : "Guardrail performance across retained metadata-only evaluations."} actions={selectedModule ? <button className="secondary" onClick={() => navigate("/guardrails-monitor")}>Back to overview</button> : undefined} />
     {error && <ErrorState message={error} retry={() => void load()} />}
-    <GuardrailFilters filters={filters} policies={policies} onChange={setFilters} />
+    <GuardrailFilters filters={filters} policies={policies} onChange={changeFilters} />
     <section className={`notice-card guardrail-scope ${report.scope === "shared_redis" ? "shared" : "fallback"}`}><h2>{scopeText}</h2><p>{report.retained_events.toLocaleString()} of {report.retention.toLocaleString()} event slots are populated. {report.retention_full ? "Older events may have been evicted. " : ""}{report.store_errors ? `${report.store_errors.toLocaleString()} shared-store operations have failed since this replica started. ` : ""}Prompts, responses and scanner details are not stored.</p></section>
     <div className="usage-stats-grid"><StatCard label="Evaluations" value={summary.total.toLocaleString()} detail={filters.window === "retained" ? "retained events" : filters.window} /><StatCard label="Rejected" value={summary.rejected.toLocaleString()} /><StatCard label="Unavailable" value={summary.unavailable.toLocaleString()} /><StatCard label="Pass rate" value={`${passRate.toFixed(1)}%`} /><StatCard label="Average latency" value={`${Math.round(summary.average_duration_ms)} ms`} /></div>
     <section className="section-block"><h2>Evaluation timeline</h2><p>Server-side buckets for the selected window and filters.</p><Timeline buckets={report.timeline} /></section>

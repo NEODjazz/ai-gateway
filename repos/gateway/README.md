@@ -45,6 +45,12 @@ Policy attachments can apply an enabled DLP/AV policy globally or to the
 intersection of configured team, virtual-key ID/alias, public model, and key-tag
 patterns. Matching policies are combined with deployment guardrails and fail
 closed if a required scanner is unavailable.
+The Guardrails UI presents these gateway-native policies as one workflow: joined
+deployment/attachment coverage, create/edit, detail inspection, policy-filtered
+monitoring and bounded multi-policy dry-run comparison. Unlike LiteLLM's
+provider-plugin catalog, the gateway keeps scanner endpoints and credentials in
+the independently operated DLP/AV services and stores no executable guardrail
+code in its control plane.
 
 Request-log session and trace views are aggregated in ClickHouse across the
 complete selected time window, rather than from the current browser page.

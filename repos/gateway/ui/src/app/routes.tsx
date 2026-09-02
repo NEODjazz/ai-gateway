@@ -8,7 +8,6 @@ import { ModelCatalogPage } from "../pages/ModelCatalogPage";
 import { PlaygroundPage } from "../pages/PlaygroundPage";
 import { LogsPage } from "../pages/LogsPage";
 import { RoutingPage } from "../pages/RoutingPage";
-import { GuardrailsPage } from "../pages/GuardrailsPage";
 import { OrganizationsPage, TeamsPage } from "../pages/IdentityAssociationPages";
 import { UsagePage } from "../pages/UsagePage";
 import { ModelOnboardingPage } from "../pages/ModelOnboardingPage";
@@ -35,6 +34,7 @@ export type AppRoute = { path: string; title: string; group: "Monitor" | "Manage
 
 const ProjectsPage = lazy(() => import("../pages/ProjectsPage").then((module) => ({ default: module.ProjectsPage })));
 const ProjectDetailsPage = lazy(() => import("../pages/ProjectsPage").then((module) => ({ default: module.ProjectDetailsPage })));
+const GuardrailsPage = lazy(() => import("../pages/GuardrailsPage").then((module) => ({ default: module.GuardrailsPage })));
 const deferred = (element: ReactNode) => <Suspense fallback={<LoadingState />}>{element}</Suspense>;
 
 const readOnly = (title: string, description: string, path: string, columns: ResourceConfig["columns"]): ReactNode => <ResourcePage config={{ eyebrow: "Operations", title, description, listPath: path, columns }} />;
@@ -85,7 +85,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/search-tools", title: "Search tools", group: "AI Hub", element: unavailable("Search tools", "A managed search-tool registry requires a dedicated execution adapter and credential boundary."), available: false },
   { path: "/skills", title: "Skills", group: "AI Hub", element: unavailable("Skills", "The gateway governs tool identities but does not store or execute skill content."), available: false },
 
-  { path: "/guardrails", title: "Guardrails", group: "Govern", element: <GuardrailsPage />, available: true },
+  { path: "/guardrails", title: "Guardrails", group: "Govern", element: deferred(<GuardrailsPage />), available: true },
   { path: "/guardrails-monitor", title: "Guardrail monitor", group: "Govern", element: <GuardrailMonitorPage />, available: true },
   { path: "/guardrails-monitor/:module", title: "Guardrail details", group: "Govern", element: <GuardrailMonitorPage />, available: true, navigation: false },
   { path: "/budgets", title: "Budgets", group: "Govern", element: <BudgetsPage />, available: true },

@@ -557,6 +557,12 @@ Playground sends a bounded text projection directly to those internal scanners,
 never invokes a model, never echoes the submitted text, and reports
 `content_stored: false`. A rejected scanner produces an explicit deny decision;
 an unavailable enabled scanner fails closed with HTTP 503.
+The Guardrails console joins each policy with its direct model deployments and
+durable scoped attachments. Operators can create or edit policies from the
+managed table, inspect their effective coverage, deep-link into a policy-filtered
+monitor report, and compare up to eight enabled policies. Comparison performs one
+bounded compliance request per policy, keeps partial failures visible, and never
+places submitted text or raw scanner output in the result table.
 
 The MCP registry stores only approved HTTPS endpoint metadata, transport type,
 and canonical tool identifiers. It deliberately has no credential, header, or
