@@ -57,13 +57,17 @@ function UsageCell({ value, limit, type, currency }: { value: number; limit?: nu
 
 function BudgetForm({ initial, loadTargets, onClose, onSave }: { initial?: BudgetPolicy; loadTargets: (scope: string) => Promise<TargetOption[]>; onClose: () => void; onSave: (draft: BudgetDraft) => Promise<void> }) {
   const [draft, setDraft] = useState<BudgetDraft>(initial ? { scope_type: initial.scope_type, scope_id: initial.scope_id, period: initial.period, currency: initial.currency, max_cost: initial.max_cost === undefined ? "" : String(initial.max_cost), max_tokens: initial.max_tokens === undefined ? "" : String(initial.max_tokens), enabled: initial.enabled } : emptyDraft);
-  const [targets, setTargets] = useState<TargetOption[]>(draft.scope_type === "global" ? [{ value: "*", label: "All gateway traffic (*)" }] : []);
+  const [targets, setTargets] = useState<TargetOption[]>(draft.scope_type === "global" ? [{ value: "*", label: "All gateway traffic (*)" }] : draft.scope_id ? [{ value: draft.scope_id, label: `${draft.scope_id} — current selection` }] : []);
   const [targetError, setTargetError] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     let active = true; setTargetError("");
-    loadTargets(draft.scope_type).then((options) => { if (active) setTargets(options); }).catch((cause) => { if (active) { setTargets([]); setTargetError(cause instanceof Error ? cause.message : "Could not load configured targets"); } });
+    const selected = draft.scope_id;
+    loadTargets(draft.scope_type).then((options) => {
+      if (!active) return;
+      setTargets(selected && !options.some((option) => option.value === selected) ? [{ value: selected, label: `${selected} — current selection` }, ...options] : options);
+    }).catch((cause) => { if (active) { setTargets(selected ? [{ value: selected, label: `${selected} — current selection` }] : []); setTargetError(cause instanceof Error ? cause.message : "Could not load configured targets"); } });
     return () => { active = false; };
   }, [draft.scope_type, loadTargets]);
   function changeScope(scope_type: string) { setDraft((value) => ({ ...value, scope_type, scope_id: scope_type === "global" ? "*" : "" })); }
