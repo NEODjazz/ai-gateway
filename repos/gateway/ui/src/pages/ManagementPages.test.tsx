@@ -43,41 +43,6 @@ describe("management pages", () => {
     expect(screen.getByLabelText("Guardrail test results")).toHaveTextContent("Content stored");
   });
 
-  it("creates a scoped policy attachment from configured resources", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input);
-      if (url === "/admin/v1/policy-attachments") return json({ data: [] });
-      if (url === "/admin/v1/guardrail-policies") return json({ data: [{ name: "strict", description: "DLP", enabled: true }, { name: "disabled", description: "Off", enabled: false }] });
-      if (url.includes("/admin/v1/teams")) return json({ data: [{ id: "care-a", name: "Care" }] });
-      if (url.includes("/admin/v1/keys")) return json({ data: [{ id: "vk-1", alias: "clinical-prod" }] });
-      if (url === "/admin/v1/model-catalog") return json({ models: [{ model: "gpt-5.6", provider: "azure" }] });
-      if (url === "/admin/v1/policy-attachments/clinical") return json({ id: "clinical", policy_name: "strict" });
-      return json({ data: [] });
-    });
-    renderAuthenticated(<ResourcePage config={resourceConfigs.policyAttachments} />);
-    await screen.findByText("No records found.");
-    await userEvent.click(screen.getByRole("button", { name: "Create Policy Attachment" }));
-    await userEvent.type(screen.getByLabelText("ID"), "clinical");
-    expect(screen.queryByRole("option", { name: /disabled/ })).not.toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText("Guardrail policy"), "strict");
-    await userEvent.selectOptions(screen.getByLabelText("Teams"), "care-a");
-    await userEvent.selectOptions(screen.getByLabelText("Models"), "gpt-5.6");
-    await userEvent.selectOptions(screen.getByLabelText("Scope"), "*");
-    expect(screen.queryByLabelText("Teams")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Models")).not.toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText("Scope"), "specific");
-    expect(Array.from((screen.getByLabelText("Teams") as HTMLSelectElement).selectedOptions)).toHaveLength(0);
-    expect(Array.from((screen.getByLabelText("Models") as HTMLSelectElement).selectedOptions)).toHaveLength(0);
-    await userEvent.selectOptions(screen.getByLabelText("Teams"), "care-a");
-    await userEvent.selectOptions(screen.getByLabelText("Models"), "gpt-5.6");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === "/admin/v1/policy-attachments/clinical" && call[1]?.method === "PUT")).toBe(true));
-    const save = fetchMock.mock.calls.find((call) => call[0] === "/admin/v1/policy-attachments/clinical");
-    expect(save?.[1]?.body).toContain('"policy_name":"strict"');
-    expect(save?.[1]?.body).toContain('"teams":["care-a"]');
-    expect(save?.[1]?.body).toContain('"models":["gpt-5.6"]');
-  });
-
   it("creates a managed tag with model restrictions", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);

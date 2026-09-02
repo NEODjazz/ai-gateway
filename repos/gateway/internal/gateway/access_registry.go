@@ -359,6 +359,32 @@ func policyAttachmentMatches(item PolicyAttachment, context PolicyMatchContext) 
 	return true
 }
 
+func policyAttachmentMatchDimensions(item PolicyAttachment, context PolicyMatchContext) []string {
+	if item.Scope == "*" {
+		return []string{"global"}
+	}
+	dimensions := make([]string, 0, 4)
+	if len(item.Teams) != 0 {
+		dimensions = append(dimensions, "team")
+	}
+	if len(item.Keys) != 0 {
+		dimension := "key"
+		if matchesPolicyPattern(context.CredentialID, item.Keys) {
+			dimension = "key_id"
+		} else if matchesPolicyPattern(context.CredentialAlias, item.Keys) {
+			dimension = "key_alias"
+		}
+		dimensions = append(dimensions, dimension)
+	}
+	if len(item.Models) != 0 {
+		dimensions = append(dimensions, "model")
+	}
+	if len(item.Tags) != 0 {
+		dimensions = append(dimensions, "tag")
+	}
+	return dimensions
+}
+
 func matchesPolicyPattern(value string, patterns []string) bool {
 	for _, pattern := range patterns {
 		if pattern == "*" || pattern == value || (strings.HasSuffix(pattern, "*") && strings.HasPrefix(value, strings.TrimSuffix(pattern, "*"))) {

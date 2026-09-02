@@ -111,6 +111,24 @@ textarea { resize: vertical; }
 .guardrail-test-results { margin-top: 24px; }
 .guardrail-test-results h3 { margin: 0 0 10px; }
 .guardrail-policy-boundary { margin-bottom: 6px; }
+.policy-attachment-modal { width: min(900px, 100%); }
+.policy-attachment-modal .modal-heading h2 { margin: 4px 0 0; }
+.policy-attachment-form { display: grid; gap: 16px; }
+.policy-attachment-form > label { grid-template-columns: 170px minmax(0, 1fr); gap: 18px; align-items: center; }
+.policy-attachment-form fieldset { display: flex; gap: 18px; margin: 0; padding: 14px 16px; border: 1px solid #dce4e8; border-radius: 9px; }
+.policy-attachment-form fieldset legend { color: #435361; font-size: 13px; font-weight: 700; padding: 0 5px; }
+.policy-attachment-form fieldset label { display: flex; align-items: center; gap: 7px; }
+.policy-attachment-form fieldset input { width: auto; }
+.policy-scope-fields { display: grid; gap: 12px; }
+.policy-scope-preview { padding: 16px; box-shadow: none; }
+.policy-scope-preview h3, .policy-resolution-issues h3 { margin: 0 0 6px; }
+.policy-scope-preview.warning, .policy-resolution-issues { border-color: #ebd0aa; background: #fff9ee; }
+.policy-scope-preview small { display: block; margin-top: 10px; color: #73818c; }
+.policy-simulator { display: grid; gap: 18px; }
+.policy-simulator-form { padding: 20px; overflow: visible; }
+.policy-simulator-form > .key-model-field { margin-top: 16px; }
+.policy-resolution { display: grid; gap: 18px; }
+.secondary.danger { color: #a52732; border-color: #e9c6ca; }
 .form-error { color: #b32d38; }
 .operation-result { margin: 0 0 16px; padding: 12px 14px; border-radius: 8px; background: #e8f5f2; color: #176e5d; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 .wizard-steps { list-style: none; padding: 0; margin: 0 0 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
@@ -308,4 +326,4 @@ textarea { resize: vertical; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
 @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar { position: static; height: auto; } .sidebar nav { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 18px; } .content { padding: 24px 18px 48px; } .split-grid, .filter-card, .candidate-row, .retry-grid, .playground-grid { grid-template-columns: 1fr; } .playground-form { position: static; } .wizard-steps { grid-template-columns: repeat(2, 1fr); } .key-toolbar { align-items: stretch; flex-direction: column; } .key-toolbar-right { justify-content: flex-start; } }
 @media (max-width: 600px) { .sidebar nav { grid-template-columns: 1fr; } .page-header { flex-direction: column; } .form-grid, .provider-model-list, .playground-settings, .playground-metadata { grid-template-columns: 1fr; } .playground-turn { max-width: 100%; } .span-2 { grid-column: auto; } .key-toolbar-right { align-items: stretch; flex-wrap: wrap; } .key-search { width: 100%; } .key-form > label, .key-model-field, .credential-form > label, .model-group-form > label, .model-group-field { grid-template-columns: 1fr; gap: 4px; } .key-form > label > span, .key-model-field > span { padding-top: 0; } .key-form-error, .key-form .modal-actions, .credential-write-only-notice, .credential-form-error, .credential-form-actions, .model-group-enabled, .access-group-enabled { margin-left: 0; } .selected-route-row { grid-template-columns: 28px minmax(120px, 1fr) 30px 30px; } .selected-route-row > span:nth-of-type(2), .selected-route-row > span:nth-of-type(3) { display: none; } .key-pagination, .key-pagination-summary { align-items: stretch; flex-wrap: wrap; justify-content: flex-start; } .key-pagination-navigation { margin-left: auto; } }
-@media (max-width: 600px) { .guardrail-test-form > small { margin-left: 0; } }
+@media (max-width: 600px) { .guardrail-test-form > small { margin-left: 0; } .policy-attachment-form > label { grid-template-columns: 1fr; gap: 4px; } .policy-attachment-form fieldset { align-items: flex-start; flex-direction: column; } }

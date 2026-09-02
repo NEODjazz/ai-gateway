@@ -977,6 +977,19 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/policy-attachments/resolve:
+    post:
+      operationId: resolvePolicyAttachments
+      tags: [Guardrails]
+      summary: Simulate runtime guardrail policy attachment resolution
+      description: Uses the same global, exact, and trailing-asterisk prefix matching as inference. It does not invoke a model or scanner and reports missing or disabled policies as fail-closed issues.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PolicyResolutionInput'}}}}
+      responses:
+        '200': {description: Effective attachment and guardrail resolution, content: {application/json: {schema: {$ref: '#/components/schemas/PolicyResolution'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/policy-attachments/{id}:
     parameters: [{$ref: '#/components/parameters/AccessEntryID'}]
     put:
@@ -3116,6 +3129,43 @@ components:
         - type: object
           required: [id]
           properties: {id: {type: string}}
+    PolicyResolutionInput:
+      type: object
+      additionalProperties: false
+      properties:
+        team_id: {type: string, maxLength: 512}
+        credential_id: {type: string, maxLength: 512}
+        credential_alias: {type: string, maxLength: 512}
+        model: {type: string, maxLength: 512}
+        tags: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+    ResolvedPolicyAttachment:
+      type: object
+      required: [id, policy_name, scope, matched_via, policy_status, dlp, av]
+      properties:
+        id: {type: string}
+        policy_name: {type: string}
+        scope: {type: string}
+        matched_via: {type: array, items: {type: string, enum: [global, team, key, key_id, key_alias, model, tag]}}
+        policy_status: {type: string, enum: [enabled, disabled, missing, unavailable]}
+        dlp: {type: boolean}
+        av: {type: boolean}
+    PolicyResolutionIssue:
+      type: object
+      required: [attachment_id, policy_name, code]
+      properties:
+        attachment_id: {type: string}
+        policy_name: {type: string}
+        code: {type: string, enum: [policy_controller_unavailable, policy_missing, policy_disabled]}
+    PolicyResolution:
+      type: object
+      required: [matched_attachments, effective_policies, dlp, av, enforceable, issues]
+      properties:
+        matched_attachments: {type: array, items: {$ref: '#/components/schemas/ResolvedPolicyAttachment'}}
+        effective_policies: {type: array, uniqueItems: true, items: {type: string}}
+        dlp: {type: boolean}
+        av: {type: boolean}
+        enforceable: {type: boolean}
+        issues: {type: array, items: {$ref: '#/components/schemas/PolicyResolutionIssue'}}
     TagDefinitionInput:
       type: object
       additionalProperties: false

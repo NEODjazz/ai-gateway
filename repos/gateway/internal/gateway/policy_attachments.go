@@ -9,6 +9,108 @@ import (
 	"ai-gateway-gateway/internal/modules"
 )
 
+type PolicyResolutionRequest struct {
+	TeamID          string   `json:"team_id,omitempty"`
+	CredentialID    string   `json:"credential_id,omitempty"`
+	CredentialAlias string   `json:"credential_alias,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
+}
+
+type ResolvedPolicyAttachment struct {
+	ID           string   `json:"id"`
+	PolicyName   string   `json:"policy_name"`
+	Scope        string   `json:"scope"`
+	MatchedVia   []string `json:"matched_via"`
+	PolicyStatus string   `json:"policy_status"`
+	DLP          bool     `json:"dlp"`
+	AV           bool     `json:"av"`
+}
+
+type PolicyResolutionIssue struct {
+	AttachmentID string `json:"attachment_id"`
+	PolicyName   string `json:"policy_name"`
+	Code         string `json:"code"`
+}
+
+type PolicyResolutionResponse struct {
+	MatchedAttachments []ResolvedPolicyAttachment `json:"matched_attachments"`
+	EffectivePolicies  []string                   `json:"effective_policies"`
+	DLP                bool                       `json:"dlp"`
+	AV                 bool                       `json:"av"`
+	Enforceable        bool                       `json:"enforceable"`
+	Issues             []PolicyResolutionIssue    `json:"issues"`
+}
+
+func (h Handler) ResolvePolicyAttachments(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeAdmin(w, r); !ok {
+		return
+	}
+	if h.access == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "policy attachment registry is unavailable")
+		return
+	}
+	var input PolicyResolutionRequest
+	if !decodeAccessJSON(w, r, &input) {
+		return
+	}
+	input.TeamID = strings.TrimSpace(input.TeamID)
+	input.CredentialID = strings.TrimSpace(input.CredentialID)
+	input.CredentialAlias = strings.TrimSpace(input.CredentialAlias)
+	input.Model = strings.TrimSpace(input.Model)
+	input.Tags = uniqueStrings(input.Tags)
+	if len(input.TeamID) > 512 || len(input.CredentialID) > 512 || len(input.CredentialAlias) > 512 || len(input.Model) > 512 || !validAccessStrings(input.Tags) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid policy resolution context")
+		return
+	}
+	context := PolicyMatchContext{TeamID: input.TeamID, CredentialID: input.CredentialID, CredentialAlias: input.CredentialAlias, Model: input.Model, Tags: input.Tags}
+	writeJSON(w, http.StatusOK, h.resolvePolicyAttachmentSet(h.access.MatchingPolicyAttachments(context), context))
+}
+
+func (h Handler) resolvePolicyAttachmentSet(attachments []PolicyAttachment, context PolicyMatchContext) PolicyResolutionResponse {
+	result := PolicyResolutionResponse{
+		MatchedAttachments: make([]ResolvedPolicyAttachment, 0, len(attachments)),
+		EffectivePolicies:  []string{},
+		Enforceable:        true,
+		Issues:             []PolicyResolutionIssue{},
+	}
+	controller, controllerAvailable := h.guardrailController()
+	seen := make(map[string]struct{}, len(attachments))
+	for _, attachment := range attachments {
+		resolved := ResolvedPolicyAttachment{ID: attachment.ID, PolicyName: attachment.PolicyName, Scope: attachment.Scope, MatchedVia: policyAttachmentMatchDimensions(attachment, context)}
+		if !controllerAvailable {
+			resolved.PolicyStatus = "unavailable"
+			result.Enforceable = false
+			result.Issues = append(result.Issues, PolicyResolutionIssue{AttachmentID: attachment.ID, PolicyName: attachment.PolicyName, Code: "policy_controller_unavailable"})
+			result.MatchedAttachments = append(result.MatchedAttachments, resolved)
+			continue
+		}
+		policy, found := controller.GetGuardrailPolicy(attachment.PolicyName)
+		if !found {
+			resolved.PolicyStatus = "missing"
+			result.Enforceable = false
+			result.Issues = append(result.Issues, PolicyResolutionIssue{AttachmentID: attachment.ID, PolicyName: attachment.PolicyName, Code: "policy_missing"})
+		} else if !policy.Enabled {
+			resolved.PolicyStatus = "disabled"
+			resolved.DLP, resolved.AV = policy.DLP, policy.AV
+			result.Enforceable = false
+			result.Issues = append(result.Issues, PolicyResolutionIssue{AttachmentID: attachment.ID, PolicyName: attachment.PolicyName, Code: "policy_disabled"})
+		} else {
+			resolved.PolicyStatus = "enabled"
+			resolved.DLP, resolved.AV = policy.DLP, policy.AV
+			result.DLP = result.DLP || policy.DLP
+			result.AV = result.AV || policy.AV
+			if _, duplicate := seen[policy.Name]; !duplicate {
+				seen[policy.Name] = struct{}{}
+				result.EffectivePolicies = append(result.EffectivePolicies, policy.Name)
+			}
+		}
+		result.MatchedAttachments = append(result.MatchedAttachments, resolved)
+	}
+	sort.Strings(result.EffectivePolicies)
+	return result
+}
+
 func (h Handler) applyPolicyAttachments(w http.ResponseWriter, req *modules.RequestContext, model string) bool {
 	return h.applyPolicyAttachmentsForModels(w, req, []string{model})
 }
@@ -36,34 +138,24 @@ func (h Handler) applyPolicyAttachmentsForModels(w http.ResponseWriter, req *mod
 	if len(attachments) == 0 {
 		return true
 	}
-	controller, ok := h.guardrailController()
-	if !ok {
-		writeError(w, http.StatusServiceUnavailable, "policy_unavailable", "required policy evaluation is unavailable")
+	resolution := h.resolvePolicyAttachmentSet(attachments, PolicyMatchContext{})
+	if !resolution.Enforceable {
+		message := "an attached policy is missing or disabled"
+		for _, issue := range resolution.Issues {
+			if issue.Code == "policy_controller_unavailable" {
+				message = "required policy evaluation is unavailable"
+				break
+			}
+		}
+		writeError(w, http.StatusServiceUnavailable, "policy_unavailable", message)
 		return false
 	}
-	names := make([]string, 0, len(attachments))
-	dlp, av := false, false
-	seen := map[string]struct{}{}
-	for _, attachment := range attachments {
-		policy, found := controller.GetGuardrailPolicy(attachment.PolicyName)
-		if !found || !policy.Enabled {
-			writeError(w, http.StatusServiceUnavailable, "policy_unavailable", "an attached policy is missing or disabled")
-			return false
-		}
-		dlp = dlp || policy.DLP
-		av = av || policy.AV
-		if _, found := seen[policy.Name]; !found {
-			seen[policy.Name] = struct{}{}
-			names = append(names, policy.Name)
-		}
-	}
-	sort.Strings(names)
 	if req.Metadata == nil {
 		req.Metadata = map[string]string{}
 	}
 	req.Metadata["policy.guardrail.required"] = "true"
-	req.Metadata["policy.guardrail.names"] = strings.Join(names, ",")
-	req.Metadata["policy.modules.dlp.enabled"] = strconv.FormatBool(dlp)
-	req.Metadata["policy.modules.av.enabled"] = strconv.FormatBool(av)
+	req.Metadata["policy.guardrail.names"] = strings.Join(resolution.EffectivePolicies, ",")
+	req.Metadata["policy.modules.dlp.enabled"] = strconv.FormatBool(resolution.DLP)
+	req.Metadata["policy.modules.av.enabled"] = strconv.FormatBool(resolution.AV)
 	return true
 }

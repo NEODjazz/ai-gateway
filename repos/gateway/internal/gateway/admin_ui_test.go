@@ -53,7 +53,7 @@ func TestAdminUIServesEmbeddedSameOriginAssets(t *testing.T) {
 		}
 		assertAdminUISecurityHeaders(t, asset.Header(), "no-store")
 	}
-	for _, pattern := range []string{"adminui/assets/ProjectsPage-*.js", "adminui/assets/GuardrailsPage-*.js"} {
+	for _, pattern := range []string{"adminui/assets/ProjectsPage-*.js", "adminui/assets/GuardrailsPage-*.js", "adminui/assets/PoliciesPage-*.js"} {
 		chunks, err := fs.Glob(adminUIAssets, pattern)
 		if err != nil || len(chunks) != 1 {
 			t.Fatalf("expected one embedded page chunk for %q, got %v (error %v)", pattern, chunks, err)

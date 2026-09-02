@@ -4,6 +4,7 @@ import (
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/provider"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -231,6 +232,56 @@ func TestPolicyAttachmentsAdminAPIAndRequestEvaluation(t *testing.T) {
 	router.ServeHTTP(remove, httptest.NewRequest(http.MethodDelete, "/admin/v1/policy-attachments/clinical", nil))
 	if remove.Code != http.StatusNoContent || len(registry.PolicyAttachments()) != 0 {
 		t.Fatalf("delete attachment status=%d body=%s", remove.Code, remove.Body.String())
+	}
+}
+
+func TestPolicyAttachmentResolutionUsesRuntimeMatchingAndReportsFailClosedIssues(t *testing.T) {
+	runtime := provider.New(provider.Config{GuardrailPolicies: map[string]config.GuardrailPolicyConfig{
+		"strict":   {DLP: true},
+		"malware":  {AV: true},
+		"disabled": {DLP: true},
+	}})
+	controller := runtime.(provider.GuardrailController)
+	if _, err := controller.UpdateGuardrailPolicy("disabled", provider.GuardrailPolicy{DLP: true, Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewAccessRegistry()
+	for id, attachment := range map[string]PolicyAttachment{
+		"global-strict": {PolicyName: "strict", Scope: "*"},
+		"clinical-av":   {PolicyName: "malware", Scope: "specific", Teams: []string{"care-*"}, Keys: []string{"clinical-*"}, Models: []string{"gpt-*"}, Tags: []string{"hipaa"}},
+		"disabled-rule": {PolicyName: "disabled", Scope: "specific", Teams: []string{"care-a"}},
+	} {
+		if _, err := registry.PutPolicyAttachment(id, attachment); err != nil {
+			t.Fatalf("put %s: %v", id, err)
+		}
+	}
+	handler := Routes(NewHandler(modulesPipeline("admin"), runtime).WithAccessRegistry(registry))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/admin/v1/policy-attachments/resolve", strings.NewReader(`{"team_id":"care-a","credential_alias":"clinical-prod","model":"gpt-5.6","tags":["hipaa"]}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("resolve status=%d body=%s", response.Code, response.Body.String())
+	}
+	var result PolicyResolutionResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Enforceable || !result.DLP || !result.AV || strings.Join(result.EffectivePolicies, ",") != "malware,strict" || len(result.MatchedAttachments) != 3 || len(result.Issues) != 1 || result.Issues[0].Code != "policy_disabled" {
+		t.Fatalf("unexpected resolution: %+v", result)
+	}
+	var clinical ResolvedPolicyAttachment
+	for _, attachment := range result.MatchedAttachments {
+		if attachment.ID == "clinical-av" {
+			clinical = attachment
+		}
+	}
+	if clinical.PolicyStatus != "enabled" || strings.Join(clinical.MatchedVia, ",") != "team,key_alias,model,tag" {
+		t.Fatalf("runtime match dimensions were not preserved: %+v", clinical)
+	}
+
+	invalid := httptest.NewRecorder()
+	handler.ServeHTTP(invalid, httptest.NewRequest(http.MethodPost, "/admin/v1/policy-attachments/resolve", strings.NewReader(`{"unknown":true}`)))
+	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("invalid resolution context status=%d body=%s", invalid.Code, invalid.Body.String())
 	}
 }
 

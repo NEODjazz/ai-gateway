@@ -45,6 +45,12 @@ Policy attachments can apply an enabled DLP/AV policy globally or to the
 intersection of configured team, virtual-key ID/alias, public model, and key-tag
 patterns. Matching policies are combined with deployment guardrails and fail
 closed if a required scanner is unavailable.
+`POST /admin/v1/policy-attachments/resolve` performs a metadata-only dry
+resolution with the exact runtime matcher. The Policies workspace uses it to
+show matched attachments, cumulative DLP/AV requirements, and fail-closed
+missing/disabled-policy issues without invoking a provider or scanner. Its
+attachment editor supports configured values plus exact or trailing-asterisk
+patterns and displays the AND-across-dimensions scope semantics before save.
 The Guardrails UI presents these gateway-native policies as one workflow: joined
 deployment/attachment coverage, create/edit, detail inspection, policy-filtered
 monitoring and bounded multi-policy dry-run comparison. Unlike LiteLLM's

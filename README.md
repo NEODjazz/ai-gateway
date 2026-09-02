@@ -615,7 +615,13 @@ with `GUARDRAIL_POLICIES_JSON` (Helm: `gateway.guardrailPolicies`) and selected
 per endpoint with `guardrail_policy`; an endpoint referencing an unknown profile
 is skipped instead of running without the intended DLP/AV controls. Runtime
 attachments are managed through `/admin/v1/policy-attachments` or the Policies
-page and are stored in the versioned control-plane snapshot.
+page and are stored in the versioned control-plane snapshot. The Policies page
+provides wildcard-aware create/edit forms, explicit global-scope warnings,
+policy-health joins, and a runtime simulator. The simulator calls
+`POST /admin/v1/policy-attachments/resolve`, which reuses the inference matcher
+and guardrail controller but invokes no provider, model, DLP, or AV service. It
+reports every matched attachment, effective modules, and missing or disabled
+policy references that would fail closed.
 
 Guardrail Monitor stores only bounded evaluation metadata: request ID, policy,
 module, source, outcome, duration and timestamp. Prompts, responses and raw

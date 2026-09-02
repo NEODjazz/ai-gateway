@@ -337,6 +337,15 @@ opaque key ID или alias, public model и key tags; все заполненн�
 обойти failover-ом на endpoint без локального guardrail. Отсутствующая,
 disabled или недоступная обязательная policy блокирует запрос.
 
+`POST /admin/v1/policy-attachments/resolve` использует тот же
+`MatchingPolicyAttachments` и тот же guardrail controller, что inference path.
+Он принимает только metadata context (`team_id`, opaque key ID/alias, model и
+tags), не запускает provider или scanner и возвращает matched attachments,
+effective policies/modules и fail-closed issues. Policies UI использует этот
+endpoint как simulator. Create/edit form допускает только поддерживаемый runtime
+wildcard — trailing `*` — и явно показывает, что dimensions соединяются AND, а
+значения внутри dimension — OR.
+
 UI управления guardrails намеренно отражает эту границу ответственности, а не
 каталог provider-specific plugins из LiteLLM. Он объединяет policy definition с
 прямыми deployment references и scoped attachments, поддерживает create/edit и
@@ -345,6 +354,10 @@ policies и выполняет независимый bounded dry-run для к�
 сравнить решения и частичные ошибки, не сохраняя и не возвращая submitted text
 или raw scanner response. Фильтры Guardrail Monitor сериализуются в URL, поэтому
 переход из policy details воспроизводимо открывает соответствующий report.
+LiteLLM policy versioning, AI-generated templates и provider-specific pipeline
+builder сознательно не перенесены: gateway policy definition — это независимый
+DLP/AV selector, attachments дают композицию scope, а executable scanner config
+и credentials остаются за границей control plane.
 
 ## Данные и хранилища
 

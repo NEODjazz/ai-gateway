@@ -92,6 +92,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/admin/v1/guardrail-policies"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListGuardrailPolicies) }},
 	{RouteContract{http.MethodPut, "/admin/v1/guardrail-policies/{name}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateGuardrailPolicy) }},
 	{RouteContract{http.MethodGet, "/admin/v1/policy-attachments"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListPolicyAttachments) }},
+	{RouteContract{http.MethodPost, "/admin/v1/policy-attachments/resolve"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ResolvePolicyAttachments) }},
 	{RouteContract{http.MethodPut, "/admin/v1/policy-attachments/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutPolicyAttachment) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/policy-attachments/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeletePolicyAttachment) }},
 	{RouteContract{http.MethodGet, "/admin/v1/tags"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListTags) }},
