@@ -55,6 +55,9 @@ Virtual-key details resolve policy impact with the key identity, owner team,
 credential tags and selected public model; team details open the same simulator
 with their identity context prefilled. The UI therefore shows a runtime result
 rather than an inaccurate context-free list of policies on an identity.
+Identity workspaces can open the attachment editor with their immutable key or
+team ID preselected. The attachment remains an independently persisted runtime
+resource, so policy assignment never requires a cross-service key/team update.
 The Guardrails UI presents these gateway-native policies as one workflow: joined
 deployment/attachment coverage, create/edit, detail inspection, policy-filtered
 monitoring and bounded multi-policy dry-run comparison. Unlike LiteLLM's

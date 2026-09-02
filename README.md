@@ -628,6 +628,11 @@ evaluating the exact request path. Team details deep-link to the simulator with
 the team ID preselected. These contextual views intentionally do not present a
 single static policy list because model and tag dimensions can change the
 runtime result.
+Global administrators can also start attachment creation from a virtual-key or
+team details workspace. The Policies form opens with the immutable identity
+scope and a sanitized editable attachment ID already filled; policy, model and
+tag scope remain explicit operator choices. This provides LiteLLM-style direct
+assignment ergonomics without duplicating policy state inside identity records.
 
 Guardrail Monitor stores only bounded evaluation metadata: request ID, policy,
 module, source, outcome, duration and timestamp. Prompts, responses and raw

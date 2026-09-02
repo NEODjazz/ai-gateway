@@ -40,7 +40,8 @@ describe("TeamDetailsPage", () => {
     expect(await screen.findByRole("heading", { name: "Platform" })).toBeInTheDocument();
     expect(screen.getByText("owner@example.test")).toBeInTheDocument();
     expect(screen.getByText("automation")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Simulate policy impact" }));
+    await userEvent.click(screen.getByRole("button", { name: "Policy actions for Platform" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Simulate policy impact" }));
     expect(await screen.findByText("Policy route ?view=simulator&team_id=platform")).toBeInTheDocument();
   });
 
@@ -81,7 +82,7 @@ describe("TeamDetailsPage", () => {
     });
     renderPage();
     await screen.findByText("Owner");
-    expect(screen.queryByRole("button", { name: "Simulate policy impact" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Policy actions for Platform" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Actions for member user-1" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Remove" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/members/user-1") && init?.method === "DELETE")).toBe(true));

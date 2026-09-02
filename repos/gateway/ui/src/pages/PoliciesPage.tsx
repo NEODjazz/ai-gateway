@@ -18,6 +18,7 @@ type VirtualKey = { id: string; alias?: string };
 type CatalogModel = { model: string; provider?: string };
 type TagDefinition = { name: string; description?: string; enabled: boolean };
 type AttachmentDraft = { id: string; policy_name: string; scope: "*" | "specific"; teams: string[]; keys: string[]; models: string[]; tags: string[] };
+type AttachmentSeed = Partial<AttachmentDraft>;
 type SimulatorContext = { team_id: string; credential_id: string; credential_alias: string; model: string; tags: string[] };
 
 const emptyDraft: AttachmentDraft = { id: "", policy_name: "", scope: "specific", teams: [], keys: [], models: [], tags: [] };
@@ -46,8 +47,8 @@ function ScopePreview({ draft }: { draft: AttachmentDraft }) {
   return <section className={`notice-card policy-scope-preview ${draft.scope === "*" ? "warning" : ""}`} aria-label="Scope impact preview"><h3>Impact preview</h3>{draft.scope === "*" ? <p>This attachment applies to all inference requests. Saving it changes enforcement immediately.</p> : <><p>{dimensions.length ? "A request must match every configured dimension. Values inside one dimension are alternatives." : "Choose at least one dimension. An empty specific scope cannot be saved."}</p><div className="tag-list">{dimensions.map((item) => <span className="tag" key={item}>{item}</span>)}</div><small>Only a trailing * is a wildcard prefix. Other characters are matched literally.</small></>}</section>;
 }
 
-function AttachmentForm({ initial, policies, teamOptions, keyOptions, modelOptions, tagOptions, client, onClose, onSaved }: { initial?: PolicyAttachment; policies: GuardrailPolicy[]; teamOptions: ChipOption[]; keyOptions: ChipOption[]; modelOptions: ChipOption[]; tagOptions: ChipOption[]; client: APIClient; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [draft, setDraft] = useState<AttachmentDraft>(() => initial ? { id: initial.id, policy_name: initial.policy_name, scope: initial.scope === "*" ? "*" : "specific", teams: values(initial.teams), keys: values(initial.keys), models: values(initial.models), tags: values(initial.tags) } : emptyDraft);
+function AttachmentForm({ initial, seed, policies, teamOptions, keyOptions, modelOptions, tagOptions, client, onClose, onSaved }: { initial?: PolicyAttachment; seed?: AttachmentSeed; policies: GuardrailPolicy[]; teamOptions: ChipOption[]; keyOptions: ChipOption[]; modelOptions: ChipOption[]; tagOptions: ChipOption[]; client: APIClient; onClose: () => void; onSaved: () => Promise<void> }) {
+  const [draft, setDraft] = useState<AttachmentDraft>(() => initial ? { id: initial.id, policy_name: initial.policy_name, scope: initial.scope === "*" ? "*" : "specific", teams: values(initial.teams), keys: values(initial.keys), models: values(initial.models), tags: values(initial.tags) } : { ...emptyDraft, ...seed, scope: "specific", teams: values(seed?.teams), keys: values(seed?.keys), models: values(seed?.models), tags: values(seed?.tags) });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const enabledPolicies = policies.filter((policy) => policy.enabled || policy.name === draft.policy_name);
@@ -90,6 +91,18 @@ function contextFromSearchParams(searchParams: URLSearchParams): SimulatorContex
   };
 }
 
+function attachmentSeedFromSearchParams(searchParams: URLSearchParams): AttachmentSeed {
+  const list = (name: string) => searchParams.getAll(name).map((value) => value.trim()).filter(Boolean);
+  return {
+    id: searchParams.get("suggested_id")?.trim() || "",
+    policy_name: searchParams.get("attach_policy")?.trim() || "",
+    teams: list("attach_team"),
+    keys: list("attach_key"),
+    models: list("attach_model"),
+    tags: list("attach_tag"),
+  };
+}
+
 function PolicySimulator({ client, teamOptions, keyOptions, modelOptions, tagOptions, initialContext }: { client: APIClient; teamOptions: ChipOption[]; keyOptions: ChipOption[]; modelOptions: ChipOption[]; tagOptions: ChipOption[]; initialContext: SimulatorContext }) {
   const [context, setContext] = useState(initialContext);
   const [result, setResult] = useState<PolicyResolution>();
@@ -113,6 +126,7 @@ export function PoliciesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = searchParams.get("view") === "simulator" ? "simulator" : "attachments";
   const initialSimulatorContext = useMemo(() => contextFromSearchParams(searchParams), [searchParams]);
+  const attachmentSeed = useMemo(() => attachmentSeedFromSearchParams(searchParams), [searchParams]);
   const [attachments, setAttachments] = useState<PolicyAttachment[]>([]);
   const [policies, setPolicies] = useState<GuardrailPolicy[]>([]);
   const [teams, setTeams] = useState<DirectoryTeam[]>([]);
@@ -122,7 +136,7 @@ export function PoliciesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [directoryWarning, setDirectoryWarning] = useState("");
-  const [editing, setEditing] = useState<PolicyAttachment | null>();
+  const [editing, setEditing] = useState<PolicyAttachment | null | undefined>(() => searchParams.get("create") === "1" ? null : undefined);
   const [inspecting, setInspecting] = useState<PolicyAttachment>();
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setError(""); setDirectoryWarning("");
@@ -140,6 +154,7 @@ export function PoliciesPage() {
     finally { if (!signal?.aborted) setLoading(false); }
   }, [client]);
   useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [load]);
+  useEffect(() => { if (searchParams.get("create") === "1") setEditing(null); }, [searchParams]);
   const policyByName = useMemo(() => new Map(policies.map((policy) => [policy.name, policy])), [policies]);
   const teamOptions = useMemo(() => options(teams, (team) => team.id, (team) => team.name || team.id, (team) => team.name && team.name !== team.id ? team.id : undefined), [teams]);
   const keyOptions = useMemo(() => options(keys, (key) => key.alias || key.id, (key) => key.alias || key.id, (key) => key.alias ? key.id : undefined), [keys]);
@@ -148,11 +163,19 @@ export function PoliciesPage() {
   const rows: Row[] = attachments.map((attachment) => { const policy = policyByName.get(attachment.policy_name); return { id: attachment.id, policy: attachment.policy_name, scope: attachment.scope === "*" ? "Global" : "Specific", dimensions: scopeDimensions(attachment), teams: values(attachment.teams), keys: values(attachment.keys), models: values(attachment.models), tags: values(attachment.tags), policy_status: policy ? policy.enabled ? "enabled" : "disabled" : "missing", modules: policyModules(policy), _attachment: attachment }; });
   const broken = rows.filter((row) => row.policy_status !== "enabled").length;
   async function remove(attachment: PolicyAttachment) { if (!window.confirm(`Delete policy attachment ${attachment.id}? Enforcement changes immediately.`)) return; try { await client.request(`/admin/v1/policy-attachments/${encodeURIComponent(attachment.id)}`, { method: "DELETE" }); setInspecting(undefined); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not delete policy attachment"); } }
+  function closeEditor() {
+    setEditing(undefined);
+    const query = new URLSearchParams(searchParams);
+    const names = ["create", "suggested_id", "attach_policy", "attach_team", "attach_key", "attach_model", "attach_tag"];
+    const changed = names.some((name) => query.has(name));
+    for (const name of names) query.delete(name);
+    if (changed) setSearchParams(query, { replace: true });
+  }
   function selectTab(next: "attachments" | "simulator") { const query = new URLSearchParams(searchParams); if (next === "simulator") query.set("view", "simulator"); else query.delete("view"); setSearchParams(query, { replace: true }); }
   if (loading && !attachments.length && !policies.length) return <LoadingState />;
   if (error && !attachments.length && !policies.length) return <ErrorState message={error} retry={() => void load()} />;
   return <><PageHeader eyebrow="Governance" title="Policies" description="Attach reusable guardrail policies to request identity and model scopes, then simulate the exact runtime resolution before traffic is affected." />{error && <ErrorState message={error} retry={() => void load()} />}{directoryWarning && <section className="notice-card" role="status"><p>{directoryWarning}</p></section>}<div className="page-tabs" role="tablist" aria-label="Policy views"><button role="tab" aria-selected={tab === "attachments"} className={tab === "attachments" ? "active" : ""} onClick={() => selectTab("attachments")}>Attachments</button><button role="tab" aria-selected={tab === "simulator"} className={tab === "simulator" ? "active" : ""} onClick={() => selectTab("simulator")}>Policy Simulator</button></div>
     {tab === "attachments" ? <><div className="usage-stats-grid"><StatCard label="Attachments" value={attachments.length.toLocaleString()} /><StatCard label="Global" value={attachments.filter((item) => item.scope === "*").length.toLocaleString()} /><StatCard label="Policies in use" value={new Set(attachments.map((item) => item.policy_name)).size.toLocaleString()} /><StatCard label="Fail-closed risks" value={broken.toLocaleString()} detail="missing or disabled policies" /></div><section className="notice-card"><h2>Composition semantics</h2><p>All matching attachments apply. Their enabled policies are combined: DLP and antivirus requirements are cumulative. Missing or disabled attached policies fail closed.</p></section><section className="section-block"><h2>Policy attachments</h2><p>Specific scopes use AND across dimensions and OR within each dimension.</p><ManagedDataTable rows={rows} columns={[{ key: "id", label: "Attachment" }, { key: "policy", label: "Policy" }, { key: "scope", label: "Scope" }, { key: "dimensions", label: "Dimensions" }, { key: "modules", label: "Modules" }, { key: "policy_status", label: "Policy state" }, { key: "teams", label: "Teams" }, { key: "keys", label: "Keys" }, { key: "models", label: "Models" }, { key: "tags", label: "Tags" }]} defaultHidden={["teams", "keys", "models", "tags"]} primaryAction={<button onClick={() => setEditing(null)}>Create Policy Attachment</button>} onRefresh={load} searchPlaceholder="Search policy attachments" actions={(row) => { const attachment = row._attachment as PolicyAttachment; return <ActionsMenu label={`Actions for policy attachment ${attachment.id}`} items={[{ label: "Inspect", onSelect: () => setInspecting(attachment) }, { label: "Edit", onSelect: () => setEditing(attachment) }, { label: "Open simulator", onSelect: () => selectTab("simulator") }, { label: "Delete", tone: "danger", onSelect: () => remove(attachment) }]} />; }} /></section></> : <PolicySimulator client={client} teamOptions={teamOptions} keyOptions={keyOptions} modelOptions={modelOptions} tagOptions={tagOptions} initialContext={initialSimulatorContext} />}
-    {editing !== undefined && <AttachmentForm initial={editing || undefined} policies={policies} teamOptions={teamOptions} keyOptions={keyOptions} modelOptions={modelOptions} tagOptions={tagOptions} client={client} onClose={() => setEditing(undefined)} onSaved={() => load()} />}{inspecting && <AttachmentDetails attachment={inspecting} policy={policyByName.get(inspecting.policy_name)} onClose={() => setInspecting(undefined)} onEdit={() => { setInspecting(undefined); setEditing(inspecting); }} onDelete={() => void remove(inspecting)} onSimulate={() => { setInspecting(undefined); selectTab("simulator"); }} />}
+    {editing !== undefined && <AttachmentForm initial={editing || undefined} seed={editing === null ? attachmentSeed : undefined} policies={policies} teamOptions={teamOptions} keyOptions={keyOptions} modelOptions={modelOptions} tagOptions={tagOptions} client={client} onClose={closeEditor} onSaved={() => load()} />}{inspecting && <AttachmentDetails attachment={inspecting} policy={policyByName.get(inspecting.policy_name)} onClose={() => setInspecting(undefined)} onEdit={() => { setInspecting(undefined); setEditing(inspecting); }} onDelete={() => void remove(inspecting)} onSimulate={() => { setInspecting(undefined); selectTab("simulator"); }} />}
   </>;
 }

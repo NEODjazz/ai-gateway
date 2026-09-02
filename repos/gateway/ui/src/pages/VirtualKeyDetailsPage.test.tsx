@@ -1,10 +1,11 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
 import { VirtualKeyDetailsPage } from "./VirtualKeyDetailsPage";
 
 const json = (payload: unknown, status = 200) => Promise.resolve(new Response(status === 204 ? null : JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } }));
+function LocationProbe() { const location = useLocation(); return <div>Policy route {location.search}</div>; }
 
 describe("VirtualKeyDetailsPage", () => {
   afterEach(() => { vi.restoreAllMocks(); sessionStorage.clear(); });
@@ -82,5 +83,23 @@ describe("VirtualKeyDetailsPage", () => {
     await userEvent.click(screen.getByRole("menuitem", { name: "Revoke" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => path === "/admin/v1/keys/vk_alpha" && init?.method === "DELETE")).toBe(true));
     expect(await screen.findByText("Virtual key catalog")).toBeInTheDocument();
+  });
+
+  it("opens a prefilled key attachment workflow", async () => {
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = String(input);
+      if (path.includes("/admin/v1/keys?")) return json({ data: [{ id: "vk_alpha", alias: "clinical prod", team_id: "care-a", tags: ["hipaa"], allowed_models: ["*"], created_at: "2026-08-27T10:00:00Z" }], financials: {} });
+      if (path.includes("/admin/v1/usage/report")) return json({ totals: [], daily: [] });
+      if (path.includes("/admin/v1/users") || path.includes("/admin/v1/teams") || path.includes("/admin/v1/organizations") || path.includes("/admin/v1/access-groups")) return json({ data: [] });
+      return json({}, 500);
+    });
+    render(<MemoryRouter initialEntries={["/api-keys/vk_alpha"]}><AuthProvider><Routes><Route path="/api-keys/:id" element={<VirtualKeyDetailsPage />} /><Route path="/policies" element={<LocationProbe />} /></Routes></AuthProvider></MemoryRouter>);
+    await screen.findByRole("heading", { name: "clinical prod" });
+    await userEvent.click(screen.getByRole("tab", { name: "Policies" }));
+    expect(screen.getByLabelText("Policy impact model")).toHaveValue("");
+    await userEvent.click(screen.getByRole("button", { name: "Policy actions for clinical prod" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Create key attachment" }));
+    expect(await screen.findByText("Policy route ?create=1&attach_key=vk_alpha&suggested_id=key-clinical-prod")).toBeInTheDocument();
   });
 });

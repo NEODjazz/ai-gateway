@@ -55,6 +55,11 @@ function initialPolicyModel(models?: string[]) {
   return models?.find((model) => model && !model.includes("*")) || "";
 }
 
+function suggestedAttachmentID(prefix: string, identity: string) {
+  const normalized = identity.trim().replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 112);
+  return normalized ? `${prefix}-${normalized}` : "";
+}
+
 export function VirtualKeyDetailsPage() {
   const { id = "" } = useParams();
   const { client } = useAuth();
@@ -165,6 +170,13 @@ export function VirtualKeyDetailsPage() {
     for (const tag of key.tags || []) query.append("tag", tag);
     navigate(`/policies?${query.toString()}`);
   }
+  function createKeyAttachment() {
+    if (!key) return;
+    const query = new URLSearchParams({ create: "1", attach_key: key.id });
+    const suggestion = suggestedAttachmentID("key", key.alias || key.id);
+    if (suggestion) query.set("suggested_id", suggestion);
+    navigate(`/policies?${query.toString()}`);
+  }
 
   if (loading && !key) return <LoadingState />;
   if (error && !key) return <ErrorState message={error} retry={() => void load()} />;
@@ -189,7 +201,7 @@ export function VirtualKeyDetailsPage() {
         <label className="key-model-field">Requested public model<input list="key-policy-model-options" aria-label="Policy impact model" value={policyModel} onChange={(event) => { setPolicyModel(event.target.value); setPolicyResolution(undefined); }} placeholder="Select or enter a public model" /></label>
         <datalist id="key-policy-model-options">{(key.allowed_models || []).map((model) => <option key={model} value={model} />)}</datalist>
         {policyError && <p className="form-error" role="alert">{policyError}</p>}
-        <div className="modal-actions"><button className="secondary" onClick={openPolicySimulator}>Open full simulator</button><button disabled={resolvingPolicies} onClick={() => void resolvePolicies()}>{resolvingPolicies ? "Resolving…" : "Resolve policy impact"}</button></div>
+        <div className="modal-actions"><ActionsMenu label={`Policy actions for ${key.alias || key.id}`} items={[{ label: "Create key attachment", onSelect: createKeyAttachment }, { label: "Open full simulator", onSelect: openPolicySimulator }]} /><button disabled={resolvingPolicies} onClick={() => void resolvePolicies()}>{resolvingPolicies ? "Resolving…" : "Resolve policy impact"}</button></div>
       </section>
       {policyResolution && <PolicyResolutionResult result={policyResolution} />}
       {!policyResolution && !policyError && <div className="table-card empty-state"><div><strong>No policy resolution yet</strong><p>Resolve with an empty model to inspect identity-wide and global attachments, or select a model for the exact request path.</p></div></div>}

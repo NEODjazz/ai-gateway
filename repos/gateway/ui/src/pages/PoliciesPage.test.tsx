@@ -98,4 +98,19 @@ describe("PoliciesPage", () => {
     const call = fetchMock.mock.calls.find(([url, init]) => String(url) === "/admin/v1/policy-attachments/resolve" && init?.method === "POST")!;
     expect(JSON.parse(String(call[1]?.body))).toEqual({ team_id: "care-a", credential_alias: "clinical-prod", model: "gpt-5.6", tags: ["hipaa"] });
   });
+
+  it("opens a create form prefilled from an identity workspace", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      const directory = directoryResponse(url);
+      if (directory) return directory;
+      if (url === "/admin/v1/policy-attachments") return json({ data: [] });
+      return json({ error: { message: `unexpected GET ${url}` } }, 500);
+    });
+    renderPage("/policies?create=1&attach_key=vk-1&suggested_id=key-clinical-prod");
+    const dialog = await screen.findByRole("dialog", { name: "Create Policy Attachment" });
+    expect(within(dialog).getByLabelText("Attachment ID")).toHaveValue("key-clinical-prod");
+    expect(within(dialog).getByRole("button", { name: "Remove key vk-1" })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Scope impact preview")).toHaveTextContent("every configured dimension");
+  });
 });

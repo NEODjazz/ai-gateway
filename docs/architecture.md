@@ -349,6 +349,10 @@ wildcard — trailing `*` — и явно показывает, что dimension
 public model и получает точный runtime result. Карточка team открывает simulator
 с заполненным team ID. Статический список «policies для identity» намеренно не
 показывается: model и tag dimensions могут изменить результат.
+Из карточек key и team global admin может открыть create attachment с уже
+заполненным immutable identity scope. Attachment по-прежнему сохраняется как
+самостоятельный control-plane resource: нет неатомарной записи policy state в
+auth directory и нет расхождения двух источников истины.
 
 UI управления guardrails намеренно отражает эту границу ответственности, а не
 каталог provider-specific plugins из LiteLLM. Он объединяет policy definition с
