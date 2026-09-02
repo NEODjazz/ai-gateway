@@ -132,16 +132,13 @@ describe("management pages", () => {
     expect(save?.[1]?.body).toContain('"scope_id":"org-a"');
   });
 
-  it("assigns a user to a team with roles", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ data: [] }));
-    renderAuthenticated(<TeamsPage />); await screen.findByText("No records found.");
-    await userEvent.type(screen.getByLabelText("Team ID"), "team-a");
-    await userEvent.type(screen.getByLabelText("User ID"), "user-a");
-    await userEvent.type(screen.getByLabelText("Roles"), "operator, viewer");
-    await userEvent.click(screen.getByRole("button", { name: "Assign" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(fetchMock.mock.calls[1][0]).toBe("/admin/v1/teams/team-a/members/user-a");
-    expect(fetchMock.mock.calls[1][1]?.body).toBe('{"roles":["operator","viewer"]}');
+  it("opens team membership management without raw ID fields", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ data: [{ id: "team-a", name: "Platform", status: "active", member_count: 2 }] }));
+    renderAuthenticated(<TeamsPage />); await screen.findByText("Platform");
+    expect(screen.queryByLabelText("Team ID")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("User ID")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for team-a" }));
+    expect(screen.getByRole("menuitem", { name: "Inspect" })).toHaveAttribute("href", "/teams/team-a");
   });
 
   it("assigns a team to an organization", async () => {

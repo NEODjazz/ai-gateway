@@ -20,6 +20,6 @@ function AssociationForm({ kind }: { kind: "team-member" | "organization-team" }
 
 export function TeamsPage() {
   const { hasCapability } = useAuth();
-  return <><ResourcePage config={resourceConfigs.teams} allowCreate={hasCapability("admin")} /><AssociationForm kind="team-member" /></>;
+  return <ResourcePage config={resourceConfigs.teams} allowCreate={hasCapability("admin")} />;
 }
 export function OrganizationsPage() { return <><ResourcePage config={resourceConfigs.organizations} /><AssociationForm kind="organization-team" /></>; }

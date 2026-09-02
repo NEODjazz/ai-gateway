@@ -276,6 +276,39 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 		logManagementAction(r, "team.membership.upsert", saved.TeamID+":"+saved.UserID)
 		writeManagementJSON(w, http.StatusOK, saved)
 	}))
+	mux.HandleFunc("GET /internal/v1/teams/{id}/members", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		limit, ok := managementLimit(w, r)
+		if !ok {
+			return
+		}
+		memberships, err := module.ListTeamMemberships(r.Context(), r.PathValue("id"), limit)
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid team membership query", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, map[string]any{"data": memberships})
+	}))
+	mux.HandleFunc("DELETE /internal/v1/teams/{id}/members/{user_id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		deleted, err := module.DeleteTeamMembership(r.Context(), r.PathValue("id"), r.PathValue("user_id"))
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid team membership", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !deleted {
+			http.Error(w, "team membership not found", http.StatusNotFound)
+			return
+		}
+		logManagementAction(r, "team.membership.delete", r.PathValue("id")+":"+r.PathValue("user_id"))
+		w.WriteHeader(http.StatusNoContent)
+	}))
 }
 
 func managementLimit(w http.ResponseWriter, r *http.Request) (int, bool) {

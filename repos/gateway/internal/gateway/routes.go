@@ -38,6 +38,8 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/admin/v1/teams"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListDirectoryTeams) }},
 	{RouteContract{http.MethodPut, "/admin/v1/teams/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutDirectoryTeam) }},
 	{RouteContract{http.MethodPut, "/admin/v1/teams/{id}/members/{user_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutTeamMembership) }},
+	{RouteContract{http.MethodGet, "/admin/v1/teams/{id}/members"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListTeamMemberships) }},
+	{RouteContract{http.MethodDelete, "/admin/v1/teams/{id}/members/{user_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteTeamMembership) }},
 	{RouteContract{http.MethodGet, "/admin/v1/organizations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListOrganizations) }},
 	{RouteContract{http.MethodPut, "/admin/v1/organizations/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutOrganization) }},
 	{RouteContract{http.MethodPut, "/admin/v1/organizations/{id}/teams/{team_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutOrganizationTeam) }},

@@ -96,3 +96,9 @@ rate, blocked/unavailable evaluations, latency, policy impact and timeline
 buckets; and keeps event rows metadata-only. The page identifies whether the
 report comes from bounded Redis history shared across replicas or from the
 current-replica fallback, including retention saturation and store errors.
+
+Teams use a route-based `/teams/:id` workspace. It resolves configured users,
+membership-specific roles and safe team-owned virtual-key metadata without raw
+ID entry. Global administrators can add visible configured users; matching
+team administrators can inspect and update their scoped memberships. Role
+changes and removals go through audited, team-scoped gateway endpoints.

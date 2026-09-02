@@ -99,6 +99,13 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 			t.Fatalf("membership-aware key page=%+v err=%v query=%+v", page, err, query)
 		}
 	}
+	memberships, err := store.ListMemberships(ctx, directoryTeamID, 10)
+	if err != nil || len(memberships) != 1 || memberships[0].UserID != directoryUserID || len(memberships[0].Roles) != 1 {
+		t.Fatalf("team memberships=%+v err=%v", memberships, err)
+	}
+	if deleted, err := store.DeleteMembership(ctx, directoryTeamID, directoryUserID); err != nil || !deleted {
+		t.Fatalf("delete team membership: deleted=%v err=%v", deleted, err)
+	}
 
 	oldToken := "old-token-" + suffix
 	old := StoredVirtualKey{ID: oldID, Alias: "automation", Description: "CI key", Tags: []string{"ci", "prod"}, UserID: "user-1", TeamID: "team-1", Roles: []string{"developer"}, AccessGroupIDs: []string{"platform", "regulated"}, AllowedModels: []string{"gpt-*"}, AllowedTools: []string{"mcp.weather.*"}, RateLimitRPM: 10}

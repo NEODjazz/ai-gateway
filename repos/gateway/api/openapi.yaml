@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.43
+  version: 0.1.44
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -524,6 +524,34 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TeamMembershipInput'}}}}
       responses:
         '200': {description: Membership saved, content: {application/json: {schema: {$ref: '#/components/schemas/TeamMembership'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    delete:
+      operationId: deleteTeamMembership
+      tags: [Identity]
+      summary: Remove a user from a team
+      parameters:
+        - {$ref: '#/components/parameters/DirectoryTeamID'}
+        - {$ref: '#/components/parameters/DirectoryUserID'}
+      responses:
+        '204': {description: Membership removed}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/teams/{id}/members:
+    get:
+      operationId: listTeamMemberships
+      tags: [Identity]
+      summary: List scoped team memberships and roles
+      parameters:
+        - {$ref: '#/components/parameters/DirectoryTeamID'}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+      responses:
+        '200': {description: Team memberships, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/TeamMembership'}}}}}}}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}

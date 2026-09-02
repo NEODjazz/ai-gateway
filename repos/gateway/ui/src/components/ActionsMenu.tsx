@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Link } from "react-router-dom";
 
 export type ActionMenuItem = {
   label: string;
-  onSelect: () => void | Promise<void>;
+  onSelect?: () => void | Promise<void>;
+  href?: string;
   disabled?: boolean;
   tone?: "default" | "danger";
 };
@@ -37,7 +39,7 @@ export function ActionsMenu({ label, items }: { label: string; items: ActionMenu
     document.addEventListener("mousedown", close);
     window.addEventListener("resize", closeOnViewportChange);
     window.addEventListener("scroll", closeOnViewportChange, true);
-    menuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    menuRef.current?.querySelector<HTMLElement>("button:not(:disabled), a:not([aria-disabled=true])")?.focus();
     return () => {
       document.removeEventListener("mousedown", close);
       window.removeEventListener("resize", closeOnViewportChange);
@@ -46,13 +48,13 @@ export function ActionsMenu({ label, items }: { label: string; items: ActionMenu
   }, [open]);
 
   function menuKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    const buttons = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") || []);
-    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const buttons = Array.from(menuRef.current?.querySelectorAll<HTMLElement>("button:not(:disabled), a:not([aria-disabled=true])") || []);
+    const index = buttons.indexOf(document.activeElement as HTMLElement);
     if (event.key === "Escape") { event.preventDefault(); setOpen(false); triggerRef.current?.focus(); }
     else if (event.key === "ArrowDown") { event.preventDefault(); buttons[(index + 1) % buttons.length]?.focus(); }
     else if (event.key === "ArrowUp") { event.preventDefault(); buttons[(index - 1 + buttons.length) % buttons.length]?.focus(); }
     else if (event.key === "Tab") setOpen(false);
   }
 
-  return <div className="actions-menu-trigger"><button ref={triggerRef} type="button" className="actions-menu-button" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => open ? setOpen(false) : openMenu()} onKeyDown={(event) => { if (!open && (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ")) { event.preventDefault(); openMenu(); } }}>⋯</button>{open && createPortal(<div ref={menuRef} className="actions-menu-popover" role="menu" aria-label={label} style={position} onKeyDown={menuKeyDown}>{items.map((item) => <button type="button" role="menuitem" key={item.label} disabled={item.disabled} className={item.tone === "danger" ? "danger" : ""} onClick={() => { setOpen(false); void item.onSelect(); }}>{item.label}</button>)}</div>, document.body)}</div>;
+  return <div className="actions-menu-trigger"><button ref={triggerRef} type="button" className="actions-menu-button" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => open ? setOpen(false) : openMenu()} onKeyDown={(event) => { if (!open && (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ")) { event.preventDefault(); openMenu(); } }}>⋯</button>{open && createPortal(<div ref={menuRef} className="actions-menu-popover" role="menu" aria-label={label} style={position} onKeyDown={menuKeyDown}>{items.map((item) => item.href ? <Link role="menuitem" key={item.label} aria-disabled={item.disabled || undefined} className={item.tone === "danger" ? "danger" : ""} to={item.href} onClick={(event) => { if (item.disabled) { event.preventDefault(); return; } setOpen(false); }}>{item.label}</Link> : <button type="button" role="menuitem" key={item.label} disabled={item.disabled} className={item.tone === "danger" ? "danger" : ""} onClick={() => { setOpen(false); void item.onSelect?.(); }}>{item.label}</button>)}</div>, document.body)}</div>;
 }

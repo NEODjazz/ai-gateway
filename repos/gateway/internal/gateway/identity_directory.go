@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -46,6 +47,8 @@ type IdentityDirectoryClient interface {
 	ListTeams(context.Context, ManagementAudit, string, int) ([]DirectoryTeam, error)
 	PutTeam(context.Context, ManagementAudit, string, DirectoryTeam) (DirectoryTeam, error)
 	PutMembership(context.Context, ManagementAudit, string, string, TeamMembership) (TeamMembership, error)
+	ListMemberships(context.Context, ManagementAudit, string, int) ([]TeamMembership, error)
+	DeleteMembership(context.Context, ManagementAudit, string, string) error
 }
 
 func (h Handler) WithIdentityDirectory(client IdentityDirectoryClient) Handler {
@@ -82,6 +85,16 @@ func (c *RemoteManagementClient) PutTeam(ctx context.Context, audit ManagementAu
 func (c *RemoteManagementClient) PutMembership(ctx context.Context, audit ManagementAudit, teamID, userID string, m TeamMembership) (TeamMembership, error) {
 	return managementCall[TeamMembership, TeamMembership](ctx, c, http.MethodPut, "/internal/v1/teams/"+url.PathEscape(teamID)+"/members/"+url.PathEscape(userID), audit, m)
 }
+func (c *RemoteManagementClient) ListMemberships(ctx context.Context, audit ManagementAudit, teamID string, limit int) ([]TeamMembership, error) {
+	result, err := managementCall[struct{}, struct {
+		Data []TeamMembership `json:"data"`
+	}](ctx, c, http.MethodGet, "/internal/v1/teams/"+url.PathEscape(teamID)+"/members?limit="+strconv.Itoa(limit), audit, struct{}{})
+	return result.Data, err
+}
+func (c *RemoteManagementClient) DeleteMembership(ctx context.Context, audit ManagementAudit, teamID, userID string) error {
+	_, err := managementCall[struct{}, struct{}](ctx, c, http.MethodDelete, "/internal/v1/teams/"+url.PathEscape(teamID)+"/members/"+url.PathEscape(userID), audit, struct{}{})
+	return err
+}
 
 func (h Handler) ListDirectoryUsers(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.authorizeDirectory(w, r, "")
@@ -95,7 +108,7 @@ func (h Handler) ListDirectoryUsers(w http.ResponseWriter, r *http.Request) {
 	teamID := directoryScope(req, r.URL.Query().Get("team_id"))
 	users, err := h.directory.ListUsers(r.Context(), managementAudit(req), teamID, limit)
 	if err != nil {
-		writeManagementFailure(w, err)
+		writeDirectoryFailure(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": users})
@@ -112,7 +125,7 @@ func (h Handler) ListDirectoryTeams(w http.ResponseWriter, r *http.Request) {
 	teamID := directoryScope(req, r.URL.Query().Get("team_id"))
 	teams, err := h.directory.ListTeams(r.Context(), managementAudit(req), teamID, limit)
 	if err != nil {
-		writeManagementFailure(w, err)
+		writeDirectoryFailure(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": teams})
@@ -136,7 +149,7 @@ func (h Handler) PutDirectoryUser(w http.ResponseWriter, r *http.Request) {
 	saved, err := h.directory.PutUser(r.Context(), managementAudit(req), user.ID, user)
 	if err != nil {
 		h.auditOutcome(r.Context(), audit, event, "failed")
-		writeManagementFailure(w, err)
+		writeDirectoryFailure(w, err)
 		return
 	}
 	h.auditOutcome(r.Context(), audit, event, "succeeded")
@@ -162,7 +175,7 @@ func (h Handler) PutDirectoryTeam(w http.ResponseWriter, r *http.Request) {
 	saved, err := h.directory.PutTeam(r.Context(), managementAudit(req), id, team)
 	if err != nil {
 		h.auditOutcome(r.Context(), audit, event, "failed")
-		writeManagementFailure(w, err)
+		writeDirectoryFailure(w, err)
 		return
 	}
 	h.auditOutcome(r.Context(), audit, event, "succeeded")
@@ -180,7 +193,7 @@ func (h Handler) PutTeamMembership(w http.ResponseWriter, r *http.Request) {
 	}
 	membership.TeamID, membership.UserID = teamID, userID
 	audit := managementAudit(req)
-	event := AuditEvent{Action: "team.membership.upsert", TargetType: "team", TargetID: teamID}
+	event := AuditEvent{Action: "team.membership.upsert", TargetType: "team", TargetID: teamID, Details: map[string]any{"user_id": userID}}
 	if !h.auditMutation(r.Context(), audit, event) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
@@ -188,11 +201,65 @@ func (h Handler) PutTeamMembership(w http.ResponseWriter, r *http.Request) {
 	saved, err := h.directory.PutMembership(r.Context(), managementAudit(req), teamID, userID, membership)
 	if err != nil {
 		h.auditOutcome(r.Context(), audit, event, "failed")
-		writeManagementFailure(w, err)
+		writeDirectoryFailure(w, err)
 		return
 	}
 	h.auditOutcome(r.Context(), audit, event, "succeeded")
 	writeJSON(w, http.StatusOK, saved)
+}
+
+func (h Handler) ListTeamMemberships(w http.ResponseWriter, r *http.Request) {
+	teamID := r.PathValue("id")
+	req, ok := h.authorizeDirectory(w, r, teamID)
+	if !ok {
+		return
+	}
+	limit, ok := directoryLimit(w, r)
+	if !ok {
+		return
+	}
+	memberships, err := h.directory.ListMemberships(r.Context(), managementAudit(req), teamID, limit)
+	if err != nil {
+		writeDirectoryFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": memberships})
+}
+
+func (h Handler) DeleteTeamMembership(w http.ResponseWriter, r *http.Request) {
+	teamID, userID := r.PathValue("id"), r.PathValue("user_id")
+	req, ok := h.authorizeDirectory(w, r, teamID)
+	if !ok {
+		return
+	}
+	audit := managementAudit(req)
+	event := AuditEvent{Action: "team.membership.delete", TargetType: "team", TargetID: teamID, Details: map[string]any{"user_id": userID}}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
+		return
+	}
+	if err := h.directory.DeleteMembership(r.Context(), audit, teamID, userID); err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
+		writeDirectoryFailure(w, err)
+		return
+	}
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func writeDirectoryFailure(w http.ResponseWriter, err error) {
+	var managementErr *ManagementError
+	if errors.As(err, &managementErr) {
+		switch managementErr.Status {
+		case http.StatusBadRequest:
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid identity directory entry")
+			return
+		case http.StatusNotFound:
+			writeError(w, http.StatusNotFound, "not_found", "identity directory entry not found")
+			return
+		}
+	}
+	writeError(w, http.StatusServiceUnavailable, "management_unavailable", "identity directory is unavailable")
 }
 
 func (h Handler) authorizeDirectory(w http.ResponseWriter, r *http.Request, targetTeam string) (modules.RequestContext, bool) {

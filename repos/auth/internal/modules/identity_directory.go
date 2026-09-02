@@ -97,6 +97,46 @@ func (m AuthModule) PutTeamMembership(ctx context.Context, membership TeamMember
 	return store.PutMembership(ctx, membership)
 }
 
+func (m AuthModule) ListTeamMemberships(ctx context.Context, teamID string, limit int) ([]TeamMembership, error) {
+	store, err := m.teamMembershipStore()
+	if err != nil {
+		return nil, err
+	}
+	teamID = strings.TrimSpace(teamID)
+	if !validDirectoryID(teamID) || limit < 1 || limit > 500 {
+		return nil, ErrInvalidDirectoryEntry
+	}
+	return store.ListMemberships(ctx, teamID, limit)
+}
+
+func (m AuthModule) DeleteTeamMembership(ctx context.Context, teamID, userID string) (bool, error) {
+	store, err := m.teamMembershipStore()
+	if err != nil {
+		return false, err
+	}
+	teamID, userID = strings.TrimSpace(teamID), strings.TrimSpace(userID)
+	if !validDirectoryID(teamID) || !validDirectoryID(userID) {
+		return false, ErrInvalidDirectoryEntry
+	}
+	return store.DeleteMembership(ctx, teamID, userID)
+}
+
+type teamMembershipStore interface {
+	ListMemberships(context.Context, string, int) ([]TeamMembership, error)
+	DeleteMembership(context.Context, string, string) (bool, error)
+}
+
+func (m AuthModule) teamMembershipStore() (teamMembershipStore, error) {
+	if m.initErr != nil {
+		return nil, m.initErr
+	}
+	store, ok := m.store.(teamMembershipStore)
+	if !ok || store == nil {
+		return nil, errors.New("persistent team membership directory is unavailable")
+	}
+	return store, nil
+}
+
 type identityDirectoryStore interface {
 	ListUsers(context.Context, string, int) ([]DirectoryUser, error)
 	PutUser(context.Context, DirectoryUser) (DirectoryUser, error)
@@ -189,4 +229,30 @@ func (s *PostgresVirtualKeyStore) PutMembership(ctx context.Context, membership 
 		ON CONFLICT(team_id,user_id) DO UPDATE SET roles=EXCLUDED.roles,updated_at=now()
 		RETURNING team_id,user_id,roles,created_at,updated_at`, membership.TeamID, membership.UserID, nonNilStrings(membership.Roles)).Scan(&membership.TeamID, &membership.UserID, &membership.Roles, &membership.CreatedAt, &membership.UpdatedAt)
 	return membership, err
+}
+
+func (s *PostgresVirtualKeyStore) ListMemberships(ctx context.Context, teamID string, limit int) ([]TeamMembership, error) {
+	rows, err := s.pool.Query(ctx, `SELECT team_id,user_id,roles,created_at,updated_at
+		FROM auth_team_memberships WHERE team_id=$1 ORDER BY created_at DESC,user_id LIMIT $2`, teamID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list team memberships: %w", err)
+	}
+	defer rows.Close()
+	result := make([]TeamMembership, 0)
+	for rows.Next() {
+		var membership TeamMembership
+		if err := rows.Scan(&membership.TeamID, &membership.UserID, &membership.Roles, &membership.CreatedAt, &membership.UpdatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, membership)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresVirtualKeyStore) DeleteMembership(ctx context.Context, teamID, userID string) (bool, error) {
+	result, err := s.pool.Exec(ctx, `DELETE FROM auth_team_memberships WHERE team_id=$1 AND user_id=$2`, teamID, userID)
+	if err != nil {
+		return false, fmt.Errorf("delete team membership: %w", err)
+	}
+	return result.RowsAffected() > 0, nil
 }

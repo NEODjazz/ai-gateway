@@ -11,10 +11,12 @@ import (
 )
 
 type directoryClientStub struct {
-	teamFilter string
-	putTeam    string
-	memberTeam string
-	memberUser string
+	teamFilter  string
+	putTeam     string
+	memberTeam  string
+	memberUser  string
+	deletedTeam string
+	deletedUser string
 }
 
 func (c *directoryClientStub) ListUsers(context.Context, ManagementAudit, string, int) ([]DirectoryUser, error) {
@@ -37,6 +39,14 @@ func (c *directoryClientStub) PutMembership(_ context.Context, _ ManagementAudit
 	c.memberTeam, c.memberUser = teamID, userID
 	m.TeamID, m.UserID = teamID, userID
 	return m, nil
+}
+func (c *directoryClientStub) ListMemberships(_ context.Context, _ ManagementAudit, teamID string, _ int) ([]TeamMembership, error) {
+	c.memberTeam = teamID
+	return []TeamMembership{{TeamID: teamID, UserID: "user-1", Roles: []string{"member"}}}, nil
+}
+func (c *directoryClientStub) DeleteMembership(_ context.Context, _ ManagementAudit, teamID, userID string) error {
+	c.deletedTeam, c.deletedUser = teamID, userID
+	return nil
 }
 
 func TestIdentityDirectoryAdminCRUD(t *testing.T) {
@@ -80,6 +90,21 @@ func TestTeamAdminIsRestrictedToOwnTeam(t *testing.T) {
 	Routes(handler).ServeHTTP(own, httptest.NewRequest(http.MethodPut, "/admin/v1/teams/team-a/members/user-1", strings.NewReader(`{"roles":["member"]}`)))
 	if own.Code != http.StatusOK || client.memberTeam != "team-a" || client.memberUser != "user-1" {
 		t.Fatalf("own mutation failed: status=%d client=%+v body=%s", own.Code, client, own.Body.String())
+	}
+	members := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(members, httptest.NewRequest(http.MethodGet, "/admin/v1/teams/team-a/members?limit=25", nil))
+	if members.Code != http.StatusOK || !strings.Contains(members.Body.String(), `"user_id":"user-1"`) {
+		t.Fatalf("membership list failed: status=%d body=%s", members.Code, members.Body.String())
+	}
+	removeForeign := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(removeForeign, httptest.NewRequest(http.MethodDelete, "/admin/v1/teams/team-b/members/user-1", nil))
+	if removeForeign.Code != http.StatusForbidden || client.deletedTeam != "" {
+		t.Fatalf("foreign membership delete reached directory: status=%d client=%+v", removeForeign.Code, client)
+	}
+	removeOwn := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(removeOwn, httptest.NewRequest(http.MethodDelete, "/admin/v1/teams/team-a/members/user-1", nil))
+	if removeOwn.Code != http.StatusNoContent || client.deletedTeam != "team-a" || client.deletedUser != "user-1" {
+		t.Fatalf("own membership delete failed: status=%d client=%+v body=%s", removeOwn.Code, client, removeOwn.Body.String())
 	}
 	global := httptest.NewRecorder()
 	Routes(handler).ServeHTTP(global, httptest.NewRequest(http.MethodPut, "/admin/v1/users/user-1", strings.NewReader(`{"status":"active"}`)))

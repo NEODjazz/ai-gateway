@@ -502,6 +502,10 @@ The identity directory exposes admin APIs and console views for users, teams,
 global roles and team memberships. Global `admin` credentials can manage the
 whole directory; `team_admin` credentials are restricted to listing and
 managing memberships in their own `team_id` and cannot edit global user roles.
+Teams link to a dedicated details workspace that joins membership-scoped roles,
+configured user identities and safe virtual-key metadata. Adding a member uses
+the visible configured-user registry rather than a manually entered ID; role
+updates and removals are audited and enforced by the same team scope in the API.
 Disabling a directory user or team immediately prevents its persistent virtual
 keys from authorizing while preserving audit and usage history.
 

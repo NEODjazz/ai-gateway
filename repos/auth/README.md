@@ -63,8 +63,11 @@ Its response type has no plaintext-token or token-hash field.
 
 Identity management uses `GET /internal/v1/{users|teams}`, `PUT
 /internal/v1/users/{id}`, `PUT /internal/v1/teams/{id}`, and `PUT
+/internal/v1/teams/{id}/members/{user_id}`. Membership roles can be listed with
+`GET /internal/v1/teams/{id}/members` and removed with `DELETE
 /internal/v1/teams/{id}/members/{user_id}`. The public gateway applies global
-admin or matching team-admin scope before calling these cluster-internal APIs.
+admin or matching team-admin scope and audit recording before calling these
+cluster-internal APIs.
 
 ## JWT and OIDC
 
