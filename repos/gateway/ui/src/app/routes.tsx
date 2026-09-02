@@ -25,6 +25,7 @@ import { CachePage } from "../pages/CachePage";
 import { MCPServersPage, MCPToolsetsPage } from "../pages/MCPPages";
 import { GuardrailMonitorPage } from "../pages/GuardrailMonitorPage";
 import { TeamDetailsPage } from "../pages/TeamDetailsPage";
+import { OrganizationDetailsPage } from "../pages/OrganizationDetailsPage";
 import { resourceConfigs } from "../pages/resourceConfigs";
 import { useAuth, type ConsoleCapability } from "../auth/AuthContext";
 
@@ -59,6 +60,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/model-groups", title: "Model groups", group: "Manage", element: <ModelGroupsPage />, available: true },
 
   { path: "/organizations", title: "Organizations", group: "Access Control", element: <OrganizationsPage />, available: true },
+  { path: "/organizations/:id", title: "Organization details", group: "Access Control", element: <OrganizationDetailsPage />, available: true, navigation: false },
   { path: "/teams", title: "Teams", group: "Access Control", element: <TeamsPage />, available: true, capability: "team_directory" },
   { path: "/teams/:id", title: "Team details", group: "Access Control", element: <TeamDetailsPage />, available: true, capability: "team_directory", navigation: false },
   { path: "/users", title: "Users", group: "Access Control", element: <UsersPage />, available: true, capability: "team_directory" },

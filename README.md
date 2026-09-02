@@ -550,7 +550,11 @@ shows currency-separated spend, tokens, error rate, applicable global/scoped
 budgets, and RPM/TPM key limits without exposing prompts or bearer secrets.
 
 Organizations persist a global-admin-managed tenant hierarchy that assigns each
-team to at most one organization. The AI Hub joins public catalog metadata with
+team to at most one organization. The Organizations table links to a route-based
+details workspace that resolves configured teams and organization-scoped virtual
+keys. Assignments use configured-team selection; a team already owned elsewhere
+is rejected with HTTP 409 rather than silently reparented, and must first be
+removed from its current organization. The AI Hub joins public catalog metadata with
 safe deployment availability and never returns endpoint URLs or credentials.
 Cost Optimization flags unavailable and unpriced entries and compares catalog
 input-plus-output prices only for the same model and currency. Reported savings

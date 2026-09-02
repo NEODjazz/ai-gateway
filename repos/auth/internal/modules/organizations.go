@@ -17,10 +17,13 @@ type Organization struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+var ErrOrganizationTeamConflict = errors.New("team is already assigned to another organization")
+
 type organizationStore interface {
 	ListOrganizations(context.Context, int) ([]Organization, error)
 	PutOrganization(context.Context, Organization) (Organization, error)
 	PutOrganizationTeam(context.Context, string, string) (Organization, error)
+	DeleteOrganizationTeam(context.Context, string, string) (bool, error)
 }
 
 func (m AuthModule) organizationStore() (organizationStore, error) {
@@ -69,6 +72,18 @@ func (m AuthModule) PutOrganizationTeam(ctx context.Context, organizationID, tea
 	return store.PutOrganizationTeam(ctx, organizationID, teamID)
 }
 
+func (m AuthModule) DeleteOrganizationTeam(ctx context.Context, organizationID, teamID string) (bool, error) {
+	store, err := m.organizationStore()
+	if err != nil {
+		return false, err
+	}
+	organizationID, teamID = strings.TrimSpace(organizationID), strings.TrimSpace(teamID)
+	if !validDirectoryID(organizationID) || !validDirectoryID(teamID) {
+		return false, ErrInvalidDirectoryEntry
+	}
+	return store.DeleteOrganizationTeam(ctx, organizationID, teamID)
+}
+
 func (s *PostgresVirtualKeyStore) ListOrganizations(ctx context.Context, limit int) ([]Organization, error) {
 	rows, err := s.pool.Query(ctx, `SELECT o.id,o.name,o.description,o.status,
 		COALESCE(array_agg(ot.team_id ORDER BY ot.team_id) FILTER (WHERE ot.team_id IS NOT NULL),'{}'),o.created_at,o.updated_at
@@ -98,9 +113,14 @@ func (s *PostgresVirtualKeyStore) PutOrganization(ctx context.Context, organizat
 }
 
 func (s *PostgresVirtualKeyStore) PutOrganizationTeam(ctx context.Context, organizationID, teamID string) (Organization, error) {
-	if _, err := s.pool.Exec(ctx, `INSERT INTO auth_organization_teams(organization_id,team_id) VALUES($1,$2)
-		ON CONFLICT(team_id) DO UPDATE SET organization_id=EXCLUDED.organization_id`, organizationID, teamID); err != nil {
+	var ownerID string
+	if err := s.pool.QueryRow(ctx, `INSERT INTO auth_organization_teams(organization_id,team_id) VALUES($1,$2)
+		ON CONFLICT(team_id) DO UPDATE SET organization_id=auth_organization_teams.organization_id
+		RETURNING organization_id`, organizationID, teamID).Scan(&ownerID); err != nil {
 		return Organization{}, err
+	}
+	if ownerID != organizationID {
+		return Organization{}, ErrOrganizationTeamConflict
 	}
 	rows, err := s.ListOrganizations(ctx, 500)
 	if err != nil {
@@ -112,4 +132,12 @@ func (s *PostgresVirtualKeyStore) PutOrganizationTeam(ctx context.Context, organ
 		}
 	}
 	return Organization{}, errors.New("organization not found")
+}
+
+func (s *PostgresVirtualKeyStore) DeleteOrganizationTeam(ctx context.Context, organizationID, teamID string) (bool, error) {
+	result, err := s.pool.Exec(ctx, `DELETE FROM auth_organization_teams WHERE organization_id=$1 AND team_id=$2`, organizationID, teamID)
+	if err != nil {
+		return false, err
+	}
+	return result.RowsAffected() > 0, nil
 }

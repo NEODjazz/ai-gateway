@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -42,13 +43,13 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	}
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
 	oldID, newID, expiredID, organizationKeyID, memberKeyID := "key-old-"+suffix, "key-new-"+suffix, "key-expired-"+suffix, "key-org-"+suffix, "key-member-"+suffix
-	directoryUserID, directoryTeamID, organizationID := "user-"+suffix, "team-"+suffix, "org-"+suffix
+	directoryUserID, directoryTeamID, organizationID, otherOrganizationID := "user-"+suffix, "team-"+suffix, "org-"+suffix, "org-other-"+suffix
 	t.Cleanup(func() {
 		ids := []string{newID, oldID, expiredID, organizationKeyID, memberKeyID}
 		_, _ = pool.Exec(context.Background(), `UPDATE auth_virtual_keys SET rotated_from_id=NULL,rotated_to_id=NULL WHERE id = ANY($1)`, ids)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_virtual_keys WHERE id = ANY($1)`, ids)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_organization_teams WHERE organization_id=$1`, organizationID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_organizations WHERE id=$1`, organizationID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_organizations WHERE id = ANY($1)`, []string{organizationID, otherOrganizationID})
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_team_memberships WHERE team_id=$1`, directoryTeamID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_teams WHERE id=$1`, directoryTeamID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, directoryUserID)
@@ -80,6 +81,12 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	if err != nil || len(organization.TeamIDs) != 1 || organization.TeamIDs[0] != directoryTeamID {
 		t.Fatalf("assign organization team=%+v err=%v", organization, err)
 	}
+	if _, err := store.PutOrganization(ctx, Organization{ID: otherOrganizationID, Name: "Other", Status: "active"}); err != nil {
+		t.Fatalf("put other organization: %v", err)
+	}
+	if _, err := store.PutOrganizationTeam(ctx, otherOrganizationID, directoryTeamID); !errors.Is(err, ErrOrganizationTeamConflict) {
+		t.Fatalf("expected organization team conflict, got %v", err)
+	}
 	organizationToken := "organization-token-" + suffix
 	if err := store.Create(ctx, StoredVirtualKey{ID: organizationKeyID, OrganizationID: organizationID, Roles: []string{"developer"}}, credentialLookupHash(organizationToken, "pepper")); err != nil {
 		t.Fatal(err)
@@ -98,6 +105,9 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 		if err != nil || page.Total != 1 || len(page.Data) != 1 || page.Data[0].ID != memberKeyID {
 			t.Fatalf("membership-aware key page=%+v err=%v query=%+v", page, err, query)
 		}
+	}
+	if deleted, err := store.DeleteOrganizationTeam(ctx, organizationID, directoryTeamID); err != nil || !deleted {
+		t.Fatalf("delete organization team: deleted=%v err=%v", deleted, err)
 	}
 	memberships, err := store.ListMemberships(ctx, directoryTeamID, 10)
 	if err != nil || len(memberships) != 1 || memberships[0].UserID != directoryUserID || len(memberships[0].Roles) != 1 {

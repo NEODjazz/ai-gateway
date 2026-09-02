@@ -190,12 +190,33 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 			http.Error(w, "invalid organization team", http.StatusBadRequest)
 			return
 		}
+		if errors.Is(err, modules.ErrOrganizationTeamConflict) {
+			http.Error(w, "team is already assigned to another organization", http.StatusConflict)
+			return
+		}
 		if err != nil {
 			http.Error(w, "organization directory unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		logManagementAction(r, "organization.team.upsert", saved.ID+":"+r.PathValue("team_id"))
 		writeManagementJSON(w, http.StatusOK, saved)
+	}))
+	mux.HandleFunc("DELETE /internal/v1/organizations/{id}/teams/{team_id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		deleted, err := module.DeleteOrganizationTeam(r.Context(), r.PathValue("id"), r.PathValue("team_id"))
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid organization team", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "organization directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !deleted {
+			http.Error(w, "organization team not found", http.StatusNotFound)
+			return
+		}
+		logManagementAction(r, "organization.team.delete", r.PathValue("id")+":"+r.PathValue("team_id"))
+		w.WriteHeader(http.StatusNoContent)
 	}))
 	mux.HandleFunc("GET /internal/v1/users", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		limit, ok := managementLimit(w, r)

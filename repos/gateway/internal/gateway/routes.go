@@ -43,6 +43,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/admin/v1/organizations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListOrganizations) }},
 	{RouteContract{http.MethodPut, "/admin/v1/organizations/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutOrganization) }},
 	{RouteContract{http.MethodPut, "/admin/v1/organizations/{id}/teams/{team_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutOrganizationTeam) }},
+	{RouteContract{http.MethodDelete, "/admin/v1/organizations/{id}/teams/{team_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteOrganizationTeam) }},
 	{RouteContract{http.MethodGet, "/admin/v1/budgets"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListBudgets) }},
 	{RouteContract{http.MethodPost, "/admin/v1/budgets"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateBudget) }},
 	{RouteContract{http.MethodGet, "/admin/v1/budgets/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetBudget) }},

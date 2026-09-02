@@ -102,3 +102,9 @@ membership-specific roles and safe team-owned virtual-key metadata without raw
 ID entry. Global administrators can add visible configured users; matching
 team administrators can inspect and update their scoped memberships. Role
 changes and removals go through audited, team-scoped gateway endpoints.
+
+Organizations use a route-based `/organizations/:id` workspace. It joins the
+configured team registry with organization-owned virtual keys, offers audited
+assignment and removal actions, and excludes teams owned by another
+organization. Reparenting is intentionally explicit: remove the current
+assignment before selecting the team for a different organization.

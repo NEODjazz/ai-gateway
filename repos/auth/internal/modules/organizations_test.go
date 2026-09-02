@@ -23,6 +23,13 @@ func (s *organizationTestStore) PutOrganizationTeam(_ context.Context, organizat
 	s.item.TeamIDs = []string{teamID}
 	return s.item, nil
 }
+func (s *organizationTestStore) DeleteOrganizationTeam(_ context.Context, organizationID, teamID string) (bool, error) {
+	if s.item.ID != organizationID || len(s.item.TeamIDs) != 1 || s.item.TeamIDs[0] != teamID {
+		return false, nil
+	}
+	s.item.TeamIDs = []string{}
+	return true, nil
+}
 
 func TestOrganizationDirectoryValidatesAndAssignsTeam(t *testing.T) {
 	store := &organizationTestStore{}
@@ -37,5 +44,11 @@ func TestOrganizationDirectoryValidatesAndAssignsTeam(t *testing.T) {
 	}
 	if _, err := module.PutOrganization(context.Background(), Organization{ID: "bad/id", Name: "Bad", Status: "active"}); err == nil {
 		t.Fatal("invalid organization ID accepted")
+	}
+	if deleted, err := module.DeleteOrganizationTeam(context.Background(), "acme", "platform"); err != nil || !deleted {
+		t.Fatalf("delete assignment: deleted=%v err=%v", deleted, err)
+	}
+	if _, err := module.DeleteOrganizationTeam(context.Background(), "bad/id", "platform"); err == nil {
+		t.Fatal("invalid organization ID accepted for delete")
 	}
 }

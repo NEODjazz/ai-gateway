@@ -257,6 +257,9 @@ func writeDirectoryFailure(w http.ResponseWriter, err error) {
 		case http.StatusNotFound:
 			writeError(w, http.StatusNotFound, "not_found", "identity directory entry not found")
 			return
+		case http.StatusConflict:
+			writeError(w, http.StatusConflict, "conflict", "identity directory entry conflicts with an existing assignment")
+			return
 		}
 	}
 	writeError(w, http.StatusServiceUnavailable, "management_unavailable", "identity directory is unavailable")

@@ -141,14 +141,13 @@ describe("management pages", () => {
     expect(screen.getByRole("menuitem", { name: "Inspect" })).toHaveAttribute("href", "/teams/team-a");
   });
 
-  it("assigns a team to an organization", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ data: [] }));
-    renderAuthenticated(<OrganizationsPage />); await screen.findByText("No records found.");
-    await userEvent.type(screen.getByLabelText("Organization ID"), "org-a");
-    await userEvent.type(screen.getByLabelText("Team ID"), "team-a");
-    await userEvent.click(screen.getByRole("button", { name: "Assign" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(fetchMock.mock.calls[1][0]).toBe("/admin/v1/organizations/org-a/teams/team-a");
+  it("opens organization team management without raw ID fields", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ data: [{ id: "org-a", name: "Acme", status: "active", team_ids: ["team-a"] }] }));
+    renderAuthenticated(<OrganizationsPage />); await screen.findByText("Acme");
+    expect(screen.queryByLabelText("Organization ID")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Team ID")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for org-a" }));
+    expect(screen.getByRole("menuitem", { name: "Inspect" })).toHaveAttribute("href", "/organizations/org-a");
   });
 
   it("loads request-log privacy settings and details", async () => {

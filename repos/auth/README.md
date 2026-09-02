@@ -69,6 +69,12 @@ Identity management uses `GET /internal/v1/{users|teams}`, `PUT
 admin or matching team-admin scope and audit recording before calling these
 cluster-internal APIs.
 
+Organization management uses `GET /internal/v1/organizations`, `PUT
+/internal/v1/organizations/{id}`, and `PUT|DELETE
+/internal/v1/organizations/{id}/teams/{team_id}`. A team can belong to only one
+organization; assignment is idempotent for its current owner and returns HTTP
+409 for a different owner instead of moving the team implicitly.
+
 ## JWT and OIDC
 
 Legacy mode supports `HS256` with `AUTH_JWT_SECRET`. For production OIDC, set a
