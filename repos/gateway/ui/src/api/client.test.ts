@@ -42,4 +42,56 @@ describe("APIClient", () => {
     await expect(new APIClient(() => "x").request("/resource")).rejects.toThrow("Expired");
     expect(listener).toHaveBeenCalledOnce();
   });
+
+  it("parses chunked SSE events and sends the bearer without exposing it to callbacks", async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: response.output_text.delta\r\ndata: {"delta":"hel"}\r\n'));
+        controller.enqueue(encoder.encode('\r\ndata: [DONE]\n\n'));
+        controller.close();
+      }
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } }));
+    const events: Array<{ event: string; data: string }> = [];
+    await new APIClient(() => "stream-token").stream("/v1/responses", { method: "POST", body: { stream: true } }, (event) => events.push(event));
+    expect(events).toEqual([
+      { event: "response.output_text.delta", data: '{"delta":"hel"}' },
+      { event: "message", data: "[DONE]" }
+    ]);
+    const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer stream-token");
+    expect(headers.get("Accept")).toBe("text/event-stream");
+    expect(JSON.stringify(events)).not.toContain("stream-token");
+  });
+
+  it("maps a non-streaming HTTP error before reading SSE data", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: { code: "provider_failed", message: "No route" } }), { status: 502 }));
+    await expect(new APIClient(() => "x").stream("/v1/chat/completions", { method: "POST", body: {} }, () => undefined)).rejects.toEqual(expect.objectContaining<Partial<APIError>>({ status: 502, code: "provider_failed", message: "No route" }));
+  });
+
+  it("rejects a successful non-SSE response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    await expect(new APIClient(() => "x").stream("/v1/chat/completions", { method: "POST", body: {} }, () => undefined)).rejects.toEqual(expect.objectContaining<Partial<APIError>>({ code: "invalid_stream" }));
+  });
+
+  it("returns an explicitly accepted JSON fallback without replaying the request", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ id: "resp-fallback" }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    const result = await new APIClient(() => "x").stream<{ id: string }>("/v1/responses", { method: "POST", body: { stream: true } }, () => undefined, true);
+    expect(result).toEqual({ streamed: false, data: { id: "resp-fallback" } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels and unlocks the response body when event handling fails", async () => {
+    const encoder = new TextEncoder();
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(encoder.encode('data: {"broken":true}\n\n')); },
+      cancel() { cancelled = true; }
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } }));
+    await expect(new APIClient(() => "x").stream("/v1/chat/completions", { method: "POST", body: {} }, () => { throw new Error("bad event"); })).rejects.toThrow("bad event");
+    expect(cancelled).toBe(true);
+    expect(body.locked).toBe(false);
+  });
 });

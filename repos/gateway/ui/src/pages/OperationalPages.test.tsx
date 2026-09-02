@@ -82,13 +82,16 @@ describe("operational pages", () => {
   });
 
   it("runs a playground request with max_completion_tokens", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }] }), { status: 200 }));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input) === "/v1/models"
+      ? new Response(JSON.stringify({ data: [{ id: "gpt" }] }), { status: 200 })
+      : new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }] }), { status: 200 }));
     authenticated(<PlaygroundPage />);
-    await userEvent.type(screen.getByLabelText("Model"), "gpt");
+    await screen.findByDisplayValue("gpt");
+    await userEvent.click(screen.getByLabelText("Stream response"));
     await userEvent.type(screen.getByLabelText("Message"), "hello");
     await userEvent.click(screen.getByRole("button", { name: "Run request" }));
     expect(await screen.findByText("OK")).toBeInTheDocument();
-    expect(String(fetchMock.mock.calls[0][1]?.body)).toContain('"max_completion_tokens":256');
+    expect(String(fetchMock.mock.calls.at(-1)?.[1]?.body)).toContain('"max_completion_tokens":256');
   });
 
   it("queries customer usage by encoded scope", async () => {

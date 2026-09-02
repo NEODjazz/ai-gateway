@@ -65,3 +65,11 @@ usage reports and request logs, independently from gateway cache-hit counts.
 The console session endpoint validates the bearer credential through the normal
 auth pipeline and returns only safe identity/scope metadata plus explicit UI
 capabilities. It never echoes the bearer token or provider credentials.
+
+The Playground uses the same authorized model list and inference endpoints as
+external clients. It supports incremental Chat Completions and Responses SSE,
+consumes the gateway's successful JSON fallback without replaying an inference,
+supports request cancellation and a stable per-conversation session ID, and
+keeps history only in tab memory. Responses continuity uses
+`previous_response_id`; prompt, response, and stream-event content is never
+written to browser storage.

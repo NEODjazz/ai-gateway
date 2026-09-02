@@ -224,6 +224,14 @@ Gateway также раздаёт встроенный `/ui/` control-plane cons
 UI является недоверенным статическим клиентом: bearer хранится только в
 `sessionStorage`, а модели, бюджеты и audit читаются через те же admin RBAC API,
 что используются CLI-клиентами. Отключение UI не меняет доступность API.
+Playground использует те же `/v1/models`, `/v1/chat/completions` и
+`/v1/responses`, а не отдельный привилегированный API. SSE читается
+инкрементально с поддержкой AbortSignal; если выбранный deployment не умеет
+native streaming, успешный JSON fallback обрабатывается без повторного запроса.
+Transcript и не более 50 последних stream events существуют только в памяти
+вкладки. Стабильный `X-Session-ID`
+связывает запросы одной беседы в observability, а новый session очищает
+Responses affinity (`previous_response_id`).
 
 Для endpoint можно задать `max_parallel_requests`, `queue_capacity` и
 `queue_timeout_ms`. Лимит охватывает всю provider-попытку, включая внутренние

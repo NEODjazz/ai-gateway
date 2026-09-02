@@ -160,7 +160,7 @@ The canonical external contract is [repos/gateway/api/openapi.yaml](repos/gatewa
 ### Admin UI
 
 The gateway serves a self-contained route-based React/TypeScript operations
-console at `/ui/`. Its 36 stable dashboard routes are organized into Monitor,
+console at `/ui/`. Its stable dashboard routes are organized into Monitor,
 Manage, AI Hub, Govern, and System workspaces. Shared API/auth, resource table,
 form, loading, empty, conflict, and error components keep CRUD behavior
 consistent; unsupported backend capabilities are marked unavailable instead of
@@ -249,8 +249,14 @@ that the tag intersection would reject. Unregistered legacy tags remain
 metadata-only so introducing the registry does not invalidate existing keys.
 Routing diagnostics expose circuit, adaptive EWMA, admission, guardrail, and
 shadow-routing state using endpoint names only; provider base URLs and secrets
-are not part of the response contract. The playground sends non-streaming chat
-requests through the same authenticated inference path as external clients.
+are not part of the response contract. The Playground discovers only models
+authorized for the current key and supports Chat Completions and Responses,
+incremental SSE with a single-response JSON fallback for deployments without
+native streaming, cancellation, optional provider-safe generation settings,
+and in-memory conversation continuity. It sends a stable `X-Session-ID` for each
+conversation; Chat resubmits its bounded text transcript while Responses uses
+`previous_response_id`. New session clears content and continuation state, and
+the console never persists prompts, responses, or raw stream events.
 Virtual-key tokens are shown once after creation or rotation and are cleared
 from the page when that dialog closes; list responses contain metadata only.
 Virtual keys can also select one or more enabled Access Groups through the same
