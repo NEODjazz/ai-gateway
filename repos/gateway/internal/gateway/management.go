@@ -72,6 +72,7 @@ type VirtualKeyListFilter struct {
 	UserID         string
 	KeyID          string
 	AccessGroupID  string
+	AccessGroupIDs []string
 	Status         string
 	SortBy         string
 	SortOrder      string
@@ -138,10 +139,17 @@ func (c *RemoteManagementClient) ListVirtualKeysPage(ctx context.Context, audit 
 	if filter.Offset != 0 {
 		query.Set("offset", strconv.Itoa(filter.Offset))
 	}
-	for key, value := range map[string]string{"search": filter.Search, "organization_id": filter.OrganizationID, "team_id": filter.TeamID, "user_id": filter.UserID, "key_id": filter.KeyID, "access_group_id": filter.AccessGroupID, "status": filter.Status, "sort_by": filter.SortBy, "sort_order": filter.SortOrder} {
+	for key, value := range map[string]string{"search": filter.Search, "organization_id": filter.OrganizationID, "team_id": filter.TeamID, "user_id": filter.UserID, "key_id": filter.KeyID, "status": filter.Status, "sort_by": filter.SortBy, "sort_order": filter.SortOrder} {
 		if value != "" {
 			query.Set(key, value)
 		}
+	}
+	if len(filter.AccessGroupIDs) != 0 {
+		for _, id := range filter.AccessGroupIDs {
+			query.Add("access_group_id", id)
+		}
+	} else if filter.AccessGroupID != "" {
+		query.Set("access_group_id", filter.AccessGroupID)
 	}
 	return managementCall[struct{}, VirtualKeyPage](ctx, c, http.MethodGet, "/internal/v1/keys?"+query.Encode(), audit, struct{}{})
 }
@@ -236,11 +244,13 @@ func (h Handler) ListVirtualKeys(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.Offset = parsed
 	}
-	for name, target := range map[string]*string{"search": &filter.Search, "organization_id": &filter.OrganizationID, "team_id": &filter.TeamID, "user_id": &filter.UserID, "key_id": &filter.KeyID, "access_group_id": &filter.AccessGroupID, "status": &filter.Status, "sort_by": &filter.SortBy, "sort_order": &filter.SortOrder} {
+	for name, target := range map[string]*string{"search": &filter.Search, "organization_id": &filter.OrganizationID, "team_id": &filter.TeamID, "user_id": &filter.UserID, "key_id": &filter.KeyID, "status": &filter.Status, "sort_by": &filter.SortBy, "sort_order": &filter.SortOrder} {
 		*target = strings.TrimSpace(r.URL.Query().Get(name))
 	}
+	filter.AccessGroupID = strings.TrimSpace(r.URL.Query().Get("access_group_id"))
+	filter.AccessGroupIDs = uniqueStrings(r.URL.Query()["access_group_id"])
 	expand := strings.TrimSpace(r.URL.Query().Get("expand"))
-	if len(filter.Search) > 128 || len(filter.OrganizationID) > 256 || len(filter.TeamID) > 256 || len(filter.UserID) > 256 || len(filter.KeyID) > 256 || !validOptionalAccessGroupID(filter.AccessGroupID) || !allowedValue(filter.Status, "", "active", "disabled", "revoked", "expired", "non_revoked") || !allowedValue(filter.SortBy, "", "key", "alias", "organization", "team", "user", "created", "status") || !allowedValue(filter.SortOrder, "", "asc", "desc") {
+	if len(filter.Search) > 128 || len(filter.OrganizationID) > 256 || len(filter.TeamID) > 256 || len(filter.UserID) > 256 || len(filter.KeyID) > 256 || len(filter.AccessGroupIDs) > 256 || !validOptionalAccessGroupIDs(filter.AccessGroupIDs) || !allowedValue(filter.Status, "", "active", "disabled", "revoked", "expired", "non_revoked") || !allowedValue(filter.SortBy, "", "key", "alias", "organization", "team", "user", "created", "status") || !allowedValue(filter.SortOrder, "", "asc", "desc") {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid virtual key list filter")
 		return
 	}
@@ -318,6 +328,15 @@ func allowedValue(value string, allowed ...string) bool {
 
 func validOptionalAccessGroupID(value string) bool {
 	return value == "" || validMCPID(value)
+}
+
+func validOptionalAccessGroupIDs(values []string) bool {
+	for _, value := range values {
+		if !validOptionalAccessGroupID(value) || value == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func (h Handler) WithManagement(client ManagementClient) Handler {

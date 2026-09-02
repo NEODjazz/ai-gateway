@@ -117,6 +117,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPut, "/admin/v1/mcp/toolsets/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateMCPToolset) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/mcp/toolsets/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteMCPToolset) }},
 	{RouteContract{http.MethodGet, "/admin/v1/projects"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListProjects) }},
+	{RouteContract{http.MethodGet, "/admin/v1/projects/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetProject) }},
 	{RouteContract{http.MethodPut, "/admin/v1/projects/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutProject) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/projects/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteProject) }},
 	{RouteContract{http.MethodGet, "/admin/v1/access-groups"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListAccessGroups) }},

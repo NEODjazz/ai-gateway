@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"strings"
 	"testing"
 
@@ -51,6 +53,16 @@ func TestAdminUIServesEmbeddedSameOriginAssets(t *testing.T) {
 		}
 		assertAdminUISecurityHeaders(t, asset.Header(), "no-store")
 	}
+	chunks, err := fs.Glob(adminUIAssets, "adminui/assets/ProjectsPage-*.js")
+	if err != nil || len(chunks) != 1 {
+		t.Fatalf("expected one embedded Projects page chunk, got %v (error %v)", chunks, err)
+	}
+	chunk := httptest.NewRecorder()
+	handler.ServeHTTP(chunk, httptest.NewRequest(http.MethodGet, "/ui/assets/"+path.Base(chunks[0]), nil))
+	if chunk.Code != http.StatusOK || chunk.Body.Len() == 0 || chunk.Header().Get("Content-Type") != "text/javascript; charset=utf-8" {
+		t.Fatalf("chunk asset: status=%d type=%q bytes=%d", chunk.Code, chunk.Header().Get("Content-Type"), chunk.Body.Len())
+	}
+	assertAdminUISecurityHeaders(t, chunk.Header(), "public, max-age=31536000, immutable")
 	deepLink := httptest.NewRecorder()
 	handler.ServeHTTP(deepLink, httptest.NewRequest(http.MethodGet, "/ui/providers", nil))
 	if deepLink.Code != http.StatusOK || !strings.Contains(deepLink.Body.String(), `<div id="root"></div>`) {

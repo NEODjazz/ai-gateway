@@ -19,6 +19,8 @@ go run ./cmd/gateway
 - `GET /admin/v1/request-logs/groups?dimension=session|trace`
 - `GET /admin/v1/request-logs/{request_id}`
 - `GET /admin/v1/request-logs/settings`
+- `GET /admin/v1/projects`
+- `GET /admin/v1/projects/{id}`
 - `GET /admin/v1/policy-attachments`
 - `PUT /admin/v1/policy-attachments/{id}`
 - `DELETE /admin/v1/policy-attachments/{id}`
@@ -62,6 +64,11 @@ user, team, and organization. The report endpoint accepts bounded, typed
 filters for each dimension so the UI drill-down is calculated in ClickHouse.
 Provider prompt-cache read and write tokens are carried as separate counters in
 usage reports and request logs, independently from gateway cache-hit counts.
+Project details remain access-policy metadata rather than a synthetic billing
+identity. The console joins owner teams, project access groups and their
+virtual-key impact. Repeated `access_group_id` key-list query parameters use
+server-side any-of matching and return an exact deduplicated total while rows
+remain bounded by the normal page limit.
 The console session endpoint validates the bearer credential through the normal
 auth pipeline and returns only safe identity/scope metadata plus explicit UI
 capabilities. It never echoes the bearer token or provider credentials.

@@ -271,6 +271,14 @@ configured project/model/tool selectors, attached-key pagination, safe budget
 projections and a non-revoked reference count. Normal deletion is rejected while
 any non-revoked key still references the group, preventing an accidental policy
 outage; operators must remove assignments or revoke those keys first.
+The Projects console resolves owner teams from the directory and provides a
+route-based workspace over the project's access groups, effective model/tool
+grants, and deduplicated non-revoked virtual-key impact. Repeating
+`access_group_id` on the key-list API applies server-side any-of filtering and
+returns an exact total without downloading the global key inventory; UI rows
+remain bounded to 500. A project is deliberately an access-policy container,
+not a separate runtime or billing identity, so the console does not invent
+project spend that request attribution cannot prove.
 The virtual-key table joins the 30-day usage projection by non-secret key ID,
 showing spend per currency and optional request/token columns without combining currencies.
 For the returned server page, `expand=financials` performs one scoped billing

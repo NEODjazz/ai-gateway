@@ -311,7 +311,12 @@ paths:
         - {name: team_id, in: query, description: Includes team-owned keys and keys owned by team members., schema: {type: string, maxLength: 256}}
         - {name: user_id, in: query, schema: {type: string, maxLength: 256}}
         - {name: key_id, in: query, description: Case-insensitive key ID substring., schema: {type: string, maxLength: 256}}
-        - {name: access_group_id, in: query, description: Exact assigned access-group ID., schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$'}}
+        - name: access_group_id
+          in: query
+          description: Match keys assigned to any repeated access-group ID.
+          style: form
+          explode: true
+          schema: {type: array, maxItems: 256, items: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$'}}
         - {name: status, in: query, schema: {type: string, enum: [active, disabled, revoked, expired, non_revoked]}}
         - {name: sort_by, in: query, schema: {type: string, enum: [key, alias, organization, team, user, created, status], default: created}}
         - {name: sort_order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
@@ -1273,6 +1278,16 @@ paths:
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/projects/{id}:
     parameters: [{$ref: '#/components/parameters/AccessEntryID'}]
+    get:
+      operationId: getProject
+      tags: [Projects and access]
+      summary: Get project ownership metadata
+      responses:
+        '200': {description: Project, content: {application/json: {schema: {$ref: '#/components/schemas/Project'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
     put:
       operationId: putProject
       tags: [Projects and access]

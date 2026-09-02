@@ -74,6 +74,7 @@ type VirtualKeyListQuery struct {
 	UserID         string
 	KeyID          string
 	AccessGroupID  string
+	AccessGroupIDs []string
 	Status         string
 	SortBy         string
 	SortOrder      string
@@ -178,6 +179,13 @@ func (m AuthModule) ListVirtualKeysPage(ctx context.Context, query VirtualKeyLis
 	query.UserID = strings.TrimSpace(query.UserID)
 	query.KeyID = strings.TrimSpace(query.KeyID)
 	query.AccessGroupID = strings.TrimSpace(query.AccessGroupID)
+	query.AccessGroupIDs = normalizePolicyStrings(query.AccessGroupIDs)
+	if len(query.AccessGroupIDs) == 0 && query.AccessGroupID != "" {
+		query.AccessGroupIDs = []string{query.AccessGroupID}
+	}
+	if query.AccessGroupID == "" && len(query.AccessGroupIDs) == 1 {
+		query.AccessGroupID = query.AccessGroupIDs[0]
+	}
 	query.Status = strings.TrimSpace(query.Status)
 	query.SortBy = strings.TrimSpace(query.SortBy)
 	query.SortOrder = strings.TrimSpace(query.SortOrder)
@@ -187,7 +195,7 @@ func (m AuthModule) ListVirtualKeysPage(ctx context.Context, query VirtualKeyLis
 	if query.SortOrder == "" {
 		query.SortOrder = "desc"
 	}
-	if query.Limit <= 0 || query.Limit > 500 || query.Offset < 0 || query.Offset > 1_000_000 || len(query.Search) > 128 || len(query.OrganizationID) > 256 || len(query.TeamID) > 256 || len(query.UserID) > 256 || len(query.KeyID) > 256 || !validOptionalAccessGroupID(query.AccessGroupID) || !oneOf(query.Status, "", "active", "disabled", "revoked", "expired", "non_revoked") || !oneOf(query.SortBy, "key", "alias", "organization", "team", "user", "created", "status") || !oneOf(query.SortOrder, "asc", "desc") {
+	if query.Limit <= 0 || query.Limit > 500 || query.Offset < 0 || query.Offset > 1_000_000 || len(query.Search) > 128 || len(query.OrganizationID) > 256 || len(query.TeamID) > 256 || len(query.UserID) > 256 || len(query.KeyID) > 256 || !validAccessGroupFilterIDs(query.AccessGroupIDs) || !oneOf(query.Status, "", "active", "disabled", "revoked", "expired", "non_revoked") || !oneOf(query.SortBy, "key", "alias", "organization", "team", "user", "created", "status") || !oneOf(query.SortOrder, "asc", "desc") {
 		return VirtualKeyPage{}, fmt.Errorf("%w: invalid virtual key list query", ErrInvalidVirtualKey)
 	}
 	if pager, ok := m.store.(interface {
@@ -198,7 +206,7 @@ func (m AuthModule) ListVirtualKeysPage(ctx context.Context, query VirtualKeyLis
 	lister, ok := m.store.(interface {
 		List(context.Context, int) ([]VirtualKeyMetadata, error)
 	})
-	if !ok || lister == nil || query.Offset != 0 || query.Search != "" || query.OrganizationID != "" || query.TeamID != "" || query.UserID != "" || query.KeyID != "" || query.Status != "" || query.SortBy != "created" || query.SortOrder != "desc" {
+	if !ok || lister == nil || query.Offset != 0 || query.Search != "" || query.OrganizationID != "" || query.TeamID != "" || query.UserID != "" || query.KeyID != "" || len(query.AccessGroupIDs) != 0 || query.Status != "" || query.SortBy != "created" || query.SortOrder != "desc" {
 		return VirtualKeyPage{}, errors.New("persistent virtual key paginated listing is unavailable")
 	}
 	data, err := lister.List(ctx, query.Limit)
@@ -207,6 +215,18 @@ func (m AuthModule) ListVirtualKeysPage(ctx context.Context, query VirtualKeyLis
 
 func validOptionalAccessGroupID(value string) bool {
 	return value == "" || validAccessGroupIDs([]string{value})
+}
+
+func validAccessGroupFilterIDs(values []string) bool {
+	if len(values) > 256 {
+		return false
+	}
+	for _, value := range values {
+		if !validOptionalAccessGroupID(value) || value == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func oneOf(value string, allowed ...string) bool {

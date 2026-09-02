@@ -153,7 +153,7 @@ func (s *PostgresVirtualKeyStore) ListPage(ctx context.Context, query VirtualKey
 		  AND ($3='' OR k.team_id=$3 OR EXISTS (SELECT 1 FROM auth_team_memberships tm WHERE tm.team_id=$3 AND tm.user_id=k.user_id))
 		  AND ($4='' OR k.user_id=$4)
 		  AND ($5='' OR k.id ILIKE '%' || $5 || '%')
-		  AND ($6='' OR k.access_group_ids @> ARRAY[$6]::TEXT[])
+		  AND (cardinality($6::TEXT[])=0 OR k.access_group_ids && $6::TEXT[])
 		  AND ($7='' OR CASE $7
 		       WHEN 'active' THEN k.revoked_at IS NULL AND k.disabled_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())
 		       WHEN 'disabled' THEN k.revoked_at IS NULL AND k.disabled_at IS NOT NULL
@@ -161,7 +161,7 @@ func (s *PostgresVirtualKeyStore) ListPage(ctx context.Context, query VirtualKey
 		       WHEN 'expired' THEN k.revoked_at IS NULL AND k.disabled_at IS NULL AND k.expires_at IS NOT NULL AND k.expires_at<=now()
 		       WHEN 'non_revoked' THEN k.revoked_at IS NULL
 		       ELSE false END)`
-	args := []any{query.Search, query.OrganizationID, query.TeamID, query.UserID, query.KeyID, query.AccessGroupID, query.Status}
+	args := []any{query.Search, query.OrganizationID, query.TeamID, query.UserID, query.KeyID, nonNilStrings(query.AccessGroupIDs), query.Status}
 	var total int
 	if err := s.pool.QueryRow(ctx, "SELECT count(*) "+filteredKeys, args...).Scan(&total); err != nil {
 		return VirtualKeyPage{}, fmt.Errorf("count virtual keys: %w", err)

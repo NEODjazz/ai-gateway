@@ -84,6 +84,16 @@ func (r *AccessRegistry) Projects() []Project {
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
 }
+func (r *AccessRegistry) Project(id string) (Project, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, found := r.projects[strings.TrimSpace(id)]
+	if !found {
+		return Project{}, false
+	}
+	item.Tags = append([]string(nil), item.Tags...)
+	return item, true
+}
 func (r *AccessRegistry) Groups() []AccessGroup {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -378,6 +388,21 @@ func (h Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"data": h.access.Projects()})
+}
+func (h Handler) GetProject(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeAdmin(w, r); !ok {
+		return
+	}
+	if h.access == nil {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "access registry is unavailable")
+		return
+	}
+	project, found := h.access.Project(r.PathValue("id"))
+	if !found {
+		writeError(w, http.StatusNotFound, "not_found", "project was not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, project)
 }
 func (h Handler) ListAccessGroups(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.authorizeAdmin(w, r); !ok {

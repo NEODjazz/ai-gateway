@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { CapabilityPage } from "../components/CapabilityPage";
 import { ResourcePage, type ResourceConfig } from "../components/ResourcePage";
 import { EndpointPage } from "../pages/EndpointPage";
@@ -27,10 +27,15 @@ import { MCPServersPage, MCPToolsetsPage } from "../pages/MCPPages";
 import { GuardrailMonitorPage } from "../pages/GuardrailMonitorPage";
 import { TeamDetailsPage } from "../pages/TeamDetailsPage";
 import { OrganizationDetailsPage } from "../pages/OrganizationDetailsPage";
+import { LoadingState } from "../components/AsyncState";
 import { resourceConfigs } from "../pages/resourceConfigs";
 import { useAuth, type ConsoleCapability } from "../auth/AuthContext";
 
 export type AppRoute = { path: string; title: string; group: "Monitor" | "Manage" | "Access Control" | "AI Hub" | "Govern" | "System"; element: ReactNode; available: boolean; capability?: ConsoleCapability; navigation?: boolean };
+
+const ProjectsPage = lazy(() => import("../pages/ProjectsPage").then((module) => ({ default: module.ProjectsPage })));
+const ProjectDetailsPage = lazy(() => import("../pages/ProjectsPage").then((module) => ({ default: module.ProjectDetailsPage })));
+const deferred = (element: ReactNode) => <Suspense fallback={<LoadingState />}>{element}</Suspense>;
 
 const readOnly = (title: string, description: string, path: string, columns: ResourceConfig["columns"]): ReactNode => <ResourcePage config={{ eyebrow: "Operations", title, description, listPath: path, columns }} />;
 const unavailable = (title: string, description: string): ReactNode => <CapabilityPage title={title} description={description} />;
@@ -68,7 +73,8 @@ export const appRoutes: AppRoute[] = [
   { path: "/users", title: "Users", group: "Access Control", element: <UsersPage />, available: true, capability: "team_directory" },
   { path: "/access-groups", title: "Access groups", group: "Access Control", element: <AccessGroupsPage />, available: true },
   { path: "/access-groups/:id", title: "Access group details", group: "Access Control", element: <AccessGroupsPage />, available: true, navigation: false },
-  { path: "/projects", title: "Projects", group: "Access Control", element: <ResourcePage config={resourceConfigs.projects} />, available: true },
+  { path: "/projects", title: "Projects", group: "Access Control", element: deferred(<ProjectsPage />), available: true },
+  { path: "/projects/:id", title: "Project details", group: "Access Control", element: deferred(<ProjectDetailsPage />), available: true, navigation: false },
 
   { path: "/ai-hub", title: "AI Hub", group: "AI Hub", element: readOnly("AI Hub", "Catalog entries joined with safe runtime availability.", "/admin/v1/ai-hub/models", [{ key: "model", label: "Model" }, { key: "provider", label: "Provider" }, { key: "capabilities", label: "Capabilities" }, { key: "deployments", label: "Deployments" }, { key: "available", label: "Available" }]), available: true },
   { path: "/cost-optimization", title: "Cost optimization", group: "AI Hub", element: readOnly("Cost optimization", "Deterministic catalog and availability recommendations.", "/admin/v1/cost-optimization/recommendations", [{ key: "type", label: "Type" }, { key: "model", label: "Model" }, { key: "current_provider", label: "Current provider" }, { key: "recommended_provider", label: "Recommended provider" }, { key: "estimated_savings_percent", label: "Savings, %" }, { key: "summary", label: "Summary" }]), available: true },

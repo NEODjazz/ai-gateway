@@ -125,9 +125,9 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	if found, ok, err := store.Lookup(ctx, credentialLookupHash(oldToken, "pepper")); err != nil || !ok || found.ID != oldID || found.Alias != "automation" || len(found.Tags) != 2 || found.Tags[0] != "ci" || found.Tags[1] != "prod" || len(found.AccessGroupIDs) != 2 || len(found.AllowedTools) != 1 {
 		t.Fatalf("active key lookup failed: key=%+v ok=%v err=%v", found, ok, err)
 	}
-	groupPage, err := store.ListPage(ctx, VirtualKeyListQuery{Limit: 10, AccessGroupID: "platform", Status: "non_revoked", SortBy: "created", SortOrder: "desc"})
+	groupPage, err := store.ListPage(ctx, VirtualKeyListQuery{Limit: 10, AccessGroupIDs: []string{"missing", "regulated"}, Status: "non_revoked", SortBy: "created", SortOrder: "desc"})
 	if err != nil || groupPage.Total != 1 || len(groupPage.Data) != 1 || groupPage.Data[0].ID != oldID {
-		t.Fatalf("access-group key filter page=%+v err=%v", groupPage, err)
+		t.Fatalf("any-of access-group key filter page=%+v err=%v", groupPage, err)
 	}
 	old.RateLimitRPM = 15
 	old.Description = "updated CI key"

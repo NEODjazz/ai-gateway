@@ -83,7 +83,7 @@ func TestInternalManagementListsOnlySafeVirtualKeyMetadata(t *testing.T) {
 	module := modules.NewAuthModuleWithStore(true, store, "hash-secret", false)
 	mux := http.NewServeMux()
 	registerManagementRoutes(mux, &module, "internal-secret")
-	request := httptest.NewRequest(http.MethodGet, "/internal/v1/keys?limit=25&offset=25&search=prod&organization_id=org-1&team_id=team-1&user_id=user-1&key_id=safe&access_group_id=platform&status=non_revoked&sort_by=alias&sort_order=asc", nil)
+	request := httptest.NewRequest(http.MethodGet, "/internal/v1/keys?limit=25&offset=25&search=prod&organization_id=org-1&team_id=team-1&user_id=user-1&key_id=safe&access_group_id=platform&access_group_id=regulated&status=non_revoked&sort_by=alias&sort_order=asc", nil)
 	request.Header.Set(managementTokenHeader, "internal-secret")
 	request.Header.Set("X-Request-ID", "req-list")
 	request.Header.Set("X-Actor-ID", "admin-user")
@@ -93,7 +93,7 @@ func TestInternalManagementListsOnlySafeVirtualKeyMetadata(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"vk_safe123"`) {
 		t.Fatalf("unexpected list response %d: %s", response.Code, response.Body.String())
 	}
-	if store.query.Offset != 25 || store.query.Search != "prod" || store.query.OrganizationID != "org-1" || store.query.AccessGroupID != "platform" || store.query.Status != "non_revoked" || store.query.SortBy != "alias" || store.query.SortOrder != "asc" || !strings.Contains(response.Body.String(), `"total":27`) {
+	if store.query.Offset != 25 || store.query.Search != "prod" || store.query.OrganizationID != "org-1" || len(store.query.AccessGroupIDs) != 2 || store.query.AccessGroupIDs[0] != "platform" || store.query.AccessGroupIDs[1] != "regulated" || store.query.Status != "non_revoked" || store.query.SortBy != "alias" || store.query.SortOrder != "asc" || !strings.Contains(response.Body.String(), `"total":27`) {
 		t.Fatalf("list query was not propagated: query=%+v body=%s", store.query, response.Body.String())
 	}
 	for _, forbidden := range []string{"token_hash", `"token"`} {

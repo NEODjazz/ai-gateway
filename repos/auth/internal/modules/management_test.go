@@ -137,11 +137,11 @@ func TestListVirtualKeysReturnsSafeMetadata(t *testing.T) {
 	if _, err := module.ListVirtualKeys(context.Background(), 0); !errors.Is(err, ErrInvalidVirtualKey) {
 		t.Fatalf("invalid limit error=%v", err)
 	}
-	page, err := module.ListVirtualKeysPage(context.Background(), VirtualKeyListQuery{Limit: 25, Offset: 50, Search: " prod ", OrganizationID: "org-1", TeamID: "team-1", UserID: "user-1", KeyID: "safe", AccessGroupID: " platform ", Status: "non_revoked", SortBy: "alias", SortOrder: "asc"})
-	if err != nil || page.Total != 17 || store.listQuery.Search != "prod" || store.listQuery.Offset != 50 || store.listQuery.OrganizationID != "org-1" || store.listQuery.AccessGroupID != "platform" || store.listQuery.Status != "non_revoked" {
+	page, err := module.ListVirtualKeysPage(context.Background(), VirtualKeyListQuery{Limit: 25, Offset: 50, Search: " prod ", OrganizationID: "org-1", TeamID: "team-1", UserID: "user-1", KeyID: "safe", AccessGroupIDs: []string{" platform ", "regulated", "platform"}, Status: "non_revoked", SortBy: "alias", SortOrder: "asc"})
+	if err != nil || page.Total != 17 || store.listQuery.Search != "prod" || store.listQuery.Offset != 50 || store.listQuery.OrganizationID != "org-1" || len(store.listQuery.AccessGroupIDs) != 2 || store.listQuery.AccessGroupIDs[0] != "platform" || store.listQuery.AccessGroupIDs[1] != "regulated" || store.listQuery.Status != "non_revoked" {
 		t.Fatalf("unexpected page=%+v query=%+v err=%v", page, store.listQuery, err)
 	}
-	for _, invalid := range []VirtualKeyListQuery{{Limit: 25, Offset: -1}, {Limit: 25, Status: "unknown"}, {Limit: 25, AccessGroupID: "bad/group"}, {Limit: 25, SortBy: "token_hash"}, {Limit: 25, SortOrder: "sideways"}} {
+	for _, invalid := range []VirtualKeyListQuery{{Limit: 25, Offset: -1}, {Limit: 25, Status: "unknown"}, {Limit: 25, AccessGroupID: "bad/group"}, {Limit: 25, AccessGroupIDs: []string{"good", "bad/group"}}, {Limit: 25, SortBy: "token_hash"}, {Limit: 25, SortOrder: "sideways"}} {
 		if _, err := module.ListVirtualKeysPage(context.Background(), invalid); !errors.Is(err, ErrInvalidVirtualKey) {
 			t.Fatalf("invalid query was accepted: %+v err=%v", invalid, err)
 		}

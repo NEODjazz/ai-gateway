@@ -19,7 +19,10 @@ describe("dashboard route manifest", () => {
   });
   it("keeps identity resources in Access Control", () => {
     expect(appRoutes.filter((route) => route.group === "Access Control" && route.navigation !== false).map((route) => route.title)).toEqual(["Organizations", "Teams", "Users", "Access groups", "Projects"]);
-    expect(appRoutes).toEqual(expect.arrayContaining([expect.objectContaining({ path: "/access-groups/:id", navigation: false })]));
+    expect(appRoutes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: "/access-groups/:id", navigation: false }),
+      expect.objectContaining({ path: "/projects/:id", navigation: false })
+    ]));
   });
   it("combines request and audit logs under Monitor", () => {
     expect(appRoutes.find((route) => route.path === "/logs")).toMatchObject({ title: "Logs", group: "Monitor", available: true });

@@ -191,6 +191,12 @@ direct grants ключа. Пустая групповая grant dimension нич
 missing/disabled assignment блокирует запрос, а тот же effective model policy
 применяется к `/v1/models` и cross-model fallback targets.
 Management lookup поддерживает индексируемый exact-фильтр по access-group ID.
+Повторенный `access_group_id` имеет any-of семантику через PostgreSQL array
+overlap и сохраняет точный server-side total. Projects workspace использует
+этот фильтр для bounded impact analysis по всем группам проекта, не загружая
+глобальный список ключей. Project остаётся контейнером access policies и owner
+team metadata: он не добавляется в request identity и не представляется как
+отдельный usage/billing scope.
 Перед обычным удалением группы gateway запрашивает наличие non-revoked ключей и
 возвращает conflict при существующих ссылках. Это защищает operator workflow от
 случайного отключения назначенных ключей, а runtime fail-closed остаётся

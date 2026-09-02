@@ -269,6 +269,16 @@ func TestAccessRegistryAdminAPI(t *testing.T) {
 	if putProject.Code != http.StatusOK {
 		t.Fatalf("put project status=%d body=%s", putProject.Code, putProject.Body.String())
 	}
+	projectDetail := httptest.NewRecorder()
+	router.ServeHTTP(projectDetail, httptest.NewRequest(http.MethodGet, "/admin/v1/projects/payments", nil))
+	if projectDetail.Code != http.StatusOK || !strings.Contains(projectDetail.Body.String(), `"id":"payments"`) || !strings.Contains(projectDetail.Body.String(), `"team_id":"team-a"`) {
+		t.Fatalf("project detail failed: status=%d body=%s", projectDetail.Code, projectDetail.Body.String())
+	}
+	missingProject := httptest.NewRecorder()
+	router.ServeHTTP(missingProject, httptest.NewRequest(http.MethodGet, "/admin/v1/projects/missing", nil))
+	if missingProject.Code != http.StatusNotFound || !strings.Contains(missingProject.Body.String(), `"code":"not_found"`) {
+		t.Fatalf("missing project response failed: status=%d body=%s", missingProject.Code, missingProject.Body.String())
+	}
 
 	putGroup := httptest.NewRecorder()
 	router.ServeHTTP(putGroup, httptest.NewRequest(http.MethodPut, "/admin/v1/access-groups/payments-read", strings.NewReader(`{"name":"Payments read","project_id":"payments","allowed_models":["gpt-*"],"allowed_tools":["toolset:ledger"],"enabled":true}`)))
