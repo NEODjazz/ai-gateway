@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
 import { VirtualKeysPage } from "./VirtualKeysPage";
 
@@ -45,7 +46,7 @@ function mockAPI(keyRows: unknown[] = [key], userRows: unknown[] = [{ id: "user-
     return json({});
   });
 }
-function renderPage() { sessionStorage.setItem("ai-gateway.admin-token", "token"); render(<AuthProvider><VirtualKeysPage /></AuthProvider>); }
+function renderPage() { sessionStorage.setItem("ai-gateway.admin-token", "token"); render(<MemoryRouter><AuthProvider><VirtualKeysPage /></AuthProvider></MemoryRouter>); }
 
 describe("VirtualKeysPage", () => {
   afterEach(() => { vi.restoreAllMocks(); sessionStorage.clear(); window.history.replaceState({}, "", "/"); });
@@ -55,6 +56,13 @@ describe("VirtualKeysPage", () => {
     const fetchMock = mockAPI(); renderPage();
     expect(await screen.findByText("production")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("key_id=vk_alpha"))).toBe(true);
+  });
+
+  it("opens the existing edit form from the route-based details workspace", async () => {
+    window.history.replaceState({}, "", "/ui/api-keys?key_id=vk_alpha&edit=1");
+    mockAPI(); renderPage();
+    const dialog = await screen.findByRole("dialog", { name: "Edit virtual key" });
+    expect(within(dialog).getByLabelText("Alias")).toHaveValue("production");
   });
 
   it("renders searchable, sortable keys with icon refresh and resettable filters", async () => {
@@ -189,6 +197,7 @@ describe("VirtualKeysPage", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchMock = mockAPI(); renderPage(); await screen.findByText("production");
     await userEvent.click(screen.getByRole("button", { name: "Actions for production" }));
+    expect(screen.getByRole("menuitem", { name: "Inspect" })).toHaveAttribute("href", "/api-keys/vk_alpha");
     await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const edit = await screen.findByRole("dialog", { name: "Edit virtual key" });
     await userEvent.type(within(edit).getByLabelText("Description"), "Updated policy");

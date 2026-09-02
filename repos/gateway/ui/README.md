@@ -57,6 +57,11 @@ model grants and enabled Access Groups. The key table exposes assignments as a
 selectable column. Group grants are runtime policy, not descriptive UI metadata:
 gateway unions the selected groups and intersects that result with the key's
 direct model/tool grants, failing closed for missing or disabled assignments.
+The row action opens `/api-keys/:id`, which keeps identity, grants, lifecycle,
+currency-separated usage, daily activity and all applicable budget policies in
+one route-based workspace. Rotate keeps its one-time secret disclosure and copy
+confirmation; settings edits reuse the configured organization/team/user and
+model selectors from the catalog.
 
 Access Groups use dedicated `/access-groups` and `/access-groups/:id` routes.
 The detail view shows current model/tool grants, project ownership, attached

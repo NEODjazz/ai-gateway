@@ -15,6 +15,7 @@ import { ModelOnboardingPage } from "../pages/ModelOnboardingPage";
 import { DeploymentsPage } from "../pages/DeploymentsPage";
 import { RouterSettingsPage } from "../pages/RouterSettingsPage";
 import { VirtualKeysPage } from "../pages/VirtualKeysPage";
+import { VirtualKeyDetailsPage } from "../pages/VirtualKeyDetailsPage";
 import { ProvidersPage } from "../pages/ProvidersPage";
 import { CredentialsPage } from "../pages/CredentialsPage";
 import { ModelGroupsPage } from "../pages/ModelGroupsPage";
@@ -52,6 +53,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/playground", title: "Playground", group: "Monitor", element: <PlaygroundPage />, available: true, capability: "inference" },
 
   { path: "/api-keys", title: "Virtual keys", group: "Manage", element: <VirtualKeysPage />, available: true },
+  { path: "/api-keys/:id", title: "Virtual key details", group: "Manage", element: <VirtualKeyDetailsPage />, available: true, navigation: false },
   { path: "/models", title: "Models", group: "Manage", element: <ModelCatalogPage />, available: true },
   { path: "/model-onboarding", title: "Model onboarding", group: "Manage", element: <ModelOnboardingPage />, available: true },
   { path: "/providers", title: "Providers", group: "Manage", element: <ProvidersPage />, available: true },

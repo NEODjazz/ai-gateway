@@ -491,6 +491,13 @@ The console sends those parameters to the server with a debounced alias search
 and uses the returned total for page navigation. Budget columns are intentionally
 not sorted: a key can have several simultaneously enforced policies in different
 currencies and dimensions, so one scalar ordering would be misleading.
+Each row links to `/ui/api-keys/{id}`, a metadata-only workspace that joins
+configured ownership names, direct grants, access groups, currency-separated
+30-day usage, daily activity and every applicable budget policy. Rotation,
+disable/enable and revoke retain the existing audited lifecycle; a rotated
+plaintext token is still displayed exactly once. Settings edits return to the
+same configured-selector form used by the catalog rather than introducing raw
+owner IDs.
 The gateway
 receives only the opaque key ID, alias, tags and policy (never the plaintext
 token or lookup hash), filters `/v1/models`, enforces model grants before the
