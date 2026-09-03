@@ -19,6 +19,8 @@ button:not(.g-button):hover { background: #0b846d; }
 .gateway-file-button { position: relative; display: inline-flex; cursor: pointer; }
 .gateway-file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .gateway-modal-close { color: #536473; }
+.gravity-login-control, .gravity-login-control > span { width: 100%; }
+.gravity-loader-scope { display: inline-flex; }
 button:not(.g-button):disabled { cursor: wait; opacity: .55; }
 .secondary { color: #344454; border: 1px solid #d7dfe5; background: white; }
 .secondary:hover { background: #f2f5f7; }
