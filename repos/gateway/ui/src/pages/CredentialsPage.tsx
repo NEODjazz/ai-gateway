@@ -7,6 +7,8 @@ import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
 import type { Row } from "../components/DataTable";
 import { formatTimestamp } from "../format";
+import { GatewayButton } from "../components/GatewayButton";
+import { ModalCloseButton } from "../components/ModalCloseButton";
 
 type Credential = Row & { id: string; provider_id?: string; description?: string; created_at: string; updated_at: string };
 type Provider = { id: string; type: string; enabled: boolean };
@@ -107,7 +109,7 @@ export function CredentialsPage() {
     <div className="usage-stats-grid credential-stats"><StatCard label="Credentials" value={String(credentials.length)} /><StatCard label="Provider-bound" value={String(bound)} /><StatCard label="Shared" value={String(credentials.length - bound)} /><StatCard label="Used by deployments" value={String(inUse)} /></div>
     {error && <ErrorState message={error} retry={() => void load()} />}
     {notice && <div className="operation-result" role="status">{notice}</div>}
-    {loading ? <LoadingState /> : <ManagedDataTable rows={rows} columns={columns} primaryAction={<button onClick={() => openForm("create")}>Create Credential</button>} onRefresh={load} searchPlaceholder="Search credentials" defaultHidden={["created_at"]} actions={(row) => {
+    {loading ? <LoadingState /> : <ManagedDataTable rows={rows} columns={columns} primaryAction={<GatewayButton size="l" onClick={() => openForm("create")}>Create Credential</GatewayButton>} onRefresh={load} searchPlaceholder="Search credentials" defaultHidden={["created_at"]} actions={(row) => {
       const credential = credentials.find((item) => item.id === row.id)!;
       return <ActionsMenu label={`Actions for ${credential.id}`} items={[
         { label: "Edit metadata", onSelect: () => openForm("edit", credential) },
@@ -115,13 +117,13 @@ export function CredentialsPage() {
         { label: "Delete", tone: "danger", onSelect: () => void remove(credential) }
       ]} />;
     }} />}
-    {mode && <div className="modal-backdrop" role="presentation"><section className="modal credential-form-modal" role="dialog" aria-modal="true" aria-label={title}><div className="modal-heading"><div><h2>{title}</h2>{selected && <span className="muted">{selected.id}</span>}</div><button className="icon-button" aria-label="Close credential form" onClick={() => setMode(undefined)}>×</button></div><form className="credential-form" onSubmit={submit}>
+    {mode && <div className="modal-backdrop" role="presentation"><section className="modal credential-form-modal" role="dialog" aria-modal="true" aria-label={title}><div className="modal-heading"><div><h2>{title}</h2>{selected && <span className="muted">{selected.id}</span>}</div><ModalCloseButton label="Close credential form" onClick={() => setMode(undefined)} /></div><form className="credential-form" onSubmit={submit}>
       {mode === "create" && <label><span>Credential ID</span><input required maxLength={128} value={form.id} onChange={(event) => setForm((current) => ({ ...current, id: event.target.value }))} /></label>}
       {mode !== "rotate" && <><label><span>Provider</span><select aria-label="Credential provider" value={form.provider_id} onChange={(event) => setForm((current) => ({ ...current, provider_id: event.target.value }))}><option value="">Shared credential</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.id} — {provider.type}{provider.enabled ? "" : " — disabled"}</option>)}</select></label><label><span>Description</span><input maxLength={512} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label></>}
       {(mode === "create" || mode === "rotate") && <><label><span>New secret</span><input required type="password" autoComplete="new-password" value={form.secret} onChange={(event) => setForm((current) => ({ ...current, secret: event.target.value }))} /></label><label><span>Confirm secret</span><input required type="password" autoComplete="new-password" value={form.confirm} onChange={(event) => setForm((current) => ({ ...current, confirm: event.target.value }))} /></label><p className="credential-write-only-notice">The plaintext value is sent once over this form and is never returned by the gateway.</p></>}
       {mode === "edit" && <p className="credential-write-only-notice">Metadata changes preserve the current encrypted secret. Use “Rotate secret” to replace it.</p>}
       {formError && <p className="form-error credential-form-error" role="alert">{formError}</p>}
-      <div className="modal-actions credential-form-actions"><button type="button" className="secondary" onClick={() => setMode(undefined)}>Cancel</button><button disabled={saving}>{saving ? "Saving…" : mode === "rotate" ? "Rotate secret" : "Save"}</button></div>
+      <div className="modal-actions credential-form-actions"><GatewayButton type="button" view="outlined" onClick={() => setMode(undefined)}>Cancel</GatewayButton><GatewayButton type="submit" disabled={saving}>{saving ? "Saving…" : mode === "rotate" ? "Rotate secret" : "Save"}</GatewayButton></div>
     </form></section></div>}
   </>;
 }

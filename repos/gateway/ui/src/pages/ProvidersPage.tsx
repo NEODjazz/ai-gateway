@@ -9,6 +9,8 @@ import { ResourceForm } from "../components/ResourceForm";
 import { StatCard } from "../components/StatCard";
 import type { Row } from "../components/DataTable";
 import { resourceConfigs } from "./resourceConfigs";
+import { GatewayButton } from "../components/GatewayButton";
+import { ModalCloseButton } from "../components/ModalCloseButton";
 
 type Provider = Row & { id: string; type: string; base_url?: string; enabled: boolean };
 type Credential = { id: string; provider_id?: string; description?: string };
@@ -124,7 +126,7 @@ export function ProvidersPage() {
     <PageHeader eyebrow="Connectivity" title="Providers" description="Manage provider endpoints, select their stored credentials, test connectivity and discover models before onboarding." />
     <div className="usage-stats-grid provider-stats"><StatCard label="Providers" value={String(providers.length)} /><StatCard label="Enabled" value={String(enabledCount)} /><StatCard label="Credentials" value={String(credentials.length)} /><StatCard label="Available in this session" value={String(availableCount)} /></div>
     {error && <ErrorState message={error} retry={() => void load()} />}
-    {loading ? <LoadingState /> : <ManagedDataTable rows={rows} columns={columns} primaryAction={<button onClick={() => setEditing(null)}>Create Provider</button>} onRefresh={load} searchPlaceholder="Search providers" defaultHidden={["last_latency"]} actions={(row) => {
+    {loading ? <LoadingState /> : <ManagedDataTable rows={rows} columns={columns} primaryAction={<GatewayButton size="l" onClick={() => setEditing(null)}>Create Provider</GatewayButton>} onRefresh={load} searchPlaceholder="Search providers" defaultHidden={["last_latency"]} actions={(row) => {
       const provider = providers.find((item) => item.id === row.id)!;
       return <ActionsMenu label={`Actions for ${provider.id}`} items={[
         { label: "Test connection", onSelect: () => openConnection(provider, "test") },
@@ -135,13 +137,13 @@ export function ProvidersPage() {
     }} />}
     {editing !== undefined && <ResourceForm title={`${editing ? "Edit" : "Create"} Provider`} fields={resourceConfigs.providers.fields!} initial={editing || undefined} loadOptions={(path) => client.request(path)} onClose={() => setEditing(undefined)} onSubmit={saveProvider} />}
     {connection && <div className="modal-backdrop" role="presentation"><section className="modal provider-connection-modal" role="dialog" aria-modal="true" aria-label={connection.mode === "test" ? "Test provider connection" : "Discover provider models"}>
-      <div className="modal-heading"><div><h2>{connection.mode === "test" ? "Test connection" : "Discover models"}</h2><span className="muted">{connection.provider.id} · {connection.provider.type}</span></div><button className="icon-button" aria-label="Close provider connection" onClick={() => setConnection(undefined)}>×</button></div>
+      <div className="modal-heading"><div><h2>{connection.mode === "test" ? "Test connection" : "Discover models"}</h2><span className="muted">{connection.provider.id} · {connection.provider.type}</span></div><ModalCloseButton label="Close provider connection" onClick={() => setConnection(undefined)} /></div>
       <label>Credential<select aria-label="Provider credential" value={credentialID} onChange={(event) => setCredentialID(event.target.value)}><option value="">No credential</option>{connectionCredentials.map((credential) => <option key={credential.id} value={credential.id}>{credential.id}{credential.description ? ` — ${credential.description}` : ""}{credential.provider_id ? "" : " — shared"}</option>)}</select></label>
       {!connectionCredentials.length && connection.provider.type !== "ollama" && connection.provider.type !== "demo" && <p className="muted">No matching credential is configured. Create one on the Credentials page or test an endpoint that does not require authentication.</p>}
       {connectionError && <p className="form-error" role="alert">{connectionError}</p>}
       {connection.mode === "test" && probes[connection.provider.id] && <div className="provider-probe-result" role="status">{status(probes[connection.provider.id].status)}<span>{probes[connection.provider.id].latency_ms.toLocaleString("en-US")} ms</span><span>{probes[connection.provider.id].model_count.toLocaleString("en-US")} models</span></div>}
       {connection.mode === "discover" && discovered && <><div className="provider-discovery-heading" role="status"><strong>{discovered.length.toLocaleString("en-US")} models discovered</strong><span className="muted">Only identifiers are loaded; provider credentials remain server-side.</span></div><div className="provider-model-list">{discovered.length ? discovered.map((model) => <code key={model.id}>{model.id}</code>) : <span className="muted">No models returned by the provider.</span>}</div></>}
-      <div className="modal-actions"><button className="secondary" onClick={() => setConnection(undefined)}>Close</button>{connection.mode === "discover" && discovered && <button className="secondary" onClick={() => navigate(`/model-onboarding?provider_id=${encodeURIComponent(connection.provider.id)}&credential_id=${encodeURIComponent(credentialID)}`)}>Continue to onboarding</button>}<button disabled={busy} onClick={() => void runConnection()}>{busy ? "Working…" : connection.mode === "test" ? "Test connection" : discovered ? "Discover again" : "Discover models"}</button></div>
+      <div className="modal-actions"><GatewayButton view="outlined" onClick={() => setConnection(undefined)}>Close</GatewayButton>{connection.mode === "discover" && discovered && <GatewayButton view="outlined" onClick={() => navigate(`/model-onboarding?provider_id=${encodeURIComponent(connection.provider.id)}&credential_id=${encodeURIComponent(credentialID)}`)}>Continue to onboarding</GatewayButton>}<GatewayButton disabled={busy} onClick={() => void runConnection()}>{busy ? "Working…" : connection.mode === "test" ? "Test connection" : discovered ? "Discover again" : "Discover models"}</GatewayButton></div>
     </section></div>}
   </>;
 }
