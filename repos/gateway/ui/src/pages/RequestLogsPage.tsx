@@ -6,6 +6,7 @@ import { useAuth } from "../auth/AuthContext";
 import { DataTable, type Row } from "../components/DataTable";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { PageHeader } from "../components/PageHeader";
+import { PageTabs } from "../components/PageTabs";
 import { ActionsMenu } from "../components/ActionsMenu";
 import { ColumnsMenu } from "../components/ColumnsMenu";
 import { ToolbarIconButton } from "../components/ToolbarIconButton";
@@ -254,11 +255,7 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
   const hasRows = view === "requests" ? rows.length > 0 : groupRows.length > 0;
   return <>
     {!embedded && <PageHeader eyebrow="Observability" title="Request logs" description="Cursor-paginated final outcomes and server-aggregated sessions and traces without prompts, responses or raw provider errors." />}
-    <div className="page-tabs" role="tablist" aria-label="Request log views">
-      <button role="tab" aria-selected={view === "requests"} className={view === "requests" ? "active" : ""} onClick={() => updateQuery({ view: "" })}>Requests</button>
-      <button role="tab" aria-selected={view === "sessions"} className={view === "sessions" ? "active" : ""} onClick={() => updateQuery({ view: "sessions" })}>Sessions</button>
-      <button role="tab" aria-selected={view === "traces"} className={view === "traces" ? "active" : ""} onClick={() => updateQuery({ view: "traces" })}>Traces</button>
-    </div>
+    <PageTabs label="Request log views" value={view} items={[{ value: "requests", label: "Requests" }, { value: "sessions", label: "Sessions" }, { value: "traces", label: "Traces" }]} onUpdate={(next) => updateQuery({ view: next === "requests" ? "" : next })} />
     <div className="key-toolbar">
       <form className="key-toolbar-right" onSubmit={applyWindow}>
         <label>Window<select aria-label="Request log window" value={windowDraft} onChange={(event) => setWindowDraft(event.target.value)}><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option><option value="custom">Custom</option></select></label>

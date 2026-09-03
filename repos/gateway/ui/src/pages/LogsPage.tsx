@@ -1,5 +1,6 @@
 import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
+import { PageTabs } from "../components/PageTabs";
 import { AuditLogsPage } from "./AuditLogsPage";
 import { RequestLogsPage } from "./RequestLogsPage";
 
@@ -15,5 +16,5 @@ export function LogsPage() {
     else next.set("tab", nextTab);
     setSearchParams(next);
   }
-  return <><PageHeader eyebrow="Observability" title="Logs" description="Request outcomes and administrative audit events in one operational workspace." /><div className="page-tabs" role="tablist" aria-label="Log types"><button role="tab" aria-selected={tab === "requests"} className={tab === "requests" ? "active" : ""} onClick={() => selectTab("requests")}>Request Logs</button><button role="tab" aria-selected={tab === "audit"} className={tab === "audit" ? "active" : ""} onClick={() => selectTab("audit")}>Audit Logs</button></div>{tab === "requests" ? <RequestLogsPage embedded /> : <AuditLogsPage />}</>;
+  return <><PageHeader eyebrow="Observability" title="Logs" description="Request outcomes and administrative audit events in one operational workspace." /><PageTabs label="Log types" value={tab} items={[{ value: "requests", label: "Request Logs" }, { value: "audit", label: "Audit Logs" }]} onUpdate={selectTab} />{tab === "requests" ? <RequestLogsPage embedded /> : <AuditLogsPage />}</>;
 }
