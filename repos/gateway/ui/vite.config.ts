@@ -23,7 +23,7 @@ export default defineConfig({
     css: false,
     server: {
       deps: {
-        inline: ["@gravity-ui/uikit", "@gravity-ui/icons"]
+        inline: ["@gravity-ui/uikit", "@gravity-ui/icons", /@gravity-ui\/navigation/]
       }
     },
     coverage: {
