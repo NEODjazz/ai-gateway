@@ -2,16 +2,14 @@
 .g-root_theme_light {
   --g-color-base-brand: #0f9f83;
   --g-color-base-brand-hover: #0b846d;
-  --g-color-base-selection: #e7f5f2;
-  --g-color-base-selection-hover: #d8eee9;
   --g-color-text-brand: #087a67;
   --g-color-text-brand-heavy: #075346;
 }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, select, textarea { font: inherit; }
-button:not(.g-button):where(:not(.g-tab):not(.sort-button)) { border: 0; border-radius: 8px; background: #0f9f83; color: white; padding: 9px 15px; cursor: pointer; font-weight: 650; }
-button:not(.g-button):where(:not(.g-tab):not(.sort-button)):hover { background: #0b846d; }
+:where(button:not(.g-button):not(.g-tab):not(.sort-button):not([class^="g-"]):not([class*=" g-"])) { border: 0; border-radius: 8px; background: #0f9f83; color: white; padding: 9px 15px; cursor: pointer; font-weight: 650; }
+:where(button:not(.g-button):not(.g-tab):not(.sort-button):not([class^="g-"]):not([class*=" g-"])):hover { background: #0b846d; }
 .button-link { display: inline-flex; align-items: center; border-radius: 8px; background: #0f9f83; color: white; padding: 9px 15px; text-decoration: none; font-weight: 650; }
 .button-link:hover { background: #0b846d; }
 .file-button { cursor: pointer; }
@@ -21,7 +19,7 @@ button:not(.g-button):where(:not(.g-tab):not(.sort-button)):hover { background: 
 .gateway-modal-close { color: #536473; }
 .gravity-login-control, .gravity-login-control > span { width: 100%; }
 .gravity-loader-scope { display: inline-flex; }
-button:not(.g-button):where(:not(.g-tab):not(.sort-button)):disabled { cursor: wait; opacity: .55; }
+:where(button:not(.g-button):not(.g-tab):not(.sort-button):not([class^="g-"]):not([class*=" g-"])):disabled { cursor: wait; opacity: .55; }
 .secondary { color: #344454; border: 1px solid #d7dfe5; background: white; }
 .secondary:hover { background: #f2f5f7; }
 .text-button { background: none; color: #087a67; padding: 5px 7px; }

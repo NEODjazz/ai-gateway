@@ -20,5 +20,8 @@ describe("ManagedDataTable", () => {
     expect(screen.queryByRole("columnheader", { name: /Description/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Refresh table" })); expect(refresh).toHaveBeenCalled();
     expect(screen.getByText("1–1 of 1")).toBeInTheDocument();
+    const pageSizeSelect = screen.getByRole("combobox", { name: "Rows per page" });
+    expect(pageSizeSelect.className).toContain("g-select-control__button");
+    expect(getComputedStyle(pageSizeSelect).backgroundColor).not.toBe("rgb(15, 159, 131)");
   });
 });
