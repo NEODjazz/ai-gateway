@@ -1,0 +1,1 @@
+import{j as a,G as c,C as t}from"./app.js";function n({label:s,value:e,detail:r}){return a.jsx("article",{className:"gravity-card-article",children:a.jsx(c,{className:"gravity-card-scope",children:a.jsxs(t,{type:"container",view:"raised",className:"stat-card",children:[a.jsx("span",{children:s}),a.jsx("strong",{children:e}),r&&a.jsx("small",{children:r})]})})})}export{n as S};

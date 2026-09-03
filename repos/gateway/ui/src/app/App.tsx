@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { Layout } from "./Layout";
 import { LoginPage } from "./LoginPage";
 import { appRoutes, routeCapability } from "./routes";
+import { LoadingState } from "../components/AsyncState";
 
 export function App() {
   const { token, session, restoreSession } = useAuth();
@@ -20,5 +21,5 @@ export function App() {
   if (!token) return <LoginPage />;
   if (!session) return <LoginPage />;
   const landing = routes[0]?.path || "/api-reference";
-  return <BrowserRouter basename="/ui"><Routes><Route element={<Layout />}>{routes.map((route) => <Route key={route.path} path={route.path} element={route.element} />)}<Route index element={<Navigate to={landing} replace />} /><Route path="*" element={<Navigate to={landing} replace />} /></Route></Routes></BrowserRouter>;
+  return <BrowserRouter basename="/ui"><Suspense fallback={<LoadingState />}><Routes><Route element={<Layout />}>{routes.map((route) => <Route key={route.path} path={route.path} element={route.element} />)}<Route index element={<Navigate to={landing} replace />} /><Route path="*" element={<Navigate to={landing} replace />} /></Route></Routes></Suspense></BrowserRouter>;
 }
