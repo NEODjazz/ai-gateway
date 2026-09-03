@@ -6,6 +6,9 @@ describe("ResourceForm", () => {
   it("converts csv, number, boolean and JSON values", async () => {
     const submit = vi.fn().mockResolvedValue(undefined);
     render(<ResourceForm title="Edit resource" fields={[{ key: "tags", label: "Tags", type: "csv" }, { key: "limit", label: "Limit", type: "number" }, { key: "enabled", label: "Enabled", type: "boolean" }, { key: "metadata", label: "Metadata", type: "json" }]} onClose={() => {}} onSubmit={submit} />);
+    expect(screen.getByLabelText("Tags")).toHaveClass("g-text-input__control");
+    expect(screen.getByLabelText("Enabled")).toHaveClass("g-checkbox__control");
+    expect(screen.getByLabelText("Metadata")).toHaveClass("g-text-area__control");
     await userEvent.type(screen.getByLabelText("Tags"), "one, two");
     await userEvent.clear(screen.getByLabelText("Limit")); await userEvent.type(screen.getByLabelText("Limit"), "7");
     await userEvent.click(screen.getByLabelText("Enabled"));
