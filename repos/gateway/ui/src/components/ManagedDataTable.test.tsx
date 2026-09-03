@@ -1,13 +1,16 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ManagedDataTable } from "./ManagedDataTable";
+import "../styles.css";
 
 describe("ManagedDataTable", () => {
   it("provides virtual-key-style search, columns, sorting, refresh and pagination", async () => {
     const refresh = vi.fn();
     render(<ManagedDataTable rows={[{ id: "b", description: "Beta" }, { id: "a", description: "Alpha" }]} columns={[{ key: "id", label: "ID" }, { key: "description", label: "Description" }]} onRefresh={refresh} searchPlaceholder="Search resources" />);
     expect(screen.getAllByRole("row")[1]).toHaveTextContent("a");
-    await userEvent.click(screen.getByRole("button", { name: /ID/ }));
+    const sortButton = screen.getByRole("button", { name: /ID/ });
+    expect(getComputedStyle(sortButton).backgroundColor).toBe("rgba(0, 0, 0, 0)");
+    await userEvent.click(sortButton);
     expect(screen.getAllByRole("row")[1]).toHaveTextContent("b");
     await userEvent.type(screen.getByLabelText("Search resources"), "Alpha");
     expect(screen.getByText("a")).toBeInTheDocument(); expect(screen.queryByText("b")).not.toBeInTheDocument();
