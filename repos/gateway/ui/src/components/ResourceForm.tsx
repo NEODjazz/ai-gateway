@@ -4,6 +4,7 @@ import { Checkbox, Icon, TextArea, TextInput } from "@gravity-ui/uikit";
 import type { Row } from "./DataTable";
 import { GatewayButton } from "./GatewayButton";
 import { GravityThemeScope } from "./GravityThemeScope";
+import { ChipMultiSelect, type ChipOption } from "./ChipMultiSelect";
 
 export type FieldReference = {
   path?: string;
@@ -18,10 +19,11 @@ export type FieldReference = {
 export type Field = {
   key: string;
   label: string;
-  type?: "text" | "password" | "number" | "boolean" | "textarea" | "csv" | "json" | "select" | "reference" | "reference-multi";
+  type?: "text" | "password" | "number" | "boolean" | "textarea" | "csv" | "json" | "select" | "reference" | "reference-multi" | "multi-select";
   required?: boolean;
   placeholder?: string;
   options?: string[];
+  chipOptions?: ChipOption[];
   reference?: FieldReference;
   referenceBy?: { fieldKey: string; values: Record<string, FieldReference> };
   defaultValue?: unknown;
@@ -32,7 +34,7 @@ export type Field = {
 
 function inputValue(field: Field, value: unknown): string | number | boolean {
   if (field.type === "boolean") return Boolean(value);
-  if ((field.type === "csv" || field.type === "reference-multi") && Array.isArray(value)) return value.join(",");
+  if ((field.type === "csv" || field.type === "reference-multi" || field.type === "multi-select") && Array.isArray(value)) return value.join(",");
   if (field.type === "json" && value && typeof value === "object") return JSON.stringify(value, null, 2);
   if (field.type === "number") return typeof value === "number" ? value : Number(value || 0);
   return String(value ?? "");
@@ -41,7 +43,7 @@ function inputValue(field: Field, value: unknown): string | number | boolean {
 function outputValue(field: Field, value: string | number | boolean): unknown {
   if (field.type === "boolean") return Boolean(value);
   if (field.type === "number") return Number(value);
-  if (field.type === "csv" || field.type === "reference-multi") return String(value).split(",").map((item) => item.trim()).filter(Boolean);
+  if (field.type === "csv" || field.type === "reference-multi" || field.type === "multi-select") return String(value).split(",").map((item) => item.trim()).filter(Boolean);
   if (field.type === "json") return String(value).trim() ? JSON.parse(String(value)) : {};
   return String(value);
 }
@@ -125,10 +127,11 @@ export function ResourceForm({ title, fields, initial, loadOptions, onClose, onS
     if (field.type === "textarea" || field.type === "json") return <GravityThemeScope className="gravity-form-control"><TextArea id={fieldID} size="l" rows={field.type === "json" ? 7 : 3} controlProps={{ required: field.required }} placeholder={field.placeholder} value={String(values[field.key] ?? "")} onUpdate={(value) => setFieldValue(field.key, value)} /></GravityThemeScope>;
     if (field.type === "select" || field.type === "reference") return <select id={fieldID} required={field.required} value={String(values[field.key] ?? "")} onChange={(event) => setFieldValue(field.key, event.target.value)}><option value="">{field.placeholder || "Select configured item"}</option>{optionsFor(field).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>;
     if (field.type === "reference-multi") return <select id={fieldID} multiple required={field.required} size={Math.min(8, Math.max(3, optionsFor(field).length))} value={selectedValues(values[field.key])} onChange={(event) => setFieldValue(field.key, Array.from(event.target.selectedOptions, (option) => option.value).join(","))}>{optionsFor(field).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>;
+    if (field.type === "multi-select") return <ChipMultiSelect id={fieldID} label={field.label} options={field.chipOptions || (field.options || []).map((value) => ({ value, label: value }))} value={selectedValues(values[field.key])} onChange={(selected) => setFieldValue(field.key, selected.join(","))} controlOnly />;
     return <GravityThemeScope className="gravity-form-control"><TextInput id={fieldID} size="l" type={field.type === "password" ? "password" : field.type === "number" ? "number" : "text"} controlProps={{ required: field.required }} readOnly={Boolean(initial && field.readOnlyOnEdit)} placeholder={field.placeholder} value={String(values[field.key] ?? "")} onUpdate={(value) => setFieldValue(field.key, field.type === "number" ? Number(value) : value)} /></GravityThemeScope>;
   }
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="modal" role="dialog" aria-modal="true" aria-label={title}><div className="modal-heading"><h2>{title}</h2><GatewayButton view="flat" size="l" aria-label="Close" title="Close" onClick={onClose}><Icon data={Xmark} size={18} /></GatewayButton></div><form onSubmit={submit}><div className="form-grid">{fields.filter((field) => !field.visibleWhen || String(values[field.visibleWhen.fieldKey]) === field.visibleWhen.equals).map((field) => {
     const fieldID = `resource-field-${field.key}`;
-    return <div key={field.key} className={`resource-form-row${field.type === "textarea" || field.type === "json" || field.type === "reference-multi" ? " span-2" : ""}`}><label htmlFor={fieldID}>{field.label}</label>{renderControl(field, fieldID)}</div>;
+    return <div key={field.key} className={`resource-form-row${field.type === "textarea" || field.type === "json" || field.type === "reference-multi" || field.type === "multi-select" ? " span-2" : ""}`}><label htmlFor={fieldID}>{field.label}</label>{renderControl(field, fieldID)}</div>;
   })}</div>{referenceError && <p className="form-error" role="alert">Could not load configured items: {referenceError}</p>}{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><GatewayButton type="button" view="outlined" size="l" onClick={onClose}>Cancel</GatewayButton><GatewayButton type="submit" size="l" disabled={saving}>{saving ? "Saving…" : "Save"}</GatewayButton></div></form></section></div>;
 }

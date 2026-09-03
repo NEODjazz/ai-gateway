@@ -37,6 +37,8 @@ describe("ModelOnboardingPage", () => {
     expect(await screen.findByText("gpt-a")).toBeInTheDocument();
     await userEvent.click(screen.getAllByRole("checkbox")[0]);
     await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
+    await userEvent.click(screen.getByLabelText("Capabilities gpt-a"));
+    await userEvent.click(screen.getByRole("option", { name: /Tools/ }));
     await userEvent.type(screen.getByLabelText("Input cost gpt-a"), "0.2");
     await userEvent.type(screen.getByLabelText("Output cost gpt-a"), "2");
     await userEvent.click(screen.getByRole("button", { name: "Apply configuration" }));
@@ -46,10 +48,10 @@ describe("ModelOnboardingPage", () => {
     const applyCall = calls.find((call) => call.path === "/admin/v1/model-onboarding/apply" && call.method === "POST");
     expect(applyCall?.body).toMatchObject({
       expected_revision: 7,
-      deployments: [{ id: "azure-gpt-a", provider_id: "azure", credential_id: "azure-key", upstream_model: "gpt-a", models: ["gpt-a"] }],
+      deployments: [{ id: "azure-gpt-a", provider_id: "azure", credential_id: "azure-key", upstream_model: "gpt-a", models: ["gpt-a"], capabilities: ["chat", "stream", "tools"] }],
       model_groups: [{ id: "gpt-a", deployment_ids: ["azure-gpt-a"] }]
     });
-    expect(applyCall?.body.catalog.models[0]).toMatchObject({ provider: "azure", model: "gpt-a", input_cost_per_1m: 0.2, output_cost_per_1m: 2, currency: "USD" });
+    expect(applyCall?.body.catalog.models[0]).toMatchObject({ provider: "azure", model: "gpt-a", capabilities: ["chat", "stream", "tools"], input_cost_per_1m: 0.2, output_cost_per_1m: 2, currency: "USD" });
     expect(calls.filter((call) => call.path === "/admin/v1/model-onboarding/plan")).toHaveLength(2);
     expect(calls.some((call) => call.method === "POST" && (call.path === "/admin/v1/model-deployments" || call.path === "/admin/v1/model-groups") || call.method === "PUT" && call.path === "/admin/v1/model-catalog")).toBe(false);
     await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path).endsWith("/discover-models"))).toBe(true));

@@ -26,6 +26,23 @@ describe("ResourceForm", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it("selects multiple fixed values as removable chips", async () => {
+    const submit = vi.fn().mockResolvedValue(undefined);
+    render(<ResourceForm title="Edit model" fields={[{
+      key: "capabilities", label: "Capabilities", type: "multi-select",
+      chipOptions: [{ value: "chat", label: "Chat" }, { value: "tools", label: "Tools" }, { value: "vision", label: "Vision" }]
+    }]} initial={{ capabilities: ["chat"] }} onClose={() => {}} onSubmit={submit} />);
+
+    expect(screen.getByRole("button", { name: "Remove capability chat" })).toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText("Capabilities"));
+    await userEvent.click(screen.getByRole("option", { name: /Tools/ }));
+    expect(screen.getByRole("button", { name: "Remove capability tools" })).toBeInTheDocument();
+    expect(screen.queryByText(/Custom exact or wildcard grant/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(submit).toHaveBeenCalledWith({ capabilities: ["chat", "tools"] });
+  });
+
   it("loads configured references, filters dependent options and submits their IDs", async () => {
     const submit = vi.fn().mockResolvedValue(undefined);
     const loadOptions = vi.fn(async (path: string) => {

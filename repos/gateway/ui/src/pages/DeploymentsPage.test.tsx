@@ -42,6 +42,13 @@ describe("DeploymentsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: /Provider/ }));
     expect(screen.getByText("42 ms")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Actions for azure-gpt" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const edit = await screen.findByRole("dialog", { name: "Edit azure-gpt" });
+    await userEvent.click(within(edit).getByLabelText("Capabilities"));
+    await userEvent.click(within(edit).getByRole("option", { name: /Tools/ }));
+    await userEvent.click(within(edit).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-deployments/azure-gpt" && options?.method === "PUT" && JSON.parse(String(options.body)).capabilities?.includes("tools"))).toBe(true));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for azure-gpt" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Details" }));
     expect(await screen.findByRole("dialog", { name: "Deployment details" })).toBeInTheDocument();
     expect(screen.getByText("2026-08-27 18:00:00 UTC")).toBeInTheDocument();
@@ -53,7 +60,7 @@ describe("DeploymentsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Actions for azure-gpt" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Pause" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-deployments/azure-gpt" && options?.method === "PUT")).toBe(true));
-    const pauseCall = fetchMock.mock.calls.find(([path, options]) => String(path) === "/admin/v1/model-deployments/azure-gpt" && options?.method === "PUT")!;
+    const pauseCall = fetchMock.mock.calls.find(([path, options]) => String(path) === "/admin/v1/model-deployments/azure-gpt" && options?.method === "PUT" && JSON.parse(String(options.body)).enabled === false)!;
     expect(JSON.parse(String(pauseCall[1]?.body)).enabled).toBe(false);
   });
 });

@@ -9,10 +9,11 @@ import { ManagedDataTable } from "../components/ManagedDataTable";
 import { ToolbarIconButton } from "../components/ToolbarIconButton";
 import { GatewayButton } from "../components/GatewayButton";
 import { GatewayFileButton } from "../components/GatewayFileButton";
+import { modelCapabilityOptions } from "../modelCapabilities";
 
 type Catalog = { version?: string; models?: Row[]; [key: string]: unknown };
 type CatalogPage = Catalog & { data?: Row[]; total?: number; limit?: number; offset?: number };
-const fields: Field[] = [{ key: "provider", label: "Provider", type: "reference", required: true, reference: { path: "/admin/v1/providers", labelKeys: ["type", "base_url"] } }, { key: "model", label: "Model", required: true }, { key: "capabilities", label: "Capabilities", type: "csv" }, { key: "max_input_tokens", label: "Maximum input tokens", type: "number" }, { key: "max_output_tokens", label: "Maximum output tokens", type: "number" }, { key: "input_cost_per_1m", label: "Input cost / 1M", type: "number" }, { key: "output_cost_per_1m", label: "Output cost / 1M", type: "number" }, { key: "currency", label: "Currency", defaultValue: "USD" }];
+const fields: Field[] = [{ key: "provider", label: "Provider", type: "reference", required: true, reference: { path: "/admin/v1/providers", labelKeys: ["type", "base_url"] } }, { key: "model", label: "Model", required: true }, { key: "capabilities", label: "Capabilities", type: "multi-select", chipOptions: modelCapabilityOptions }, { key: "max_input_tokens", label: "Maximum input tokens", type: "number" }, { key: "max_output_tokens", label: "Maximum output tokens", type: "number" }, { key: "input_cost_per_1m", label: "Input cost / 1M", type: "number" }, { key: "output_cost_per_1m", label: "Output cost / 1M", type: "number" }, { key: "currency", label: "Currency", defaultValue: "USD" }];
 const tableColumns = [{ key: "model", label: "Model" }, { key: "provider", label: "Provider" }, { key: "capabilities", label: "Capabilities" }, { key: "input_cost_per_1m", label: "Input / 1M" }, { key: "output_cost_per_1m", label: "Output / 1M" }, { key: "currency", label: "Currency" }, { key: "max_input_tokens", label: "Max input tokens" }, { key: "max_output_tokens", label: "Max output tokens" }];
 const catalogSortKeys: Record<string, string> = { model: "model", provider: "provider", input_cost_per_1m: "input_cost", output_cost_per_1m: "output_cost" };
 

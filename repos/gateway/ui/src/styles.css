@@ -201,6 +201,7 @@ textarea { resize: vertical; }
 .key-form-modal { width: min(820px, 100%); }
 .key-form { display: grid; gap: 14px; }
 .key-form > label, .key-model-field { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 18px; align-items: start; }
+.key-model-field.key-model-field-control { display: block; }
 .key-form > label > span, .key-model-field > span { padding-top: 10px; color: #435361; font-size: 13px; font-weight: 650; }
 .model-multi-select { position: relative; min-width: 0; }
 .model-multi-control { min-height: 40px; width: 100%; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; border: 1px solid #cad4da; border-radius: 7px; background: white; padding: 5px 8px; cursor: text; }

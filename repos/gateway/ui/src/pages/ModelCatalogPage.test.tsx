@@ -29,19 +29,22 @@ describe("ModelCatalogPage", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       if (String(input) === "/admin/v1/providers") return new Response(JSON.stringify({ data: [{ id: "azure", type: "openai-compatible" }] }), { status: 200 });
       if (options?.method === "PUT") return new Response(JSON.stringify({ version: "v2", models: [{ provider: "azure", model: "gpt-new", currency: "USD" }] }), { status: 200 });
-      return new Response(JSON.stringify({ version: "v1", models: [{ provider: "azure", model: "gpt", currency: "USD" }] }), { status: 200 });
+      return new Response(JSON.stringify({ version: "v1", models: [{ provider: "azure", model: "gpt", capabilities: ["chat"], currency: "USD" }] }), { status: 200 });
     });
     renderPage(); await screen.findByText("gpt");
     await userEvent.click(screen.getByRole("button", { name: "Actions for azure/gpt" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     expect(await screen.findByRole("option", { name: "azure — openai-compatible" })).toBeInTheDocument();
     await userEvent.clear(screen.getByLabelText("Model")); await userEvent.type(screen.getByLabelText("Model"), "gpt-new");
+    await userEvent.click(screen.getByLabelText("Capabilities"));
+    await userEvent.click(screen.getByRole("option", { name: /Tools/ }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[1]?.method === "PUT")).toBe(true));
     const saveCall = fetchMock.mock.calls.find((call) => call[1]?.method === "PUT")!;
     const body = JSON.parse(String(saveCall[1]?.body));
     expect(body.models).toHaveLength(1);
     expect(body.models[0].model).toBe("gpt-new");
+    expect(body.models[0].capabilities).toEqual(["chat", "tools"]);
   });
 
   it("deletes only catalog metadata", async () => {
