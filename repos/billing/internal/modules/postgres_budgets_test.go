@@ -138,6 +138,29 @@ func TestPostgresBudgetReservationsAreAtomicAndLifecycleAware(t *testing.T) {
 		t.Fatalf("new provider did not receive moved reservation, err=%v", err)
 	}
 
+	managedProvider := "managed-provider-" + suffix
+	if _, err := pool.Exec(ctx, `INSERT INTO billing_budget_policies(scope_type,scope_id,period,currency,max_tokens) VALUES('provider',$1,'day','USD',3)`, managedProvider); err != nil {
+		t.Fatal(err)
+	}
+	managedProviderFirst := budgetTestEvent("managed-provider-first-"+suffix, "managed-provider-team-"+suffix, 3)
+	managedProviderFirst.ProviderID = managedProvider
+	managedProviderFirst.ProviderEndpointName = "deployment-" + suffix
+	managedProviderFirst.ProviderEndpointType = "openai-compatible"
+	if err := checker.Apply(ctx, managedProviderFirst); err != nil {
+		t.Fatalf("managed provider reservation failed: %v", err)
+	}
+	var storedProvider string
+	if err := pool.QueryRow(ctx, `SELECT provider_name FROM billing_budget_reservations WHERE request_id=$1`, managedProviderFirst.RequestID).Scan(&storedProvider); err != nil || storedProvider != managedProvider {
+		t.Fatalf("stored provider=%q err=%v", storedProvider, err)
+	}
+	managedProviderOver := budgetTestEvent("managed-provider-over-"+suffix, "managed-provider-team-"+suffix, 1)
+	managedProviderOver.ProviderID = managedProvider
+	managedProviderOver.ProviderEndpointName = "another-deployment-" + suffix
+	managedProviderOver.ProviderEndpointType = "openai-compatible"
+	if err := checker.Apply(ctx, managedProviderOver); !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("managed provider budget was not enforced across deployments, err=%v", err)
+	}
+
 	costUser := "cost-user-" + suffix
 	if _, err := pool.Exec(ctx, `INSERT INTO billing_budget_policies(scope_type,scope_id,period,currency,max_cost) VALUES('user',$1,'month','USD',0.01)`, costUser); err != nil {
 		t.Fatal(err)
@@ -365,5 +388,38 @@ func budgetTestEvent(requestID, team string, tokens int) *BillingEvent {
 		RequestID: requestID, TeamID: team, APIKeyFingerprint: "key-" + team,
 		Model: "model", Provider: "provider", Phase: "reserve", TotalTokens: tokens,
 		Currency: "USD", Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+func TestBudgetProviderIdentity(t *testing.T) {
+	event := BillingEvent{
+		ProviderID:           "azure-open-ai",
+		ProviderEndpointName: "azure-open-ai-gpt-5.6-luna",
+		ProviderEndpointType: "openai-compatible",
+		Provider:             "legacy-provider",
+	}
+
+	if got := budgetProviderName(event); got != event.ProviderID {
+		t.Fatalf("budgetProviderName()=%q, want managed provider ID %q", got, event.ProviderID)
+	}
+	wantScopes := []string{event.ProviderID, event.ProviderEndpointName, event.ProviderEndpointType, event.Provider}
+	gotScopes := budgetProviderScopes(event)
+	if len(gotScopes) != len(wantScopes) {
+		t.Fatalf("budgetProviderScopes()=%v, want %v", gotScopes, wantScopes)
+	}
+	for index := range wantScopes {
+		if gotScopes[index] != wantScopes[index] {
+			t.Fatalf("budgetProviderScopes()=%v, want %v", gotScopes, wantScopes)
+		}
+	}
+
+	legacyReservation := budgetReservation{
+		ProviderName: event.ProviderEndpointName,
+		ProviderType: event.ProviderEndpointType,
+		Model:        "gpt-5.6-luna",
+	}
+	event.Model = legacyReservation.Model
+	if !samePricingRoute(legacyReservation, event) {
+		t.Fatal("legacy endpoint-name reservation no longer matches its managed provider route")
 	}
 }

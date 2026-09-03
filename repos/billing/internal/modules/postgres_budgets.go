@@ -264,7 +264,7 @@ func applicableBudgetPolicies(ctx context.Context, tx pgx.Tx, event BillingEvent
 		)
 		ORDER BY id
 		FOR UPDATE`, event.Currency, event.APIKeyFingerprint, event.UserID, event.TeamID, event.OrganizationID,
-		event.Model, []string{budgetProviderName(event), budgetProviderType(event)}, budgetTags(event))
+		event.Model, budgetProviderScopes(event), budgetTags(event))
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +296,7 @@ func reservationState(ctx context.Context, tx pgx.Tx, requestID string) (budgetR
 }
 
 func samePricingRoute(reservation budgetReservation, event BillingEvent) bool {
-	return reservation.ProviderName == budgetProviderName(event) &&
+	return containsString(budgetProviderScopes(event), reservation.ProviderName) &&
 		reservation.ProviderType == budgetProviderType(event) && reservation.Model == event.Model
 }
 
@@ -373,10 +373,38 @@ func budgetTags(event BillingEvent) []string {
 }
 
 func budgetProviderName(event BillingEvent) string {
+	if event.ProviderID != "" {
+		return event.ProviderID
+	}
 	if event.ProviderEndpointName != "" {
 		return event.ProviderEndpointName
 	}
 	return event.Provider
+}
+
+func budgetProviderScopes(event BillingEvent) []string {
+	values := []string{
+		budgetProviderName(event),
+		event.ProviderEndpointName,
+		event.ProviderEndpointType,
+		event.Provider,
+	}
+	scopes := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != "" && !containsString(scopes, value) {
+			scopes = append(scopes, value)
+		}
+	}
+	return scopes
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func budgetProviderType(event BillingEvent) string {
