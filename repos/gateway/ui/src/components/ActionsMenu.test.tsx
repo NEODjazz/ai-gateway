@@ -1,10 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ActionsMenu } from "./ActionsMenu";
 
 function renderMenu(menu: React.ReactNode) {
-  return render(<MemoryRouter>{menu}</MemoryRouter>);
+  return render(menu);
 }
 
 describe("ActionsMenu", () => {
@@ -29,10 +28,9 @@ describe("ActionsMenu", () => {
     await userEvent.keyboard("{Escape}"); expect(trigger).toHaveFocus(); await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
   });
 
-  it("routes inspect actions through React Router", async () => {
-    render(<MemoryRouter initialEntries={["/api-keys"]}><ActionsMenu label="Actions for key" items={[{ label: "Inspect", href: "/api-keys/vk-1" }]} /><Routes><Route path="/api-keys" element={null} /><Route path="/api-keys/:id" element={<div>Virtual key details</div>} /></Routes></MemoryRouter>);
+  it("prefixes inspect links with the console base path", async () => {
+    renderMenu(<ActionsMenu label="Actions for key" items={[{ label: "Inspect", href: "/api-keys/vk-1" }]} />);
     await userEvent.click(screen.getByRole("button", { name: "Actions for key" }));
-    await userEvent.click(screen.getByRole("menuitem", { name: "Inspect" }));
-    expect(await screen.findByText("Virtual key details")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Inspect" })).toHaveAttribute("href", "/ui/api-keys/vk-1");
   });
 });

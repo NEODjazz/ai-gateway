@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Ellipsis } from "@gravity-ui/icons";
 import { Button, DropdownMenu, Icon, type DropdownMenuItem } from "@gravity-ui/uikit";
-import { useNavigate } from "react-router-dom";
 import { GravityThemeScope } from "./GravityThemeScope";
 
 export type ActionMenuItem = {
@@ -13,7 +12,6 @@ export type ActionMenuItem = {
 };
 
 export function ActionsMenu({ label, items }: { label: string; items: ActionMenuItem[] }) {
-  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -46,11 +44,7 @@ export function ActionsMenu({ label, items }: { label: string; items: ActionMenu
   }, [label, open]);
   const menuItems: DropdownMenuItem[] = items.map((item) => ({
     text: item.label,
-    action: () => {
-      queueMicrotask(() => setOpen(false));
-      if (item.href) navigate(item.href);
-      else void item.onSelect?.();
-    },
+    ...(item.href ? { href: `/ui${item.href.startsWith("/") ? item.href : `/${item.href}`}` } : { action: () => { queueMicrotask(() => setOpen(false)); void item.onSelect?.(); } }),
     disabled: item.disabled,
     extraProps: item.disabled ? { "aria-disabled": true } : undefined,
     theme: item.tone === "danger" ? "danger" : "normal",

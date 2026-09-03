@@ -111,7 +111,7 @@ describe("management pages", () => {
     expect(screen.queryByLabelText("Team ID")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("User ID")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Actions for team-a" }));
-    expect(screen.getByRole("menuitem", { name: "Inspect" })).toHaveAttribute("href", "/teams/team-a");
+    expect(screen.getByRole("menuitem", { name: "Inspect" })).toHaveAttribute("href", "/ui/teams/team-a");
   });
 
   it("opens organization team management without raw ID fields", async () => {
@@ -120,7 +120,7 @@ describe("management pages", () => {
     expect(screen.queryByLabelText("Organization ID")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Team ID")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Actions for org-a" }));
-    expect(screen.getByRole("menuitem", { name: "Inspect" })).toHaveAttribute("href", "/organizations/org-a");
+    expect(screen.getByRole("menuitem", { name: "Inspect" })).toHaveAttribute("href", "/ui/organizations/org-a");
   });
 
   it("loads request-log privacy settings and details", async () => {
