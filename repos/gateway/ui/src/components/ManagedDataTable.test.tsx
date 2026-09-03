@@ -1,7 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { ManagedDataTable } from "./ManagedDataTable";
 import "../styles.css";
+
+function SelectableHarness() {
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  return <ManagedDataTable rows={[{ id: "a", description: "Alpha" }, { id: "b", description: "Beta" }]} columns={[{ key: "id", label: "ID" }, { key: "description", label: "Description" }]} selection={{ selectedIds, onSelectionChange: setSelectedIds }} />;
+}
 
 describe("ManagedDataTable", () => {
   it("provides virtual-key-style search, columns, sorting, refresh and pagination", async () => {
@@ -23,5 +29,18 @@ describe("ManagedDataTable", () => {
     const pageSizeSelect = screen.getByRole("combobox", { name: "Rows per page" });
     expect(pageSizeSelect.className).toContain("g-select-control__button");
     expect(getComputedStyle(pageSizeSelect).backgroundColor).not.toBe("rgb(15, 159, 131)");
+  });
+
+  it("uses the Gravity Table selection column with select-all and indeterminate states", async () => {
+    render(<SelectableHarness />);
+    const headerCheckbox = within(screen.getAllByRole("columnheader")[0]).getByRole("checkbox");
+    const rowCheckboxes = screen.getAllByRole("checkbox").slice(1);
+    expect(rowCheckboxes).toHaveLength(2);
+    await userEvent.click(rowCheckboxes[0]);
+    expect(rowCheckboxes[0]).toBeChecked();
+    expect(headerCheckbox).toBePartiallyChecked();
+    await userEvent.click(headerCheckbox);
+    expect(headerCheckbox).toBeChecked();
+    expect(rowCheckboxes.every((checkbox) => (checkbox as HTMLInputElement).checked)).toBe(true);
   });
 });

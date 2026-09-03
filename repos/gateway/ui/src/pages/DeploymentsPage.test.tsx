@@ -23,12 +23,14 @@ describe("DeploymentsPage", () => {
     render(<MemoryRouter><AuthProvider><DeploymentsPage /></AuthProvider></MemoryRouter>);
 
     expect(await screen.findByText("azure-gpt")).toBeInTheDocument();
-    expect(screen.getAllByRole("columnheader")[0]).toHaveTextContent("Selected");
-    expect(screen.getByLabelText("Select azure-gpt")).toBeInTheDocument();
+    const selectPage = within(screen.getAllByRole("columnheader")[0]).getByRole("checkbox");
+    expect(screen.queryByText("Select page")).not.toBeInTheDocument();
+    await userEvent.click(selectPage);
+    expect(selectPage).toBeChecked();
+    expect(screen.getByRole("button", { name: "Check selected (1)" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Columns" }));
-    const selectedColumn = screen.getByRole("menuitemcheckbox", { name: "Selected" });
-    expect(selectedColumn).toBeDisabled();
-    expect(selectedColumn).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("menuitemcheckbox", { name: "Selected" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Deployment" })).toBeDisabled();
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("sort=priority") && String(path).includes("limit=25"))).toBe(true);
     await userEvent.type(screen.getByLabelText("Search deployments"), "azure");
     await userEvent.click(screen.getByRole("button", { name: "Filter" }));
@@ -38,7 +40,6 @@ describe("DeploymentsPage", () => {
     await userEvent.click(within(filters).getByRole("button", { name: "Apply filters" }));
     await userEvent.click(screen.getByRole("button", { name: /Provider/ }));
     await userEvent.click(screen.getByRole("button", { name: /Provider/ }));
-    await userEvent.click(screen.getByLabelText("Select all deployments"));
     expect(screen.getByText("42 ms")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Actions for azure-gpt" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Details" }));

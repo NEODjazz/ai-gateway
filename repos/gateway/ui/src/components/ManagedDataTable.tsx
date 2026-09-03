@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Magnifier } from "@gravity-ui/icons";
-import { Icon, Pagination, Select, Table, TextInput, type TableColumnConfig } from "@gravity-ui/uikit";
+import { Icon, Pagination, Select, Table, TextInput, withTableSelection, type TableColumnConfig } from "@gravity-ui/uikit";
 import { ColumnsMenu } from "./ColumnsMenu";
 import { DataTable, displayValue, type Column, type Row } from "./DataTable";
 import { ToolbarIconButton } from "./ToolbarIconButton";
@@ -19,8 +19,11 @@ function compareValues(left: unknown, right: unknown): number {
 }
 
 export type ServerTableState = { search: string; onSearchChange: (value: string) => void; total: number; offset: number; pageSize: number; onPageSizeChange: (value: number) => void; onOffsetChange: (value: number) => void; sort: string; direction: "asc" | "desc"; onSortChange: (key: string, direction: "asc" | "desc") => void; sortableKeys: string[] };
+export type TableSelectionState = { selectedIds: string[]; onSelectionChange: (ids: string[]) => void; isRowSelectionDisabled?: (row: Row, index: number) => boolean };
 
-export function ManagedDataTable({ rows, columns, actions, primaryAction, toolbarExtra, onRefresh, searchPlaceholder = "Search…", rowKey = "id", defaultHidden = [], server }: { rows: Row[]; columns: Column[]; actions?: (row: Row) => ReactNode; primaryAction?: ReactNode; toolbarExtra?: ReactNode; onRefresh?: () => void | Promise<void>; searchPlaceholder?: string; rowKey?: string; defaultHidden?: string[]; server?: ServerTableState }) {
+const SelectableTable = withTableSelection<Row>(Table);
+
+export function ManagedDataTable({ rows, columns, actions, primaryAction, toolbarExtra, onRefresh, searchPlaceholder = "Search…", rowKey = "id", defaultHidden = [], server, selection }: { rows: Row[]; columns: Column[]; actions?: (row: Row) => ReactNode; primaryAction?: ReactNode; toolbarExtra?: ReactNode; onRefresh?: () => void | Promise<void>; searchPlaceholder?: string; rowKey?: string; defaultHidden?: string[]; server?: ServerTableState; selection?: TableSelectionState }) {
   const [localSearch, setLocalSearch] = useState("");
   const [localSort, setLocalSort] = useState(columns[0]?.key || "");
   const [localDirection, setLocalDirection] = useState<"asc" | "desc">("asc");
@@ -81,7 +84,20 @@ export function ManagedDataTable({ rows, columns, actions, primaryAction, toolba
 
   return <>
     <div className="key-toolbar">{primaryAction || <span />}<div className="key-toolbar-right"><GravityThemeScope className="gravity-search-scope"><TextInput className="key-search" size="l" type="search" controlProps={{ "aria-label": searchPlaceholder }} placeholder={searchPlaceholder} value={search} startContent={<Icon data={Magnifier} size={16} />} onUpdate={(value) => server ? server.onSearchChange(value) : setLocalSearch(value)} /></GravityThemeScope><ColumnsMenu columns={columnChoices} visible={visible} onChange={setVisible} />{toolbarExtra}{onRefresh && <ToolbarIconButton icon="refresh" label="Refresh table" onClick={() => void onRefresh()} />}</div></div>
-    {pageRows.length ? <GravityThemeScope className="gravity-table-scope"><div className="table-card"><Table<Row>
+    {pageRows.length ? <GravityThemeScope className="gravity-table-scope"><div className="table-card">{selection ? <SelectableTable
+      aria-label="Managed data table"
+      className="gateway-table"
+      columns={tableColumns}
+      data={pageRows}
+      edgePadding
+      getRowId={(row, index) => String(row[rowKey] || row.id || row.name || index)}
+      isRowSelectionDisabled={selection.isRowSelectionDisabled}
+      onSelectionChange={selection.onSelectionChange}
+      selectedIds={selection.selectedIds}
+      verticalAlign="middle"
+      width="max"
+      wordWrap
+    /> : <Table<Row>
       aria-label="Managed data table"
       className="gateway-table"
       columns={tableColumns}
@@ -91,7 +107,7 @@ export function ManagedDataTable({ rows, columns, actions, primaryAction, toolba
       verticalAlign="middle"
       width="max"
       wordWrap
-    /></div></GravityThemeScope> : <DataTable rows={[]} columns={shownColumns} />}
+    />}</div></GravityThemeScope> : <DataTable rows={[]} columns={shownColumns} />}
     <div className="key-pagination"><div className="key-pagination-summary"><label><span>Rows per page</span><GravityThemeScope className="gravity-pagination-size"><Select aria-label="Rows per page" size="l" width={104} value={[server && ![10, 25, 50, 100].includes(pageSize) ? "custom" : pageSizeOption]} options={[10, 25, 50, 100].map((size) => ({ value: String(size), content: String(size) })).concat({ value: "custom", content: "Custom" })} onUpdate={(value) => changePageSize(value[0] || "25")} /></GravityThemeScope></label>{(server && ![10, 25, 50, 100].includes(pageSize) || pageSizeOption === "custom") && <label><span>Custom rows</span><GravityThemeScope className="gravity-pagination-custom"><TextInput aria-label="Custom rows per page" size="l" type="number" controlProps={{ min: 1, max: server ? 200 : 500 }} value={String(server ? pageSize : customPageSize)} onUpdate={changeCustomPageSize} /></GravityThemeScope></label>}<span>{total ? `${activePage * pageSize + 1}–${Math.min((activePage + 1) * pageSize, total)} of ${total}` : "0 results"}</span></div><GravityThemeScope className="gravity-pagination-navigation"><Pagination compact page={activePage + 1} pageSize={pageSize} total={total} onUpdate={(nextPage) => changePage(nextPage - 1)} /></GravityThemeScope></div>
   </>;
 }
