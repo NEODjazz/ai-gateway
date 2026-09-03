@@ -23,6 +23,12 @@ describe("DeploymentsPage", () => {
     render(<MemoryRouter><AuthProvider><DeploymentsPage /></AuthProvider></MemoryRouter>);
 
     expect(await screen.findByText("azure-gpt")).toBeInTheDocument();
+    expect(screen.getAllByRole("columnheader")[0]).toHaveTextContent("Selected");
+    expect(screen.getByLabelText("Select azure-gpt")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Columns" }));
+    const selectedColumn = screen.getByRole("menuitemcheckbox", { name: "Selected" });
+    expect(selectedColumn).toBeDisabled();
+    expect(selectedColumn).toHaveAttribute("aria-checked", "true");
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("sort=priority") && String(path).includes("limit=25"))).toBe(true);
     await userEvent.type(screen.getByLabelText("Search deployments"), "azure");
     await userEvent.click(screen.getByRole("button", { name: "Filter" }));
