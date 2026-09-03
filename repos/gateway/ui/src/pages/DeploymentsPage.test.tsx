@@ -63,4 +63,30 @@ describe("DeploymentsPage", () => {
     const pauseCall = fetchMock.mock.calls.find(([path, options]) => String(path) === "/admin/v1/model-deployments/azure-gpt" && options?.method === "PUT" && JSON.parse(String(options.body)).enabled === false)!;
     expect(JSON.parse(String(pauseCall[1]?.body)).enabled).toBe(false);
   });
+
+  it("deletes a deployment through its actions menu", async () => {
+    const deployment = { id: "unused-deployment", provider_id: "azure", provider_type: "openai-compatible", upstream_model: "gpt-versioned", models: ["gpt"], capabilities: ["chat"], priority: 0, weight: 1, enabled: false, runtime_state: "available" };
+    let deleted = false;
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input);
+      if (path.startsWith("/admin/v1/model-deployments?") && !options?.method) return response({ data: deleted ? [] : [deployment], total: deleted ? 0 : 1 });
+      if (path.startsWith("/admin/v1/model-deployments/health?")) return response({ data: [] });
+      if (path === "/admin/v1/model-deployments/unused-deployment" && options?.method === "DELETE") {
+        deleted = true;
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      return response({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><DeploymentsPage /></AuthProvider></MemoryRouter>);
+
+    expect(await screen.findByText("unused-deployment")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for unused-deployment" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    expect(confirm).toHaveBeenCalledWith("Delete deployment unused-deployment?");
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-deployments/unused-deployment" && options?.method === "DELETE")).toBe(true));
+    await waitFor(() => expect(screen.queryByText("unused-deployment")).not.toBeInTheDocument());
+  });
 });
