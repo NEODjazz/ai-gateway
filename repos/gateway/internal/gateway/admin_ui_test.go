@@ -89,10 +89,19 @@ func TestAdminUIPathsHaveBoundedObservabilityLabels(t *testing.T) {
 }
 
 func TestAdminUIBundleContainsRouteBasedManagementConsole(t *testing.T) {
-	handler := Routes(NewHandler(modules.NewPipeline(nil), modelsProvider{}).WithAdminUI())
-	asset := httptest.NewRecorder()
-	handler.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "/ui/assets/app.js", nil))
-	body := asset.Body.String()
+	assets, err := fs.Glob(adminUIAssets, "adminui/assets/*.js")
+	if err != nil || len(assets) == 0 {
+		t.Fatalf("list embedded JavaScript assets: files=%v error=%v", assets, err)
+	}
+	var bundle strings.Builder
+	for _, name := range assets {
+		payload, readErr := adminUIAssets.ReadFile(name)
+		if readErr != nil {
+			t.Fatalf("read embedded UI asset %q: %v", name, readErr)
+		}
+		bundle.Write(payload)
+	}
+	body := bundle.String()
 	for _, expected := range []string{"/overview", "/providers", "/deployments", "/model-groups", "input_cost_per_1m", "upstream_model", "control-plane-conflict"} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("admin UI asset missing %q", expected)
