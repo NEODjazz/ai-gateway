@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ToolbarIconButton } from "./ToolbarIconButton";
 
 export type ColumnChoice = { key: string; label: string; locked?: boolean };
 
@@ -21,7 +22,7 @@ export function ColumnsMenu({ columns, visible, onChange }: { columns: ColumnCho
   }
 
   return <div className="columns-menu" ref={rootRef}>
-    <button type="button" className="secondary columns-menu-trigger" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>Columns</button>
+    <ToolbarIconButton icon="columns" label="Columns" className="columns-menu-trigger" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)} />
     {open && <div className="columns-menu-popover" role="menu" aria-label="Table columns" onKeyDown={(event) => { if (event.key === "Escape") { setOpen(false); rootRef.current?.querySelector<HTMLButtonElement>(".columns-menu-trigger")?.focus(); } }}>
       {columns.map((column) => <button type="button" role="menuitemcheckbox" aria-checked={visible.has(column.key)} disabled={column.locked} key={column.key} onClick={() => toggle(column)}><span aria-hidden="true" className="column-check">{visible.has(column.key) ? "✓" : ""}</span><span>{column.label}</span></button>)}
     </div>}

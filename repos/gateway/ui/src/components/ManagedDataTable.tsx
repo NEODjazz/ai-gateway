@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Magnifier } from "@gravity-ui/icons";
+import { Icon, TextInput } from "@gravity-ui/uikit";
 import { ColumnsMenu } from "./ColumnsMenu";
 import { DataTable, displayValue, type Column, type Row } from "./DataTable";
+import { ToolbarIconButton } from "./ToolbarIconButton";
+import { GravityThemeScope } from "./GravityThemeScope";
 
 function searchable(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -13,8 +17,6 @@ function compareValues(left: unknown, right: unknown): number {
   if (typeof left === "boolean" && typeof right === "boolean") return Number(left) - Number(right);
   return searchable(left).localeCompare(searchable(right), undefined, { numeric: true, sensitivity: "base" });
 }
-
-function RefreshIcon() { return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
 
 export type ServerTableState = { search: string; onSearchChange: (value: string) => void; total: number; offset: number; pageSize: number; onPageSizeChange: (value: number) => void; onOffsetChange: (value: number) => void; sort: string; direction: "asc" | "desc"; onSortChange: (key: string, direction: "asc" | "desc") => void; sortableKeys: string[] };
 
@@ -61,7 +63,7 @@ export function ManagedDataTable({ rows, columns, actions, primaryAction, toolba
   const sortableColumns = shownColumns.map((column) => ({ ...column, label: column.label.replace(/ [↑↓↕]$/, ""), render: column.render }));
 
   return <>
-    <div className="key-toolbar">{primaryAction || <span />}<div className="key-toolbar-right"><label className="key-search"><span className="sr-only">{searchPlaceholder}</span><input aria-label={searchPlaceholder} placeholder={searchPlaceholder} value={search} onChange={(event) => server ? server.onSearchChange(event.target.value) : setLocalSearch(event.target.value)} /></label><ColumnsMenu columns={columnChoices} visible={visible} onChange={setVisible} />{toolbarExtra}{onRefresh && <button type="button" className="secondary icon-only-button" aria-label="Refresh table" title="Refresh" onClick={() => void onRefresh()}><RefreshIcon /></button>}</div></div>
+    <div className="key-toolbar">{primaryAction || <span />}<div className="key-toolbar-right"><GravityThemeScope className="gravity-search-scope"><TextInput className="key-search" size="l" type="search" controlProps={{ "aria-label": searchPlaceholder }} placeholder={searchPlaceholder} value={search} startContent={<Icon data={Magnifier} size={16} />} onUpdate={(value) => server ? server.onSearchChange(value) : setLocalSearch(value)} /></GravityThemeScope><ColumnsMenu columns={columnChoices} visible={visible} onChange={setVisible} />{toolbarExtra}{onRefresh && <ToolbarIconButton icon="refresh" label="Refresh table" onClick={() => void onRefresh()} />}</div></div>
     {pageRows.length ? <div className="table-card"><div className="table-scroll"><table><thead><tr>{shownColumns.map((column) => <th key={column.key}><button className="sort-button" onClick={() => sortBy(column.key)}>{column.label}</button></th>)}{actions && <th><span className="sr-only">Actions</span></th>}</tr></thead><tbody>{pageRows.map((row, index) => <tr key={String(row[rowKey] || row.id || row.name || index)}>{sortableColumns.map((column) => <td key={column.key}>{column.render ? column.render(row[column.key], row) : displayValue(row[column.key])}</td>)}{actions && <td className="row-actions">{actions(row)}</td>}</tr>)}</tbody></table></div></div> : <DataTable rows={[]} columns={shownColumns} />}
     <div className="key-pagination"><div className="key-pagination-summary"><label>Rows per page<select aria-label="Rows per page" value={server && ![10, 25, 50, 100].includes(pageSize) ? "custom" : pageSizeOption} onChange={(event) => changePageSize(event.target.value)}>{[10, 25, 50, 100].map((size) => <option value={size} key={size}>{size}</option>)}<option value="custom">Custom</option></select></label>{(server && ![10, 25, 50, 100].includes(pageSize) || pageSizeOption === "custom") && <label>Custom rows<input aria-label="Custom rows per page" type="number" min="1" max={server ? 200 : 500} value={server ? pageSize : customPageSize} onChange={(event) => changeCustomPageSize(event.target.value)} /></label>}<span>{total ? `${activePage * pageSize + 1}–${Math.min((activePage + 1) * pageSize, total)} of ${total}` : "0 results"}</span></div><div className="key-pagination-navigation"><button className="secondary" disabled={activePage === 0} onClick={() => changePage(Math.max(0, activePage - 1))}>Previous</button><button className="secondary" disabled={activePage + 1 >= pageCount} onClick={() => changePage(Math.min(pageCount - 1, activePage + 1))}>Next</button></div></div>
   </>;

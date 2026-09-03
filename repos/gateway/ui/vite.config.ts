@@ -21,6 +21,11 @@ export default defineConfig({
     globals: true,
     setupFiles: "./src/test/setup.ts",
     css: false,
+    server: {
+      deps: {
+        inline: ["@gravity-ui/uikit", "@gravity-ui/icons"]
+      }
+    },
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],

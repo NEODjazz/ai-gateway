@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { Magnifier } from "@gravity-ui/icons";
+import { Icon, TextInput } from "@gravity-ui/uikit";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { DataTable, type Row } from "../components/DataTable";
@@ -6,6 +8,8 @@ import { ErrorState, LoadingState } from "../components/AsyncState";
 import { PageHeader } from "../components/PageHeader";
 import { ActionsMenu } from "../components/ActionsMenu";
 import { ColumnsMenu } from "../components/ColumnsMenu";
+import { ToolbarIconButton } from "../components/ToolbarIconButton";
+import { GravityThemeScope } from "../components/GravityThemeScope";
 import { formatCost, formatTimestamp } from "../format";
 
 type RequestLog = Row & {
@@ -57,8 +61,6 @@ const requestLogColumns = [
   { key: "usage_estimated", label: "Token source" }, { key: "latency_ms", label: "Latency" }, { key: "first_token_latency_ms", label: "TTFT" },
   { key: "retry_count", label: "Retries" }, { key: "fallback_count", label: "Fallbacks" }, { key: "cost", label: "Cost" }, { key: "currency", label: "Currency" }
 ];
-function RefreshIcon() { return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
-
 function cacheStatus(value: unknown): ReactNode {
   if (typeof value !== "string" || !value) return <span className="muted">—</span>;
   const hit = value === "hit";
@@ -266,10 +268,10 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
         {liveTail && <span className="status enabled">Every 15s</span>}
       </form>
       <div className="key-toolbar-right">
-        <label className="key-search"><span className="sr-only">Search request logs</span><input aria-label="Search request logs" placeholder="Search by request ID" value={draftFilters.request_id} onChange={(event) => setDraftFilters((current) => ({ ...current, request_id: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") updateQuery({ request_id: draftFilters.request_id }); }} /></label>
+        <GravityThemeScope className="gravity-search-scope"><TextInput className="key-search" size="l" type="search" controlProps={{ "aria-label": "Search request logs", onKeyDown: (event) => { if (event.key === "Enter") updateQuery({ request_id: draftFilters.request_id }); } }} placeholder="Search by request ID" value={draftFilters.request_id} startContent={<Icon data={Magnifier} size={16} />} onUpdate={(value) => setDraftFilters((current) => ({ ...current, request_id: value }))} /></GravityThemeScope>
         {view === "requests" && <ColumnsMenu columns={requestLogColumns} visible={visibleColumns} onChange={setVisibleColumns} />}
-        <button className="secondary" onClick={() => setFiltersOpen(true)}>Filter{Object.entries(filters).some(([key, value]) => key !== "request_id" && value) ? " (active)" : ""}</button>
-        <button className="secondary icon-only-button" aria-label="Refresh request logs" onClick={() => void load(false)}><RefreshIcon /></button>
+        <ToolbarIconButton icon="filter" label="Filter" active={Object.entries(filters).some(([key, value]) => key !== "request_id" && Boolean(value))} onClick={() => setFiltersOpen(true)} />
+        <ToolbarIconButton icon="refresh" label="Refresh request logs" onClick={() => void load(false)} />
       </div>
     </div>
     {settings !== undefined && <div className="operation-result">Privacy settings: {JSON.stringify(settings)}</div>}

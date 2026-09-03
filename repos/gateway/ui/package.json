@@ -16,11 +16,14 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@gravity-ui/icons": "2.22.0",
+    "@gravity-ui/navigation": "6.4.2",
+    "@gravity-ui/uikit": "7.49.0",
     "@vitejs/plugin-react": "5.0.2",
-    "vite": "7.3.6",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "react-router-dom": "7.18.2"
+    "react-router-dom": "7.18.2",
+    "vite": "7.3.6"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "6.9.1",
