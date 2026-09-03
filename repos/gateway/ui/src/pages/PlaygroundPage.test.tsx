@@ -30,6 +30,8 @@ describe("PlaygroundPage", () => {
     authenticated();
     expect(await screen.findByDisplayValue("gpt-a")).toBeInTheDocument();
     expect(screen.getByText("2 authorized models")).toBeInTheDocument();
+    expect(screen.getByLabelText("Instructions")).toHaveClass("g-text-area__control");
+    expect(screen.getByLabelText("Message")).toHaveClass("g-text-area__control");
     await userEvent.type(screen.getByLabelText("Instructions"), "Be concise");
     await userEvent.type(screen.getByLabelText("Message"), "hello");
     await userEvent.click(screen.getByRole("button", { name: "Run request" }));

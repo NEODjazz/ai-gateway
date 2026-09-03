@@ -66,6 +66,7 @@ describe("ModelCatalogPage", () => {
     });
     Object.defineProperty(File.prototype, "text", { configurable: true, value: vi.fn().mockResolvedValue(JSON.stringify({ models: [{ provider: "azure", model: "gpt", input_cost_per_1m: 2, currency: "usd" }, { provider: "azure", model: "embed", input_cost_per_1m: 0.1, currency: "USD" }] })) });
     renderPage(); await screen.findByText("gpt");
+    expect(screen.getByText("Import pricing").closest(".g-button")).not.toBeNull();
     await userEvent.upload(screen.getByLabelText("Pricing JSON file"), new File(["{}"], "pricing.json", { type: "application/json" }));
     expect(await screen.findByRole("dialog", { name: "Pricing import preview" })).toBeInTheDocument();
     expect(screen.getByText(/Source: pricing\.json/)).toBeInTheDocument();

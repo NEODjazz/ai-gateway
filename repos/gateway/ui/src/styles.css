@@ -16,6 +16,8 @@ button:not(.g-button):hover { background: #0b846d; }
 .button-link:hover { background: #0b846d; }
 .file-button { cursor: pointer; }
 .file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.gateway-file-button { position: relative; display: inline-flex; cursor: pointer; }
+.gateway-file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 button:not(.g-button):disabled { cursor: wait; opacity: .55; }
 .secondary { color: #344454; border: 1px solid #d7dfe5; background: white; }
 .secondary:hover { background: #f2f5f7; }
@@ -356,6 +358,7 @@ textarea { resize: vertical; }
 .playground-selection-bar > .gravity-control-scope { justify-self: end; }
 .playground-model-control { display: grid; grid-template-columns: minmax(0, 1fr) 36px; gap: 7px; }
 .playground-model-control .gravity-control-scope { width: 36px; }
+.gravity-playground-control, .gravity-playground-control > span { width: 100%; }
 .playground-workspace { display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 380px); gap: 20px; align-items: start; }
 .playground-conversation-card, .playground-parameters-card, .playground-metadata-card { border: 1px solid #e0e5e9; border-radius: 8px; background: white; box-shadow: 0 1px 5px rgba(0, 0, 0, .15); }
 .playground-conversation-card { min-height: 680px; display: flex; flex-direction: column; gap: 14px; padding: 20px; }
