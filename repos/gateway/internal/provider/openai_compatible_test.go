@@ -127,6 +127,46 @@ func TestOpenAICompatibleCapturesSafeUpstreamParameterError(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleRetriesLegacyMaxTokensAsMaxCompletionTokens(t *testing.T) {
+	requests := make([]openAICompatibleChatRequest, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request openAICompatibleChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		requests = append(requests, request)
+		if len(requests) == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"code":"unsupported_parameter","param":"max_tokens","message":"use max_completion_tokens"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chat-modern\",\"model\":\"gpt-modern\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"OK\"},\"finish_reason\":null}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	maxTokens := 256
+	response, err := NewOpenAICompatible(server.URL, "provider-key", true).StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{
+		Model: "gpt-modern", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxTokens: &maxTokens,
+	}, func(string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("upstream requests=%d, want compatibility retry", len(requests))
+	}
+	if requests[0].MaxTokens == nil || *requests[0].MaxTokens != maxTokens || requests[0].MaxCompletionTokens != nil {
+		t.Fatalf("first request did not preserve client parameters: %+v", requests[0])
+	}
+	if requests[1].MaxTokens != nil || requests[1].MaxCompletionTokens == nil || *requests[1].MaxCompletionTokens != maxTokens {
+		t.Fatalf("retry did not translate max_tokens: %+v", requests[1])
+	}
+	if !requests[1].Stream || openai.ContentText(response.Choices[0].Message.Content) != "OK" {
+		t.Fatalf("streaming compatibility retry failed: request=%+v response=%+v", requests[1], response)
+	}
+}
+
 func TestOpenAICompatibleForwardsVisionContent(t *testing.T) {
 	var upstream openAICompatibleChatRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

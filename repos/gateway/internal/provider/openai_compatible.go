@@ -133,36 +133,19 @@ func (OpenAICompatible) SupportsMCP() bool    { return true }
 func (OpenAICompatible) SupportsVision() bool { return true }
 
 func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
-	body, err := json.Marshal(openAICompatibleChatRequest{
+	upstreamRequest := openAICompatibleChatRequest{
 		Model: request.Model, Messages: request.Messages, Tools: request.Tools,
 		ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		ResponseFormat: request.ResponseFormat, Stream: request.Stream && p.upstreamStream,
 		MaxTokens: request.MaxTokens, MaxCompletionTokens: request.MaxCompletionTokens,
 		Temperature: request.Temperature, TopP: request.TopP,
 		Stop: request.Stop, Seed: request.Seed,
-	})
-	if err != nil {
-		return openai.ChatCompletionResponse{}, err
 	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(p.baseURL, "chat/completions"), bytes.NewReader(body))
-	if err != nil {
-		return openai.ChatCompletionResponse{}, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if p.apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
-	}
-
-	resp, err := p.client.Do(httpReq)
+	resp, err := p.chatCompletionResponse(ctx, &upstreamRequest)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ChatCompletionResponse{}, responseStatusError("openai-compatible", resp)
-	}
 
 	if request.Stream && p.upstreamStream {
 		return decodeChatCompletionStream(resp.Body, request.Model)
@@ -211,38 +194,65 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 		return openai.ChatCompletionResponse{}, ErrStreamingUnsupported
 	}
 
-	body, err := json.Marshal(openAICompatibleChatRequest{
+	upstreamRequest := openAICompatibleChatRequest{
 		Model: request.Model, Messages: request.Messages, Tools: request.Tools,
 		ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		ResponseFormat: request.ResponseFormat, Stream: true,
 		MaxTokens: request.MaxTokens, MaxCompletionTokens: request.MaxCompletionTokens,
 		Temperature: request.Temperature, TopP: request.TopP,
 		Stop: request.Stop, Seed: request.Seed,
-	})
-	if err != nil {
-		return openai.ChatCompletionResponse{}, err
 	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(p.baseURL, "chat/completions"), bytes.NewReader(body))
-	if err != nil {
-		return openai.ChatCompletionResponse{}, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if p.apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
-	}
-
-	resp, err := p.client.Do(httpReq)
+	resp, err := p.chatCompletionResponse(ctx, &upstreamRequest)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ChatCompletionResponse{}, responseStatusError("openai-compatible", resp)
-	}
-
 	return streamChatCompletionData(resp.Body, request.Model, write)
+}
+
+func (p OpenAICompatible) chatCompletionResponse(ctx context.Context, request *openAICompatibleChatRequest) (*http.Response, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		body, err := json.Marshal(request)
+		if err != nil {
+			return nil, err
+		}
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(p.baseURL, "chat/completions"), bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		if p.apiKey != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+		}
+		response, err := p.client.Do(httpReq)
+		if err != nil {
+			return nil, err
+		}
+		if response.StatusCode >= 200 && response.StatusCode < 300 {
+			return response, nil
+		}
+		providerErr := responseStatusError("openai-compatible", response)
+		_ = response.Body.Close()
+		if attempt == 0 && useMaxCompletionTokens(request, providerErr) {
+			continue
+		}
+		return nil, providerErr
+	}
+	return nil, errors.New("openai-compatible chat compatibility retry exhausted")
+}
+
+func useMaxCompletionTokens(request *openAICompatibleChatRequest, err error) bool {
+	if request.MaxTokens == nil || request.MaxCompletionTokens != nil {
+		return false
+	}
+	var providerErr *Error
+	if !errors.As(err, &providerErr) || providerErr.UpstreamCode != "unsupported_parameter" || providerErr.Param != "max_tokens" {
+		return false
+	}
+	request.MaxCompletionTokens = request.MaxTokens
+	request.MaxTokens = nil
+	return true
 }
 
 func (p OpenAICompatible) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {

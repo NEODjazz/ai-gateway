@@ -153,6 +153,8 @@ curl -sS http://127.0.0.1:18080/v1/rerank \
 
 `/v1/chat/completions` forwards OpenAI function tools, tool choice, parallel-tool policy, stop/seed, and JSON object or JSON Schema response formats. Anthropic tool definitions, calls, results, and forced structured outputs are translated to and from its native content blocks; Ollama receives its native `tools` and `format` fields. Tool arguments are included in the DLP/AV text projection and anonymized independently of the tool schema.
 
+For OpenAI-compatible upstreams, a safe compatibility retry translates legacy `max_tokens` to `max_completion_tokens` only when the upstream explicitly rejects `max_tokens` as unsupported. This keeps older clients such as OpenCode interoperable without changing requests for models that still accept the legacy parameter.
+
 ### OpenAPI contract
 
 The canonical external contract is [repos/gateway/api/openapi.yaml](repos/gateway/api/openapi.yaml).
