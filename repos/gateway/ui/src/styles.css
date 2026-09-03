@@ -234,6 +234,7 @@ textarea { resize: vertical; }
 .key-pagination select { width: 92px; }
 .key-pagination input { width: 92px; }
 .usage-window { width: 340px; }
+.gravity-usage-filter, .gravity-usage-filter > span { width: 100%; }
 .usage-filter-bar { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; padding: 12px 0; margin-bottom: 24px; border: 0; border-bottom: 1px solid #e4e9ed; background: transparent; }
 .usage-filter-bar label { display: grid; gap: 5px; min-width: 140px; color: #536473; font-size: 12px; font-weight: 700; }
 .page-tabs { display: flex; gap: 24px; margin-bottom: 0; overflow-x: auto; border-bottom: 1px solid #d7dfe5; }

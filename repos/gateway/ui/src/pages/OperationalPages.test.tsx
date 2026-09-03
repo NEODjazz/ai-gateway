@@ -11,6 +11,11 @@ function authenticated(node: React.ReactNode) {
   return render(<AuthProvider>{node}</AuthProvider>);
 }
 
+async function selectUsageWindow(name: string) {
+  await userEvent.click(screen.getByRole("combobox", { name: "Window" }));
+  await userEvent.click(await screen.findByRole("option", { name }));
+}
+
 describe("operational pages", () => {
   it("renders usage totals and changes the bounded window", async () => {
     const aggregate = { currency: "USD", requests: 4, errors: 0, input_tokens: 8, output_tokens: 12, total_tokens: 20, cache_read_input_tokens: 6, cache_write_input_tokens: 2, cost: 0.00265, avg_latency_ms: 12, cache_hits: 1, cost_per_request: 0.0006625 };
@@ -42,7 +47,7 @@ describe("operational pages", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Users" })); expect(screen.getByText("user-1")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Teams" })); expect(screen.getByText("team-1")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Organizations" })); expect(screen.getByText("org-1")).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText("Window"), "7");
+    await selectUsageWindow("7 days");
     await userEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/admin/v1/usage/report?days=7", expect.anything()));
   });
@@ -68,7 +73,7 @@ describe("operational pages", () => {
   it("applies LiteLLM-style model, provider and custom date filters", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ totals: [], daily: [], by_model: [], by_provider: [], by_tag: [] }), { status: 200 }));
     authenticated(<UsagePage />); await screen.findByText("Spend per day");
-    await userEvent.selectOptions(screen.getByLabelText("Window"), "custom");
+    await selectUsageWindow("Custom range");
     await userEvent.type(screen.getByLabelText("Usage from"), "2026-08-01");
     await userEvent.type(screen.getByLabelText("Usage to"), "2026-08-28");
     await userEvent.type(screen.getByLabelText("Usage model"), "gpt");
