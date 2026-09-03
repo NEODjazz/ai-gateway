@@ -10,6 +10,7 @@ describe("ManagedDataTable", () => {
     expect(screen.getAllByRole("row")[1]).toHaveTextContent("a");
     const sortButton = screen.getByRole("button", { name: /ID/ });
     expect(getComputedStyle(sortButton).backgroundColor).toBe("rgba(0, 0, 0, 0)");
+    expect(sortButton).toHaveClass("sort-button");
     await userEvent.click(sortButton);
     expect(screen.getAllByRole("row")[1]).toHaveTextContent("b");
     await userEvent.type(screen.getByLabelText("Search resources"), "Alpha");

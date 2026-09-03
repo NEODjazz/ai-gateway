@@ -198,7 +198,7 @@ textarea { resize: vertical; }
 .icon-only-button, .icon-text-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
 .icon-only-button { width: 40px; height: 40px; padding: 9px; }
 .icon-only-button svg, .icon-text-button svg { width: 18px; height: 18px; }
-.sort-button { display: inline-flex; background: transparent; color: inherit; padding: 0; border-radius: 0; font: inherit; text-transform: inherit; letter-spacing: inherit; }
+.sort-button { display: inline-flex; appearance: none; border: 0; background: transparent; color: inherit; padding: 0; border-radius: 0; cursor: pointer; font: inherit; text-transform: inherit; letter-spacing: inherit; }
 .sort-button:hover { background: transparent; color: inherit; }
 .key-form-modal { width: min(820px, 100%); }
 .key-form { display: grid; gap: 14px; }
