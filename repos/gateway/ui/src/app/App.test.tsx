@@ -28,10 +28,10 @@ describe("App", () => {
     await userEvent.type(screen.getByLabelText("Gateway bearer token"), "token");
     await userEvent.click(screen.getByRole("button", { name: "Open console" }));
     const navigation = await screen.findByRole("navigation", { name: "Dashboard" });
-    expect(within(navigation).getAllByRole("button", { name: /Manage|Monitor|Access Control|AI Hub|Govern|System/ }).map((button) => button.getAttribute("aria-label"))).toEqual(["Manage", "Monitor", "Access Control", "AI Hub", "Govern", "System"]);
+    expect(within(navigation).queryByRole("button", { name: /Manage|Monitor|Access Control|AI Hub|Govern|System/ })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Providers" })).toHaveAttribute("href", "/ui/providers");
     expect(screen.getByRole("link", { name: "Logs" })).toHaveAttribute("href", "/ui/logs");
-    expect(within(navigation).getByRole("button", { name: "Access Control" })).toBeInTheDocument();
+    expect(within(navigation).getByRole("link", { name: "Organizations" })).toBeInTheDocument();
     expect(screen.getByText("admin-user")).toBeInTheDocument();
   });
 
