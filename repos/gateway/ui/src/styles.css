@@ -89,9 +89,9 @@ td code { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .columns-menu-trigger { min-width: 0; }
 .columns-menu-popover { position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; width: 210px; max-height: min(420px, 70vh); overflow-y: auto; padding: 6px; border: 1px solid #d7dfe5; border-radius: 9px; background: white; box-shadow: 0 14px 36px rgba(29, 48, 63, .18); }
 .columns-menu-popover button { display: grid; grid-template-columns: 20px 1fr; align-items: center; width: 100%; padding: 8px 10px; border-radius: 6px; background: transparent; color: #263846; text-align: left; font-weight: 550; }
-.columns-menu-popover button:hover, .columns-menu-popover button:focus { background: #edf7f4; color: #087660; }
+.columns-menu-popover button:hover, .columns-menu-popover button:focus { background: #f2f4f5; color: #263846; }
 .columns-menu-popover button:disabled { color: #536473; opacity: 1; cursor: default; }
-.column-check { color: #087660; font-weight: 800; }
+.column-check { color: #536473; font-weight: 800; }
 .tag-list { display: flex; gap: 5px; flex-wrap: wrap; }
 .budget-values { display: grid; gap: 4px; min-width: 170px; }
 .budget-values span { white-space: nowrap; }
@@ -197,13 +197,12 @@ textarea { resize: vertical; }
 .gravity-search-scope { display: block; width: min(360px, 100%); }
 .gravity-control-scope { display: inline-flex; }
 .gateway-icon-button { position: relative; flex: 0 0 auto; }
-.gateway-icon-button.active { color: #087a67; }
-.gateway-icon-button-indicator { position: absolute; top: 5px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: #0f9f83; box-shadow: 0 0 0 2px white; }
+.gateway-icon-button.g-button_selected { --_--text-color: var(--g-color-text-primary); --_--background-color: var(--g-color-base-simple-hover); --_--background-color-hover: var(--g-color-base-generic-accent); }
 .icon-only-button, .icon-text-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
 .icon-only-button { width: 40px; height: 40px; padding: 9px; }
 .icon-only-button svg, .icon-text-button svg { width: 18px; height: 18px; }
 .sort-button { display: inline-flex; background: transparent; color: inherit; padding: 0; border-radius: 0; font: inherit; text-transform: inherit; letter-spacing: inherit; }
-.sort-button:hover { background: transparent; color: #087a67; }
+.sort-button:hover { background: transparent; color: inherit; }
 .key-form-modal { width: min(820px, 100%); }
 .key-form { display: grid; gap: 14px; }
 .key-form > label, .key-model-field { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 18px; align-items: start; }
@@ -240,12 +239,6 @@ textarea { resize: vertical; }
 .gravity-usage-filter, .gravity-usage-filter > span { width: 100%; }
 .usage-filter-bar { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; padding: 12px 0; margin-bottom: 24px; border: 0; border-bottom: 1px solid #e4e9ed; background: transparent; }
 .usage-filter-bar label { display: grid; gap: 5px; min-width: 140px; color: #536473; font-size: 12px; font-weight: 700; }
-.page-tabs { display: flex; gap: 24px; margin-bottom: 0; overflow-x: auto; border-bottom: 1px solid #d7dfe5; }
-.page-tabs button { min-height: 36px; padding: 7px 0 9px; border-radius: 0; background: transparent; color: #61717e; white-space: nowrap; font-weight: 500; }
-.page-tabs button:hover { background: transparent; color: #172733; }
-.page-tabs button.active { background: transparent; color: #172733; box-shadow: inset 0 -2px #0f9f83; }
-.gravity-page-tabs { display: block; min-width: 0; }
-.gravity-page-tabs .g-tab-list { --g-tabs-item-gap: 24px; }
 .usage-stats-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 14px; margin-bottom: 22px; }
 .usage-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .usage-chart-card { padding: 18px; border: 1px solid #d7dfe5; border-radius: 11px; background: white; box-shadow: 0 7px 20px rgba(49, 65, 77, .05); }
@@ -372,7 +365,6 @@ textarea { resize: vertical; }
 .playground-parameters-card { min-height: 420px; display: grid; align-content: start; gap: 12px; }
 .playground-parameters-card h2, .playground-metadata-card h2 { margin: 0; font-size: 18px; }
 .playground-api-tabs { margin-bottom: 2px; }
-.playground-api-tabs .g-tab-list { --g-tabs-item-gap: 16px; }
 .playground-default-note { margin: -7px 0 0; font-size: 12px; line-height: 1.45; }
 .playground-output { min-height: 160px; flex: 1; }
 .playground-output-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-top: 2px; }

@@ -13,7 +13,7 @@ export type ToolbarIcon = keyof typeof icons;
 export function ToolbarIconButton({
   icon,
   label,
-  active = false,
+  active,
   className = "",
   ...props
 }: Omit<ButtonButtonProps, "children" | "view" | "size"> & {
@@ -25,11 +25,11 @@ export function ToolbarIconButton({
       {...props}
       view="outlined"
       size="l"
-      className={`gateway-icon-button${active ? " active" : ""}${className ? ` ${className}` : ""}`}
+      selected={active}
+      className={`gateway-icon-button${className ? ` ${className}` : ""}`}
       aria-label={label}
       title={label}
     >
       <Icon data={icons[icon]} size={16} />
-      {active && <span className="gateway-icon-button-indicator" aria-hidden="true" />}
     </Button></GravityThemeScope>;
 }
