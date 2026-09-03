@@ -91,7 +91,8 @@ describe("operational pages", () => {
       ? new Response(JSON.stringify({ data: [{ id: "gpt" }] }), { status: 200 })
       : new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }] }), { status: 200 }));
     authenticated(<PlaygroundPage />);
-    await screen.findByDisplayValue("gpt");
+    await screen.findByText("1 authorized model");
+    expect(screen.getByLabelText("Model")).toHaveTextContent("gpt");
     await userEvent.click(screen.getByLabelText("Stream response"));
     await userEvent.type(screen.getByLabelText("Message"), "hello");
     await userEvent.click(screen.getByRole("button", { name: "Run request" }));

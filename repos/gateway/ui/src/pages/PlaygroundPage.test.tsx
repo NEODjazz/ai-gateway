@@ -28,8 +28,11 @@ describe("PlaygroundPage", () => {
       ]);
     });
     authenticated();
-    expect(await screen.findByDisplayValue("gpt-a")).toBeInTheDocument();
-    expect(screen.getByText("2 authorized models")).toBeInTheDocument();
+    expect(await screen.findByText("2 authorized models")).toBeInTheDocument();
+    expect(screen.getByLabelText("Model")).toHaveTextContent("gpt-a");
+    await userEvent.click(screen.getByLabelText("Model"));
+    expect(screen.getByRole("option", { name: "gpt-z" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("option", { name: "gpt-a" }));
     expect(screen.getByLabelText("Instructions")).toHaveClass("g-text-area__control");
     expect(screen.getByLabelText("Message")).toHaveClass("g-text-area__control");
     await userEvent.type(screen.getByLabelText("Instructions"), "Be concise");
@@ -64,7 +67,8 @@ describe("PlaygroundPage", () => {
       return new Response(JSON.stringify({ id: `resp-${responseNumber}`, model: "response-model", output_text: responseNumber === 1 ? "First" : "Second", usage: { total_tokens: responseNumber + 1 } }), { status: 200, headers: { "Content-Type": "application/json" } });
     });
     authenticated();
-    await screen.findByDisplayValue("response-model");
+    await screen.findByText("1 authorized model");
+    expect(screen.getByLabelText("Model")).toHaveTextContent("response-model");
     await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
     await userEvent.type(screen.getByLabelText("Instructions"), "Use plain text");
     await userEvent.type(screen.getByLabelText("Message"), "first question");
@@ -89,7 +93,8 @@ describe("PlaygroundPage", () => {
       });
     });
     authenticated();
-    await screen.findByDisplayValue("slow-model");
+    await screen.findByText("1 authorized model");
+    expect(screen.getByLabelText("Model")).toHaveTextContent("slow-model");
     await userEvent.type(screen.getByLabelText("Message"), "wait");
     await userEvent.click(screen.getByRole("button", { name: "Run request" }));
     await userEvent.click(await screen.findByRole("button", { name: "Stop" }));
