@@ -24,7 +24,7 @@ function LocationProbe() {
 
 describe("ModelGroupsPage", () => {
   it("shows route topology, runs bounded health checks and saves membership order and retry policy", async () => {
-    const group = { id: "public-chat", deployment_ids: ["primary", "fallback"], strategy: "weighted", retry_policy: { timeout: 1 }, fallbacks: { general: ["safe-chat"] }, enabled: true };
+    const group = { id: "public-chat", deployment_ids: ["primary", "fallback"], strategy: "weighted", retry_policy: { timeout: 1, unknown: 1 }, fallbacks: { general: ["safe-chat"] }, enabled: true };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const path = String(input);
       if (path === "/admin/v1/model-groups" && !options?.method) return response({ data: [group] });
@@ -44,6 +44,7 @@ describe("ModelGroupsPage", () => {
     const detail = await screen.findByRole("dialog", { name: "Model group routing details" });
     expect(within(detail).getByText("gpt-versioned")).toBeInTheDocument();
     expect(within(detail).getByText("42 ms")).toBeInTheDocument();
+    expect(within(detail).getByText(/Unclassified provider failures: 1/)).toBeInTheDocument();
     await userEvent.click(within(detail).getByRole("button", { name: "Run health checks" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-deployments/health-checks" && options?.method === "POST")).toBe(true));
     const healthCall = fetchMock.mock.calls.find(([path, options]) => String(path) === "/admin/v1/model-deployments/health-checks" && options?.method === "POST")!;
@@ -54,12 +55,14 @@ describe("ModelGroupsPage", () => {
     await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const form = await screen.findByRole("dialog", { name: "Edit model group" });
     await userEvent.click(within(form).getByLabelText("Move fallback up"));
-    await userEvent.clear(within(form).getByLabelText("Retries rate_limit"));
-    await userEvent.type(within(form).getByLabelText("Retries rate_limit"), "2");
+    expect(within(form).queryByLabelText("Retries unknown")).not.toBeInTheDocument();
+    expect(within(form).getByLabelText("Retries Unclassified provider failures")).toHaveValue(1);
+    await userEvent.clear(within(form).getByLabelText("Retries Rate limit"));
+    await userEvent.type(within(form).getByLabelText("Retries Rate limit"), "2");
     await userEvent.click(within(form).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-groups/public-chat" && options?.method === "PUT")).toBe(true));
     const update = fetchMock.mock.calls.find(([path, options]) => String(path) === "/admin/v1/model-groups/public-chat" && options?.method === "PUT")!;
-    expect(JSON.parse(String(update[1]?.body))).toMatchObject({ deployment_ids: ["fallback", "primary"], retry_policy: { timeout: 1, rate_limit: 2 }, fallbacks: { general: ["safe-chat"] } });
+    expect(JSON.parse(String(update[1]?.body))).toMatchObject({ deployment_ids: ["fallback", "primary"], retry_policy: { timeout: 1, rate_limit: 2, unknown: 1 }, fallbacks: { general: ["safe-chat"] } });
     await userEvent.click(screen.getByRole("button", { name: "Actions for public-chat" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Configure routing" }));
     expect(screen.getByTestId("location")).toHaveTextContent("/router-settings?group=public-chat");
@@ -86,7 +89,7 @@ describe("ModelGroupsPage", () => {
     await userEvent.type(selector, "fall");
     await userEvent.click(within(form).getByRole("option", { name: /fallback/ }));
     await userEvent.selectOptions(within(form).getByLabelText("Strategy"), "adaptive");
-    await userEvent.type(within(form).getByLabelText("Retries unavailable"), "3");
+    await userEvent.type(within(form).getByLabelText("Retries Service unavailable"), "3");
     await userEvent.click(within(form).getByRole("button", { name: "Create group" }));
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-groups" && options?.method === "POST")).toBe(true));

@@ -15,7 +15,12 @@ type Deployment = Row & { id: string; provider_id: string; upstream_model?: stri
 type HealthCheck = { deployment_id: string; status: string; latency_ms: number; checked_at: string; failure_class?: string };
 type GroupDraft = { id: string; deployment_ids: string[]; strategy: "weighted" | "adaptive"; retry_policy: Record<string, number>; fallbacks: Record<string, string[]>; enabled: boolean };
 
-const failureClasses = ["timeout", "unavailable", "rate_limit", "unknown"] as const;
+const failureClasses = [
+  { key: "timeout", label: "Timeout" },
+  { key: "unavailable", label: "Service unavailable" },
+  { key: "rate_limit", label: "Rate limit" },
+  { key: "unknown", label: "Unclassified provider failures", description: "Provider failures that could not be mapped to a more specific retry class." }
+] as const;
 const emptyDraft: GroupDraft = { id: "", deployment_ids: [], strategy: "weighted", retry_policy: {}, fallbacks: {}, enabled: true };
 
 function records<T>(payload: unknown): T[] {
@@ -31,7 +36,7 @@ function chunks<T>(values: T[], size: number): T[][] {
 }
 
 function retrySummary(policy?: Record<string, number>) {
-  const entries = failureClasses.filter((name) => policy?.[name] !== undefined).map((name) => `${name.replace("_", " ")}: ${policy![name]}`);
+  const entries = failureClasses.filter(({ key }) => policy?.[key] !== undefined).map(({ key, label }) => `${label}: ${policy![key]}`);
   return entries.length ? entries.join(" · ") : "Deployment defaults";
 }
 
@@ -76,7 +81,7 @@ function GroupForm({ initial, deployments, onClose, onSave }: { initial?: ModelG
       <label className="checkbox-line model-group-enabled"><input aria-label="Model group enabled" type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /> Enabled</label>
     </div>
     {selected.length > 0 && <section className="selected-route"><h3>Membership order and runtime tiers</h3><p className="muted">Membership order is persisted. Runtime fallback tiers come from deployment priority; weight applies inside a tier.</p>{selected.map((deployment, index) => <div className="selected-route-row" key={deployment.id}><span className="route-position">{index + 1}</span><div><strong>{deployment.id}</strong><small>{deployment.provider_id} · {deployment.upstream_model || "No upstream model"}</small></div><span>priority {deployment.priority}</span><span>weight {deployment.weight}</span><button type="button" className="text-button" aria-label={`Move ${deployment.id} up`} disabled={index === 0} onClick={() => move(deployment.id, -1)}>↑</button><button type="button" className="text-button" aria-label={`Move ${deployment.id} down`} disabled={index === selected.length - 1} onClick={() => move(deployment.id, 1)}>↓</button></div>)}</section>}
-    <h3>Retry policy by failure class</h3><p className="muted">Leave a value empty to use the deployment default. Permanent request and authorization errors are never retried.</p><div className="retry-grid">{failureClasses.map((name) => <label key={name}>{name.replace("_", " ")}<input aria-label={`Retries ${name}`} type="number" min="0" max="10" value={draft.retry_policy[name] ?? ""} placeholder="Default" onChange={(event) => { const retry_policy = { ...draft.retry_policy }; if (event.target.value === "") delete retry_policy[name]; else retry_policy[name] = Number(event.target.value); setDraft({ ...draft, retry_policy }); }} /></label>)}</div>
+    <h3>Retry policy by failure class</h3><p className="muted">Leave a value empty to use the deployment default. Permanent request and authorization errors are never retried.</p><div className="retry-grid">{failureClasses.map(({ key, label, ...failureClass }) => <label key={key} title={"description" in failureClass ? failureClass.description : undefined}>{label}<input aria-label={`Retries ${label}`} type="number" min="0" max="10" value={draft.retry_policy[key] ?? ""} placeholder="Default" onChange={(event) => { const retry_policy = { ...draft.retry_policy }; if (event.target.value === "") delete retry_policy[key]; else retry_policy[key] = Number(event.target.value); setDraft({ ...draft, retry_policy }); }} /></label>)}</div>
     {error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><GatewayButton type="button" view="outlined" onClick={onClose}>Cancel</GatewayButton><GatewayButton type="submit" disabled={busy}>{busy ? "Saving…" : initial ? "Save changes" : "Create group"}</GatewayButton></div>
   </form></div>;
 }
