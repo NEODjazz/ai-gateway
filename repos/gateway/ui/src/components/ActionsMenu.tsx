@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
+import { Ellipsis } from "@gravity-ui/icons";
+import { Button, DropdownMenu, Icon, type DropdownMenuItem } from "@gravity-ui/uikit";
+import { GravityThemeScope } from "./GravityThemeScope";
 
 export type ActionMenuItem = {
   label: string;
@@ -10,51 +11,67 @@ export type ActionMenuItem = {
   tone?: "default" | "danger";
 };
 
-type MenuPosition = { top?: number; bottom?: number; right: number };
-
 export function ActionsMenu({ label, items }: { label: string; items: ActionMenuItem[] }) {
   const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState<MenuPosition>({ top: 0, right: 0 });
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  function openMenu() {
-    const rect = triggerRef.current?.getBoundingClientRect();
-    if (rect) {
-      const estimatedHeight = items.length * 38 + 12;
-      setPosition(rect.bottom + estimatedHeight > window.innerHeight
-        ? { bottom: window.innerHeight - rect.top + 6, right: Math.max(8, window.innerWidth - rect.right) }
-        : { top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) });
-    }
-    setOpen(true);
-  }
-
   useEffect(() => {
     if (!open) return;
-    const close = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
+    const selector = `[role="menu"][aria-label="${CSS.escape(label)}"] [role="menuitem"]`;
+    const timer = window.setTimeout(() => {
+      document.querySelector<HTMLElement>(selector)?.focus();
+    });
+    const navigate = (event: KeyboardEvent) => {
+      const menuItems = Array.from(document.querySelectorAll<HTMLElement>(selector)).filter((item) => item.getAttribute("aria-disabled") !== "true");
+      if (!menuItems.length) return;
+      const index = menuItems.indexOf(document.activeElement as HTMLElement);
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        menuItems[(index + step + menuItems.length) % menuItems.length]?.focus();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
-    const closeOnViewportChange = () => setOpen(false);
-    document.addEventListener("mousedown", close);
-    window.addEventListener("resize", closeOnViewportChange);
-    window.addEventListener("scroll", closeOnViewportChange, true);
-    menuRef.current?.querySelector<HTMLElement>("button:not(:disabled), a:not([aria-disabled=true])")?.focus();
+    document.addEventListener("keydown", navigate, true);
     return () => {
-      document.removeEventListener("mousedown", close);
-      window.removeEventListener("resize", closeOnViewportChange);
-      window.removeEventListener("scroll", closeOnViewportChange, true);
+      window.clearTimeout(timer);
+      document.removeEventListener("keydown", navigate, true);
     };
-  }, [open]);
+  }, [label, open]);
+  const menuItems: DropdownMenuItem[] = items.map((item) => ({
+    text: item.label,
+    ...(item.href ? { href: item.href } : { action: () => { queueMicrotask(() => setOpen(false)); void item.onSelect?.(); } }),
+    disabled: item.disabled,
+    extraProps: item.disabled ? { "aria-disabled": true } : undefined,
+    theme: item.tone === "danger" ? "danger" : "normal",
+  }));
 
-  function menuKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    const buttons = Array.from(menuRef.current?.querySelectorAll<HTMLElement>("button:not(:disabled), a:not([aria-disabled=true])") || []);
-    const index = buttons.indexOf(document.activeElement as HTMLElement);
-    if (event.key === "Escape") { event.preventDefault(); setOpen(false); triggerRef.current?.focus(); }
-    else if (event.key === "ArrowDown") { event.preventDefault(); buttons[(index + 1) % buttons.length]?.focus(); }
-    else if (event.key === "ArrowUp") { event.preventDefault(); buttons[(index - 1 + buttons.length) % buttons.length]?.focus(); }
-    else if (event.key === "Tab") setOpen(false);
-  }
-
-  return <div className="actions-menu-trigger"><button ref={triggerRef} type="button" className="actions-menu-button" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => open ? setOpen(false) : openMenu()} onKeyDown={(event) => { if (!open && (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ")) { event.preventDefault(); openMenu(); } }}>⋯</button>{open && createPortal(<div ref={menuRef} className="actions-menu-popover" role="menu" aria-label={label} style={position} onKeyDown={menuKeyDown}>{items.map((item) => item.href ? <Link role="menuitem" key={item.label} aria-disabled={item.disabled || undefined} className={item.tone === "danger" ? "danger" : ""} to={item.href} onClick={(event) => { if (item.disabled) { event.preventDefault(); return; } setOpen(false); }}>{item.label}</Link> : <button type="button" role="menuitem" key={item.label} disabled={item.disabled} className={item.tone === "danger" ? "danger" : ""} onClick={() => { setOpen(false); void item.onSelect?.(); }}>{item.label}</button>)}</div>, document.body)}</div>;
+  return <GravityThemeScope className="gravity-action-menu"><DropdownMenu
+    items={menuItems}
+    menuProps={{ "aria-label": label }}
+    onOpenToggle={setOpen}
+    open={open}
+    popupProps={{ placement: "bottom-end" }}
+    renderSwitcher={(props) => <Button
+      ref={triggerRef}
+      aria-label={label}
+      title={label}
+      view="flat"
+      size="l"
+      onClick={props.onClick}
+      onKeyDown={(event) => {
+        if (!open && event.key === "ArrowDown") {
+          event.preventDefault();
+          setOpen(true);
+          return;
+        }
+        props.onKeyDown(event);
+      }}
+    ><Icon data={Ellipsis} size={18} /></Button>}
+    size="l"
+  /></GravityThemeScope>;
 }

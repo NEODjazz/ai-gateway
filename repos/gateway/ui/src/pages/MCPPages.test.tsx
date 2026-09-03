@@ -30,7 +30,7 @@ describe("MCP management pages", () => {
     expect(within(screen.getByText("Toolset links").closest("article")!).getByText("1")).toBeInTheDocument();
     expect(screen.getByText(/stores no MCP credentials or request headers/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Actions for MCP server weather" }));
-    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toHaveAttribute("aria-disabled", "true");
 
     await userEvent.click(screen.getByRole("button", { name: "Create MCP Server" }));
     const form = screen.getByRole("dialog", { name: "Create MCP server" });
@@ -74,6 +74,6 @@ describe("MCP management pages", () => {
     expect(JSON.parse(String(create?.[1]?.body))).toMatchObject({ name: "Operations", tools: [connector], enabled: true });
 
     await userEvent.click(screen.getByRole("button", { name: "Actions for MCP toolset weather-read" }));
-    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toHaveAttribute("aria-disabled", "true");
   });
 });

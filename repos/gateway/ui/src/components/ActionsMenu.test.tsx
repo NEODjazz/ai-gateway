@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ActionsMenu } from "./ActionsMenu";
 
@@ -11,15 +11,16 @@ describe("ActionsMenu", () => {
     expect(screen.getByRole("menu")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     expect(remove).toHaveBeenCalledOnce(); expect(edit).not.toHaveBeenCalled();
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
   });
 
   it("supports keyboard opening, navigation and escape", async () => {
     render(<ActionsMenu label="Actions for keyboard row" items={[{ label: "Details", onSelect: () => {} }, { label: "Edit", onSelect: () => {} }]} />);
     const trigger = screen.getByRole("button", { name: "Actions for keyboard row" });
     trigger.focus(); await userEvent.keyboard("{ArrowDown}");
-    expect(await screen.findByRole("menuitem", { name: "Details" })).toHaveFocus();
-    await userEvent.keyboard("{ArrowDown}"); expect(screen.getByRole("menuitem", { name: "Edit" })).toHaveFocus();
-    await userEvent.keyboard("{Escape}"); expect(trigger).toHaveFocus(); expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    const firstItem = await screen.findByRole("menuitem", { name: "Details" });
+    await waitFor(() => expect(firstItem).toHaveFocus());
+    await userEvent.keyboard("{ArrowDown}"); await waitFor(() => expect(screen.getByRole("menuitem", { name: "Edit" })).toHaveFocus());
+    await userEvent.keyboard("{Escape}"); expect(trigger).toHaveFocus(); await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
   });
 });

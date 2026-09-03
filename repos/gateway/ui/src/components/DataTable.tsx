@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
+import { Table, type TableColumnConfig } from "@gravity-ui/uikit";
 import { EmptyState } from "./AsyncState";
+import { GravityThemeScope } from "./GravityThemeScope";
 
 export type Row = Record<string, unknown>;
 export type Column = { key: string; label: string; render?: (value: unknown, row: Row) => ReactNode };
@@ -14,5 +16,28 @@ export function displayValue(value: unknown): ReactNode {
 
 export function DataTable({ rows, columns, actions }: { rows: Row[]; columns: Column[]; actions?: (row: Row) => ReactNode }) {
   if (!rows.length) return <EmptyState>No records found.</EmptyState>;
-  return <div className="table-card"><div className="table-scroll"><table><thead><tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}{actions && <th><span className="sr-only">Actions</span></th>}</tr></thead><tbody>{rows.map((row, index) => <tr key={String(row.id || row.name || index)}>{columns.map((column) => <td key={column.key}>{column.render ? column.render(row[column.key], row) : displayValue(row[column.key])}</td>)}{actions && <td className="row-actions">{actions(row)}</td>}</tr>)}</tbody></table></div></div>;
+  const tableColumns: TableColumnConfig<Row>[] = columns.map((column) => ({
+    id: column.key,
+    name: column.label,
+    template: (row) => column.render ? column.render(row[column.key], row) : displayValue(row[column.key]),
+  }));
+  if (actions) tableColumns.push({
+    id: "_actions",
+    name: () => <span className="sr-only">Actions</span>,
+    align: "end",
+    sticky: "end",
+    width: 52,
+    template: (row) => <div className="row-actions">{actions(row)}</div>,
+  });
+  return <GravityThemeScope className="gravity-table-scope"><div className="table-card"><Table<Row>
+    aria-label="Data table"
+    className="gateway-table"
+    columns={tableColumns}
+    data={rows}
+    edgePadding
+    getRowId={(row, index) => String(row.id || row.name || index)}
+    verticalAlign="middle"
+    width="max"
+    wordWrap
+  /></div></GravityThemeScope>;
 }
