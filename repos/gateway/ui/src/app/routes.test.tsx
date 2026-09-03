@@ -24,6 +24,16 @@ describe("dashboard route manifest", () => {
       expect.objectContaining({ path: "/projects/:id", navigation: false })
     ]));
   });
+  it("provides a client-side details route for every inspect destination", () => {
+    expect(appRoutes.map((route) => route.path)).toEqual(expect.arrayContaining([
+      "/api-keys/:id",
+      "/organizations/:id",
+      "/teams/:id",
+      "/access-groups/:id",
+      "/projects/:id",
+      "/budgets/:id"
+    ]));
+  });
   it("combines request and audit logs under Monitor", () => {
     expect(appRoutes.find((route) => route.path === "/logs")).toMatchObject({ title: "Logs", group: "Monitor", available: true });
     expect(appRoutes.some((route) => route.path === "/audit" || route.path === "/request-logs")).toBe(false);

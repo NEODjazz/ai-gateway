@@ -197,7 +197,7 @@ describe("VirtualKeysPage", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchMock = mockAPI(); renderPage(); await screen.findByText("production");
     await userEvent.click(screen.getByRole("button", { name: "Actions for production" }));
-    expect(screen.getByRole("menuitem", { name: "Inspect" })).toHaveAttribute("href", "/api-keys/vk_alpha");
+    expect(screen.getByRole("menuitem", { name: "Inspect" })).not.toHaveAttribute("href");
     await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const edit = await screen.findByRole("dialog", { name: "Edit virtual key" });
     await userEvent.type(within(edit).getByLabelText("Description"), "Updated policy");
