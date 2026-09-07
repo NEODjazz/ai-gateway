@@ -1,0 +1,178 @@
+# Конфигурация
+
+Helm values — рекомендуемый интерфейс Kubernetes-конфигурации. Charts
+преобразуют их в environment variables и Secrets. При локальном запуске те же
+переменные задаются процессу напрямую. HTTP resources и payloads описаны в
+OpenAPI, а не в этом документе.
+
+## Gateway
+
+| Environment variable | Default | Назначение |
+| --- | --- | --- |
+| `HTTP_ADDR` | `:8080` | HTTP listener |
+| `ADMIN_UI_ENABLED` | `true` | UI на `/ui/` |
+| `API_DOCS_ENABLED` | `false` | Swagger UI и `/openapi.yaml` |
+| `API_DOCS_TRY_IT_OUT_ENABLED` | `false` | Browser calls из Swagger UI |
+| `DEFAULT_PROVIDER` | `PROVIDER_TYPE` или `demo` | Provider по умолчанию |
+| `PROVIDERS_JSON` | пусто | Static provider endpoints; managed snapshot заменяет их после bootstrap |
+| `MODEL_CATALOG_JSON` | empty catalog | Capabilities и pricing contract |
+| `GUARDRAIL_POLICIES_JSON` | `{}` | Static DLP/AV policies |
+| `GUARDRAIL_MONITOR_CAPACITY` | `1000` | Process-local monitor capacity, диапазон 1–10000 |
+| `GUARDRAIL_MONITOR_TTL_SECONDS` | `604800` | Redis retention событий monitor |
+| `ROUTING_STRATEGY` | `weighted` | `weighted` или `adaptive` |
+| `ADAPTIVE_ROUTING_EWMA_ALPHA` | `0.2` | Сглаживание adaptive routing |
+| `RESPONSES_AFFINITY_TTL_SECONDS` | `3600` | Affinity для `previous_response_id` |
+| `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` | пусто | Durable versioned admin state |
+| `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` | ephemeral без DSN | AES-GCM key; с DSN требуется минимум 16 символов |
+| `PROVIDER_CONTROL_PLANE_REFRESH_SECONDS` | `1` | Poll durable revision |
+| `REDIS_ADDR` | пусто | Shared cache/rate/circuit/affinity/monitor state |
+| `REDIS_DB` | `0` | Redis DB |
+| `REDIS_PREFIX` | `ai-gateway` | Namespace Redis keys |
+| `REDIS_PASSWORD` | пусто | Redis credential |
+
+### Static provider endpoint
+
+Элемент `PROVIDERS_JSON` объединяет connection и route в одной записи:
+
+- identity: `name`, `type`, `base_url`, `api_key`, `models`, `model_aliases`,
+  `enabled`;
+- routing: `priority`, `weight`, `max_retries` и cooldown settings;
+- admission: `max_parallel_requests`, `queue_capacity`, `queue_timeout_ms`;
+- behavior: `stream`, `capabilities`, `rerank_path`;
+- security: `dlp_enabled`, `av_enabled`, `guardrail_policy`;
+- shadowing: `shadow`, `mirror_percentage`, `mirror_timeout_ms`.
+
+`queue_capacity > 0` требует положительные `max_parallel_requests` и
+`queue_timeout_ms`. Shadow endpoint требует `max_parallel_requests > 0`.
+`mirror_percentage` должен быть от 0 до 100. `rerank_path` должен быть
+абсолютным путём без query, fragment и `..`.
+
+Поддерживаемые static adapter types: `demo`, `ollama`, `openai`,
+`openai-compatible`, `openrouter`, `anthropic`. Capability задаётся явно для
+ограниченных endpoints. Используемые значения: `chat`, `responses`,
+`embeddings`, `rerank`, `stream`, `tools`, `structured_output`, `mcp`, `vision`.
+Route выбирает endpoint только при наличии capabilities, выведенных из запроса.
+
+Provider API key в static config можно передать полем `api_key` или переменной
+`PROVIDER_API_KEY_<NORMALIZED_ENDPOINT_NAME>`. Managed credentials шифруются в
+control-plane snapshot и никогда не возвращаются read API.
+
+### Managed control plane
+
+Managed-режим намеренно разделяет конфигурацию на независимые ресурсы:
+
+- Provider: `id`, `type`, `base_url`, `enabled`;
+- Credential: `id`, optional `provider_id`, description и write-only secret;
+- Deployment: ссылки `provider_id`/`credential_id`, upstream/public models,
+  capabilities, routing, admission, retries, guardrail и enabled state;
+- Model Group: public model ID, упорядоченные deployment IDs, strategy, retry
+  policy и cross-model fallbacks;
+- Model Catalog: pricing и model-level capabilities.
+
+Provider и Credential должны быть созданы до ссылающегося Deployment, а
+Deployment — до Model Group. UI использует выбор из уже созданных ресурсов, API
+принимает их IDs и возвращает `409` при удалении используемого ресурса. Managed
+Provider сейчас принимает `demo`, `ollama`, `openai`, `openai-compatible` и
+`anthropic`; отдельный тип `openrouter` доступен только static-конфигурации и в
+managed mode задаётся как OpenAI-compatible endpoint.
+
+## Gateway modules
+
+| Модуль | URL | Required default | Особенность |
+| --- | --- | --- | --- |
+| Auth | `AUTH_URL` | `true` | Без URL доступна локальная реализация |
+| DLP | `DLP_URL` | `true` | Remote-only; вызывается для endpoint с DLP enabled |
+| AV | `AV_URL` | `true` | Remote-only; вызывается для endpoint с AV enabled |
+| Anonymizer | `ANONYMIZER_URL` | `false` | Без URL доступна локальная реализация |
+| Billing | `BILLING_URL` | `false` | `BILLING_SHARED_SECRET` защищает service contract |
+
+Для каждого URL есть `<MODULE>_REQUIRED`. Optional dependency error позволяет
+pipeline продолжить; content rejection остаётся terminal. Management API
+использует отдельные `MANAGEMENT_AUTH_URL`, `MANAGEMENT_SHARED_SECRET`,
+`BILLING_MANAGEMENT_URL` и `BILLING_MANAGEMENT_SHARED_SECRET`.
+Gateway и соответствующий internal service должны получать одинаковый shared
+secret. Это не клиентские Bearer-токены; auth management и billing management
+должны использовать разные значения.
+
+## Cache и telemetry
+
+| Переменная | Default |
+| --- | --- |
+| `EXACT_CACHE_TTL_SECONDS` | `0` (disabled) |
+| `EXACT_CACHE_MAX_BYTES` | `1048576` |
+| `SEMANTIC_CACHE_TTL_SECONDS` | `0` (disabled) |
+| `SEMANTIC_CACHE_THRESHOLD` | `0.95` |
+| `SEMANTIC_CACHE_MAX_ENTRIES` | `100` |
+| `SEMANTIC_CACHE_MAX_BYTES` | `1048576` |
+| `SEMANTIC_CACHE_EMBEDDING_URL` | required when enabled |
+| `SEMANTIC_CACHE_EMBEDDING_MODEL` | required when enabled |
+| `SEMANTIC_CACHE_EMBEDDING_API_KEY` | пусто |
+| `OTEL_SERVICE_NAME` | `ai-gateway` |
+| `AI_GATEWAY_VERSION` | `dev` |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | пусто (export disabled) |
+| `OTEL_TRACE_SAMPLE_RATIO` | `1` |
+
+## Auth
+
+| Переменная | Default | Назначение |
+| --- | --- | --- |
+| `AUTH_POSTGRES_KEYS_ENABLED` | `false` | Durable Virtual Keys и directory |
+| `AUTH_POSTGRES_DSN` | пусто | Auth PostgreSQL |
+| `AUTH_KEY_HASH_SECRET` | пусто | HMAC pepper для key lookup |
+| `AUTH_STATIC_KEY_FALLBACK_ENABLED` | `true` | Разрешить `AUTH_VIRTUAL_KEYS_JSON` |
+| `AUTH_DEMO_KEYS_ENABLED` | `true` | Built-in demo keys |
+| `AUTH_VIRTUAL_KEYS_JSON` | пусто | Static migration fallback; содержит plaintext keys |
+| `MANAGEMENT_SHARED_SECRET` | пусто | Защита auth `/internal/v1/*` |
+| `AUTH_JWT_SECRET` | пусто | Legacy HS256 secret |
+| `AUTH_JWT_JWKS_URL` | пусто | OIDC JWKS; включает RS256/ES256 mode |
+| `AUTH_JWT_ISSUER` / `AUTH_JWT_AUDIENCE` | пусто | Ожидаемые claims в JWKS mode |
+| `AUTH_JWT_JWKS_CACHE_TTL_SECONDS` | `300` | JWKS cache TTL |
+| `AUTH_JWT_CLOCK_SKEW_SECONDS` | `30` | Допустимый clock skew |
+| `AUTH_JWT_USER_ID_CLAIM` | `sub` | Dot-separated claim path |
+| `AUTH_JWT_TEAM_ID_CLAIM` | `team_id` | Dot-separated claim path |
+| `AUTH_JWT_ROLES_CLAIM` | `roles` | Dot-separated claim path |
+
+Production должен использовать уникальные `AUTH_KEY_HASH_SECRET` и management
+secret, отключённые demo keys и static fallback после миграции ключей.
+
+## Billing
+
+| Переменная | Default | Назначение |
+| --- | --- | --- |
+| `BILLING_USAGE_EVENTS_ENABLED` | `false` | ClickHouse usage events |
+| `CLICKHOUSE_URL` | `http://localhost:8123` | ClickHouse HTTP endpoint |
+| `CLICKHOUSE_DATABASE` | `ai_gateway` | Database |
+| `CLICKHOUSE_USAGE_EVENTS_TABLE` | `usage_events` | Event table |
+| `CLICKHOUSE_USERNAME` / `CLICKHOUSE_PASSWORD` | пусто | ClickHouse credential |
+| `POSTGRES_DSN` | пусто | Budgets, audit и durable outbox |
+| `BILLING_SHARED_SECRET` | пусто | Защита `/usage` |
+| `BILLING_MANAGEMENT_SHARED_SECRET` | пусто | Защита billing `/internal/v1/*` |
+| `BILLING_DURABLE_OUTBOX_ENABLED` | `false` | PostgreSQL-backed delivery |
+| `BILLING_OUTBOX_POLL_MS` | `500` | Worker polling interval |
+| `BILLING_RESERVATION_TTL_SECONDS` | `900` | Active budget reservation TTL |
+| `BILLING_DEFAULT_RESERVE_OUTPUT_TOKENS` | `1024` | Fallback output allowance |
+| `BILLING_LIMITS_ENABLED` / `BILLING_QUOTAS_ENABLED` | `false` | Atomic budget enforcement |
+| `BILLING_TARIFFS_ENABLED` / `BILLING_FINANCIAL_TRANSACTIONS_ENABLED` | `false` | Зарезервировано; fail closed |
+
+ClickHouse username/password и service/management shared secrets должны
+приходить из Secret. Gateway и Billing должны получать одинаковые catalog JSON
+и billing service secret. Management secret является отдельным credential.
+
+## Anonymizer, DLP и AV
+
+Anonymizer слушает `:8081`. `ANONYMIZER_RULES` выбирает built-in правила;
+`ANONYMIZER_RULES_CONFIG_PATH` загружает JSON definitions с `name`,
+`placeholder`, RE2 `pattern`, optional `capture_group` и `validator=luhn`.
+
+DLP и AV используют `HTTP_ADDR` (`:8084` и `:8085`), `<MODULE>_ICAP_HOST`,
+`<MODULE>_ICAP_PORT`, `<MODULE>_ICAP_SERVICE` (`/dlp` или `/av`) и
+`<MODULE>_ICAP_TIMEOUT` (`5s`). Generic `ICAP_*` служат fallback. Пустой ICAP
+endpoint не мешает startup, но непустой scan завершится dependency error.
+
+## Helm secrets
+
+Default values удобны только для локального запуска. Для managed окружения
+передавайте secrets через защищённый values source или заранее созданные
+Kubernetes Secrets. Не храните реальные provider keys, DSN passwords,
+encryption keys и shared secrets в Git. Изменение encryption key без
+перешифрования snapshot сделает сохранённые credentials нечитаемыми.

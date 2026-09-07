@@ -2,6 +2,11 @@
 
 A fast, modular AI gateway written in Go with OpenAI API compatibility.
 
+Документация разделена по задачам в [docs/README.md](docs/README.md): быстрый
+запуск, конфигурация, архитектура, MCP, эксплуатация и документация отдельных
+сервисов. Контракт внешнего HTTP API находится в
+[OpenAPI](repos/gateway/api/openapi.yaml); README не заменяет Swagger-схемы.
+
 ## Overview
 
 The gateway accepts requests in the OpenAI API format, runs gateway-level functions, and forwards each request to the provider router. Provider-level functions run as part of a specific attempt to call an AI provider endpoint. Each function can be required or optional:
@@ -99,7 +104,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:18080/v1/responses `
   -Body '{"provider":"ollama","model":"lfm2.5-thinking:1.2b","input":"Reply with exactly this text and nothing else: user@example.com"}'
 ```
 
-For `/v1/responses`, the gateway uses the same flow: gateway-level authentication, provider routing and failover, provider-level anonymization, DLP, antivirus, and billing, followed by response deanonymization. The contract supports text input/output, function tools and tool choice, structured `text.format`, `previous_response_id`, and streamed function-call argument events.
+For `/v1/responses`, the gateway uses the same flow: gateway-level authentication, provider routing and failover, provider-level DLP, antivirus, anonymization, and billing, followed by response deanonymization. The contract supports text input/output, function tools and tool choice, structured `text.format`, `previous_response_id`, and streamed function-call argument events.
 
 `POST /v1/embeddings` supports a string or an array of strings and runs through
 the same authentication, model grants, rate limits, DLP/AV, anonymization,
@@ -401,7 +406,8 @@ truth. Without a control-plane store, Redis remains the backward-compatible
 runtime catalog store and the bundled chart enables AOF-backed persistence.
 
 The gateway derives required capabilities from each request (`chat`,
-`responses`, `embeddings`, `stream`, `tools`, and `structured_output`) and excludes catalog
+`responses`, `embeddings`, `rerank`, `stream`, `tools`, `structured_output`,
+`mcp`, and `vision`) and excludes catalog
 entries that cannot satisfy them or whose `max_output_tokens` is too small.
 Billing records `catalog_version`, `pricing_key`, and both rates in every usage
 event. The reserve transaction persists that snapshot, so a catalog rollout or
@@ -827,13 +833,13 @@ dlp:
   icap:
     host: dlp.example.local
     port: "1344"
-    service: /reqmod
+    service: /dlp
 av:
   enabled: true
   icap:
     host: av.example.local
     port: "1344"
-    service: /avscan
+    service: /av
 ```
 
 When running without Helm, use these variables:
@@ -850,11 +856,11 @@ Configure the ICAP connections for the `dlp` and `av` microservices with these e
 ```text
 DLP_ICAP_HOST=dlp.example.local
 DLP_ICAP_PORT=1344
-DLP_ICAP_SERVICE=/reqmod
+DLP_ICAP_SERVICE=/dlp
 DLP_ICAP_TIMEOUT=5s
 AV_ICAP_HOST=av.example.local
 AV_ICAP_PORT=1344
-AV_ICAP_SERVICE=/avscan
+AV_ICAP_SERVICE=/av
 AV_ICAP_TIMEOUT=5s
 ```
 

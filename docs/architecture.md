@@ -55,12 +55,12 @@ flowchart LR
 
 | Сервис | HTTP API | Текущая ответственность |
 | --- | --- | --- |
-| Gateway | `GET /healthz`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/responses` | OpenAI-compatible API, auth pipeline, provider routing, failover, SSE, orchestration provider-level modules, deanonymization |
-| Auth | `GET /healthz`, `GET /readyz`, `POST /authorize` | PostgreSQL virtual keys с expiry/revoke/rotation, переходный static fallback, legacy HS256 и OIDC JWKS RS256/ES256; заполняет identity и access policy |
+| Gateway | `GET /healthz`, `GET /readyz`, `GET /metrics`, `/v1/*`, `/admin/v1/*` | OpenAI-compatible API, admin API, auth pipeline, provider routing, failover, SSE, orchestration provider-level modules, deanonymization |
+| Auth | `GET /healthz`, `GET /livez`, `GET /readyz`, `POST /authorize`, `/internal/v1/*` | PostgreSQL virtual keys с expiry/revoke/rotation, identity directory, переходный static fallback, legacy HS256 и OIDC JWKS RS256/ES256; заполняет identity и access policy |
 | DLP | `GET /healthz`, `POST /scan` | Извлекает текст запроса и отправляет его в настроенный ICAP-сервис через `REQMOD` |
 | AV | `GET /healthz`, `POST /scan` | HTTP-to-ICAP адаптер для текста и отдельных бинарных image attachments |
 | Anonymizer | `GET /healthz`, `POST /anonymize` | Маскирует значения по настраиваемым RE2-правилам и возвращает преобразованный контент с placeholder map |
-| Billing | `GET /healthz`, `POST /usage` | Оценивает/собирает tokens и cost, создает billing event, после ответа пишет usage event в ClickHouse |
+| Billing | `GET /healthz`, `GET /livez`, `POST /usage`, `/internal/v1/*` | Резервирует budgets, собирает tokens и cost, ведёт request/audit logs и после ответа пишет usage event в ClickHouse; `/healthz` является readiness check |
 
 `RequestContext` существует только внутри gateway. Между сервисами используются отдельные минимальные DTO: исходный bearer token получает только auth, DLP получает текстовую проекцию, AV — текст и отдельные validated binary attachments, anonymizer — текстовую проекцию без image URL/base64, а billing — identity fingerprint, provider metadata и счетчики tokens без prompt/response content. Ответ каждого сервиса применяется к локальному контексту по явному allowlist полей.
 
@@ -318,9 +318,16 @@ flowchart TD
 
 ### Streaming
 
-Для endpoints с `stream: true` gateway пытается проксировать provider SSE. Если client не поддерживает streaming, gateway может выполнить обычный запрос и синтезировать SSE-ответ. После начала настоящего provider stream ошибка уже возвращается в этот stream, без failover на следующий endpoint.
+Для endpoints с `stream: true` gateway проксирует provider SSE. Если выбранный
+provider adapter сообщает, что native streaming не поддерживается, gateway
+выполняет один обычный запрос и синтезирует совместимый SSE-ответ. После начала
+настоящего provider stream ошибка возвращается внутри текущего stream без
+failover на следующий endpoint.
 
-Текущее ограничение: запрос перед streaming-вызовом анонимизируется, но provider chunks передаются клиенту напрямую; request-local deanonymization применяется только к собранному финальному response object и не преобразует уже отправленные chunks.
+Request-local deanonymization применяется инкрементально к text delta и
+function-call arguments. Адаптер удерживает только возможный префикс
+placeholder на границе соседних chunks, а не весь ответ. Поэтому masked value,
+разделённое provider-ом между событиями, восстанавливается до отправки клиенту.
 
 ## Безопасность контента
 
@@ -379,7 +386,10 @@ DLP/AV selector, attachments дают композицию scope, а executable 
 
 ### Anonymization state
 
-Placeholder map сейчас живет только в копии `RequestContext` конкретной provider attempt. Она очищается перед каждой следующей попыткой и используется gateway для восстановления успешного нестрируемого ответа.
+Placeholder map сейчас живет только в копии `RequestContext` конкретной
+provider attempt. Она очищается перед каждой следующей попыткой и используется
+gateway для восстановления успешного JSON-ответа или инкрементальной обработки
+text/tool deltas в SSE stream.
 
 Helm chart передает anonymizer переменную `REDIS_ADDR` и отдельно разворачивает Redis, однако текущий Go-код anonymizer не подключается к Redis. Redis-backed vault является подготовленной, но не реализованной частью архитектуры.
 
@@ -465,13 +475,17 @@ BILLING_REQUIRED=true
 BILLING_URL=http://ai-gateway-billing:8083
 ```
 
-Provider API keys не хранятся в `PROVIDERS_JSON`: chart создает Secret, а gateway подставляет ключ по переменной `PROVIDER_API_KEY_<NORMALIZED_ENDPOINT_NAME>`.
+Helm chart удаляет `api_key` из сериализованного `PROVIDERS_JSON`, создаёт
+Secret и передаёт gateway ключ через
+`PROVIDER_API_KEY_<NORMALIZED_ENDPOINT_NAME>`. При прямом локальном запуске
+static JSON технически принимает `api_key`, но environment/Secret безопаснее.
 
 ## Известные границы текущей реализации
 
 - Нет Redis-backed anonymization vault; placeholder map request-local.
 - PostgreSQL budgets/quotas реализованы; tariffs и financial transactions пока fail closed.
-- Deanonymization не применяется к уже отправленным streaming chunks.
+- Streaming deanonymization выполняется до отправки каждого text/tool delta и
+  умеет удерживать placeholder prefix, разделённый границей соседних событий.
 - Tool/function arguments входят в DLP/AV text projection и anonymization pipeline; JSON Schema инструмента не изменяется.
 - DLP сканирует только текст; AV дополнительно сканирует validated inline image attachments. Remote image URLs и иные бинарные типы пока не поддерживаются.
 - Content rejection является terminal и не запускает fallback на другой endpoint.

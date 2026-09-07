@@ -22,7 +22,12 @@ does not receive bearer credentials, identity, or the complete gateway context.
 HTTP_ADDR=:8084
 DLP_ICAP_HOST=dlp.example.local
 DLP_ICAP_PORT=1344
-DLP_ICAP_SERVICE=/reqmod
+DLP_ICAP_SERVICE=/dlp
+DLP_ICAP_TIMEOUT=5s
 ```
 
-`DLP_ICAP_PORT` is required and is not hardcoded by the service. The service also accepts generic `ICAP_*` variables as a fallback.
+`DLP_ICAP_HOST` and `DLP_ICAP_PORT` must identify a reachable ICAP server for
+non-empty scans. The service does not fail startup when they are empty; scan
+requests then fail with a dependency error. Generic `ICAP_*` variables are
+accepted as fallbacks. `DLP_ICAP_SERVICE` defaults to `/dlp` and
+`DLP_ICAP_TIMEOUT` to `5s`.

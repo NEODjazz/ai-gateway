@@ -11,7 +11,14 @@ go run ./cmd/billing
 ## Endpoints
 
 - `GET /healthz`
+- `GET /livez`
 - `POST /usage`
+- `/internal/v1/*` management endpoints for budgets, reports, request logs, and
+  audit events; these require `BILLING_MANAGEMENT_SHARED_SECRET` when configured
+
+`/livez` reports process liveness. `/healthz` is the readiness check: it verifies
+the enabled billing dependencies and the audit PostgreSQL store. There is no
+separate `/readyz` endpoint.
 
 ## Collected data
 
@@ -33,7 +40,7 @@ The internally generated and persisted `billing_event` includes:
 - provider
 - provider endpoint name/type
 - model
-- API type: `chat_completions` or `responses`
+- API type: `chat_completions`, `responses`, `embeddings`, or `rerank`
 - status/error
 - latency in ms
 - estimated prompt tokens
@@ -173,6 +180,8 @@ migrations/clickhouse/003_usage_identity.sql
 migrations/clickhouse/004_usage_sessions.sql
 migrations/clickhouse/005_usage_observability.sql
 migrations/clickhouse/006_usage_traces.sql
+migrations/clickhouse/007_usage_tags.sql
+migrations/clickhouse/008_usage_cache_tokens.sql
 ```
 
 Final usage events retain normalized provider/deployment identity, organization,

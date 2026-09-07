@@ -25,7 +25,12 @@ are supported with signature checks and bounded count/size.
 HTTP_ADDR=:8085
 AV_ICAP_HOST=av.example.local
 AV_ICAP_PORT=1344
-AV_ICAP_SERVICE=/avscan
+AV_ICAP_SERVICE=/av
+AV_ICAP_TIMEOUT=5s
 ```
 
-`AV_ICAP_PORT` is required and is not hardcoded by the service. The service also accepts generic `ICAP_*` variables as a fallback.
+`AV_ICAP_HOST` and `AV_ICAP_PORT` must identify a reachable ICAP server for
+non-empty scans. The service does not fail startup when they are empty; scan
+requests then fail with a dependency error. Generic `ICAP_*` variables are
+accepted as fallbacks. `AV_ICAP_SERVICE` defaults to `/av` and
+`AV_ICAP_TIMEOUT` to `5s`.
