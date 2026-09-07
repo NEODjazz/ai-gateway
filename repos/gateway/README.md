@@ -8,7 +8,11 @@ Central OpenAI-compatible gateway with provider routing, failover, auth integrat
 go run ./cmd/gateway
 ```
 
-## Endpoints
+## Selected endpoints
+
+The complete route and schema reference is [OpenAPI](api/openapi.yaml).
+For MCP registry management, client-side tools, Responses passthrough and
+permission examples, see [MCP integration](../../docs/mcp.md).
 
 - `GET /healthz`
 - `POST /v1/chat/completions`

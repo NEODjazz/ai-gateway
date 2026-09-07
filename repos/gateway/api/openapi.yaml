@@ -160,7 +160,7 @@ paths:
       operationId: createResponse
       tags: [Inference]
       summary: Create a Responses API response
-      description: Supports function tools, explicitly scoped MCP connectors, structured output, previous-response affinity, SSE, and inline images.
+      description: Supports function tools, explicitly scoped MCP connectors, structured output, previous-response affinity, SSE, and inline images. MCP definitions are forwarded to an upstream provider that must support remote MCP; the gateway does not execute MCP calls. Routing requires explicit mcp capability. Tool authorization checks connector identity (label and canonical URL), not individual remote tool names.
       requestBody:
         required: true
         content:
@@ -1222,6 +1222,7 @@ paths:
       operationId: updateMCPServer
       tags: [MCP]
       summary: Create or atomically update safe MCP server metadata
+      description: Stores metadata only; does not connect, discover tools, execute calls, or configure clients. No credential or header fields are accepted. Enabled server tool grants are consulted for connector authorization through toolsets; direct grants are independent. Tool strings are not verified against the server URL or a remote tool list.
       parameters: [{$ref: '#/components/parameters/MCPEntryID'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/MCPServerInput'}}}}
       responses:
@@ -1259,6 +1260,7 @@ paths:
       operationId: updateMCPToolset
       tags: [MCP]
       summary: Create or atomically update a toolset grant
+      description: Groups function names or connector identifiers as exact or trailing-wildcard grants. Assignment uses toolset:<id> in allowed_tools. Disabling this toolset stops that authorization path but does not revoke other grants. Connector grants require a matching tools grant on an enabled registered server at authorization time; ordinary function names do not.
       parameters: [{$ref: '#/components/parameters/MCPEntryID'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/MCPToolsetInput'}}}}
       responses:
@@ -2509,6 +2511,7 @@ components:
         strict: {type: boolean}
     MCPResponseTool:
       type: object
+      description: Remote connector forwarded to the selected provider for execution. This does not reference or automatically load a registry entry. Gateway authorization checks mcp:<server_label>@<canonical-https-url>; the provider enforces connector-level allowed_tools and require_approval.
       additionalProperties: false
       required: [type, server_label, server_url]
       properties:
@@ -3393,8 +3396,8 @@ components:
         label: {type: string, minLength: 1, maxLength: 128}
         description: {type: string, maxLength: 1024}
         server_url: {type: string, format: uri, pattern: '^https://[^?#]+$'}
-        transport: {type: string, enum: [streamable-http, sse]}
-        tools: {type: array, maxItems: 256, description: Exact or trailing-wildcard canonical connector grants, items: {type: string, minLength: 1, maxLength: 512}}
+        transport: {type: string, enum: [streamable-http, sse], description: Metadata only; does not configure an MCP connection}
+        tools: {type: array, maxItems: 256, description: Permission strings matched for connector authorization through toolsets. Empty or omitted grants match any connector. Exact connector identities are recommended; strings are not verified against server URL or discovered tools., items: {type: string, minLength: 1, maxLength: 512}}
         enabled: {type: boolean}
     MCPServer:
       allOf:
@@ -3415,7 +3418,7 @@ components:
       properties:
         name: {type: string, minLength: 1, maxLength: 256}
         description: {type: string, maxLength: 1024}
-        tools: {type: array, maxItems: 256, description: Connector grants selected from registered MCP server metadata, items: {type: string, minLength: 1, maxLength: 512}}
+        tools: {type: array, maxItems: 256, description: Function names or connector identities with exact or trailing-wildcard matching. Empty grants match any identifier subject to the enabled-server check for connectors. Registry membership is not validated on save., items: {type: string, minLength: 1, maxLength: 512}}
         enabled: {type: boolean}
     MCPToolset:
       allOf:

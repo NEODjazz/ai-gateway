@@ -170,18 +170,26 @@ credential ID и отдельный scoped service secret. Новый plaintext 
 
 Virtual-key policy также содержит `allowed_tools`. Gateway сопоставляет function
 name либо MCP identity `mcp:<server_label>@<canonical-https-url>` с
-exact/wildcard grants до provider pipeline. URL привязан к grant, поэтому один
-и тот же label нельзя перенаправить на другой MCP server. MCP routing требует
+exact/wildcard grants до provider pipeline. Exact connector grant связывает
+label и URL; wildcard или пустой список grants разрешают более широкий доступ.
+MCP routing требует
 одновременно явной capability `mcp` и adapter, который реализует MCP
 passthrough; legacy empty capabilities не считаются opt-in.
-MCP Servers хранят только безопасные HTTPS metadata и допустимые canonical
-connector grants, а Toolsets группируют эти grants для повторного назначения.
+MCP Servers хранят HTTPS metadata без credentials и строки разрешений,
+а Toolsets группируют имена функций и connector grants для повторного назначения.
+API проверяет формат URL, размеры и непустоту строк, но не обнаруживает
+инструменты и не подтверждает принадлежность grants указанному server URL.
 `expand=references` строит impact по связанным toolsets, Access Groups и полной
 пагинированной выборке non-revoked virtual keys. Delete выполняется fail-closed: сервер с
 зависимым toolset и toolset с любым назначением не удаляются. Gateway не делает
-отдельный health/discovery вызов к произвольному MCP URL: в текущей архитектуре
-upstream MCP transport и его credentials принадлежат provider adapter, поэтому
-такой probe без отдельной egress/credential политики создал бы новую SSRF-границу.
+отдельный health/discovery вызов к MCP URL и не реализует MCP proxy endpoint.
+В Chat Completions инструменты выполняет клиент (например OpenCode), который
+сам подключается к MCP. В Responses API adapter передаёт connector definition
+провайдеру модели, а MCP transport выполняет upstream provider. Переданные
+клиентом connector headers уходят этому провайдеру; bearer Virtual Key не
+подставляется в них автоматически. Отключение сервера влияет на connector
+grants через toolsets, но не отменяет прямые grants и не блокирует клиентские
+соединения с MCP. Подробные сценарии и ограничения: [MCP](mcp.md).
 
 Virtual key может содержать `access_group_ids`. Auth хранит и передает только
 идентификаторы назначений; актуальные Access Groups разрешаются gateway из

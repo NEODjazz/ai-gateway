@@ -571,12 +571,21 @@ monitor report, and compare up to eight enabled policies. Comparison performs on
 bounded compliance request per policy, keeps partial failures visible, and never
 places submitted text or raw scanner output in the result table.
 
-The MCP registry stores only approved HTTPS endpoint metadata, transport type,
-and canonical tool identifiers. It deliberately has no credential, header, or
+The MCP registry stores operator-configured HTTPS endpoint metadata, transport type,
+and tool permission strings. It is not an MCP proxy or execution service: adding
+a server does not connect it to OpenCode, discover tools, or execute them.
+See [MCP integration and authorization](docs/mcp.md) for both supported flows,
+configuration examples, and enforcement boundaries.
+The registry deliberately has no credential, header, or
 secret fields, and rejects URLs containing user info, query parameters, or
 fragments. Toolsets group exact or prefix-wildcard tool identifiers; virtual
 keys receive them through `allowed_tools` grants such as `toolset:weather`.
-Disabled toolsets stop authorizing immediately. Registry changes are audited
+Empty registry `tools` lists match all identifiers in the current matcher,
+subject to the enabled-server check for connectors through toolsets; use
+explicit grants rather than empty lists to restrict access.
+Disabled toolsets no longer authorize through their `toolset:<id>` grant once
+the updated registry is loaded. Direct grants and other enabled toolsets remain
+independent authorization paths. Registry changes are audited
 and use the same durable admin-state snapshot when configured. The management
 API can expand server and toolset references. Server deletion is rejected while
 a toolset consumes one of its grants; toolset deletion enumerates the complete
@@ -724,13 +733,19 @@ identity `mcp:<server_label>@<canonical-https-url>`, for example
 `mcp:weather-prod@https://mcp.example.test`. Non-HTTPS URLs and URLs containing
 userinfo, query parameters, or fragments are rejected. Invalid tool definitions
 return 400 and disallowed tools return 403 without reaching DLP, billing, or a
-provider.
+provider. Exact connector grants bind both label and URL; a wildcard or empty
+grant list intentionally permits broader access. Authorization checks every
+tool declared in the request and rejects the whole request if any is denied.
 
 Responses MCP passthrough requires both an adapter implementing the MCP contract
 and an endpoint/catalog entry explicitly declaring `mcp`; legacy empty
 capabilities are not an opt-in. Connector URL, connector-level allowed tools,
 approval policy, and scoped headers are forwarded only to the selected
-OpenAI-compatible provider.
+OpenAI-compatible provider. The upstream provider executes the MCP protocol;
+the gateway adapter only forwards the connector definition. The `mcp`
+capability enables routing but does not prove upstream MCP support. In Chat
+Completions, clients such as OpenCode execute function tool calls themselves;
+their direct connections to MCP servers are outside gateway enforcement.
 
 Set `ROUTING_STRATEGY=adaptive` (Helm: `gateway.routing.strategy`) to rank
 same-priority endpoints by an EWMA of observed latency and failures. Unknown
