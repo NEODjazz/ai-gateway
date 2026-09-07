@@ -9,10 +9,18 @@ package и Helm template.
 
 - [Быстрый запуск](getting-started.md) — локальный demo, Rancher Desktop,
   проверка API и UI.
+- [Inference API](inference.md) — endpoints, capabilities, adapters, routing,
+  streaming и cache.
+- [Managed control plane](control-plane.md) — Providers/Credentials/Deployments,
+  persistence, UI и audit.
 - [Конфигурация](configuration.md) — основные environment variables,
   providers, capabilities, модули и хранилища.
+- [Безопасность](security.md) — authentication, service DTO, secrets и
+  guardrails.
 - [Эксплуатация](operations.md) — health/readiness, миграции, тесты,
   обновление и диагностика.
+- [Разработка](development.md) — модули, правила изменения контрактов, CI и
+  releases.
 
 ## Устройство системы
 
