@@ -1091,3 +1091,17 @@ entries, 64 Unicode code points per key and 512 per value before execution. Anth
 with `400 unsupported_parameter`; it is not silently mapped to unrelated native
 metadata semantics. Gateway authorization and billing identities are not derived
 from this client-supplied object.
+
+### Stored Responses transport foundation
+
+The native-compatible adapter exposes `RetrieveResponse` for internal lifecycle
+integration. It performs a GET using the configured provider credential, accepts
+only bounded ASCII resource IDs, rejects redirects, observes context cancellation,
+and uses the bounded Responses decoder and redacted upstream error conversion.
+A successful payload must return the requested ID. Reading reported usage here
+does not execute inference or run billing settlement.
+
+This transport method does not authorize resource ownership. No public retrieval
+route is enabled yet: the router/handler must first resolve the resource owner,
+original deployment, current credential policy and resource retention state.
+This is a lifecycle implementation step, not completion of the retrieval API.
