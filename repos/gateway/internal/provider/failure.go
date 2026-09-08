@@ -87,14 +87,19 @@ func responseStatusError(provider string, response *http.Response) error {
 	var body struct {
 		Error struct {
 			Code  string `json:"code"`
+			Type  string `json:"type"`
 			Param string `json:"param"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(payload, &body) != nil {
 		return err
 	}
-	if safeUpstreamIdentifier.MatchString(strings.TrimSpace(body.Error.Code)) {
-		providerErr.UpstreamCode = strings.TrimSpace(body.Error.Code)
+	code := strings.TrimSpace(body.Error.Code)
+	if code == "" {
+		code = strings.TrimSpace(body.Error.Type)
+	}
+	if safeUpstreamIdentifier.MatchString(code) {
+		providerErr.UpstreamCode = code
 		switch strings.ToLower(providerErr.UpstreamCode) {
 		case "context_length_exceeded", "context_window_exceeded":
 			providerErr.Class = FailureContextLength

@@ -642,6 +642,12 @@ longer suppress a valid `Retry-After` fallback. Existing fractional-unit support
 HTTP-date parsing and scheduler wait limits remain in effect. Deterministic tests
 cover large values, infinity and NaN without sleeping or calling external services.
 
+Provider HTTP error normalization accepts a bounded identifier from `error.type`
+when `error.code` is absent or blank, supporting native error envelopes. An
+explicit code keeps precedence. The same safe identifier filter applies to both
+fields; raw messages remain excluded. Tests cover native types, precedence,
+whitespace, overlong/unsafe values and preservation of HTTP-based classification.
+
 ### Responses stream output-index bound
 
 Native Responses SSE decoding accepts explicit `output_index` values only as
