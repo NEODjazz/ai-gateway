@@ -1009,7 +1009,7 @@ The public response schema includes the annotation array. Event fields follow th
 Responses accepts optional `truncation` (`auto` or `disabled`) and forwards the
 explicit value through OpenAI-compatible and Ollama native Responses requests,
 including streaming. Omission leaves the upstream default unchanged. The upstream
-validates the value and implements context truncation; the gateway still reserves
+implements context truncation; the gateway validates the enum and still reserves
 tokens against the complete input context before execution. Anthropic conversion
 and the demo adapter reject explicit truncation with `400 unsupported_parameter`
 and `param=truncation` rather than discarding the requested behavior.
@@ -1036,8 +1036,8 @@ totals or billing.
 
 Responses also forwards optional integer `top_logprobs` to OpenAI-compatible and
 Ollama native Responses endpoints in both JSON and streaming mode, preserving
-explicit zero. The documented range is 0–20; the upstream validates the range and
-model compatibility. Omission leaves the upstream default unchanged. Anthropic
+explicit zero. The gateway validates the 0–20 range before running request
+modules or routing; the upstream validates model compatibility. Omission leaves the upstream default unchanged. Anthropic
 conversion and demo reject supplied values with `400 unsupported_parameter` and
 `param=top_logprobs`, including zero.
 
@@ -1046,3 +1046,8 @@ Anthropic Responses conversion rejects non-null `phase` on input items with
 request. Its native message contract cannot preserve this assistant state.
 Omitted or null phase keeps existing conversion behavior. OpenAI-compatible
 Responses replay continues to preserve phase unchanged.
+
+The Responses HTTP boundary rejects an invalid `top_logprobs` range or a
+`truncation` value other than `auto`/`disabled` with `400 invalid_request` for
+both JSON and streaming requests. Omitted and null options remain accepted.
+These requests stop before pipeline execution and provider calls.

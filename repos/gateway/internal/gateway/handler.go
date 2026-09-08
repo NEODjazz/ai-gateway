@@ -251,6 +251,11 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if message := request.Validate(); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
+
 	reqCtx := modules.RequestContext{
 		APIKey:          bearerToken(r.Header.Get("Authorization")),
 		RequestID:       executionID(w),
