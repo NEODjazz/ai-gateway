@@ -44,3 +44,22 @@ func TestImmutableRecordConcurrentWriters(t *testing.T) {
 		t.Fatal("retry extended retention")
 	}
 }
+
+func TestImmutableRecordCompareAndDelete(t *testing.T) {
+	server := miniredis.RunT(t)
+	store := New(Config{Addr: server.Addr(), Prefix: "immutable-delete"})
+	if ok, err := store.SetIfAbsentOrEqual(t.Context(), "owner", []byte("original"), time.Hour); err != nil || !ok {
+		t.Fatalf("create=%v err=%v", ok, err)
+	}
+	if ok, err := store.DeleteIfEqual(t.Context(), "owner", []byte("other")); err != nil || ok {
+		t.Fatalf("mismatched delete=%v err=%v", ok, err)
+	}
+	if value, found, err := store.Get(t.Context(), "owner"); err != nil || !found || string(value) != "original" {
+		t.Fatalf("record changed: value=%q found=%v err=%v", value, found, err)
+	}
+	for i := 0; i < 2; i++ {
+		if ok, err := store.DeleteIfEqual(t.Context(), "owner", []byte("original")); err != nil || !ok {
+			t.Fatalf("delete %d=%v err=%v", i, ok, err)
+		}
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"time"
 
 	"ai-gateway-gateway/internal/modules"
@@ -32,6 +33,7 @@ type responseOwnershipStore struct {
 	store interface {
 		Get(context.Context, string) ([]byte, bool, error)
 		SetIfAbsentOrEqual(context.Context, string, []byte, time.Duration) (bool, error)
+		DeleteIfEqual(context.Context, string, []byte) (bool, error)
 	}
 	ttl time.Duration
 }
@@ -40,6 +42,7 @@ func newResponseOwnershipStore(ttl time.Duration, store SessionStore) responseOw
 	immutable, _ := store.(interface {
 		Get(context.Context, string) ([]byte, bool, error)
 		SetIfAbsentOrEqual(context.Context, string, []byte, time.Duration) (bool, error)
+		DeleteIfEqual(context.Context, string, []byte) (bool, error)
 	})
 	return responseOwnershipStore{store: immutable, ttl: ttl}
 }
@@ -144,6 +147,25 @@ func (s responseOwnershipStore) get(ctx context.Context, req modules.RequestCont
 	return binding, true, nil
 }
 
+func (s responseOwnershipStore) remove(ctx context.Context, req modules.RequestContext, id string, binding responseOwnership) error {
+	key := responseOwnershipKey(req, id)
+	if key == "" || interfaceIsNil(s.store) {
+		return ErrResponseOwnershipUnavailable
+	}
+	payload, err := json.Marshal(binding)
+	if err != nil {
+		return ErrResponseOwnershipUnavailable
+	}
+	removed, err := s.store.DeleteIfEqual(ctx, key, payload)
+	if err != nil {
+		return ErrResponseOwnershipUnavailable
+	}
+	if !removed {
+		return ErrResponseOwnershipConflict
+	}
+	return nil
+}
+
 type responseRetrieveClient interface {
 	RetrieveResponse(context.Context, string) (openai.ResponseResponse, error)
 }
@@ -154,6 +176,10 @@ type responseCancelClient interface {
 
 type responseInputItemsClient interface {
 	ListResponseInputItems(context.Context, string, ResponseInputItemsOptions) (openai.ResponseInputItemList, error)
+}
+
+type responseDeleteClient interface {
+	DeleteResponse(context.Context, string) (openai.ResponseDeletion, error)
 }
 
 func (r Router) responseResource(ctx context.Context, req modules.RequestContext, id string) (responseOwnership, Endpoint, error) {
@@ -224,6 +250,31 @@ func (r Router) ListResponseInputItems(ctx context.Context, req modules.RequestC
 	return callResponseLifecycle(r, ctx, endpoint, "responses.input_items", func(callCtx context.Context) (openai.ResponseInputItemList, error) {
 		return client.ListResponseInputItems(callCtx, id, options)
 	})
+}
+
+func (r Router) DeleteResponse(ctx context.Context, req modules.RequestContext, id string) (openai.ResponseDeletion, error) {
+	binding, endpoint, err := r.responseResource(ctx, req, id)
+	if err != nil {
+		return openai.ResponseDeletion{}, err
+	}
+	client, ok := endpoint.Provider.(responseDeleteClient)
+	if !ok {
+		return openai.ResponseDeletion{}, ErrResponseDeploymentChanged
+	}
+	result, err := callResponseLifecycle(r, ctx, endpoint, "responses.delete", func(callCtx context.Context) (openai.ResponseDeletion, error) {
+		return client.DeleteResponse(callCtx, id)
+	})
+	if err != nil {
+		var providerErr *Error
+		if !errors.As(err, &providerErr) || providerErr.StatusCode != http.StatusNotFound {
+			return openai.ResponseDeletion{}, err
+		}
+		result = openai.ResponseDeletion{ID: id, Object: "response.deleted", Deleted: true}
+	}
+	if err := r.ownership.remove(ctx, req, id, binding); err != nil {
+		return openai.ResponseDeletion{}, err
+	}
+	return result, nil
 }
 
 func callResponseLifecycle[T any](r Router, ctx context.Context, endpoint Endpoint, operation string, call func(context.Context) (T, error)) (T, error) {

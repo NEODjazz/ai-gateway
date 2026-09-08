@@ -351,6 +351,12 @@ type ResponseInputItemList struct {
 	HasMore bool              `json:"has_more"`
 }
 
+type ResponseDeletion struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Deleted bool   `json:"deleted"`
+}
+
 type ResponseError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

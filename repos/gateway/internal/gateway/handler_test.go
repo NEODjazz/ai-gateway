@@ -44,6 +44,7 @@ type lifecycleResourceProvider struct {
 	retrieveCalls int
 	cancelCalls   int
 	inputCalls    int
+	deleteCalls   int
 	credentialID  string
 }
 
@@ -86,6 +87,12 @@ func (p *lifecycleResourceProvider) ListResponseInputItems(_ context.Context, re
 	p.inputCalls++
 	p.credentialID = req.CredentialID
 	return openai.ResponseInputItemList{Object: "list", Data: []json.RawMessage{json.RawMessage(`{"id":"msg_1"}`)}, FirstID: options.After}, nil
+}
+
+func (p *lifecycleResourceProvider) DeleteResponse(_ context.Context, req modules.RequestContext, id string) (openai.ResponseDeletion, error) {
+	p.deleteCalls++
+	p.credentialID = req.CredentialID
+	return openai.ResponseDeletion{ID: id, Object: "response.deleted", Deleted: true}, nil
 }
 
 func TestChatCompletionsRejectsConflictingTokenLimits(t *testing.T) {
@@ -678,6 +685,22 @@ func TestGetResponseAuthenticatesAndSkipsBillingLifecycle(t *testing.T) {
 	}
 	if recorder.Header().Get("X-Execution-ID") == "" || !strings.Contains(recorder.Body.String(), `"id":"resp_123"`) {
 		t.Fatalf("missing lifecycle response metadata: headers=%v body=%s", recorder.Header(), recorder.Body.String())
+	}
+}
+
+func TestDeleteResponseAuthenticatesAndSkipsBillingLifecycle(t *testing.T) {
+	resource := &lifecycleResourceProvider{}
+	billing := &lifecycleBillingModule{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{modules.NewAuthModule(true), billing}), resource))
+	request := httptest.NewRequest(http.MethodDelete, "/v1/responses/resp_123", nil)
+	request.Header.Set("Authorization", "Bearer demo-user-key")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || resource.resolveCalls != 1 || resource.deleteCalls != 1 || billing.calls != 0 {
+		t.Fatalf("status=%d resolve=%d delete=%d billing=%d body=%s", recorder.Code, resource.resolveCalls, resource.deleteCalls, billing.calls, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"deleted":true`) {
+		t.Fatalf("unexpected delete response: %s", recorder.Body.String())
 	}
 }
 

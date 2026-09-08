@@ -62,6 +62,11 @@ type ResponseInputItemsProvider interface {
 	ListResponseInputItems(ctx context.Context, req modules.RequestContext, id string, options ResponseInputItemsOptions) (openai.ResponseInputItemList, error)
 }
 
+type ResponseDeletionProvider interface {
+	ResponseResourceResolver
+	DeleteResponse(ctx context.Context, req modules.RequestContext, id string) (openai.ResponseDeletion, error)
+}
+
 type EmbeddingProvider interface {
 	Embeddings(ctx context.Context, req modules.RequestContext) (openai.EmbeddingResponse, error)
 }

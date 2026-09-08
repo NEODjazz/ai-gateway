@@ -44,6 +44,31 @@ func TestCancelResponseTransport(t *testing.T) {
 	}
 }
 
+func TestDeleteResponseTransport(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v1/responses/resp_123" || r.Header.Get("Authorization") != "Bearer test-key" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		fmt.Fprint(w, `{"id":"resp_123","object":"response.deleted","deleted":true}`)
+	}))
+	defer server.Close()
+	result, err := NewOpenAICompatible(server.URL, "test-key", true).DeleteResponse(t.Context(), "resp_123")
+	if err != nil || !result.Deleted || result.ID != "resp_123" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestDeleteResponseRejectsInvalidResult(t *testing.T) {
+	for _, body := range []string{"null", `{}`, `{"id":"other","object":"response.deleted","deleted":true}`, `{"id":"resp_123","object":"response.deleted","deleted":false}`} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, body) }))
+		_, err := NewOpenAICompatible(server.URL, "", true).DeleteResponse(t.Context(), "resp_123")
+		server.Close()
+		if err == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+}
+
 func TestListResponseInputItemsTransport(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/responses/resp_123/input_items" || r.URL.Query().Get("after") != "item_1" || r.URL.Query().Get("limit") != "25" || r.URL.Query().Get("order") != "asc" || len(r.URL.Query()["include"]) != 2 {
@@ -98,6 +123,7 @@ func TestRetrieveResponseRejectsUnsafeIDs(t *testing.T) {
 				_, err := p.ListResponseInputItems(t.Context(), id, ResponseInputItemsOptions{})
 				return err
 			},
+			func() error { _, err := p.DeleteResponse(t.Context(), id); return err },
 		} {
 			var failure *Error
 			if err := operation(); !errors.As(err, &failure) || failure.Param != "response_id" || failure.StatusCode != 400 {

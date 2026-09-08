@@ -13,8 +13,9 @@ import (
 )
 
 type ownershipTestStore struct {
-	data map[string][]byte
-	err  error
+	data      map[string][]byte
+	err       error
+	deleteErr error
 }
 
 type ownershipResponseClient struct {
@@ -22,6 +23,8 @@ type ownershipResponseClient struct {
 	retrieveCalls int
 	cancelCalls   int
 	inputCalls    int
+	deleteCalls   int
+	deleteErr     error
 }
 
 type ownershipPostModule struct {
@@ -65,6 +68,14 @@ func (p *ownershipResponseClient) CancelResponse(_ context.Context, id string) (
 func (p *ownershipResponseClient) ListResponseInputItems(_ context.Context, _ string, _ ResponseInputItemsOptions) (openai.ResponseInputItemList, error) {
 	p.inputCalls++
 	return openai.ResponseInputItemList{Object: "list", Data: []json.RawMessage{json.RawMessage(`{"id":"msg_1"}`)}}, nil
+}
+
+func (p *ownershipResponseClient) DeleteResponse(_ context.Context, id string) (openai.ResponseDeletion, error) {
+	p.deleteCalls++
+	if p.deleteErr != nil {
+		return openai.ResponseDeletion{}, p.deleteErr
+	}
+	return openai.ResponseDeletion{ID: id, Object: "response.deleted", Deleted: true}, nil
 }
 
 func (s *ownershipTestStore) Get(_ context.Context, k string) ([]byte, bool, error) {
@@ -260,6 +271,46 @@ func TestListResponseInputItemsUsesOwnedDeployment(t *testing.T) {
 	}
 }
 
+func TestDeleteResponseRemovesOwnershipAfterUpstream(t *testing.T) {
+	owner := modules.RequestContext{CredentialID: "credential", UserID: "user"}
+	backend := &ownershipTestStore{data: map[string][]byte{}}
+	client := &ownershipResponseClient{}
+	endpoint := Endpoint{Name: "deployment", Type: "test", Models: []string{"public-model"}, Provider: client}
+	router := Router{endpoints: []Endpoint{endpoint}, ownership: newResponseOwnershipStore(time.Hour, backend), health: newEndpointHealthTracker()}
+	binding := responseOwnership{Endpoint: endpoint.Name, Model: "public-model", Deployment: responseDeploymentIdentity(endpoint)}
+	if err := router.ownership.put(t.Context(), owner, "resp_owned", binding); err != nil {
+		t.Fatal(err)
+	}
+	result, err := router.DeleteResponse(t.Context(), owner, "resp_owned")
+	if err != nil || !result.Deleted || client.deleteCalls != 1 {
+		t.Fatalf("result=%+v calls=%d err=%v", result, client.deleteCalls, err)
+	}
+	if _, found, err := router.ownership.get(t.Context(), owner, "resp_owned"); err != nil || found {
+		t.Fatalf("ownership remains: found=%v err=%v", found, err)
+	}
+}
+
+func TestDeleteResponseRetriesOwnershipCleanupAfterUpstreamIsGone(t *testing.T) {
+	owner := modules.RequestContext{CredentialID: "credential", UserID: "user"}
+	backend := &ownershipTestStore{data: map[string][]byte{}, deleteErr: errors.New("redis failed")}
+	client := &ownershipResponseClient{}
+	endpoint := Endpoint{Name: "deployment", Type: "test", Models: []string{"public-model"}, Provider: client}
+	router := Router{endpoints: []Endpoint{endpoint}, ownership: newResponseOwnershipStore(time.Hour, backend), health: newEndpointHealthTracker()}
+	binding := responseOwnership{Endpoint: endpoint.Name, Model: "public-model", Deployment: responseDeploymentIdentity(endpoint)}
+	if err := router.ownership.put(t.Context(), owner, "resp_owned", binding); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.DeleteResponse(t.Context(), owner, "resp_owned"); !errors.Is(err, ErrResponseOwnershipUnavailable) {
+		t.Fatalf("cleanup failure err=%v", err)
+	}
+	backend.deleteErr = nil
+	client.deleteErr = &Error{Class: FailureClientRequest, StatusCode: 404, UpstreamCode: "not_found", Err: errors.New("gone")}
+	result, err := router.DeleteResponse(t.Context(), owner, "resp_owned")
+	if err != nil || !result.Deleted || client.deleteCalls != 2 {
+		t.Fatalf("retry result=%+v calls=%d err=%v", result, client.deleteCalls, err)
+	}
+}
+
 func (s *ownershipTestStore) SetIfAbsentOrEqual(ctx context.Context, k string, v []byte, ttl time.Duration) (bool, error) {
 	if s.err != nil {
 		return false, s.err
@@ -268,6 +319,21 @@ func (s *ownershipTestStore) SetIfAbsentOrEqual(ctx context.Context, k string, v
 		return string(old) == string(v), nil
 	}
 	return true, s.Set(ctx, k, v, ttl)
+}
+
+func (s *ownershipTestStore) DeleteIfEqual(_ context.Context, k string, v []byte) (bool, error) {
+	if s.deleteErr != nil {
+		return false, s.deleteErr
+	}
+	old, found := s.data[k]
+	if !found {
+		return true, nil
+	}
+	if string(old) != string(v) {
+		return false, nil
+	}
+	delete(s.data, k)
+	return true, nil
 }
 
 func TestResponseOwnershipCannotBeReassigned(t *testing.T) {

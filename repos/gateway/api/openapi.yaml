@@ -468,6 +468,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      operationId: deleteResponse
+      tags: [Inference]
+      summary: Delete a stored response
+      description: Deletes the resource from its original deployment, then atomically removes the matching ownership binding. An upstream not-found response is treated as an idempotent delete when the ownership binding still exists.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, maxLength: 256}}
+      responses:
+        '200':
+          description: Deletion confirmation
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ResponseDeletion'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404':
+          description: The response does not exist for the authenticated owner.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: The original deployment or ownership binding changed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Response ownership storage is unavailable or could not be cleaned after upstream deletion.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /v1/responses/{id}/cancel:
     post:
       operationId: cancelResponse
@@ -3422,6 +3454,14 @@ components:
         first_id: {type: string, maxLength: 256}
         last_id: {type: string, maxLength: 256}
         has_more: {type: boolean}
+    ResponseDeletion:
+      type: object
+      additionalProperties: false
+      required: [id, object, deleted]
+      properties:
+        id: {type: string}
+        object: {type: string, const: response.deleted}
+        deleted: {type: boolean, const: true}
     EmbeddingRequest:
       type: object
       additionalProperties: false

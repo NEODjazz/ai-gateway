@@ -10,6 +10,7 @@ Gateway реализует OpenAI-compatible endpoints:
 | `POST /v1/chat/completions` | Chat, tools, structured output и vision |
 | `POST /v1/responses` | Responses, continuity, function tools и MCP passthrough |
 | `GET /v1/responses/{id}` | Чтение сохраненного Response владельцем credential |
+| `DELETE /v1/responses/{id}` | Удаление сохраненного Response и ownership binding |
 | `POST /v1/responses/{id}/cancel` | Отмена сохраненного background Response владельцем credential |
 | `GET /v1/responses/{id}/input_items` | Страница исходных input items сохраненного Response |
 | `POST /v1/embeddings` | String или массив строк |
@@ -915,7 +916,7 @@ change, covered by local HTTP payload tests for both values and default behavior
 `store` controls upstream response storage. An explicit `true` also enables the
 gateway ownership binding required by `GET /v1/responses/{id}`. Gateway logging
 policies remain separate; this option is not a gateway-wide retention switch.
-Delete and other background lifecycle endpoints are not published.
+Other background lifecycle endpoints are not published.
 
 Opaque `encrypted_content` fields are protected during input text processing.
 Local text transformation leaves them unchanged, the remote text-only projection
@@ -1148,3 +1149,11 @@ accepts only bounded `after`, `limit`, `order` and repeated `include` parameters
 The upstream JSON body is capped at 32 MiB and 10,000 items. Items remain raw JSON
 objects so newly introduced provider fields are not silently discarded. Listing
 does not open a generation billing lifecycle.
+
+`DELETE /v1/responses/{id}` removes the upstream resource before deleting its
+ownership binding. Redis compare-and-delete prevents a stale cleanup from removing
+a different immutable record. If Redis cleanup fails after upstream success, the
+gateway returns `503 response_ownership_unavailable` and retains the binding; a
+retry treats upstream 404 as the desired deleted state and retries atomic cleanup.
+Once cleanup succeeds, later requests return `404 response_not_found` without an
+upstream call. Deletion does not open a generation billing lifecycle.

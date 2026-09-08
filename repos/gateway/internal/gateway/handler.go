@@ -376,6 +376,25 @@ func (h Handler) GetResponse(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h Handler) DeleteResponse(w http.ResponseWriter, r *http.Request) {
+	resourceProvider, ok := h.provider.(provider.ResponseDeletionProvider)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "response_lifecycle_unsupported", "response deletion is not supported")
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	reqCtx, ok := h.authorizeResponseResource(w, r, resourceProvider, id)
+	if !ok {
+		return
+	}
+	response, err := resourceProvider.DeleteResponse(r.Context(), reqCtx, id)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func (h Handler) CancelResponse(w http.ResponseWriter, r *http.Request) {
 	resourceProvider, ok := h.provider.(provider.ResponseCancellationProvider)
 	if !ok {

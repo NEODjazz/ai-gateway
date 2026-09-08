@@ -122,6 +122,45 @@ func (p OpenAICompatible) CancelResponse(ctx context.Context, id string) (openai
 	return p.responseResourceRequest(ctx, http.MethodPost, id, "cancel")
 }
 
+func (p OpenAICompatible) DeleteResponse(ctx context.Context, id string) (openai.ResponseDeletion, error) {
+	if !validResponseResourceID(id) {
+		return openai.ResponseDeletion{}, &Error{Class: FailureClientRequest, StatusCode: 400, UpstreamCode: "invalid_request", Param: "response_id", Err: errors.New("invalid response ID")}
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, providerURL(p.baseURL, "responses/"+id), http.NoBody)
+	if err != nil {
+		return openai.ResponseDeletion{}, err
+	}
+	request.Header.Set("Accept", "application/json")
+	if p.apiKey != "" {
+		request.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	client := *p.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	response, err := client.Do(request)
+	if err != nil {
+		return openai.ResponseDeletion{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return openai.ResponseDeletion{}, responseStatusError("openai-compatible", response)
+	}
+	payload, err := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
+	if err != nil {
+		return openai.ResponseDeletion{}, err
+	}
+	if len(payload) > 64<<10 {
+		return openai.ResponseDeletion{}, errors.New("upstream response deletion exceeds 64 KiB")
+	}
+	var result *openai.ResponseDeletion
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return openai.ResponseDeletion{}, err
+	}
+	if result == nil || result.ID != id || result.Object != "response.deleted" || !result.Deleted {
+		return openai.ResponseDeletion{}, errors.New("invalid upstream response deletion")
+	}
+	return *result, nil
+}
+
 func (p OpenAICompatible) responseResourceRequest(ctx context.Context, method, id, action string) (openai.ResponseResponse, error) {
 	if !validResponseResourceID(id) {
 		return openai.ResponseResponse{}, &Error{Class: FailureClientRequest, StatusCode: 400, UpstreamCode: "invalid_request", Param: "response_id", Err: errors.New("invalid response ID")}
