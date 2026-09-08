@@ -1118,3 +1118,11 @@ the lifecycle integration must persist the binding after creation, handle persis
 failure, recheck current authorization and compare the original deployment identity.
 Retention, ID collisions, upstream model aliases and reconstruction after restart
 remain integration requirements; optional affinity alone is not sufficient.
+
+Ownership persistence now requires atomic create-or-equal storage. Redis executes
+comparison and insertion in one Lua operation. An identical retry succeeds without
+refreshing TTL; a different model/deployment binding for the same scoped response
+ID returns an ownership conflict and preserves the original record. The ownership
+store no longer accepts a backend providing only unconditional Set. Concurrency
+and retention tests use an isolated in-process Redis-compatible test server; this
+increment does not enable public lifecycle routes.

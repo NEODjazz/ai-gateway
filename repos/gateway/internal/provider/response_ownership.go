@@ -11,6 +11,8 @@ import (
 	"ai-gateway-gateway/internal/modules"
 )
 
+var errResponseOwnershipConflict = errors.New("response ownership conflict")
+
 var errResponseOwnershipUnavailable = errors.New("response ownership storage is unavailable")
 
 // Ownership is separate from optional routing affinity. Lifecycle operations
@@ -22,8 +24,11 @@ type responseOwnership struct {
 }
 
 type responseOwnershipStore struct {
-	store SessionStore
-	ttl   time.Duration
+	store interface {
+		Get(context.Context, string) ([]byte, bool, error)
+		SetIfAbsentOrEqual(context.Context, string, []byte, time.Duration) (bool, error)
+	}
+	ttl time.Duration
 }
 
 func responseDeploymentIdentity(endpoint Endpoint) string {
@@ -58,8 +63,12 @@ func (s responseOwnershipStore) put(ctx context.Context, req modules.RequestCont
 	if len(payload) > 4096 {
 		return errors.New("response ownership record exceeds limit")
 	}
-	if err := s.store.Set(ctx, key, payload, s.ttl); err != nil {
+	accepted, err := s.store.SetIfAbsentOrEqual(ctx, key, payload, s.ttl)
+	if err != nil {
 		return errResponseOwnershipUnavailable
+	}
+	if !accepted {
+		return errResponseOwnershipConflict
 	}
 	return nil
 }

@@ -79,3 +79,34 @@ func TestResponseDeploymentIdentityDetectsReplacement(t *testing.T) {
 		}
 	}
 }
+
+func (s *ownershipTestStore) SetIfAbsentOrEqual(ctx context.Context, k string, v []byte, ttl time.Duration) (bool, error) {
+	if s.err != nil {
+		return false, s.err
+	}
+	if old, found := s.data[k]; found {
+		return string(old) == string(v), nil
+	}
+	return true, s.Set(ctx, k, v, ttl)
+}
+
+func TestResponseOwnershipCannotBeReassigned(t *testing.T) {
+	backend := &ownershipTestStore{data: map[string][]byte{}}
+	store := responseOwnershipStore{store: backend, ttl: time.Hour}
+	owner := modules.RequestContext{CredentialID: "key", UserID: "user"}
+	binding := responseOwnership{Endpoint: "first", Model: "m", Deployment: responseDeploymentIdentity(Endpoint{Name: "first"})}
+	for i := 0; i < 2; i++ {
+		if err := store.put(t.Context(), owner, "resp_1", binding); err != nil {
+			t.Fatal(err)
+		}
+	}
+	changed := binding
+	changed.Endpoint = "second"
+	if err := store.put(t.Context(), owner, "resp_1", changed); !errors.Is(err, errResponseOwnershipConflict) {
+		t.Fatalf("collision=%v", err)
+	}
+	got, found, err := store.get(t.Context(), owner, "resp_1")
+	if err != nil || !found || got != binding {
+		t.Fatal("original owner record changed")
+	}
+}
