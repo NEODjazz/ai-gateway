@@ -291,6 +291,7 @@ func EmbeddingInputText(value any) string {
 }
 
 type ResponseRequest struct {
+	Metadata          map[string]string  `json:"metadata,omitempty"`
 	TopLogprobs       *int               `json:"top_logprobs,omitempty"`
 	Truncation        *string            `json:"truncation,omitempty"`
 	Reasoning         *ResponseReasoning `json:"reasoning,omitempty"`
@@ -327,6 +328,7 @@ type ResponseTool struct {
 }
 
 type ResponseResponse struct {
+	Metadata map[string]string `json:"metadata,omitempty"`
 	// InputTokensReported distinguishes an explicit upstream zero from absent usage.
 	InputTokensReported bool                       `json:"-"`
 	Error               *ResponseError             `json:"error,omitempty"`

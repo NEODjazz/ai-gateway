@@ -33,6 +33,7 @@ type openAICompatibleChatRequest struct {
 }
 
 type openAICompatibleResponseRequest struct {
+	Metadata          map[string]string         `json:"metadata,omitempty"`
 	TopLogprobs       *int                      `json:"top_logprobs,omitempty"`
 	Truncation        *string                   `json:"truncation,omitempty"`
 	Reasoning         *openai.ResponseReasoning `json:"reasoning,omitempty"`
@@ -291,7 +292,7 @@ func useMaxCompletionTokens(request *openAICompatibleChatRequest, err error) boo
 
 func (p OpenAICompatible) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs,
+		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: false,
@@ -330,7 +331,7 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 	}
 
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs,
+		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: true,
@@ -723,6 +724,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			// An output snapshot replaces text assembled from earlier events.
 			if _, present := typed["output"]; present {
 				response.OutputText = ""
+			}
+			if _, present := typed["metadata"]; present {
+				response.Metadata = nil
 			}
 			if err := json.Unmarshal(marshaled, &response); err != nil {
 				return err

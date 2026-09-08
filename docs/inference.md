@@ -28,7 +28,7 @@ upstream. Новые поддерживаемые параметры переч�
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
 | `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
-| `/v1/responses` | `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
+| `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `encoding_format`, `dimensions`, `user` |
 | `/v1/rerank` | `provider`, `model`, `query`, `documents`, `top_n`, `rank_fields`, `return_documents`, `max_chunks_per_doc`, `max_tokens_per_doc` |
 
@@ -1081,3 +1081,12 @@ Native Responses adapters normalize the gateway's legacy `max_tokens` alias to
 and the forwarded value matches the output cap selected for token reservation.
 This changes the upstream wire field for clients using the legacy alias while
 preserving their configured token limit.
+
+Responses accepts string-valued `metadata` and forwards it through native
+OpenAI-compatible and Ollama JSON/SSE requests. Upstream response metadata is
+retained in JSON, assembled SSE and synthetic SSE snapshots. An explicit metadata
+snapshot replaces earlier metadata rather than merging stale keys. The upstream
+validates metadata limits. Anthropic conversion and demo reject nonempty metadata
+with `400 unsupported_parameter`; it is not silently mapped to unrelated native
+metadata semantics. Gateway authorization and billing identities are not derived
+from this client-supplied object.

@@ -3143,6 +3143,9 @@ components:
       additionalProperties: false
       required: [model, input]
       properties:
+        metadata:
+          type: object
+          additionalProperties: {type: string}
         reasoning:
           type: object
           additionalProperties: false
@@ -3246,6 +3249,9 @@ components:
       type: object
       required: [id, object, model]
       properties:
+        metadata:
+          type: object
+          additionalProperties: {type: string}
         id: {type: string}
         object: {type: string}
         created_at: {type: integer, format: int64}

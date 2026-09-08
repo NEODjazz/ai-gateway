@@ -43,7 +43,7 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 	}
 	return rejectParameters("anthropic",
 		parameterCheck{"input", hasOpaqueResponseContext(request.Input)},
-		parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
+		parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
 		parameterCheck{"previous_response_id", request.PreviousResponse != ""},
 	)
 }
@@ -135,7 +135,7 @@ func rejectToolCallMetadata(adapter string, messages []openai.Message) error {
 }
 
 func (Demo) ValidateResponseParameters(request openai.ResponseRequest) error {
-	return rejectParameters("demo", parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil})
+	return rejectParameters("demo", parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil})
 }
 
 // Provider-specific reasoning and compaction cannot be flattened into messages.
