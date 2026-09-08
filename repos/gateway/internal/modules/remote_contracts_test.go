@@ -138,7 +138,7 @@ func TestRemoteBillingReceivesCredentialIDButNotBearer(t *testing.T) {
 		if body["phase"] != "reserve" {
 			t.Fatalf("expected reserve phase, got %v", body["phase"])
 		}
-		for _, forbidden := range []string{"request", "response", "response_request", "responses_response", "messages", "anonymization_values"} {
+		for _, forbidden := range []string{"request", "response", "completion_request", "completion_response", "response_request", "responses_response", "messages", "anonymization_values"} {
 			if _, found := body[forbidden]; found {
 				t.Fatalf("billing request contains prompt or full context field %q", forbidden)
 			}
@@ -244,6 +244,27 @@ func TestRemoteBillingCommitsCompactionUsageSeparately(t *testing.T) {
 	committed := billingRequest(&req)
 	if committed.APIType != "responses_compact" || committed.Phase != "commit" || committed.InputTokens != 14 || committed.OutputTokens != 3 || committed.TotalTokens != 17 || committed.UsageEstimated {
 		t.Fatalf("unexpected compaction commit: %+v", committed)
+	}
+}
+
+func TestRemoteBillingReservesAllCompletionCandidatesAndCommitsUsage(t *testing.T) {
+	maxTokens, bestOf := 100, 3
+	req := sensitiveContext()
+	req.CompletionRequest = &openai.CompletionRequest{Provider: "provider", Model: "instruct", Prompt: "private prompt", MaxTokens: &maxTokens, BestOf: &bestOf}
+	reserved := billingRequest(&req)
+	input := openai.CompletionInputTokens(*req.CompletionRequest)
+	if reserved.APIType != "completions" || reserved.InputTokens != input || reserved.OutputTokens != 300 || reserved.TotalTokens != input+300 {
+		t.Fatalf("unexpected completion reserve: %+v", reserved)
+	}
+	req.CompletionResponse = &openai.CompletionResponse{Model: "instruct-v2", Usage: openai.Usage{PromptTokens: 11, CompletionTokens: 9, TotalTokens: 20}}
+	committed := billingRequest(&req)
+	if committed.Phase != "commit" || committed.InputTokens != 11 || committed.OutputTokens != 9 || committed.TotalTokens != 20 || committed.UpstreamModel != "instruct-v2" {
+		t.Fatalf("unexpected completion commit: %+v", committed)
+	}
+	req.CompletionResponse = &openai.CompletionResponse{Model: "instruct-v2"}
+	estimated := billingRequest(&req)
+	if !estimated.UsageEstimated || estimated.InputTokens != input || estimated.OutputTokens != 300 || estimated.TotalTokens != input+300 {
+		t.Fatalf("completion fallback lost reserved candidates: %+v", estimated)
 	}
 }
 

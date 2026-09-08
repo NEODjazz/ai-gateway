@@ -59,6 +59,26 @@ type openAICompatibleCompactRequest struct {
 	Instructions string `json:"instructions,omitempty"`
 }
 
+type openAICompatibleCompletionRequest struct {
+	Model            string         `json:"model"`
+	Prompt           string         `json:"prompt"`
+	BestOf           *int           `json:"best_of,omitempty"`
+	Echo             *bool          `json:"echo,omitempty"`
+	FrequencyPenalty *float64       `json:"frequency_penalty,omitempty"`
+	LogitBias        map[string]int `json:"logit_bias,omitempty"`
+	Logprobs         *int           `json:"logprobs,omitempty"`
+	MaxTokens        *int           `json:"max_tokens,omitempty"`
+	N                *int           `json:"n,omitempty"`
+	PresencePenalty  *float64       `json:"presence_penalty,omitempty"`
+	Seed             *int64         `json:"seed,omitempty"`
+	Stop             any            `json:"stop,omitempty"`
+	Stream           bool           `json:"stream"`
+	Suffix           string         `json:"suffix,omitempty"`
+	Temperature      *float64       `json:"temperature,omitempty"`
+	TopP             *float64       `json:"top_p,omitempty"`
+	User             string         `json:"user,omitempty"`
+}
+
 type openAICompatibleEmbeddingRequest struct {
 	Model          string `json:"model"`
 	Input          any    `json:"input"`
@@ -144,6 +164,36 @@ func (p OpenAICompatible) Rerank(ctx context.Context, request openai.RerankReque
 
 func (OpenAICompatible) SupportsMCP() bool    { return true }
 func (OpenAICompatible) SupportsVision() bool { return true }
+
+func (p OpenAICompatible) Completions(ctx context.Context, request openai.CompletionRequest) (openai.CompletionResponse, error) {
+	upstream := openAICompatibleCompletionRequest{
+		Model: request.Model, Prompt: request.Prompt, BestOf: request.BestOf, Echo: request.Echo,
+		FrequencyPenalty: request.FrequencyPenalty, LogitBias: request.LogitBias, Logprobs: request.Logprobs,
+		MaxTokens: request.MaxTokens, N: request.N, PresencePenalty: request.PresencePenalty, Seed: request.Seed,
+		Stop: request.Stop, Stream: false, Suffix: request.Suffix, Temperature: request.Temperature, TopP: request.TopP, User: request.User,
+	}
+	body, err := json.Marshal(upstream)
+	if err != nil {
+		return openai.CompletionResponse{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(p.baseURL, "completions"), bytes.NewReader(body))
+	if err != nil {
+		return openai.CompletionResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return openai.CompletionResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return openai.CompletionResponse{}, responseStatusError("openai-compatible", resp)
+	}
+	return decodeCompletionResponse(resp.Body)
+}
 
 func (p OpenAICompatible) CompactResponse(ctx context.Context, request openai.ResponseCompactRequest) (openai.CompactedResponse, error) {
 	body, err := json.Marshal(openAICompatibleCompactRequest{Model: request.Model, Input: request.Input, Instructions: request.Instructions})

@@ -136,6 +136,35 @@ func TestOpenAICompatibleCompactsResponseWithoutLosingOpaqueOutput(t *testing.T)
 	}
 }
 
+func TestOpenAICompatibleForwardsNativeCompletionParameters(t *testing.T) {
+	var upstream map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/completions" || r.Header.Get("Authorization") != "Bearer provider-key" {
+			t.Fatalf("unexpected completion request: path=%q authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"id":"cmpl_1","object":"text_completion","created":7,"model":"instruct","choices":[{"index":0,"text":" done","finish_reason":"stop","logprobs":{"text_offset":[0],"token_logprobs":[-0.1],"tokens":[" done"],"top_logprobs":[{" done":-0.1}]}}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}`))
+	}))
+	defer server.Close()
+	bestOf, n, maxTokens, logprobs := 2, 1, 9, 1
+	echo := true
+	response, err := NewOpenAICompatible(server.URL+"/v1", "provider-key", true).Completions(t.Context(), openai.CompletionRequest{
+		Provider: "route-only", Model: "instruct", Prompt: "complete", BestOf: &bestOf, N: &n, MaxTokens: &maxTokens,
+		Logprobs: &logprobs, Echo: &echo, Suffix: "suffix", Stop: []any{"END"}, User: "user-1", Stream: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := upstream["provider"]; found || string(upstream["stream"]) != "false" || string(upstream["best_of"]) != "2" || string(upstream["suffix"]) != `"suffix"` {
+		t.Fatalf("unexpected upstream payload: %+v", upstream)
+	}
+	if response.Usage.TotalTokens != 4 || response.Choices[0].Logprobs == nil || response.Choices[0].Logprobs.Tokens[0] != " done" {
+		t.Fatalf("unexpected completion response: %+v", response)
+	}
+}
+
 func TestOpenAICompatibleRejectsInvalidCompactedResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"id":"cmp_1","object":"response.compaction","output":[null],"usage":{"input_tokens":-1}}`))

@@ -6,6 +6,8 @@ TPM and remote billing reserve use the same context estimator. For chat, it incl
 
 `max_tokens` and `max_completion_tokens` produce identical chat reservations. The public chat API rejects supplying both. Responses uses `max_output_tokens`, with the existing `max_tokens` alias. Without an explicit output cap, reserve includes 1024 output tokens; this estimate does not impose a new upstream generation limit. Applications needing a bounded output reservation should send an explicit cap. Embeddings and rerank do not reserve output generation tokens.
 
+Text completions reserve the prompt once plus `max_tokens` for every server-generated candidate. Candidate count is the larger of `n` and `best_of`; the default output allowance is 16 tokens. Multiplication and addition saturate at the platform integer limit. Provider-reported usage settles the final charge, while a response without usage retains the full candidate reserve as explicitly estimated usage.
+
 The external `X-Request-ID` remains a correlation identifier. Every inference execution receives a server-generated `X-Execution-ID`; client-supplied execution IDs are ignored. Billing lifecycle `request_id` and request-log IDs now identify this execution. Reusing an external correlation ID never makes two inference calls a single billing operation. HTTP logs contain both `request_id` and `execution_id`; traces expose `ai.request.id` and `ai.execution.id`. This intentionally changes billing/request-log ID semantics while preserving payload field names.
 
 ## Cache isolation and memory limits

@@ -232,6 +232,15 @@ func (p *chatProvider) CompactResponse(_ context.Context, req modules.RequestCon
 	}, nil
 }
 
+func (p *chatProvider) Completions(_ context.Context, req modules.RequestContext) (openai.CompletionResponse, error) {
+	p.request = req
+	return openai.CompletionResponse{
+		ID: "cmpl-test", Object: "text_completion", Created: 7, Model: req.CompletionRequest.Model,
+		Choices: []openai.CompletionChoice{{Index: 0, Text: "done", FinishReason: "stop"}},
+		Usage:   openai.Usage{PromptTokens: 3, CompletionTokens: 1, TotalTokens: 4},
+	}, nil
+}
+
 func (p *chatProvider) ChatCompletions(_ context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
 	p.request = req
 	return openai.ChatCompletionResponse{
@@ -299,6 +308,48 @@ func TestCompactResponseUsesAuthenticatedInferencePipeline(t *testing.T) {
 	}
 	if llm.request.Metadata["gateway.api_type"] != "responses_compact" || !strings.Contains(response.Body.String(), `"object":"response.compaction"`) {
 		t.Fatalf("compact contract was not preserved: context=%+v body=%s", llm.request, response.Body.String())
+	}
+}
+
+func TestCompletionsUsesAuthenticatedInferencePipelineAndSyntheticSSE(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		llm := &chatProvider{}
+		handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), llm))
+		body := `{"model":"instruct","prompt":"complete me","max_tokens":8}`
+		if stream {
+			body = `{"model":"instruct","prompt":"complete me","max_tokens":8,"stream":true}`
+		}
+		request := httptest.NewRequest(http.MethodPost, "/v1/completions", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer client-secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || llm.request.APIKey != "" || llm.request.CompletionRequest == nil {
+			t.Fatalf("stream=%v status=%d context=%+v body=%s", stream, response.Code, llm.request, response.Body.String())
+		}
+		if stream {
+			if response.Header().Get("Content-Type") != "text/event-stream" || !strings.Contains(response.Body.String(), `"object":"text_completion"`) || !strings.Contains(response.Body.String(), `"finish_reason":null`) || !strings.Contains(response.Body.String(), "data: [DONE]") {
+				t.Fatalf("invalid completion stream: %s", response.Body.String())
+			}
+		} else if !strings.Contains(response.Body.String(), `"text":"done"`) {
+			t.Fatalf("invalid completion JSON: %s", response.Body.String())
+		}
+	}
+}
+
+func TestCompletionsRejectsInvalidAndUnsupportedRequestShapes(t *testing.T) {
+	handler := Routes(NewHandler(modules.NewPipeline(nil), &chatProvider{}))
+	for _, body := range []string{
+		`{"model":"m","prompt":["one","two"]}`,
+		`{"model":"m","prompt":"x","unknown":true}`,
+		`{"model":"m","prompt":"x","n":2,"best_of":1}`,
+		`{"model":"m","prompt":"x","logprobs":6}`,
+		`{"model":"m","prompt":"x","stream":true,"best_of":2}`,
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/completions", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body=%s status=%d response=%s", body, response.Code, response.Body.String())
+		}
 	}
 }
 

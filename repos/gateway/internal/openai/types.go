@@ -110,6 +110,51 @@ type ChatCompletionResponse struct {
 	Usage   Usage    `json:"usage"`
 }
 
+type CompletionRequest struct {
+	Provider         string         `json:"provider,omitempty"`
+	Model            string         `json:"model"`
+	Prompt           string         `json:"prompt"`
+	BestOf           *int           `json:"best_of,omitempty"`
+	Echo             *bool          `json:"echo,omitempty"`
+	FrequencyPenalty *float64       `json:"frequency_penalty,omitempty"`
+	LogitBias        map[string]int `json:"logit_bias,omitempty"`
+	Logprobs         *int           `json:"logprobs,omitempty"`
+	MaxTokens        *int           `json:"max_tokens,omitempty"`
+	N                *int           `json:"n,omitempty"`
+	PresencePenalty  *float64       `json:"presence_penalty,omitempty"`
+	Seed             *int64         `json:"seed,omitempty"`
+	Stop             any            `json:"stop,omitempty"`
+	Stream           bool           `json:"stream,omitempty"`
+	Suffix           string         `json:"suffix,omitempty"`
+	Temperature      *float64       `json:"temperature,omitempty"`
+	TopP             *float64       `json:"top_p,omitempty"`
+	User             string         `json:"user,omitempty"`
+}
+
+type CompletionResponse struct {
+	ID                string             `json:"id"`
+	Object            string             `json:"object"`
+	Created           int64              `json:"created"`
+	Model             string             `json:"model"`
+	Choices           []CompletionChoice `json:"choices"`
+	SystemFingerprint string             `json:"system_fingerprint,omitempty"`
+	Usage             Usage              `json:"usage"`
+}
+
+type CompletionChoice struct {
+	FinishReason string              `json:"finish_reason"`
+	Index        int                 `json:"index"`
+	Logprobs     *CompletionLogprobs `json:"logprobs,omitempty"`
+	Text         string              `json:"text"`
+}
+
+type CompletionLogprobs struct {
+	TextOffset    []int                `json:"text_offset"`
+	TokenLogprobs []*float64           `json:"token_logprobs"`
+	Tokens        []string             `json:"tokens"`
+	TopLogprobs   []map[string]float64 `json:"top_logprobs"`
+}
+
 type Choice struct {
 	StopSequence *string         `json:"stop_sequence,omitempty"`
 	Logprobs     *ChoiceLogprobs `json:"logprobs,omitempty"`

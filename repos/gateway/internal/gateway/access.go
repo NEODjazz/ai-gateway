@@ -226,6 +226,10 @@ func estimateChatTokens(request openai.ChatCompletionRequest) int {
 	return openai.ReserveTokens(openai.ChatInputTokens(request), openai.ChatOutputLimit(request))
 }
 
+func estimateCompletionTokens(request openai.CompletionRequest) int {
+	return openai.CompletionReserveTokens(request)
+}
+
 func estimateResponseTokens(request openai.ResponseRequest) int {
 	return openai.ReserveTokens(openai.ResponseInputTokens(request), openai.ResponseOutputLimit(request))
 }

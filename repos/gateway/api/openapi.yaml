@@ -364,6 +364,41 @@ paths:
           $ref: '#/components/responses/ContentRejected'
         '502':
           $ref: '#/components/responses/ProviderFailed'
+  /v1/completions:
+    post:
+      operationId: createCompletion
+      tags: [Inference]
+      summary: Create a text completion
+      description: Supports a single string prompt and native completion parameters on adapters with a native completions operation. Streaming uses the text completion SSE contract after the bounded upstream JSON result has passed billing and post-processing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CompletionRequest'}
+            example:
+              model: gpt-3.5-turbo-instruct
+              prompt: Complete this sentence
+              max_tokens: 16
+      responses:
+        '200':
+          description: Text completion JSON or buffered SSE when `stream=true`
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CompletionResponse'}
+            text/event-stream:
+              schema:
+                type: string
+                description: 'Text completion `data:` events terminated by `data: [DONE]`.'
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/RequestTooLarge'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '451': {$ref: '#/components/responses/ContentRejected'}
+        '502': {$ref: '#/components/responses/ProviderFailed'}
   /v1/responses:
     post:
       operationId: createResponse
@@ -3240,6 +3275,87 @@ components:
             cached_tokens: {type: integer, minimum: 0}
             cache_write_tokens: {type: integer, minimum: 0}
             cache_creation_tokens: {type: integer, minimum: 0}
+    CompletionRequest:
+      type: object
+      additionalProperties: false
+      required: [model, prompt]
+      properties:
+        provider: {type: string}
+        model: {type: string, minLength: 1}
+        prompt: {type: string, minLength: 1}
+        best_of: {type: integer, minimum: 1, maximum: 20, description: Must be at least n and cannot exceed 1 with stream=true.}
+        echo: {type: boolean}
+        frequency_penalty: {type: number, minimum: -2, maximum: 2}
+        logit_bias:
+          type: object
+          propertyNames: {pattern: '^[0-9]+$'}
+          additionalProperties: {type: integer, minimum: -100, maximum: 100}
+        logprobs: {type: integer, minimum: 0, maximum: 5}
+        max_tokens: {type: integer, minimum: 0}
+        n: {type: integer, minimum: 1, maximum: 128}
+        presence_penalty: {type: number, minimum: -2, maximum: 2}
+        seed: {type: integer, format: int64}
+        stop:
+          oneOf:
+            - type: string
+              minLength: 1
+            - type: array
+              minItems: 1
+              maxItems: 4
+              items: {type: string, minLength: 1}
+        stream: {type: boolean, default: false}
+        suffix: {type: string}
+        temperature: {type: number, minimum: 0, maximum: 2}
+        top_p: {type: number, minimum: 0, maximum: 1}
+        user: {type: string}
+    CompletionLogprobs:
+      type: object
+      required: [text_offset, token_logprobs, tokens, top_logprobs]
+      properties:
+        text_offset:
+          type: array
+          items: {type: integer, minimum: 0}
+        token_logprobs:
+          type: array
+          items:
+            type: [number, 'null']
+        tokens:
+          type: array
+          items: {type: string}
+        top_logprobs:
+          type: array
+          items:
+            oneOf:
+              - type: object
+                additionalProperties: {type: number}
+              - type: 'null'
+    CompletionChoice:
+      type: object
+      required: [finish_reason, index, text]
+      properties:
+        finish_reason: {type: string}
+        index: {type: integer, minimum: 0, maximum: 127}
+        logprobs:
+          oneOf:
+            - {$ref: '#/components/schemas/CompletionLogprobs'}
+            - type: 'null'
+        text: {type: string}
+    CompletionResponse:
+      type: object
+      additionalProperties: false
+      required: [id, object, created, model, choices, usage]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 512}
+        object: {type: string, const: text_completion}
+        created: {type: integer, minimum: 0}
+        model: {type: string, minLength: 1}
+        choices:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items: {$ref: '#/components/schemas/CompletionChoice'}
+        system_fingerprint: {type: string}
+        usage: {$ref: '#/components/schemas/Usage'}
     ChoiceLogprobs:
       type: object
       properties:

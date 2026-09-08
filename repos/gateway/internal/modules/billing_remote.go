@@ -150,10 +150,19 @@ func billingRequest(req *RequestContext) UsageRequest {
 	}
 	request.InputTokens = request.PromptTokensEstimated
 	request.OutputTokens = requestedOutputTokens(req)
-	if request.OutputTokens == 0 {
+	if request.OutputTokens == 0 && req.CompletionRequest == nil {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
 	}
 	request.TotalTokens = openai.ReserveTokens(request.InputTokens, request.OutputTokens)
+	if req.CompletionRequest != nil {
+		request.Provider = req.CompletionRequest.Provider
+		request.Model = req.CompletionRequest.Model
+		request.APIType = "completions"
+		request.InputTokens = openai.CompletionInputTokens(*req.CompletionRequest)
+		request.PromptTokensEstimated = request.InputTokens
+		request.TotalTokens = openai.CompletionReserveTokens(*req.CompletionRequest)
+		request.OutputTokens = request.TotalTokens - request.InputTokens
+	}
 	if req.ResponseRequest != nil {
 		request.Provider = req.ResponseRequest.Provider
 		request.Model = req.ResponseRequest.Model
@@ -184,6 +193,18 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.UpstreamModel = req.Response.Model
 		request.UsageEstimated = request.TotalTokens == 0
 		if details := req.Response.Usage.PromptTokensDetails; details != nil {
+			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
+			request.CacheWriteInputTokens = nonNegative(firstNonZero(details.CacheWriteTokens, details.CacheCreationTokens))
+		}
+	}
+	if req.CompletionResponse != nil {
+		request.Phase = "commit"
+		request.InputTokens = req.CompletionResponse.Usage.PromptTokens
+		request.OutputTokens = req.CompletionResponse.Usage.CompletionTokens
+		request.TotalTokens = req.CompletionResponse.Usage.TotalTokens
+		request.UpstreamModel = req.CompletionResponse.Model
+		request.UsageEstimated = request.TotalTokens == 0
+		if details := req.CompletionResponse.Usage.PromptTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
 			request.CacheWriteInputTokens = nonNegative(firstNonZero(details.CacheWriteTokens, details.CacheCreationTokens))
 		}
@@ -242,8 +263,14 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.UsageEstimated = false
 	}
 	if request.TotalTokens == 0 && request.CacheStatus != "hit" {
-		request.InputTokens = request.PromptTokensEstimated
-		request.TotalTokens = request.PromptTokensEstimated
+		if req.CompletionRequest != nil {
+			request.InputTokens = openai.CompletionInputTokens(*req.CompletionRequest)
+			request.TotalTokens = openai.CompletionReserveTokens(*req.CompletionRequest)
+			request.OutputTokens = request.TotalTokens - request.InputTokens
+		} else {
+			request.InputTokens = request.PromptTokensEstimated
+			request.TotalTokens = request.PromptTokensEstimated
+		}
 	}
 	return request
 }
@@ -265,6 +292,9 @@ func firstNonZero(values ...int) int {
 }
 
 func requestedOutputTokens(req *RequestContext) int {
+	if req.CompletionRequest != nil {
+		return 0
+	}
 	if req.ResponseRequest != nil {
 		return openai.ResponseOutputLimit(*req.ResponseRequest)
 	}
@@ -272,6 +302,9 @@ func requestedOutputTokens(req *RequestContext) int {
 }
 
 func estimateRequestTokens(req *RequestContext) int {
+	if req.CompletionRequest != nil {
+		return openai.CompletionInputTokens(*req.CompletionRequest)
+	}
 	if req.ResponseRequest != nil {
 		return openai.ResponseInputTokens(*req.ResponseRequest)
 	}

@@ -87,6 +87,34 @@ func ResponseCompactInputTokens(r ResponseCompactRequest) int {
 	}{r.Input, r.Instructions})
 }
 
+func CompletionInputTokens(r CompletionRequest) int {
+	return EstimateContextTokens(r.Prompt)
+}
+
+func CompletionReserveTokens(r CompletionRequest) int {
+	output := 16
+	if r.MaxTokens != nil {
+		output = max(0, *r.MaxTokens)
+	}
+	candidates := 1
+	if r.N != nil {
+		candidates = max(candidates, *r.N)
+	}
+	if r.BestOf != nil {
+		candidates = max(candidates, *r.BestOf)
+	}
+	limit := int(^uint(0) >> 1)
+	if candidates > 0 && output > limit/candidates {
+		return limit
+	}
+	generated := output * candidates
+	input := CompletionInputTokens(r)
+	if input > limit-generated {
+		return limit
+	}
+	return input + generated
+}
+
 // ReserveTokens saturates instead of overflowing for an untrusted output cap.
 func ReserveTokens(input, output int) int {
 	if output <= 0 {

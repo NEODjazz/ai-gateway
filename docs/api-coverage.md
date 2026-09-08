@@ -24,7 +24,7 @@ availability is not inferred from these tests.
 | Response compaction | Native compact contract, bounded opaque output, model authorization and usage settlement | Additional provider-native compact request options as demand is confirmed |
 | Embeddings | String/list input, float output, compatible and native adapters | Provider compatibility matrix, additional input/output encodings |
 | Rerank | Query/documents, compatible adapter | Provider-specific request and usage matrix |
-| Text completions | Not implemented | Native completion execution and legacy response/SSE contracts |
+| Text completions | Native single-string prompt execution, legacy parameters/response/logprobs, bounded JSON and buffered SSE | Prompt arrays, token arrays and native incremental upstream streaming |
 | Messages | Inbound `/v1/messages` JSON/SSE over the shared Chat pipeline; outbound Anthropic adapter | Thinking, prompt-cache controls, server tools and prefill |
 | Anthropic token counting | Native Anthropic/Gemini counters behind `/v1/messages/count_tokens` with authorization, policy, input quotas and bounded transport | Advanced native content blocks and additional provider counters |
 | GenerateContent | Native inbound JSON/SSE and context token counting through shared policy; outbound Gemini chat/tools/vision | Advanced native options and cloud credentials |

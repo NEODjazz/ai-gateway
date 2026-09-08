@@ -32,6 +32,21 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	if ResponseCompactInputTokens(compact) < 1000 {
 		t.Fatal("compaction instructions omitted")
 	}
+	maxTokens, bestOf := 100, 3
+	completion := CompletionRequest{Prompt: "test", MaxTokens: &maxTokens, BestOf: &bestOf}
+	if CompletionReserveTokens(completion) != CompletionInputTokens(completion)+300 {
+		t.Fatal("completion best_of reserve omitted generated candidates")
+	}
+	zero := 0
+	completion.MaxTokens, completion.BestOf = &zero, nil
+	if CompletionReserveTokens(completion) != CompletionInputTokens(completion) {
+		t.Fatal("explicit zero completion output was replaced by a default reserve")
+	}
+	maxTokens = int(^uint(0) >> 1)
+	completion.MaxTokens, completion.BestOf = &maxTokens, &bestOf
+	if CompletionReserveTokens(completion) != int(^uint(0)>>1) {
+		t.Fatal("completion reserve overflow")
+	}
 	if ReserveTokens(20, 0) != 20+DefaultOutputTokenReserve {
 		t.Fatal("missing default reserve")
 	}

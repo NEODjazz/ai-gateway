@@ -245,6 +245,113 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h Handler) Completions(w http.ResponseWriter, r *http.Request) {
+	var request openai.CompletionRequest
+	if !decodeInferenceRequest(w, r, &request) {
+		return
+	}
+	if message := validateCompletionRequest(request); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
+	reqCtx := modules.RequestContext{
+		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r),
+		CompletionRequest: &request,
+		Request: openai.ChatCompletionRequest{
+			Provider: request.Provider, Model: request.Model, Messages: []openai.Message{{Role: "user", Content: request.Prompt}},
+		},
+	}
+	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
+		return
+	}
+	reqCtx.APIKey = ""
+	if reqCtx.CompletionRequest == nil || len(reqCtx.Request.Messages) != 1 {
+		writeError(w, http.StatusBadGateway, "module_failed", "module removed completion request")
+		return
+	}
+	request = *reqCtx.CompletionRequest
+	request.Provider = reqCtx.Request.Provider
+	request.Model = reqCtx.Request.Model
+	request.Prompt = openai.ContentText(reqCtx.Request.Messages[0].Content)
+	*reqCtx.CompletionRequest = request
+	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateCompletionTokens(request)) {
+		return
+	}
+	if !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+		return
+	}
+	completionProvider, ok := h.provider.(provider.CompletionProvider)
+	if !ok {
+		writeError(w, http.StatusBadGateway, "provider_failed", "text completions are not supported by the configured provider")
+		return
+	}
+	response, err := completionProvider.Completions(r.Context(), reqCtx)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	if request.Stream {
+		writeCompletionStream(w, response)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func validateCompletionRequest(request openai.CompletionRequest) string {
+	if strings.TrimSpace(request.Model) == "" {
+		return "model is required"
+	}
+	if request.Prompt == "" {
+		return "prompt is required and must be a string"
+	}
+	if request.MaxTokens != nil && *request.MaxTokens < 0 {
+		return "max_tokens must be nonnegative"
+	}
+	n := 1
+	if request.N != nil {
+		n = *request.N
+		if n < 1 || n > 128 {
+			return "n must be between 1 and 128"
+		}
+	}
+	if request.BestOf != nil {
+		if *request.BestOf < 1 || *request.BestOf > 20 || *request.BestOf < n {
+			return "best_of must be between n and 20"
+		}
+		if request.Stream && *request.BestOf > 1 {
+			return "best_of greater than 1 cannot be streamed"
+		}
+	}
+	if request.Logprobs != nil && (*request.Logprobs < 0 || *request.Logprobs > 5) {
+		return "logprobs must be between 0 and 5"
+	}
+	for _, value := range []*float64{request.FrequencyPenalty, request.PresencePenalty} {
+		if value != nil && (*value < -2 || *value > 2) {
+			return "frequency_penalty and presence_penalty must be between -2 and 2"
+		}
+	}
+	if request.Temperature != nil && (*request.Temperature < 0 || *request.Temperature > 2) {
+		return "temperature must be between 0 and 2"
+	}
+	if request.TopP != nil && (*request.TopP < 0 || *request.TopP > 1) {
+		return "top_p must be between 0 and 1"
+	}
+	if _, valid := openai.StopSequences(request.Stop); !valid {
+		return "stop must contain between 1 and 4 non-empty strings"
+	}
+	for token, bias := range request.LogitBias {
+		if _, err := strconv.ParseUint(token, 10, 64); err != nil || bias < -100 || bias > 100 {
+			return "logit_bias requires nonnegative token IDs and biases between -100 and 100"
+		}
+	}
+	return ""
+}
+
 func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	var request openai.ResponseRequest
 	if !decodeInferenceRequest(w, r, &request) {
@@ -757,6 +864,10 @@ func decodeInferenceRequest(w http.ResponseWriter, r *http.Request, target any) 
 }
 
 func writeProviderFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, provider.ErrCompletionsUnsupported) {
+		writeProviderParameterError(w, http.StatusBadRequest, "unsupported_operation", "text completions are not supported by the selected deployment", "")
+		return
+	}
 	if errors.Is(err, provider.ErrResponseCompactionUnsupported) {
 		writeProviderParameterError(w, http.StatusBadRequest, "unsupported_operation", "response compaction is not supported by the selected deployment", "")
 		return
@@ -982,6 +1093,32 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 		"choices": []any{},
 		"usage":   response.Usage,
 	})
+	writeSSEDone(w)
+}
+
+func writeCompletionStream(w http.ResponseWriter, response openai.CompletionResponse) {
+	writeStreamHeaders(w)
+	w.WriteHeader(http.StatusOK)
+	for _, choice := range response.Choices {
+		content := map[string]any{
+			"id": response.ID, "object": "text_completion", "created": response.Created, "model": response.Model,
+			"choices": []map[string]any{{
+				"index": choice.Index, "text": choice.Text, "logprobs": choice.Logprobs, "finish_reason": nil,
+			}},
+		}
+		finished := map[string]any{
+			"id": response.ID, "object": "text_completion", "created": response.Created, "model": response.Model,
+			"choices": []map[string]any{{
+				"index": choice.Index, "text": "", "logprobs": nil, "finish_reason": choice.FinishReason,
+			}},
+		}
+		if response.SystemFingerprint != "" {
+			content["system_fingerprint"] = response.SystemFingerprint
+			finished["system_fingerprint"] = response.SystemFingerprint
+		}
+		writeSSE(w, content)
+		writeSSE(w, finished)
+	}
 	writeSSEDone(w)
 }
 

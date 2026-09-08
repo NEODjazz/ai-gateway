@@ -75,6 +75,14 @@ type ResponseCompactClient interface {
 	CompactResponse(ctx context.Context, request openai.ResponseCompactRequest) (openai.CompactedResponse, error)
 }
 
+type CompletionProvider interface {
+	Completions(ctx context.Context, req modules.RequestContext) (openai.CompletionResponse, error)
+}
+
+type CompletionClient interface {
+	Completions(ctx context.Context, request openai.CompletionRequest) (openai.CompletionResponse, error)
+}
+
 type EmbeddingProvider interface {
 	Embeddings(ctx context.Context, req modules.RequestContext) (openai.EmbeddingResponse, error)
 }
@@ -1199,6 +1207,10 @@ func (r Router) Models() []openai.Model {
 func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modules.RequestContext {
 	attemptCtx := req
 	attemptCtx.Request = req.Request
+	if req.CompletionRequest != nil {
+		completionRequest := *req.CompletionRequest
+		attemptCtx.CompletionRequest = &completionRequest
+	}
 	if req.ResponseRequest != nil {
 		responseRequest := *req.ResponseRequest
 		attemptCtx.ResponseRequest = &responseRequest
@@ -1214,6 +1226,7 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		}
 	}
 	attemptCtx.Response = nil
+	attemptCtx.CompletionResponse = nil
 	attemptCtx.ResponsesResponse = nil
 	attemptCtx.CompactedResponse = nil
 	attemptCtx.EmbeddingResponse = nil
@@ -1241,6 +1254,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		if attemptCtx.ResponseRequest != nil {
 			attemptCtx.ResponseRequest.Model = routingModel
 		}
+		if attemptCtx.CompletionRequest != nil {
+			attemptCtx.CompletionRequest.Model = routingModel
+		}
 		if attemptCtx.EmbeddingRequest != nil {
 			attemptCtx.EmbeddingRequest.Model = routingModel
 		}
@@ -1256,6 +1272,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		attemptCtx.Request.Model = upstreamModel
 		if attemptCtx.ResponseRequest != nil {
 			attemptCtx.ResponseRequest.Model = upstreamModel
+		}
+		if attemptCtx.CompletionRequest != nil {
+			attemptCtx.CompletionRequest.Model = upstreamModel
 		}
 		if attemptCtx.EmbeddingRequest != nil {
 			attemptCtx.EmbeddingRequest.Model = upstreamModel

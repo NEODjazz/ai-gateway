@@ -8,6 +8,7 @@ Gateway реализует OpenAI-compatible endpoints:
 | --- | --- |
 | `GET /v1/models` | Модели, доступные текущему credential |
 | `POST /v1/chat/completions` | Chat, tools, structured output и vision |
+| `POST /v1/completions` | Native text completion для одного строкового prompt; JSON и buffered SSE |
 | `POST /v1/responses` | Responses, continuity, function tools и MCP passthrough |
 | `POST /v1/responses/compact` | Native compaction с авторизацией модели и учетом фактического usage |
 | `GET /v1/responses/{id}` | Чтение сохраненного Response владельцем credential |
@@ -33,6 +34,7 @@ upstream. Новые поддерживаемые параметры переч�
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
 | `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
+| `/v1/completions` | `provider`, `model`, `prompt`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `n`, `presence_penalty`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
 | `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/compact` | `provider`, `model`, `input`, `instructions` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `encoding_format`, `dimensions`, `user` |
@@ -43,6 +45,13 @@ adapter дополнительно ограничивают допустимые
 выбором adapter. Свободные JSON-объекты, например `tools[].function.parameters`
 и `response_format.json_schema.schema`, сохраняют произвольные свойства:
 имена полей пользовательской схемы не считаются параметрами inference.
+
+`/v1/completions` следует legacy [text completion contract](https://developers.openai.com/api/reference/java/resources/completions/methods/create).
+Gateway принимает один строковый prompt и передает параметры только адаптеру с
+native completion operation. `n` и `best_of` входят в TPM и billing reserve;
+provider usage закрывает фактическое списание. `stream=true` возвращает
+совместимые SSE events после завершения ограниченного JSON-вызова, поэтому это
+buffered stream без incremental upstream delivery.
 
 ## Capabilities
 
