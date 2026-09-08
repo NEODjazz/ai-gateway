@@ -346,6 +346,9 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			continue
 		}
 		progress.enter(endpoint)
+		if err := validateChatAdapter(endpoint.Provider, request); err != nil {
+			return openai.ChatCompletionResponse{}, err
+		}
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
@@ -499,6 +502,9 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		}
 		progress.enter(endpoint)
 
+		if err := validateChatAdapter(endpoint.Provider, request); err != nil {
+			return openai.ChatCompletionResponse{}, false, err
+		}
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
@@ -635,6 +641,9 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			continue
 		}
 		progress.enter(endpoint)
+		if err := validateResponseAdapter(endpoint.Provider, request); err != nil {
+			return openai.ResponseResponse{}, err
+		}
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
@@ -746,6 +755,9 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 			continue
 		}
 		progress.enter(endpoint)
+		if err := validateEmbeddingAdapter(endpoint.Provider, request); err != nil {
+			return openai.EmbeddingResponse{}, err
+		}
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
@@ -941,6 +953,9 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		}
 		progress.enter(endpoint)
 
+		if err := validateResponseAdapter(endpoint.Provider, request); err != nil {
+			return openai.ResponseResponse{}, false, err
+		}
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {

@@ -103,3 +103,25 @@ cache применяется только к поддерживаемому non-
 Gateway cache hit и provider prompt-cache tokens — разные метрики. Billing и
 Logs сохраняют `cache_status`/`cache_kind`, а также отдельные
 `cache_read_input_tokens` и `cache_write_input_tokens`.
+
+## Adapter parameter policy
+
+Параметр должен сохранять смысл при преобразовании adapter. Поля, которые
+текущая реализация native adapter не передаёт, возвращают HTTP 400
+`unsupported_parameter` с `param`. Проверка выполняется до provider modules,
+резервирования billing, cache lookup и отправки upstream. Такая ошибка является
+терминальной и не запускает retry/fallback с потерей параметра. Прямые вызовы
+adapter используют те же проверки, включая streaming.
+
+| Adapter / endpoint | Явно отклоняемые поля |
+| --- | --- |
+| Anthropic chat | `stop`, `seed`, `parallel_tool_calls` |
+| Anthropic Responses | `previous_response_id`, `parallel_tool_calls` |
+| Ollama native chat | `tool_choice`, `parallel_tool_calls` |
+| Ollama embeddings | `user`; `encoding_format`, отличный от `float` |
+
+Остальные верхнеуровневые поля действующего OpenAI-compatible контракта
+передаются соответствующим upstream wire request. Это не подтверждает поддержку
+параметра каждой моделью: upstream может вернуть собственную ошибку.
+Native adapter ограничения выше являются изменением совместимости для клиентов,
+которые раньше отправляли эти поля и получали ответ с молча потерянной настройкой.

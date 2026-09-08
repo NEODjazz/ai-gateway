@@ -90,6 +90,9 @@ func NewOllama(baseURL string, upstreamStream bool) Ollama {
 func (Ollama) SupportsVision() bool { return true }
 
 func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	if err := p.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	body, err := json.Marshal(ollamaChatRequest{
 		Model:    request.Model,
 		Messages: ollamaMessages(request.Messages),
@@ -149,6 +152,9 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 }
 
 func (p Ollama) Embeddings(ctx context.Context, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
+	if err := p.ValidateEmbeddingParameters(request); err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
 	body, err := json.Marshal(ollamaEmbeddingRequest{Model: request.Model, Input: request.Input, Dimensions: request.Dimensions})
 	if err != nil {
 		return openai.EmbeddingResponse{}, err
@@ -181,6 +187,9 @@ func (p Ollama) Embeddings(ctx context.Context, request openai.EmbeddingRequest)
 }
 
 func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+	if err := p.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	if !p.upstreamStream {
 		return openai.ChatCompletionResponse{}, ErrStreamingUnsupported
 	}

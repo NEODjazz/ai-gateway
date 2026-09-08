@@ -87,6 +87,9 @@ func NewAnthropic(baseURL string, apiKey string, upstreamStream bool) Anthropic 
 func (Anthropic) SupportsVision() bool { return true }
 
 func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	if err := p.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	upstreamRequest := anthropicChatRequest(request, false)
 	var response anthropicResponse
 	if err := p.doMessages(ctx, upstreamRequest, &response); err != nil {
@@ -100,6 +103,9 @@ func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompl
 }
 
 func (p Anthropic) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+	if err := p.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	if !p.upstreamStream {
 		return openai.ChatCompletionResponse{}, ErrStreamingUnsupported
 	}
@@ -114,6 +120,9 @@ func (p Anthropic) StreamChatCompletions(ctx context.Context, request openai.Cha
 }
 
 func (p Anthropic) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
+	if err := p.ValidateResponseParameters(request); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	upstreamRequest := anthropicResponsesRequest(request, false)
 	var response anthropicResponse
 	if err := p.doMessages(ctx, upstreamRequest, &response); err != nil {
@@ -127,6 +136,9 @@ func (p Anthropic) Responses(ctx context.Context, request openai.ResponseRequest
 }
 
 func (p Anthropic) StreamResponses(ctx context.Context, request openai.ResponseRequest, write ResponseStreamWriter) (openai.ResponseResponse, error) {
+	if err := p.ValidateResponseParameters(request); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	if !p.upstreamStream {
 		return openai.ResponseResponse{}, ErrStreamingUnsupported
 	}
