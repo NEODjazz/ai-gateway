@@ -1105,3 +1105,16 @@ This transport method does not authorize resource ownership. No public retrieval
 route is enabled yet: the router/handler must first resolve the resource owner,
 original deployment, current credential policy and resource retention state.
 This is a lifecycle implementation step, not completion of the retrieval API.
+
+Lifecycle ownership has a separate storage foundation from routing affinity.
+Records are scoped by gateway credential ID, user ID and response ID, with model,
+endpoint and a hash of deployment name/provider/type/base URL/credential identity.
+Records are bounded to 4 KiB, use an explicit TTL and require a configured shared
+SessionStore; absence, corrupt data and storage failures do not permit an upstream
+lookup. Backend error details are not returned to callers.
+
+This store is not yet wired into create/retrieve routes. Before exposing retrieval,
+the lifecycle integration must persist the binding after creation, handle persistence
+failure, recheck current authorization and compare the original deployment identity.
+Retention, ID collisions, upstream model aliases and reconstruction after restart
+remain integration requirements; optional affinity alone is not sufficient.
