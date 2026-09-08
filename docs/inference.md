@@ -563,3 +563,19 @@ Regression tests cover JSON and streaming with primary/fallback endpoint pins
 across unavailable, context-length, and content-policy errors. They assert the
 original error is preserved and no other endpoint executes. Existing tests also
 verify initial fallback followed by a successful pinned continuation.
+
+### Responses shadow traffic and continuity
+
+Requests with `previous_response_id` are not mirrored to shadow deployments.
+The shadow provider does not own the primary response's state, and the gateway
+has no mapping from primary response IDs to an independently executed shadow
+conversation. This rule applies to JSON and streaming requests regardless of
+whether affinity storage is enabled or its binding is present.
+
+Independent Responses requests retain configured shadow sampling, model alias
+conversion, and bounded asynchronous execution. Continuations still execute on
+their normal primary route and run its billing pipeline. This changes only
+shadow traffic; no conversation history is reconstructed or copied as a fallback.
+Regression tests synchronize asynchronous execution with the standard Go
+`testing/synctest` package and verify initial requests are mirrored, continuations
+are skipped, and primary usage reaches billing exactly once for JSON and SSE.
