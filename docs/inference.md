@@ -1086,7 +1086,8 @@ Responses accepts string-valued `metadata` and forwards it through native
 OpenAI-compatible and Ollama JSON/SSE requests. Upstream response metadata is
 retained in JSON, assembled SSE and synthetic SSE snapshots. An explicit metadata
 snapshot replaces earlier metadata rather than merging stale keys. The upstream
-validates metadata limits. Anthropic conversion and demo reject nonempty metadata
+may apply additional metadata restrictions. The gateway enforces at most 16
+entries, 64 Unicode code points per key and 512 per value before execution. Anthropic conversion and demo reject nonempty metadata
 with `400 unsupported_parameter`; it is not silently mapped to unrelated native
 metadata semantics. Gateway authorization and billing identities are not derived
 from this client-supplied object.

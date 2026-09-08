@@ -3145,7 +3145,9 @@ components:
       properties:
         metadata:
           type: object
-          additionalProperties: {type: string}
+          maxProperties: 16
+          propertyNames: {maxLength: 64}
+          additionalProperties: {type: string, maxLength: 512}
         reasoning:
           type: object
           additionalProperties: false

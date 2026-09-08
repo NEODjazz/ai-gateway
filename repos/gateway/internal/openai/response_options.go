@@ -1,7 +1,17 @@
 package openai
 
+import "unicode/utf8"
+
 // Validate checks provider-independent Responses generation options.
 func (r ResponseRequest) Validate() string {
+	if len(r.Metadata) > 16 {
+		return "metadata must contain at most 16 entries"
+	}
+	for key, value := range r.Metadata {
+		if utf8.RuneCountInString(key) > 64 || utf8.RuneCountInString(value) > 512 {
+			return "metadata keys must be at most 64 characters and values at most 512 characters"
+		}
+	}
 	if r.MaxOutputTokens != nil && r.MaxTokens != nil {
 		return "max_output_tokens and max_tokens are mutually exclusive"
 	}
