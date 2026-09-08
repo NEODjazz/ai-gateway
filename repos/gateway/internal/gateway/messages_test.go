@@ -273,3 +273,14 @@ func TestMessagesAnthropicStreamFinalUsage(t *testing.T) {
 		t.Fatalf("native accounting: code=%d usage=%+v body=%s", response.Code, recorder.usage, response.Body.String())
 	}
 }
+
+func TestMessagesPreservesMatchedStopInJSONAndFallbackStream(t *testing.T) {
+	sequence := " END "
+	for _, stream := range []string{"false", "true"} {
+		upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "m", Model: "model", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "hello"}, FinishReason: "stop", StopSequence: &sequence}}}}
+		response := nativeMessageCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), `{"model":"model","max_tokens":10,"stream":`+stream+`,"messages":[{"role":"user","content":"hi"}]}`, "")
+		if response.Code != 200 || !strings.Contains(response.Body.String(), `"stop_reason":"stop_sequence"`) || !strings.Contains(response.Body.String(), `"stop_sequence":" END "`) {
+			t.Fatalf("matched stop lost: %s", response.Body.String())
+		}
+	}
+}

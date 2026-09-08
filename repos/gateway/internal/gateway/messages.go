@@ -50,6 +50,7 @@ type messagesWriter struct {
 	started, terminal bool
 	model             string
 	finishReason      string
+	stopSequence      *string
 	usage             openai.Usage
 	tools             map[int]int
 	toolArguments     [128]strings.Builder
@@ -175,7 +176,7 @@ func (w *messagesWriter) chunk(payload string) error {
 				return err
 			}
 		}
-		if err := w.event("message_delta", map[string]any{"delta": map[string]any{"stop_reason": w.finishReason, "stop_sequence": nil}, "usage": messagesUsage(w.usage)}); err != nil {
+		if err := w.event("message_delta", map[string]any{"delta": map[string]any{"stop_reason": w.finishReason, "stop_sequence": w.stopSequence}, "usage": messagesUsage(w.usage)}); err != nil {
 			return err
 		}
 		w.terminal = true
@@ -185,9 +186,10 @@ func (w *messagesWriter) chunk(payload string) error {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
 		Choices []struct {
-			Index  int            `json:"index"`
-			Delta  openai.Message `json:"delta"`
-			Finish string         `json:"finish_reason"`
+			Index        int            `json:"index"`
+			Delta        openai.Message `json:"delta"`
+			Finish       string         `json:"finish_reason"`
+			StopSequence *string        `json:"stop_sequence"`
 		} `json:"choices"`
 		Usage *openai.Usage   `json:"usage"`
 		Error json.RawMessage `json:"error"`
@@ -223,6 +225,10 @@ func (w *messagesWriter) chunk(payload string) error {
 				return err
 			}
 			w.finishReason = reason
+		}
+		if choice.StopSequence != nil {
+			w.stopSequence = choice.StopSequence
+			w.finishReason = "stop_sequence"
 		}
 		if text := openai.ContentText(choice.Delta.Content); text != "" {
 			if w.textBlock == nil {
@@ -321,6 +327,9 @@ func (w *messagesWriter) finish() {
 		content, err = messagesContent(response.Choices[0].Message)
 		if err == nil {
 			reason, err = messagesStop(response.Choices[0].FinishReason)
+			if response.Choices[0].StopSequence != nil {
+				reason = "stop_sequence"
+			}
 		}
 	} else {
 		err = errors.New("invalid message response")
@@ -329,7 +338,7 @@ func (w *messagesWriter) finish() {
 		writeJSON(w.destination, 502, map[string]any{"type": "error", "error": map[string]any{"type": "api_error", "message": "provider response cannot be represented as Messages"}})
 		return
 	}
-	writeJSON(w.destination, 200, map[string]any{"id": response.ID, "type": "message", "role": "assistant", "model": response.Model, "content": content, "stop_reason": reason, "stop_sequence": nil, "usage": messagesUsage(response.Usage)})
+	writeJSON(w.destination, 200, map[string]any{"id": response.ID, "type": "message", "role": "assistant", "model": response.Model, "content": content, "stop_reason": reason, "stop_sequence": response.Choices[0].StopSequence, "usage": messagesUsage(response.Usage)})
 }
 
 func validMessagesUsage(usage openai.Usage) bool {
@@ -353,4 +362,8 @@ func (w *messagesWriter) chatStreamResult(response openai.ChatCompletionResponse
 		return
 	}
 	w.usage = response.Usage
+	if len(response.Choices) == 1 && response.Choices[0].StopSequence != nil {
+		w.stopSequence = response.Choices[0].StopSequence
+		w.finishReason = "stop_sequence"
+	}
 }

@@ -260,3 +260,11 @@ reported usage reaching the accounting stage through Router. No live paid
 provider calls were used. Protocol references:
 [Messages](https://platform.claude.com/docs/en/api/messages/create) and
 [streaming](https://platform.claude.com/docs/en/build-with-claude/streaming).
+
+When an adapter reports an exact matched stop sequence, Chat choices preserve it
+in the optional `stop_sequence` result field. Anthropic populates this only for
+its native `stop_sequence` reason; `end_turn` does not invent a match. JSON,
+stream accumulation and fallback SSE retain the value without trimming it.
+Messages then reports native `stop_reason: stop_sequence` with the exact value.
+This is an additive response-contract extension, not permission to accept inbound
+Messages `stop_sequences` on adapters that cannot report the matched delimiter.

@@ -2069,8 +2069,8 @@ components:
         content:
           type: array
           items: {type: object}
-        stop_reason: {type: string, enum: [end_turn, max_tokens, tool_use, refusal]}
-        stop_sequence: {type: 'null'}
+        stop_reason: {type: string, enum: [end_turn, max_tokens, tool_use, refusal, stop_sequence]}
+        stop_sequence: {type: [string, 'null']}
         usage:
           type: object
           required: [input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens]
@@ -2664,6 +2664,7 @@ components:
         index: {type: integer, minimum: 0}
         message: {$ref: '#/components/schemas/Message'}
         finish_reason: {type: string}
+        stop_sequence: {type: string, description: Exact matched sequence when reported by the provider}
         logprobs: {$ref: '#/components/schemas/ChoiceLogprobs'}
     ChatCompletionResponse:
       type: object

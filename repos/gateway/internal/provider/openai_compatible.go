@@ -350,7 +350,7 @@ func providerURL(baseURL string, path string) string {
 	return baseURL + "/v1/" + strings.TrimLeft(path, "/")
 }
 
-func openAIChatCompletionChunkPayload(id string, model string, index int, role string, content string, finishReason *string) string {
+func openAIChatCompletionChunkPayload(id string, model string, index int, role string, content string, finishReason *string, stopSequence ...*string) string {
 	delta := map[string]any{}
 	if role != "" {
 		delta["role"] = role
@@ -358,18 +358,16 @@ func openAIChatCompletionChunkPayload(id string, model string, index int, role s
 	if content != "" {
 		delta["content"] = content
 	}
+	choice := map[string]any{"index": index, "delta": delta, "finish_reason": finishReason}
+	if len(stopSequence) > 0 && stopSequence[0] != nil {
+		choice["stop_sequence"] = stopSequence[0]
+	}
 	payload, err := json.Marshal(map[string]any{
 		"id":      id,
 		"object":  "chat.completion.chunk",
 		"created": time.Now().UTC().Unix(),
 		"model":   model,
-		"choices": []map[string]any{
-			{
-				"index":         index,
-				"delta":         delta,
-				"finish_reason": finishReason,
-			},
-		},
+		"choices": []map[string]any{choice},
 	})
 	if err != nil {
 		return "{}"
@@ -412,6 +410,7 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 					ToolCalls []openai.ToolCall `json:"tool_calls,omitempty"`
 				} `json:"delta"`
 				FinishReason *string                `json:"finish_reason"`
+				StopSequence *string                `json:"stop_sequence"`
 				Logprobs     *openai.ChoiceLogprobs `json:"logprobs"`
 			} `json:"choices"`
 		}
@@ -454,6 +453,9 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			}
 			if choice.FinishReason != nil && *choice.FinishReason != "" {
 				current.FinishReason = *choice.FinishReason
+			}
+			if choice.StopSequence != nil {
+				current.StopSequence = choice.StopSequence
 			}
 		}
 		if write != nil {

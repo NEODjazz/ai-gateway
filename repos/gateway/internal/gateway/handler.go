@@ -677,6 +677,7 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 					"index":         choice.Index,
 					"delta":         map[string]any{},
 					"finish_reason": choice.FinishReason,
+					"stop_sequence": choice.StopSequence,
 				},
 			},
 		})

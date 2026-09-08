@@ -109,6 +109,7 @@ type ChatCompletionResponse struct {
 }
 
 type Choice struct {
+	StopSequence *string         `json:"stop_sequence,omitempty"`
 	Logprobs     *ChoiceLogprobs `json:"logprobs,omitempty"`
 	Index        int             `json:"index"`
 	Message      Message         `json:"message"`

@@ -46,13 +46,14 @@ type anthropicTool struct {
 }
 
 type anthropicResponse struct {
-	ID         string             `json:"id"`
-	Type       string             `json:"type"`
-	Role       string             `json:"role"`
-	Model      string             `json:"model"`
-	Content    []anthropicContent `json:"content"`
-	StopReason string             `json:"stop_reason"`
-	Usage      anthropicUsage     `json:"usage"`
+	ID           string             `json:"id"`
+	Type         string             `json:"type"`
+	Role         string             `json:"role"`
+	Model        string             `json:"model"`
+	Content      []anthropicContent `json:"content"`
+	StopReason   string             `json:"stop_reason"`
+	StopSequence *string            `json:"stop_sequence"`
+	Usage        anthropicUsage     `json:"usage"`
 }
 
 type anthropicContent struct {
@@ -512,6 +513,7 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 				Index:        0,
 				Message:      openai.Message{Role: "assistant", Content: content, ToolCalls: toolCalls},
 				FinishReason: anthropicFinishReason(response.StopReason),
+				StopSequence: anthropicMatchedStop(response.StopReason, response.StopSequence),
 			},
 		},
 		Usage: openai.Usage{
@@ -683,7 +685,8 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			if streamEvent.Delta.StopReason != "" {
 				finishReason := anthropicFinishReason(streamEvent.Delta.StopReason)
 				response.Choices[0].FinishReason = finishReason
-				return write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, "", "", &finishReason))
+				response.Choices[0].StopSequence = anthropicMatchedStop(streamEvent.Delta.StopReason, streamEvent.Delta.StopSequence)
+				return write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, "", "", &finishReason, response.Choices[0].StopSequence))
 			}
 		}
 		return nil
@@ -815,12 +818,20 @@ type anthropicStreamEvent struct {
 	Message      anthropicResponse `json:"message"`
 	ContentBlock anthropicContent  `json:"content_block"`
 	Delta        struct {
-		Type        string `json:"type"`
-		Text        string `json:"text"`
-		PartialJSON string `json:"partial_json"`
-		StopReason  string `json:"stop_reason"`
+		Type         string  `json:"type"`
+		Text         string  `json:"text"`
+		PartialJSON  string  `json:"partial_json"`
+		StopReason   string  `json:"stop_reason"`
+		StopSequence *string `json:"stop_sequence"`
 	} `json:"delta"`
 	Usage anthropicUsage `json:"usage"`
+}
+
+func anthropicMatchedStop(reason string, sequence *string) *string {
+	if reason == "stop_sequence" {
+		return sequence
+	}
+	return nil
 }
 
 func decodeAnthropicStreamEvent(payload string) (anthropicStreamEvent, error) {
