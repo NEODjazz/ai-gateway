@@ -214,3 +214,17 @@ func TestGeminiStreamFinishesAccumulatedToolCalls(t *testing.T) {
 		t.Fatalf("tool stream not completed correctly: %+v %v", response, payloads)
 	}
 }
+
+func TestGeminiToolResponsePreservesJSONObjects(t *testing.T) {
+	for _, value := range []any{map[string]any{"answer": "yes"}, `{"answer":"yes"}`} {
+		result := geminiToolResponse(value)
+		if result["answer"] != "yes" || result["result"] != nil {
+			t.Fatalf("object wrapped as text: %v", result)
+		}
+	}
+	for _, value := range []any{"plain text", `[1,2]`, `null`} {
+		if result := geminiToolResponse(value); result["result"] != value {
+			t.Fatalf("plain tool result changed: %v", result)
+		}
+	}
+}

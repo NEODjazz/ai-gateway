@@ -215,7 +215,7 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 			if !ok || message.ToolCallID == "" {
 				return result, geminiInvalid("messages.tool_call_id")
 			}
-			content.Parts = []geminiPart{{FunctionResponse: &geminiFunctionResponse{ID: message.ToolCallID, Name: name, Response: map[string]any{"result": message.Content}}}}
+			content.Parts = []geminiPart{{FunctionResponse: &geminiFunctionResponse{ID: message.ToolCallID, Name: name, Response: geminiToolResponse(message.Content)}}}
 		default:
 			return result, geminiInvalid("messages.role")
 		}
@@ -316,6 +316,19 @@ func geminiMessageParts(value any) ([]geminiPart, error) {
 	default:
 		return nil, geminiInvalid("messages.content")
 	}
+}
+
+func geminiToolResponse(value any) map[string]any {
+	if object, ok := value.(map[string]any); ok && object != nil {
+		return object
+	}
+	if text, ok := value.(string); ok {
+		var object map[string]any
+		if json.Unmarshal([]byte(text), &object) == nil && object != nil {
+			return object
+		}
+	}
+	return map[string]any{"result": value}
 }
 
 func geminiBaseURL(baseURL string) string {

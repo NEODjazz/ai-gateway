@@ -327,3 +327,25 @@ controls still fail before HTTP. Tests cover complete native context, model alia
 routing, malformed counts, redirect refusal and cancellation. This does not add
 inbound GenerateContent or cloud workload credentials.
 Protocol: [Gemini token counting](https://ai.google.dev/api/tokens).
+
+## GenerateContent request conversion
+
+The internal GenerateContent converter maps native system/contents, inline user
+images, function declarations and results, tool choice, output limits,
+temperature/top-p/seed, stop sequences and JSON output configuration to Chat.
+Native Schema types are normalized to JSON Schema for the supported subset;
+unknown native schema fields require using parametersJsonSchema or
+responseJsonSchema instead. Multiple candidates and unsupported native fields
+are rejected, so output reservation is not silently multiplied.
+
+Function-call signatures are preserved. Missing call IDs receive deterministic
+request-local IDs; response references must match a pending call. An ambiguous
+name-only response is rejected. Native function-response objects are encoded as
+JSON tool content for the shared pipeline. The Gemini adapter now sends object
+results, including strings containing JSON objects, directly as native response
+objects. Plain text and non-object JSON keep the result wrapper. This changes the
+native wire representation of object-valued tool results to avoid double wrapping.
+
+Regression tests cover native context/config conversion and function history
+round-trips through the adapter. This increment is conversion groundwork; no
+inbound GenerateContent HTTP route is exposed yet.
