@@ -958,3 +958,12 @@ This adds an optional typed request object and its OpenAPI schema. HTTP regressi
 tests verify all five fields on the wire for both adapters and modes, alongside
 unsupported-adapter rejection. Fields follow the
 [Responses create contract](https://developers.openai.com/api/reference/cli/resources/responses/methods/create).
+
+Responses usage now retains optional `output_tokens_details.reasoning_tokens`,
+using the existing completion-token detail type. Negative values are rejected
+before forwarding a native SSE event or returning decoded JSON. This detail is
+not added to `output_tokens` or `total_tokens`; those reported counters remain
+unchanged. Tests cover positive/zero details, negative rejection and unchanged
+totals for JSON and native streaming. The OpenAPI response schema includes the
+optional detail object. As with existing token detail types, zero-valued members
+may be omitted when serialized while retaining the detail object.

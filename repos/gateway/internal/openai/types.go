@@ -368,10 +368,11 @@ type ResponseOutputContent struct {
 }
 
 type ResponseUsage struct {
-	InputTokens        int                `json:"input_tokens,omitempty"`
-	OutputTokens       int                `json:"output_tokens,omitempty"`
-	TotalTokens        int                `json:"total_tokens,omitempty"`
-	InputTokensDetails *InputTokenDetails `json:"input_tokens_details,omitempty"`
+	OutputTokensDetails *CompletionTokenDetails `json:"output_tokens_details,omitempty"`
+	InputTokens         int                     `json:"input_tokens,omitempty"`
+	OutputTokens        int                     `json:"output_tokens,omitempty"`
+	TotalTokens         int                     `json:"total_tokens,omitempty"`
+	InputTokensDetails  *InputTokenDetails      `json:"input_tokens_details,omitempty"`
 }
 
 type InputTokenDetails struct {

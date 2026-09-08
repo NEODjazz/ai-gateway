@@ -8,6 +8,9 @@ import (
 )
 
 func validateResponseUsage(usage openai.ResponseUsage) error {
+	if details := usage.OutputTokensDetails; details != nil && details.ReasoningTokens < 0 {
+		return errors.New("invalid negative Responses reasoning token usage")
+	}
 	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.TotalTokens < 0 {
 		return errors.New("invalid negative Responses token usage")
 	}
