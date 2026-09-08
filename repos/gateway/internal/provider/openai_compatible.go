@@ -601,6 +601,21 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			switch event {
 			case "response.output_text.delta", "response.output_text.done":
 				part.Type, part.Refusal = "output_text", ""
+				if value, exists := decoded["logprobs"]; exists {
+					payload, err := json.Marshal(value)
+					if err != nil {
+						return err
+					}
+					var logprobs []openai.TokenLogprob
+					if err := json.Unmarshal(payload, &logprobs); err != nil {
+						return errors.New("invalid Responses logprobs")
+					}
+					if event == "response.output_text.delta" {
+						part.Logprobs = append(part.Logprobs, logprobs...)
+					} else {
+						part.Logprobs = logprobs
+					}
+				}
 				if event == "response.output_text.delta" {
 					if delta, ok := decoded["delta"].(string); ok {
 						part.Text += delta

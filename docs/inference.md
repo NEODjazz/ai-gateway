@@ -1023,3 +1023,13 @@ The text transformation pipeline excludes phase from text-only projections and
 preserves its original value when merging processed content, so anonymization
 cannot rewrite this protocol metadata. This adds an optional output field;
 messages without phase keep their existing representation.
+
+### Responses output token probabilities
+
+Responses output text retains upstream `logprobs`, including token bytes and
+`top_logprobs`. Native SSE deltas append probabilities to the indexed content
+part; an explicit done-event list replaces accumulated values. JSON-to-SSE
+conversion emits probabilities with text delta/done and completed content.
+Clients can request this data with `include: ["message.output_text.logprobs"]`
+when supported by the upstream model. These diagnostic values do not alter usage
+totals or billing.

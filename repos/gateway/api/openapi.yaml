@@ -3190,6 +3190,9 @@ components:
       type: object
       required: [type]
       properties:
+        logprobs:
+          type: array
+          items: {$ref: '#/components/schemas/TokenLogprob'}
         annotations:
           type: array
           items:

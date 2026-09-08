@@ -364,6 +364,7 @@ type ResponseOutputItem struct {
 }
 
 type ResponseOutputContent struct {
+	Logprobs    []TokenLogprob    `json:"logprobs,omitempty"`
 	Annotations []json.RawMessage `json:"annotations,omitempty"`
 	Refusal     string            `json:"refusal,omitempty"`
 	Type        string            `json:"type"`

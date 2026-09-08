@@ -75,6 +75,7 @@ func synthesizeResponseStream(response openai.ResponseResponse, write provider.R
 			empty.Text = ""
 			empty.Refusal = ""
 			empty.Annotations = nil
+			empty.Logprobs = nil
 			fields := func() map[string]any {
 				return map[string]any{"item_id": item.ID, "output_index": index, "content_index": contentIndex}
 			}
@@ -86,11 +87,17 @@ func synthesizeResponseStream(response openai.ResponseResponse, write provider.R
 			if part.Type == "output_text" {
 				data = fields()
 				data["delta"] = part.Text
+				if part.Logprobs != nil {
+					data["logprobs"] = part.Logprobs
+				}
 				if err := emit("response.output_text.delta", data); err != nil {
 					return err
 				}
 				data = fields()
 				data["text"] = part.Text
+				if part.Logprobs != nil {
+					data["logprobs"] = part.Logprobs
+				}
 				if err := emit("response.output_text.done", data); err != nil {
 					return err
 				}
@@ -172,7 +179,11 @@ func syntheticResponsePart(part openai.ResponseOutputContent) any {
 		if annotations == nil {
 			annotations = []json.RawMessage{}
 		}
-		return map[string]any{"type": part.Type, "text": part.Text, "annotations": annotations}
+		result := map[string]any{"type": part.Type, "text": part.Text, "annotations": annotations}
+		if part.Logprobs != nil {
+			result["logprobs"] = part.Logprobs
+		}
+		return result
 	}
 	return part
 }
