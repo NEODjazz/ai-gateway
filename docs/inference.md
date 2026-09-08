@@ -880,3 +880,14 @@ of silently dropping the option. Empty or omitted arrays preserve prior behavior
 Local HTTP regression tests check the actual upstream payload in all four
 forwarding paths and adapter rejection. The public OpenAPI schema includes the
 new optional request field.
+
+Responses also accepts optional boolean `store`. OpenAI-compatible and Ollama
+forward explicit `true` and `false` in JSON and SSE requests; an absent or null
+value leaves the upstream default in effect. Anthropic and Demo reject either
+explicit value with `unsupported_parameter` because these adapters cannot express
+the requested Responses storage control. This is an additive request-schema
+change, covered by local HTTP payload tests for both values and default behavior.
+
+`store` controls upstream response storage only. Gateway cache and logging policies
+are configured separately; this option is not a gateway-wide retention switch.
+It does not publish retrieve/delete/cancel endpoints or a background lifecycle.

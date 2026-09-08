@@ -291,6 +291,7 @@ func EmbeddingInputText(value any) string {
 }
 
 type ResponseRequest struct {
+	Store             *bool          `json:"store,omitempty"`
 	Include           []string       `json:"include,omitempty"`
 	Provider          string         `json:"provider,omitempty"`
 	Model             string         `json:"model"`

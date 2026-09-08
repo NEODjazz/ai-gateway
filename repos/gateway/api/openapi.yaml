@@ -3142,6 +3142,7 @@ components:
       additionalProperties: false
       required: [model, input]
       properties:
+        store: {type: boolean}
         include:
           type: array
           items: {type: string}
