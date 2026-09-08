@@ -788,3 +788,21 @@ lifecycle instead of a successful post-response billing callback. Already emitte
 partial output cannot be recalled. HTTP regression tests cover valid terminal
 states, missing/contradictory outcome payloads, truncation, and billing/failure
 callbacks. Collector fixtures now contain explicit terminal outcomes.
+
+### Responses text part assembly
+
+Native Responses SSE text deltas are assembled by `output_index` and
+`content_index`, preserving each message's item ID. Text `done` events replace
+their part's accumulated text. Content indices use the same bounded validation
+as refusals; invalid indices fail before forwarding the offending event.
+
+The derived `output_text` concatenates all text parts in output/content order,
+excluding refusals and tool arguments. This also applies to decoded JSON
+Responses. A final response output snapshot replaces previously assembled text,
+including when the snapshot contains an empty output array. Top-level text is
+still accepted as a fallback when no nonempty structured text is available.
+
+Regression tests cover interleaved messages and parts, text completion events,
+empty and populated terminal snapshots, invalid content indices and JSON text
+aggregation. The tests also reproduced the earlier behavior through a temporary
+Go overlay before passing with the fix.

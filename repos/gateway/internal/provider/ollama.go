@@ -450,15 +450,16 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 }
 
 func responseText(response openai.ResponseResponse) string {
-	if response.OutputText != "" {
-		return response.OutputText
-	}
+	var text strings.Builder
 	for _, item := range response.Output {
 		for _, content := range item.Content {
-			if content.Type == "output_text" && content.Text != "" {
-				return content.Text
+			if content.Type == "output_text" {
+				text.WriteString(content.Text)
 			}
 		}
 	}
-	return ""
+	if text.Len() > 0 {
+		return text.String()
+	}
+	return response.OutputText
 }

@@ -568,13 +568,10 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				item := ensureResponseOutputItem(&response, outputIndex)
 				item.Type = "function_call"
 				item.Arguments += delta
-			case "response.output_text.delta":
-				response.OutputText += delta
-				textSlot := ensureResponseOutputTextSlot(&response)
-				textSlot.Text += delta
 			}
 		}
-		if event == "response.refusal.delta" || event == "response.refusal.done" {
+		if event == "response.refusal.delta" || event == "response.refusal.done" ||
+			event == "response.output_text.delta" || event == "response.output_text.done" {
 			contentIndex, err := boundedResponseStreamIndex(decoded, "content_index", maxResponseStreamContentParts)
 			if err != nil {
 				return err
@@ -588,13 +585,25 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				item.Content = append(item.Content, openai.ResponseOutputContent{})
 			}
 			part := &item.Content[contentIndex]
-			part.Type, part.Text = "refusal", ""
-			if event == "response.refusal.delta" {
-				if delta, ok := decoded["delta"].(string); ok {
-					part.Refusal += delta
+			switch event {
+			case "response.output_text.delta", "response.output_text.done":
+				part.Type, part.Refusal = "output_text", ""
+				if event == "response.output_text.delta" {
+					if delta, ok := decoded["delta"].(string); ok {
+						part.Text += delta
+					}
+				} else if text, ok := decoded["text"].(string); ok {
+					part.Text = text
 				}
-			} else if refusal, ok := decoded["refusal"].(string); ok {
-				part.Refusal = refusal
+			case "response.refusal.delta", "response.refusal.done":
+				part.Type, part.Text = "refusal", ""
+				if event == "response.refusal.delta" {
+					if delta, ok := decoded["delta"].(string); ok {
+						part.Refusal += delta
+					}
+				} else if refusal, ok := decoded["refusal"].(string); ok {
+					part.Refusal = refusal
+				}
 			}
 		}
 		if itemValue, ok := decoded["item"].(map[string]any); ok {
@@ -611,6 +620,10 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			marshaled, err := json.Marshal(typed)
 			if err != nil {
 				return err
+			}
+			// An output snapshot replaces text assembled from earlier events.
+			if _, present := typed["output"]; present {
+				response.OutputText = ""
 			}
 			if err := json.Unmarshal(marshaled, &response); err != nil {
 				return err
@@ -647,9 +660,7 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 	if !terminal {
 		return openai.ResponseResponse{}, io.ErrUnexpectedEOF
 	}
-	if response.OutputText == "" {
-		response.OutputText = responseText(response)
-	}
+	response.OutputText = responseText(response)
 	return response, nil
 }
 
