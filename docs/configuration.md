@@ -22,6 +22,7 @@ OpenAPI, а не в этом документе.
 | `ROUTING_STRATEGY` | `weighted` | `weighted` или `adaptive` |
 | `ADAPTIVE_ROUTING_EWMA_ALPHA` | `0.2` | Сглаживание adaptive routing |
 | `RESPONSES_AFFINITY_TTL_SECONDS` | `3600` | Affinity для `previous_response_id` |
+| `RESPONSES_OWNERSHIP_TTL_SECONDS` | `2592000` | Срок хранения неизменяемой привязки сохраняемого Response к владельцу и deployment; требует Redis |
 | `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` | пусто | Durable versioned admin state |
 | `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` | ephemeral без DSN | AES-GCM key; с DSN требуется минимум 16 символов |
 | `PROVIDER_CONTROL_PLANE_REFRESH_SECONDS` | `1` | Poll durable revision |

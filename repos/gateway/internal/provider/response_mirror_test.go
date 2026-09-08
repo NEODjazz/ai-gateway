@@ -64,3 +64,41 @@ func TestResponsesMirrorsOnlyIndependentRequests(t *testing.T) {
 		}
 	}
 }
+
+func TestStoredResponsesAreNotMirrored(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				store := true
+				primary := &affinityUsageProvider{}
+				shadow := &responseMirrorCapture{requests: make(chan openai.ResponseRequest, 1)}
+				backend := &ownershipTestStore{data: map[string][]byte{}}
+				router := Router{
+					health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, modules: modules.NewPipeline(nil),
+					ownership: newResponseOwnershipStore(time.Hour, backend),
+					endpoints: []Endpoint{
+						{Name: "primary", Models: []string{"m"}, Capabilities: []string{"responses", "stream"}, Provider: primary},
+						{Name: "shadow", Models: []string{"m"}, Capabilities: []string{"responses", "stream"}, Shadow: true, MirrorPercentage: 100, MirrorTimeout: time.Second, Provider: shadow},
+					},
+				}
+				request := openai.ResponseRequest{Model: "m", Input: "hello", Store: &store}
+				req := modules.RequestContext{RequestID: "request", CredentialID: "tenant", Request: openai.ChatCompletionRequest{Model: "m"}, ResponseRequest: &request}
+				var err error
+				if stream {
+					_, _, err = router.StreamResponses(t.Context(), req, func(string, string) error { return nil })
+				} else {
+					_, err = router.Responses(t.Context(), req)
+				}
+				if err != nil || primary.calls != 1 {
+					t.Fatalf("err=%v calls=%d", err, primary.calls)
+				}
+				synctest.Wait()
+				select {
+				case mirrored := <-shadow.requests:
+					t.Fatalf("stored response sent to shadow: %+v", mirrored)
+				default:
+				}
+			})
+		})
+	}
+}

@@ -1113,16 +1113,23 @@ Records are bounded to 4 KiB, use an explicit TTL and require a configured share
 SessionStore; absence, corrupt data and storage failures do not permit an upstream
 lookup. Backend error details are not returned to callers.
 
-This store is not yet wired into create/retrieve routes. Before exposing retrieval,
-the lifecycle integration must persist the binding after creation, handle persistence
-failure, recheck current authorization and compare the original deployment identity.
-Retention, ID collisions, upstream model aliases and reconstruction after restart
-remain integration requirements; optional affinity alone is not sufficient.
-
 Ownership persistence now requires atomic create-or-equal storage. Redis executes
 comparison and insertion in one Lua operation. An identical retry succeeds without
 refreshing TTL; a different model/deployment binding for the same scoped response
 ID returns an ownership conflict and preserves the original record. The ownership
-store no longer accepts a backend providing only unconditional Set. Concurrency
-and retention tests use an isolated in-process Redis-compatible test server; this
-increment does not enable public lifecycle routes.
+store no longer accepts a backend providing only unconditional Set.
+
+Creation now persists this binding for an explicit `store=true` request. Such a
+request requires a configured Redis-backed ownership store and an authenticated
+gateway credential before provider execution. It bypasses exact response caching
+and shadow mirroring so a stored resource cannot be substituted or duplicated.
+After a successful provider call, post-response accounting completes before the
+binding is written. A storage failure returns `503 response_ownership_unavailable`;
+an ID collision with a different binding returns `409 response_ownership_conflict`.
+Omitted, null or false `store` values retain the existing stateless behavior.
+
+Public retrieval is still disabled. Its route must load this binding, recheck the
+current authorization and compare the original deployment identity before making
+an upstream request. Retention, upstream model aliases and reconstruction after
+restart remain lifecycle integration requirements; optional affinity alone is not
+sufficient.

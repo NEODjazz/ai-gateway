@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
 )
 
-var errResponseOwnershipConflict = errors.New("response ownership conflict")
+var ErrResponseOwnershipConflict = errors.New("response ownership conflict")
 
-var errResponseOwnershipUnavailable = errors.New("response ownership storage is unavailable")
+var ErrResponseOwnershipUnavailable = errors.New("response ownership storage is unavailable")
 
 // Ownership is separate from optional routing affinity. Lifecycle operations
 // must never infer ownership from an upstream ID or fall back on a cache miss.
@@ -29,6 +30,50 @@ type responseOwnershipStore struct {
 		SetIfAbsentOrEqual(context.Context, string, []byte, time.Duration) (bool, error)
 	}
 	ttl time.Duration
+}
+
+func newResponseOwnershipStore(ttl time.Duration, store SessionStore) responseOwnershipStore {
+	immutable, _ := store.(interface {
+		Get(context.Context, string) ([]byte, bool, error)
+		SetIfAbsentOrEqual(context.Context, string, []byte, time.Duration) (bool, error)
+	})
+	return responseOwnershipStore{store: immutable, ttl: ttl}
+}
+
+func (s responseOwnershipStore) configured() bool {
+	return !interfaceIsNil(s.store) && s.ttl > 0
+}
+
+func persistentResponseRequested(request openai.ResponseRequest) bool {
+	return request.Store != nil && *request.Store
+}
+
+func (r Router) validateResponseOwnership(req modules.RequestContext, request openai.ResponseRequest) error {
+	if !persistentResponseRequested(request) {
+		return nil
+	}
+	if !r.ownership.configured() || req.CredentialID == "" {
+		return ErrResponseOwnershipUnavailable
+	}
+	return nil
+}
+
+func (r Router) persistResponseOwnership(ctx context.Context, req modules.RequestContext, request openai.ResponseRequest, model, responseID string, endpoint Endpoint) error {
+	if !persistentResponseRequested(request) {
+		return nil
+	}
+	binding := responseOwnership{
+		Endpoint:   endpoint.Name,
+		Model:      model,
+		Deployment: responseDeploymentIdentity(endpoint),
+	}
+	if err := r.ownership.put(ctx, req, responseID, binding); err != nil {
+		if errors.Is(err, ErrResponseOwnershipConflict) {
+			return err
+		}
+		return ErrResponseOwnershipUnavailable
+	}
+	return nil
 }
 
 func responseDeploymentIdentity(endpoint Endpoint) string {
@@ -54,7 +99,7 @@ func (s responseOwnershipStore) put(ctx context.Context, req modules.RequestCont
 		return errors.New("invalid response ownership record")
 	}
 	if interfaceIsNil(s.store) || s.ttl <= 0 {
-		return errResponseOwnershipUnavailable
+		return ErrResponseOwnershipUnavailable
 	}
 	payload, err := json.Marshal(binding)
 	if err != nil {
@@ -65,10 +110,10 @@ func (s responseOwnershipStore) put(ctx context.Context, req modules.RequestCont
 	}
 	accepted, err := s.store.SetIfAbsentOrEqual(ctx, key, payload, s.ttl)
 	if err != nil {
-		return errResponseOwnershipUnavailable
+		return ErrResponseOwnershipUnavailable
 	}
 	if !accepted {
-		return errResponseOwnershipConflict
+		return ErrResponseOwnershipConflict
 	}
 	return nil
 }
@@ -79,18 +124,18 @@ func (s responseOwnershipStore) get(ctx context.Context, req modules.RequestCont
 		return responseOwnership{}, false, nil
 	}
 	if interfaceIsNil(s.store) || s.ttl <= 0 {
-		return responseOwnership{}, false, errResponseOwnershipUnavailable
+		return responseOwnership{}, false, ErrResponseOwnershipUnavailable
 	}
 	payload, found, err := s.store.Get(ctx, key)
 	if err != nil {
-		return responseOwnership{}, false, errResponseOwnershipUnavailable
+		return responseOwnership{}, false, ErrResponseOwnershipUnavailable
 	}
 	if !found {
 		return responseOwnership{}, false, nil
 	}
 	var binding responseOwnership
 	if len(payload) > 4096 || json.Unmarshal(payload, &binding) != nil || binding.Endpoint == "" || binding.Model == "" || len(binding.Deployment) != 64 {
-		return responseOwnership{}, false, errResponseOwnershipUnavailable
+		return responseOwnership{}, false, ErrResponseOwnershipUnavailable
 	}
 	return binding, true, nil
 }

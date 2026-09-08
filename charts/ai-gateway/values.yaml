@@ -60,6 +60,7 @@ gateway:
     strategy: weighted
     adaptiveEwmaAlpha: "0.2"
     responsesAffinityTtlSeconds: 3600
+    responsesOwnershipTtlSeconds: 2592000
   controlPlane:
     # PostgreSQL is the source of truth; empty DSN keeps runtime-only management.
     postgresDsn: ""

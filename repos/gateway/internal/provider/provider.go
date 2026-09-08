@@ -89,6 +89,7 @@ type Config struct {
 	SessionStore            SessionStore
 	CircuitStore            CircuitStore
 	AffinityTTL             time.Duration
+	ResponseOwnershipTTL    time.Duration
 	SemanticCacheTTL        time.Duration
 	SemanticCacheThreshold  float64
 	SemanticCacheMaxEntries int
@@ -149,6 +150,7 @@ type Router struct {
 	routingStrategy  string
 	adaptive         *adaptiveRouter
 	affinity         affinityStore
+	ownership        responseOwnershipStore
 	semantic         *semanticResponseCache
 	deployments      *deploymentRegistry
 	providers        *managedProviderRegistry
@@ -267,6 +269,7 @@ func NewWithError(cfg Config) (Provider, error) {
 		routingStrategy: strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
 		adaptive:        newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
 		affinity:        newAffinityStore(cfg.AffinityTTL, cfg.SessionStore),
+		ownership:       newResponseOwnershipStore(cfg.ResponseOwnershipTTL, cfg.SessionStore),
 		semantic: newSemanticResponseCache(semanticCacheConfig{
 			ttl: cfg.SemanticCacheTTL, threshold: cfg.SemanticCacheThreshold,
 			maxEntries: cfg.SemanticCacheMaxEntries, maxBytes: cfg.SemanticCacheMaxBytes,
@@ -622,6 +625,9 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 	if err := validateResponseOptions(*req.ResponseRequest); err != nil {
 		return openai.ResponseResponse{}, err
 	}
+	if err := r.validateResponseOwnership(req, *req.ResponseRequest); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 
 	request := *req.ResponseRequest
 	candidates, affinityErr := r.responseCandidates(ctx, req, request, requiredResponseCapabilities(request, false)...)
@@ -667,10 +673,16 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			progress.fail(err)
 			continue
 		}
+		if err := r.validateResponseOwnership(attemptCtx, *attemptCtx.ResponseRequest); err != nil {
+			return openai.ResponseResponse{}, err
+		}
 
 		started := time.Now()
 		lastAttempt = &attemptCtx
-		cacheKey := providerCacheKey("responses", attemptCtx)
+		cacheKey := ""
+		if !persistentResponseRequested(*attemptCtx.ResponseRequest) {
+			cacheKey = providerCacheKey("responses", attemptCtx)
+		}
 		if payload, found, cacheErr := r.cacheGet(ctx, cacheKey); found {
 			if response, ok := decodeCached[openai.ResponseResponse](payload); ok && cacheableResponsesResult(response) {
 				attemptCtx.Metadata["provider.cache.status"] = "hit"
@@ -691,7 +703,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			attemptCtx.Metadata["provider.cache.status"] = "error"
 			log.Printf("provider cache get failed: %v", cacheErr)
 		}
-		if !mirrored {
+		if !mirrored && !persistentResponseRequested(*attemptCtx.ResponseRequest) {
 			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, false)...)
 			mirrored = true
 		}
@@ -716,6 +728,9 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
 			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 				return openai.ResponseResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+			}
+			if err := r.persistResponseOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, request.Model, response.ID, endpoint); err != nil {
+				return openai.ResponseResponse{}, err
 			}
 			return response, nil
 		}
@@ -934,6 +949,9 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 	if err := validateResponseOptions(*req.ResponseRequest); err != nil {
 		return openai.ResponseResponse{}, true, err
 	}
+	if err := r.validateResponseOwnership(req, *req.ResponseRequest); err != nil {
+		return openai.ResponseResponse{}, true, err
+	}
 
 	request := *req.ResponseRequest
 	request.Stream = true
@@ -991,8 +1009,11 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			progress.fail(err)
 			continue
 		}
+		if err := r.validateResponseOwnership(attemptCtx, *attemptCtx.ResponseRequest); err != nil {
+			return openai.ResponseResponse{}, true, err
+		}
 		lastAttempt = &attemptCtx
-		if !mirrored {
+		if !mirrored && !persistentResponseRequested(*attemptCtx.ResponseRequest) {
 			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, true)...)
 			mirrored = true
 		}
@@ -1071,6 +1092,9 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
 		if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 			return openai.ResponseResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+		}
+		if err := r.persistResponseOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, request.Model, response.ID, endpoint); err != nil {
+			return openai.ResponseResponse{}, true, err
 		}
 		return response, true, nil
 	}

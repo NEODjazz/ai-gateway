@@ -99,15 +99,16 @@ type FeatureConfig struct {
 }
 
 type ProviderConfig struct {
-	Default             string
-	Endpoints           []ProviderEndpointConfig
-	GuardrailPolicies   map[string]GuardrailPolicyConfig
-	RoutingStrategy     string
-	AdaptiveEWMAAlpha   float64
-	AffinityTTL         time.Duration
-	CredentialKey       string
-	ControlPlaneDSN     string
-	ControlPlaneRefresh time.Duration
+	Default              string
+	Endpoints            []ProviderEndpointConfig
+	GuardrailPolicies    map[string]GuardrailPolicyConfig
+	RoutingStrategy      string
+	AdaptiveEWMAAlpha    float64
+	AffinityTTL          time.Duration
+	ResponseOwnershipTTL time.Duration
+	CredentialKey        string
+	ControlPlaneDSN      string
+	ControlPlaneRefresh  time.Duration
 }
 
 type GuardrailPolicyConfig struct {
@@ -194,15 +195,16 @@ func Load() Config {
 			DB: envInt("REDIS_DB", 0), Prefix: env("REDIS_PREFIX", "ai-gateway"),
 		},
 		Provider: ProviderConfig{
-			Default:             env("DEFAULT_PROVIDER", env("PROVIDER_TYPE", "demo")),
-			Endpoints:           providerEndpoints,
-			GuardrailPolicies:   loadGuardrailPolicies(),
-			RoutingStrategy:     env("ROUTING_STRATEGY", "weighted"),
-			AdaptiveEWMAAlpha:   envFloat("ADAPTIVE_ROUTING_EWMA_ALPHA", 0.2),
-			AffinityTTL:         time.Duration(envInt("RESPONSES_AFFINITY_TTL_SECONDS", 3600)) * time.Second,
-			CredentialKey:       credentialKey,
-			ControlPlaneDSN:     controlPlaneDSN,
-			ControlPlaneRefresh: time.Duration(envInt("PROVIDER_CONTROL_PLANE_REFRESH_SECONDS", 1)) * time.Second,
+			Default:              env("DEFAULT_PROVIDER", env("PROVIDER_TYPE", "demo")),
+			Endpoints:            providerEndpoints,
+			GuardrailPolicies:    loadGuardrailPolicies(),
+			RoutingStrategy:      env("ROUTING_STRATEGY", "weighted"),
+			AdaptiveEWMAAlpha:    envFloat("ADAPTIVE_ROUTING_EWMA_ALPHA", 0.2),
+			AffinityTTL:          time.Duration(envInt("RESPONSES_AFFINITY_TTL_SECONDS", 3600)) * time.Second,
+			ResponseOwnershipTTL: time.Duration(envInt("RESPONSES_OWNERSHIP_TTL_SECONDS", 2_592_000)) * time.Second,
+			CredentialKey:        credentialKey,
+			ControlPlaneDSN:      controlPlaneDSN,
+			ControlPlaneRefresh:  time.Duration(envInt("PROVIDER_CONTROL_PLANE_REFRESH_SECONDS", 1)) * time.Second,
 		},
 		Catalog: catalog,
 		Telemetry: TelemetryConfig{

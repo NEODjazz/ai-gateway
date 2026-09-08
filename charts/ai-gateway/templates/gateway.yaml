@@ -113,6 +113,8 @@ spec:
               value: {{ .Values.gateway.routing.adaptiveEwmaAlpha | quote }}
             - name: RESPONSES_AFFINITY_TTL_SECONDS
               value: {{ .Values.gateway.routing.responsesAffinityTtlSeconds | quote }}
+            - name: RESPONSES_OWNERSHIP_TTL_SECONDS
+              value: {{ .Values.gateway.routing.responsesOwnershipTtlSeconds | quote }}
             - name: PROVIDER_CONTROL_PLANE_REFRESH_SECONDS
               value: {{ .Values.gateway.controlPlane.refreshSeconds | quote }}
             - name: PROVIDER_CONTROL_PLANE_POSTGRES_DSN

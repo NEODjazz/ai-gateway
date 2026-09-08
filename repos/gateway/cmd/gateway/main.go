@@ -78,6 +78,7 @@ func main() {
 		RoutingStrategy:         cfg.Provider.RoutingStrategy,
 		AdaptiveEWMAAlpha:       cfg.Provider.AdaptiveEWMAAlpha,
 		AffinityTTL:             cfg.Provider.AffinityTTL,
+		ResponseOwnershipTTL:    cfg.Provider.ResponseOwnershipTTL,
 		SemanticCacheTTL:        time.Duration(cfg.Cache.Semantic.TTLSeconds) * time.Second,
 		SemanticCacheThreshold:  cfg.Cache.Semantic.Threshold,
 		SemanticCacheMaxEntries: cfg.Cache.Semantic.MaxEntries,

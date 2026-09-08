@@ -539,6 +539,14 @@ func writeProviderFailure(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusServiceUnavailable, "response_affinity_unavailable", "response session storage is unavailable")
 		return
 	}
+	if errors.Is(err, provider.ErrResponseOwnershipUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "response_ownership_unavailable", "response ownership storage is unavailable")
+		return
+	}
+	if errors.Is(err, provider.ErrResponseOwnershipConflict) {
+		writeError(w, http.StatusConflict, "response_ownership_conflict", "response ownership conflict")
+		return
+	}
 	if errors.Is(err, modules.ErrContentRejected) {
 		writeError(w, http.StatusUnavailableForLegalReasons, "content_rejected", "content rejected")
 		return

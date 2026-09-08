@@ -581,6 +581,29 @@ func TestProviderBillingConflictReturns409(t *testing.T) {
 	}
 }
 
+func TestProviderResponseOwnershipFailuresAreNormalized(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{name: "storage unavailable", err: errors.Join(errors.New("redis password=secret"), provider.ErrResponseOwnershipUnavailable), status: http.StatusServiceUnavailable, code: "response_ownership_unavailable"},
+		{name: "ownership conflict", err: errors.Join(errors.New("deployment=secret"), provider.ErrResponseOwnershipConflict), status: http.StatusConflict, code: "response_ownership_conflict"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			writeProviderFailure(recorder, test.err)
+			if recorder.Code != test.status || !strings.Contains(recorder.Body.String(), `"code":"`+test.code+`"`) {
+				t.Fatalf("unexpected response: status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if strings.Contains(recorder.Body.String(), "secret") {
+				t.Fatalf("ownership details leaked: %s", recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestModelGrantRejectsRequestBeforeProvider(t *testing.T) {
 	provider := &chatProvider{}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{
