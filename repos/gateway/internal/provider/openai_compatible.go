@@ -539,8 +539,14 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			return io.EOF
 		}
 		var decoded map[string]any
-		if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+		decoder := json.NewDecoder(strings.NewReader(payload))
+		decoder.UseNumber()
+		if err := decoder.Decode(&decoded); err != nil {
 			return err
+		}
+		var extra any
+		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+			return errors.New("invalid trailing data in Responses SSE event")
 		}
 		if event == "" {
 			event = eventName(decoded)
@@ -640,6 +646,11 @@ func boundedResponseStreamIndex(decoded map[string]any, field string, limit int)
 		return 0, nil
 	}
 	value, ok := raw.(float64)
+	if number, isNumber := raw.(json.Number); isNumber {
+		var err error
+		value, err = number.Float64()
+		ok = err == nil
+	}
 	// Check the small range before converting to int, including on 32-bit builds.
 	if !ok || !(value >= 0 && value < float64(limit)) || value != float64(int(value)) {
 		return 0, fmt.Errorf("invalid upstream response %s", field)

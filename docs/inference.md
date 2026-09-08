@@ -724,3 +724,17 @@ The Go response type gains an additive internal field excluded from JSON; client
 see no new wire field. Other native adapters keep their existing presence behavior.
 Regression tests cover missing, null, output-only, zero and positive usage in both
 JSON and SSE, partial snapshots, and exclusion of the internal marker from JSON.
+
+### Exact integer usage in native Responses SSE
+
+Native Responses events retain JSON numbers during intermediate decoding instead
+of converting them to float64. Typed token counters therefore keep exact integer
+values above 2^53 and through the platform integer maximum, matching JSON-response
+decoding. Existing integer-range and negative-usage validation still applies.
+This fixes one-token rounding and rejection of otherwise representable counters.
+
+Only bounded output/content indices are converted to floating point for the
+existing small-range index validation. Events must still contain a single JSON
+value; trailing documents or junk are rejected before forwarding. Regression tests
+compare JSON and SSE counters at precision boundaries and preserve trailing-data
+rejection and integer-valued index representations.
