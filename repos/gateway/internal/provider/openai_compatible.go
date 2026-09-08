@@ -188,9 +188,26 @@ func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.Embeddi
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return openai.EmbeddingResponse{}, responseStatusError("openai-compatible", resp)
 	}
-	var response openai.EmbeddingResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	var upstream struct {
+		openai.EmbeddingResponse
+		Usage *struct {
+			openai.Usage
+			PromptTokens *int `json:"prompt_tokens"`
+			TotalTokens  *int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&upstream); err != nil {
 		return openai.EmbeddingResponse{}, err
+	}
+	response := upstream.EmbeddingResponse
+	if usage := upstream.Usage; usage != nil {
+		if usage.PromptTokens == nil || usage.TotalTokens == nil || *usage.PromptTokens < 0 || *usage.TotalTokens < *usage.PromptTokens || usage.CompletionTokens != 0 {
+			return openai.EmbeddingResponse{}, errors.New("invalid embedding usage")
+		}
+		response.Usage = usage.Usage
+		response.Usage.PromptTokens = *usage.PromptTokens
+		response.Usage.TotalTokens = *usage.TotalTokens
+		response.UsageReported = true
 	}
 	return response, nil
 }

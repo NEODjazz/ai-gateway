@@ -153,6 +153,7 @@ func TestOllamaConvertsVisionContentToNativeImages(t *testing.T) {
 }
 
 func TestOllamaEmbeddingsMapsNativeContract(t *testing.T) {
+	promptTokens := 4
 	var upstream ollamaEmbeddingRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/embed" {
@@ -161,7 +162,7 @@ func TestOllamaEmbeddingsMapsNativeContract(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
 			t.Fatal(err)
 		}
-		_ = json.NewEncoder(w).Encode(ollamaEmbeddingResponse{Model: "nomic-embed", Embeddings: [][]float64{{0.25, 0.75}, {0.5, 0.5}}, PromptEvalCount: 4})
+		_ = json.NewEncoder(w).Encode(ollamaEmbeddingResponse{Model: "nomic-embed", Embeddings: [][]float64{{0.25, 0.75}, {0.5, 0.5}}, PromptEvalCount: &promptTokens})
 	}))
 	defer server.Close()
 	dimensions := 2

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -76,7 +77,7 @@ type ollamaEmbeddingRequest struct {
 type ollamaEmbeddingResponse struct {
 	Model           string      `json:"model"`
 	Embeddings      [][]float64 `json:"embeddings"`
-	PromptEvalCount int         `json:"prompt_eval_count"`
+	PromptEvalCount *int        `json:"prompt_eval_count"`
 }
 
 func NewOllama(baseURL string, upstreamStream bool) Ollama {
@@ -176,13 +177,21 @@ func (p Ollama) Embeddings(ctx context.Context, request openai.EmbeddingRequest)
 	if err := json.NewDecoder(resp.Body).Decode(&upstream); err != nil {
 		return openai.EmbeddingResponse{}, err
 	}
+	tokens := 0
+	if upstream.PromptEvalCount != nil {
+		tokens = *upstream.PromptEvalCount
+		if tokens < 0 {
+			return openai.EmbeddingResponse{}, errors.New("invalid Ollama embedding usage")
+		}
+	}
 	data := make([]openai.Embedding, len(upstream.Embeddings))
 	for index, vector := range upstream.Embeddings {
 		data[index] = openai.Embedding{Object: "embedding", Embedding: vector, Index: index}
 	}
 	return openai.EmbeddingResponse{
 		Object: "list", Data: data, Model: upstream.Model,
-		Usage: openai.Usage{PromptTokens: upstream.PromptEvalCount, TotalTokens: upstream.PromptEvalCount},
+		UsageReported: upstream.PromptEvalCount != nil,
+		Usage:         openai.Usage{PromptTokens: tokens, TotalTokens: tokens},
 	}, nil
 }
 
