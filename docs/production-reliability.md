@@ -157,3 +157,25 @@ These runtime smoke checks did not perform authenticated external inference or
 browser visual QA. PostgreSQL integration and UI component tests were not rerun
 for this rollout; their earlier execution is recorded above. No deployment
 credentials, runtime settings, or database contents were changed.
+
+## Responses accounting PostgreSQL verification (2026-09-08)
+
+Source revision `d0ecfbb` passed `scripts/test-postgres-integration.sh` with Go
+1.25.13 against PostgreSQL 16 in Rancher Desktop's dedicated test container.
+The script applied migrations and ran `go test -race -count=1 ./...` for gateway,
+auth and billing with `POSTGRES_INTEGRATION_REQUIRED=true`. All three modules
+completed successfully; database tests were supplied their required DSNs.
+
+Fresh databases were `verify_d0ecfbb_854728_gateway`,
+`verify_d0ecfbb_854728_auth`, and `verify_d0ecfbb_854728_billing`, exposed only
+through the test container's existing loopback port. Coverage includes atomic
+budget reservations, joint budget/outbox rollback, durable and idempotent outbox,
+worker restart/delivery failure, budget overflow, auth key persistence and control
+plane storage. This complements the native Responses JSON/SSE regression tests;
+it is not a live external-provider billing test.
+
+The test container was returned to its original stopped state and its databases
+were retained. Deployment databases and running stack resources were not changed.
+The existing CI `postgres-integration` job invokes the same script with required
+PostgreSQL testing, but GitHub Actions was not dispatched by this local check.
+This verification did not update the deployed gateway image or rerun browser QA.
