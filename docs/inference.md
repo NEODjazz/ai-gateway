@@ -60,7 +60,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `openai`, `openai-compatible`, `openrouter` | OpenAI wire format; Azure-style base URL поддерживается |
 | `anthropic` | Преобразование chat/tools/vision в native Messages API |
 | `ollama` | Native chat/stream/embeddings |
-| `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output; API key |
+| `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output, text embeddings; API key |
 | `demo` | Локальный deterministic fallback для разработки |
 
 OpenAI-compatible adapter один раз повторяет запрос с
@@ -198,8 +198,9 @@ are limited to 32 MiB and the accumulated SSE wire payload to 64 MiB.
 
 Discovery follows native pagination with a 30-second overall deadline, a maximum
 of 100 pages/10,000 scanned models and repeated-token detection. Only models
-advertising `generateContent` are offered. Native Responses, embeddings, inbound
-Advanced inbound GenerateContent options, Interactions and cloud workload identity remain separate gaps.
+advertising `generateContent`, `embedContent` or `batchEmbedContents` are offered.
+Native Responses, advanced inbound GenerateContent options, Interactions and cloud
+workload identity remain separate gaps.
 Unsupported generation controls, parallel tool control and strict function
 schemas fail explicitly; seed/output limits must fit the native integer range.
 
@@ -422,3 +423,28 @@ unsupported; callers can use the explicit JSON Schema fields when appropriate.
 
 Regression tests validate accepted/rejected instances against converted schemas,
 including nullable enums, nested alternatives and exact int64 serialization.
+
+
+### Native Gemini embeddings
+
+Provider type `gemini` supports `/v1/embeddings` through synchronous
+`batchEmbedContents`. Configure an embedding model alias and the `embeddings`
+capability on its deployment; discovery now includes embedding models. A request
+contains one string or up to 100 strings and produces vectors in the same order.
+Optional `dimensions` is forwarded as outputDimensionality. The adapter requires
+float output and rejects user metadata and token-ID inputs.
+
+Requests use API-key headers, a 30-second deadline and no redirects. Responses
+are limited to 32 MiB and must contain exactly one nonempty vector per input,
+consistent dimensions (at most 65536), and the requested dimension when set.
+Provider/model limits may be stricter. Native usageMetadata.promptTokenCount is
+used when present, including zero. If usage is absent, the gateway's existing
+context estimator supplies usage; this is not model-specific tokenization.
+Malformed usage is rejected rather than replaced with an estimate.
+
+The internal EmbeddingResponse type has a non-JSON UsageReported flag so a reported
+zero survives usage merging. The public response schema is unchanged. Native
+adapter and endpoint tests cover vector order, alias routing, credentials, quotas,
+parameter rejection before billing, reported usage, response bounds and redirects.
+Task-specific embedding options, multimodal input and asynchronous batches remain
+separate gaps. [Native embedding protocol](https://ai.google.dev/api/embeddings).

@@ -26,7 +26,7 @@ func TestGeminiDiscoveryPaginatesAndFiltersCapabilities(t *testing.T) {
 	}))
 	defer server.Close()
 	models, err := discoverGeminiModels(context.Background(), server.URL, "fake-key")
-	if err != nil || calls != 2 || len(models) != 2 || models[0].ID != "a" || models[1].ID != "z" {
+	if err != nil || calls != 2 || len(models) != 3 || models[0].ID != "a" || models[1].ID != "embed" || models[2].ID != "z" {
 		t.Fatalf("discovery: models=%v calls=%d err=%v", models, calls, err)
 	}
 }

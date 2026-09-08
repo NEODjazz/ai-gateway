@@ -62,7 +62,7 @@ func discoverGeminiModels(ctx context.Context, baseURL, secret string) ([]Discov
 		}
 		for _, model := range body.Models {
 			name := strings.TrimPrefix(model.Name, "models/")
-			if name != "" && len(name) <= 256 && slices.Contains(model.Methods, "generateContent") {
+			if name != "" && len(name) <= 256 && (slices.Contains(model.Methods, "generateContent") || slices.Contains(model.Methods, "embedContent") || slices.Contains(model.Methods, "batchEmbedContents")) {
 				models[name] = true
 			}
 		}

@@ -1499,7 +1499,7 @@ func mergeResponseUsage(response *openai.ResponseResponse, usage *openai.Usage) 
 }
 
 func mergeEmbeddingUsage(response *openai.EmbeddingResponse, usage *openai.Usage) {
-	if usage == nil || response.Usage.PromptTokens != 0 {
+	if usage == nil || response.UsageReported || response.Usage.PromptTokens != 0 {
 		return
 	}
 	response.Usage.PromptTokens = usage.PromptTokens

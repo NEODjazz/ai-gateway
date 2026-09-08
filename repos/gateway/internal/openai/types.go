@@ -146,10 +146,12 @@ type EmbeddingRequest struct {
 }
 
 type EmbeddingResponse struct {
-	Object string      `json:"object"`
-	Data   []Embedding `json:"data"`
-	Model  string      `json:"model"`
-	Usage  Usage       `json:"usage"`
+	// UsageReported distinguishes a provider-reported zero from absent usage.
+	UsageReported bool        `json:"-"`
+	Object        string      `json:"object"`
+	Data          []Embedding `json:"data"`
+	Model         string      `json:"model"`
+	Usage         Usage       `json:"usage"`
 }
 
 type Embedding struct {
