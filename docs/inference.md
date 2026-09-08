@@ -908,3 +908,11 @@ recorder verifies two usage callbacks with reported totals and distinct internal
 execution IDs despite identical external request IDs. This verifies gateway
 transport and pipeline integration; it does not exercise real provider encryption,
 remote authorization or durable PostgreSQL billing.
+
+Anthropic Responses conversion rejects reasoning/compaction input items and
+items carrying `encrypted_content` with `400 unsupported_parameter`, `param=input`.
+These provider-specific items cannot be represented by the adapter's Messages
+conversion. Validation runs before upstream HTTP execution in both JSON and SSE
+paths. Regression tests verify zero upstream calls for those inputs and continued
+acceptance of ordinary message input. Native Responses forwarding remains the
+path for upstreams that understand their own encrypted continuation context.

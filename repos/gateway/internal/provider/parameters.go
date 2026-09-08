@@ -39,6 +39,7 @@ func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) er
 
 func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) error {
 	return rejectParameters("anthropic",
+		parameterCheck{"input", hasOpaqueResponseContext(request.Input)},
 		parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil},
 		parameterCheck{"previous_response_id", request.PreviousResponse != ""},
 	)
@@ -132,4 +133,23 @@ func rejectToolCallMetadata(adapter string, messages []openai.Message) error {
 
 func (Demo) ValidateResponseParameters(request openai.ResponseRequest) error {
 	return rejectParameters("demo", parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil})
+}
+
+// Provider-specific reasoning and compaction cannot be flattened into messages.
+func hasOpaqueResponseContext(input any) bool {
+	switch value := input.(type) {
+	case []any:
+		for _, item := range value {
+			if hasOpaqueResponseContext(item) {
+				return true
+			}
+		}
+	case map[string]any:
+		if value["type"] == "reasoning" || value["type"] == "compaction" {
+			return true
+		}
+		_, present := value["encrypted_content"]
+		return present
+	}
+	return false
 }
