@@ -179,3 +179,29 @@ were retained. Deployment databases and running stack resources were not changed
 The existing CI `postgres-integration` job invokes the same script with required
 PostgreSQL testing, but GitHub Actions was not dispatched by this local check.
 This verification did not update the deployed gateway image or rerun browser QA.
+
+## Responses streaming reliability rollout (2026-09-08)
+
+Source revision `f1fb3f1` was built and deployed after its Go 1.25.13 formatting,
+vet, regression/unit, race and build checks passed. This update includes synthetic
+Responses SSE, refusal and outcome preservation, bounded response parsing, exact
+usage decoding, safe usage estimation, cache outcome filtering and required native
+stream terminal events.
+
+- Rancher Desktop reported Moby with Kubernetes enabled. The unchanged Dockerfile
+  successfully built `ai-gateway-gateway:api-f1fb3f1`.
+- Helm release `ai-gateway` revision 116 deployed successfully. Stored values
+  differ from revision 115 only in `image.tag`.
+- The gateway pod ran digest
+  `sha256:75beb7cd8a9e9bc8a2adfbd096f3686e1c92b8653dff9435655d0c3fcd428b2f`
+  with zero restarts. All nine deployments reported their desired replica Ready.
+- Thirteen local ingress checks passed: health/readiness returned 204, UI and its
+  assets returned 200, and CSS/JavaScript carried `Cache-Control: no-store`.
+  Chat, Responses, embeddings, Messages/count_tokens and GenerateContent
+  JSON/SSE/countTokens rejected unauthenticated requests with 401; GenerateContent
+  preserved its native `UNAUTHENTICATED` error envelope.
+
+Authenticated external inference and browser visual QA were not performed.
+PostgreSQL integration was not repeated during rollout; the successful isolated
+database verification at `d0ecfbb` is recorded above. UI code was unchanged and
+its component suite was not rerun for this deployment.
