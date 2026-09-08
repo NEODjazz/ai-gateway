@@ -806,3 +806,11 @@ Regression tests cover interleaved messages and parts, text completion events,
 empty and populated terminal snapshots, invalid content indices and JSON text
 aggregation. The tests also reproduced the earlier behavior through a temporary
 Go overlay before passing with the fix.
+
+Native Responses function-call argument events likewise preserve `item_id` and
+assemble arguments separately by output index. A
+`response.function_call_arguments.done` event replaces partial arguments with
+the reported final string, including when no delta events preceded it. Function
+items do not retain the decoder's initial message content or assistant role.
+Regression tests cover interleaved calls, preserved call metadata, both SSE event
+name forms and a final argument event without deltas.

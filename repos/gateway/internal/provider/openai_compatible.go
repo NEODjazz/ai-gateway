@@ -562,12 +562,19 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 		if id, ok := decoded["response_id"].(string); ok && response.ID == "" {
 			response.ID = id
 		}
-		if delta, ok := decoded["delta"].(string); ok {
-			switch event {
-			case "response.function_call_arguments.delta":
-				item := ensureResponseOutputItem(&response, outputIndex)
-				item.Type = "function_call"
-				item.Arguments += delta
+		if event == "response.function_call_arguments.delta" || event == "response.function_call_arguments.done" {
+			item := ensureResponseOutputItem(&response, outputIndex)
+			item.Type = "function_call"
+			item.Role, item.Content = "", nil
+			if id, ok := decoded["item_id"].(string); ok {
+				item.ID = id
+			}
+			if event == "response.function_call_arguments.delta" {
+				if delta, ok := decoded["delta"].(string); ok {
+					item.Arguments += delta
+				}
+			} else if arguments, ok := decoded["arguments"].(string); ok {
+				item.Arguments = arguments
 			}
 		}
 		if event == "response.refusal.delta" || event == "response.refusal.done" ||
