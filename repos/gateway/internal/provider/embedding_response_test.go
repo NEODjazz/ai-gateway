@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -71,6 +73,36 @@ func TestEmbeddingVectorValidation(t *testing.T) {
 	}
 	if err := validateEmbeddingVectors(openai.EmbeddingRequest{Input: []any{[]any{1.0}, []any{2.0}}}, valid); err != nil {
 		t.Fatalf("token-array input count was not honored: %v", err)
+	}
+}
+
+func TestBase64EmbeddingVectorValidation(t *testing.T) {
+	encode := func(values ...uint32) string {
+		data := make([]byte, len(values)*4)
+		for index, value := range values {
+			binary.LittleEndian.PutUint32(data[index*4:], value)
+		}
+		return base64.StdEncoding.EncodeToString(data)
+	}
+	dimensions := 2
+	request := openai.EmbeddingRequest{Input: "a", EncodingFormat: "base64", Dimensions: &dimensions}
+	valid := encode(math.Float32bits(1), math.Float32bits(-2.5))
+	if err := validateEmbeddingVectors(request, []openai.Embedding{{EmbeddingBase64: valid}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []openai.Embedding{
+		{Embedding: []float64{1, 2}},
+		{EmbeddingBase64: "%%%"},
+		{EmbeddingBase64: base64.StdEncoding.EncodeToString([]byte{1, 2, 3})},
+		{EmbeddingBase64: encode(math.Float32bits(float32(math.Inf(1))), math.Float32bits(1))},
+		{EmbeddingBase64: encode(math.Float32bits(1))},
+	} {
+		if err := validateEmbeddingVectors(request, []openai.Embedding{value}); err == nil {
+			t.Fatalf("invalid base64 embedding accepted: %+v", value)
+		}
+	}
+	if err := validateEmbeddingVectors(openai.EmbeddingRequest{Input: "a"}, []openai.Embedding{{EmbeddingBase64: valid}}); err == nil {
+		t.Fatal("base64 response accepted for float request")
 	}
 }
 func TestEmbeddingAdaptersEnforceResponseContract(t *testing.T) {

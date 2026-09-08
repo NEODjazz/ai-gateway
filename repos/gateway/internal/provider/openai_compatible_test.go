@@ -356,6 +356,31 @@ func TestOpenAICompatibleEmbeddingsForwardsTokenArrays(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleEmbeddingsPreservesBase64Output(t *testing.T) {
+	const encodedVector = "AACAPwAAAEA="
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var upstream openAICompatibleEmbeddingRequest
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		if upstream.EncodingFormat != "base64" {
+			t.Fatalf("encoding format was not forwarded: %+v", upstream)
+		}
+		_, _ = w.Write([]byte(`{"object":"list","model":"embed-model","data":[{"object":"embedding","index":0,"embedding":"` + encodedVector + `"}],"usage":{"prompt_tokens":1,"total_tokens":1}}`))
+	}))
+	defer server.Close()
+	dimensions := 2
+	response, err := NewOpenAICompatible(server.URL, "", false).Embeddings(t.Context(), openai.EmbeddingRequest{
+		Model: "embed-model", Input: "hello", EncodingFormat: "base64", Dimensions: &dimensions,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Data) != 1 || response.Data[0].EmbeddingBase64 != encodedVector || len(response.Data[0].Embedding) != 0 || !response.UsageReported {
+		t.Fatalf("base64 response was not preserved: %+v", response)
+	}
+}
+
 func TestOpenAICompatibleRerankUsesProviderCredentialAndConfiguredPath(t *testing.T) {
 	var upstream openAICompatibleRerankRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

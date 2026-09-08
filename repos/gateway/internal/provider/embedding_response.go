@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -34,16 +36,37 @@ func validateEmbeddingVectors(request openai.EmbeddingRequest, data []openai.Emb
 			return errors.New("invalid embedding index")
 		}
 		seen[item.Index] = true
-		if dimensions == 0 {
-			dimensions = len(item.Embedding)
-		}
-		if dimensions == 0 || dimensions > 65536 || len(item.Embedding) != dimensions || (request.Dimensions != nil && dimensions != *request.Dimensions) {
-			return errors.New("invalid embedding dimensions")
-		}
-		for _, value := range item.Embedding {
-			if math.IsNaN(value) || math.IsInf(value, 0) {
-				return errors.New("invalid embedding value")
+		itemDimensions := len(item.Embedding)
+		if request.EncodingFormat == "base64" {
+			if len(item.Embedding) != 0 || item.EmbeddingBase64 == "" {
+				return errors.New("provider returned an embedding in the wrong encoding format")
 			}
+			decoded, err := base64.StdEncoding.Strict().DecodeString(item.EmbeddingBase64)
+			if err != nil || len(decoded) == 0 || len(decoded)%4 != 0 || len(decoded) > 65536*4 {
+				return errors.New("invalid base64 embedding")
+			}
+			itemDimensions = len(decoded) / 4
+			for offset := 0; offset < len(decoded); offset += 4 {
+				value := math.Float32frombits(binary.LittleEndian.Uint32(decoded[offset : offset+4]))
+				if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+					return errors.New("invalid embedding value")
+				}
+			}
+		} else {
+			if item.EmbeddingBase64 != "" {
+				return errors.New("provider returned an embedding in the wrong encoding format")
+			}
+			for _, value := range item.Embedding {
+				if math.IsNaN(value) || math.IsInf(value, 0) {
+					return errors.New("invalid embedding value")
+				}
+			}
+		}
+		if dimensions == 0 {
+			dimensions = itemDimensions
+		}
+		if dimensions == 0 || dimensions > 65536 || itemDimensions != dimensions || (request.Dimensions != nil && dimensions != *request.Dimensions) {
+			return errors.New("invalid embedding dimensions")
 		}
 	}
 	return nil

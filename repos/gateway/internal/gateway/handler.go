@@ -737,8 +737,8 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	if request.EncodingFormat != "" && request.EncodingFormat != "float" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "only encoding_format=float is supported")
+	if request.EncodingFormat != "" && request.EncodingFormat != "float" && request.EncodingFormat != "base64" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "encoding_format must be float or base64")
 		return
 	}
 	if request.Dimensions != nil && *request.Dimensions <= 0 {

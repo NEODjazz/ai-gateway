@@ -200,9 +200,10 @@ type EmbeddingResponse struct {
 }
 
 type Embedding struct {
-	Object    string    `json:"object"`
-	Embedding []float64 `json:"embedding"`
-	Index     int       `json:"index"`
+	Object          string    `json:"object"`
+	Embedding       []float64 `json:"-"`
+	EmbeddingBase64 string    `json:"-"`
+	Index           int       `json:"index"`
 }
 
 type RerankRequest struct {

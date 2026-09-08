@@ -228,9 +228,14 @@ func (p *nativeCompletionStreamProvider) StreamCompletions(_ context.Context, re
 
 func (p *chatProvider) Embeddings(_ context.Context, req modules.RequestContext) (openai.EmbeddingResponse, error) {
 	p.request = req
+	embedding := openai.Embedding{Object: "embedding", Embedding: []float64{0.1, 0.2}, Index: 0}
+	if req.EmbeddingRequest.EncodingFormat == "base64" {
+		embedding.Embedding = nil
+		embedding.EmbeddingBase64 = "AACAPwAAAEA="
+	}
 	return openai.EmbeddingResponse{
 		Object: "list", Model: req.EmbeddingRequest.Model,
-		Data:  []openai.Embedding{{Object: "embedding", Embedding: []float64{0.1, 0.2}, Index: 0}},
+		Data:  []openai.Embedding{embedding},
 		Usage: openai.Usage{PromptTokens: 2, TotalTokens: 2},
 	}, nil
 }
@@ -305,6 +310,21 @@ func TestEmbeddingsUsesAuthenticatedProviderPipeline(t *testing.T) {
 	}
 	if input := openai.EmbeddingInputText(llm.request.EmbeddingRequest.Input); input != "hello\nworld" {
 		t.Fatalf("unexpected embedding input: %q", input)
+	}
+}
+
+func TestEmbeddingsReturnsRequestedBase64Format(t *testing.T) {
+	llm := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), llm)
+	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embed-model","input":"hello","encoding_format":"base64","dimensions":2}`))
+	request.Header.Set("Authorization", "Bearer test-key")
+	response := httptest.NewRecorder()
+	handler.Embeddings(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"embedding":"AACAPwAAAEA="`) || llm.request.EmbeddingRequest.EncodingFormat != "base64" {
+		t.Fatalf("base64 contract was not preserved: request=%+v body=%s", llm.request.EmbeddingRequest, response.Body.String())
 	}
 }
 

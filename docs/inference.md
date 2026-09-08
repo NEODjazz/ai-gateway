@@ -158,6 +158,12 @@ adapter используют те же проверки, включая streamin
 Native adapter ограничения выше являются изменением совместимости для клиентов,
 которые раньше отправляли эти поля и получали ответ с молча потерянной настройкой.
 
+OpenAI-compatible embeddings поддерживает `encoding_format=float` и
+`encoding_format=base64`. Base64-ответ сохраняется без преобразования, но gateway
+проверяет строгую кодировку, непустой little-endian float32 buffer, конечность
+значений, предел 65 536 dimensions и соответствие запрошенному `dimensions`.
+Ollama, Gemini и demo отклоняют `base64` до обращения к upstream.
+
 OpenAI-compatible SSE учитывает `usage` из финального события с пустым `choices`:
 reported prompt/completion/total tokens и prompt-cache details доходят до
 post-response billing. Это событие не создаёт дополнительный choice и сохраняется
