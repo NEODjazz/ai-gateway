@@ -466,3 +466,22 @@ This tightens acceptance of malformed or oversized upstream responses; valid
 responses below these limits retain their existing public representation.
 Regression tests verify bounded reads and adapter-level rejection, plus vector
 count/index/dimension checks.
+
+### Capability intersection
+
+An explicit deployment capability list is an upper bound even when the model
+catalog advertises more operations. Routing and shadow selection require both
+the deployment and catalog to permit the requested capabilities. Legacy empty
+lists retain their existing catalog-driven behavior and explicit opt-in rules.
+Deployments that previously relied on the catalog overriding their nonempty list
+must include every intended operation in that list.
+
+The native Gemini adapter declares that Responses is unsupported. Such endpoints
+are excluded before selecting a Responses route, allowing another compatible
+endpoint to serve the request. Direct calls still return the explicit unsupported
+protocol error. The optional internal SupportsResponses capability hook preserves
+behavior for existing adapters that do not implement it.
+
+Regression tests reproduce catalog expansion of a chat-only deployment and an
+unsupported native endpoint blocking a valid Responses route, then verify the
+corrected selection behavior.

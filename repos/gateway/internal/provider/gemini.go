@@ -34,6 +34,8 @@ func NewGemini(baseURL, apiKey string, stream bool) Gemini {
 
 func (Gemini) SupportsVision() bool { return true }
 
+func (Gemini) SupportsResponses() bool { return false }
+
 type geminiPart struct {
 	Text             string                  `json:"text,omitempty"`
 	InlineData       *geminiInlineData       `json:"inlineData,omitempty"`

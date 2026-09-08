@@ -1704,6 +1704,11 @@ func (e Endpoint) supportsModel(model string) bool {
 }
 
 func (e Endpoint) supportsCapabilities(required ...string) bool {
+	if hasCapability(required, "responses") {
+		if client, ok := e.Provider.(interface{ SupportsResponses() bool }); ok && !client.SupportsResponses() {
+			return false
+		}
+	}
 	if len(e.Capabilities) == 0 {
 		return true
 	}
@@ -1720,6 +1725,11 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 }
 
 func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint, requestedModel string, required ...string) bool {
+	// Catalog capabilities describe the model, not an expansion of deployment
+	// or adapter support. Both must permit the operation.
+	if !endpoint.supportsCapabilities(required...) {
+		return false
+	}
 	models := []string{requestedModel}
 	if upstream, found := endpoint.ModelAliases[requestedModel]; found {
 		models = append(models, upstream)
