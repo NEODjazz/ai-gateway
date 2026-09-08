@@ -112,6 +112,26 @@ func synthesizeResponseStream(response openai.ResponseResponse, write provider.R
 				return err
 			}
 		}
+		if item.Type == "reasoning" {
+			for summaryIndex, part := range item.Summary {
+				for _, kind := range []string{"response.reasoning_summary_part.added", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done", "response.reasoning_summary_part.done"} {
+					data := map[string]any{"item_id": item.ID, "output_index": index, "summary_index": summaryIndex}
+					switch kind {
+					case "response.reasoning_summary_part.added":
+						data["part"] = map[string]any{"type": "summary_text", "text": ""}
+					case "response.reasoning_summary_text.delta":
+						data["delta"] = part.Text
+					case "response.reasoning_summary_text.done":
+						data["text"] = part.Text
+					case "response.reasoning_summary_part.done":
+						data["part"] = map[string]any{"type": "summary_text", "text": part.Text}
+					}
+					if err := emit(kind, data); err != nil {
+						return err
+					}
+				}
+			}
+		}
 		if item.Type == "function_call" {
 			for _, suffix := range []string{"delta", "done"} {
 				data := map[string]any{"item_id": item.ID, "output_index": index}

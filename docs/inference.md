@@ -855,3 +855,10 @@ Regression tests cover part snapshots, delta/final text replacement, multiple
 summary parts alongside a normal answer, and invalid indices for all four event
 types. The refusal isolation fixture now gives reasoning its own output index.
 Event fields follow the [Responses streaming reference](https://developers.openai.com/api/reference/resources/responses/streaming-events).
+
+JSON-to-SSE fallback emits the same four summary events for each reasoning
+summary part before completing its output item. Empty text is explicitly included
+in added and completed summary parts. This is a replay of the existing JSON
+result after the normal pipeline, without another provider execution. Regression
+coverage checks event order, sequence numbers, indices, empty text, unchanged input
+data and immediate termination on writer failure at each summary event.
