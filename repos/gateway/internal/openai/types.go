@@ -343,6 +343,14 @@ type ResponseResponse struct {
 	Usage               ResponseUsage              `json:"usage,omitempty"`
 }
 
+type ResponseInputItemList struct {
+	Object  string            `json:"object"`
+	Data    []json.RawMessage `json:"data"`
+	FirstID string            `json:"first_id,omitempty"`
+	LastID  string            `json:"last_id,omitempty"`
+	HasMore bool              `json:"has_more"`
+}
+
 type ResponseError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

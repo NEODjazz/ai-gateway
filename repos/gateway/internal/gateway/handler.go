@@ -395,6 +395,75 @@ func (h Handler) CancelResponse(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h Handler) ListResponseInputItems(w http.ResponseWriter, r *http.Request) {
+	resourceProvider, ok := h.provider.(provider.ResponseInputItemsProvider)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "response_lifecycle_unsupported", "response input items are not supported")
+		return
+	}
+	options, err := responseInputItemsOptions(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	reqCtx, ok := h.authorizeResponseResource(w, r, resourceProvider, id)
+	if !ok {
+		return
+	}
+	response, err := resourceProvider.ListResponseInputItems(r.Context(), reqCtx, id, options)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func responseInputItemsOptions(r *http.Request) (provider.ResponseInputItemsOptions, error) {
+	query := r.URL.Query()
+	for key := range query {
+		if key != "after" && key != "limit" && key != "order" && key != "include" {
+			return provider.ResponseInputItemsOptions{}, fmt.Errorf("unsupported query parameter %q", key)
+		}
+	}
+	options := provider.ResponseInputItemsOptions{After: query.Get("after"), Order: query.Get("order"), Include: append([]string(nil), query["include"]...)}
+	if options.After != "" && !validLifecycleToken(options.After) {
+		return provider.ResponseInputItemsOptions{}, errors.New("after is invalid")
+	}
+	if value := query.Get("limit"); value != "" {
+		limit, err := strconv.Atoi(value)
+		if err != nil || limit < 1 || limit > 100 {
+			return provider.ResponseInputItemsOptions{}, errors.New("limit must be between 1 and 100")
+		}
+		options.Limit = limit
+	}
+	if options.Order != "" && options.Order != "asc" && options.Order != "desc" {
+		return provider.ResponseInputItemsOptions{}, errors.New("order must be asc or desc")
+	}
+	if len(options.Include) > 16 {
+		return provider.ResponseInputItemsOptions{}, errors.New("include must contain at most 16 values")
+	}
+	for _, value := range options.Include {
+		if !validLifecycleToken(value) {
+			return provider.ResponseInputItemsOptions{}, errors.New("include contains an invalid value")
+		}
+	}
+	return options, nil
+}
+
+func validLifecycleToken(value string) bool {
+	if value == "" || len(value) > 256 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '_' || character == '-' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func (h Handler) authorizeResponseResource(w http.ResponseWriter, r *http.Request, resolver provider.ResponseResourceResolver, id string) (modules.RequestContext, bool) {
 	reqCtx := modules.RequestContext{APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w)}
 	if err := h.pipeline.RunAuthentication(r.Context(), &reqCtx); err != nil {

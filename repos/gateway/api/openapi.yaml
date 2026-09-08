@@ -512,6 +512,51 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/responses/{id}/input_items:
+    get:
+      operationId: listResponseInputItems
+      tags: [Inference]
+      summary: List input items for a stored response
+      description: Reads a bounded page from the original deployment after ownership and current policy checks. This operation does not create inference usage or billing.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, maxLength: 256}}
+        - {name: after, in: query, schema: {type: string, maxLength: 256}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc]}}
+        - name: include
+          in: query
+          schema:
+            type: array
+            maxItems: 16
+            items: {type: string, maxLength: 256}
+          style: form
+          explode: true
+      responses:
+        '200':
+          description: Bounded input item page
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ResponseInputItemList'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404':
+          description: The response does not exist for the authenticated owner.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: The original deployment binding no longer matches the active deployment.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Response ownership storage is unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /v1/embeddings:
     post:
       operationId: createEmbeddings
@@ -3365,6 +3410,18 @@ components:
           items: {$ref: '#/components/schemas/ResponseOutputItem'}
         output_text: {type: string}
         usage: {$ref: '#/components/schemas/ResponseUsage'}
+    ResponseInputItemList:
+      type: object
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data:
+          type: array
+          maxItems: 10000
+          items: {type: object, additionalProperties: true}
+        first_id: {type: string, maxLength: 256}
+        last_id: {type: string, maxLength: 256}
+        has_more: {type: boolean}
     EmbeddingRequest:
       type: object
       additionalProperties: false

@@ -11,6 +11,7 @@ Gateway реализует OpenAI-compatible endpoints:
 | `POST /v1/responses` | Responses, continuity, function tools и MCP passthrough |
 | `GET /v1/responses/{id}` | Чтение сохраненного Response владельцем credential |
 | `POST /v1/responses/{id}/cancel` | Отмена сохраненного background Response владельцем credential |
+| `GET /v1/responses/{id}/input_items` | Страница исходных input items сохраненного Response |
 | `POST /v1/embeddings` | String или массив строк |
 | `POST /v1/rerank` | Query/documents ranking |
 
@@ -1141,3 +1142,9 @@ native-compatible provider. It uses the deployment admission, timeout, retry,
 circuit and telemetry controls without opening a new generation billing lifecycle.
 The ownership record remains available for subsequent retrieval of the terminal
 resource state.
+
+`GET /v1/responses/{id}/input_items` applies the same lifecycle authorization and
+accepts only bounded `after`, `limit`, `order` and repeated `include` parameters.
+The upstream JSON body is capped at 32 MiB and 10,000 items. Items remain raw JSON
+objects so newly introduced provider fields are not silently discarded. Listing
+does not open a generation billing lifecycle.

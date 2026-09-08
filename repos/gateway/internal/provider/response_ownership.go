@@ -152,6 +152,10 @@ type responseCancelClient interface {
 	CancelResponse(context.Context, string) (openai.ResponseResponse, error)
 }
 
+type responseInputItemsClient interface {
+	ListResponseInputItems(context.Context, string, ResponseInputItemsOptions) (openai.ResponseInputItemList, error)
+}
+
 func (r Router) responseResource(ctx context.Context, req modules.RequestContext, id string) (responseOwnership, Endpoint, error) {
 	binding, found, err := r.ownership.get(ctx, req, id)
 	if err != nil {
@@ -189,7 +193,7 @@ func (r Router) RetrieveResponse(ctx context.Context, req modules.RequestContext
 	if !ok {
 		return openai.ResponseResponse{}, ErrResponseDeploymentChanged
 	}
-	return r.callResponseLifecycle(ctx, endpoint, "responses.retrieve", func(callCtx context.Context) (openai.ResponseResponse, error) {
+	return callResponseLifecycle(r, ctx, endpoint, "responses.retrieve", func(callCtx context.Context) (openai.ResponseResponse, error) {
 		return client.RetrieveResponse(callCtx, id)
 	})
 }
@@ -203,19 +207,34 @@ func (r Router) CancelResponse(ctx context.Context, req modules.RequestContext, 
 	if !ok {
 		return openai.ResponseResponse{}, ErrResponseDeploymentChanged
 	}
-	return r.callResponseLifecycle(ctx, endpoint, "responses.cancel", func(callCtx context.Context) (openai.ResponseResponse, error) {
+	return callResponseLifecycle(r, ctx, endpoint, "responses.cancel", func(callCtx context.Context) (openai.ResponseResponse, error) {
 		return client.CancelResponse(callCtx, id)
 	})
 }
 
-func (r Router) callResponseLifecycle(ctx context.Context, endpoint Endpoint, operation string, call func(context.Context) (openai.ResponseResponse, error)) (openai.ResponseResponse, error) {
+func (r Router) ListResponseInputItems(ctx context.Context, req modules.RequestContext, id string, options ResponseInputItemsOptions) (openai.ResponseInputItemList, error) {
+	_, endpoint, err := r.responseResource(ctx, req, id)
+	if err != nil {
+		return openai.ResponseInputItemList{}, err
+	}
+	client, ok := endpoint.Provider.(responseInputItemsClient)
+	if !ok {
+		return openai.ResponseInputItemList{}, ErrResponseDeploymentChanged
+	}
+	return callResponseLifecycle(r, ctx, endpoint, "responses.input_items", func(callCtx context.Context) (openai.ResponseInputItemList, error) {
+		return client.ListResponseInputItems(callCtx, id, options)
+	})
+}
+
+func callResponseLifecycle[T any](r Router, ctx context.Context, endpoint Endpoint, operation string, call func(context.Context) (T, error)) (T, error) {
+	var zero T
 	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
 	if err != nil {
-		return openai.ResponseResponse{}, err
+		return zero, err
 	}
 	defer release()
 	if err := r.health.permit(ctx, endpoint); err != nil {
-		return openai.ResponseResponse{}, err
+		return zero, err
 	}
 	for attempt := 0; attempt <= endpointMaxRetries(endpoint); attempt++ {
 		callCtx, finish := r.startProviderCall(ctx, endpoint, operation)
@@ -227,12 +246,12 @@ func (r Router) callResponseLifecycle(ctx context.Context, endpoint Endpoint, op
 		}
 		if ctx.Err() != nil || attempt >= endpointRetryLimit(endpoint, callErr) || !retrySameEndpointWithPolicy(endpoint, callErr) {
 			r.health.failure(ctx, endpoint, callErr)
-			return openai.ResponseResponse{}, callErr
+			return zero, callErr
 		}
 		if waitErr := r.retry.beforeRetry(ctx, callErr, attempt); waitErr != nil {
 			r.health.failure(ctx, endpoint, waitErr)
-			return openai.ResponseResponse{}, waitErr
+			return zero, waitErr
 		}
 	}
-	return openai.ResponseResponse{}, errors.New("response retrieval failed")
+	return zero, errors.New("response lifecycle request failed")
 }

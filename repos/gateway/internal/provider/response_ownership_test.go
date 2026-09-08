@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -20,6 +21,7 @@ type ownershipResponseClient struct {
 	calls         int
 	retrieveCalls int
 	cancelCalls   int
+	inputCalls    int
 }
 
 type ownershipPostModule struct {
@@ -58,6 +60,11 @@ func (p *ownershipResponseClient) RetrieveResponse(_ context.Context, id string)
 func (p *ownershipResponseClient) CancelResponse(_ context.Context, id string) (openai.ResponseResponse, error) {
 	p.cancelCalls++
 	return openai.ResponseResponse{ID: id, Model: "public-model", Status: "cancelled"}, nil
+}
+
+func (p *ownershipResponseClient) ListResponseInputItems(_ context.Context, _ string, _ ResponseInputItemsOptions) (openai.ResponseInputItemList, error) {
+	p.inputCalls++
+	return openai.ResponseInputItemList{Object: "list", Data: []json.RawMessage{json.RawMessage(`{"id":"msg_1"}`)}}, nil
 }
 
 func (s *ownershipTestStore) Get(_ context.Context, k string) ([]byte, bool, error) {
@@ -235,6 +242,21 @@ func TestCancelResponseUsesOwnedDeployment(t *testing.T) {
 	}
 	if _, found, err := router.ownership.get(t.Context(), owner, "resp_owned"); err != nil || !found {
 		t.Fatalf("cancellation removed ownership: found=%v err=%v", found, err)
+	}
+}
+
+func TestListResponseInputItemsUsesOwnedDeployment(t *testing.T) {
+	owner := modules.RequestContext{CredentialID: "credential", UserID: "user"}
+	backend := &ownershipTestStore{data: map[string][]byte{}}
+	client := &ownershipResponseClient{}
+	endpoint := Endpoint{Name: "deployment", Type: "test", Models: []string{"public-model"}, Provider: client}
+	router := Router{endpoints: []Endpoint{endpoint}, ownership: newResponseOwnershipStore(time.Hour, backend), health: newEndpointHealthTracker()}
+	if err := router.ownership.put(t.Context(), owner, "resp_owned", responseOwnership{Endpoint: endpoint.Name, Model: "public-model", Deployment: responseDeploymentIdentity(endpoint)}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := router.ListResponseInputItems(t.Context(), owner, "resp_owned", ResponseInputItemsOptions{Limit: 10})
+	if err != nil || len(result.Data) != 1 || client.inputCalls != 1 {
+		t.Fatalf("result=%+v calls=%d err=%v", result, client.inputCalls, err)
 	}
 }
 

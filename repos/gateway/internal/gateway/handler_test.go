@@ -43,6 +43,7 @@ type lifecycleResourceProvider struct {
 	resolveCalls  int
 	retrieveCalls int
 	cancelCalls   int
+	inputCalls    int
 	credentialID  string
 }
 
@@ -79,6 +80,12 @@ func (p *lifecycleResourceProvider) CancelResponse(_ context.Context, req module
 	p.cancelCalls++
 	p.credentialID = req.CredentialID
 	return openai.ResponseResponse{ID: id, Model: req.Request.Model, Status: "cancelled"}, nil
+}
+
+func (p *lifecycleResourceProvider) ListResponseInputItems(_ context.Context, req modules.RequestContext, _ string, options provider.ResponseInputItemsOptions) (openai.ResponseInputItemList, error) {
+	p.inputCalls++
+	p.credentialID = req.CredentialID
+	return openai.ResponseInputItemList{Object: "list", Data: []json.RawMessage{json.RawMessage(`{"id":"msg_1"}`)}, FirstID: options.After}, nil
 }
 
 func TestChatCompletionsRejectsConflictingTokenLimits(t *testing.T) {
@@ -710,6 +717,27 @@ func TestCancelResponseAuthenticatesAndSkipsBillingLifecycle(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), `"status":"cancelled"`) {
 		t.Fatalf("unexpected cancel response: %s", recorder.Body.String())
+	}
+}
+
+func TestListResponseInputItemsValidatesPaginationAndSkipsBilling(t *testing.T) {
+	resource := &lifecycleResourceProvider{}
+	billing := &lifecycleBillingModule{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{modules.NewAuthModule(true), billing}), resource))
+	request := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_123/input_items?after=item_1&limit=25&order=asc&include=reasoning.encrypted_content", nil)
+	request.Header.Set("Authorization", "Bearer demo-user-key")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || resource.resolveCalls != 1 || resource.inputCalls != 1 || billing.calls != 0 || !strings.Contains(recorder.Body.String(), `"first_id":"item_1"`) {
+		t.Fatalf("status=%d resolve=%d input=%d billing=%d body=%s", recorder.Code, resource.resolveCalls, resource.inputCalls, billing.calls, recorder.Body.String())
+	}
+	for _, query := range []string{"?limit=101", "?order=random", "?unknown=x", "?after=../other"} {
+		request := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_123/input_items"+query, nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("query=%q status=%d body=%s", query, recorder.Code, recorder.Body.String())
+		}
 	}
 }
 

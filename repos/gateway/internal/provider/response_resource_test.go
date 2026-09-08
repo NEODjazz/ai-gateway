@@ -44,6 +44,47 @@ func TestCancelResponseTransport(t *testing.T) {
 	}
 }
 
+func TestListResponseInputItemsTransport(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/responses/resp_123/input_items" || r.URL.Query().Get("after") != "item_1" || r.URL.Query().Get("limit") != "25" || r.URL.Query().Get("order") != "asc" || len(r.URL.Query()["include"]) != 2 {
+			t.Errorf("unexpected request: %s %s query=%v", r.Method, r.URL.Path, r.URL.Query())
+		}
+		fmt.Fprint(w, `{"object":"list","data":[{"id":"msg_1","type":"message","future_field":{"kept":true}}],"first_id":"msg_1","last_id":"msg_1","has_more":false}`)
+	}))
+	defer server.Close()
+	result, err := NewOpenAICompatible(server.URL, "test-key", true).ListResponseInputItems(t.Context(), "resp_123", ResponseInputItemsOptions{After: "item_1", Limit: 25, Order: "asc", Include: []string{"reasoning.encrypted_content", "message.input_image.image_url"}})
+	if err != nil || len(result.Data) != 1 || !strings.Contains(string(result.Data[0]), `"future_field"`) || result.FirstID != "msg_1" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestResponseInputItemsDecoderRejectsInvalidOrUnboundedResults(t *testing.T) {
+	for _, body := range []string{"null", `{}`, `{"object":"list"}`, `{"object":"other","data":[]}`, `{"object":"list","data":["not-an-object"]}`} {
+		if _, err := decodeResponseInputItems(strings.NewReader(body)); err == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+	reader := &embeddingLimitReader{}
+	if _, err := decodeResponseInputItems(reader); err == nil || reader.read != maxResponseJSONBytes+1 {
+		t.Fatalf("unbounded input-items read: bytes=%d err=%v", reader.read, err)
+	}
+}
+
+func TestListResponseInputItemsRejectsInvalidOptionsBeforeUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	p := NewOpenAICompatible(server.URL, "", true)
+	for _, options := range []ResponseInputItemsOptions{{After: "../item"}, {Limit: 101}, {Order: "random"}, {Include: []string{"bad/value"}}} {
+		if _, err := p.ListResponseInputItems(t.Context(), "resp_123", options); err == nil {
+			t.Fatalf("accepted options=%+v", options)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("invalid options reached upstream: %d", calls.Load())
+	}
+}
+
 func TestRetrieveResponseRejectsUnsafeIDs(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }))
@@ -53,6 +94,10 @@ func TestRetrieveResponseRejectsUnsafeIDs(t *testing.T) {
 		for _, operation := range []func() error{
 			func() error { _, err := p.RetrieveResponse(t.Context(), id); return err },
 			func() error { _, err := p.CancelResponse(t.Context(), id); return err },
+			func() error {
+				_, err := p.ListResponseInputItems(t.Context(), id, ResponseInputItemsOptions{})
+				return err
+			},
 		} {
 			var failure *Error
 			if err := operation(); !errors.As(err, &failure) || failure.Param != "response_id" || failure.StatusCode != 400 {

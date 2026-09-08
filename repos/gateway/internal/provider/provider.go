@@ -50,6 +50,18 @@ type ResponseCancellationProvider interface {
 	CancelResponse(ctx context.Context, req modules.RequestContext, id string) (openai.ResponseResponse, error)
 }
 
+type ResponseInputItemsOptions struct {
+	After   string
+	Limit   int
+	Order   string
+	Include []string
+}
+
+type ResponseInputItemsProvider interface {
+	ResponseResourceResolver
+	ListResponseInputItems(ctx context.Context, req modules.RequestContext, id string, options ResponseInputItemsOptions) (openai.ResponseInputItemList, error)
+}
+
 type EmbeddingProvider interface {
 	Embeddings(ctx context.Context, req modules.RequestContext) (openai.EmbeddingResponse, error)
 }
