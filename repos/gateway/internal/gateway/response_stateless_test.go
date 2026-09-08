@@ -51,19 +51,22 @@ func TestResponsesStatelessContinuationThroughGateway(t *testing.T) {
 				}
 				if n == 2 {
 					items, ok := body["input"].([]any)
-					if !ok || len(items) != 2 {
+					if !ok || len(items) != 3 {
 						t.Error("continuation items lost")
 						return
 					}
 					if items[0].(map[string]any)["encrypted_content"] != opaque {
 						t.Error("encrypted context changed")
 					}
-					encoded, _ := json.Marshal(items[1])
+					if items[1].(map[string]any)["phase"] != "final_answer" {
+						t.Error("assistant phase changed")
+					}
+					encoded, _ := json.Marshal(items[2])
 					if strings.Contains(string(encoded), "user@example.com") || !strings.Contains(string(encoded), "EMAIL") {
 						t.Error("text was not anonymized")
 					}
 				}
-				result := fmt.Sprintf(`{"id":"r%d","status":"completed","model":"m","output":[{"id":"reason","type":"reasoning","encrypted_content":%q,"summary":[]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`, n, opaque)
+				result := fmt.Sprintf(`{"id":"r%d","status":"completed","model":"m","output":[{"id":"reason","type":"reasoning","encrypted_content":%q,"summary":[]},{"id":"answer","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"done"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`, n, opaque)
 				if mode == "native stream" {
 					w.Header().Set("Content-Type", "text/event-stream")
 					_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":%s}\n\n", result)
@@ -112,10 +115,13 @@ func TestResponsesStatelessContinuationThroughGateway(t *testing.T) {
 				if err := json.Unmarshal(payload, &result); err != nil {
 					t.Fatal(err)
 				}
-				if len(result.Output) != 1 || result.Output[0]["encrypted_content"] != opaque {
+				if len(result.Output) != 2 || result.Output[0]["encrypted_content"] != opaque {
 					t.Fatal("returned context lost")
 				}
-				input = []any{result.Output[0], map[string]any{"role": "user", "content": "user@example.com"}}
+				if result.Output[1]["phase"] != "final_answer" {
+					t.Fatal("returned phase lost")
+				}
+				input = []any{result.Output[0], result.Output[1], map[string]any{"role": "user", "content": "user@example.com"}}
 			}
 			if calls.Load() != 2 || len(recorder.ids) != 2 || recorder.ids[0] == "" || recorder.ids[0] == recorder.ids[1] || len(recorder.totals) != 2 || recorder.totals[0] != 5 || recorder.totals[1] != 5 {
 				t.Fatalf("calls=%d ids=%v totals=%v", calls.Load(), recorder.ids, recorder.totals)

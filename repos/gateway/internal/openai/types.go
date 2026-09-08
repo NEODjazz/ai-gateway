@@ -350,6 +350,7 @@ type ResponseIncompleteDetails struct {
 }
 
 type ResponseOutputItem struct {
+	Phase            *string                 `json:"phase,omitempty"`
 	EncryptedContent *string                 `json:"encrypted_content,omitempty"`
 	ID               string                  `json:"id,omitempty"`
 	Type             string                  `json:"type"`

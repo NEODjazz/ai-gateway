@@ -3212,6 +3212,9 @@ components:
         call_id: {type: string}
         arguments: {type: string}
         encrypted_content: {type: string, nullable: true}
+        phase:
+          type: [string, "null"]
+          enum: [commentary, final_answer, null]
         content:
           type: array
           items: {$ref: '#/components/schemas/ResponseOutputContent'}

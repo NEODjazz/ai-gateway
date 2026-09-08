@@ -1013,3 +1013,13 @@ validates the value and implements context truncation; the gateway still reserve
 tokens against the complete input context before execution. Anthropic conversion
 and the demo adapter reject explicit truncation with `400 unsupported_parameter`
 and `param=truncation` rather than discarding the requested behavior.
+
+### Responses assistant message phase
+
+Responses output items retain optional `phase` across JSON decoding, native SSE
+item and terminal snapshots, and synthesized SSE. Clients replaying assistant
+output can preserve `commentary` and `final_answer` without losing their meaning.
+The text transformation pipeline excludes phase from text-only projections and
+preserves its original value when merging processed content, so anonymization
+cannot rewrite this protocol metadata. This adds an optional output field;
+messages without phase keep their existing representation.
