@@ -1051,3 +1051,8 @@ The Responses HTTP boundary rejects an invalid `top_logprobs` range or a
 `truncation` value other than `auto`/`disabled` with `400 invalid_request` for
 both JSON and streaming requests. Omitted and null options remain accepted.
 These requests stop before pipeline execution and provider calls.
+
+When a native Responses refusal replaces output text at the same content index,
+the collector clears the replaced text's annotations and token probabilities.
+This applies to both refusal delta and done events, preventing text diagnostics
+from appearing on a refusal in the assembled response.

@@ -626,6 +626,7 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				}
 			case "response.refusal.delta", "response.refusal.done":
 				part.Type, part.Text = "refusal", ""
+				part.Annotations, part.Logprobs = nil, nil
 				if event == "response.refusal.delta" {
 					if delta, ok := decoded["delta"].(string); ok {
 						part.Refusal += delta

@@ -51,3 +51,18 @@ func TestNativeResponseRefusalBoundsContentIndex(t *testing.T) {
 		t.Fatalf("upper bound rejected: err=%v", err)
 	}
 }
+
+func TestResponseRefusalClearsTextMetadata(t *testing.T) {
+	for _, kind := range []string{"response.refusal.delta", "response.refusal.done"} {
+		wire := `data: {"type":"response.content_part.done","part":{"type":"output_text","text":"old","annotations":[{"type":"url_citation","url":"https://example.com"}],"logprobs":[{"token":"old","logprob":-1}]}}` + "\n\n"
+		wire += fmt.Sprintf(`data: {"type":%q,"delta":"no","refusal":"no"}`+"\n\n", kind)
+		response, err := streamResponseData(strings.NewReader(wire+responseTestTerminal), "m", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		part := response.Output[0].Content[0]
+		if part.Type != "refusal" || part.Refusal != "no" || part.Text != "" || len(part.Annotations) != 0 || len(part.Logprobs) != 0 || response.OutputText != "" {
+			t.Fatalf("%s retained replaced text metadata: %+v", kind, part)
+		}
+	}
+}
