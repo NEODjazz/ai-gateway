@@ -3151,6 +3151,7 @@ components:
             generate_summary: {type: string}
             context: {type: string}
             mode: {type: string}
+        top_logprobs: {type: integer, minimum: 0, maximum: 20}
         truncation: {type: string, enum: [auto, disabled]}
         store: {type: boolean}
         include:

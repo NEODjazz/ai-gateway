@@ -28,7 +28,7 @@ upstream. Новые поддерживаемые параметры переч�
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
 | `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
-| `/v1/responses` | `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
+| `/v1/responses` | `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `encoding_format`, `dimensions`, `user` |
 | `/v1/rerank` | `provider`, `model`, `query`, `documents`, `top_n`, `rank_fields`, `return_documents`, `max_chunks_per_doc`, `max_tokens_per_doc` |
 
@@ -1033,3 +1033,10 @@ conversion emits probabilities with text delta/done and completed content.
 Clients can request this data with `include: ["message.output_text.logprobs"]`
 when supported by the upstream model. These diagnostic values do not alter usage
 totals or billing.
+
+Responses also forwards optional integer `top_logprobs` to OpenAI-compatible and
+Ollama native Responses endpoints in both JSON and streaming mode, preserving
+explicit zero. The documented range is 0–20; the upstream validates the range and
+model compatibility. Omission leaves the upstream default unchanged. Anthropic
+conversion and demo reject supplied values with `400 unsupported_parameter` and
+`param=top_logprobs`, including zero.
