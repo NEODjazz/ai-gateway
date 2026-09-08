@@ -542,3 +542,24 @@ with the reported usage. This is observable best-effort persistence, not durable
 session storage. Read errors instead fail closed with HTTP 503. Regression tests
 cover JSON and streaming write failures, original usage reaching billing once,
 zero-usage cache hits, and read hit/miss/error counters.
+
+### Responses continuation fallback policy
+
+When affinity resolves `previous_response_id` to an eligible endpoint, that
+endpoint is the only execution candidate. Its failure does not activate general,
+context-window, or content-policy model-group fallbacks: authorization to use
+another model does not prove that it owns the previous response's upstream state.
+A pinned endpoint that was originally selected through fallback is also included
+only once. Configured retries on the same endpoint retain their existing policy.
+
+This intentionally tightens continuation behavior. Initial requests without a
+previous response retain normal model-group fallback; a successful initial
+fallback still establishes affinity to its selected endpoint. Missing or expired
+affinity retains the documented cache-miss behavior. Native streaming and JSON
+share this candidate restriction, and pinned endpoints without native streaming
+retain the existing JSON fallback to the same endpoint.
+
+Regression tests cover JSON and streaming with primary/fallback endpoint pins
+across unavailable, context-length, and content-policy errors. They assert the
+original error is preserved and no other endpoint executes. Existing tests also
+verify initial fallback followed by a successful pinned continuation.

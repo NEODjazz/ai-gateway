@@ -1626,13 +1626,9 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 		if endpoint.Name == endpointName {
 			pinned := endpoint
 			pinned.FallbackStage = 0
-			selected := []Endpoint{pinned}
-			for _, fallback := range candidates {
-				if fallback.FallbackStage > 0 {
-					selected = append(selected, fallback)
-				}
-			}
-			return selected, nil
+			// The previous response belongs to this endpoint. Model-group fallback
+			// authorization does not establish shared provider-side session state.
+			return []Endpoint{pinned}, nil
 		}
 	}
 	return nil, fmt.Errorf("responses session endpoint %q is unavailable for previous_response_id", endpointName)
