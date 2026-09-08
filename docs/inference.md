@@ -772,3 +772,19 @@ being committed, rather than guaranteeing reconciliation of unusable upstream
 usage. Regression tests verify no cache entry or successful billing callback,
 one provider call and failure callback, exact boundaries, and unchanged counters
 when a merge is rejected.
+
+### Native Responses SSE completion requirement
+
+A native Responses stream must contain `response.completed`, `response.incomplete`
+or `response.failed` with a response object before EOF or `[DONE]`. An explicit
+status must agree with the event; an omitted status is inferred from it. Empty,
+created-only, and partial-output streams now return an unexpected-EOF error rather
+than a fabricated successful response. A valid terminal event followed by clean
+EOF remains accepted without requiring the optional `[DONE]` sentinel.
+
+This tightens the shared native Responses decoder used by OpenAI-compatible and
+Ollama Responses adapters. On an interrupted result, the router runs its failure
+lifecycle instead of a successful post-response billing callback. Already emitted
+partial output cannot be recalled. HTTP regression tests cover valid terminal
+states, missing/contradictory outcome payloads, truncation, and billing/failure
+callbacks. Collector fixtures now contain explicit terminal outcomes.

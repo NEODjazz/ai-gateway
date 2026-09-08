@@ -35,7 +35,7 @@ func TestResponsesSSENumberDecodingKeepsDocumentValidation(t *testing.T) {
 		}
 	}
 	for _, index := range []string{"1.0", "1e2"} {
-		_, err := streamResponseData(strings.NewReader(`data: {"type":"response.output_item.added","output_index":`+index+`,"item":{"type":"message"}}`+"\n\n"), "m", nil)
+		_, err := streamResponseData(strings.NewReader(`data: {"type":"response.output_item.added","output_index":`+index+`,"item":{"type":"message"}}`+"\n\n"+responseTestTerminal), "m", nil)
 		if err != nil {
 			t.Fatalf("integer-valued index %s rejected: %v", index, err)
 		}

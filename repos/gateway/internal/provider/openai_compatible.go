@@ -534,8 +534,12 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			},
 		},
 	}
+	terminal := false
 	err := scanSSEEvents(&responseStreamReader{source: body, remaining: maxResponseStreamBytes}, func(event string, payload string) error {
 		if payload == "[DONE]" {
+			if !terminal {
+				return io.ErrUnexpectedEOF
+			}
 			return io.EOF
 		}
 		var decoded map[string]any
@@ -619,6 +623,19 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			}
 			response.OutputText = responseText(response)
 		}
+		switch event {
+		case "response.completed", "response.incomplete", "response.failed":
+			outcome, ok := decoded["response"].(map[string]any)
+			if !ok {
+				return errors.New("Responses terminal event is missing its response")
+			}
+			status := strings.TrimPrefix(event, "response.")
+			if reported, exists := outcome["status"]; exists && reported != status {
+				return errors.New("Responses terminal event has contradictory status")
+			}
+			response.Status = status
+			terminal = true
+		}
 		if write != nil {
 			return write(event, payload)
 		}
@@ -626,6 +643,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 	})
 	if err != nil && !errors.Is(err, io.EOF) {
 		return openai.ResponseResponse{}, err
+	}
+	if !terminal {
+		return openai.ResponseResponse{}, io.ErrUnexpectedEOF
 	}
 	if response.OutputText == "" {
 		response.OutputText = responseText(response)
