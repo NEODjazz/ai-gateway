@@ -1607,6 +1607,15 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 		return candidates, nil
 	}
 	endpointName, found, err := r.affinity.get(ctx, key)
+	if r.observer != nil {
+		result := "miss"
+		if err != nil {
+			result = "error"
+		} else if found {
+			result = "hit"
+		}
+		r.observer.ObserveCache("affinity_get", result)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrResponseAffinityUnavailable, err)
 	}
@@ -1637,8 +1646,16 @@ func (r Router) rememberResponseAffinity(ctx context.Context, req modules.Reques
 	if key == "" {
 		return
 	}
-	if err := r.affinity.set(ctx, key, endpoint); err != nil {
-		log.Printf("responses affinity store failed: %v", err)
+	err := r.affinity.set(ctx, key, endpoint)
+	if r.observer != nil {
+		result := "ok"
+		if err != nil {
+			result = "error"
+		}
+		r.observer.ObserveCache("affinity_set", result)
+	}
+	if err != nil {
+		log.Print("responses affinity store failed")
 	}
 }
 

@@ -425,6 +425,8 @@ func TestDetailedMetricsExposeOnlyBoundedOperationalLabels(t *testing.T) {
 	metrics.ObserveModule("billing", "pre", "budget_exceeded", 5*time.Millisecond)
 	metrics.ObserveModule("dlp", "pre", "content_rejected", 3*time.Millisecond)
 	metrics.ObserveCache("get", "hit")
+	metrics.ObserveCache("affinity_get", "error")
+	metrics.ObserveCache("affinity_set", "error")
 	recorder := httptest.NewRecorder()
 	metrics.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	body := recorder.Body.String()
@@ -434,6 +436,8 @@ func TestDetailedMetricsExposeOnlyBoundedOperationalLabels(t *testing.T) {
 		`ai_gateway_billing_events_total{phase="pre",result="budget_exceeded"} 1`,
 		`ai_gateway_security_module_calls_total{module="dlp",phase="pre",result="content_rejected"} 1`,
 		`ai_gateway_cache_operations_total{operation="get",result="hit"} 1`,
+		`ai_gateway_cache_operations_total{operation="affinity_get",result="error"} 1`,
+		`ai_gateway_cache_operations_total{operation="affinity_set",result="error"} 1`,
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("missing metric %q in:\n%s", expected, body)

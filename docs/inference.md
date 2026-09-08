@@ -524,3 +524,21 @@ account still requires a cache/affinity namespace or retention transition.
 Regression tests cover two deployments serving the same request, same-endpoint
 cache reuse, changed alias targets, expiry followed by cache hit and continuation,
 and affinity ordering before the cache-hit billing callback.
+
+### Monitoring Responses affinity
+
+`ai_gateway_cache_operations_total` includes `operation="affinity_get"` with
+`result="hit|miss|error"` and `operation="affinity_set"` with `result="ok|error"`.
+Only actual store calls are counted, including writes that refresh cache hits.
+These operations also appear in authenticated cache diagnostics; they do not
+change exact/semantic cache hit ratios. Labels contain no response IDs, user IDs,
+credential IDs, endpoint names, or storage error text.
+
+Alert on increases of
+`ai_gateway_cache_operations_total{operation="affinity_set",result="error"}`:
+a completed generation may have lost its continuation binding. The gateway logs
+a fixed message, retains the successful response, and runs post-response billing
+with the reported usage. This is observable best-effort persistence, not durable
+session storage. Read errors instead fail closed with HTTP 503. Regression tests
+cover JSON and streaming write failures, original usage reaching billing once,
+zero-usage cache hits, and read hit/miss/error counters.
