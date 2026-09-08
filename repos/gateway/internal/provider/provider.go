@@ -925,6 +925,9 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 	request.Stream = true
 	candidates, affinityErr := r.responseCandidates(ctx, req, request, requiredResponseCapabilities(request, true)...)
 	if affinityErr != nil {
+		if errors.Is(affinityErr, ErrResponseAffinityUnavailable) {
+			return openai.ResponseResponse{}, true, affinityErr
+		}
 		// Let the handler retry the same pinned endpoint through the non-streaming
 		// path. This preserves affinity for endpoints without native streaming.
 		return openai.ResponseResponse{}, false, nil
@@ -1604,8 +1607,7 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 	}
 	endpointName, found, err := r.affinity.get(ctx, key)
 	if err != nil {
-		log.Printf("responses affinity lookup failed: %v", err)
-		return candidates, nil
+		return nil, fmt.Errorf("%w: %w", ErrResponseAffinityUnavailable, err)
 	}
 	if !found {
 		return candidates, nil

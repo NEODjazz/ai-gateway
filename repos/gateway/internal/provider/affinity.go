@@ -5,10 +5,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"time"
 
 	"ai-gateway-gateway/internal/modules"
 )
+
+// ErrResponseAffinityUnavailable prevents continuation routing when the stored
+// endpoint binding cannot be read. A missing binding is a separate cache miss.
+var ErrResponseAffinityUnavailable = errors.New("response affinity is unavailable")
 
 type SessionStore interface {
 	Get(ctx context.Context, key string) ([]byte, bool, error)

@@ -510,6 +510,10 @@ func decodeInferenceRequest(w http.ResponseWriter, r *http.Request, target any) 
 }
 
 func writeProviderFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, provider.ErrResponseAffinityUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "response_affinity_unavailable", "response session storage is unavailable")
+		return
+	}
 	if errors.Is(err, modules.ErrContentRejected) {
 		writeError(w, http.StatusUnavailableForLegalReasons, "content_rejected", "content rejected")
 		return

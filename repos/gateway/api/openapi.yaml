@@ -418,6 +418,12 @@ paths:
           $ref: '#/components/responses/ContentRejected'
         '502':
           $ref: '#/components/responses/ProviderFailed'
+        '503':
+          description: Response session storage is unavailable; continuation was not sent to a provider. The error code is response_affinity_unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/embeddings:
     post:
       operationId: createEmbeddings

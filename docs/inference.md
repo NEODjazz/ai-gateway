@@ -485,3 +485,20 @@ behavior for existing adapters that do not implement it.
 Regression tests reproduce catalog expansion of a chat-only deployment and an
 unsupported native endpoint blocking a valid Responses route, then verify the
 corrected selection behavior.
+
+### Responses affinity storage failures
+
+When a continuation has previous_response_id and its configured affinity store
+fails to read, the gateway returns HTTP 503 (`response_affinity_unavailable`)
+before provider-specific modules or upstream calls. Streaming requests fail before
+opening SSE and do not retry the lookup through the JSON fallback path. The error
+response does not expose the storage error text.
+
+This deliberately changes the previous behavior that routed despite a lookup
+failure. Successful lookups still re-evaluate endpoint/model capabilities; a
+missing or expired binding retains existing cache-miss behavior. First requests
+without previous_response_id do not need a lookup. Failure to persist a new binding
+retains the existing logged best-effort behavior and is a separate durability gap.
+Regression tests cover JSON and streaming lookup failures, no provider execution,
+no provider-module execution, and preservation of the existing pinned non-streaming
+fallback tests.
