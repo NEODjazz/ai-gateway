@@ -346,15 +346,16 @@ type ResponseIncompleteDetails struct {
 }
 
 type ResponseOutputItem struct {
-	ID        string                  `json:"id,omitempty"`
-	Type      string                  `json:"type"`
-	Status    string                  `json:"status,omitempty"`
-	Role      string                  `json:"role,omitempty"`
-	Name      string                  `json:"name,omitempty"`
-	CallID    string                  `json:"call_id,omitempty"`
-	Arguments string                  `json:"arguments,omitempty"`
-	Content   []ResponseOutputContent `json:"content,omitempty"`
-	Summary   []ResponseOutputContent `json:"summary,omitempty"`
+	EncryptedContent *string                 `json:"encrypted_content,omitempty"`
+	ID               string                  `json:"id,omitempty"`
+	Type             string                  `json:"type"`
+	Status           string                  `json:"status,omitempty"`
+	Role             string                  `json:"role,omitempty"`
+	Name             string                  `json:"name,omitempty"`
+	CallID           string                  `json:"call_id,omitempty"`
+	Arguments        string                  `json:"arguments,omitempty"`
+	Content          []ResponseOutputContent `json:"content,omitempty"`
+	Summary          []ResponseOutputContent `json:"summary,omitempty"`
 }
 
 type ResponseOutputContent struct {

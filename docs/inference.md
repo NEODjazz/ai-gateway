@@ -862,3 +862,11 @@ in added and completed summary parts. This is a replay of the existing JSON
 result after the normal pipeline, without another provider execution. Regression
 coverage checks event order, sequence numbers, indices, empty text, unchanged input
 data and immediate termination on writer failure at each summary event.
+
+Responses output items preserve optional `encrypted_content` as an opaque string.
+This additive response-schema field survives JSON decoding, native SSE item and
+terminal snapshots, and synthetic SSE item/completion events. The gateway does
+not decrypt or rewrite it. Regression tests reproduce its former loss in each of
+these paths. Absent or null values remain omitted on serialization; an explicitly
+empty string remains present. This change preserves returned context; it does not
+add a response-storage or background-job lifecycle API.

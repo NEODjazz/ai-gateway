@@ -3190,6 +3190,7 @@ components:
         name: {type: string}
         call_id: {type: string}
         arguments: {type: string}
+        encrypted_content: {type: string, nullable: true}
         content:
           type: array
           items: {$ref: '#/components/schemas/ResponseOutputContent'}
