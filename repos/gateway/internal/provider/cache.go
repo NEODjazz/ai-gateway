@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
 )
 
 const memoryCacheMaxEntries = 1024
@@ -105,7 +106,18 @@ func providerCacheKey(kind string, req modules.RequestContext) string {
 		if logicalModel := req.Metadata["provider.requested_model"]; logicalModel != "" {
 			responseRequest.Model = logicalModel
 		}
-		value = responseRequest
+		// Response IDs refer to state owned by the selected upstream. A cached
+		// response from another deployment cannot serve as its continuation.
+		value = struct {
+			Request                                           openai.ResponseRequest
+			Endpoint, ProviderID, ProviderType, UpstreamModel string
+		}{
+			Request:       responseRequest,
+			Endpoint:      req.Metadata["provider.endpoint.name"],
+			ProviderID:    req.Metadata["provider.id"],
+			ProviderType:  req.Metadata["provider.endpoint.type"],
+			UpstreamModel: req.ResponseRequest.Model,
+		}
 	}
 	body, err := json.Marshal(value)
 	if err != nil {

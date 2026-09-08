@@ -502,3 +502,25 @@ retains the existing logged best-effort behavior and is a separate durability ga
 Regression tests cover JSON and streaming lookup failures, no provider execution,
 no provider-module execution, and preservation of the existing pinned non-streaming
 fallback tests.
+
+### Responses cache endpoint ownership
+
+Responses exact-cache entries include the selected deployment name, provider ID,
+provider type, and actual upstream model in addition to the existing credential,
+user, and effective-policy scope. Response IDs refer to upstream state and cannot
+be reused across deployments, even when they expose the same logical model.
+Changing an alias target also invalidates its Responses entries. Existing entries
+use a different key shape and expire naturally; no cache deletion is required.
+Chat cache keys are unchanged.
+
+A Responses cache hit refreshes the response's affinity binding to its owning
+endpoint before post-response modules, preserving continuation routing when the
+binding has expired before the cached response. The hit keeps zero generation
+usage and runs the normal post-response pipeline without another upstream call.
+This does not extend provider-side response retention, or make failed affinity
+writes durable. Repointing an existing deployment name to a different provider
+account still requires a cache/affinity namespace or retention transition.
+
+Regression tests cover two deployments serving the same request, same-endpoint
+cache reuse, changed alias targets, expiry followed by cache hit and continuation,
+and affinity ordering before the cache-hit billing callback.

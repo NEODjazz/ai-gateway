@@ -674,6 +674,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 				setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 				response.Usage = openai.ResponseUsage{}
 				attemptCtx.ResponsesResponse = &response
+				r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
 				if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 					return openai.ResponseResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 				}
