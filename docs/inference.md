@@ -814,3 +814,16 @@ the reported final string, including when no delta events preceded it. Function
 items do not retain the decoder's initial message content or assistant role.
 Regression tests cover interleaved calls, preserved call metadata, both SSE event
 name forms and a final argument event without deltas.
+
+### Responses terminal event boundary
+
+After validating and forwarding the first terminal Responses event, the native
+decoder returns its result immediately. Later frames cannot replace the response
+ID, status, text or usage passed to post-response accounting. The decoder does
+not wait for upstream EOF or an optional `[DONE]` after that outcome. A failure
+writing the terminal event is still returned to the caller.
+
+Regression tests cover all three terminal states, duplicate outcomes with changed
+usage, late text, malformed trailing frames, read failure after the terminal frame
+and terminal writer failure. Upstream streams without a valid terminal outcome
+continue to fail as documented above.

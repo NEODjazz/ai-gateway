@@ -657,7 +657,12 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			terminal = true
 		}
 		if write != nil {
-			return write(event, payload)
+			if err := write(event, payload); err != nil {
+				return err
+			}
+		}
+		if terminal {
+			return io.EOF
 		}
 		return nil
 	})
