@@ -97,3 +97,33 @@ against a disposable Redis server. Do not point this variable at deployment data
 This validation did not rerun PostgreSQL integration or UI tests because these
 fixes do not change database or UI code. The earlier rollout above predates these
 additional rate-limit and inference changes.
+
+## Native API rollout verification (2026-09-08)
+
+Source revision `089b625` was validated and deployed to Rancher Desktop:
+
+- `scripts/test-postgres-integration.sh` passed with Go 1.25.13, required
+  PostgreSQL tests enabled, and `go test -race -count=1 ./...` for gateway, auth
+  and billing. PostgreSQL 16 ran in the separate local test container, using
+  three new databases (`api_089b625_gateway`, `api_089b625_auth`,
+  `api_089b625_billing`). The test container was stopped afterwards; deployment
+  databases were not used for these tests.
+- All 144 UI component tests across 42 files passed. The existing Dockerfile
+  built the UI and gateway successfully, producing image
+  `ai-gateway-gateway:api-089b625` with digest
+  `sha256:6bf0182ed7bc6e482e2aacd6f4dcd8956ea0f44e8c1fec94c51a55e6925c0029`.
+  The build retained the existing Vite large-chunk advisory.
+- Helm release `ai-gateway` revision 114 reused its existing values with only
+  the image tag override. All nine stack deployments reported Ready. The new
+  gateway pod ran the expected image digest with zero restarts.
+- Local ingress checks returned 204 for health/readiness and 200 for the UI.
+  Unversioned `app.css` and `app.js` returned `Cache-Control: no-store`.
+  GenerateContent JSON/SSE/countTokens and Messages/count_tokens returned 401
+  without credentials; GenerateContent errors used the native UNAUTHENTICATED
+  envelope.
+
+These runtime smoke checks did not execute authenticated external inference or
+perform authenticated browser visual QA. Native generation, policy and billing
+behavior was exercised by the repository regression tests and local fake upstream
+servers. GitHub Actions itself was not dispatched; its PostgreSQL script was run
+locally against a real isolated database server.
