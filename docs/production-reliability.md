@@ -127,3 +127,33 @@ perform authenticated browser visual QA. Native generation, policy and billing
 behavior was exercised by the repository regression tests and local fake upstream
 servers. GitHub Actions itself was not dispatched; its PostgreSQL script was run
 locally against a real isolated database server.
+
+## Provider and continuity rollout verification (2026-09-08)
+
+Source revision `67531cb` was built and deployed to Rancher Desktop after its
+Go 1.25.13 formatting, vet, unit/regression, race, and build checks passed.
+The update includes native text embeddings, embedding response validation,
+deployment capability intersection, Responses affinity/cache/fallback/shadow
+fixes and observability, and synthetic Chat SSE for JSON-only deployments.
+
+- Rancher Desktop reported Moby with Kubernetes enabled. Docker identified the
+  `lima-rancher-desktop` server. The unchanged Dockerfile successfully built
+  `ai-gateway-gateway:api-67531cb`; existing UI build layers were reused.
+- Helm release `ai-gateway` revision 115 completed successfully. Comparing stored
+  values with revision 114 confirmed that only `image.tag` changed.
+- The gateway pod ran digest
+  `sha256:53e95829b026e7eebf7b90e131987341225e288d8bcb4d0d3d04c2f7b7005db7`
+  with zero restarts. All nine stack deployments reported their desired replica
+  Ready.
+- Local ingress returned 204 for `/healthz` and `/readyz`, 200 for `/ui/`, and
+  `Cache-Control: no-store` for `/ui/app.css` and `/ui/app.js`.
+- Chat, Responses, embeddings, Messages/count_tokens and native GenerateContent
+  JSON/SSE/countTokens returned 401 without credentials. GenerateContent errors
+  used the native `UNAUTHENTICATED` envelope. Messages additionally rejected a
+  missing required version header with 400; requests with `anthropic-version:
+  2023-06-01` reached the 401 authorization boundary.
+
+These runtime smoke checks did not perform authenticated external inference or
+browser visual QA. PostgreSQL integration and UI component tests were not rerun
+for this rollout; their earlier execution is recorded above. No deployment
+credentials, runtime settings, or database contents were changed.
