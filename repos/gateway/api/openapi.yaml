@@ -34,6 +34,54 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /v1/messages/count_tokens:
+    post:
+      operationId: countMessageTokens
+      tags: [Inference]
+      summary: Count context tokens using a native provider counter
+      description: |
+        Applies authorization, tool ACL, input TPM/RPM and pre-inference policy.
+        Does not generate output or open a billing lifecycle. Currently requires
+        native Anthropic. No automatic retry, mirror or response cache is used.
+      security:
+        - nativeAPIKey: []
+        - bearerAuth: []
+      parameters:
+        - in: header
+          name: anthropic-version
+          required: true
+          schema: {type: string, enum: ['2023-06-01']}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MessageTokenCountRequest'}
+      responses:
+        '200':
+          description: Provider-reported count of the context after policy processing
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [input_tokens]
+                additionalProperties: false
+                properties:
+                  input_tokens: {type: integer, minimum: 0}
+        default:
+          description: Native Messages error
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [type, error]
+                properties:
+                  type: {type: string, enum: [error]}
+                  error:
+                    type: object
+                    required: [type, message]
+                    properties:
+                      type: {type: string}
+                      message: {type: string}
   /v1/messages:
     post:
       operationId: createMessage
@@ -2008,6 +2056,16 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    MessageTokenCountRequest:
+      type: object
+      additionalProperties: false
+      required: [model, messages]
+      properties:
+        model: {type: string, minLength: 1}
+        messages: {$ref: '#/components/schemas/MessagesRequest/properties/messages'}
+        system: {$ref: '#/components/schemas/MessagesRequest/properties/system'}
+        tools: {$ref: '#/components/schemas/MessagesRequest/properties/tools'}
+        tool_choice: {$ref: '#/components/schemas/MessagesRequest/properties/tool_choice'}
     MessagesRequest:
       type: object
       additionalProperties: false

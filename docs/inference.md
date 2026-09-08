@@ -252,7 +252,7 @@ server tools, documents, URL images, metadata, top_k, assistant
 prefill, text after tool_use and is_error=true tool results are not supported.
 All tool-use history requires matching results. Opaque provider tool metadata
 that cannot be represented in Messages produces an explicit conversion error.
-The endpoint does not provide count_tokens or background jobs.
+Token counting is a separate endpoint; background jobs are not supported.
 
 Regressions cover request/response conversion, native and fallback SSE, stream
 failure, model/tool authorization, TPM, unknown input, response-size bounds and
@@ -293,7 +293,21 @@ and source; errors never fall back silently to the local context estimate.
 The adapter enforces a 30-second context deadline, the inference body limit and
 a 64 KiB response limit. Redirects are refused to protect the provider API key;
 missing, negative, fractional or overflowing counts are errors. Caller
-cancellation is propagated. This adapter is not yet a public gateway endpoint or
-a replacement for reserve estimates. Counter authorization, content-policy
-execution and quota semantics must be integrated before public exposure.
+cancellation is propagated. The counter is not a replacement for reserve estimates.
+
+`POST /v1/messages/count_tokens` exposes the counter with the same native auth
+headers as Messages. It accepts model, messages, system, tools and tool_choice;
+generation parameters are rejected. Partial assistant/tool-use history is allowed
+for counting. Advanced block types remain unsupported.
+
+The endpoint applies gateway auth, model/tool ACL, access groups and shared
+RPM/input TPM admission. TPM uses the local input estimate before contacting the
+provider; the returned provider count does not generate a billing event. Router
+runs configured pre-inference policies (including anonymization, DLP and AV),
+excluding the billing module, then uses deployment admission limits. Thus the
+reported count describes the context after those policies, including model alias
+resolution. No generation post/failure lifecycle, reserve, mirror, retry or
+response cache runs. Counter errors never become successful estimated counts.
+The Router operation has a 30-second deadline. Unsupported selected adapters fail
+explicitly before provider modules. Observer metrics use operation count_tokens.
 Protocol: [native token counting](https://platform.claude.com/docs/en/api/messages/count_tokens).

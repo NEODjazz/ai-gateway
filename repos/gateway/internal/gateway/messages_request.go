@@ -51,6 +51,10 @@ func decodeMessagesValue(raw json.RawMessage, target any) error {
 }
 
 func (request messagesRequest) chat() (openai.ChatCompletionRequest, error) {
+	return request.chatContext(false)
+}
+
+func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatCompletionRequest, error) {
 	result := openai.ChatCompletionRequest{Model: request.Model, MaxTokens: &request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP, Stream: request.Stream}
 	if len(request.StopSequences) > 0 {
 		if _, valid := openai.StopSequences(request.StopSequences); !valid {
@@ -175,10 +179,10 @@ func (request messagesRequest) chat() (openai.ChatCompletionRequest, error) {
 		}
 		flush()
 	}
-	if request.Messages[len(request.Messages)-1].Role == "assistant" {
+	if !allowPartial && request.Messages[len(request.Messages)-1].Role == "assistant" {
 		return result, errors.New("assistant prefill is not supported")
 	}
-	if len(knownCalls) > 0 {
+	if !allowPartial && len(knownCalls) > 0 {
 		return result, errors.New("all tool_use blocks require a tool_result")
 	}
 	if len(request.Tools) > 128 {

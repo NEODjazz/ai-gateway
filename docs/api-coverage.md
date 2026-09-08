@@ -26,7 +26,7 @@ availability is not inferred from these tests.
 | Rerank | Query/documents, compatible adapter | Provider-specific request and usage matrix |
 | Text completions | Not implemented | Native completion execution and legacy response/SSE contracts |
 | Messages | Inbound `/v1/messages` JSON/SSE over the shared Chat pipeline; outbound Anthropic adapter | Thinking, prompt-cache controls, server tools and prefill |
-| Anthropic token counting | Native adapter counter with provider-reported result and bounded transport | Public endpoint, authorization/content-policy integration and counter-specific quota behavior |
+| Anthropic token counting | Native adapter and `/v1/messages/count_tokens` with authorization, policy, input quotas and bounded transport | Advanced native content blocks and additional provider counters |
 | GenerateContent | Outbound native Gemini chat/tools/vision, SSE and usage | Native inbound contract and broader provider options |
 | Interactions | Not implemented | Native lifecycle, resource ownership and accounting |
 | Image generation | Not implemented | Generation contract and image-specific pricing/usage |

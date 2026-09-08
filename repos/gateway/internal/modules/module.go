@@ -82,7 +82,20 @@ func NewPipelineWithObserver(modules []Module, observer ModuleObserver) Pipeline
 }
 
 func (p Pipeline) Run(ctx context.Context, req *RequestContext) error {
+	return p.runPre(ctx, req, false)
+}
+
+// RunTokenCount applies the configured pre-inference policies without opening
+// the generation billing lifecycle. Counting never runs post/failure billing.
+func (p Pipeline) RunTokenCount(ctx context.Context, req *RequestContext) error {
+	return p.runPre(ctx, req, true)
+}
+
+func (p Pipeline) runPre(ctx context.Context, req *RequestContext, tokenCount bool) error {
 	for _, module := range p.modules {
+		if tokenCount && module.Name() == "billing" {
+			continue
+		}
 		err := p.run(ctx, req, module, "pre", module.Handle)
 		if err != nil {
 			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
