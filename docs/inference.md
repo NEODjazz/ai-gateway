@@ -1056,3 +1056,8 @@ When a native Responses refusal replaces output text at the same content index,
 the collector clears the replaced text's annotations and token probabilities.
 This applies to both refusal delta and done events, preventing text diagnostics
 from appearing on a refusal in the assembled response.
+
+The router also validates these Responses options before endpoint selection and
+affinity lookup. Internal callers and requests modified by ingress modules receive
+the same client-error classification. Streaming validation errors are terminal
+and cannot trigger a JSON fallback that would discard the error.

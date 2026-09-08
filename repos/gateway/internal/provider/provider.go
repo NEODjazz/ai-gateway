@@ -619,6 +619,10 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 	if req.ResponseRequest == nil {
 		return openai.ResponseResponse{}, errors.New("missing response request")
 	}
+	if err := validateResponseOptions(*req.ResponseRequest); err != nil {
+		return openai.ResponseResponse{}, err
+	}
+
 	request := *req.ResponseRequest
 	candidates, affinityErr := r.responseCandidates(ctx, req, request, requiredResponseCapabilities(request, false)...)
 	if affinityErr != nil {
@@ -927,6 +931,10 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 	if req.ResponseRequest == nil {
 		return openai.ResponseResponse{}, false, errors.New("missing response request")
 	}
+	if err := validateResponseOptions(*req.ResponseRequest); err != nil {
+		return openai.ResponseResponse{}, true, err
+	}
+
 	request := *req.ResponseRequest
 	request.Stream = true
 	candidates, affinityErr := r.responseCandidates(ctx, req, request, requiredResponseCapabilities(request, true)...)

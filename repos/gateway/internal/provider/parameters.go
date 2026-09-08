@@ -156,3 +156,10 @@ func hasOpaqueResponseContext(input any) bool {
 	}
 	return false
 }
+
+func validateResponseOptions(request openai.ResponseRequest) error {
+	if message := request.Validate(); message != "" {
+		return &Error{Class: FailureClientRequest, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
+	}
+	return nil
+}
