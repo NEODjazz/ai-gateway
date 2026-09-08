@@ -3142,6 +3142,15 @@ components:
       additionalProperties: false
       required: [model, input]
       properties:
+        reasoning:
+          type: object
+          additionalProperties: false
+          properties:
+            effort: {type: string}
+            summary: {type: string}
+            generate_summary: {type: string}
+            context: {type: string}
+            mode: {type: string}
         store: {type: boolean}
         include:
           type: array

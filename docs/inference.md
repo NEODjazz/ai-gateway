@@ -944,3 +944,17 @@ Within a user turn, tool results precede other content as required by the native
 protocol; relative order among results and among other blocks is preserved.
 This handles parallel results interleaved with additional user text. A regression
 test verifies grouping and block order for text before, between and after results.
+
+### Responses reasoning request options
+
+The optional `reasoning` object accepts `effort`, `summary`, `generate_summary`,
+`context` and `mode` string fields. OpenAI-compatible and Ollama Responses adapters
+forward supplied fields in both JSON and streaming requests. Upstream/model
+support determines valid values; the gateway does not translate them into a
+different provider's thinking controls. Anthropic and Demo return
+`unsupported_parameter` for a supplied object. Omission preserves prior defaults.
+
+This adds an optional typed request object and its OpenAPI schema. HTTP regression
+tests verify all five fields on the wire for both adapters and modes, alongside
+unsupported-adapter rejection. Fields follow the
+[Responses create contract](https://developers.openai.com/api/reference/cli/resources/responses/methods/create).

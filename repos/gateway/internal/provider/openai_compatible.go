@@ -33,21 +33,22 @@ type openAICompatibleChatRequest struct {
 }
 
 type openAICompatibleResponseRequest struct {
-	Store             *bool                 `json:"store,omitempty"`
-	Include           []string              `json:"include,omitempty"`
-	Model             string                `json:"model"`
-	Input             any                   `json:"input"`
-	Instructions      string                `json:"instructions,omitempty"`
-	Tools             []openai.ResponseTool `json:"tools,omitempty"`
-	ToolChoice        any                   `json:"tool_choice,omitempty"`
-	ParallelToolCalls *bool                 `json:"parallel_tool_calls,omitempty"`
-	Text              any                   `json:"text,omitempty"`
-	PreviousResponse  string                `json:"previous_response_id,omitempty"`
-	Stream            bool                  `json:"stream,omitempty"`
-	MaxOutputTokens   *int                  `json:"max_output_tokens,omitempty"`
-	MaxTokens         *int                  `json:"max_tokens,omitempty"`
-	Temperature       *float64              `json:"temperature,omitempty"`
-	TopP              *float64              `json:"top_p,omitempty"`
+	Reasoning         *openai.ResponseReasoning `json:"reasoning,omitempty"`
+	Store             *bool                     `json:"store,omitempty"`
+	Include           []string                  `json:"include,omitempty"`
+	Model             string                    `json:"model"`
+	Input             any                       `json:"input"`
+	Instructions      string                    `json:"instructions,omitempty"`
+	Tools             []openai.ResponseTool     `json:"tools,omitempty"`
+	ToolChoice        any                       `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool                     `json:"parallel_tool_calls,omitempty"`
+	Text              any                       `json:"text,omitempty"`
+	PreviousResponse  string                    `json:"previous_response_id,omitempty"`
+	Stream            bool                      `json:"stream,omitempty"`
+	MaxOutputTokens   *int                      `json:"max_output_tokens,omitempty"`
+	MaxTokens         *int                      `json:"max_tokens,omitempty"`
+	Temperature       *float64                  `json:"temperature,omitempty"`
+	TopP              *float64                  `json:"top_p,omitempty"`
 }
 
 type openAICompatibleEmbeddingRequest struct {
@@ -289,7 +290,7 @@ func useMaxCompletionTokens(request *openAICompatibleChatRequest, err error) boo
 
 func (p OpenAICompatible) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store,
+		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: false,
@@ -328,7 +329,7 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 	}
 
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store,
+		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: true,

@@ -291,22 +291,23 @@ func EmbeddingInputText(value any) string {
 }
 
 type ResponseRequest struct {
-	Store             *bool          `json:"store,omitempty"`
-	Include           []string       `json:"include,omitempty"`
-	Provider          string         `json:"provider,omitempty"`
-	Model             string         `json:"model"`
-	Input             any            `json:"input"`
-	Instructions      string         `json:"instructions,omitempty"`
-	Tools             []ResponseTool `json:"tools,omitempty"`
-	ToolChoice        any            `json:"tool_choice,omitempty"`
-	ParallelToolCalls *bool          `json:"parallel_tool_calls,omitempty"`
-	Text              any            `json:"text,omitempty"`
-	PreviousResponse  string         `json:"previous_response_id,omitempty"`
-	Stream            bool           `json:"stream,omitempty"`
-	MaxOutputTokens   *int           `json:"max_output_tokens,omitempty"`
-	MaxTokens         *int           `json:"max_tokens,omitempty"`
-	Temperature       *float64       `json:"temperature,omitempty"`
-	TopP              *float64       `json:"top_p,omitempty"`
+	Reasoning         *ResponseReasoning `json:"reasoning,omitempty"`
+	Store             *bool              `json:"store,omitempty"`
+	Include           []string           `json:"include,omitempty"`
+	Provider          string             `json:"provider,omitempty"`
+	Model             string             `json:"model"`
+	Input             any                `json:"input"`
+	Instructions      string             `json:"instructions,omitempty"`
+	Tools             []ResponseTool     `json:"tools,omitempty"`
+	ToolChoice        any                `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool              `json:"parallel_tool_calls,omitempty"`
+	Text              any                `json:"text,omitempty"`
+	PreviousResponse  string             `json:"previous_response_id,omitempty"`
+	Stream            bool               `json:"stream,omitempty"`
+	MaxOutputTokens   *int               `json:"max_output_tokens,omitempty"`
+	MaxTokens         *int               `json:"max_tokens,omitempty"`
+	Temperature       *float64           `json:"temperature,omitempty"`
+	TopP              *float64           `json:"top_p,omitempty"`
 }
 
 type ResponseTool struct {
@@ -435,4 +436,12 @@ func ContentText(value any) string {
 	default:
 		return ""
 	}
+}
+
+type ResponseReasoning struct {
+	Effort          *string `json:"effort,omitempty"`
+	Summary         *string `json:"summary,omitempty"`
+	GenerateSummary *string `json:"generate_summary,omitempty"`
+	Context         *string `json:"context,omitempty"`
+	Mode            *string `json:"mode,omitempty"`
 }
