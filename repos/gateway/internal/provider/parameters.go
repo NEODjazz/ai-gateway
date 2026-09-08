@@ -98,6 +98,23 @@ func validateEmbeddingAdapter(client Client, request openai.EmbeddingRequest) er
 	return nil
 }
 
+func validateCompletionAdapter(client CompletionClient, request openai.CompletionRequest) error {
+	if validator, ok := client.(interface {
+		ValidateCompletionParameters(openai.CompletionRequest) error
+	}); ok {
+		return validator.ValidateCompletionParameters(request)
+	}
+	return nil
+}
+
+func (Ollama) ValidateCompletionParameters(request openai.CompletionRequest) error {
+	prompt, err := openai.InspectCompletionPrompt(request.Prompt)
+	if err != nil {
+		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "prompt", Err: err}
+	}
+	return rejectParameters("ollama", parameterCheck{"prompt", prompt.Kind != openai.CompletionPromptText})
+}
+
 func rejectGenerationOptions(adapter string, options openai.ChatGenerationOptions) error {
 	return rejectParameters(adapter,
 		parameterCheck{"reasoning_effort", options.ReasoningEffort != ""},

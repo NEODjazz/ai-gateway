@@ -199,6 +199,22 @@ func TestRouterCompletionsRequiresNativeAdapter(t *testing.T) {
 	}
 }
 
+func TestRouterRejectsUnsupportedOllamaPromptBeforeModules(t *testing.T) {
+	module := &completionLifecycleModule{}
+	router := Router{
+		endpoints: []Endpoint{{Name: "ollama", Type: "ollama", Provider: NewOllama("http://unused.invalid", true), Admission: newAdmissionController(0, 0, 0)}},
+		modules:   modules.NewPipeline([]modules.Module{module}), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	request := openai.CompletionRequest{Model: "model", Prompt: []string{"one", "two"}}
+	_, err := router.Completions(t.Context(), modules.RequestContext{
+		Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: []any{"one", "two"}}}}, CompletionRequest: &request,
+	})
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Param != "prompt" || module.pre != 0 {
+		t.Fatalf("unsupported prompt reached modules: err=%v pre=%d", err, module.pre)
+	}
+}
+
 func TestCompletionDecoderRejectsOversizeAndMalformedLogprobs(t *testing.T) {
 	reader := &embeddingLimitReader{}
 	if _, err := decodeCompletionResponse(reader); err == nil || reader.read != maxResponseJSONBytes+1 {

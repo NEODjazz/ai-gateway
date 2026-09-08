@@ -24,7 +24,7 @@ availability is not inferred from these tests.
 | Response compaction | Native compact contract, bounded opaque output, model authorization and usage settlement | Additional provider-native compact request options as demand is confirmed |
 | Embeddings | String/list input, float output, compatible and native adapters | Provider compatibility matrix, additional input/output encodings |
 | Rerank | Query/documents, compatible adapter | Provider-specific request and usage matrix |
-| Text completions | Native string/list and token-ID prompts, legacy parameters/response/logprobs, bounded JSON, incremental SSE and buffered fallback | Additional native provider adapters |
+| Text completions | Compatible adapters accept string/list and token-ID prompts; Ollama provider execution accepts string prompts; legacy parameters/response/logprobs, bounded JSON, incremental SSE and buffered fallback | Additional native provider adapters and provider-specific prompt forms |
 | Messages | Inbound `/v1/messages` JSON/SSE over the shared Chat pipeline; outbound Anthropic adapter | Thinking, prompt-cache controls, server tools and prefill |
 | Anthropic token counting | Native Anthropic/Gemini counters behind `/v1/messages/count_tokens` with authorization, policy, input quotas and bounded transport | Advanced native content blocks and additional provider counters |
 | GenerateContent | Native inbound JSON/SSE and context token counting through shared policy; outbound Gemini chat/tools/vision | Advanced native options and cloud credentials |
@@ -62,7 +62,7 @@ availability is not inferred from these tests.
 
 | Capability | Current implementation | Remaining work |
 | --- | --- | --- |
-| Native provider catalog | Anthropic, Ollama, Gemini; compatible HTTP adapter | Additional native providers with protocol tests |
+| Native provider catalog | Anthropic, Ollama, Gemini; compatible HTTP adapter; Ollama text completions with protocol tests | Additional native providers with protocol tests |
 | Azure | Compatible HTTP scenarios only | Native endpoint/version behavior, Entra identity and refresh |
 | Workload identity | Not implemented | AWS signing, GCP credentials, Azure refresh and cancellation |
 | Model tokenization | Context estimate including tool schemas; native Anthropic/Gemini counter API | Exact model tokenizers/counters with versioned provenance |

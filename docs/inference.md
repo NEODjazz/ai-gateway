@@ -59,6 +59,10 @@ content policy и anonymization; token IDs сохраняются без пре�
 клиенту. Placeholder, разделённый между chunks, восстанавливается до отправки.
 Если выбранный adapter не поддерживает native stream, gateway выполняет один
 ограниченный JSON-вызов и возвращает его как buffered SSE.
+Ollama выполняет строковые prompts через свой `/v1/completions` endpoint с
+provider-reported usage и native SSE. Его текущий provider contract не принимает
+prompt arrays; gateway возвращает terminal `unsupported_parameter` до policy
+modules, billing reserve и сетевого вызова.
 
 ## Capabilities
 
@@ -81,7 +85,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | --- | --- |
 | `openai`, `openai-compatible`, `openrouter` | OpenAI wire format; Azure-style base URL поддерживается |
 | `anthropic` | Преобразование chat/tools/vision в native Messages API |
-| `ollama` | Native chat/stream/embeddings |
+| `ollama` | Native chat/stream/embeddings и provider completions JSON/SSE для строкового prompt |
 | `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output, text embeddings; API key |
 | `demo` | Локальный deterministic fallback для разработки |
 

@@ -50,6 +50,14 @@ func TestNativeAdaptersRejectUnrepresentableChatParameters(t *testing.T) {
 }
 
 func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
+	for _, prompt := range []any{[]string{"one", "two"}, []int{1, 2}} {
+		client := NewOllama("http://unused.invalid", true)
+		request := openai.CompletionRequest{Model: "m", Prompt: prompt, Stream: true}
+		_, err := client.Completions(context.Background(), request)
+		assertUnsupportedParameter(t, err, "prompt")
+		_, err = client.StreamCompletions(context.Background(), request, func(string) error { t.Error("unexpected stream output"); return nil })
+		assertUnsupportedParameter(t, err, "prompt")
+	}
 	for _, tc := range []struct {
 		field   string
 		request openai.ResponseRequest

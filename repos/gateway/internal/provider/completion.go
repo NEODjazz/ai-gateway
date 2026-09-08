@@ -155,6 +155,10 @@ func (r Router) Completions(ctx context.Context, req modules.RequestContext) (op
 		if !progress.allows(endpoint) {
 			continue
 		}
+		client := endpoint.Provider.(CompletionClient)
+		if err := validateCompletionAdapter(client, request); err != nil {
+			return openai.CompletionResponse{}, err
+		}
 		progress.enter(endpoint)
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
@@ -183,7 +187,6 @@ func (r Router) Completions(ctx context.Context, req modules.RequestContext) (op
 		attemptCtx.CompletionRequest.Prompt = effectivePrompt
 		started := time.Now()
 		lastAttempt = &attemptCtx
-		client := endpoint.Provider.(CompletionClient)
 		response, retries, err := r.callCompletion(ctx, endpoint, client, *attemptCtx.CompletionRequest)
 		totalRetries += retries
 		setAttemptMetadata(&attemptCtx, started, err)
@@ -242,6 +245,13 @@ func (r Router) StreamCompletions(ctx context.Context, req modules.RequestContex
 		client, ok := endpoint.Provider.(StreamingCompletionClient)
 		if !ok {
 			continue
+		}
+		completionClient, ok := endpoint.Provider.(CompletionClient)
+		if !ok {
+			continue
+		}
+		if err := validateCompletionAdapter(completionClient, request); err != nil {
+			return openai.CompletionResponse{}, false, err
 		}
 		progress.enter(endpoint)
 		attemptCtx := providerAttemptContext(req, endpoint)

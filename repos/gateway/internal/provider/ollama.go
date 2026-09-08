@@ -90,6 +90,24 @@ func NewOllama(baseURL string, upstreamStream bool) Ollama {
 
 func (Ollama) SupportsVision() bool { return true }
 
+func (p Ollama) Completions(ctx context.Context, request openai.CompletionRequest) (openai.CompletionResponse, error) {
+	if err := p.ValidateCompletionParameters(request); err != nil {
+		return openai.CompletionResponse{}, err
+	}
+	return p.completionAdapter().Completions(ctx, request)
+}
+
+func (p Ollama) StreamCompletions(ctx context.Context, request openai.CompletionRequest, write CompletionStreamWriter) (openai.CompletionResponse, error) {
+	if err := p.ValidateCompletionParameters(request); err != nil {
+		return openai.CompletionResponse{}, err
+	}
+	return p.completionAdapter().StreamCompletions(ctx, request, write)
+}
+
+func (p Ollama) completionAdapter() OpenAICompatible {
+	return OpenAICompatible{baseURL: p.baseURL, upstreamStream: p.upstreamStream, client: p.client}
+}
+
 func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	if err := p.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err

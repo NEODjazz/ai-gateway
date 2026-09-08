@@ -19,6 +19,58 @@ func TestOllamaMapsMaxCompletionTokensToNumPredict(t *testing.T) {
 	}
 }
 
+func TestOllamaCompletionsUsesProviderContract(t *testing.T) {
+	var upstream openAICompatibleCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"id":"cmpl-ollama","object":"text_completion","created":7,"model":"phi3","choices":[{"index":0,"text":"done","finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}`))
+	}))
+	defer server.Close()
+	maxTokens := 12
+	response, err := NewOllama(server.URL, false).Completions(t.Context(), openai.CompletionRequest{Model: "phi3", Prompt: "complete", MaxTokens: &maxTokens})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upstream.Prompt != "complete" || upstream.MaxTokens == nil || *upstream.MaxTokens != 12 || upstream.Stream {
+		t.Fatalf("unexpected upstream request: %+v", upstream)
+	}
+	if response.Choices[0].Text != "done" || response.Usage.TotalTokens != 4 {
+		t.Fatalf("unexpected completion response: %+v", response)
+	}
+}
+
+func TestOllamaStreamsProviderCompletions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var upstream openAICompatibleCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		if !upstream.Stream {
+			t.Fatal("native completion stream was not requested")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"cmpl-ollama\",\"object\":\"text_completion\",\"created\":7,\"model\":\"phi3\",\"choices\":[{\"index\":0,\"text\":\"hello\",\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+	var payloads []string
+	response, err := NewOllama(server.URL, true).StreamCompletions(t.Context(), openai.CompletionRequest{Model: "phi3", Prompt: "complete", Stream: true}, func(payload string) error {
+		payloads = append(payloads, payload)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payloads) != 2 || response.Choices[0].Text != "hello" || response.Usage.TotalTokens != 4 {
+		t.Fatalf("unexpected completion stream: payloads=%v response=%+v", payloads, response)
+	}
+}
+
 func TestOllamaChatCompletions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/chat" {
