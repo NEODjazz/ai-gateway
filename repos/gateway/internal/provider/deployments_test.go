@@ -2,9 +2,16 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/openai"
 )
 
 func TestModelDeploymentUpdateChangesRuntimeCandidates(t *testing.T) {
@@ -31,5 +38,44 @@ func TestModelDeploymentUpdateChangesRuntimeCandidates(t *testing.T) {
 	}
 	if diagnostics := router.Diagnostics(context.Background()); len(diagnostics.Endpoints) != 0 {
 		t.Fatalf("disabled deployment leaked into active diagnostics: %+v", diagnostics)
+	}
+}
+
+func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
+	var streamRequested atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Stream bool `json:"stream"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		streamRequested.Store(body.Stream)
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"native\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	router := New(Config{}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "native", Type: "openai-compatible", BaseURL: server.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, stream := range []bool{false, true} {
+		capabilities := []string{"chat"}
+		if stream {
+			capabilities = append(capabilities, "stream")
+		}
+		endpoint, err := router.endpointForDeployment(ModelDeployment{ProviderID: "native", Models: []string{"test"}, Capabilities: capabilities})
+		if err != nil {
+			t.Fatal(err)
+		}
+		client := endpoint.Provider.(StreamingClient)
+		_, err = client.StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "test"}, func(string) error { return nil })
+		if stream {
+			if err != nil || !streamRequested.Load() {
+				t.Fatalf("native stream not enabled: %v", err)
+			}
+		} else if !errors.Is(err, ErrStreamingUnsupported) {
+			t.Fatalf("stream unexpectedly enabled: %v", err)
+		}
 	}
 }

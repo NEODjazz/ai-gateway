@@ -358,7 +358,7 @@ func (r *Router) endpointForDeployment(deployment ModelDeployment) (Endpoint, er
 	if err != nil {
 		return Endpoint{}, err
 	}
-	client := providerFor(config.ProviderEndpointConfig{Type: managed.Type, BaseURL: managed.BaseURL, APIKey: secret})
+	client := providerFor(config.ProviderEndpointConfig{Type: managed.Type, BaseURL: managed.BaseURL, APIKey: secret, Stream: hasCapability(deployment.Capabilities, "stream")})
 	if client == nil {
 		return Endpoint{}, ErrInvalidDeployment
 	}

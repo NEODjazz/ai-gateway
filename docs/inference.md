@@ -161,3 +161,7 @@ OpenAI-compatible chat stream допускает индексы choices и tool 
 Отрицательные и выходящие за пределы индексы upstream возвращают ошибку до
 выделения массивов и передачи некорректного события клиенту. Это ограничение
 накопления stream, а не объявление поддержки параметра `n` в публичном API.
+
+Managed deployment с capability `stream` включает native streaming в adapter.
+Без этой capability создание adapter не включает native stream неявно. Настройка
+применяется при построении runtime endpoint из сохранённого deployment.
