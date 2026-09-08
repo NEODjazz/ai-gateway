@@ -16,6 +16,10 @@ var ErrResponseOwnershipConflict = errors.New("response ownership conflict")
 
 var ErrResponseOwnershipUnavailable = errors.New("response ownership storage is unavailable")
 
+var ErrResponseNotFound = errors.New("response not found")
+
+var ErrResponseDeploymentChanged = errors.New("response deployment changed")
+
 // Ownership is separate from optional routing affinity. Lifecycle operations
 // must never infer ownership from an upstream ID or fall back on a cache miss.
 type responseOwnership struct {
@@ -138,4 +142,73 @@ func (s responseOwnershipStore) get(ctx context.Context, req modules.RequestCont
 		return responseOwnership{}, false, ErrResponseOwnershipUnavailable
 	}
 	return binding, true, nil
+}
+
+type responseResourceClient interface {
+	RetrieveResponse(context.Context, string) (openai.ResponseResponse, error)
+}
+
+func (r Router) responseResource(ctx context.Context, req modules.RequestContext, id string) (responseOwnership, Endpoint, responseResourceClient, error) {
+	binding, found, err := r.ownership.get(ctx, req, id)
+	if err != nil {
+		return responseOwnership{}, Endpoint{}, nil, err
+	}
+	if !found {
+		return responseOwnership{}, Endpoint{}, nil, ErrResponseNotFound
+	}
+	for _, endpoint := range r.runtimeEndpoints() {
+		if endpoint.Name != binding.Endpoint {
+			continue
+		}
+		if responseDeploymentIdentity(endpoint) != binding.Deployment || !endpoint.supportsModel(binding.Model) || !endpoint.supportsCapabilities("responses") {
+			return responseOwnership{}, Endpoint{}, nil, ErrResponseDeploymentChanged
+		}
+		client, ok := endpoint.Provider.(responseResourceClient)
+		if !ok {
+			return responseOwnership{}, Endpoint{}, nil, ErrResponseDeploymentChanged
+		}
+		return binding, endpoint, client, nil
+	}
+	return responseOwnership{}, Endpoint{}, nil, ErrResponseDeploymentChanged
+}
+
+func (r Router) ResolveResponseResource(ctx context.Context, req modules.RequestContext, id string) (string, error) {
+	binding, _, _, err := r.responseResource(ctx, req, id)
+	if err != nil {
+		return "", err
+	}
+	return binding.Model, nil
+}
+
+func (r Router) RetrieveResponse(ctx context.Context, req modules.RequestContext, id string) (openai.ResponseResponse, error) {
+	_, endpoint, client, err := r.responseResource(ctx, req, id)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	defer release()
+	if err := r.health.permit(ctx, endpoint); err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	for attempt := 0; attempt <= endpointMaxRetries(endpoint); attempt++ {
+		callCtx, finish := r.startProviderCall(ctx, endpoint, "responses.retrieve")
+		response, callErr := client.RetrieveResponse(callCtx, id)
+		finish(callErr)
+		if callErr == nil {
+			r.health.success(ctx, endpoint)
+			return response, nil
+		}
+		if ctx.Err() != nil || attempt >= endpointRetryLimit(endpoint, callErr) || !retrySameEndpointWithPolicy(endpoint, callErr) {
+			r.health.failure(ctx, endpoint, callErr)
+			return openai.ResponseResponse{}, callErr
+		}
+		if waitErr := r.retry.beforeRetry(ctx, callErr, attempt); waitErr != nil {
+			r.health.failure(ctx, endpoint, waitErr)
+			return openai.ResponseResponse{}, waitErr
+		}
+	}
+	return openai.ResponseResponse{}, errors.New("response retrieval failed")
 }

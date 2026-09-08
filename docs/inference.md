@@ -9,6 +9,7 @@ Gateway реализует OpenAI-compatible endpoints:
 | `GET /v1/models` | Модели, доступные текущему credential |
 | `POST /v1/chat/completions` | Chat, tools, structured output и vision |
 | `POST /v1/responses` | Responses, continuity, function tools и MCP passthrough |
+| `GET /v1/responses/{id}` | Чтение сохраненного Response владельцем credential |
 | `POST /v1/embeddings` | String или массив строк |
 | `POST /v1/rerank` | Query/documents ranking |
 
@@ -909,9 +910,10 @@ explicit value with `unsupported_parameter` because these adapters cannot expres
 the requested Responses storage control. This is an additive request-schema
 change, covered by local HTTP payload tests for both values and default behavior.
 
-`store` controls upstream response storage only. Gateway cache and logging policies
-are configured separately; this option is not a gateway-wide retention switch.
-It does not publish retrieve/delete/cancel endpoints or a background lifecycle.
+`store` controls upstream response storage. An explicit `true` also enables the
+gateway ownership binding required by `GET /v1/responses/{id}`. Gateway logging
+policies remain separate; this option is not a gateway-wide retention switch.
+Delete, cancel and background lifecycle endpoints are not published.
 
 Opaque `encrypted_content` fields are protected during input text processing.
 Local text transformation leaves them unchanged, the remote text-only projection
@@ -1092,19 +1094,14 @@ with `400 unsupported_parameter`; it is not silently mapped to unrelated native
 metadata semantics. Gateway authorization and billing identities are not derived
 from this client-supplied object.
 
-### Stored Responses transport foundation
+### Stored Responses lifecycle
 
-The native-compatible adapter exposes `RetrieveResponse` for internal lifecycle
-integration. It performs a GET using the configured provider credential, accepts
+The native-compatible adapter exposes bounded retrieval transport. It performs a
+GET using the configured provider credential, accepts
 only bounded ASCII resource IDs, rejects redirects, observes context cancellation,
 and uses the bounded Responses decoder and redacted upstream error conversion.
 A successful payload must return the requested ID. Reading reported usage here
 does not execute inference or run billing settlement.
-
-This transport method does not authorize resource ownership. No public retrieval
-route is enabled yet: the router/handler must first resolve the resource owner,
-original deployment, current credential policy and resource retention state.
-This is a lifecycle implementation step, not completion of the retrieval API.
 
 Lifecycle ownership has a separate storage foundation from routing affinity.
 Records are scoped by gateway credential ID, user ID and response ID, with model,
@@ -1128,8 +1125,11 @@ binding is written. A storage failure returns `503 response_ownership_unavailabl
 an ID collision with a different binding returns `409 response_ownership_conflict`.
 Omitted, null or false `store` values retain the existing stateless behavior.
 
-Public retrieval is still disabled. Its route must load this binding, recheck the
-current authorization and compare the original deployment identity before making
-an upstream request. Retention, upstream model aliases and reconstruction after
-restart remain lifecycle integration requirements; optional affinity alone is not
-sufficient.
+`GET /v1/responses/{id}` runs authentication without opening a generation billing
+lifecycle, resolves the record within the credential and user scope, and rechecks
+current model, tag, access-group and RPM policy before reading upstream. The router
+loads the immutable binding again immediately before transport and rejects a
+removed or changed deployment with `409 response_deployment_changed`. Missing and
+cross-owner records return the same `404 response_not_found` response. Retention,
+upstream model aliases and reconstruction after restart remain lifecycle integration
+requirements; optional affinity alone is not sufficient.

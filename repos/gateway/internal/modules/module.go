@@ -91,6 +91,29 @@ func (p Pipeline) RunTokenCount(ctx context.Context, req *RequestContext) error 
 	return p.runPre(ctx, req, true)
 }
 
+// RunAuthentication establishes the caller identity for a non-inference
+// operation without invoking content transforms or the billing lifecycle.
+func (p Pipeline) RunAuthentication(ctx context.Context, req *RequestContext) error {
+	found := false
+	for _, module := range p.modules {
+		if module.Name() != "auth" {
+			continue
+		}
+		found = true
+		err := p.run(ctx, req, module, "pre", module.Handle)
+		if err != nil {
+			if module.Required() {
+				return fmt.Errorf("%s module failed: %w", module.Name(), err)
+			}
+			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
+		}
+	}
+	if !found || req.CredentialID == "" {
+		return ErrUnauthorized
+	}
+	return nil
+}
+
 func (p Pipeline) runPre(ctx context.Context, req *RequestContext, tokenCount bool) error {
 	for _, module := range p.modules {
 		if tokenCount && module.Name() == "billing" {

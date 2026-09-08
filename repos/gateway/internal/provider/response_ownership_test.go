@@ -17,7 +17,8 @@ type ownershipTestStore struct {
 }
 
 type ownershipResponseClient struct {
-	calls int
+	calls         int
+	retrieveCalls int
 }
 
 type ownershipPostModule struct {
@@ -46,6 +47,11 @@ func (p *ownershipResponseClient) Responses(_ context.Context, request openai.Re
 
 func (p *ownershipResponseClient) StreamResponses(ctx context.Context, request openai.ResponseRequest, _ ResponseStreamWriter) (openai.ResponseResponse, error) {
 	return p.Responses(ctx, request)
+}
+
+func (p *ownershipResponseClient) RetrieveResponse(_ context.Context, id string) (openai.ResponseResponse, error) {
+	p.retrieveCalls++
+	return openai.ResponseResponse{ID: id, Model: "public-model", Status: "completed"}, nil
 }
 
 func (s *ownershipTestStore) Get(_ context.Context, k string) ([]byte, bool, error) {
@@ -175,6 +181,36 @@ func TestStoredResponseSettlesPostModulesWhenOwnershipWriteFails(t *testing.T) {
 	router := Router{endpoints: []Endpoint{endpoint}, modules: modules.NewPipeline([]modules.Module{post}), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, ownership: newResponseOwnershipStore(time.Hour, backend)}
 	if _, err := router.Responses(t.Context(), req); !errors.Is(err, ErrResponseOwnershipUnavailable) || client.calls != 1 || post.postCalls != 1 {
 		t.Fatalf("calls=%d post=%d err=%v", client.calls, post.postCalls, err)
+	}
+}
+
+func TestRetrieveResponseRequiresOwnerAndOriginalDeployment(t *testing.T) {
+	owner := modules.RequestContext{CredentialID: "credential", UserID: "user"}
+	other := modules.RequestContext{CredentialID: "other", UserID: "user"}
+	backend := &ownershipTestStore{data: map[string][]byte{}}
+	client := &ownershipResponseClient{}
+	endpoint := Endpoint{Name: "deployment", ProviderID: "provider", Type: "test", Models: []string{"public-model"}, Provider: client}
+	router := Router{endpoints: []Endpoint{endpoint}, ownership: newResponseOwnershipStore(time.Hour, backend)}
+	binding := responseOwnership{Endpoint: endpoint.Name, Model: "public-model", Deployment: responseDeploymentIdentity(endpoint)}
+	if err := router.ownership.put(t.Context(), owner, "resp_owned", binding); err != nil {
+		t.Fatal(err)
+	}
+	if model, err := router.ResolveResponseResource(t.Context(), owner, "resp_owned"); err != nil || model != "public-model" {
+		t.Fatalf("model=%q err=%v", model, err)
+	}
+	response, err := router.RetrieveResponse(t.Context(), owner, "resp_owned")
+	if err != nil || response.ID != "resp_owned" || client.retrieveCalls != 1 {
+		t.Fatalf("response=%+v calls=%d err=%v", response, client.retrieveCalls, err)
+	}
+	if _, err := router.ResolveResponseResource(t.Context(), other, "resp_owned"); !errors.Is(err, ErrResponseNotFound) {
+		t.Fatalf("cross-owner lookup err=%v", err)
+	}
+
+	replacement := endpoint
+	replacement.BaseURL = "https://replacement.example"
+	router.endpoints = []Endpoint{replacement}
+	if _, err := router.RetrieveResponse(t.Context(), owner, "resp_owned"); !errors.Is(err, ErrResponseDeploymentChanged) || client.retrieveCalls != 1 {
+		t.Fatalf("changed deployment calls=%d err=%v", client.retrieveCalls, err)
 	}
 }
 

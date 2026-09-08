@@ -357,6 +357,43 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h Handler) GetResponse(w http.ResponseWriter, r *http.Request) {
+	resourceProvider, ok := h.provider.(provider.ResponseResourceProvider)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "response_lifecycle_unsupported", "response lifecycle is not supported")
+		return
+	}
+	reqCtx := modules.RequestContext{
+		APIKey:    bearerToken(r.Header.Get("Authorization")),
+		RequestID: executionID(w),
+	}
+	if err := h.pipeline.RunAuthentication(r.Context(), &reqCtx); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "module_failed", "authentication failed")
+		return
+	}
+	reqCtx.APIKey = ""
+	id := strings.TrimSpace(r.PathValue("id"))
+	model, err := resourceProvider.ResolveResponseResource(r.Context(), reqCtx, id)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, model, 0) {
+		return
+	}
+	reqCtx.Request.Model = model
+	response, err := resourceProvider.RetrieveResponse(r.Context(), reqCtx, id)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 	var request openai.EmbeddingRequest
 	if !decodeInferenceRequest(w, r, &request) {
@@ -535,6 +572,14 @@ func decodeInferenceRequest(w http.ResponseWriter, r *http.Request, target any) 
 }
 
 func writeProviderFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, provider.ErrResponseNotFound) {
+		writeError(w, http.StatusNotFound, "response_not_found", "response not found")
+		return
+	}
+	if errors.Is(err, provider.ErrResponseDeploymentChanged) {
+		writeError(w, http.StatusConflict, "response_deployment_changed", "response deployment has changed")
+		return
+	}
 	if errors.Is(err, provider.ErrResponseAffinityUnavailable) {
 		writeError(w, http.StatusServiceUnavailable, "response_affinity_unavailable", "response session storage is unavailable")
 		return

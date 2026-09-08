@@ -32,6 +32,48 @@ type accessPolicyModule struct {
 
 type countingAccessModule struct{ calls int }
 
+type lifecycleBillingModule struct{ calls int }
+
+type lifecycleAuthModule struct {
+	allowedModels []string
+}
+
+type lifecycleResourceProvider struct {
+	chatProvider
+	resolveCalls  int
+	retrieveCalls int
+	credentialID  string
+}
+
+func (*lifecycleBillingModule) Name() string   { return "billing" }
+func (*lifecycleBillingModule) Required() bool { return true }
+func (m *lifecycleBillingModule) Handle(context.Context, *modules.RequestContext) error {
+	m.calls++
+	return nil
+}
+
+func (*lifecycleAuthModule) Name() string   { return "auth" }
+func (*lifecycleAuthModule) Required() bool { return true }
+func (m *lifecycleAuthModule) Handle(_ context.Context, req *modules.RequestContext) error {
+	req.APIKey = ""
+	req.CredentialID = "credential"
+	req.UserID = "user"
+	req.AllowedModels = append([]string(nil), m.allowedModels...)
+	return nil
+}
+
+func (p *lifecycleResourceProvider) ResolveResponseResource(_ context.Context, req modules.RequestContext, _ string) (string, error) {
+	p.resolveCalls++
+	p.credentialID = req.CredentialID
+	return "test-model", nil
+}
+
+func (p *lifecycleResourceProvider) RetrieveResponse(_ context.Context, req modules.RequestContext, id string) (openai.ResponseResponse, error) {
+	p.retrieveCalls++
+	p.credentialID = req.CredentialID
+	return openai.ResponseResponse{ID: id, Model: req.Request.Model, Status: "completed"}, nil
+}
+
 func TestChatCompletionsRejectsConflictingTokenLimits(t *testing.T) {
 	handler := NewHandler(modules.NewPipeline(nil), &chatProvider{})
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[{"role":"user","content":"hello"}],"max_tokens":10,"max_completion_tokens":20}`))
@@ -590,6 +632,8 @@ func TestProviderResponseOwnershipFailuresAreNormalized(t *testing.T) {
 	}{
 		{name: "storage unavailable", err: errors.Join(errors.New("redis password=secret"), provider.ErrResponseOwnershipUnavailable), status: http.StatusServiceUnavailable, code: "response_ownership_unavailable"},
 		{name: "ownership conflict", err: errors.Join(errors.New("deployment=secret"), provider.ErrResponseOwnershipConflict), status: http.StatusConflict, code: "response_ownership_conflict"},
+		{name: "not found", err: errors.Join(errors.New("record=secret"), provider.ErrResponseNotFound), status: http.StatusNotFound, code: "response_not_found"},
+		{name: "deployment changed", err: errors.Join(errors.New("endpoint=secret"), provider.ErrResponseDeploymentChanged), status: http.StatusConflict, code: "response_deployment_changed"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
@@ -601,6 +645,48 @@ func TestProviderResponseOwnershipFailuresAreNormalized(t *testing.T) {
 				t.Fatalf("ownership details leaked: %s", recorder.Body.String())
 			}
 		})
+	}
+}
+
+func TestGetResponseAuthenticatesAndSkipsBillingLifecycle(t *testing.T) {
+	resource := &lifecycleResourceProvider{}
+	billing := &lifecycleBillingModule{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{modules.NewAuthModule(true), billing}), resource))
+	request := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_123", nil)
+	request.Header.Set("Authorization", "Bearer demo-user-key")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || resource.resolveCalls != 1 || resource.retrieveCalls != 1 || resource.credentialID == "" {
+		t.Fatalf("status=%d resolve=%d retrieve=%d credential=%q body=%s", recorder.Code, resource.resolveCalls, resource.retrieveCalls, resource.credentialID, recorder.Body.String())
+	}
+	if billing.calls != 0 {
+		t.Fatalf("retrieval opened billing lifecycle: calls=%d", billing.calls)
+	}
+	if recorder.Header().Get("X-Execution-ID") == "" || !strings.Contains(recorder.Body.String(), `"id":"resp_123"`) {
+		t.Fatalf("missing lifecycle response metadata: headers=%v body=%s", recorder.Header(), recorder.Body.String())
+	}
+}
+
+func TestGetResponseRejectsUnauthenticatedCallerBeforeOwnershipLookup(t *testing.T) {
+	resource := &lifecycleResourceProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{modules.NewAuthModule(true)}), resource))
+	request := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_123", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized || resource.resolveCalls != 0 || resource.retrieveCalls != 0 {
+		t.Fatalf("status=%d resolve=%d retrieve=%d body=%s", recorder.Code, resource.resolveCalls, resource.retrieveCalls, recorder.Body.String())
+	}
+}
+
+func TestGetResponseRechecksCurrentModelPolicyBeforeRetrieval(t *testing.T) {
+	resource := &lifecycleResourceProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"other-model"}}}), resource))
+	request := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_123", nil)
+	request.Header.Set("Authorization", "Bearer key")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden || resource.resolveCalls != 1 || resource.retrieveCalls != 0 {
+		t.Fatalf("status=%d resolve=%d retrieve=%d body=%s", recorder.Code, resource.resolveCalls, resource.retrieveCalls, recorder.Body.String())
 	}
 }
 
