@@ -242,7 +242,6 @@ func TestOllamaStreamsChatCompletions(t *testing.T) {
 
 func TestOllamaResponses(t *testing.T) {
 	maxOutputTokens := 11
-	maxTokens := 12
 	temperature := 0.2
 	topP := 0.8
 	parallel := true
@@ -262,7 +261,6 @@ func TestOllamaResponses(t *testing.T) {
 			t.Fatal("expected non-stream responses request")
 		}
 		if request.MaxOutputTokens == nil || *request.MaxOutputTokens != maxOutputTokens ||
-			request.MaxTokens == nil || *request.MaxTokens != maxTokens ||
 			request.Temperature == nil || *request.Temperature != temperature ||
 			request.TopP == nil || *request.TopP != topP || request.PreviousResponse != "resp-previous" ||
 			request.ParallelToolCalls == nil || !*request.ParallelToolCalls || len(request.Tools) != 1 {
@@ -298,7 +296,7 @@ func TestOllamaResponses(t *testing.T) {
 		Model: "test-model", Input: "ping", Stream: true,
 		Tools: []openai.ResponseTool{{Type: "function", Name: "weather.get"}}, ToolChoice: "required",
 		ParallelToolCalls: &parallel, PreviousResponse: "resp-previous",
-		MaxOutputTokens: &maxOutputTokens, MaxTokens: &maxTokens, Temperature: &temperature, TopP: &topP,
+		MaxOutputTokens: &maxOutputTokens, Temperature: &temperature, TopP: &topP,
 	})
 	if err != nil {
 		t.Fatal(err)

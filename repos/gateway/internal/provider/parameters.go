@@ -163,3 +163,10 @@ func validateResponseOptions(request openai.ResponseRequest) error {
 	}
 	return nil
 }
+
+func responseOutputTokenLimit(request openai.ResponseRequest) *int {
+	if request.MaxOutputTokens != nil {
+		return request.MaxOutputTokens
+	}
+	return request.MaxTokens
+}

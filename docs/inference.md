@@ -1074,3 +1074,10 @@ when their values match. Previously the gateway reserved against max_output_toke
 but native-compatible adapters forwarded both fields, leaving provider precedence
 ambiguous. Clients sending both must remove one. Single-limit requests and null
 aliases retain their existing behavior.
+
+Native Responses adapters normalize the gateway's legacy `max_tokens` alias to
+`max_output_tokens` before sending JSON or streaming requests. They never send
+`max_tokens` to the native Responses endpoint. An omitted cap remains omitted,
+and the forwarded value matches the output cap selected for token reservation.
+This changes the upstream wire field for clients using the legacy alias while
+preserving their configured token limit.

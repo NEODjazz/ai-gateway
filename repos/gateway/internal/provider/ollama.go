@@ -384,8 +384,8 @@ func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: false,
-		MaxOutputTokens: request.MaxOutputTokens, MaxTokens: request.MaxTokens,
-		Temperature: request.Temperature, TopP: request.TopP,
+		MaxOutputTokens: responseOutputTokenLimit(request),
+		Temperature:     request.Temperature, TopP: request.TopP,
 	})
 	if err != nil {
 		return openai.ResponseResponse{}, err
@@ -425,8 +425,8 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: true,
-		MaxOutputTokens: request.MaxOutputTokens, MaxTokens: request.MaxTokens,
-		Temperature: request.Temperature, TopP: request.TopP,
+		MaxOutputTokens: responseOutputTokenLimit(request),
+		Temperature:     request.Temperature, TopP: request.TopP,
 	})
 	if err != nil {
 		return openai.ResponseResponse{}, err
