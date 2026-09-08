@@ -547,6 +547,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 		if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
 			return err
 		}
+		if event == "" {
+			event = eventName(decoded)
+		}
 		outputIndex, err := responseOutputIndex(decoded)
 		if err != nil {
 			return err
@@ -560,10 +563,33 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				item := ensureResponseOutputItem(&response, outputIndex)
 				item.Type = "function_call"
 				item.Arguments += delta
-			default:
+			case "response.output_text.delta":
 				response.OutputText += delta
 				textSlot := ensureResponseOutputTextSlot(&response)
 				textSlot.Text += delta
+			}
+		}
+		if event == "response.refusal.delta" || event == "response.refusal.done" {
+			contentIndex, err := boundedResponseStreamIndex(decoded, "content_index", maxResponseStreamContentParts)
+			if err != nil {
+				return err
+			}
+			item := ensureResponseOutputItem(&response, outputIndex)
+			item.Type, item.Role = "message", "assistant"
+			if id, ok := decoded["item_id"].(string); ok {
+				item.ID = id
+			}
+			for len(item.Content) <= contentIndex {
+				item.Content = append(item.Content, openai.ResponseOutputContent{})
+			}
+			part := &item.Content[contentIndex]
+			part.Type, part.Text = "refusal", ""
+			if event == "response.refusal.delta" {
+				if delta, ok := decoded["delta"].(string); ok {
+					part.Refusal += delta
+				}
+			} else if refusal, ok := decoded["refusal"].(string); ok {
+				part.Refusal = refusal
 			}
 		}
 		if itemValue, ok := decoded["item"].(map[string]any); ok {
@@ -587,9 +613,6 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			response.OutputText = responseText(response)
 		}
 		if write != nil {
-			if event == "" {
-				event = eventName(decoded)
-			}
 			return write(event, payload)
 		}
 		return nil
@@ -604,16 +627,21 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 }
 
 const maxResponseStreamOutputItems = 1024
+const maxResponseStreamContentParts = 128
 
 func responseOutputIndex(decoded map[string]any) (int, error) {
-	raw, present := decoded["output_index"]
+	return boundedResponseStreamIndex(decoded, "output_index", maxResponseStreamOutputItems)
+}
+
+func boundedResponseStreamIndex(decoded map[string]any, field string, limit int) (int, error) {
+	raw, present := decoded[field]
 	if !present {
 		return 0, nil
 	}
 	value, ok := raw.(float64)
 	// Check the small range before converting to int, including on 32-bit builds.
-	if !ok || !(value >= 0 && value < maxResponseStreamOutputItems) || value != float64(int(value)) {
-		return 0, fmt.Errorf("invalid upstream response output index")
+	if !ok || !(value >= 0 && value < float64(limit)) || value != float64(int(value)) {
+		return 0, fmt.Errorf("invalid upstream response %s", field)
 	}
 	return int(value), nil
 }

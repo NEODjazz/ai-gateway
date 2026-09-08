@@ -647,3 +647,18 @@ This intentionally limits stream output slots to 1024. It bounds allocation driv
 by an index, not total response bytes, text accumulation, or background lifecycle.
 Regression tests cover malformed values, numbers beyond machine integer range,
 the first rejected index, the highest accepted index, and omitted indices.
+
+### Native Responses refusal assembly
+
+Native SSE accumulation resolves the event name from JSON `type` when the SSE
+`event:` line is absent. Only `response.output_text.delta` contributes to ordinary
+text; function arguments and refusal text are collected separately. Other delta
+events continue to be forwarded, but are no longer misrepresented as answer text.
+
+Refusal delta/done events retain output/content indices and item identity. The
+final refusal replaces accumulated fragments rather than duplicating them.
+Explicit refusal `content_index` is limited to integers 0–127 and is validated
+before allocation or forwarding; omitted values retain slot-zero compatibility.
+These limits do not bound cumulative text bytes. Regression tests cover named and
+JSON-typed events, interleaved text/refusal/tool output, unrelated deltas, refusal
+completion, invalid indices, and the highest valid content slot.
