@@ -44,11 +44,19 @@ type FunctionDefinition struct {
 	Strict      *bool  `json:"strict,omitempty"`
 }
 
+type ToolCallExtraContent struct {
+	Google *GoogleToolCallContent `json:"google,omitempty"`
+}
+type GoogleToolCallContent struct {
+	ThoughtSignature string `json:"thought_signature,omitempty"`
+}
+
 type ToolCall struct {
-	Index    *int         `json:"index,omitempty"`
-	ID       string       `json:"id,omitempty"`
-	Type     string       `json:"type"`
-	Function FunctionCall `json:"function"`
+	ExtraContent *ToolCallExtraContent `json:"extra_content,omitempty"`
+	Index        *int                  `json:"index,omitempty"`
+	ID           string                `json:"id,omitempty"`
+	Type         string                `json:"type"`
+	Function     FunctionCall          `json:"function"`
 }
 
 type FunctionCall struct {

@@ -1,0 +1,216 @@
+package provider
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
+)
+
+func geminiTestChat() openai.ChatCompletionRequest {
+	limit := 123
+	return openai.ChatCompletionRequest{Model: "gemini-test", MaxCompletionTokens: &limit, Messages: []openai.Message{{Role: "system", Content: "Be concise"}, {Role: "user", Content: "Weather?"}}, Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object"}}}}, ToolChoice: "required", ResponseFormat: &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "answer", Schema: map[string]any{"type": "object"}}}}
+}
+
+func TestGeminiNativeChatAndToolSignatures(t *testing.T) {
+	var request geminiRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models/gemini-test:generateContent" || r.URL.RawQuery != "" || r.Header.Get("x-goog-api-key") != "fake-key" || r.Header.Get("Authorization") != "" {
+			t.Errorf("invalid native transport: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"responseId":"native-id","candidates":[{"index":0,"content":{"parts":[{"functionCall":{"id":"native-call","name":"weather","args":{"city":"Moscow"}},"thoughtSignature":"opaque-signature"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"cachedContentTokenCount":4,"candidatesTokenCount":2,"thoughtsTokenCount":3,"totalTokenCount":15}}`)
+	}))
+	defer server.Close()
+	client := NewGemini(server.URL, "fake-key", true)
+	response, err := client.ChatCompletions(context.Background(), geminiTestChat())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.System == nil || request.System.Parts[0].Text != "Be concise" || request.Generation.MaxOutputTokens == nil || *request.Generation.MaxOutputTokens != 123 || request.Generation.ResponseMIMEType != "application/json" || len(request.Tools) != 1 {
+		t.Fatalf("native mapping incomplete: %+v", request)
+	}
+	if response.Usage.TotalTokens != 15 || response.Usage.CompletionTokens != 5 || response.Usage.PromptTokensDetails.CachedTokens != 4 {
+		t.Fatalf("usage mapped incorrectly: %+v", response.Usage)
+	}
+	if response.Choices[0].FinishReason != "tool_calls" {
+		t.Fatal("tool finish reason lost")
+	}
+	call := response.Choices[0].Message.ToolCalls[0]
+	if call.ID != "native-call" || call.ExtraContent.Google.ThoughtSignature != "opaque-signature" {
+		t.Fatal("native tool identity/signature lost")
+	}
+	next := geminiTestChat()
+	next.Messages = append(next.Messages, response.Choices[0].Message, openai.Message{Role: "tool", ToolCallID: call.ID, Content: map[string]any{"temperature": 20}})
+	encoded, err := geminiChatRequest(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encoded.Contents[1].Parts[0].ThoughtSignature != "opaque-signature" || encoded.Contents[2].Parts[0].FunctionResponse.Name != "weather" {
+		t.Fatalf("tool continuation was not preserved: %+v", encoded.Contents)
+	}
+}
+
+func TestGeminiNativeStreamUsageAndBilling(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models/gemini-test:streamGenerateContent" || r.URL.Query().Get("alt") != "sse" || r.URL.Query().Has("key") {
+			t.Error("invalid SSE URL")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"responseId\":\"stream-id\",\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"private\",\"thought\":true},{\"text\":\"hello\"}]}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\" world\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":3,\"totalTokenCount\":15}}\n\n")
+	}))
+	defer server.Close()
+	recorder := &streamUsageRecorder{}
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "native", Type: "gemini", BaseURL: server.URL, APIKey: "fake-key", Stream: true, Models: []string{"gemini-test"}, Capabilities: []string{"chat", "stream"}}}, Modules: modules.NewPipeline([]modules.Module{recorder})}).(*Router)
+	var payloads []string
+	response, streamed, err := router.StreamChatCompletions(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: "hello"}}}}, func(payload string) error { payloads = append(payloads, payload); return nil })
+	if err != nil || !streamed {
+		t.Fatalf("stream failed: %v", err)
+	}
+	if response.Choices[0].Message.Content != "hello world" || recorder.calls != 1 || recorder.usage.CompletionTokens != 5 || recorder.usage.TotalTokens != 15 {
+		t.Fatalf("stream/billing result: %+v %+v", response, recorder)
+	}
+	if len(payloads) != 2 || strings.Contains(strings.Join(payloads, ""), "private") || !strings.Contains(payloads[1], `"total_tokens":15`) {
+		t.Fatalf("invalid SSE conversion: %v", payloads)
+	}
+}
+
+func TestGeminiRejectsInvalidAndUnsupportedRequests(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(500) }))
+	defer server.Close()
+	enabled := true
+	for _, change := range []func(*openai.ChatCompletionRequest){
+		func(r *openai.ChatCompletionRequest) { r.Model = "../other" },
+		func(r *openai.ChatCompletionRequest) { r.ParallelToolCalls = &enabled },
+		func(r *openai.ChatCompletionRequest) { r.Logprobs = &enabled },
+		func(r *openai.ChatCompletionRequest) { r.ResponseFormat.JSONSchema.Schema = nil },
+		func(r *openai.ChatCompletionRequest) { r.Messages[0].Role = "invalid" },
+		func(r *openai.ChatCompletionRequest) {
+			r.Messages = append(r.Messages, openai.Message{Role: "tool", ToolCallID: "missing", Content: "result"})
+		},
+		func(r *openai.ChatCompletionRequest) { r.Tools[0].Function.Strict = &enabled },
+	} {
+		request := geminiTestChat()
+		change(&request)
+		_, err := NewGemini(server.URL, "fake-key", true).ChatCompletions(context.Background(), request)
+		var failure *Error
+		if !errors.As(err, &failure) || failure.Class != FailureClientRequest {
+			t.Fatalf("invalid request not rejected: %v", err)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatal("invalid request reached upstream")
+	}
+}
+
+func TestGeminiDoesNotForwardCredentialsOnRedirect(t *testing.T) {
+	var leaked atomic.Bool
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { leaked.Store(true) }))
+	defer destination.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, destination.URL, http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+	_, err := NewGemini(source.URL, "fake-key", false).ChatCompletions(context.Background(), geminiTestChat())
+	if err == nil || leaked.Load() {
+		t.Fatal("redirect followed with provider credential")
+	}
+}
+
+func TestGeminiRejectsTruncatedStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"partial\"}]}}]}\n\n")
+	}))
+	defer server.Close()
+	_, err := NewGemini(server.URL, "", true).StreamChatCompletions(context.Background(), geminiTestChat(), func(string) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "before completion") {
+		t.Fatalf("truncated stream accepted: %v", err)
+	}
+}
+
+func TestGeminiInlineVisionPreservesPartOrder(t *testing.T) {
+	parts, err := geminiMessageParts([]any{map[string]any{"type": "text", "text": "before"}, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}}, map[string]any{"type": "text", "text": "after"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parts) != 3 || parts[0].Text != "before" || parts[1].InlineData.MIMEType != "image/png" || parts[2].Text != "after" {
+		t.Fatalf("vision content order lost: %+v", parts)
+	}
+}
+
+func TestGeminiUsageValidation(t *testing.T) {
+	for _, usage := range []geminiUsage{{Prompt: -1}, {Prompt: 1, Cached: 2}, {Prompt: 10, Candidates: 2, Thoughts: 3, Total: 12}} {
+		if _, err := geminiToChat(geminiResponse{Usage: &usage}, "test"); err == nil {
+			t.Fatalf("invalid usage accepted: %+v", usage)
+		}
+	}
+}
+
+func TestGeminiStreamStopsOnClientWriteError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"hello\"}]},\"finishReason\":\"STOP\"}]}\n\n")
+	}))
+	defer server.Close()
+	sentinel := errors.New("client disconnected")
+	_, err := NewGemini(server.URL, "", true).StreamChatCompletions(context.Background(), geminiTestChat(), func(string) error { return sentinel })
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("write failure lost: %v", err)
+	}
+}
+
+func TestGeminiUpstreamErrorIsClassifiedAndRedacted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(429)
+		_, _ = fmt.Fprint(w, `{"error":{"code":429,"message":"private echoed input"}}`)
+	}))
+	defer server.Close()
+	_, err := NewGemini(server.URL, "", false).ChatCompletions(context.Background(), geminiTestChat())
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Class != FailureRateLimit || strings.Contains(err.Error(), "private") {
+		t.Fatalf("incorrect upstream error: %v", err)
+	}
+}
+
+func TestGeminiParallelToolResultsShareNativeContent(t *testing.T) {
+	request := geminiTestChat()
+	request.Messages = append(request.Messages, openai.Message{Role: "assistant", ToolCalls: []openai.ToolCall{
+		{ID: "one", Type: "function", Function: openai.FunctionCall{Name: "weather", Arguments: `{}`}},
+		{ID: "two", Type: "function", Function: openai.FunctionCall{Name: "weather", Arguments: `{}`}},
+	}}, openai.Message{Role: "tool", ToolCallID: "one", Content: "first"}, openai.Message{Role: "tool", ToolCallID: "two", Content: "second"})
+	native, err := geminiChatRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(native.Contents) != 3 || len(native.Contents[2].Parts) != 2 || native.Contents[2].Parts[1].FunctionResponse.ID != "two" {
+		t.Fatalf("parallel results not grouped: %+v", native.Contents)
+	}
+}
+
+func TestGeminiStreamFinishesAccumulatedToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"weather\",\"args\":{}},\"thoughtSignature\":\"opaque\"}]}}]}\n\ndata: {\"candidates\":[{\"index\":0,\"finishReason\":\"STOP\"}]}\n\n")
+	}))
+	defer server.Close()
+	var payloads []string
+	response, err := NewGemini(server.URL, "", true).StreamChatCompletions(context.Background(), geminiTestChat(), func(s string) error { payloads = append(payloads, s); return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Choices[0].FinishReason != "tool_calls" || response.Choices[0].Message.ToolCalls[0].ExtraContent.Google.ThoughtSignature != "opaque" || !strings.Contains(payloads[1], `"finish_reason":"tool_calls"`) {
+		t.Fatalf("tool stream not completed correctly: %+v %v", response, payloads)
+	}
+}

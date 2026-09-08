@@ -2392,6 +2392,15 @@ components:
       properties:
         name: {type: string, minLength: 1}
         arguments: {type: string}
+    ToolCallExtraContent:
+      type: object
+      additionalProperties: false
+      properties:
+        google:
+          type: object
+          additionalProperties: false
+          properties:
+            thought_signature: {type: string}
     ToolCall:
       type: object
       required: [type, function]
@@ -2400,6 +2409,7 @@ components:
         id: {type: string}
         type: {type: string, const: function}
         function: {$ref: '#/components/schemas/FunctionCall'}
+        extra_content: {$ref: '#/components/schemas/ToolCallExtraContent'}
     Message:
       type: object
       required: [role]
@@ -2949,7 +2959,7 @@ components:
       required: [id, type, enabled]
       properties:
         id: {type: string, minLength: 1, maxLength: 128}
-        type: {type: string, enum: [demo, ollama, openai, openai-compatible, anthropic]}
+        type: {type: string, enum: [demo, ollama, openai, openai-compatible, anthropic, gemini]}
         base_url: {type: string, format: uri, maxLength: 2048}
         enabled: {type: boolean}
     ProviderCredentialCreateInput:

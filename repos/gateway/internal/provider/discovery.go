@@ -60,6 +60,9 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 	if err != nil {
 		return nil, err
 	}
+	if managed.Type == "gemini" {
+		return discoverGeminiModels(ctx, managed.BaseURL, secret)
+	}
 	endpoint, err := discoveryURL(managed)
 	if err != nil {
 		return nil, ErrProviderProbeFailed

@@ -27,7 +27,7 @@ availability is not inferred from these tests.
 | Text completions | Not implemented | Native completion execution and legacy response/SSE contracts |
 | Messages | Outbound Anthropic adapter | Native inbound message protocol and errors |
 | Anthropic token counting | Not implemented | Authenticated native counter; distinguish exact count from estimate |
-| GenerateContent | Not implemented | Native inbound and outbound content protocol, usage and SSE |
+| GenerateContent | Outbound native Gemini chat/tools/vision, SSE and usage | Native inbound contract and broader provider options |
 | Interactions | Not implemented | Native lifecycle, resource ownership and accounting |
 | Image generation | Not implemented | Generation contract and image-specific pricing/usage |
 | Image edits | Not implemented | Multipart validation, AV, size limits and accounting |
@@ -62,7 +62,7 @@ availability is not inferred from these tests.
 
 | Capability | Current implementation | Remaining work |
 | --- | --- | --- |
-| Native provider catalog | Anthropic, Ollama; compatible HTTP adapter | Additional native providers with protocol tests |
+| Native provider catalog | Anthropic, Ollama, Gemini; compatible HTTP adapter | Additional native providers with protocol tests |
 | Azure | Compatible HTTP scenarios only | Native endpoint/version behavior, Entra identity and refresh |
 | Workload identity | Not implemented | AWS signing, GCP credentials, Azure refresh and cancellation |
 | Model tokenization | Context estimate including tool schemas | Exact model tokenizers/counters with versioned provenance |
@@ -89,7 +89,14 @@ Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control
 increment. These commits have not been rolled out to the local deployment.
 
-The next implementation area is a native Gemini provider, with explicit
-capabilities, protocol conversion, reported usage and parameter rejection. The
+The native Gemini provider now has explicit protocol conversion, reported usage,
+parameter rejection and bounded model discovery. Native inbound protocols and
+Responses lifecycle remain next implementation areas. The
 remaining lifecycle and media families stay open until their own acceptance
 checks pass; this inventory does not declare overall completion.
+
+Gemini protocol regressions use local HTTP servers, including native streaming
+through the router into accounting, tool signature round-trips, redirect refusal,
+truncated streams and discovery pagination limits. Go vet, tests, race tests and
+build passed, as did UI tests, type checking and the production UI build. No live
+paid inference or cloud credential validation was performed.

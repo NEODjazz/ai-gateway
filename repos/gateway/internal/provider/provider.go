@@ -1832,6 +1832,8 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 		return NewOllama(endpoint.BaseURL, endpoint.Stream)
 	case "openai", "openai-compatible", "openrouter":
 		return NewOpenAICompatibleWithRerankPath(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.RerankPath)
+	case "gemini":
+		return NewGemini(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "anthropic":
 		return NewAnthropic(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "demo":

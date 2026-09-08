@@ -546,3 +546,15 @@ func TestChatStreamIndexBoundaries(t *testing.T) {
 		t.Fatal("valid boundary index rejected")
 	}
 }
+
+func TestCompatibleStreamPreservesToolSignatures(t *testing.T) {
+	payload := `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call","type":"function","function":{"name":"lookup","arguments":"{}"},"extra_content":{"google":{"thought_signature":"opaque"}}}]}}]}` + "\n\n"
+	response, err := decodeChatCompletionStream(strings.NewReader(payload), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := response.Choices[0].Message.ToolCalls[0]
+	if call.ExtraContent == nil || call.ExtraContent.Google == nil || call.ExtraContent.Google.ThoughtSignature != "opaque" {
+		t.Fatal("tool signature was lost during accumulation")
+	}
+}

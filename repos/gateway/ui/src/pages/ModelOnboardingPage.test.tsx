@@ -56,4 +56,17 @@ describe("ModelOnboardingPage", () => {
     expect(calls.some((call) => call.method === "POST" && (call.path === "/admin/v1/model-deployments" || call.path === "/admin/v1/model-groups") || call.method === "PUT" && call.path === "/admin/v1/model-catalog")).toBe(false);
     await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path).endsWith("/discover-models"))).toBe(true));
   });
+  it("offers native Gemini when creating a provider", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input) === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
+      return json({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ModelOnboardingPage /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("option", { name: "+ Create provider" });
+    await userEvent.selectOptions(screen.getByLabelText("Provider"), "__new");
+    await userEvent.selectOptions(screen.getByLabelText("Provider type"), "gemini");
+    expect(screen.getByLabelText("Provider type")).toHaveValue("gemini");
+  });
+
 });

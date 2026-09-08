@@ -480,6 +480,9 @@ func mergeToolCallDeltas(target *[]openai.ToolCall, deltas []openai.ToolCall) er
 			*target = append(*target, openai.ToolCall{Type: "function"})
 		}
 		current := &(*target)[index]
+		if delta.ExtraContent != nil {
+			current.ExtraContent = delta.ExtraContent
+		}
 		if delta.ID != "" {
 			current.ID = delta.ID
 		}

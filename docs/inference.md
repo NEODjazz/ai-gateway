@@ -60,6 +60,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `openai`, `openai-compatible`, `openrouter` | OpenAI wire format; Azure-style base URL поддерживается |
 | `anthropic` | Преобразование chat/tools/vision в native Messages API |
 | `ollama` | Native chat/stream/embeddings |
+| `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output; API key |
 | `demo` | Локальный deterministic fallback для разработки |
 
 OpenAI-compatible adapter один раз повторяет запрос с
@@ -165,3 +166,36 @@ OpenAI-compatible chat stream допускает индексы choices и tool 
 Managed deployment с capability `stream` включает native streaming в adapter.
 Без этой capability создание adapter не включает native stream неявно. Настройка
 применяется при построении runtime endpoint из сохранённого deployment.
+
+
+## Native Gemini adapter
+
+Provider type `gemini` uses the GenerateContent protocol, not an OpenAI-compatible
+URL. Set `base_url` to `https://generativelanguage.googleapis.com` (or an explicit
+`/v1beta` or `/v1` base) and use a provider-scoped API-key credential. The key is
+sent only in `x-goog-api-key`; redirects are not followed. Managed deployments
+must explicitly include `stream`, `tools`, `vision` or `structured_output` when
+those capabilities are needed.
+
+Chat supports system/developer instructions, text and inline image parts, function
+tools/results, forced tool choice, JSON output schemas, temperature, top-p, seed,
+stop sequences and output token limits. Opaque function-call signatures round-trip
+in `tool_calls[].extra_content.google.thought_signature`; Anthropic/Ollama/demo
+reject this metadata instead of silently dropping it. Model-generated thinking
+text is excluded from the chat content, while thinking tokens are included once
+in completion usage. Reported prompt/cache/total usage is retained for billing.
+
+Native SSE accumulates content and tool calls, forwards translated events and
+requires a completed finish reason. It rejects invalid/duplicate candidate
+indices, invalid usage, truncated streams and oversized payloads. JSON responses
+are limited to 32 MiB and the accumulated SSE wire payload to 64 MiB.
+
+Discovery follows native pagination with a 30-second overall deadline, a maximum
+of 100 pages/10,000 scanned models and repeated-token detection. Only models
+advertising `generateContent` are offered. Native Responses, embeddings, inbound
+GenerateContent/Interactions and cloud workload identity remain separate gaps.
+Unsupported generation controls, parallel tool control and strict function
+schemas fail explicitly; seed/output limits must fit the native integer range.
+
+Protocol references: [GenerateContent](https://ai.google.dev/api/generate-content)
+and [tool signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures).

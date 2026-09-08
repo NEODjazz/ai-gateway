@@ -24,6 +24,9 @@ func rejectParameters(adapter string, checks ...parameterCheck) error {
 }
 
 func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectToolCallMetadata("anthropic", request.Messages); err != nil {
+		return err
+	}
 	if err := rejectGenerationOptions("anthropic", request.ChatGenerationOptions); err != nil {
 		return err
 	}
@@ -41,6 +44,9 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectToolCallMetadata("ollama", request.Messages); err != nil {
+		return err
+	}
 	if err := rejectGenerationOptions("ollama", request.ChatGenerationOptions); err != nil {
 		return err
 	}
@@ -93,12 +99,26 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 }
 
 func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectToolCallMetadata("demo", request.Messages); err != nil {
+		return err
+	}
 	return rejectGenerationOptions("demo", request.ChatGenerationOptions)
 }
 
 func (OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if message := request.ChatGenerationOptions.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
+	}
+	return nil
+}
+
+func rejectToolCallMetadata(adapter string, messages []openai.Message) error {
+	for _, message := range messages {
+		for _, call := range message.ToolCalls {
+			if call.ExtraContent != nil {
+				return rejectParameters(adapter, parameterCheck{"messages.tool_calls.extra_content", true})
+			}
+		}
 	}
 	return nil
 }

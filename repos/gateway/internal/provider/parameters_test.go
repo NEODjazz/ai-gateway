@@ -96,3 +96,10 @@ func TestRouterValidatesParametersBeforeProviderModules(t *testing.T) {
 	_, _, err = router.StreamResponses(context.Background(), req, func(string, string) error { return nil })
 	assertUnsupportedParameter(t, err, "previous_response_id")
 }
+
+func TestNativeAdaptersRejectForeignToolSignatures(t *testing.T) {
+	request := openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "assistant", ToolCalls: []openai.ToolCall{{ExtraContent: &openai.ToolCallExtraContent{Google: &openai.GoogleToolCallContent{ThoughtSignature: "opaque"}}}}}}}
+	for _, client := range []Client{NewAnthropic("http://unused.invalid", "", true), NewOllama("http://unused.invalid", true), Demo{}} {
+		assertUnsupportedParameter(t, validateChatAdapter(client, request), "messages.tool_calls.extra_content")
+	}
+}
