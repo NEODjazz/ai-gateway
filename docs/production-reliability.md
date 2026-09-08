@@ -205,3 +205,29 @@ Authenticated external inference and browser visual QA were not performed.
 PostgreSQL integration was not repeated during rollout; the successful isolated
 database verification at `d0ecfbb` is recorded above. UI code was unchanged and
 its component suite was not rerun for this deployment.
+
+## Responses continuation and tool history rollout (2026-09-08)
+
+Source `31d49b6` was deployed after successful Go 1.25.13 formatting, vet,
+unit/regression, race and build checks. It includes indexed Responses text,
+function arguments and snapshots, terminal boundaries, reasoning summaries,
+encrypted context preservation, include/store forwarding, protected protocol
+identifiers and Anthropic tool-history conversion.
+
+- Rancher Desktop reported Moby and enabled Kubernetes; Docker identified
+  `lima-rancher-desktop`. The unchanged Dockerfile built
+  `ai-gateway-gateway:api-31d49b6` successfully.
+- Helm revision 117 deployed successfully. Comparison with revision 116 found
+  only `image.tag` changed in stored values.
+- The gateway ran digest
+  `sha256:194ac152e28662b333904b3588fc7c9046898f39c82984aabd519abd69d6fd49`
+  with zero restarts. All nine deployments reported their desired replicas Ready.
+- Thirteen ingress checks passed: health/readiness 204, UI/assets 200, asset
+  `no-store` headers and unauthenticated 401 responses for Chat, Responses,
+  embeddings, Messages/count_tokens and GenerateContent JSON/SSE/countTokens.
+  The Responses smoke payload included the new include/store fields.
+
+Authenticated external inference and browser visual QA were not performed.
+Stateless continuation was verified against local fake upstreams in repository
+tests. PostgreSQL integration and UI component tests were not repeated for this
+rollout; the earlier isolated PostgreSQL verification is recorded above.
