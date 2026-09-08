@@ -362,3 +362,24 @@ Stream failures emit a redacted native error without a successful finish reason.
 Regression tests cover conversion, JSON/SSE, authorization, quotas, native usage
 and billing, bounded stream accumulation and disconnects. Advanced safety, grounding,
 thought output, file/audio parts and Interactions remain unsupported.
+
+
+### Native GenerateContent token counting
+
+POST `/v1beta/models/{model}:countTokens` accepts either `contents` or
+`generateContentRequest` with contents, systemInstruction, tools and toolConfig.
+An optional nested model must match the path model (the `models/` prefix is accepted).
+The two input forms are mutually exclusive. Generation options, cachedContent and
+unsupported native parts are rejected. Authentication uses the same gateway headers
+as GenerateContent; only optional `alt=json` is allowed in the query.
+
+The response contains provider-reported `totalTokens`. The endpoint shares the
+Messages counter's model/tool ACL, input TPM/RPM and pre-inference policy checks.
+Quota windows are shared across protocols. Counting does not open a generation
+billing lifecycle or use generation cache/retries; unsupported providers return an
+error instead of an estimated count. Native counters currently cover Gemini and
+Anthropic. Modality-specific breakdowns are not synthesized.
+
+Regression tests verify native system/tools delivery, alias routing, validation,
+authorization, shared quotas and absence of generation billing.
+Protocol reference: [Gemini token counting](https://ai.google.dev/api/tokens).

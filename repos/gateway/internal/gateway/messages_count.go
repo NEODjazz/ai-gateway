@@ -48,41 +48,55 @@ func (h Handler) CountMessageTokens(w http.ResponseWriter, r *http.Request) {
 		}
 		key = nativeKey
 	}
-	req := modules.RequestContext{APIKey: key, RequestID: executionID(output), SessionID: sessionID(r), Request: request}
-	if err := h.pipeline.RunTokenCount(r.Context(), &req); err != nil {
-		if errors.Is(err, modules.ErrUnauthorized) {
-			writeError(output, 401, "unauthorized", "invalid api key")
-		} else {
-			writeProviderFailure(output, err)
-		}
-		return
-	}
-	req.APIKey = ""
-	if !h.prepareAccessGroups(output, &req) {
-		return
-	}
-	if _, err := openai.ChatImageAttachments(req.Request.Messages); err != nil {
-		writeError(output, 400, "invalid_image", err.Error())
-		return
-	}
-	tools, valid := chatToolIdentifiers(request.Tools)
-	if !h.authorizeTools(output, req, tools, valid) || !h.authorizeAccess(output, r.Context(), req, request.Model, openai.ChatInputTokens(request)) {
-		return
-	}
-	if !h.prepareModelFallbacks(output, r.Context(), &req, request.Model) {
-		return
-	}
-	counter, ok := h.provider.(provider.TokenCountProvider)
+	count, ok := h.countContextTokens(output, r, request, key)
 	if !ok {
-		writeError(output, 400, "unsupported_parameter", "count_tokens is not supported")
-		return
-	}
-	result, err := counter.CountTokens(r.Context(), req)
-	if err != nil {
-		writeProviderFailure(output, err)
 		return
 	}
 	output.copyHeaders()
-	writeJSON(w, 200, map[string]int{"input_tokens": result.InputTokens})
+	writeJSON(w, 200, map[string]int{"input_tokens": count})
 	completed = true
+}
+
+// countContextTokens applies the same admission and policy checks to each native
+// counting protocol, without opening a generation billing lifecycle.
+func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, key string) (int, bool) {
+	req := modules.RequestContext{APIKey: key, RequestID: executionID(w), SessionID: sessionID(r), Request: request}
+	if err := h.pipeline.RunTokenCount(r.Context(), &req); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, 401, "unauthorized", "invalid api key")
+		} else {
+			writeProviderFailure(w, err)
+		}
+		return 0, false
+	}
+	req.APIKey = ""
+	if !h.prepareAccessGroups(w, &req) {
+		return 0, false
+	}
+	if _, err := openai.ChatImageAttachments(req.Request.Messages); err != nil {
+		writeError(w, 400, "invalid_image", err.Error())
+		return 0, false
+	}
+	tools, valid := chatToolIdentifiers(request.Tools)
+	if !h.authorizeTools(w, req, tools, valid) || !h.authorizeAccess(w, r.Context(), req, request.Model, openai.ChatInputTokens(request)) {
+		return 0, false
+	}
+	if !h.prepareModelFallbacks(w, r.Context(), &req, request.Model) {
+		return 0, false
+	}
+	counter, ok := h.provider.(provider.TokenCountProvider)
+	if !ok {
+		writeError(w, 400, "unsupported_parameter", "count_tokens is not supported")
+		return 0, false
+	}
+	result, err := counter.CountTokens(r.Context(), req)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return 0, false
+	}
+	if result.InputTokens < 0 {
+		writeError(w, 502, "provider_error", "invalid provider token count")
+		return 0, false
+	}
+	return result.InputTokens, true
 }

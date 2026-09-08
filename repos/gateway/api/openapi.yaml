@@ -34,6 +34,47 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /v1beta/models/{model}:countTokens:
+    post:
+      operationId: countGenerateTokens
+      tags: [Inference]
+      summary: Count native GenerateContent context tokens
+      description: |
+        Uses gateway authorization, model/tool ACL, quotas and content policy.
+        Does not generate output or open a billing lifecycle. Query credentials are
+        rejected. Requires a native token counter; no estimate fallback is used.
+      security:
+        - googleAPIKey: []
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: model
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 256}
+        - in: query
+          name: alt
+          required: false
+          schema: {type: string, enum: [json]}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GenerateCountRequest'}
+      responses:
+        '200':
+          description: Provider-reported input token count
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [totalTokens]
+                properties:
+                  totalTokens: {type: integer, minimum: 0}
+        default:
+          description: Native error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GenerateContentError'}
   /v1beta/models/{model}:generateContent:
     post:
       operationId: generateContent
@@ -2146,6 +2187,73 @@ components:
             code: {type: integer}
             status: {type: string}
             message: {type: string}
+    GenerateCountRequest:
+      type: object
+      additionalProperties: false
+      oneOf:
+        - required: [contents]
+        - required: [generateContentRequest]
+      properties:
+        contents:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: {$ref: '#/components/schemas/GenerateContent'}
+        generateContentRequest:
+          $ref: '#/components/schemas/GenerateCountContext'
+    GenerateCountContext:
+      type: object
+      additionalProperties: false
+      required: [contents]
+      properties:
+        model:
+          type: string
+          description: Optional path model name, with or without the models/ prefix. Must match the path.
+        contents:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: {$ref: '#/components/schemas/GenerateContent'}
+        systemInstruction:
+          allOf:
+            - {$ref: '#/components/schemas/GenerateContent'}
+          description: Text parts only; role must be absent or system.
+        tools:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [functionDeclarations]
+            properties:
+              functionDeclarations:
+                type: array
+                minItems: 1
+                maxItems: 128
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [name]
+                  properties:
+                    name: {type: string, minLength: 1}
+                    description: {type: string}
+                    parameters:
+                      type: object
+                      description: Supported native Schema subset; mutually exclusive with parametersJsonSchema.
+                    parametersJsonSchema: {type: object}
+        toolConfig:
+          type: object
+          additionalProperties: false
+          properties:
+            functionCallingConfig:
+              type: object
+              additionalProperties: false
+              properties:
+                mode: {type: string, enum: [AUTO, NONE, ANY]}
+                allowedFunctionNames:
+                  type: array
+                  maxItems: 1
+                  items: {type: string}
+                  description: ANY requires exactly one declared function name.
     GenerateContentRequest:
       type: object
       additionalProperties: false

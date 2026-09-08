@@ -14,6 +14,7 @@ import (
 
 var generateRoutes = []RouteContract{
 	{http.MethodPost, "/v1beta/models/{model}:generateContent"},
+	{http.MethodPost, "/v1beta/models/{model}:countTokens"},
 	{http.MethodPost, "/v1beta/models/{model}:streamGenerateContent"},
 }
 
@@ -21,7 +22,7 @@ func (h Handler) GenerateContent(w http.ResponseWriter, r *http.Request) {
 	output := &generateWriter{destination: w, headers: make(http.Header), status: http.StatusOK}
 	defer output.finish()
 	model, action, ok := strings.Cut(r.PathValue("modelAction"), ":")
-	if !ok || model == "" || len(model) > 256 || (action != "generateContent" && action != "streamGenerateContent") {
+	if !ok || model == "" || len(model) > 256 || (action != "generateContent" && action != "streamGenerateContent" && action != "countTokens") {
 		writeError(output, 404, "not_found", "unknown model operation")
 		return
 	}
@@ -38,6 +39,10 @@ func (h Handler) GenerateContent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		key = native
+	}
+	if action == "countTokens" {
+		h.countGenerateTokens(output, r, model, key)
+		return
 	}
 	var request generateRequest
 	if !decodeInferenceRequest(output, r, &request) {

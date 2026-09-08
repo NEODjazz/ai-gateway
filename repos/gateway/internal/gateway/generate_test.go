@@ -115,7 +115,7 @@ func TestGenerateContentStreamingBoundsAndWriteFailure(t *testing.T) {
 	}
 }
 func TestGenerateContentMetricPathsAreBounded(t *testing.T) {
-	for _, action := range []string{"generateContent", "streamGenerateContent"} {
+	for _, action := range []string{"generateContent", "streamGenerateContent", "countTokens"} {
 		if got := metricPath("/v1beta/models/private-model:" + action); got != "/v1beta/models/{model}:"+action {
 			t.Fatalf("metric path %s", got)
 		}
