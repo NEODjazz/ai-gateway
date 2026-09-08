@@ -231,3 +231,31 @@ Authenticated external inference and browser visual QA were not performed.
 Stateless continuation was verified against local fake upstreams in repository
 tests. PostgreSQL integration and UI component tests were not repeated for this
 rollout; the earlier isolated PostgreSQL verification is recorded above.
+
+### Responses diagnostics rollout (source 5d10695)
+
+Source `5d10695`, previously verified with Go 1.25.13 vet, unit/regression,
+race and build checks, was deployed to Rancher Desktop. It includes reasoning
+request and usage details, annotations, provider error normalization, context
+truncation, assistant phase preservation, and output token probabilities with
+`top_logprobs` forwarding.
+
+- Rancher Desktop reported Moby and enabled Kubernetes. Docker identified
+  `lima-rancher-desktop`; the unchanged Dockerfile successfully built
+  `ai-gateway-gateway:api-5d10695`.
+- Helm revision 118 is deployed. Stored values comparison against revision 117
+  confirmed that only `image.tag` changed.
+- Gateway pod `ai-gateway-gateway-8f4f4fdbc-wfwph` was Ready with zero restarts,
+  running digest
+  `sha256:57bc929c1aa5fe7c08f7bff27e39b568826e083c9b7aa70327cd04ead55f2243`.
+  All nine deployments had their desired Ready replica counts.
+- Thirteen ingress checks passed: health/readiness 204, UI and assets 200 with
+  asset `no-store`, and unauthenticated 401 responses for Chat, Responses,
+  embeddings, Messages/count_tokens and GenerateContent JSON/SSE/countTokens.
+  The Responses request exercised decoding of reasoning, truncation, store,
+  include and explicit zero top_logprobs before authorization rejection.
+
+These smoke checks do not prove authenticated provider execution. External
+inference, browser visual QA, PostgreSQL integration and UI component tests were
+not repeated for this rollout; provider behavior was checked by repository tests
+against local fake upstreams before deployment.
