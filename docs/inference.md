@@ -279,3 +279,21 @@ Requests requiring exact stop metadata use separate exact-cache keys and bypass
 semantic cache. A native stop-sequence reason without its matched delimiter is
 an upstream error rather than an inferred end_turn. JSON/SSE regressions cover
 native conversion, cache isolation and rejection before accounting modules.
+
+
+## Native token counter adapter
+
+`TokenCountClient` is an optional adapter interface. Anthropic uses native
+`/v1/messages/count_tokens` for model context, system instructions, text/inline
+images, function schemas, function-call history/results and tool choice. The
+counter wire request contains no generation limit or streaming flag. Unsupported
+context parts and parameters fail before HTTP. Results retain the provider model
+and source; errors never fall back silently to the local context estimate.
+
+The adapter enforces a 30-second context deadline, the inference body limit and
+a 64 KiB response limit. Redirects are refused to protect the provider API key;
+missing, negative, fractional or overflowing counts are errors. Caller
+cancellation is propagated. This adapter is not yet a public gateway endpoint or
+a replacement for reserve estimates. Counter authorization, content-policy
+execution and quota semantics must be integrated before public exposure.
+Protocol: [native token counting](https://platform.claude.com/docs/en/api/messages/count_tokens).
