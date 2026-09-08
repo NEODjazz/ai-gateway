@@ -150,10 +150,14 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if (request.MaxTokens != nil && *request.MaxTokens <= 0) || (request.MaxCompletionTokens != nil && *request.MaxCompletionTokens <= 0) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "output token limit must be positive")
+		return
+	}
 	stream := request.Stream
 	reqCtx := modules.RequestContext{
 		APIKey:    bearerToken(r.Header.Get("Authorization")),
-		RequestID: requestID(r),
+		RequestID: executionID(w),
 		SessionID: sessionID(r),
 		Request:   request,
 	}
@@ -236,7 +240,7 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 
 	reqCtx := modules.RequestContext{
 		APIKey:          bearerToken(r.Header.Get("Authorization")),
-		RequestID:       requestID(r),
+		RequestID:       executionID(w),
 		SessionID:       sessionID(r),
 		ResponseRequest: &request,
 		Request: openai.ChatCompletionRequest{
@@ -334,7 +338,7 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 
 	reqCtx := modules.RequestContext{
 		APIKey:           bearerToken(r.Header.Get("Authorization")),
-		RequestID:        requestID(r),
+		RequestID:        executionID(w),
 		SessionID:        sessionID(r),
 		EmbeddingRequest: &request,
 		Request: openai.ChatCompletionRequest{
@@ -383,7 +387,7 @@ func (h Handler) Rerank(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx := modules.RequestContext{
-		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: requestID(r), SessionID: sessionID(r), RerankRequest: &request,
+		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r), RerankRequest: &request,
 		Request: openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model},
 	}
 	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
@@ -552,6 +556,16 @@ func requestID(r *http.Request) string {
 	if value := strings.TrimSpace(r.Header.Get("X-Request-ID")); value != "" && len(value) <= 128 {
 		return value
 	}
+	return newExecutionID()
+}
+
+func executionID(w http.ResponseWriter) string {
+	id := newExecutionID()
+	w.Header().Set("X-Execution-ID", id)
+	return id
+}
+
+func newExecutionID() string {
 	var value [16]byte
 	if _, err := rand.Read(value[:]); err != nil {
 		return fmt.Sprintf("req-%d", time.Now().UTC().UnixNano())

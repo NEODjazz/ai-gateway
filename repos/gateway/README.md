@@ -73,8 +73,7 @@ team ID preselected. The attachment remains an independently persisted runtime
 resource, so policy assignment never requires a cross-service key/team update.
 The Guardrails UI presents these gateway-native policies as one workflow: joined
 deployment/attachment coverage, create/edit, detail inspection, policy-filtered
-monitoring and bounded multi-policy dry-run comparison. Unlike LiteLLM's
-provider-plugin catalog, the gateway keeps scanner endpoints and credentials in
+monitoring and bounded multi-policy dry-run comparison. The gateway keeps scanner endpoints and credentials in
 the independently operated DLP/AV services and stores no executable guardrail
 code in its control plane.
 

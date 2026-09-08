@@ -50,12 +50,18 @@ func NewBillingModuleWithSettings(required bool, settings Settings) BillingModul
 	module := BillingModule{
 		required:                   required,
 		pricing:                    settings.Pricing,
-		writer:                     NewUsageEventWriter(settings),
+		writer:                     NoopUsageEventWriter{},
 		policy:                     NewPolicyChecker(settings),
 		lifecycle:                  NewLifecycleStore(),
 		defaultReserveOutputTokens: settings.DefaultReserveOutputTokens,
 		catalog:                    catalog,
 		initErr:                    catalogErr,
+	}
+	if required && settings.UsageEventsEnabled && !settings.DurableOutboxEnabled {
+		module.initErr = errors.Join(module.initErr, errors.New("required usage reporting requires BILLING_DURABLE_OUTBOX_ENABLED and POSTGRES_DSN"))
+	}
+	if !settings.DurableOutboxEnabled && module.initErr == nil {
+		module.writer = NewUsageEventWriter(settings)
 	}
 	if settings.DurableOutboxEnabled {
 		writer := UsageEventWriter(NoopUsageEventWriter{})
@@ -98,6 +104,12 @@ func (m BillingModule) Ready(ctx context.Context) error {
 }
 
 func (m BillingModule) Close() {
+	if outbox, ok := m.writer.(*AsyncUsageOutbox); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = outbox.Close(ctx)
+	}
+
 	m.policy.Close()
 	if repository, ok := m.durable.(*PostgresOutboxRepository); ok {
 		repository.Close()
@@ -163,6 +175,11 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 		key = event.RequestID + ":" + phase
 	}
 	event.EventID = key
+	if policy, ok := m.policy.(*PostgresBudgetPolicyChecker); ok {
+		if repository, ok := m.durable.(*PostgresOutboxRepository); ok {
+			return m.handleDurableBudget(ctx, req, &event, policy, repository, pricingErr)
+		}
+	}
 	if err := m.policy.Apply(ctx, &event); err != nil {
 		return err
 	}
@@ -199,7 +216,11 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 		}
 		return nil
 	}
-	if !m.lifecycle.Begin(key) {
+	created, claimErr := m.lifecycle.Claim(key)
+	if claimErr != nil {
+		return claimErr
+	}
+	if !created {
 		req.Metadata["billing.idempotent_replay"] = "true"
 		return nil
 	}
@@ -455,4 +476,49 @@ func metadataInt(req *RequestContext, key string) int {
 func metadataBool(req *RequestContext, key string) bool {
 	value, _ := strconv.ParseBool(metadata(req, key))
 	return value
+}
+
+// Budget state and delivery intent commit together. A database failure cannot
+// leave a finalized budget entry without its durable delivery event.
+func (m BillingModule) handleDurableBudget(ctx context.Context, req *RequestContext, event *BillingEvent, policy *PostgresBudgetPolicyChecker, repository *PostgresOutboxRepository, pricingErr error) error {
+	if policy.initErr != nil {
+		return policy.initErr
+	}
+	if event.RequestID == "" || (event.Phase != "reserve" && event.Phase != "commit" && event.Phase != "cancel") {
+		return errors.New("invalid billing lifecycle")
+	}
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := policy.applyTx(ctx, tx, event); err != nil {
+		return err
+	}
+	if pricingErr != nil && event.Phase == "commit" && event.CatalogVersion == "" {
+		return pricingErr
+	}
+	created := false
+	if event.Phase == "reserve" {
+		tag, err := tx.Exec(ctx, `INSERT INTO billing_event_ledger(event_id,request_id,phase) VALUES($1,$2,$3) ON CONFLICT(event_id) DO NOTHING`, event.EventID, event.RequestID, event.Phase)
+		if err != nil {
+			return err
+		}
+		created = tag.RowsAffected() == 1
+	} else {
+		if event.Phase == "cancel" {
+			event.InputTokens, event.OutputTokens, event.TotalTokens, event.Cost = 0, 0, 0, 0
+		}
+		created, err = repository.enqueueTx(ctx, tx, *event)
+		if err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	if !created {
+		req.Metadata["billing.idempotent_replay"] = "true"
+	}
+	return nil
 }

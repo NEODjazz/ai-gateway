@@ -78,15 +78,26 @@ func (r *PostgresOutboxRepository) Enqueue(ctx context.Context, event BillingEve
 	if event.EventID == "" {
 		return false, errors.New("billing event_id is required for durable enqueue")
 	}
-	payload, err := json.Marshal(event)
-	if err != nil {
-		return false, err
-	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	created, err := r.enqueueTx(ctx, tx, event)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return created, nil
+}
+
+func (r *PostgresOutboxRepository) enqueueTx(ctx context.Context, tx pgx.Tx, event BillingEvent) (bool, error) {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return false, err
+	}
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO billing_event_ledger (event_id, request_id, phase)
 		VALUES ($1, $2, $3)
@@ -101,9 +112,6 @@ func (r *PostgresOutboxRepository) Enqueue(ctx context.Context, event BillingEve
 		INSERT INTO billing_outbox (event_id, payload)
 		VALUES ($1, $2::jsonb)`, event.EventID, payload); err != nil {
 		return false, fmt.Errorf("enqueue billing event: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return false, err
 	}
 	return true, nil
 }

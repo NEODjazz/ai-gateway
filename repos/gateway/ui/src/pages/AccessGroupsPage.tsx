@@ -1,3 +1,4 @@
+import { ModalFrame } from "../components/ModalFrame";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
@@ -70,7 +71,7 @@ function GroupForm({ initial, projects, modelOptions, toolOptions, referencedKey
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save access group"); }
     finally { setSaving(false); }
   }
-  return <div className="modal-backdrop" role="presentation"><form className="modal key-form-modal" role="dialog" aria-modal="true" aria-label={initial ? "Edit access group" : "Create access group"} onSubmit={submit}>
+  return <ModalFrame label={initial ? "Edit access group" : "Create access group"} onClose={onClose}><form className="modal key-form-modal"    onSubmit={submit}>
     <div className="modal-heading"><div><h2>{initial ? "Edit" : "Create"} Access Group</h2><span className="muted">Reusable model and tool permissions evaluated on every request.</span></div><button type="button" className="icon-button" aria-label="Close access group form" onClick={onClose}>×</button></div>
     {initial && referencedKeys > 0 && <p className="access-impact-warning" role="status">Changes apply immediately to {referencedKeys} non-revoked virtual {referencedKeys === 1 ? "key" : "keys"}. Disabling this group will block their requests.</p>}
     <div className="key-form">
@@ -84,7 +85,7 @@ function GroupForm({ initial, projects, modelOptions, toolOptions, referencedKey
       <label className="checkbox-line access-group-enabled"><input aria-label="Access group enabled" type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /> Enabled</label>
     </div>
     {error && <p className="form-error key-form-error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button disabled={saving}>{saving ? "Saving…" : initial ? "Save changes" : "Create access group"}</button></div>
-  </form></div>;
+  </form></ModalFrame>;
 }
 
 function AccessGroupDetail({ id, projects, modelOptions, toolOptions }: { id: string; projects: Project[]; modelOptions: ChipOption[]; toolOptions: ChipOption[] }) {

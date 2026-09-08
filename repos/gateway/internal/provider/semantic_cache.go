@@ -18,6 +18,9 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
+const semanticCacheMaxTotalBytes = 64 << 20
+const semanticCacheMaxEntries = 1024
+
 type semanticCacheConfig struct {
 	ttl        time.Duration
 	threshold  float64
@@ -63,6 +66,9 @@ func newSemanticResponseCache(cfg semanticCacheConfig) *semanticResponseCache {
 	}
 	if cfg.maxEntries <= 0 {
 		cfg.maxEntries = 100
+	}
+	if cfg.maxEntries > semanticCacheMaxEntries {
+		cfg.maxEntries = semanticCacheMaxEntries
 	}
 	if cfg.maxBytes <= 0 {
 		cfg.maxBytes = 1 << 20
@@ -136,6 +142,7 @@ func (c *semanticResponseCache) lookup(scope string, vector []float64) ([]byte, 
 			bestIndex = len(active) - 1
 		}
 	}
+	clear(entries[len(active):])
 	c.entries[scope] = active
 	if len(active) == 0 {
 		delete(c.entries, scope)
@@ -147,12 +154,12 @@ func (c *semanticResponseCache) lookup(scope string, vector []float64) ([]byte, 
 }
 
 func (c *semanticResponseCache) set(scope string, vector []float64, payload []byte) bool {
-	if c == nil || scope == "" || len(vector) == 0 || len(payload) == 0 || len(payload) > c.maxBytes {
+	if c == nil || scope == "" || len(vector) == 0 || len(payload) == 0 || len(payload) > c.maxBytes || semanticEntryBytes(scope, vector, payload) > semanticCacheMaxTotalBytes {
 		return false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.pruneAndEvictLocked(c.now())
+	c.pruneAndEvictLocked(c.now(), semanticEntryBytes(scope, vector, payload))
 	entries := c.entries[scope]
 	entries = append(entries, semanticEntry{
 		vector: append([]float64(nil), vector...), payload: append([]byte(nil), payload...), expiresAt: c.now().Add(c.ttl),
@@ -161,10 +168,11 @@ func (c *semanticResponseCache) set(scope string, vector []float64, payload []by
 	return true
 }
 
-func (c *semanticResponseCache) pruneAndEvictLocked(now time.Time) {
-	total := 0
-	oldestScope, oldestIndex := "", -1
-	var oldestExpiry time.Time
+func semanticEntryBytes(scope string, vector []float64, payload []byte) int {
+	return len(scope) + len(vector)*8 + len(payload)
+}
+
+func (c *semanticResponseCache) pruneAndEvictLocked(now time.Time, incomingBytes int) {
 	for scope, entries := range c.entries {
 		active := entries[:0]
 		for _, entry := range entries {
@@ -172,27 +180,38 @@ func (c *semanticResponseCache) pruneAndEvictLocked(now time.Time) {
 				active = append(active, entry)
 			}
 		}
+		clear(entries[len(active):])
 		if len(active) == 0 {
 			delete(c.entries, scope)
-			continue
+		} else {
+			c.entries[scope] = active
 		}
-		c.entries[scope] = active
-		for index, entry := range active {
-			total++
-			if oldestIndex < 0 || entry.expiresAt.Before(oldestExpiry) {
-				oldestScope, oldestIndex, oldestExpiry = scope, index, entry.expiresAt
+	}
+	for {
+		total, bytes := 0, 0
+		oldestScope, oldestIndex := "", -1
+		var oldestExpiry time.Time
+		for scope, entries := range c.entries {
+			for index, entry := range entries {
+				total++
+				bytes += semanticEntryBytes(scope, entry.vector, entry.payload)
+				if oldestIndex < 0 || entry.expiresAt.Before(oldestExpiry) {
+					oldestScope, oldestIndex, oldestExpiry = scope, index, entry.expiresAt
+				}
 			}
 		}
-	}
-	if total < c.maxEntries || oldestIndex < 0 {
-		return
-	}
-	entries := c.entries[oldestScope]
-	entries = append(entries[:oldestIndex], entries[oldestIndex+1:]...)
-	if len(entries) == 0 {
-		delete(c.entries, oldestScope)
-	} else {
-		c.entries[oldestScope] = entries
+		if oldestIndex < 0 || (total < c.maxEntries && bytes+incomingBytes <= semanticCacheMaxTotalBytes) {
+			return
+		}
+		entries := c.entries[oldestScope]
+		copy(entries[oldestIndex:], entries[oldestIndex+1:])
+		entries[len(entries)-1] = semanticEntry{}
+		entries = entries[:len(entries)-1]
+		if len(entries) == 0 {
+			delete(c.entries, oldestScope)
+		} else {
+			c.entries[oldestScope] = entries
+		}
 	}
 }
 
@@ -239,7 +258,7 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if err != nil {
 		return "", "", false
 	}
-	scopeHash := sha256.Sum256([]byte(req.CredentialID + "\x00" + req.UserID + "\x00" + endpoint.Name + "\x00" + string(settingsJSON) + "\x00" + strings.Join(structure, "\x1e")))
+	scopeHash := sha256.Sum256([]byte(cacheIsolationScope(req) + "\x00" + endpoint.Name + "\x00" + string(settingsJSON) + "\x00" + strings.Join(structure, "\x1e")))
 	return hex.EncodeToString(scopeHash[:]), strings.Join(parts, "\n"), true
 }
 

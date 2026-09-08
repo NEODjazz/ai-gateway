@@ -1,0 +1,20 @@
+import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { AuthProvider } from "../auth/AuthContext";
+import { UsagePage } from "./UsagePage";
+const json = (x: unknown) => new Response(JSON.stringify(x));
+const report = (name: string) => ({ totals: [], daily: [], by_model: [{ name, currency: "USD", requests: 1, errors: 0, input_tokens: 1, output_tokens: 1, total_tokens: 2, cost: 1, avg_latency_ms: 1, cache_hits: 0, cost_per_request: 1 }] });
+it.each([false, true])("ignores stale report and stale error (failure=%s)", async (failure) => {
+  let resolveOld!: (r: Response) => void;
+  let rejectOld!: (e: Error) => void;
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementationOnce(() => new Promise<Response>((resolve, reject) => { resolveOld = resolve; rejectOld = reject; })).mockImplementation(async () => json(report("new-model")));
+  render(<AuthProvider><UsagePage /></AuthProvider>);
+  await userEvent.type(screen.getByLabelText("Usage model"), "new-model");
+  await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+  expect(await screen.findByText("new-model")).toBeInTheDocument();
+  expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
+  await act(async () => { if (failure) rejectOld(new Error("stale failure")); else resolveOld(json(report("old-model"))); });
+  expect(screen.getByText("new-model")).toBeInTheDocument();
+  expect(screen.queryByText("old-model")).not.toBeInTheDocument();
+  expect(screen.queryByText("stale failure")).not.toBeInTheDocument();
+});

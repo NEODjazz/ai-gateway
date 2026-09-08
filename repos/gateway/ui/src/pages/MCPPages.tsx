@@ -1,3 +1,4 @@
+import { ModalFrame } from "../components/ModalFrame";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { ActionsMenu } from "../components/ActionsMenu";
@@ -38,7 +39,7 @@ function MCPServerForm({ initial, onClose, onSave }: { initial?: MCPServer; onCl
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save MCP server"); }
     finally { setSaving(false); }
   }
-  return <div className="modal-backdrop" role="presentation"><form className="modal key-form-modal" role="dialog" aria-modal="true" aria-label={initial ? "Edit MCP server" : "Create MCP server"} onSubmit={submit}>
+  return <ModalFrame label={initial ? "Edit MCP server" : "Create MCP server"} onClose={onClose}><form className="modal key-form-modal"    onSubmit={submit}>
     <div className="modal-heading"><div><h2>{initial ? "Edit" : "Create"} MCP Server</h2><span className="muted">Safe endpoint metadata and the connector grants accepted by gateway policy.</span></div><button type="button" className="icon-button" aria-label="Close MCP server form" onClick={onClose}>×</button></div>
     <div className="key-form">
       <label><span>ID</span><input aria-label="MCP server ID" required disabled={Boolean(initial)} value={draft.id} onChange={(event) => setDraft({ ...draft, id: event.target.value })} /></label>
@@ -51,7 +52,7 @@ function MCPServerForm({ initial, onClose, onSave }: { initial?: MCPServer; onCl
       <label className="checkbox-line"><input aria-label="MCP server enabled" type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /> Enabled</label>
     </div>
     {error && <p className="form-error key-form-error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button disabled={saving}>{saving ? "Saving…" : initial ? "Save changes" : "Create MCP server"}</button></div>
-  </form></div>;
+  </form></ModalFrame>;
 }
 
 function MCPToolsetForm({ initial, options, onClose, onSave }: { initial?: MCPToolset; options: ChipOption[]; onClose: () => void; onSave: (toolset: MCPToolset) => Promise<void> }) {
@@ -68,7 +69,7 @@ function MCPToolsetForm({ initial, options, onClose, onSave }: { initial?: MCPTo
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save MCP toolset"); }
     finally { setSaving(false); }
   }
-  return <div className="modal-backdrop" role="presentation"><form className="modal key-form-modal" role="dialog" aria-modal="true" aria-label={initial ? "Edit MCP toolset" : "Create MCP toolset"} onSubmit={submit}>
+  return <ModalFrame label={initial ? "Edit MCP toolset" : "Create MCP toolset"} onClose={onClose}><form className="modal key-form-modal"    onSubmit={submit}>
     <div className="modal-heading"><div><h2>{initial ? "Edit" : "Create"} MCP Toolset</h2><span className="muted">Reusable connector permissions selected from configured servers.</span></div><button type="button" className="icon-button" aria-label="Close MCP toolset form" onClick={onClose}>×</button></div>
     <div className="key-form">
       <label><span>ID</span><input aria-label="MCP toolset ID" required disabled={Boolean(initial)} value={draft.id} onChange={(event) => setDraft({ ...draft, id: event.target.value })} /></label>
@@ -78,7 +79,7 @@ function MCPToolsetForm({ initial, options, onClose, onSave }: { initial?: MCPTo
       <label className="checkbox-line"><input aria-label="MCP toolset enabled" type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /> Enabled</label>
     </div>
     {error && <p className="form-error key-form-error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button disabled={saving}>{saving ? "Saving…" : initial ? "Save changes" : "Create MCP toolset"}</button></div>
-  </form></div>;
+  </form></ModalFrame>;
 }
 
 export function MCPServersPage() {

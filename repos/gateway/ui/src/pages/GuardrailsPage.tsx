@@ -1,3 +1,4 @@
+import { ModalFrame } from "../components/ModalFrame";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { type APIClient } from "../api/client";
@@ -51,11 +52,11 @@ function GuardrailPolicyForm({ initial, client, onClose, onSaved }: { initial?: 
 function PolicyDetails({ policy, attachments, deployments, onClose, onEdit, onTest, onMonitor, onAttachments }: { policy: Policy; attachments: PolicyAttachment[]; deployments: Deployment[]; onClose: () => void; onEdit: () => void; onTest: () => void; onMonitor: () => void; onAttachments: () => void }) {
   const linkedAttachments = attachments.filter((item) => item.policy_name === policy.name);
   const linkedDeployments = deployments.filter((item) => item.guardrail_policy === policy.name);
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="modal guardrail-details-modal" role="dialog" aria-modal="true" aria-label={`Guardrail policy ${policy.name}`}>
+  return <ModalFrame label={`Guardrail policy ${policy.name}`} onClose={onClose}><section className="modal guardrail-details-modal">
     <div className="modal-heading"><div><span className="eyebrow">Guardrail policy</span><h2>{policy.name}</h2></div><button className="icon-button" aria-label="Close policy details" onClick={onClose}>×</button></div>
     <dl className="detail-grid"><div><dt>Status</dt><dd><span className={`status ${policy.enabled ? "enabled" : "disabled"}`}>{policy.enabled ? "Enabled" : "Disabled"}</span></dd></div><div><dt>Scanners</dt><dd><div className="tag-list">{checksLabel(policy).map((item) => <span className="tag" key={item}>{item}</span>)}</div></dd></div><div><dt>Direct deployments</dt><dd>{linkedDeployments.length ? linkedDeployments.map((item) => item.id).join(", ") : "None"}</dd></div><div><dt>Scoped attachments</dt><dd>{linkedAttachments.length ? linkedAttachments.map((item) => item.id).join(", ") : "None"}</dd></div><div className="span-2"><dt>Description</dt><dd>{policy.description || "—"}</dd></div><div className="span-2"><dt>Runtime behavior</dt><dd>Every requested scanner must pass. An unavailable required scanner fails closed; deployment and scoped attachment policies are combined.</dd></div></dl>
     <div className="modal-actions"><button className="secondary" onClick={onAttachments}>Policy attachments</button><button className="secondary" onClick={onMonitor}>Open monitor</button><button className="secondary" onClick={onEdit}>Edit</button><button disabled={!policy.enabled} onClick={onTest}>Test policy</button></div>
-  </section></div>;
+  </section></ModalFrame>;
 }
 
 function GuardrailTestDialog({ policies, initialNames, client, onClose }: { policies: Policy[]; initialNames: string[]; client: APIClient; onClose: () => void }) {
@@ -91,11 +92,11 @@ function GuardrailTestDialog({ policies, initialNames, client, onClose }: { poli
     setError(""); setSelected(values); setOutcomes(undefined);
   }
 
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => !testing && event.target === event.currentTarget && onClose()}><section className="modal guardrail-test-modal" role="dialog" aria-modal="true" aria-label="Test guardrails">
+  return <ModalFrame label="Test guardrails" onClose={onClose} dismissDisabled={testing}><section className="modal guardrail-test-modal">
     <div className="modal-heading"><div><span className="eyebrow">Compliance playground</span><h2>Compare guardrail policies</h2></div><button className="icon-button" aria-label="Close guardrail test" disabled={testing} onClick={onClose}>×</button></div>
     <form onSubmit={run} className="guardrail-test-form"><ChipMultiSelect label="Policies" options={options} value={selected} onChange={updateSelection} /><small>Select up to 8 enabled policies. Each policy is evaluated independently so results can be compared.</small><label>Text projection<textarea aria-label="Text projection" required rows={7} value={text} onChange={(event) => { setText(event.target.value); setOutcomes(undefined); }} placeholder="Enter text to evaluate without calling a model…" /><small>{textBytes.toLocaleString()} / 65,536 UTF-8 bytes</small></label><div className="guardrail-test-privacy">The gateway sends only request ID and this text projection to configured DLP/AV services. Submitted text and raw scanner responses are not retained or returned.</div>{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary" disabled={testing} onClick={onClose}>Close</button><button disabled={testing || !selected.length || !text.trim() || textBytes > 65_536}>{testing ? `Testing ${selected.length} policies…` : `Test ${selected.length || "selected"} policies`}</button></div></form>
     {outcomes && <section className="guardrail-test-results" aria-label="Guardrail test results"><h3>Results</h3><div className="table-card"><div className="table-scroll"><table><thead><tr><th>Policy</th><th>Decision</th><th>Checks</th><th>Latency</th><th>Request</th><th>Content stored</th></tr></thead><tbody>{outcomes.map((outcome) => <tr key={outcome.policy}><td><strong>{outcome.policy}</strong></td><td>{outcome.error ? <span className="status error">Unavailable</span> : <span className={`status ${outcome.result?.allowed ? "enabled" : "warning"}`}>{outcome.result?.allowed ? "Allowed" : "Rejected"}</span>}</td><td>{outcome.error || Object.entries(outcome.result?.checks || {}).map(([name, status]) => `${name.toUpperCase()}: ${status}`).join(" · ")}</td><td>{outcome.latencyMS} ms</td><td><code>{outcome.result?.request_id || "—"}</code></td><td>{outcome.result ? "No" : "—"}</td></tr>)}</tbody></table></div></div></section>}
-  </section></div>;
+  </section></ModalFrame>;
 }
 
 export function GuardrailsPage() {

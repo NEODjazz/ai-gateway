@@ -1,19 +1,31 @@
 package main
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
+	"time"
 
 	"ai-gateway-billing/internal/modules"
 	"ai-gateway-billing/internal/openai"
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Print(err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	settings := modules.SettingsFromEnv()
 	module := modules.NewBillingModuleWithSettings(true, settings)
 	defer module.Close()
@@ -32,6 +44,11 @@ func main() {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	})
+	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		stats := module.UsageDeliveryStats()
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		_, _ = fmt.Fprintf(w, "billing_memory_outbox_accepted_total %d\nbilling_memory_outbox_delivered_total %d\nbilling_memory_outbox_failed_total %d\nbilling_memory_outbox_dropped_total %d\nbilling_memory_outbox_rejected_total %d\nbilling_memory_outbox_queued %d\n", stats.Accepted, stats.Delivered, stats.Failed, stats.Dropped, stats.Rejected, stats.Queued)
 	})
 	http.HandleFunc("/livez", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -116,7 +133,26 @@ func main() {
 	})
 
 	log.Println("billing listening on :8083")
-	log.Fatal(http.ListenAndServe(":8083", nil))
+	server := &http.Server{Addr: ":8083", Handler: http.DefaultServeMux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	finished := make(chan error, 1)
+	go func() { finished <- server.ListenAndServe() }()
+	select {
+	case err := <-finished:
+		if !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("billing server stopped: %w", err)
+		}
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			_ = server.Close()
+			log.Print("billing shutdown deadline exceeded")
+		}
+		<-finished
+	}
+	return nil
 }
 
 func authorizeBillingUsage(w http.ResponseWriter, r *http.Request, secret string) bool {

@@ -1,10 +1,10 @@
 package provider
 
 import (
+	"ai-gateway-gateway/internal/bounded"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"sync"
 	"time"
 
 	"ai-gateway-gateway/internal/modules"
@@ -20,15 +20,11 @@ type affinityStore interface {
 	set(ctx context.Context, key, endpoint string) error
 }
 
-type memoryAffinityEntry struct {
-	endpoint  string
-	expiresAt time.Time
-}
+const memoryAffinityMaxEntries = 4096
+const memoryAffinityMaxBytes = 2 << 20
 
 type memoryAffinity struct {
-	mu      sync.Mutex
-	ttl     time.Duration
-	entries map[string]memoryAffinityEntry
+	entries *bounded.Cache[string]
 	now     func() time.Time
 }
 
@@ -44,30 +40,22 @@ func newAffinityStore(ttl time.Duration, store SessionStore) affinityStore {
 	if !interfaceIsNil(store) {
 		return distributedAffinity{store: store, ttl: ttl}
 	}
-	return &memoryAffinity{ttl: ttl, entries: map[string]memoryAffinityEntry{}, now: time.Now}
+	return &memoryAffinity{entries: bounded.New[string](ttl, memoryAffinityMaxEntries, memoryAffinityMaxBytes), now: time.Now}
 }
 
 func (s *memoryAffinity) get(_ context.Context, key string) (string, bool, error) {
 	if s == nil || key == "" {
 		return "", false, nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry, found := s.entries[key]
-	if !found || !s.now().Before(entry.expiresAt) {
-		delete(s.entries, key)
-		return "", false, nil
-	}
-	return entry.endpoint, true, nil
+	value, found := s.entries.Get(key, s.now())
+	return value, found, nil
 }
 
 func (s *memoryAffinity) set(_ context.Context, key, endpoint string) error {
 	if s == nil || key == "" || endpoint == "" {
 		return nil
 	}
-	s.mu.Lock()
-	s.entries[key] = memoryAffinityEntry{endpoint: endpoint, expiresAt: s.now().Add(s.ttl)}
-	s.mu.Unlock()
+	s.entries.Set(key, endpoint, len(endpoint), s.now())
 	return nil
 }
 
@@ -81,11 +69,8 @@ func (s distributedAffinity) set(ctx context.Context, key, endpoint string) erro
 }
 
 func affinityKey(req modules.RequestContext, responseID string) string {
-	tenant := req.CredentialID
-	if req.TeamID != "" {
-		tenant = "team:" + req.TeamID
-	}
-	if tenant == "" || responseID == "" {
+	tenant := req.CredentialID + "\x00" + req.UserID
+	if req.CredentialID == "" || responseID == "" {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(tenant + "\x00" + responseID))

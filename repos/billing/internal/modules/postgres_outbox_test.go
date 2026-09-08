@@ -19,6 +19,9 @@ func (w channelUsageWriter) WriteUsageEvent(_ context.Context, event BillingEven
 func TestPostgresOutboxIsDurableAndIdempotent(t *testing.T) {
 	dsn := os.Getenv("BILLING_POSTGRES_TEST_DSN")
 	if dsn == "" {
+		if os.Getenv("POSTGRES_INTEGRATION_REQUIRED") == "true" {
+			t.Fatal("BILLING_POSTGRES_TEST_DSN is required")
+		}
 		t.Skip("BILLING_POSTGRES_TEST_DSN is not set")
 	}
 	writer := channelUsageWriter{events: make(chan BillingEvent, 1)}

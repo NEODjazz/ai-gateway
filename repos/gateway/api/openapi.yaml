@@ -131,6 +131,7 @@ paths:
         '200':
           description: Completion JSON or an SSE stream when `stream=true`
           headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
             X-Request-ID:
               $ref: '#/components/headers/XRequestID'
           content:
@@ -184,6 +185,7 @@ paths:
         '200':
           description: Response JSON or an SSE stream when `stream=true`
           headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
             X-Request-ID:
               $ref: '#/components/headers/XRequestID'
           content:
@@ -227,6 +229,7 @@ paths:
         '200':
           description: Embedding vectors
           headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
             X-Request-ID:
               $ref: '#/components/headers/XRequestID'
           content:
@@ -252,7 +255,7 @@ paths:
       operationId: rerankDocuments
       tags: [Inference]
       summary: Rank documents by relevance to a query
-      description: LiteLLM/Cohere-compatible rerank request routed to an explicitly rerank-capable provider.
+      description: Cohere-compatible rerank request routed to an explicitly rerank-capable provider.
       requestBody:
         required: true
         content:
@@ -268,6 +271,7 @@ paths:
         '200':
           description: Documents ranked by provider relevance score
           headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
             X-Request-ID: {$ref: '#/components/headers/XRequestID'}
           content:
             application/json:
@@ -1792,6 +1796,11 @@ components:
       scheme: bearer
       bearerFormat: Virtual key or JWT
   headers:
+    XExecutionID:
+      description: Server-generated inference execution identifier used in billing and request logs. Independent of the caller correlation ID.
+      schema:
+        type: string
+        maxLength: 128
     XRequestID:
       description: Request correlation identifier
       schema:

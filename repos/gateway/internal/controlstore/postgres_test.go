@@ -28,6 +28,9 @@ func (c *memoryRevisionCache) Set(_ context.Context, key string, value []byte, _
 func TestPostgresControlPlaneSnapshotLifecycleIntegration(t *testing.T) {
 	dsn := os.Getenv("CONTROL_PLANE_POSTGRES_TEST_DSN")
 	if dsn == "" {
+		if os.Getenv("POSTGRES_INTEGRATION_REQUIRED") == "true" {
+			t.Fatal("CONTROL_PLANE_POSTGRES_TEST_DSN is required")
+		}
 		t.Skip("CONTROL_PLANE_POSTGRES_TEST_DSN is not set")
 	}
 	ctx := context.Background()
@@ -79,6 +82,9 @@ func TestPostgresControlPlaneSnapshotLifecycleIntegration(t *testing.T) {
 func TestPostgresControlPlaneRestoresManagedRouterIntegration(t *testing.T) {
 	dsn := os.Getenv("CONTROL_PLANE_POSTGRES_TEST_DSN")
 	if dsn == "" {
+		if os.Getenv("POSTGRES_INTEGRATION_REQUIRED") == "true" {
+			t.Fatal("CONTROL_PLANE_POSTGRES_TEST_DSN is required")
+		}
 		t.Skip("CONTROL_PLANE_POSTGRES_TEST_DSN is not set")
 	}
 	ctx := context.Background()

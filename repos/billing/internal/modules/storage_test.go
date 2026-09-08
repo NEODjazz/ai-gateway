@@ -82,6 +82,13 @@ func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 func TestAsyncUsageOutboxRetriesDelivery(t *testing.T) {
 	writer := &retryWriter{done: make(chan BillingEvent, 1)}
 	outbox := NewAsyncUsageOutbox(writer, 1, 2)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := outbox.Close(ctx); err != nil {
+			t.Error(err)
+		}
+	})
 	event := BillingEvent{RequestID: "req-async", Phase: "commit"}
 	if err := outbox.WriteUsageEvent(context.Background(), event); err != nil {
 		t.Fatal(err)

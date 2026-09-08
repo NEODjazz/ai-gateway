@@ -1,3 +1,4 @@
+import { ModalFrame } from "../components/ModalFrame";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { ActionsMenu } from "../components/ActionsMenu";
@@ -117,13 +118,13 @@ export function CredentialsPage() {
         { label: "Delete", tone: "danger", onSelect: () => void remove(credential) }
       ]} />;
     }} />}
-    {mode && <div className="modal-backdrop" role="presentation"><section className="modal credential-form-modal" role="dialog" aria-modal="true" aria-label={title}><div className="modal-heading"><div><h2>{title}</h2>{selected && <span className="muted">{selected.id}</span>}</div><ModalCloseButton label="Close credential form" onClick={() => setMode(undefined)} /></div><form className="credential-form" onSubmit={submit}>
+    {mode && <ModalFrame label={title} onClose={() => setMode(undefined)}><section className="modal credential-form-modal"><div className="modal-heading"><div><h2>{title}</h2>{selected && <span className="muted">{selected.id}</span>}</div><ModalCloseButton label="Close credential form" onClick={() => setMode(undefined)} /></div><form className="credential-form" onSubmit={submit}>
       {mode === "create" && <label><span>Credential ID</span><input required maxLength={128} value={form.id} onChange={(event) => setForm((current) => ({ ...current, id: event.target.value }))} /></label>}
       {mode !== "rotate" && <><label><span>Provider</span><select aria-label="Credential provider" value={form.provider_id} onChange={(event) => setForm((current) => ({ ...current, provider_id: event.target.value }))}><option value="">Shared credential</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.id} — {provider.type}{provider.enabled ? "" : " — disabled"}</option>)}</select></label><label><span>Description</span><input maxLength={512} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label></>}
       {(mode === "create" || mode === "rotate") && <><label><span>New secret</span><input required type="password" autoComplete="new-password" value={form.secret} onChange={(event) => setForm((current) => ({ ...current, secret: event.target.value }))} /></label><label><span>Confirm secret</span><input required type="password" autoComplete="new-password" value={form.confirm} onChange={(event) => setForm((current) => ({ ...current, confirm: event.target.value }))} /></label><p className="credential-write-only-notice">The plaintext value is sent once over this form and is never returned by the gateway.</p></>}
       {mode === "edit" && <p className="credential-write-only-notice">Metadata changes preserve the current encrypted secret. Use “Rotate secret” to replace it.</p>}
       {formError && <p className="form-error credential-form-error" role="alert">{formError}</p>}
       <div className="modal-actions credential-form-actions"><GatewayButton type="button" view="outlined" onClick={() => setMode(undefined)}>Cancel</GatewayButton><GatewayButton type="submit" disabled={saving}>{saving ? "Saving…" : mode === "rotate" ? "Rotate secret" : "Save"}</GatewayButton></div>
-    </form></section></div>}
+    </form></section></ModalFrame>}
   </>;
 }

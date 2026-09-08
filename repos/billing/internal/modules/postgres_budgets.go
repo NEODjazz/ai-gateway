@@ -109,6 +109,13 @@ func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event *BillingE
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := c.applyTx(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (c *PostgresBudgetPolicyChecker) applyTx(ctx context.Context, tx pgx.Tx, event *BillingEvent) error {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, event.RequestID); err != nil {
 		return err
 	}
@@ -169,7 +176,7 @@ func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event *BillingE
 			event.InputCostPer1M, event.OutputCostPer1M, c.ttl.Milliseconds())
 	case "commit":
 		if found && reservation.State == "committed" {
-			return tx.Commit(ctx)
+			return nil
 		}
 		if found && reservation.State == "canceled" {
 			return fmt.Errorf("%w: canceled request cannot be committed", ErrBillingConflict)
@@ -217,7 +224,7 @@ func (c *PostgresBudgetPolicyChecker) Apply(ctx context.Context, event *BillingE
 	if err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 func checkBudgetPolicies(ctx context.Context, tx pgx.Tx, policies []budgetPolicy, event BillingEvent) error {
@@ -229,7 +236,7 @@ func checkBudgetPolicies(ctx context.Context, tx pgx.Tx, policies []budgetPolicy
 		if policy.MaxCost > 0 && cost+event.Cost > policy.MaxCost+1e-12 {
 			return &BudgetExceededError{PolicyID: policy.ID, Dimension: "cost"}
 		}
-		if policy.MaxTokens > 0 && tokens+int64(event.TotalTokens) > policy.MaxTokens {
+		if policy.MaxTokens > 0 && (tokens > policy.MaxTokens || int64(event.TotalTokens) > policy.MaxTokens-tokens) {
 			return &BudgetExceededError{PolicyID: policy.ID, Dimension: "tokens"}
 		}
 	}

@@ -70,7 +70,7 @@ describe("operational pages", () => {
     expect(screen.getByText("20")).toBeInTheDocument();
   });
 
-  it("applies LiteLLM-style model, provider and custom date filters", async () => {
+  it("applies bounded model, provider and custom date filters", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ totals: [], daily: [], by_model: [], by_provider: [], by_tag: [] }), { status: 200 }));
     authenticated(<UsagePage />); await screen.findByText("Spend per day");
     await selectUsageWindow("Custom range");

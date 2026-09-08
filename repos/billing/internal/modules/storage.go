@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -36,74 +35,6 @@ func (NoopPolicyChecker) Apply(context.Context, *BillingEvent) error {
 }
 func (NoopPolicyChecker) Ready(context.Context) error { return nil }
 func (NoopPolicyChecker) Close()                      {}
-
-type LifecycleStore struct {
-	mu   sync.Mutex
-	seen map[string]struct{}
-}
-
-func NewLifecycleStore() *LifecycleStore {
-	return &LifecycleStore{seen: map[string]struct{}{}}
-}
-
-func (s *LifecycleStore) Begin(key string) bool {
-	if s == nil || key == "" {
-		return true
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.seen[key]; exists {
-		return false
-	}
-	s.seen[key] = struct{}{}
-	return true
-}
-
-func (s *LifecycleStore) Release(key string) {
-	if s == nil || key == "" {
-		return
-	}
-	s.mu.Lock()
-	delete(s.seen, key)
-	s.mu.Unlock()
-}
-
-type AsyncUsageOutbox struct {
-	writer  UsageEventWriter
-	queue   chan BillingEvent
-	retries int
-}
-
-func NewAsyncUsageOutbox(writer UsageEventWriter, capacity int, retries int) *AsyncUsageOutbox {
-	if capacity <= 0 {
-		capacity = 1024
-	}
-	outbox := &AsyncUsageOutbox{writer: writer, queue: make(chan BillingEvent, capacity), retries: retries}
-	go outbox.run()
-	return outbox
-}
-
-func (o *AsyncUsageOutbox) WriteUsageEvent(_ context.Context, event BillingEvent) error {
-	select {
-	case o.queue <- event:
-		return nil
-	default:
-		return errors.New("usage outbox is full")
-	}
-}
-
-func (o *AsyncUsageOutbox) run() {
-	for event := range o.queue {
-		for attempt := 0; attempt <= o.retries; attempt++ {
-			if err := o.writer.WriteUsageEvent(context.Background(), event); err == nil {
-				break
-			}
-			if attempt < o.retries {
-				time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
-			}
-		}
-	}
-}
 
 type NotConfiguredPolicyChecker struct {
 	settings Settings

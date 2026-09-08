@@ -259,6 +259,10 @@ func observabilityMiddleware(metrics *Metrics, next http.Handler) http.Handler {
 		metrics.Observe(metricMethod(r.Method), path, status, duration)
 		span := trace.SpanFromContext(r.Context())
 		span.SetAttributes(attribute.String("ai.request.id", id), attribute.String("http.route", path))
+		executionID := recorder.Header().Get("X-Execution-ID")
+		if executionID != "" {
+			span.SetAttributes(attribute.String("ai.execution.id", executionID))
+		}
 		spanContext := span.SpanContext()
 		traceID, spanID := "", ""
 		if spanContext.IsValid() {
@@ -267,7 +271,7 @@ func observabilityMiddleware(metrics *Metrics, next http.Handler) http.Handler {
 		payload, _ := json.Marshal(map[string]any{
 			"event": "http_request", "request_id": id, "method": r.Method,
 			"path": path, "status": status, "duration_ms": duration.Milliseconds(),
-			"trace_id": traceID, "span_id": spanID,
+			"trace_id": traceID, "span_id": spanID, "execution_id": executionID,
 		})
 		log.Print(string(payload))
 	})

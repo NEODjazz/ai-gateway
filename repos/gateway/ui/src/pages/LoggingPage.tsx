@@ -1,3 +1,4 @@
+import { ModalFrame } from "../components/ModalFrame";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { ActionsMenu } from "../components/ActionsMenu";
@@ -27,7 +28,7 @@ function DestinationForm({ initial, onClose, onSave }: { initial?: LoggingDestin
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save logging destination"); }
     finally { setSaving(false); }
   }
-  return <div className="modal-backdrop" role="presentation"><form className="modal key-form-modal" role="dialog" aria-modal="true" aria-label={initial ? "Edit logging destination" : "Create logging destination"} onSubmit={submit}>
+  return <ModalFrame label={initial ? "Edit logging destination" : "Create logging destination"} onClose={onClose}><form className="modal key-form-modal"    onSubmit={submit}>
     <div className="modal-heading"><div><h2>{initial ? "Edit" : "Create"} Logging Destination</h2><span className="muted">Only bounded request metadata is delivered. Prompt and response content is never included.</span></div><button type="button" className="icon-button" aria-label="Close logging destination form" onClick={onClose}>×</button></div>
     <div className="key-form">
       <label><span>ID</span><input aria-label="Logging destination ID" required disabled={Boolean(initial)} value={draft.id} onChange={(event) => setDraft({ ...draft, id: event.target.value })} /></label>
@@ -41,7 +42,7 @@ function DestinationForm({ initial, onClose, onSave }: { initial?: LoggingDestin
     {initial?.secret_configured && <p className="credential-write-only-notice">A secret is configured. It cannot be read back; leave this field blank to preserve it.</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button disabled={saving}>{saving ? "Saving…" : initial ? "Save changes" : "Create destination"}</button></div>
-  </form></div>;
+  </form></ModalFrame>;
 }
 
 export function LoggingPage() {

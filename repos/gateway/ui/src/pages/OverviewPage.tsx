@@ -4,7 +4,6 @@ import { ErrorState, LoadingState } from "../components/AsyncState";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
 
-type Counts = Record<string, number>;
 const sources: Record<string, string> = {
   "Virtual keys": "/admin/v1/keys",
   Providers: "/admin/v1/providers",
@@ -14,17 +13,24 @@ const sources: Record<string, string> = {
   Guardrails: "/admin/v1/guardrail-policies"
 };
 
-export function OverviewPage() {
+function InventoryCard({ label, path }: { label: string; path: string }) {
   const { client } = useAuth();
-  const [counts, setCounts] = useState<Counts | null>(null);
+  const [count, setCount] = useState<number>();
   const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    let active = true;
-    Promise.all(Object.entries(sources).map(async ([label, path]) => {
-      const payload = await client.request<{ data?: unknown[] }>(path);
-      return [label, Array.isArray(payload.data) ? payload.data.length : 0] as const;
-    })).then((entries) => active && setCounts(Object.fromEntries(entries))).catch((cause) => active && setError(cause instanceof Error ? cause.message : "Could not load overview"));
-    return () => { active = false; };
-  }, [client]);
-  return <><PageHeader eyebrow="Control plane" title="Overview" description="Operational inventory without prompt or response content." />{error ? <ErrorState message={error} /> : !counts ? <LoadingState /> : <div className="stats-grid">{Object.entries(counts).map(([label, value]) => <StatCard key={label} label={label} value={value} detail="Configured" />)}</div>}<section className="notice-card"><strong>Content storage is off</strong><p>The console works with identities, routing metadata, token counts and bounded diagnostics. Provider credentials and bearer tokens remain write-only.</p></section></>;
+    const controller = new AbortController();
+    setError(""); setCount(undefined);
+    client.request<{ data?: unknown[]; total?: number }>(path, { signal: controller.signal }).then((payload) => {
+      if (!controller.signal.aborted) setCount(typeof payload.total === "number" ? payload.total : (payload.data?.length || 0));
+    }).catch((cause) => {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not load inventory");
+    });
+    return () => controller.abort();
+  }, [client, path, attempt]);
+  return count !== undefined ? <StatCard label={label} value={count} detail="Configured" /> : <section aria-label={label}><h2>{label}</h2>{error ? <ErrorState message={error} retry={() => setAttempt((value) => value + 1)} /> : <LoadingState />}</section>;
+}
+
+export function OverviewPage() {
+  return <><PageHeader eyebrow="Control plane" title="Overview" description="Operational inventory without prompt or response content." /><div className="stats-grid">{Object.entries(sources).map(([label, path]) => <InventoryCard key={label} label={label} path={path} />)}</div><section className="notice-card"><strong>Content storage is off</strong><p>The console works with identities, routing metadata, token counts and bounded diagnostics. Provider credentials and bearer tokens remain write-only.</p></section></>;
 }

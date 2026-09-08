@@ -6,8 +6,11 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 )
+
+var versionedAsset = regexp.MustCompile(`-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$`)
 
 const adminUICSP = "default-src 'none'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; script-src 'self'; style-src 'self'"
 
@@ -32,7 +35,7 @@ func registerAdminUI(mux *http.ServeMux) {
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		adminUIAsset("adminui/assets/"+name, contentType).ServeHTTP(w, r)
+		adminUISecurityHeaders(versionedAsset.MatchString(name), adminUIAsset("adminui/assets/"+name, contentType)).ServeHTTP(w, r)
 	})))
 	mux.Handle("GET /ui/{path...}", adminUISecurityHeaders(false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(r.URL.Path) >= len("/ui/assets/") && r.URL.Path[:len("/ui/assets/")] == "/ui/assets/" {

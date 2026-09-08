@@ -1,3 +1,4 @@
+import { ModalFrame } from "../components/ModalFrame";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
@@ -28,7 +29,7 @@ function TeamAssignmentForm({ teams, onClose, onSave }: { teams: Team[]; onClose
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not assign team"); }
     finally { setSaving(false); }
   }
-  return <div className="modal-backdrop" role="presentation"><section className="modal compact-modal" role="dialog" aria-modal="true" aria-label="Assign team"><div className="modal-heading"><h2>Assign configured team</h2><button className="icon-button" aria-label="Close team assignment" onClick={onClose}>×</button></div><form onSubmit={submit}><div className="form-grid"><label className="span-2">Team<select aria-label="Organization team" required value={teamID} onChange={(event) => setTeamID(event.target.value)}><option value="">Select unassigned team</option>{teams.map((team) => <option key={team.id} value={team.id}>{team.name} · {team.id}</option>)}</select></label></div><p className="muted">Teams already owned by another organization are excluded to prevent implicit re-parenting.</p>{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button disabled={saving || !teamID}>{saving ? "Saving…" : "Assign team"}</button></div></form></section></div>;
+  return <ModalFrame label="Assign team" onClose={onClose}><section className="modal compact-modal"><div className="modal-heading"><h2>Assign configured team</h2><button className="icon-button" aria-label="Close team assignment" onClick={onClose}>×</button></div><form onSubmit={submit}><div className="form-grid"><label className="span-2">Team<select aria-label="Organization team" required value={teamID} onChange={(event) => setTeamID(event.target.value)}><option value="">Select unassigned team</option>{teams.map((team) => <option key={team.id} value={team.id}>{team.name} · {team.id}</option>)}</select></label></div><p className="muted">Teams already owned by another organization are excluded to prevent implicit re-parenting.</p>{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button disabled={saving || !teamID}>{saving ? "Saving…" : "Assign team"}</button></div></form></section></ModalFrame>;
 }
 
 export function OrganizationDetailsPage() {

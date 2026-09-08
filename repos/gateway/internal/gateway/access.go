@@ -185,47 +185,22 @@ func filterModels(models []openai.Model, grants []string) []openai.Model {
 }
 
 func estimateChatTokens(request openai.ChatCompletionRequest) int {
-	characters := 0
-	for _, message := range request.Messages {
-		characters += len([]rune(openai.ContentText(message.Content)))
-	}
-	tokens := (characters + 3) / 4
-	if request.MaxTokens != nil {
-		tokens += *request.MaxTokens
-	}
-	if tokens < 1 {
-		return 1
-	}
-	return tokens
+	return openai.ReserveTokens(openai.ChatInputTokens(request), openai.ChatOutputLimit(request))
 }
 
 func estimateResponseTokens(request openai.ResponseRequest) int {
-	tokens := (len([]rune(responseInputText(request.Input))) + len([]rune(request.Instructions)) + 3) / 4
-	if request.MaxOutputTokens != nil {
-		tokens += *request.MaxOutputTokens
-	} else if request.MaxTokens != nil {
-		tokens += *request.MaxTokens
-	}
-	if tokens < 1 {
-		return 1
-	}
-	return tokens
+	return openai.ReserveTokens(openai.ResponseInputTokens(request), openai.ResponseOutputLimit(request))
 }
 
 func estimateEmbeddingTokens(request openai.EmbeddingRequest) int {
-	tokens := (len([]rune(openai.EmbeddingInputText(request.Input))) + 3) / 4
-	if tokens < 1 {
-		return 1
-	}
-	return tokens
+	return openai.EstimateContextTokens(request.Input)
 }
 
 func estimateRerankTokens(request openai.RerankRequest) int {
-	text, ok := openai.RerankDocumentText(request)
-	if !ok {
-		return 0
-	}
-	return len(strings.Fields(text))
+	return openai.EstimateContextTokens(struct {
+		Query     string
+		Documents []any
+	}{request.Query, request.Documents})
 }
 
 func (h Handler) authorizeAccess(w http.ResponseWriter, ctx context.Context, req modules.RequestContext, model string, tokens int) bool {

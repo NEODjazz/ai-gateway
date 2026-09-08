@@ -1,25 +1,24 @@
 package provider
 
 import (
+	"ai-gateway-gateway/internal/bounded"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"sync"
+	"sort"
+	"strings"
 	"time"
 
 	"ai-gateway-gateway/internal/modules"
 )
 
-type exactCacheEntry struct {
-	value     []byte
-	expiresAt time.Time
-}
+const memoryCacheMaxEntries = 1024
+const memoryCacheMaxBytes = 64 << 20
 
 type exactCache struct {
-	mu       sync.Mutex
 	ttl      time.Duration
-	entries  map[string]exactCacheEntry
+	entries  *bounded.Cache[[]byte]
 	now      func() time.Time
 	maxBytes int
 }
@@ -58,33 +57,22 @@ func newExactCacheWithLimit(ttl time.Duration, maxBytes int) *exactCache {
 	if ttl <= 0 {
 		return nil
 	}
-	return &exactCache{ttl: ttl, entries: map[string]exactCacheEntry{}, now: time.Now, maxBytes: maxBytes}
+	return &exactCache{ttl: ttl, entries: bounded.New[[]byte](ttl, memoryCacheMaxEntries, memoryCacheMaxBytes), now: time.Now, maxBytes: maxBytes}
 }
 
 func (c *exactCache) get(_ context.Context, key string) ([]byte, bool, error) {
 	if c == nil || key == "" {
 		return nil, false, nil
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	entry, found := c.entries[key]
-	if !found || !c.now().Before(entry.expiresAt) {
-		delete(c.entries, key)
-		return nil, false, nil
-	}
-	return append([]byte(nil), entry.value...), true, nil
+	payload, found := c.entries.Get(key, c.now())
+	return append([]byte(nil), payload...), found, nil
 }
 
 func (c *exactCache) set(_ context.Context, key string, value []byte) error {
-	if c == nil || key == "" {
+	if c == nil || key == "" || len(value) > memoryCacheMaxBytes || (c.maxBytes > 0 && len(value) > c.maxBytes) {
 		return nil
 	}
-	if c.maxBytes > 0 && len(value) > c.maxBytes {
-		return nil
-	}
-	c.mu.Lock()
-	c.entries[key] = exactCacheEntry{value: append([]byte(nil), value...), expiresAt: c.now().Add(c.ttl)}
-	c.mu.Unlock()
+	c.entries.Set(key, append([]byte(nil), value...), len(value), c.now())
 	return nil
 }
 
@@ -100,10 +88,7 @@ func (c distributedExactCache) set(ctx context.Context, key string, value []byte
 }
 
 func providerCacheKey(kind string, req modules.RequestContext) string {
-	tenant := req.CredentialID
-	if req.TeamID != "" {
-		tenant = "team:" + req.TeamID
-	}
+	tenant := cacheIsolationScope(req)
 	if tenant == "" {
 		return ""
 	}
@@ -123,7 +108,7 @@ func providerCacheKey(kind string, req modules.RequestContext) string {
 	if err != nil {
 		return ""
 	}
-	sum := sha256.Sum256(append([]byte(kind+"\x00"+tenant+"\x00"), body...))
+	sum := sha256.Sum256(append([]byte("v2\x00"+kind+"\x00"+tenant+"\x00"), body...))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -171,4 +156,28 @@ func (r Router) cacheSet(ctx context.Context, key string, value []byte) error {
 		r.observer.ObserveCache("set", result)
 	}
 	return err
+}
+
+// cacheIsolationScope intentionally does not allow implicit team-wide sharing.
+// Only effective policy metadata enters the fingerprint; request IDs and usage
+// counters would prevent hits and are excluded.
+func cacheIsolationScope(req modules.RequestContext) string {
+	if req.CredentialID == "" {
+		return ""
+	}
+	canonical := func(values []string) []string { v := append([]string{}, values...); sort.Strings(v); return v }
+	policy := map[string]string{}
+	for key, value := range req.Metadata {
+		if strings.HasPrefix(key, "policy.") || strings.HasPrefix(key, "provider.modules.") || strings.HasPrefix(key, "provider.guardrail.") {
+			policy[key] = value
+		}
+	}
+	data, _ := json.Marshal(struct {
+		Credential, User, Team, Organization                string
+		Roles, Tags, Models, Tools, GroupModels, GroupTools []string
+		GroupsEvaluated                                     bool
+		Policy                                              map[string]string
+	}{req.CredentialID, req.UserID, req.TeamID, req.OrganizationID, canonical(req.Roles), canonical(req.Tags), canonical(req.AllowedModels), canonical(req.AllowedTools), canonical(req.AccessGroupModels), canonical(req.AccessGroupTools), req.AccessGroupsEvaluated, policy})
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }

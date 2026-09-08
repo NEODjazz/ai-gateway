@@ -1,3 +1,4 @@
+import { ModalFrame } from "../components/ModalFrame";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
@@ -82,7 +83,7 @@ function BudgetForm({ initial, loadTargets, onClose, onSave }: { initial?: Budge
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save budget"); }
     finally { setSaving(false); }
   }
-  return <div className="modal-backdrop" role="presentation"><form className="modal key-form-modal" role="dialog" aria-modal="true" aria-label={initial ? "Edit budget" : "Create budget"} onSubmit={submit}>
+  return <ModalFrame label={initial ? "Edit budget" : "Create budget"} onClose={onClose}><form className="modal key-form-modal"    onSubmit={submit}>
     <div className="modal-heading"><div><h2>{initial ? "Edit" : "Create"} Budget</h2><span className="muted">Limits are enforced atomically within one currency and reset window.</span></div><button type="button" className="icon-button" aria-label="Close budget form" onClick={onClose}>×</button></div>
     <div className="key-form">
       <label><span>Scope type</span><select aria-label="Budget scope type" value={draft.scope_type} onChange={(event) => changeScope(event.target.value)}>{scopeTypes.map((scope) => <option key={scope} value={scope}>{scope}</option>)}</select></label>
@@ -95,7 +96,7 @@ function BudgetForm({ initial, loadTargets, onClose, onSave }: { initial?: Budge
     </div>
     {targetError && <p className="form-error" role="alert">Configured targets are unavailable: {targetError}</p>}{error && <p className="form-error" role="alert">{error}</p>}
     <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button disabled={saving}>{saving ? "Saving…" : initial ? "Save changes" : "Create budget"}</button></div>
-  </form></div>;
+  </form></ModalFrame>;
 }
 
 export function BudgetsPage() {

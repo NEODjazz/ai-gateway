@@ -411,7 +411,7 @@ func TestRemoteBillingEmbeddingsContractContainsOnlyCounters(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body["api_type"] != "embeddings" || body["input_tokens"] != float64(3) || body["output_tokens"] != float64(0) {
+		if body["api_type"] != "embeddings" || body["input_tokens"] != float64(openai.EstimateContextTokens("private embedding text")) || body["output_tokens"] != float64(0) {
 			t.Fatalf("unexpected embedding usage contract: %+v", body)
 		}
 		encoded, _ := json.Marshal(body)

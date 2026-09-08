@@ -17,6 +17,9 @@ import (
 func TestPostgresBudgetReservationsAreAtomicAndLifecycleAware(t *testing.T) {
 	dsn := os.Getenv("BILLING_POSTGRES_TEST_DSN")
 	if dsn == "" {
+		if os.Getenv("POSTGRES_INTEGRATION_REQUIRED") == "true" {
+			t.Fatal("BILLING_POSTGRES_TEST_DSN is required")
+		}
 		t.Skip("BILLING_POSTGRES_TEST_DSN is not set")
 	}
 	ctx := context.Background()
@@ -273,6 +276,9 @@ func TestPostgresBudgetReservationsAreAtomicAndLifecycleAware(t *testing.T) {
 func TestPostgresBudgetReservationExpires(t *testing.T) {
 	dsn := os.Getenv("BILLING_POSTGRES_TEST_DSN")
 	if dsn == "" {
+		if os.Getenv("POSTGRES_INTEGRATION_REQUIRED") == "true" {
+			t.Fatal("BILLING_POSTGRES_TEST_DSN is required")
+		}
 		t.Skip("BILLING_POSTGRES_TEST_DSN is not set")
 	}
 	ctx := context.Background()
@@ -301,6 +307,9 @@ func TestPostgresBudgetReservationExpires(t *testing.T) {
 func TestPostgresBudgetManagementLifecycleAndSummary(t *testing.T) {
 	dsn := os.Getenv("BILLING_POSTGRES_TEST_DSN")
 	if dsn == "" {
+		if os.Getenv("POSTGRES_INTEGRATION_REQUIRED") == "true" {
+			t.Fatal("BILLING_POSTGRES_TEST_DSN is required")
+		}
 		t.Skip("BILLING_POSTGRES_TEST_DSN is not set")
 	}
 	ctx := context.Background()

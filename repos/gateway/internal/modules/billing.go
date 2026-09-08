@@ -33,17 +33,7 @@ func (m BillingModule) HandlePostResponse(ctx context.Context, req *RequestConte
 }
 
 func (m BillingModule) Handle(_ context.Context, req *RequestContext) error {
-	promptTokens := 0
-	for _, message := range req.Request.Messages {
-		promptTokens += estimateTokens(openai.ContentText(message.Content))
-	}
-	if req.ResponseRequest != nil {
-		promptTokens += estimateTokens(textFromAny(req.ResponseRequest.Input))
-		promptTokens += estimateTokens(req.ResponseRequest.Instructions)
-	}
-	if req.EmbeddingRequest != nil {
-		promptTokens += estimateTokens(openai.EmbeddingInputText(req.EmbeddingRequest.Input))
-	}
+	promptTokens := estimateRequestTokens(req)
 
 	req.Usage = &openai.Usage{
 		PromptTokens: promptTokens,

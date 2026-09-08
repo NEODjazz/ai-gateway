@@ -64,7 +64,7 @@ kubectl get pods -n ai-gateway
 
 ## Диагностика запроса
 
-1. Получите `X-Request-ID` ответа.
+1. Получите `X-Execution-ID` ответа inference. Внешний `X-Request-ID` остается идентификатором корреляции; billing и Request Logs используют execution ID.
 2. Найдите metadata-only запись на Logs → Request Logs или через
    `/admin/v1/request-logs?request_id=...`.
 3. Проверьте public/upstream model, provider endpoint, status/failure class,

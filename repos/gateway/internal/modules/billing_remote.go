@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"ai-gateway-gateway/internal/openai"
 	"go.opentelemetry.io/otel/trace"
@@ -151,7 +150,10 @@ func billingRequest(req *RequestContext) UsageRequest {
 	}
 	request.InputTokens = request.PromptTokensEstimated
 	request.OutputTokens = requestedOutputTokens(req)
-	request.TotalTokens = request.InputTokens + request.OutputTokens
+	if request.OutputTokens == 0 {
+		request.OutputTokens = openai.DefaultOutputTokenReserve
+	}
+	request.TotalTokens = openai.ReserveTokens(request.InputTokens, request.OutputTokens)
 	if req.ResponseRequest != nil {
 		request.Provider = req.ResponseRequest.Provider
 		request.Model = req.ResponseRequest.Model
@@ -249,37 +251,25 @@ func firstNonZero(values ...int) int {
 
 func requestedOutputTokens(req *RequestContext) int {
 	if req.ResponseRequest != nil {
-		if req.ResponseRequest.MaxOutputTokens != nil && *req.ResponseRequest.MaxOutputTokens > 0 {
-			return *req.ResponseRequest.MaxOutputTokens
-		}
-		if req.ResponseRequest.MaxTokens != nil && *req.ResponseRequest.MaxTokens > 0 {
-			return *req.ResponseRequest.MaxTokens
-		}
+		return openai.ResponseOutputLimit(*req.ResponseRequest)
 	}
-	if req.Request.MaxTokens != nil && *req.Request.MaxTokens > 0 {
-		return *req.Request.MaxTokens
-	}
-	return 0
+	return openai.ChatOutputLimit(req.Request)
 }
 
 func estimateRequestTokens(req *RequestContext) int {
-	total := 0
-	for _, message := range req.Request.Messages {
-		total += len(strings.Fields(openai.ContentText(message.Content)))
-	}
 	if req.ResponseRequest != nil {
-		total += len(strings.Fields(openai.ContentText(req.ResponseRequest.Input)))
-		total += len(strings.Fields(req.ResponseRequest.Instructions))
+		return openai.ResponseInputTokens(*req.ResponseRequest)
 	}
 	if req.EmbeddingRequest != nil {
-		total += len(strings.Fields(openai.EmbeddingInputText(req.EmbeddingRequest.Input)))
+		return openai.EstimateContextTokens(req.EmbeddingRequest.Input)
 	}
 	if req.RerankRequest != nil {
-		if text, ok := openai.RerankDocumentText(*req.RerankRequest); ok {
-			total += len(strings.Fields(text))
-		}
+		return openai.EstimateContextTokens(struct {
+			Query     string
+			Documents []any
+		}{req.RerankRequest.Query, req.RerankRequest.Documents})
 	}
-	return total
+	return openai.ChatInputTokens(req.Request)
 }
 
 func metadataValue(metadata map[string]string, key string) string {

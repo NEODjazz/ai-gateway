@@ -1,3 +1,4 @@
+import { ModalFrame } from "../components/ModalFrame";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
@@ -136,7 +137,7 @@ export function ProvidersPage() {
       ]} />;
     }} />}
     {editing !== undefined && <ResourceForm title={`${editing ? "Edit" : "Create"} Provider`} fields={resourceConfigs.providers.fields!} initial={editing || undefined} loadOptions={(path) => client.request(path)} onClose={() => setEditing(undefined)} onSubmit={saveProvider} />}
-    {connection && <div className="modal-backdrop" role="presentation"><section className="modal provider-connection-modal" role="dialog" aria-modal="true" aria-label={connection.mode === "test" ? "Test provider connection" : "Discover provider models"}>
+    {connection && <ModalFrame label={connection.mode === "test" ? "Test provider connection" : "Discover provider models"} onClose={() => setConnection(undefined)}><section className="modal provider-connection-modal">
       <div className="modal-heading"><div><h2>{connection.mode === "test" ? "Test connection" : "Discover models"}</h2><span className="muted">{connection.provider.id} · {connection.provider.type}</span></div><ModalCloseButton label="Close provider connection" onClick={() => setConnection(undefined)} /></div>
       <label>Credential<select aria-label="Provider credential" value={credentialID} onChange={(event) => setCredentialID(event.target.value)}><option value="">No credential</option>{connectionCredentials.map((credential) => <option key={credential.id} value={credential.id}>{credential.id}{credential.description ? ` — ${credential.description}` : ""}{credential.provider_id ? "" : " — shared"}</option>)}</select></label>
       {!connectionCredentials.length && connection.provider.type !== "ollama" && connection.provider.type !== "demo" && <p className="muted">No matching credential is configured. Create one on the Credentials page or test an endpoint that does not require authentication.</p>}
@@ -144,6 +145,6 @@ export function ProvidersPage() {
       {connection.mode === "test" && probes[connection.provider.id] && <div className="provider-probe-result" role="status">{status(probes[connection.provider.id].status)}<span>{probes[connection.provider.id].latency_ms.toLocaleString("en-US")} ms</span><span>{probes[connection.provider.id].model_count.toLocaleString("en-US")} models</span></div>}
       {connection.mode === "discover" && discovered && <><div className="provider-discovery-heading" role="status"><strong>{discovered.length.toLocaleString("en-US")} models discovered</strong><span className="muted">Only identifiers are loaded; provider credentials remain server-side.</span></div><div className="provider-model-list">{discovered.length ? discovered.map((model) => <code key={model.id}>{model.id}</code>) : <span className="muted">No models returned by the provider.</span>}</div></>}
       <div className="modal-actions"><GatewayButton view="outlined" onClick={() => setConnection(undefined)}>Close</GatewayButton>{connection.mode === "discover" && discovered && <GatewayButton view="outlined" onClick={() => navigate(`/model-onboarding?provider_id=${encodeURIComponent(connection.provider.id)}&credential_id=${encodeURIComponent(credentialID)}`)}>Continue to onboarding</GatewayButton>}<GatewayButton disabled={busy} onClick={() => void runConnection()}>{busy ? "Working…" : connection.mode === "test" ? "Test connection" : discovered ? "Discover again" : "Discover models"}</GatewayButton></div>
-    </section></div>}
+    </section></ModalFrame>}
   </>;
 }

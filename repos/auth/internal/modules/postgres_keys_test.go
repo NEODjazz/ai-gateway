@@ -14,6 +14,9 @@ import (
 func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	dsn := os.Getenv("AUTH_POSTGRES_TEST_DSN")
 	if dsn == "" {
+		if os.Getenv("POSTGRES_INTEGRATION_REQUIRED") == "true" {
+			t.Fatal("AUTH_POSTGRES_TEST_DSN is required")
+		}
 		t.Skip("AUTH_POSTGRES_TEST_DSN is not set")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

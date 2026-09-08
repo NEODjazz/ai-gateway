@@ -369,16 +369,14 @@ public model и получает точный runtime result. Карточка t
 самостоятельный control-plane resource: нет неатомарной записи policy state в
 auth directory и нет расхождения двух источников истины.
 
-UI управления guardrails намеренно отражает эту границу ответственности, а не
-каталог provider-specific plugins из LiteLLM. Он объединяет policy definition с
+UI управления guardrails отражает эту границу ответственности. Он объединяет policy definition с
 прямыми deployment references и scoped attachments, поддерживает create/edit и
 metadata-only detail view. Compliance comparison ограничен восемью enabled
 policies и выполняет независимый bounded dry-run для каждой: это позволяет
 сравнить решения и частичные ошибки, не сохраняя и не возвращая submitted text
 или raw scanner response. Фильтры Guardrail Monitor сериализуются в URL, поэтому
 переход из policy details воспроизводимо открывает соответствующий report.
-LiteLLM policy versioning, AI-generated templates и provider-specific pipeline
-builder сознательно не перенесены: gateway policy definition — это независимый
+Gateway policy definition — это независимый
 DLP/AV selector, attachments дают композицию scope, а executable scanner config
 и credentials остаются за границей control plane.
 

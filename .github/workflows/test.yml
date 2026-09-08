@@ -104,6 +104,37 @@ jobs:
           path: repos/${{ matrix.service }}/coverage.out
           if-no-files-found: error
 
+  postgres-integration:
+    name: PostgreSQL integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      CONTROL_PLANE_POSTGRES_TEST_DSN: postgres://postgres@127.0.0.1:5432/gateway_test?sslmode=disable
+      AUTH_POSTGRES_TEST_DSN: postgres://postgres@127.0.0.1:5432/auth_test?sslmode=disable
+      BILLING_POSTGRES_TEST_DSN: postgres://postgres@127.0.0.1:5432/billing_test?sslmode=disable
+      POSTGRES_INTEGRATION_REQUIRED: "true"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: repos/gateway/go.mod
+      - name: Create isolated test databases
+        run: |
+          psql postgres://postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE gateway_test' -c 'CREATE DATABASE auth_test' -c 'CREATE DATABASE billing_test'
+      - name: Apply migrations and run required database scenarios
+        run: bash scripts/test-postgres-integration.sh
+
   admin-ui:
     name: React admin UI
     runs-on: ubuntu-latest

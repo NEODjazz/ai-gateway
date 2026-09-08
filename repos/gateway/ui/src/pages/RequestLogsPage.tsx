@@ -1,3 +1,4 @@
+import { ModalFrame } from "../components/ModalFrame";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Magnifier } from "@gravity-ui/icons";
 import { Icon, TextInput } from "@gravity-ui/uikit";
@@ -278,8 +279,8 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
       ? <DataTable rows={rows} columns={columns.filter((column) => visibleColumns.has(column.key))} actions={(row) => <ActionsMenu label={`Actions for ${String(row.request_id)}`} items={[{ label: "Details", onSelect: () => showDetail(row as RequestLog) }]} />} />
       : <DataTable rows={groupRows} columns={groupedColumns} actions={(row) => <ActionsMenu label={`Actions for ${String(row.group_id)}`} items={[{ label: "View requests", onSelect: () => showGroupRequests(row as GroupedRequestLog) }]} />} />}
     {activeCursor && <button className="secondary load-more" onClick={() => void load(true, activeCursor)}>Load older</button>}
-    {filtersOpen && <div className="modal-backdrop" role="presentation">
-      <form className="modal compact-modal" role="dialog" aria-modal="true" aria-label="Filter request logs" onSubmit={apply}>
+    {filtersOpen && <ModalFrame label="Filter request logs" onClose={() => setFiltersOpen(false)}>
+      <form className="modal compact-modal"    onSubmit={apply}>
         <div className="modal-heading"><h2>Filter request logs</h2><button type="button" className="icon-button" aria-label="Close filters" onClick={() => setFiltersOpen(false)}>×</button></div>
         <div className="form-grid">
           <label>Session ID<input value={draftFilters.session_id} onChange={(event) => setDraftFilters((current) => ({ ...current, session_id: event.target.value }))} /></label>
@@ -299,7 +300,7 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
         </div>
         <div className="modal-actions"><button type="button" className="secondary" onClick={() => setDraftFilters(emptyFilters)}>Reset filters</button><button>Apply filters</button></div>
       </form>
-    </div>}
-    {detail !== undefined && <div className="modal-backdrop" role="presentation"><section className="modal" role="dialog" aria-modal="true" aria-label="Request details"><div className="modal-heading"><h2>Request details</h2><button className="icon-button" aria-label="Close" onClick={() => updateQuery({ log: "" })}>×</button></div><pre>{JSON.stringify(detail, null, 2)}</pre></section></div>}
+    </ModalFrame>}
+    {detail !== undefined && <ModalFrame label="Request details" onClose={() => updateQuery({ log: "" })}><section className="modal"><div className="modal-heading"><h2>Request details</h2><button className="icon-button" aria-label="Close" onClick={() => updateQuery({ log: "" })}>×</button></div><pre>{JSON.stringify(detail, null, 2)}</pre></section></ModalFrame>}
   </>;
 }
