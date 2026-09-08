@@ -187,7 +187,7 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 			case part.Call != nil:
 				callIndex++
 				call := part.Call
-				if role != "assistant" || call.Name == "" || call.Args == nil {
+				if role != "assistant" || call.Name == "" {
 					return fail("functionCall")
 				}
 				id := call.ID
@@ -202,7 +202,11 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 					return fail("functionCall.id")
 				}
 				seen[id] = true
-				args, err := json.Marshal(call.Args)
+				arguments := call.Args
+				if arguments == nil {
+					arguments = map[string]any{}
+				}
+				args, err := json.Marshal(arguments)
 				if err != nil {
 					return result, err
 				}

@@ -99,3 +99,31 @@ func TestGenerateRequestRejectsUnsupportedFieldsAndUnions(t *testing.T) {
 		t.Fatal("unknown generation parameter ignored")
 	}
 }
+
+func TestGenerateHistoryWithoutFunctionArguments(t *testing.T) {
+	for _, args := range []string{"", `,"args":null`, `,"args":{}`} {
+		var native generateRequest
+		raw := `{"contents":[{"role":"model","parts":[{"functionCall":{"name":"clock"` + args + `},"thoughtSignature":"opaque"}]},{"parts":[{"functionResponse":{"name":"clock","response":{"time":"12:00"}}}]}]}`
+		if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+			t.Fatal(err)
+		}
+		request, err := native.chat("m", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		call := request.Messages[0].ToolCalls[0]
+		if call.Function.Arguments != "{}" || call.ID != request.Messages[1].ToolCallID || call.ExtraContent.Google.ThoughtSignature != "opaque" {
+			t.Fatalf("history changed: %+v", request)
+		}
+	}
+	for _, args := range []string{`[]`, `1`, `"text"`} {
+		var native generateRequest
+		err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"model","parts":[{"functionCall":{"name":"clock","args":`+args+`}}]}]}`), &native)
+		if err == nil {
+			_, err = native.chat("m", false)
+		}
+		if err == nil {
+			t.Fatalf("non-object args accepted: %s", args)
+		}
+	}
+}

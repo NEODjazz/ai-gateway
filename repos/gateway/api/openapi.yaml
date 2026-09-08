@@ -2355,11 +2355,15 @@ components:
         functionCall:
           type: object
           additionalProperties: false
-          required: [name, args]
+          required: [name]
           properties:
             id: {type: string}
             name: {type: string, minLength: 1}
-            args: {type: object}
+            args:
+              description: Omitted or null arguments are normalized to an empty object.
+              oneOf:
+                - {type: object}
+                - {type: 'null'}
         functionResponse:
           type: object
           additionalProperties: false

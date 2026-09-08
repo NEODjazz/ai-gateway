@@ -396,3 +396,10 @@ request causes a 502 module error before provider execution.
 Regression tests cover rewritten models, added tools, expanded input context and
 replacement/removal of typed requests. Provider-specific modules still run in
 their existing provider execution phase.
+
+
+Native Gemini function calls may omit `args`. The inbound history converter and
+outbound JSON/SSE adapter normalize omitted or null arguments to `{}`, preserving
+call IDs and thought signatures. Array, scalar and malformed arguments remain
+errors. This allows parameterless tools to complete a generation/history round trip.
+See [FunctionCall](https://ai.google.dev/api/generate-content#FunctionCall).

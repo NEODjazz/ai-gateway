@@ -462,13 +462,17 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 			}
 			text.WriteString(part.Text)
 			if part.FunctionCall != nil {
-				if part.FunctionCall.Name == "" || part.FunctionCall.Args == nil {
+				if part.FunctionCall.Name == "" {
 					return result, errors.New("invalid Gemini function call")
 				}
 				if len(choice.Message.ToolCalls) >= maxChatStreamToolCalls {
 					return result, errors.New("too many Gemini tool calls")
 				}
-				args, err := json.Marshal(part.FunctionCall.Args)
+				arguments := part.FunctionCall.Args
+				if arguments == nil {
+					arguments = map[string]any{}
+				}
+				args, err := json.Marshal(arguments)
 				if err != nil {
 					return result, err
 				}

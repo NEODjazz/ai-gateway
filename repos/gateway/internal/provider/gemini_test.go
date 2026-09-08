@@ -228,3 +228,54 @@ func TestGeminiToolResponsePreservesJSONObjects(t *testing.T) {
 		}
 	}
 }
+
+func TestGeminiFunctionCallsWithoutArguments(t *testing.T) {
+	for _, args := range []string{"", `,"args":null`, `,"args":{}`} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("args=%s/stream=%t", args, stream), func(t *testing.T) {
+				payload := `{"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"clock"` + args + `},"thoughtSignature":"opaque"}]},"finishReason":"STOP"}]}`
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if stream {
+						_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+					} else {
+						_, _ = fmt.Fprint(w, payload)
+					}
+				}))
+				defer server.Close()
+				client := NewGemini(server.URL, "", true)
+				request := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "time?"}}}
+				var response openai.ChatCompletionResponse
+				var err error
+				var chunks strings.Builder
+				if stream {
+					response, err = client.StreamChatCompletions(context.Background(), request, func(chunk string) error { chunks.WriteString(chunk); return nil })
+				} else {
+					response, err = client.ChatCompletions(context.Background(), request)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(response.Choices) != 1 || len(response.Choices[0].Message.ToolCalls) != 1 {
+					t.Fatalf("missing call: %+v", response)
+				}
+				call := response.Choices[0].Message.ToolCalls[0]
+				if call.Function.Arguments != "{}" || call.ExtraContent.Google.ThoughtSignature != "opaque" || response.Choices[0].FinishReason != "tool_calls" {
+					t.Fatalf("invalid normalized call: %+v", call)
+				}
+				if stream && !strings.Contains(chunks.String(), `"arguments":"{}"`) {
+					t.Fatal("stream arguments lost")
+				}
+			})
+		}
+	}
+	for _, args := range []string{`[]`, `1`, `"text"`} {
+		var body geminiResponse
+		err := json.Unmarshal([]byte(`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"clock","args":`+args+`}}]},"finishReason":"STOP"}]}`), &body)
+		if err == nil {
+			_, err = geminiToChat(body, "m")
+		}
+		if err == nil {
+			t.Fatalf("non-object args accepted: %s", args)
+		}
+	}
+}
