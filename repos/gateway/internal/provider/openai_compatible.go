@@ -618,10 +618,12 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			if err != nil {
 				return err
 			}
-			item := ensureResponseOutputItem(&response, outputIndex)
-			if err := json.Unmarshal(marshaled, item); err != nil {
+			var snapshot openai.ResponseOutputItem
+			if err := json.Unmarshal(marshaled, &snapshot); err != nil {
 				return err
 			}
+			*ensureResponseOutputItem(&response, outputIndex) = snapshot
+			response.OutputText = ""
 		}
 		if typed, ok := decoded["response"].(map[string]any); ok {
 			marshaled, err := json.Marshal(typed)

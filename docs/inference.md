@@ -827,3 +827,9 @@ Regression tests cover all three terminal states, duplicate outcomes with change
 usage, late text, malformed trailing frames, read failure after the terminal frame
 and terminal writer failure. Upstream streams without a valid terminal outcome
 continue to fail as documented above.
+
+Output-item snapshots replace the accumulated item rather than merging into its
+existing fields. This prevents obsolete message content, role or status from
+surviving in a function-call snapshot. The derived top-level text is invalidated
+and rebuilt from the current output. Regression coverage exercises both added
+and done item snapshots, including a previously populated top-level text field.
