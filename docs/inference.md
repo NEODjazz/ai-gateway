@@ -841,3 +841,17 @@ remain available even without individual deltas. Output and content index bounds
 apply before allocation. Missing, non-object or malformed typed parts fail before
 event forwarding. Tests cover both events, multiple content slots, replacement of
 earlier text by a refusal and invalid payloads.
+
+### Native Responses reasoning summaries
+
+The SSE collector preserves `response.reasoning_summary_part.added/done` and
+`response.reasoning_summary_text.delta/done` in each reasoning item's `summary`.
+Parts are indexed by `summary_index` (0 through 127) within the bounded output
+item array. Final text and part events replace accumulated fragments; deltas
+append to their selected part. Summary text remains separate from `output_text`.
+Invalid part/text payloads and summary indices fail before forwarding the event.
+
+Regression tests cover part snapshots, delta/final text replacement, multiple
+summary parts alongside a normal answer, and invalid indices for all four event
+types. The refusal isolation fixture now gives reasoning its own output index.
+Event fields follow the [Responses streaming reference](https://developers.openai.com/api/reference/resources/responses/streaming-events).

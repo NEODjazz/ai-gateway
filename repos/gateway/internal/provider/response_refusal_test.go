@@ -15,7 +15,7 @@ func TestNativeResponseRefusalDoesNotBecomeText(t *testing.T) {
 				{"response.refusal.delta", `"output_index":1,"content_index":2,"item_id":"refusal-item","delta":"cannot "`},
 				{"response.refusal.delta", `"output_index":1,"content_index":2,"item_id":"refusal-item","delta":"help"`},
 				{"response.refusal.done", `"output_index":1,"content_index":2,"item_id":"refusal-item","refusal":"cannot help"`},
-				{"response.reasoning_summary_text.delta", `"delta":"summary"`},
+				{"response.reasoning_summary_text.delta", `"output_index":3,"delta":"summary"`},
 				{"response.function_call_arguments.delta", `"output_index":2,"delta":"{}"`},
 			} {
 				if named {
@@ -28,7 +28,7 @@ func TestNativeResponseRefusalDoesNotBecomeText(t *testing.T) {
 			if err != nil || forwarded != 7 || response.OutputText != "answer" {
 				t.Fatalf("err=%v forwarded=%d text=%q", err, forwarded, response.OutputText)
 			}
-			if len(response.Output) != 3 || len(response.Output[1].Content) != 3 || response.Output[1].ID != "refusal-item" || response.Output[1].Content[2].Type != "refusal" || response.Output[1].Content[2].Refusal != "cannot help" || response.Output[2].Arguments != "{}" {
+			if len(response.Output) != 4 || len(response.Output[1].Content) != 3 || response.Output[1].ID != "refusal-item" || response.Output[1].Content[2].Type != "refusal" || response.Output[1].Content[2].Refusal != "cannot help" || response.Output[2].Arguments != "{}" {
 				t.Fatalf("output=%+v", response.Output)
 			}
 		})

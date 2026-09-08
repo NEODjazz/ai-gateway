@@ -641,6 +641,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			item.Content[contentIndex] = snapshot
 			response.OutputText = ""
 		}
+		if err := applyResponseSummaryEvent(&response, outputIndex, event, decoded); err != nil {
+			return err
+		}
 		if itemValue, ok := decoded["item"].(map[string]any); ok {
 			marshaled, err := json.Marshal(itemValue)
 			if err != nil {
