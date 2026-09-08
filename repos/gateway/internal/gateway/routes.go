@@ -26,6 +26,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/v1/messages/count_tokens"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CountMessageTokens) }},
 	{RouteContract{http.MethodPost, "/v1/responses"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Responses) }},
 	{RouteContract{http.MethodGet, "/v1/responses/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetResponse) }},
+	{RouteContract{http.MethodPost, "/v1/responses/{id}/cancel"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CancelResponse) }},
 	{RouteContract{http.MethodPost, "/v1/embeddings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Embeddings) }},
 	{RouteContract{http.MethodPost, "/v1/rerank"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Rerank) }},
 	{RouteContract{http.MethodGet, "/admin/v1/session"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetAdminSession) }},

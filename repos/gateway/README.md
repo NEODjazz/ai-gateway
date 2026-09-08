@@ -18,6 +18,7 @@ permission examples, see [MCP integration](../../docs/mcp.md).
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
 - `GET /v1/responses/{id}`
+- `POST /v1/responses/{id}/cancel`
 - `GET /admin/v1/session`
 - `GET /admin/v1/usage/report`
 - `GET /admin/v1/request-logs`

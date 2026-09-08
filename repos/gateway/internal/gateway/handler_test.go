@@ -42,6 +42,7 @@ type lifecycleResourceProvider struct {
 	chatProvider
 	resolveCalls  int
 	retrieveCalls int
+	cancelCalls   int
 	credentialID  string
 }
 
@@ -72,6 +73,12 @@ func (p *lifecycleResourceProvider) RetrieveResponse(_ context.Context, req modu
 	p.retrieveCalls++
 	p.credentialID = req.CredentialID
 	return openai.ResponseResponse{ID: id, Model: req.Request.Model, Status: "completed"}, nil
+}
+
+func (p *lifecycleResourceProvider) CancelResponse(_ context.Context, req modules.RequestContext, id string) (openai.ResponseResponse, error) {
+	p.cancelCalls++
+	p.credentialID = req.CredentialID
+	return openai.ResponseResponse{ID: id, Model: req.Request.Model, Status: "cancelled"}, nil
 }
 
 func TestChatCompletionsRejectsConflictingTokenLimits(t *testing.T) {
@@ -687,6 +694,22 @@ func TestGetResponseRechecksCurrentModelPolicyBeforeRetrieval(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden || resource.resolveCalls != 1 || resource.retrieveCalls != 0 {
 		t.Fatalf("status=%d resolve=%d retrieve=%d body=%s", recorder.Code, resource.resolveCalls, resource.retrieveCalls, recorder.Body.String())
+	}
+}
+
+func TestCancelResponseAuthenticatesAndSkipsBillingLifecycle(t *testing.T) {
+	resource := &lifecycleResourceProvider{}
+	billing := &lifecycleBillingModule{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{modules.NewAuthModule(true), billing}), resource))
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses/resp_123/cancel", nil)
+	request.Header.Set("Authorization", "Bearer demo-user-key")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || resource.resolveCalls != 1 || resource.cancelCalls != 1 || billing.calls != 0 {
+		t.Fatalf("status=%d resolve=%d cancel=%d billing=%d body=%s", recorder.Code, resource.resolveCalls, resource.cancelCalls, billing.calls, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"status":"cancelled"`) {
+		t.Fatalf("unexpected cancel response: %s", recorder.Body.String())
 	}
 }
 

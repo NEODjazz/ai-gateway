@@ -468,6 +468,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/responses/{id}/cancel:
+    post:
+      operationId: cancelResponse
+      tags: [Inference]
+      summary: Cancel a stored background response
+      description: Resolves the authenticated owner's immutable deployment binding and rechecks current model policy before forwarding cancellation. Cancellation does not create a new inference billing lifecycle.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 256
+      responses:
+        '200':
+          description: Updated response resource
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResponseResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The response does not exist for the authenticated owner.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The original deployment binding no longer matches the active deployment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Response ownership storage is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/embeddings:
     post:
       operationId: createEmbeddings

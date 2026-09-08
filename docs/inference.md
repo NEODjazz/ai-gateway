@@ -10,6 +10,7 @@ Gateway реализует OpenAI-compatible endpoints:
 | `POST /v1/chat/completions` | Chat, tools, structured output и vision |
 | `POST /v1/responses` | Responses, continuity, function tools и MCP passthrough |
 | `GET /v1/responses/{id}` | Чтение сохраненного Response владельцем credential |
+| `POST /v1/responses/{id}/cancel` | Отмена сохраненного background Response владельцем credential |
 | `POST /v1/embeddings` | String или массив строк |
 | `POST /v1/rerank` | Query/documents ranking |
 
@@ -913,7 +914,7 @@ change, covered by local HTTP payload tests for both values and default behavior
 `store` controls upstream response storage. An explicit `true` also enables the
 gateway ownership binding required by `GET /v1/responses/{id}`. Gateway logging
 policies remain separate; this option is not a gateway-wide retention switch.
-Delete, cancel and background lifecycle endpoints are not published.
+Delete and other background lifecycle endpoints are not published.
 
 Opaque `encrypted_content` fields are protected during input text processing.
 Local text transformation leaves them unchanged, the remote text-only projection
@@ -1133,3 +1134,10 @@ removed or changed deployment with `409 response_deployment_changed`. Missing an
 cross-owner records return the same `404 response_not_found` response. Retention,
 upstream model aliases and reconstruction after restart remain lifecycle integration
 requirements; optional affinity alone is not sufficient.
+
+`POST /v1/responses/{id}/cancel` applies the same ownership, deployment and current
+policy checks before forwarding a bounded cancellation request to the original
+native-compatible provider. It uses the deployment admission, timeout, retry,
+circuit and telemetry controls without opening a new generation billing lifecycle.
+The ownership record remains available for subsequent retrieval of the terminal
+resource state.

@@ -36,9 +36,18 @@ type Provider interface {
 	Models() []openai.Model
 }
 
-type ResponseResourceProvider interface {
+type ResponseResourceResolver interface {
 	ResolveResponseResource(ctx context.Context, req modules.RequestContext, id string) (string, error)
+}
+
+type ResponseResourceProvider interface {
+	ResponseResourceResolver
 	RetrieveResponse(ctx context.Context, req modules.RequestContext, id string) (openai.ResponseResponse, error)
+}
+
+type ResponseCancellationProvider interface {
+	ResponseResourceResolver
+	CancelResponse(ctx context.Context, req modules.RequestContext, id string) (openai.ResponseResponse, error)
 }
 
 type EmbeddingProvider interface {

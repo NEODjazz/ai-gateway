@@ -144,36 +144,36 @@ func (s responseOwnershipStore) get(ctx context.Context, req modules.RequestCont
 	return binding, true, nil
 }
 
-type responseResourceClient interface {
+type responseRetrieveClient interface {
 	RetrieveResponse(context.Context, string) (openai.ResponseResponse, error)
 }
 
-func (r Router) responseResource(ctx context.Context, req modules.RequestContext, id string) (responseOwnership, Endpoint, responseResourceClient, error) {
+type responseCancelClient interface {
+	CancelResponse(context.Context, string) (openai.ResponseResponse, error)
+}
+
+func (r Router) responseResource(ctx context.Context, req modules.RequestContext, id string) (responseOwnership, Endpoint, error) {
 	binding, found, err := r.ownership.get(ctx, req, id)
 	if err != nil {
-		return responseOwnership{}, Endpoint{}, nil, err
+		return responseOwnership{}, Endpoint{}, err
 	}
 	if !found {
-		return responseOwnership{}, Endpoint{}, nil, ErrResponseNotFound
+		return responseOwnership{}, Endpoint{}, ErrResponseNotFound
 	}
 	for _, endpoint := range r.runtimeEndpoints() {
 		if endpoint.Name != binding.Endpoint {
 			continue
 		}
 		if responseDeploymentIdentity(endpoint) != binding.Deployment || !endpoint.supportsModel(binding.Model) || !endpoint.supportsCapabilities("responses") {
-			return responseOwnership{}, Endpoint{}, nil, ErrResponseDeploymentChanged
+			return responseOwnership{}, Endpoint{}, ErrResponseDeploymentChanged
 		}
-		client, ok := endpoint.Provider.(responseResourceClient)
-		if !ok {
-			return responseOwnership{}, Endpoint{}, nil, ErrResponseDeploymentChanged
-		}
-		return binding, endpoint, client, nil
+		return binding, endpoint, nil
 	}
-	return responseOwnership{}, Endpoint{}, nil, ErrResponseDeploymentChanged
+	return responseOwnership{}, Endpoint{}, ErrResponseDeploymentChanged
 }
 
 func (r Router) ResolveResponseResource(ctx context.Context, req modules.RequestContext, id string) (string, error) {
-	binding, _, _, err := r.responseResource(ctx, req, id)
+	binding, _, err := r.responseResource(ctx, req, id)
 	if err != nil {
 		return "", err
 	}
@@ -181,10 +181,34 @@ func (r Router) ResolveResponseResource(ctx context.Context, req modules.Request
 }
 
 func (r Router) RetrieveResponse(ctx context.Context, req modules.RequestContext, id string) (openai.ResponseResponse, error) {
-	_, endpoint, client, err := r.responseResource(ctx, req, id)
+	_, endpoint, err := r.responseResource(ctx, req, id)
 	if err != nil {
 		return openai.ResponseResponse{}, err
 	}
+	client, ok := endpoint.Provider.(responseRetrieveClient)
+	if !ok {
+		return openai.ResponseResponse{}, ErrResponseDeploymentChanged
+	}
+	return r.callResponseLifecycle(ctx, endpoint, "responses.retrieve", func(callCtx context.Context) (openai.ResponseResponse, error) {
+		return client.RetrieveResponse(callCtx, id)
+	})
+}
+
+func (r Router) CancelResponse(ctx context.Context, req modules.RequestContext, id string) (openai.ResponseResponse, error) {
+	_, endpoint, err := r.responseResource(ctx, req, id)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	client, ok := endpoint.Provider.(responseCancelClient)
+	if !ok {
+		return openai.ResponseResponse{}, ErrResponseDeploymentChanged
+	}
+	return r.callResponseLifecycle(ctx, endpoint, "responses.cancel", func(callCtx context.Context) (openai.ResponseResponse, error) {
+		return client.CancelResponse(callCtx, id)
+	})
+}
+
+func (r Router) callResponseLifecycle(ctx context.Context, endpoint Endpoint, operation string, call func(context.Context) (openai.ResponseResponse, error)) (openai.ResponseResponse, error) {
 	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
 	if err != nil {
 		return openai.ResponseResponse{}, err
@@ -194,8 +218,8 @@ func (r Router) RetrieveResponse(ctx context.Context, req modules.RequestContext
 		return openai.ResponseResponse{}, err
 	}
 	for attempt := 0; attempt <= endpointMaxRetries(endpoint); attempt++ {
-		callCtx, finish := r.startProviderCall(ctx, endpoint, "responses.retrieve")
-		response, callErr := client.RetrieveResponse(callCtx, id)
+		callCtx, finish := r.startProviderCall(ctx, endpoint, operation)
+		response, callErr := call(callCtx)
 		finish(callErr)
 		if callErr == nil {
 			r.health.success(ctx, endpoint)

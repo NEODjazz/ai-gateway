@@ -28,16 +28,36 @@ func TestRetrieveResponseTransport(t *testing.T) {
 	}
 }
 
+func TestCancelResponseTransport(t *testing.T) {
+	for _, base := range []string{"", "/v1"} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || r.URL.Path != "/v1/responses/resp_123/cancel" || r.Header.Get("Authorization") != "Bearer test-key" || r.ContentLength > 0 {
+				t.Errorf("unexpected request: %s %s content-length=%d", r.Method, r.URL.Path, r.ContentLength)
+			}
+			fmt.Fprint(w, `{"id":"resp_123","status":"cancelled","output":[],"usage":{"input_tokens":2,"output_tokens":0,"total_tokens":2}}`)
+		}))
+		result, err := NewOpenAICompatible(server.URL+base, "test-key", true).CancelResponse(t.Context(), "resp_123")
+		server.Close()
+		if err != nil || result.ID != "resp_123" || result.Status != "cancelled" || result.Usage.TotalTokens != 2 {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
+	}
+}
+
 func TestRetrieveResponseRejectsUnsafeIDs(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }))
 	defer server.Close()
 	p := NewOpenAICompatible(server.URL, "", true)
 	for _, id := range []string{"", "../models", "a/b", "a?x=y", "a#b", "a%2fb", "a b", strings.Repeat("a", 257)} {
-		_, err := p.RetrieveResponse(t.Context(), id)
-		var failure *Error
-		if !errors.As(err, &failure) || failure.Param != "response_id" || failure.StatusCode != 400 {
-			t.Fatalf("id=%q err=%v", id, err)
+		for _, operation := range []func() error{
+			func() error { _, err := p.RetrieveResponse(t.Context(), id); return err },
+			func() error { _, err := p.CancelResponse(t.Context(), id); return err },
+		} {
+			var failure *Error
+			if err := operation(); !errors.As(err, &failure) || failure.Param != "response_id" || failure.StatusCode != 400 {
+				t.Fatalf("id=%q err=%v", id, err)
+			}
 		}
 	}
 	if calls.Load() != 0 {

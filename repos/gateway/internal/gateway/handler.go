@@ -363,35 +363,59 @@ func (h Handler) GetResponse(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotImplemented, "response_lifecycle_unsupported", "response lifecycle is not supported")
 		return
 	}
-	reqCtx := modules.RequestContext{
-		APIKey:    bearerToken(r.Header.Get("Authorization")),
-		RequestID: executionID(w),
-	}
-	if err := h.pipeline.RunAuthentication(r.Context(), &reqCtx); err != nil {
-		if errors.Is(err, modules.ErrUnauthorized) {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
-			return
-		}
-		writeError(w, http.StatusBadGateway, "module_failed", "authentication failed")
-		return
-	}
-	reqCtx.APIKey = ""
 	id := strings.TrimSpace(r.PathValue("id"))
-	model, err := resourceProvider.ResolveResponseResource(r.Context(), reqCtx, id)
-	if err != nil {
-		writeProviderFailure(w, err)
+	reqCtx, ok := h.authorizeResponseResource(w, r, resourceProvider, id)
+	if !ok {
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, model, 0) {
-		return
-	}
-	reqCtx.Request.Model = model
 	response, err := resourceProvider.RetrieveResponse(r.Context(), reqCtx, id)
 	if err != nil {
 		writeProviderFailure(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (h Handler) CancelResponse(w http.ResponseWriter, r *http.Request) {
+	resourceProvider, ok := h.provider.(provider.ResponseCancellationProvider)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "response_lifecycle_unsupported", "response cancellation is not supported")
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	reqCtx, ok := h.authorizeResponseResource(w, r, resourceProvider, id)
+	if !ok {
+		return
+	}
+	response, err := resourceProvider.CancelResponse(r.Context(), reqCtx, id)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h Handler) authorizeResponseResource(w http.ResponseWriter, r *http.Request, resolver provider.ResponseResourceResolver, id string) (modules.RequestContext, bool) {
+	reqCtx := modules.RequestContext{APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w)}
+	if err := h.pipeline.RunAuthentication(r.Context(), &reqCtx); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+			return modules.RequestContext{}, false
+		}
+		writeError(w, http.StatusBadGateway, "module_failed", "authentication failed")
+		return modules.RequestContext{}, false
+	}
+	reqCtx.APIKey = ""
+	model, err := resolver.ResolveResponseResource(r.Context(), reqCtx, id)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return modules.RequestContext{}, false
+	}
+	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, model, 0) {
+		return modules.RequestContext{}, false
+	}
+	reqCtx.Request.Model = model
+	return reqCtx, true
 }
 
 func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {

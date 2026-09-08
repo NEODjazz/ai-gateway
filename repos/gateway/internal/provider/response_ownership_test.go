@@ -19,6 +19,7 @@ type ownershipTestStore struct {
 type ownershipResponseClient struct {
 	calls         int
 	retrieveCalls int
+	cancelCalls   int
 }
 
 type ownershipPostModule struct {
@@ -52,6 +53,11 @@ func (p *ownershipResponseClient) StreamResponses(ctx context.Context, request o
 func (p *ownershipResponseClient) RetrieveResponse(_ context.Context, id string) (openai.ResponseResponse, error) {
 	p.retrieveCalls++
 	return openai.ResponseResponse{ID: id, Model: "public-model", Status: "completed"}, nil
+}
+
+func (p *ownershipResponseClient) CancelResponse(_ context.Context, id string) (openai.ResponseResponse, error) {
+	p.cancelCalls++
+	return openai.ResponseResponse{ID: id, Model: "public-model", Status: "cancelled"}, nil
 }
 
 func (s *ownershipTestStore) Get(_ context.Context, k string) ([]byte, bool, error) {
@@ -211,6 +217,24 @@ func TestRetrieveResponseRequiresOwnerAndOriginalDeployment(t *testing.T) {
 	router.endpoints = []Endpoint{replacement}
 	if _, err := router.RetrieveResponse(t.Context(), owner, "resp_owned"); !errors.Is(err, ErrResponseDeploymentChanged) || client.retrieveCalls != 1 {
 		t.Fatalf("changed deployment calls=%d err=%v", client.retrieveCalls, err)
+	}
+}
+
+func TestCancelResponseUsesOwnedDeployment(t *testing.T) {
+	owner := modules.RequestContext{CredentialID: "credential", UserID: "user"}
+	backend := &ownershipTestStore{data: map[string][]byte{}}
+	client := &ownershipResponseClient{}
+	endpoint := Endpoint{Name: "deployment", Type: "test", Models: []string{"public-model"}, Provider: client}
+	router := Router{endpoints: []Endpoint{endpoint}, ownership: newResponseOwnershipStore(time.Hour, backend), health: newEndpointHealthTracker()}
+	if err := router.ownership.put(t.Context(), owner, "resp_owned", responseOwnership{Endpoint: endpoint.Name, Model: "public-model", Deployment: responseDeploymentIdentity(endpoint)}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := router.CancelResponse(t.Context(), owner, "resp_owned")
+	if err != nil || response.Status != "cancelled" || client.cancelCalls != 1 {
+		t.Fatalf("response=%+v calls=%d err=%v", response, client.cancelCalls, err)
+	}
+	if _, found, err := router.ownership.get(t.Context(), owner, "resp_owned"); err != nil || !found {
+		t.Fatalf("cancellation removed ownership: found=%v err=%v", found, err)
 	}
 }
 

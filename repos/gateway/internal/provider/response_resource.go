@@ -11,10 +11,24 @@ import (
 // RetrieveResponse reads an upstream resource. The caller must authorize its
 // owner and select the original deployment before invoking this transport method.
 func (p OpenAICompatible) RetrieveResponse(ctx context.Context, id string) (openai.ResponseResponse, error) {
+	return p.responseResourceRequest(ctx, http.MethodGet, id, "")
+}
+
+// CancelResponse requests cancellation of an upstream background response.
+// Ownership and deployment authorization remain the caller's responsibility.
+func (p OpenAICompatible) CancelResponse(ctx context.Context, id string) (openai.ResponseResponse, error) {
+	return p.responseResourceRequest(ctx, http.MethodPost, id, "cancel")
+}
+
+func (p OpenAICompatible) responseResourceRequest(ctx context.Context, method, id, action string) (openai.ResponseResponse, error) {
 	if !validResponseResourceID(id) {
 		return openai.ResponseResponse{}, &Error{Class: FailureClientRequest, StatusCode: 400, UpstreamCode: "invalid_request", Param: "response_id", Err: errors.New("invalid response ID")}
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, providerURL(p.baseURL, "responses/"+id), nil)
+	path := "responses/" + id
+	if action != "" {
+		path += "/" + action
+	}
+	request, err := http.NewRequestWithContext(ctx, method, providerURL(p.baseURL, path), http.NoBody)
 	if err != nil {
 		return openai.ResponseResponse{}, err
 	}
