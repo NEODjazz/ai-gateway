@@ -26,3 +26,12 @@ func TestResponseRejectsNonPositiveOutputLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestResponseRejectsConflictingOutputLimits(t *testing.T) {
+	for _, pair := range [][2]int{{1, 1000}, {1000, 1}, {10, 10}} {
+		request := ResponseRequest{MaxOutputTokens: &pair[0], MaxTokens: &pair[1]}
+		if request.Validate() == "" {
+			t.Fatalf("both output caps accepted: %v", pair)
+		}
+	}
+}

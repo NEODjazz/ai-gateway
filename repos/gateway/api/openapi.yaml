@@ -3138,6 +3138,7 @@ components:
               - $ref: '#/components/schemas/TextContentPart'
               - $ref: '#/components/schemas/InputImageContentPart'
     ResponseRequest:
+      description: Supply at most one non-null output limit, max_output_tokens or max_tokens.
       type: object
       additionalProperties: false
       required: [model, input]

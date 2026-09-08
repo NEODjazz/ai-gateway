@@ -1067,3 +1067,10 @@ Responses enforces the documented positive minimum for supplied
 return `400 invalid_request` at the HTTP boundary and router before execution.
 Omission or null retains default reserve behavior; positive limits retain the
 existing reserve calculation.
+
+Responses accepts at most one non-null output limit: `max_output_tokens` or the
+legacy `max_tokens` alias. Supplying both now returns `400 invalid_request`, even
+when their values match. Previously the gateway reserved against max_output_tokens
+but native-compatible adapters forwarded both fields, leaving provider precedence
+ambiguous. Clients sending both must remove one. Single-limit requests and null
+aliases retain their existing behavior.

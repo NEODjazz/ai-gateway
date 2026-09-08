@@ -2,6 +2,9 @@ package openai
 
 // Validate checks provider-independent Responses generation options.
 func (r ResponseRequest) Validate() string {
+	if r.MaxOutputTokens != nil && r.MaxTokens != nil {
+		return "max_output_tokens and max_tokens are mutually exclusive"
+	}
 	if r.MaxOutputTokens != nil && *r.MaxOutputTokens <= 0 {
 		return "max_output_tokens must be positive"
 	}
