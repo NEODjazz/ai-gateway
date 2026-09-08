@@ -613,6 +613,34 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				}
 			}
 		}
+		if event == "response.content_part.added" || event == "response.content_part.done" {
+			contentIndex, err := boundedResponseStreamIndex(decoded, "content_index", maxResponseStreamContentParts)
+			if err != nil {
+				return err
+			}
+			part, ok := decoded["part"].(map[string]any)
+			if !ok {
+				return errors.New("Responses content event is missing its part")
+			}
+			payload, err := json.Marshal(part)
+			if err != nil {
+				return err
+			}
+			var snapshot openai.ResponseOutputContent
+			if err := json.Unmarshal(payload, &snapshot); err != nil {
+				return err
+			}
+			item := ensureResponseOutputItem(&response, outputIndex)
+			item.Type, item.Role = "message", "assistant"
+			if id, ok := decoded["item_id"].(string); ok {
+				item.ID = id
+			}
+			for len(item.Content) <= contentIndex {
+				item.Content = append(item.Content, openai.ResponseOutputContent{})
+			}
+			item.Content[contentIndex] = snapshot
+			response.OutputText = ""
+		}
 		if itemValue, ok := decoded["item"].(map[string]any); ok {
 			marshaled, err := json.Marshal(itemValue)
 			if err != nil {

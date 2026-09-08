@@ -833,3 +833,11 @@ existing fields. This prevents obsolete message content, role or status from
 surviving in a function-call snapshot. The derived top-level text is invalidated
 and rebuilt from the current output. Regression coverage exercises both added
 and done item snapshots, including a previously populated top-level text field.
+
+The native decoder also consumes `response.content_part.added` and
+`response.content_part.done` snapshots. Each snapshot replaces its indexed
+content part and preserves the message item ID, so final text and refusal content
+remain available even without individual deltas. Output and content index bounds
+apply before allocation. Missing, non-object or malformed typed parts fail before
+event forwarding. Tests cover both events, multiple content slots, replacement of
+earlier text by a refusal and invalid payloads.
