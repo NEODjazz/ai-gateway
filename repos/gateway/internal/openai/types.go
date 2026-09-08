@@ -322,14 +322,25 @@ type ResponseTool struct {
 }
 
 type ResponseResponse struct {
-	ID         string               `json:"id"`
-	Object     string               `json:"object"`
-	CreatedAt  int64                `json:"created_at,omitempty"`
-	Status     string               `json:"status,omitempty"`
-	Model      string               `json:"model"`
-	Output     []ResponseOutputItem `json:"output,omitempty"`
-	OutputText string               `json:"output_text,omitempty"`
-	Usage      ResponseUsage        `json:"usage,omitempty"`
+	Error             *ResponseError             `json:"error,omitempty"`
+	IncompleteDetails *ResponseIncompleteDetails `json:"incomplete_details,omitempty"`
+	ID                string                     `json:"id"`
+	Object            string                     `json:"object"`
+	CreatedAt         int64                      `json:"created_at,omitempty"`
+	Status            string                     `json:"status,omitempty"`
+	Model             string                     `json:"model"`
+	Output            []ResponseOutputItem       `json:"output,omitempty"`
+	OutputText        string                     `json:"output_text,omitempty"`
+	Usage             ResponseUsage              `json:"usage,omitempty"`
+}
+
+type ResponseError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type ResponseIncompleteDetails struct {
+	Reason string `json:"reason"`
 }
 
 type ResponseOutputItem struct {
@@ -345,8 +356,9 @@ type ResponseOutputItem struct {
 }
 
 type ResponseOutputContent struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Refusal string `json:"refusal,omitempty"`
+	Type    string `json:"type"`
+	Text    string `json:"text,omitempty"`
 }
 
 type ResponseUsage struct {

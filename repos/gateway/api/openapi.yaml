@@ -3178,6 +3178,7 @@ components:
       properties:
         type: {type: string}
         text: {type: string}
+        refusal: {type: string}
     ResponseOutputItem:
       type: object
       required: [type]
@@ -3215,6 +3216,19 @@ components:
         object: {type: string}
         created_at: {type: integer, format: int64}
         status: {type: string}
+        error:
+          type: object
+          nullable: true
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+        incomplete_details:
+          type: object
+          nullable: true
+          required: [reason]
+          properties:
+            reason: {type: string}
         model: {type: string}
         output:
           type: array

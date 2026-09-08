@@ -616,3 +616,20 @@ This is buffered replay, not live token streaming or background job support.
 Payloads remain limited to the gateway's existing response types. Regression tests
 cover JSON-only deployments, upstream errors, capability denial, text and function
 output ordering, usage, terminal statuses, and client write errors.
+
+### Responses outcome details
+
+The response contract retains provider `error.code`, `error.message`,
+`incomplete_details.reason`, and content-part `refusal` text. These are additive
+optional fields in the public Go types and JSON/OpenAPI response schema. Previously
+they were discarded by typed JSON decoding, leaving an unexplained failed or
+incomplete result, or an empty refusal.
+
+Synthetic SSE preserves outcome details in its terminal response and emits
+`response.refusal.delta` / `response.refusal.done` for refusal content. Creation
+and empty content-part events do not expose the future terminal details or refusal
+text. Refusal content follows the existing deanonymization behavior. This does
+not implement retries, background execution, or provider-specific error handling.
+Regression tests cover JSON round trips, terminal SSE details, refusal events,
+and restoration of anonymized refusal text. Event fields follow the
+[Responses streaming reference](https://developers.openai.com/api/reference/resources/responses/streaming-events).

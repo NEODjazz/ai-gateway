@@ -39,6 +39,7 @@ func synthesizeResponseStream(response openai.ResponseResponse, write provider.R
 		return write(kind, string(payload))
 	}
 	initial := response
+	initial.Error, initial.IncompleteDetails = nil, nil
 	initial.Status, initial.Output, initial.OutputText, initial.Usage = "in_progress", nil, "", openai.ResponseUsage{}
 	if err := emit("response.created", map[string]any{"response": struct {
 		openai.ResponseResponse
@@ -72,6 +73,7 @@ func synthesizeResponseStream(response openai.ResponseResponse, write provider.R
 		for contentIndex, part := range item.Content {
 			empty := part
 			empty.Text = ""
+			empty.Refusal = ""
 			fields := func() map[string]any {
 				return map[string]any{"item_id": item.ID, "output_index": index, "content_index": contentIndex}
 			}
@@ -89,6 +91,18 @@ func synthesizeResponseStream(response openai.ResponseResponse, write provider.R
 				data = fields()
 				data["text"] = part.Text
 				if err := emit("response.output_text.done", data); err != nil {
+					return err
+				}
+			}
+			if part.Type == "refusal" {
+				data = fields()
+				data["delta"] = part.Refusal
+				if err := emit("response.refusal.delta", data); err != nil {
+					return err
+				}
+				data = fields()
+				data["refusal"] = part.Refusal
+				if err := emit("response.refusal.done", data); err != nil {
 					return err
 				}
 			}
@@ -119,6 +133,9 @@ func synthesizeResponseStream(response openai.ResponseResponse, write provider.R
 }
 
 func syntheticResponsePart(part openai.ResponseOutputContent) any {
+	if part.Type == "refusal" {
+		return map[string]any{"type": part.Type, "refusal": part.Refusal}
+	}
 	if part.Type == "output_text" {
 		return map[string]any{"type": part.Type, "text": part.Text, "annotations": []any{}}
 	}

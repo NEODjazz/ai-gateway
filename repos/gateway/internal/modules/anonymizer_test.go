@@ -194,6 +194,7 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 				Type: "message",
 				Content: []openai.ResponseOutputContent{
 					{Type: "output_text", Text: "Email: {{EMAIL_1}}"},
+					{Type: "refusal", Refusal: "Cannot send to {{EMAIL_1}}"},
 				},
 			},
 		},
@@ -206,6 +207,10 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 	if !strings.Contains(response.Output[0].Content[0].Text, "user@example.com") {
 		t.Fatalf("expected output content to be restored: %s", response.Output[0].Content[0].Text)
 	}
+	if response.Output[0].Content[1].Refusal != "Cannot send to user@example.com" {
+		t.Fatalf("refusal was not restored: %s", response.Output[0].Content[1].Refusal)
+	}
+
 }
 
 func TestAnonymizerProtectsToolArgumentsAndRestoresToolResponse(t *testing.T) {

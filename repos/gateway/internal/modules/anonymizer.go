@@ -159,6 +159,7 @@ func DeanonymizeResponsesResponse(req *RequestContext, response *openai.Response
 		response.Output[outputIndex].Arguments = DeanonymizeText(response.Output[outputIndex].Arguments, req.AnonymizationValues)
 		for contentIndex := range response.Output[outputIndex].Content {
 			response.Output[outputIndex].Content[contentIndex].Text = DeanonymizeText(response.Output[outputIndex].Content[contentIndex].Text, req.AnonymizationValues)
+			response.Output[outputIndex].Content[contentIndex].Refusal = DeanonymizeText(response.Output[outputIndex].Content[contentIndex].Refusal, req.AnonymizationValues)
 		}
 		for summaryIndex := range response.Output[outputIndex].Summary {
 			response.Output[outputIndex].Summary[summaryIndex].Text = DeanonymizeText(response.Output[outputIndex].Summary[summaryIndex].Text, req.AnonymizationValues)
