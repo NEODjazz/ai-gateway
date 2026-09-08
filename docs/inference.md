@@ -1061,3 +1061,9 @@ The router also validates these Responses options before endpoint selection and
 affinity lookup. Internal callers and requests modified by ingress modules receive
 the same client-error classification. Streaming validation errors are terminal
 and cannot trigger a JSON fallback that would discard the error.
+
+Responses enforces the documented positive minimum for supplied
+`max_output_tokens` and the legacy `max_tokens` alias. Zero and negative values
+return `400 invalid_request` at the HTTP boundary and router before execution.
+Omission or null retains default reserve behavior; positive limits retain the
+existing reserve calculation.

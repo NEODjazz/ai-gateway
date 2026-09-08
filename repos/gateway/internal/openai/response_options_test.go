@@ -6,13 +6,23 @@ import (
 )
 
 func TestResponseOptionsValidation(t *testing.T) {
-	for _, body := range []string{`{}`, `{"top_logprobs":null,"truncation":null}`, `{"top_logprobs":0,"truncation":"auto"}`, `{"top_logprobs":20,"truncation":"disabled"}`} {
+	for _, body := range []string{`{"max_output_tokens":1}`, `{"max_tokens":1}`, `{"max_output_tokens":null,"max_tokens":null}`, `{}`, `{"top_logprobs":null,"truncation":null}`, `{"top_logprobs":0,"truncation":"auto"}`, `{"top_logprobs":20,"truncation":"disabled"}`} {
 		var request ResponseRequest
 		if err := json.Unmarshal([]byte(body), &request); err != nil {
 			t.Fatal(err)
 		}
 		if message := request.Validate(); message != "" {
 			t.Fatalf("%s: %s", body, message)
+		}
+	}
+}
+
+func TestResponseRejectsNonPositiveOutputLimits(t *testing.T) {
+	for _, value := range []int{-1, 0} {
+		for _, request := range []ResponseRequest{{MaxOutputTokens: &value}, {MaxTokens: &value}} {
+			if request.Validate() == "" {
+				t.Fatalf("non-positive output limit accepted: %+v", request)
+			}
 		}
 	}
 }
