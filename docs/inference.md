@@ -16,6 +16,28 @@ Gateway реализует OpenAI-compatible endpoints:
 [OpenAPI](../repos/gateway/api/openapi.yaml). Все endpoints требуют Bearer
 credential и применяют тот же model/tool policy, что `/v1/models` и Playground.
 
+## Матрица полей запроса
+
+JSON decoder применяет закрытый контракт request types, указанный в OpenAPI
+(`additionalProperties: false`). Неизвестные поля верхнего уровня возвращают HTTP 400 `invalid_request` с сообщением
+`json: unknown field "имя"` до выполнения pipeline и provider call.
+Это намеренное изменение совместимости: раньше неизвестные поля игнорировались.
+В частности, `reasoning_effort`, `logprobs` и `service_tier` не поддерживаются
+и должны быть удалены из запроса; они не передаются upstream.
+
+| Endpoint | Поля контракта верхнего уровня |
+| --- | --- |
+| `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed` |
+| `/v1/responses` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
+| `/v1/embeddings` | `provider`, `model`, `input`, `encoding_format`, `dimensions`, `user` |
+| `/v1/rerank` | `provider`, `model`, `query`, `documents`, `top_n`, `rank_fields`, `return_documents`, `max_chunks_per_doc`, `max_tokens_per_doc` |
+
+Матрица описывает входной контракт gateway; возможности конкретной модели и
+adapter дополнительно ограничивают допустимые запросы. `provider` управляет
+выбором adapter. Свободные JSON-объекты, например `tools[].function.parameters`
+и `response_format.json_schema.schema`, сохраняют произвольные свойства:
+имена полей пользовательской схемы не считаются параметрами inference.
+
 ## Capabilities
 
 Поддерживаемые значения: `chat`, `responses`, `embeddings`, `rerank`, `stream`,

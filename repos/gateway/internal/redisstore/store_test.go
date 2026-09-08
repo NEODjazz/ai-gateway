@@ -2,7 +2,9 @@ package redisstore
 
 import (
 	"context"
+	"math"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -145,5 +147,58 @@ func TestRedisCircuitIsSharedAndAllowsSingleHalfOpenProbe(t *testing.T) {
 		if strings.Contains(key, "ollama") {
 			t.Fatalf("endpoint name leaked into Redis key: %q", key)
 		}
+	}
+}
+
+func TestRedisRateLimitPreservesFixedExpiry(t *testing.T) {
+	server := miniredis.RunT(t)
+	store := New(Config{Addr: server.Addr(), Prefix: t.Name()})
+	ctx := context.Background()
+	if allowed, _, err := store.Allow(ctx, "identity", 2, 100, 1, time.Minute); !allowed || err != nil {
+		t.Fatal("first admission failed", err)
+	}
+	server.FastForward(30 * time.Second)
+	if allowed, retry, err := store.Allow(ctx, "identity", 2, 100, 1, time.Minute); !allowed || err != nil || retry != 30*time.Second {
+		t.Fatalf("second admission: allowed=%v retry=%v err=%v", allowed, retry, err)
+	}
+	for _, key := range server.Keys() {
+		if server.TTL(key) != 30*time.Second {
+			t.Fatalf("window extended for %s", key)
+		}
+	}
+	if allowed, retry, err := store.Allow(ctx, "identity", 2, 100, 1, time.Minute); allowed || err != nil || retry != 30*time.Second {
+		t.Fatalf("exhausted window: allowed=%v retry=%v err=%v", allowed, retry, err)
+	}
+	server.FastForward(30 * time.Second)
+	if allowed, _, err := store.Allow(ctx, "identity", 2, 100, 1, time.Minute); !allowed || err != nil {
+		t.Fatal("window did not reset", err)
+	}
+}
+
+func TestRedisRateLimitRequestCounterBoundary(t *testing.T) {
+	store := integrationStore(t)
+	ctx := context.Background()
+	if allowed, _, err := store.Allow(ctx, "identity", math.MaxInt, 0, 0, time.Minute); !allowed || err != nil {
+		t.Fatal("first admission failed", err)
+	}
+	keys, err := store.client.Keys(ctx, store.prefix+":rate:*:requests").Result()
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("request counter keys: %v %v", keys, err)
+	}
+	if err := store.client.Set(ctx, keys[0], math.MaxInt-1, time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, _, err := store.Allow(ctx, "identity", math.MaxInt, 0, 0, time.Minute); !allowed || err != nil {
+		t.Fatalf("last available request: allowed=%v err=%v", allowed, err)
+	}
+	if allowed, _, err := store.Allow(ctx, "identity", math.MaxInt, 0, 0, time.Minute); allowed || err != nil {
+		t.Fatalf("request limit overflow: allowed=%v err=%v", allowed, err)
+	}
+	if allowed, _, err := store.Allow(ctx, "identity", 0, 1, 0, time.Minute); !allowed || err != nil {
+		t.Fatalf("unlimited request dimension: allowed=%v err=%v", allowed, err)
+	}
+	value, err := store.client.Get(ctx, keys[0]).Result()
+	if err != nil || value != strconv.Itoa(math.MaxInt) {
+		t.Fatalf("request counter did not saturate: %s %v", value, err)
 	}
 }

@@ -19,9 +19,29 @@ Global limits apply per in-memory store instance, shared across its request scop
 | Exact response cache | 1024 | 64 MiB including keys | FIFO eviction and configured TTL |
 | Semantic response cache | configured, capped at 1024 (default 100) | 64 MiB including scope, vectors and payload | oldest-expiry eviction and configured TTL |
 | Responses affinity | 4096 | 2 MiB including keys | FIFO eviction and configured TTL |
+| Memory rate-limit windows | 10000 | fixed-size SHA-256 identity keys and counters | fixed one-minute TTL; reject new identities at capacity |
 | Billing lifecycle dedup | 10000 | fixed-size hashed keys and metadata | 15-minute TTL; reject new claims at capacity |
 
 Per-response size limits still apply. Store metadata and allocations add overhead to these data limits, but entry counts are bounded. Expired items are reclaimed on access/insertion; no cleanup goroutine is needed. Redis-backed caches retain their existing TTL behavior and require Redis capacity management. In-memory lifecycle dedup is only a short-lived best-effort mode: after expiry or process restart, old events may be accepted again. Durable billing uses PostgreSQL instead.
+
+## Rate-limit counter guarantees
+
+Memory and Redis rate limiting reject requests that exceed the remaining TPM
+allowance without overflowing integer addition. Redis uses exact decimal string
+arithmetic rather than Lua floating-point counter arithmetic, including above
+2^53. Counters for an unlimited dimension saturate at the platform's maximum
+integer; tightening that limit within the window cannot erase prior usage.
+Negative token estimates are clamped to zero in both stores and cannot refund
+usage. Rejected requests do not increment either counter.
+
+The memory store hashes identity keys to a fixed 32-byte value and holds at most
+10,000 active windows per instance. Expired windows are reclaimed on the next
+limited request, including after idle periods. Existing identities retain their
+original expiry and remain usable at capacity; a new identity receives HTTP 503
+`rate_limit_unavailable` when all slots are active. No active window is evicted.
+Normal quota exhaustion remains HTTP 429 with `Retry-After`. The capacity is an
+internal fixed bound, not a new configuration option. These limits remain
+per-process in memory mode; use the Redis store for shared multi-instance quotas.
 
 ## Billing delivery and failure behavior
 
@@ -54,3 +74,26 @@ For local execution, provision **disposable test databases** and set `CONTROL_PL
 Rancher Desktop releases `ai-gateway` (revision 113) and `ai-gateway-billing` (revision 24) were upgraded using their existing Helm values and locally built `reliability-20260908` image tags. All nine stack components became Ready; the updated gateway and billing pods had no restarts. Gateway emitted one transient connection-refused readiness event while starting, then passed readiness checks.
 
 The existing ingress served `/healthz` and `/readyz` with HTTP 204 and `/ui/` with HTTP 200. Served UI bundles matched the workspace build byte-for-byte. Unversioned CSS/JS returned `no-store`; hashed page bundles retained immutable caching. Unauthenticated inference and administrative requests returned 401. Billing exposed its memory-outbox metrics, and the durable outbox had zero pending events and zero pending retries. These deployment smoke checks did not perform authenticated inference against an external provider.
+
+## Rate-limit and inference validation (2026-09-08)
+
+The counter, cardinality and strict inference-decoding regressions are permanent
+repository tests. They cover an oversized reservation after prior consumption,
+exact `MaxInt` admission boundaries, unchanged counters after rejection,
+saturation and negative estimates, concurrent admission, capacity exhaustion,
+HTTP 503 mapping, reclamation after expiry/idle periods, rejection of unsupported
+parameters on all four inference endpoints, and preservation of arbitrary tool
+and output-schema properties.
+
+Go 1.25.13 `gofmt`, `go vet ./...`, `go test -count=1 ./...`,
+`go test -race -count=1 ./...` and `go build ./...` passed for the gateway module.
+The rate-limit contract and Redis rate-limit tests also passed with the race
+detector against an isolated Redis 7 container in Rancher Desktop. Its fixed TTL,
+atomic admission and large request/token counters were exercised; the test
+container was stopped afterwards. The default tests use miniredis; setting
+`REDIS_TEST_ADDR` runs the counter contract and Redis store integration fixtures
+against a disposable Redis server. Do not point this variable at deployment data.
+
+This validation did not rerun PostgreSQL integration or UI tests because these
+fixes do not change database or UI code. The earlier rollout above predates these
+additional rate-limit and inference changes.

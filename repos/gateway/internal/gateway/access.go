@@ -1,7 +1,11 @@
 package gateway
 
 import (
+	"container/list"
 	"context"
+	"crypto/sha256"
+	"errors"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -23,7 +27,10 @@ type RateLimitStore interface {
 	Allow(ctx context.Context, key string, limit RateLimit, tokens int) (allowed bool, retryAfter time.Duration, err error)
 }
 
+const memoryRateLimitCapacity = 10_000
+
 type rateWindow struct {
+	key      [32]byte
 	started  time.Time
 	requests int
 	tokens   int
@@ -33,7 +40,8 @@ type rateWindow struct {
 // contract. A Redis implementation can provide the same atomic Allow operation.
 type MemoryRateLimitStore struct {
 	mu      sync.Mutex
-	windows map[string]rateWindow
+	windows map[[32]byte]*list.Element
+	expiry  list.List
 	now     func() time.Time
 }
 
@@ -50,27 +58,57 @@ func (s *RedisRateLimitStore) Allow(ctx context.Context, key string, limit RateL
 }
 
 func NewMemoryRateLimitStore() *MemoryRateLimitStore {
-	return &MemoryRateLimitStore{windows: map[string]rateWindow{}, now: time.Now}
+	return &MemoryRateLimitStore{windows: make(map[[32]byte]*list.Element), now: time.Now}
 }
 
-func (s *MemoryRateLimitStore) Allow(_ context.Context, key string, limit RateLimit, tokens int) (bool, time.Duration, error) {
+func (s *MemoryRateLimitStore) Allow(ctx context.Context, key string, limit RateLimit, tokens int) (bool, time.Duration, error) {
 	if s == nil || key == "" || (limit.Requests <= 0 && limit.Tokens <= 0) {
 		return true, 0, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return false, 0, err
+	}
+	tokens = max(tokens, 0)
+	identity := sha256.Sum256([]byte(key))
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	window := s.windows[key]
-	if window.started.IsZero() || now.Sub(window.started) >= time.Minute {
-		window = rateWindow{started: now}
+	// Activity never extends expiry, so insertion order is also expiry order.
+	for front := s.expiry.Front(); front != nil; front = s.expiry.Front() {
+		if now.Sub(front.Value.(rateWindow).started) < time.Minute {
+			break
+		}
+		delete(s.windows, front.Value.(rateWindow).key)
+		s.expiry.Remove(front)
 	}
-	if (limit.Requests > 0 && window.requests+1 > limit.Requests) || (limit.Tokens > 0 && window.tokens+tokens > limit.Tokens) {
+	entry := s.windows[identity]
+	window := rateWindow{key: identity, started: now}
+	if entry != nil {
+		window = entry.Value.(rateWindow)
+	}
+	if (limit.Requests > 0 && window.requests >= limit.Requests) ||
+		(limit.Tokens > 0 && (window.tokens > limit.Tokens || tokens > limit.Tokens-window.tokens)) {
 		return false, time.Minute - now.Sub(window.started), nil
 	}
-	window.requests++
-	window.tokens += tokens
-	s.windows[key] = window
+	if entry == nil && len(s.windows) >= memoryRateLimitCapacity {
+		return false, 0, errors.New("memory rate limiter capacity exceeded")
+	}
+	// Saturate unlimited dimensions so tightening a limit cannot bypass usage.
+	window.requests = saturatedRateCount(window.requests, 1)
+	window.tokens = saturatedRateCount(window.tokens, tokens)
+	if entry == nil {
+		s.windows[identity] = s.expiry.PushBack(window)
+	} else {
+		entry.Value = window
+	}
 	return true, 0, nil
+}
+
+func saturatedRateCount(current, increment int) int {
+	if increment > math.MaxInt-current {
+		return math.MaxInt
+	}
+	return current + increment
 }
 
 func modelAllowed(model string, grants []string) bool {

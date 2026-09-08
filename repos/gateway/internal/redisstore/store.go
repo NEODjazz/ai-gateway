@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"math"
 	"strconv"
 	"time"
 
@@ -104,29 +105,45 @@ func (s *Store) ListBounded(ctx context.Context, namespace string, limit int) ([
 	return result, nil
 }
 
+// Redis Lua numbers cannot exactly represent counters above 2^53. Keep counter
+// arithmetic in decimal strings and saturate unlimited dimensions at Go's MaxInt.
 var fixedWindowScript = redis.NewScript(`
-local current_requests = tonumber(redis.call('GET', KEYS[1]) or '0')
-local current_tokens = tonumber(redis.call('GET', KEYS[2]) or '0')
-local request_limit = tonumber(ARGV[1])
-local token_limit = tonumber(ARGV[2])
-local requested_tokens = tonumber(ARGV[3])
-local window_ms = tonumber(ARGV[4])
+local function greater(a, b)
+  if #a ~= #b then return #a > #b end
+  return a > b
+end
+local function add(a, b)
+  local result, carry = '', 0
+  local i, j = #a, #b
+  while i > 0 or j > 0 or carry > 0 do
+    local x, y = 0, 0
+    if i > 0 then x = tonumber(string.sub(a, i, i)) end
+    if j > 0 then y = tonumber(string.sub(b, j, j)) end
+    local sum = x + y + carry
+    result = tostring(sum % 10) .. result
+    carry = math.floor(sum / 10)
+    i, j = i - 1, j - 1
+  end
+  return result
+end
+local current_requests = redis.call('GET', KEYS[1]) or '0'
+local current_tokens = redis.call('GET', KEYS[2]) or '0'
+local requests = add(current_requests, '1')
+local tokens = add(current_tokens, ARGV[3])
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl < 0 then ttl = redis.call('PTTL', KEYS[2]) end
+if ttl < 0 then ttl = tonumber(ARGV[4]) end
 
-if (request_limit > 0 and current_requests + 1 > request_limit) or
-   (token_limit > 0 and current_tokens + requested_tokens > token_limit) then
-  local ttl = redis.call('PTTL', KEYS[1])
-  if ttl < 0 then ttl = redis.call('PTTL', KEYS[2]) end
-  if ttl < 0 then ttl = window_ms end
+if (ARGV[1] ~= '0' and greater(requests, ARGV[1])) or
+   (ARGV[2] ~= '0' and greater(tokens, ARGV[2])) then
   return {0, ttl}
 end
-
-local requests = redis.call('INCR', KEYS[1])
-redis.call('INCRBY', KEYS[2], requested_tokens)
-if requests == 1 then
-  redis.call('PEXPIRE', KEYS[1], window_ms)
-  redis.call('PEXPIRE', KEYS[2], window_ms)
-end
-return {1, redis.call('PTTL', KEYS[1])}
+if greater(requests, ARGV[5]) then requests = ARGV[5] end
+if greater(tokens, ARGV[5]) then tokens = ARGV[5] end
+-- Both keys share the remaining fixed window; admission never extends it.
+redis.call('SET', KEYS[1], requests, 'PX', math.max(ttl, 1))
+redis.call('SET', KEYS[2], tokens, 'PX', math.max(ttl, 1))
+return {1, ttl}
 `)
 
 func (s *Store) Allow(ctx context.Context, identity string, requestLimit, tokenLimit, tokens int, window time.Duration) (bool, time.Duration, error) {
@@ -144,7 +161,7 @@ func (s *Store) Allow(ctx context.Context, identity string, requestLimit, tokenL
 	}
 	identityHash := sha256.Sum256([]byte(identity))
 	base := s.prefix + ":rate:" + hex.EncodeToString(identityHash[:16])
-	result, err := fixedWindowScript.Run(ctx, s.client, []string{base + ":requests", base + ":tokens"}, requestLimit, tokenLimit, tokens, window.Milliseconds()).Slice()
+	result, err := fixedWindowScript.Run(ctx, s.client, []string{base + ":requests", base + ":tokens"}, max(requestLimit, 0), max(tokenLimit, 0), tokens, max(window.Milliseconds(), 1), math.MaxInt).Slice()
 	if err != nil {
 		return false, 0, err
 	}
