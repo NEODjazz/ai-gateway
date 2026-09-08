@@ -479,7 +479,9 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 	request.Stream = true
 	candidates := r.routeCandidates(ctx, req, request, requiredChatCapabilities(request, true)...)
 	if len(candidates) == 0 {
-		return openai.ChatCompletionResponse{}, false, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
+		// No native stream is available. The handler's normal Chat path still
+		// enforces all non-stream capabilities and can synthesize SSE on success.
+		return openai.ChatCompletionResponse{}, false, nil
 	}
 
 	var errs []error

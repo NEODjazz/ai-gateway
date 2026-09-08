@@ -579,3 +579,18 @@ shadow traffic; no conversation history is reconstructed or copied as a fallback
 Regression tests synchronize asynchronous execution with the standard Go
 `testing/synctest` package and verify initial requests are mirrored, continuations
 are skipped, and primary usage reaches billing exactly once for JSON and SSE.
+
+### Chat streaming without a native streaming deployment
+
+When no eligible deployment provides native Chat streaming, the gateway proceeds
+to its ordinary non-streaming Chat route and emits synthetic SSE after a successful
+JSON response. This includes deployments whose explicit capability list contains
+`chat` but omits `stream`. The normal route still checks model/deployment
+capabilities and applies provider modules, limits, cache, and billing. It sends
+`stream=false` upstream and does not provide live incremental latency.
+
+A native streaming attempt that returns an error remains terminal to the handler;
+this fallback is not an extra retry after a failed stream. If no non-streaming Chat
+route is eligible, the ordinary routing error is returned without opening SSE.
+Regression tests cover a JSON-only deployment, one upstream call on failure, and
+rejection of a deployment that lacks the Chat capability.
