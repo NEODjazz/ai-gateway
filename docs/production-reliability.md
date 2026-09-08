@@ -259,3 +259,24 @@ These smoke checks do not prove authenticated provider execution. External
 inference, browser visual QA, PostgreSQL integration and UI component tests were
 not repeated for this rollout; provider behavior was checked by repository tests
 against local fake upstreams before deployment.
+
+### PostgreSQL verification after Responses option validation
+
+Source `63dbfa9` passed `scripts/test-postgres-integration.sh` with Go 1.25.13
+and PostgreSQL 16 in the dedicated Rancher Desktop test container. The script
+applied migrations and ran `go test -race -count=1 ./...` for gateway, auth and
+billing with all three test DSNs supplied and `POSTGRES_INTEGRATION_REQUIRED=true`.
+All three modules completed successfully.
+
+Fresh databases were `verify_63dbfa9_20260908_gateway`,
+`verify_63dbfa9_20260908_auth` and `verify_63dbfa9_20260908_billing`.
+The existing port binding was loopback-only (`127.0.0.1:15439`), checked before
+starting the container. Coverage includes atomic budget reservations, joint
+budget/outbox rollback, idempotent durable outbox, worker restart/delivery failure,
+budget overflow, auth key lifecycle and control-plane persistence.
+
+The dedicated container was returned to its original stopped state; test databases
+were retained. Deployment databases were not used. The CI postgres-integration job
+still invokes the same required-test script; this run did not dispatch GitHub
+Actions. This is database integration evidence, not external-provider execution
+or browser QA. The deployed image remains source `5d10695` at Helm revision 118.
