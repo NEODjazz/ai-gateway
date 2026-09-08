@@ -145,6 +145,10 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !decodeInferenceRequest(w, r, &request) {
 		return
 	}
+	if message := request.ChatGenerationOptions.Validate(); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
 	if request.MaxTokens != nil && request.MaxCompletionTokens != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "max_tokens and max_completion_tokens are mutually exclusive")
 		return
@@ -640,7 +644,8 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 			"created": time.Now().UTC().Unix(),
 			"choices": []map[string]any{
 				{
-					"index": choice.Index,
+					"index":    choice.Index,
+					"logprobs": choice.Logprobs,
 					"delta": map[string]any{
 						"role":    choice.Message.Role,
 						"content": openai.ContentText(choice.Message.Content),

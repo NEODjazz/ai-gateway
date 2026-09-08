@@ -15,6 +15,7 @@ import (
 )
 
 type openAICompatibleChatRequest struct {
+	openai.ChatGenerationOptions
 	Model               string                 `json:"model"`
 	Messages            []openai.Message       `json:"messages"`
 	Tools               []openai.Tool          `json:"tools,omitempty"`
@@ -133,8 +134,12 @@ func (OpenAICompatible) SupportsMCP() bool    { return true }
 func (OpenAICompatible) SupportsVision() bool { return true }
 
 func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	if err := p.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	upstreamRequest := openAICompatibleChatRequest{
-		Model: request.Model, Messages: request.Messages, Tools: request.Tools,
+		ChatGenerationOptions: request.ChatGenerationOptions,
+		Model:                 request.Model, Messages: request.Messages, Tools: request.Tools,
 		ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		ResponseFormat: request.ResponseFormat, Stream: request.Stream && p.upstreamStream,
 		MaxTokens: request.MaxTokens, MaxCompletionTokens: request.MaxCompletionTokens,
@@ -190,12 +195,16 @@ func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.Embeddi
 }
 
 func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+	if err := p.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	if !p.upstreamStream {
 		return openai.ChatCompletionResponse{}, ErrStreamingUnsupported
 	}
 
 	upstreamRequest := openAICompatibleChatRequest{
-		Model: request.Model, Messages: request.Messages, Tools: request.Tools,
+		ChatGenerationOptions: request.ChatGenerationOptions,
+		Model:                 request.Model, Messages: request.Messages, Tools: request.Tools,
 		ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		ResponseFormat: request.ResponseFormat, Stream: true,
 		MaxTokens: request.MaxTokens, MaxCompletionTokens: request.MaxCompletionTokens,
@@ -398,7 +407,8 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 					Content   string            `json:"content"`
 					ToolCalls []openai.ToolCall `json:"tool_calls,omitempty"`
 				} `json:"delta"`
-				FinishReason *string `json:"finish_reason"`
+				FinishReason *string                `json:"finish_reason"`
+				Logprobs     *openai.ChoiceLogprobs `json:"logprobs"`
 			} `json:"choices"`
 		}
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
@@ -419,6 +429,13 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			}
 			current := &response.Choices[choice.Index]
 			current.Index = choice.Index
+			if choice.Logprobs != nil {
+				if current.Logprobs == nil {
+					current.Logprobs = &openai.ChoiceLogprobs{}
+				}
+				current.Logprobs.Content = append(current.Logprobs.Content, choice.Logprobs.Content...)
+				current.Logprobs.Refusal = append(current.Logprobs.Refusal, choice.Logprobs.Refusal...)
+			}
 			if choice.Delta.Role != "" {
 				current.Message.Role = choice.Delta.Role
 			}

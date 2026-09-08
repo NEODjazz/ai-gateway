@@ -24,6 +24,9 @@ func rejectParameters(adapter string, checks ...parameterCheck) error {
 }
 
 func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectGenerationOptions("anthropic", request.ChatGenerationOptions); err != nil {
+		return err
+	}
 	return rejectParameters("anthropic",
 		parameterCheck{"stop", request.Stop != nil},
 		parameterCheck{"seed", request.Seed != nil},
@@ -39,6 +42,9 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectGenerationOptions("ollama", request.ChatGenerationOptions); err != nil {
+		return err
+	}
 	return rejectParameters("ollama",
 		parameterCheck{"tool_choice", request.ToolChoice != nil},
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
@@ -72,6 +78,28 @@ func validateEmbeddingAdapter(client Client, request openai.EmbeddingRequest) er
 		ValidateEmbeddingParameters(openai.EmbeddingRequest) error
 	}); ok {
 		return validator.ValidateEmbeddingParameters(request)
+	}
+	return nil
+}
+
+func rejectGenerationOptions(adapter string, options openai.ChatGenerationOptions) error {
+	return rejectParameters(adapter,
+		parameterCheck{"reasoning_effort", options.ReasoningEffort != ""},
+		parameterCheck{"logprobs", options.Logprobs != nil},
+		parameterCheck{"top_logprobs", options.TopLogprobs != nil},
+		parameterCheck{"frequency_penalty", options.FrequencyPenalty != nil},
+		parameterCheck{"presence_penalty", options.PresencePenalty != nil},
+		parameterCheck{"logit_bias", options.LogitBias != nil},
+	)
+}
+
+func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	return rejectGenerationOptions("demo", request.ChatGenerationOptions)
+}
+
+func (OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if message := request.ChatGenerationOptions.Validate(); message != "" {
+		return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
 	}
 	return nil
 }

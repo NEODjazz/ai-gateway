@@ -217,6 +217,9 @@ func (c *semanticResponseCache) pruneAndEvictLocked(now time.Time, incomingBytes
 
 func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, string, bool) {
 	request := req.Request
+	if request.Logprobs != nil && *request.Logprobs {
+		return "", "", false
+	}
 	if req.CredentialID == "" || len(request.Messages) == 0 || len(request.Tools) > 0 || request.ToolChoice != nil || request.ResponseFormat != nil {
 		return "", "", false
 	}

@@ -2475,6 +2475,16 @@ components:
         top_p: {type: number}
         stop: {}
         seed: {type: integer, format: int64}
+        reasoning_effort: {type: string, enum: [none, minimal, low, medium, high, xhigh, max]}
+        logprobs: {type: boolean}
+        top_logprobs: {type: integer, minimum: 0, maximum: 20, description: Requires logprobs=true.}
+        frequency_penalty: {type: number, minimum: -2, maximum: 2}
+        presence_penalty: {type: number, minimum: -2, maximum: 2}
+        logit_bias:
+          type: object
+          propertyNames: {pattern: '^[0-9]+$'}
+          additionalProperties: {type: integer, minimum: -100, maximum: 100}
+
     Usage:
       type: object
       required: [prompt_tokens, completion_tokens, total_tokens]
@@ -2488,6 +2498,34 @@ components:
             cached_tokens: {type: integer, minimum: 0}
             cache_write_tokens: {type: integer, minimum: 0}
             cache_creation_tokens: {type: integer, minimum: 0}
+    ChoiceLogprobs:
+      type: object
+      properties:
+        content:
+          type: array
+          items: {$ref: '#/components/schemas/TokenLogprob'}
+        refusal:
+          type: array
+          items: {$ref: '#/components/schemas/TokenLogprob'}
+    TopLogprob:
+      type: object
+      required: [token, logprob, bytes]
+      properties:
+        token: {type: string}
+        logprob: {type: number}
+        bytes:
+          oneOf:
+            - type: 'null'
+            - type: array
+              items: {type: integer}
+    TokenLogprob:
+      allOf:
+        - {$ref: '#/components/schemas/TopLogprob'}
+        - type: object
+          properties:
+            top_logprobs:
+              type: array
+              items: {$ref: '#/components/schemas/TopLogprob'}
     Choice:
       type: object
       required: [index, message, finish_reason]
@@ -2495,6 +2533,7 @@ components:
         index: {type: integer, minimum: 0}
         message: {$ref: '#/components/schemas/Message'}
         finish_reason: {type: string}
+        logprobs: {$ref: '#/components/schemas/ChoiceLogprobs'}
     ChatCompletionResponse:
       type: object
       required: [id, object, model, choices, usage]

@@ -41,7 +41,10 @@ func (Demo) Embeddings(_ context.Context, request openai.EmbeddingRequest) (open
 	}, nil
 }
 
-func (Demo) ChatCompletions(_ context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+func (d Demo) ChatCompletions(_ context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	if err := d.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	content := "Gateway accepted request for model " + request.Model
 	if len(request.Messages) > 0 {
 		content += ". Last message: " + openai.ContentText(request.Messages[len(request.Messages)-1].Content)

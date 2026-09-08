@@ -22,12 +22,12 @@ JSON decoder применяет закрытый контракт request types,
 (`additionalProperties: false`). Неизвестные поля верхнего уровня возвращают HTTP 400 `invalid_request` с сообщением
 `json: unknown field "имя"` до выполнения pipeline и provider call.
 Это намеренное изменение совместимости: раньше неизвестные поля игнорировались.
-В частности, `reasoning_effort`, `logprobs` и `service_tier` не поддерживаются
-и должны быть удалены из запроса; они не передаются upstream.
+Например, `service_tier` и `background` пока не поддерживаются и не передаются
+upstream. Новые поддерживаемые параметры перечислены ниже.
 
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
-| `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed` |
+| `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
 | `/v1/responses` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `encoding_format`, `dimensions`, `user` |
 | `/v1/rerank` | `provider`, `model`, `query`, `documents`, `top_n`, `rank_fields`, `return_documents`, `max_chunks_per_doc`, `max_tokens_per_doc` |
@@ -131,3 +131,20 @@ reported prompt/completion/total tokens и prompt-cache details доходят �
 post-response billing. Это событие не создаёт дополнительный choice и сохраняется
 при проксировании клиенту. Если upstream не присылает usage, остаётся существующий
 estimated fallback; точный учет не выводится из отсутствующих данных.
+
+
+## Chat generation controls
+
+OpenAI-compatible chat передаёт `reasoning_effort`, `logprobs`, `top_logprobs`,
+`frequency_penalty`, `presence_penalty` и `logit_bias` в обычном и streaming flow.
+Явные `false` и `0` сохраняются. Gateway проверяет диапазоны и зависимость
+`top_logprobs` от `logprobs=true`; конкретная модель дополнительно проверяет
+поддержку каждого значения. Anthropic, Ollama и demo отклоняют эти новые controls
+как `unsupported_parameter`, пока для них нет соответствующего преобразования.
+
+Logprobs сохраняются в JSON response, проксируемом SSE, накопленном результате
+stream и синтетическом SSE. Semantic cache отключён при `logprobs=true`, поскольку
+вероятности относятся к точному контексту. Exact cache включает все controls в
+ключ. Reasoning tokens входят в общий completion usage, а не прибавляются повторно.
+
+Контракт: [Chat API reference](https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create).

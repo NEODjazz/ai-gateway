@@ -12,7 +12,7 @@ import (
 )
 
 func TestInferenceEndpointsRejectUnsupportedParameters(t *testing.T) {
-	for field, value := range map[string]string{"reasoning_effort": `"high"`, "logprobs": "true", "service_tier": `"priority"`} {
+	for field, value := range map[string]string{"unsupported_future_option": `"high"`, "background": "true", "service_tier": `"priority"`} {
 		for _, endpoint := range []string{"chat", "responses", "embeddings", "rerank"} {
 			t.Run(endpoint+"/"+field, func(t *testing.T) {
 				access := &countingAccessModule{}
@@ -67,5 +67,23 @@ func TestInferenceDecoderRejectsUnknownMessageField(t *testing.T) {
 	}
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d", response.Code)
+	}
+}
+
+func TestSyntheticChatStreamPreservesLogprobs(t *testing.T) {
+	response := httptest.NewRecorder()
+	writeChatCompletionStream(response, openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "hello"}, Logprobs: &openai.ChoiceLogprobs{Content: []openai.TokenLogprob{{Token: "hello", Logprob: -0.5}}}}}})
+	if !strings.Contains(response.Body.String(), `"logprobs":{"content":[{"token":"hello","logprob":-0.5`) {
+		t.Fatalf("synthetic SSE dropped logprobs: %s", response.Body.String())
+	}
+}
+
+func TestChatRejectsInvalidGenerationOptionsBeforePipeline(t *testing.T) {
+	access := &countingAccessModule{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{access}), &chatProvider{})
+	response := httptest.NewRecorder()
+	handler.ChatCompletions(response, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[],"top_logprobs":2}`)))
+	if response.Code != 400 || !strings.Contains(response.Body.String(), "requires logprobs=true") || access.calls != 0 {
+		t.Fatalf("invalid generation options: status=%d body=%s pipeline=%d", response.Code, response.Body.String(), access.calls)
 	}
 }

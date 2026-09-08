@@ -7,6 +7,7 @@ import (
 )
 
 type ChatCompletionRequest struct {
+	ChatGenerationOptions
 	Provider            string          `json:"provider,omitempty"`
 	Model               string          `json:"model"`
 	Messages            []Message       `json:"messages"`
@@ -100,9 +101,10 @@ type ChatCompletionResponse struct {
 }
 
 type Choice struct {
-	Index        int     `json:"index"`
-	Message      Message `json:"message"`
-	FinishReason string  `json:"finish_reason"`
+	Logprobs     *ChoiceLogprobs `json:"logprobs,omitempty"`
+	Index        int             `json:"index"`
+	Message      Message         `json:"message"`
+	FinishReason string          `json:"finish_reason"`
 }
 
 type Usage struct {
