@@ -891,3 +891,11 @@ change, covered by local HTTP payload tests for both values and default behavior
 `store` controls upstream response storage only. Gateway cache and logging policies
 are configured separately; this option is not a gateway-wide retention switch.
 It does not publish retrieve/delete/cancel endpoints or a background lifecycle.
+
+Opaque `encrypted_content` fields are protected during input text processing.
+Local text transformation leaves them unchanged, the remote text-only projection
+omits them, and projection merging retains the original value even if a processor
+returns a replacement. Reasoning summary text remains transformable. Regression
+tests cover transformation, projection, hostile replacement, original-input
+preservation and text restoration. This prevents text anonymization from
+corrupting provider-encrypted continuation context.
