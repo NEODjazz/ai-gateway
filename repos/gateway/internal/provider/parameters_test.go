@@ -74,8 +74,8 @@ func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
 		field   string
 		request openai.EmbeddingRequest
 	}{
-		{"user", openai.EmbeddingRequest{User: "customer"}},
-		{"encoding_format", openai.EmbeddingRequest{EncodingFormat: "base64"}},
+		{"user", openai.EmbeddingRequest{Model: "embed", Input: "text", User: "customer"}},
+		{"encoding_format", openai.EmbeddingRequest{Model: "embed", Input: "text", EncodingFormat: "base64"}},
 	} {
 		_, err := NewOllama("http://unused.invalid", false).Embeddings(context.Background(), tc.request)
 		assertUnsupportedParameter(t, err, tc.field)

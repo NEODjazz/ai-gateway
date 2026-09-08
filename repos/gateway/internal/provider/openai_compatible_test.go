@@ -335,6 +335,27 @@ func TestOpenAICompatibleEmbeddings(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleEmbeddingsForwardsTokenArrays(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var upstream openAICompatibleEmbeddingRequest
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(upstream.Input)
+		if string(encoded) != `[[11,12],[13]]` {
+			t.Fatalf("token boundaries changed: %s", encoded)
+		}
+		_, _ = w.Write([]byte(`{"object":"list","model":"embed-model","data":[{"object":"embedding","index":0,"embedding":[0.1]},{"object":"embedding","index":1,"embedding":[0.2]}],"usage":{"prompt_tokens":3,"total_tokens":3}}`))
+	}))
+	defer server.Close()
+	response, err := NewOpenAICompatible(server.URL, "", false).Embeddings(t.Context(), openai.EmbeddingRequest{
+		Model: "embed-model", Input: []any{[]any{11.0, 12.0}, []any{13.0}},
+	})
+	if err != nil || len(response.Data) != 2 || response.Usage.PromptTokens != 3 {
+		t.Fatalf("unexpected token embedding response: %+v err=%v", response, err)
+	}
+}
+
 func TestOpenAICompatibleRerankUsesProviderCredentialAndConfiguredPath(t *testing.T) {
 	var upstream openAICompatibleRerankRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

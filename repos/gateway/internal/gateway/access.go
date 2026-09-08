@@ -239,7 +239,7 @@ func estimateResponseCompactTokens(request openai.ResponseCompactRequest) int {
 }
 
 func estimateEmbeddingTokens(request openai.EmbeddingRequest) int {
-	return openai.EstimateContextTokens(request.Input)
+	return openai.EmbeddingInputTokenCount(request.Input)
 }
 
 func estimateRerankTokens(request openai.RerankRequest) int {

@@ -465,3 +465,24 @@ func TestRemoteBillingEmbeddingsContractContainsOnlyCounters(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRemoteBillingEmbeddingsUsesExactTokenIDCount(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["api_type"] != "embeddings" || body["input_tokens"] != float64(3) || body["total_tokens"] != float64(3) {
+			t.Fatalf("token IDs were not counted exactly: %+v", body)
+		}
+		_ = json.NewEncoder(w).Encode(UsageResponse{})
+	}))
+	defer server.Close()
+	request := openai.EmbeddingRequest{Model: "embed", Input: []any{11.0, 12.0, 13.0}}
+	req := sensitiveContext()
+	req.Request.Messages = nil
+	req.EmbeddingRequest = &request
+	if err := NewRemoteBillingModule(true, server.URL).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+}

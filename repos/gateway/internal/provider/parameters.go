@@ -62,7 +62,13 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 }
 
 func (Ollama) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
-	return rejectParameters("ollama", parameterCheck{"user", request.User != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"})
+	input, err := openai.InspectEmbeddingInput(request.Input)
+	return rejectParameters("ollama", parameterCheck{"input", err != nil || input.Tokenized()}, parameterCheck{"user", request.User != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"})
+}
+
+func (Demo) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
+	input, err := openai.InspectEmbeddingInput(request.Input)
+	return rejectParameters("demo", parameterCheck{"input", err != nil || input.Tokenized()})
 }
 
 func validateChatAdapter(client Client, request openai.ChatCompletionRequest) error {

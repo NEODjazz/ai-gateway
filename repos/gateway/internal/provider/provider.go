@@ -849,6 +849,10 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
+		input, _ := openai.InspectEmbeddingInput(request.Input)
+		if input.Tokenized() && attemptCtx.Metadata["provider.modules.dlp.enabled"] == "true" {
+			return openai.EmbeddingResponse{}, rejectParameters(endpoint.Type, parameterCheck{"input", true})
+		}
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
 			errs = append(errs, err)

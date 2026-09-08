@@ -16,7 +16,7 @@ Gateway реализует OpenAI-compatible endpoints:
 | `DELETE /v1/responses/{id}` | Удаление сохраненного Response и ownership binding |
 | `POST /v1/responses/{id}/cancel` | Отмена сохраненного background Response владельцем credential |
 | `GET /v1/responses/{id}/input_items` | Страница исходных input items сохраненного Response |
-| `POST /v1/embeddings` | String или массив строк |
+| `POST /v1/embeddings` | Строки или bounded token-ID inputs |
 | `POST /v1/rerank` | Query/documents ranking |
 
 Полные payloads, ограничения и ошибки описывает
@@ -149,7 +149,8 @@ adapter используют те же проверки, включая streamin
 | Anthropic chat | `seed`; `stop` неверного типа или более четырёх последовательностей |
 | Anthropic Responses | `previous_response_id` |
 | Ollama native chat | `tool_choice`, `parallel_tool_calls` |
-| Ollama embeddings | `user`; `encoding_format`, отличный от `float` |
+| Ollama embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
+| Gemini embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
 
 Остальные верхнеуровневые поля действующего OpenAI-compatible контракта
 передаются соответствующим upstream wire request. Это не подтверждает поддержку
@@ -486,6 +487,14 @@ at least prompt and no completion tokens; malformed objects now return an error.
 Ollama rejects negative prompt_eval_count. This is a stricter upstream response
 validation rule; the public request/response schema is unchanged. Regression tests
 exercise missing, zero, positive and malformed counts for both adapters.
+
+OpenAI-compatible embeddings accept a token-ID array as one input or up to 2048
+token-ID arrays as independent inputs. Each token array is nonempty and bounded
+to 8192 nonnegative 32-bit IDs; the aggregate limit is 300000 tokens. TPM and
+billing reserve use the exact number of IDs rather than serialized JSON size.
+Native adapters that accept text only reject token inputs before policy modules
+or provider calls. A route requiring DLP also rejects opaque token IDs because
+the gateway cannot reconstruct trustworthy text for content inspection.
 
 OpenAI-compatible and Ollama embedding responses are limited to 32 MiB before
 JSON decoding. Trailing JSON, truncated payloads and read errors fail explicitly.

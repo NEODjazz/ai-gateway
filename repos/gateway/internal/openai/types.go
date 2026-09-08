@@ -286,38 +286,11 @@ func RerankDocumentStrings(document any, rankFields []string) ([]string, bool) {
 }
 
 func EmbeddingInputStrings(value any) ([]string, bool) {
-	switch typed := value.(type) {
-	case string:
-		if typed == "" {
-			return nil, false
-		}
-		return []string{typed}, true
-	case []string:
-		if len(typed) == 0 {
-			return nil, false
-		}
-		for _, item := range typed {
-			if item == "" {
-				return nil, false
-			}
-		}
-		return typed, true
-	case []any:
-		if len(typed) == 0 {
-			return nil, false
-		}
-		items := make([]string, len(typed))
-		for index, item := range typed {
-			text, ok := item.(string)
-			if !ok || text == "" {
-				return nil, false
-			}
-			items[index] = text
-		}
-		return items, true
-	default:
+	info, err := InspectEmbeddingInput(value)
+	if err != nil || info.Tokenized() {
 		return nil, false
 	}
+	return info.Texts, true
 }
 
 func EmbeddingInputText(value any) string {

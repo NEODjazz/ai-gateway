@@ -69,6 +69,9 @@ func TestEmbeddingVectorValidation(t *testing.T) {
 	if err := validateEmbeddingVectors(openai.EmbeddingRequest{Input: "a"}, []openai.Embedding{{Embedding: make([]float64, 65537)}}); err == nil {
 		t.Fatal("dimension limit ignored")
 	}
+	if err := validateEmbeddingVectors(openai.EmbeddingRequest{Input: []any{[]any{1.0}, []any{2.0}}}, valid); err != nil {
+		t.Fatalf("token-array input count was not honored: %v", err)
+	}
 }
 func TestEmbeddingAdaptersEnforceResponseContract(t *testing.T) {
 	for _, adapter := range []string{"compatible", "ollama"} {

@@ -309,7 +309,7 @@ func estimateRequestTokens(req *RequestContext) int {
 		return openai.ResponseInputTokens(*req.ResponseRequest)
 	}
 	if req.EmbeddingRequest != nil {
-		return openai.EstimateContextTokens(req.EmbeddingRequest.Input)
+		return openai.EmbeddingInputTokenCount(req.EmbeddingRequest.Input)
 	}
 	if req.RerankRequest != nil {
 		return openai.EstimateContextTokens(struct {

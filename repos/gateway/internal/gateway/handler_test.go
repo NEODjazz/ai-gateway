@@ -456,18 +456,59 @@ func TestRerankRejectsInvalidDocuments(t *testing.T) {
 	}
 }
 
-func TestEmbeddingsRejectsTokenArraysBeforePipeline(t *testing.T) {
+func TestEmbeddingsAcceptsTokenArraysAndAccountsExactInput(t *testing.T) {
 	auth := &countingAccessModule{}
 	handler := NewHandler(modules.NewPipeline([]modules.Module{auth}), &chatProvider{})
 	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embed-model","input":[1,2,3]}`))
 	response := httptest.NewRecorder()
 
 	handler.Embeddings(response, request)
-	if response.Code != http.StatusBadRequest {
+	if response.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String())
 	}
+	if auth.calls != 1 {
+		t.Fatalf("pipeline did not run for token input: %d", auth.calls)
+	}
+}
+
+type embeddingTokenRateStore struct {
+	tokens int
+}
+
+func (s *embeddingTokenRateStore) Allow(_ context.Context, _ string, _ RateLimit, tokens int) (bool, time.Duration, error) {
+	s.tokens = tokens
+	return true, 0, nil
+}
+
+func TestEmbeddingsTokenIDsUseExactTPMReservation(t *testing.T) {
+	store := &embeddingTokenRateStore{}
+	handler := NewHandlerWithRateLimitStore(
+		modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tpm: 100}}),
+		&chatProvider{}, store,
+	)
+	response := httptest.NewRecorder()
+	handler.Embeddings(response, httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embed-model","input":[11,12,13]}`)))
+	if response.Code != http.StatusOK || store.tokens != 3 {
+		t.Fatalf("token IDs were not reserved exactly: status=%d tokens=%d body=%s", response.Code, store.tokens, response.Body.String())
+	}
+}
+
+func TestEmbeddingsRejectsMalformedTokenArraysBeforePipeline(t *testing.T) {
+	auth := &countingAccessModule{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{auth}), &chatProvider{})
+	for _, body := range []string{
+		`{"model":"embed-model","input":[1,-2]}`,
+		`{"model":"embed-model","input":[[1],[]]}`,
+		`{"model":"embed-model","input":[1,"mixed"]}`,
+	} {
+		response := httptest.NewRecorder()
+		handler.Embeddings(response, httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body=%s status=%d response=%s", body, response.Code, response.Body.String())
+		}
+	}
 	if auth.calls != 0 {
-		t.Fatalf("pipeline ran for unsupported token input: %d", auth.calls)
+		t.Fatalf("pipeline ran for malformed token inputs: %d", auth.calls)
 	}
 }
 

@@ -23,8 +23,8 @@ func decodeEmbeddingResponse(reader io.Reader, target any) error {
 }
 
 func validateEmbeddingVectors(request openai.EmbeddingRequest, data []openai.Embedding) error {
-	inputs, ok := openai.EmbeddingInputStrings(request.Input)
-	if !ok || len(data) != len(inputs) {
+	input, err := openai.InspectEmbeddingInput(request.Input)
+	if err != nil || len(data) != input.Count {
 		return errors.New("embedding response count does not match input")
 	}
 	seen := make([]bool, len(data))

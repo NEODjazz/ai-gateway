@@ -733,8 +733,8 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "model is required")
 		return
 	}
-	if _, ok := openai.EmbeddingInputStrings(request.Input); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_request", "input must be a non-empty string or array of non-empty strings; token arrays are not supported")
+	if _, err := openai.InspectEmbeddingInput(request.Input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if request.EncodingFormat != "" && request.EncodingFormat != "float" {

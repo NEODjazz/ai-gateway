@@ -21,6 +21,13 @@ func (Gemini) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error
 	if err := rejectParameters("gemini", parameterCheck{"user", request.User != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"}); err != nil {
 		return err
 	}
+	input, err := openai.InspectEmbeddingInput(request.Input)
+	if err != nil {
+		return geminiInvalid("input")
+	}
+	if input.Tokenized() {
+		return rejectParameters("gemini", parameterCheck{"input", true})
+	}
 	inputs, ok := openai.EmbeddingInputStrings(request.Input)
 	if !ok || len(inputs) > maxGeminiEmbeddingInputs {
 		return geminiInvalid("input")
