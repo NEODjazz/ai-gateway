@@ -756,3 +756,19 @@ automatic retries or asynchronous job polling.
 Regression tests cover fresh and pre-seeded entries for every listed state,
 legacy status compatibility, repeated upstream calls for non-cacheable outcomes,
 and billing callbacks for both real execution and successful cache hits.
+
+### Safe Responses usage estimation
+
+Merging a missing input-token count with the local prompt estimate now checks
+nonnegative counters and remaining integer capacity before mutation. Both the
+resulting total and input/output sum must fit. Explicit provider input counts
+(including reported zero) still take precedence over the estimate.
+
+On invalid usage, JSON and streaming router paths stop before successful
+post-response billing. The JSON path also validates before writing cache data.
+The failure lifecycle runs once, and the router does not retry the generation.
+The provider may already have executed; this prevents corrupted counters from
+being committed, rather than guaranteeing reconciliation of unusable upstream
+usage. Regression tests verify no cache entry or successful billing callback,
+one provider call and failure callback, exact boundaries, and unchanged counters
+when a merge is rejected.

@@ -696,6 +696,10 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		setAttemptMetadata(&attemptCtx, started, err)
 		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
+			if err := mergeResponseUsage(&response, attemptCtx.Usage); err != nil {
+				r.modules.RunFailure(ctx, &attemptCtx, err)
+				return openai.ResponseResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+			}
 			attemptCtx.Metadata["provider.cache.status"] = "miss"
 			if payload, marshalErr := json.Marshal(response); marshalErr == nil && cacheableResponsesResult(response) {
 				if cacheErr := r.cacheSet(ctx, cacheKey, payload); cacheErr != nil {
@@ -703,7 +707,6 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 					log.Printf("provider cache set failed: %v", cacheErr)
 				}
 			}
-			mergeResponseUsage(&response, attemptCtx.Usage)
 			attemptCtx.ResponsesResponse = &response
 			modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
 			r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
@@ -1051,7 +1054,10 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		}
 		r.health.success(ctx, endpoint)
 
-		mergeResponseUsage(&response, attemptCtx.Usage)
+		if err := mergeResponseUsage(&response, attemptCtx.Usage); err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.ResponseResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+		}
 		attemptCtx.ResponsesResponse = &response
 		modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
 		r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
@@ -1496,12 +1502,21 @@ func mergeChatUsage(response *openai.ChatCompletionResponse, usage *openai.Usage
 	response.Usage.TotalTokens += usage.PromptTokens
 }
 
-func mergeResponseUsage(response *openai.ResponseResponse, usage *openai.Usage) {
-	if usage == nil || response.InputTokensReported || response.Usage.InputTokens != 0 {
-		return
+func mergeResponseUsage(response *openai.ResponseResponse, usage *openai.Usage) error {
+	if err := validateResponseUsage(response.Usage); err != nil {
+		return err
 	}
-	response.Usage.InputTokens = usage.PromptTokens
-	response.Usage.TotalTokens += usage.PromptTokens
+	if usage == nil || response.InputTokensReported || response.Usage.InputTokens != 0 {
+		return nil
+	}
+	prompt := usage.PromptTokens
+	maxInt := int(^uint(0) >> 1)
+	if prompt < 0 || prompt > maxInt-response.Usage.TotalTokens || prompt > maxInt-response.Usage.OutputTokens {
+		return errors.New("invalid estimated Responses token usage")
+	}
+	response.Usage.InputTokens = prompt
+	response.Usage.TotalTokens += prompt
+	return nil
 }
 
 func mergeEmbeddingUsage(response *openai.EmbeddingResponse, usage *openai.Usage) {
