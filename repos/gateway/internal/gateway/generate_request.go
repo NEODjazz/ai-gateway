@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -293,65 +292,6 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 	}
 	if _, err := openai.ChatImageAttachments(result.Messages); err != nil {
 		return result, err
-	}
-	return result, nil
-}
-
-// Convert the supported native Schema subset to JSON Schema. Unknown fields
-// fail rather than silently weakening a caller's schema constraints.
-func generateSchema(native map[string]any) (map[string]any, error) {
-	result := map[string]any{}
-	for key, value := range native {
-		switch key {
-		case "type":
-			name, ok := value.(string)
-			if !ok {
-				return nil, errors.New("invalid schema type")
-			}
-			name = strings.ToLower(name)
-			switch name {
-			case "object", "array", "string", "number", "integer", "boolean", "null":
-			default:
-				return nil, errors.New("unsupported schema type")
-			}
-			result[key] = name
-		case "properties":
-			properties, ok := value.(map[string]any)
-			if !ok {
-				return nil, errors.New("invalid schema properties")
-			}
-			converted := map[string]any{}
-			for name, property := range properties {
-				schema, ok := property.(map[string]any)
-				if !ok {
-					return nil, errors.New("invalid property schema")
-				}
-				item, err := generateSchema(schema)
-				if err != nil {
-					return nil, err
-				}
-				converted[name] = item
-			}
-			result[key] = converted
-		case "items":
-			schema, ok := value.(map[string]any)
-			if !ok {
-				return nil, errors.New("invalid items schema")
-			}
-			item, err := generateSchema(schema)
-			if err != nil {
-				return nil, err
-			}
-			result[key] = item
-		case "description", "format", "enum", "required", "minimum", "maximum":
-			result[key] = value
-		case "nullable":
-			if value != false {
-				return nil, errors.New("nullable native schemas require responseJsonSchema/parametersJsonSchema")
-			}
-		default:
-			return nil, fmt.Errorf("unsupported native schema field %q; use JSON Schema", key)
-		}
 	}
 	return result, nil
 }

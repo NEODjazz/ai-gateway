@@ -403,3 +403,22 @@ outbound JSON/SSE adapter normalize omitted or null arguments to `{}`, preservin
 call IDs and thought signatures. Array, scalar and malformed arguments remain
 errors. This allows parameterless tools to complete a generation/history round trip.
 See [FunctionCall](https://ai.google.dev/api/generate-content#FunctionCall).
+
+
+### Native Schema constraints
+
+GenerateContent tool parameters and responseSchema support `nullable`, `anyOf`,
+array/string/object size bounds, `pattern`, numeric bounds, enum and required
+properties, plus title/description/format/default/example annotations. Native
+`example` becomes JSON Schema `examples`; nullable wraps the complete schema in
+an anyOf with null, so enum and other constraints remain effective for non-null values.
+
+Size bounds accept native nonnegative int64 strings or exact JSON integers.
+String-encoded int64 bounds are emitted as JSON numbers without float rounding;
+JSON numeric bounds above 2^53-1 must be supplied as strings. Contradictory bounds,
+invalid field types and unknown constraints are rejected. Native Schema traversal
+is limited to 64 levels and 128 alternatives per anyOf. propertyOrdering remains
+unsupported; callers can use the explicit JSON Schema fields when appropriate.
+
+Regression tests validate accepted/rejected instances against converted schemas,
+including nullable enums, nested alternatives and exact int64 serialization.

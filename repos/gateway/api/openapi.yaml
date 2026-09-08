@@ -2238,7 +2238,7 @@ components:
                     description: {type: string}
                     parameters:
                       type: object
-                      description: Supported native Schema subset; mutually exclusive with parametersJsonSchema.
+                      description: Native Schema supports nullable, anyOf, size/numeric bounds and pattern (64 levels, 128 alternatives); mutually exclusive with parametersJsonSchema.
                     parametersJsonSchema: {type: object}
         toolConfig:
           type: object
@@ -2288,7 +2288,7 @@ components:
                     description: {type: string}
                     parameters:
                       type: object
-                      description: Supported native Schema subset; mutually exclusive with parametersJsonSchema.
+                      description: Native Schema supports nullable, anyOf, size/numeric bounds and pattern (64 levels, 128 alternatives); mutually exclusive with parametersJsonSchema.
                     parametersJsonSchema: {type: object}
         toolConfig:
           type: object
@@ -2320,7 +2320,7 @@ components:
             responseMimeType: {type: string, enum: [text/plain, application/json]}
             responseSchema:
               type: object
-              description: Supported native Schema subset; mutually exclusive with responseJsonSchema. Requires application/json.
+              description: Native Schema supports nullable, anyOf, size/numeric bounds and pattern (64 levels, 128 alternatives); mutually exclusive with responseJsonSchema. Requires application/json.
             responseJsonSchema: {type: object}
     GenerateContent:
       type: object
