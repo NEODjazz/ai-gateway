@@ -362,9 +362,10 @@ type ResponseOutputItem struct {
 }
 
 type ResponseOutputContent struct {
-	Refusal string `json:"refusal,omitempty"`
-	Type    string `json:"type"`
-	Text    string `json:"text,omitempty"`
+	Annotations []json.RawMessage `json:"annotations,omitempty"`
+	Refusal     string            `json:"refusal,omitempty"`
+	Type        string            `json:"type"`
+	Text        string            `json:"text,omitempty"`
 }
 
 type ResponseUsage struct {

@@ -649,6 +649,43 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 		if err := applyResponseSummaryEvent(&response, outputIndex, event, decoded); err != nil {
 			return err
 		}
+		if event == "response.output_text.annotation.added" {
+			contentIndex, err := boundedResponseStreamIndex(decoded, "content_index", maxResponseStreamContentParts)
+			if err != nil {
+				return err
+			}
+			annotationIndex, err := boundedResponseStreamIndex(decoded, "annotation_index", maxResponseStreamContentParts)
+			if err != nil {
+				return err
+			}
+			annotation, present := decoded["annotation"]
+			if !present {
+				return errors.New("Responses annotation event is missing its annotation")
+			}
+			if annotation != nil {
+				if _, ok := annotation.(map[string]any); !ok {
+					return errors.New("invalid Responses annotation")
+				}
+			}
+			encoded, err := json.Marshal(annotation)
+			if err != nil {
+				return err
+			}
+			item := ensureResponseOutputItem(&response, outputIndex)
+			item.Type, item.Role = "message", "assistant"
+			if id, ok := decoded["item_id"].(string); ok {
+				item.ID = id
+			}
+			for len(item.Content) <= contentIndex {
+				item.Content = append(item.Content, openai.ResponseOutputContent{})
+			}
+			part := &item.Content[contentIndex]
+			part.Type, part.Refusal = "output_text", ""
+			for len(part.Annotations) <= annotationIndex {
+				part.Annotations = append(part.Annotations, json.RawMessage("null"))
+			}
+			part.Annotations[annotationIndex] = encoded
+		}
 		if itemValue, ok := decoded["item"].(map[string]any); ok {
 			marshaled, err := json.Marshal(itemValue)
 			if err != nil {

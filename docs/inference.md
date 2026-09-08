@@ -967,3 +967,18 @@ unchanged. Tests cover positive/zero details, negative rejection and unchanged
 totals for JSON and native streaming. The OpenAPI response schema includes the
 optional detail object. As with existing token detail types, zero-valued members
 may be omitted when serialized while retaining the detail object.
+
+### Responses annotations
+
+Output content retains `annotations` as raw JSON values, preserving provider
+citation fields. Native `response.output_text.annotation.added` events populate
+the selected output/content part; content and annotation indices are bounded to
+0 through 127, while existing output-item bounds still apply. An annotation event
+must carry an object or null. Full content/item/response snapshots also preserve
+annotations through the response type.
+
+JSON-to-SSE fallback emits annotation events and includes the actual array in the
+completed content part; the added part starts with an empty array. Tests verify
+JSON preservation, indexed native events, invalid indices and fallback payloads.
+The public response schema includes the annotation array. Event fields follow the
+[Responses streaming reference](https://developers.openai.com/api/reference/resources/responses/streaming-events).
