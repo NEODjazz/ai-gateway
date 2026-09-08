@@ -131,7 +131,10 @@ func (p Anthropic) Responses(ctx context.Context, request openai.ResponseRequest
 	if err := p.ValidateResponseParameters(request); err != nil {
 		return openai.ResponseResponse{}, err
 	}
-	upstreamRequest := anthropicResponsesRequest(request, false)
+	upstreamRequest, err := anthropicResponsesRequest(request, false)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	var response anthropicResponse
 	if err := p.doMessages(ctx, upstreamRequest, &response); err != nil {
 		return openai.ResponseResponse{}, err
@@ -151,7 +154,11 @@ func (p Anthropic) StreamResponses(ctx context.Context, request openai.ResponseR
 		return openai.ResponseResponse{}, ErrStreamingUnsupported
 	}
 
-	resp, err := p.doMessagesStream(ctx, anthropicResponsesRequest(request, true))
+	upstreamRequest, err := anthropicResponsesRequest(request, true)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	resp, err := p.doMessagesStream(ctx, upstreamRequest)
 	if err != nil {
 		return openai.ResponseResponse{}, err
 	}
@@ -258,9 +265,12 @@ func anthropicStructuredChat(response openai.ChatCompletionResponse) openai.Chat
 	return response
 }
 
-func anthropicResponsesRequest(request openai.ResponseRequest, stream bool) anthropicRequest {
+func anthropicResponsesRequest(request openai.ResponseRequest, stream bool) (anthropicRequest, error) {
 	maxTokens := requestMaxTokens(request.MaxTokens, request.MaxOutputTokens)
-	messages := anthropicResponseMessages(request.Input)
+	messages, err := anthropicResponseMessages(request.Input)
+	if err != nil {
+		return anthropicRequest{}, err
+	}
 	tools, toolChoice := anthropicResponseTools(request.Tools, request.ToolChoice)
 	if structuredTool, ok := anthropicStructuredResponseTool(request.Text); ok {
 		tools = append(tools, structuredTool)
@@ -276,7 +286,7 @@ func anthropicResponsesRequest(request openai.ResponseRequest, stream bool) anth
 		Stream:      stream,
 		Temperature: request.Temperature,
 		TopP:        request.TopP,
-	}
+	}, nil
 }
 
 func anthropicStructuredResponseTool(text any) (anthropicTool, bool) {
@@ -365,7 +375,7 @@ func anthropicMessages(messages []openai.Message) (string, []anthropicMessage) {
 	return strings.Join(system, "\n\n"), converted
 }
 
-func anthropicResponseMessages(input any) []anthropicMessage {
+func anthropicResponseMessages(input any) ([]anthropicMessage, error) {
 	if items, ok := input.([]any); ok {
 		messages := make([]anthropicMessage, 0, len(items))
 		for _, item := range items {
@@ -373,6 +383,23 @@ func anthropicResponseMessages(input any) []anthropicMessage {
 			if !ok {
 				messages = nil
 				break
+			}
+			if kind, _ := object["type"].(string); kind == "function_call" || kind == "function_call_output" {
+				message, err := anthropicResponseToolMessage(object)
+				if err != nil {
+					return nil, err
+				}
+				if len(messages) > 0 && messages[len(messages)-1].Role == message.Role {
+					previous := &messages[len(messages)-1]
+					blocks, ok := previous.Content.([]anthropicContent)
+					if !ok {
+						blocks = []anthropicContent{{Type: "text", Text: openai.ContentText(previous.Content)}}
+					}
+					previous.Content = append(blocks, message.Content.([]anthropicContent)...)
+				} else {
+					messages = append(messages, message)
+				}
+				continue
 			}
 			role, _ := object["role"].(string)
 			if role != "user" && role != "assistant" {
@@ -382,10 +409,10 @@ func anthropicResponseMessages(input any) []anthropicMessage {
 			messages = append(messages, anthropicMessage{Role: role, Content: anthropicMessageContent(object["content"])})
 		}
 		if len(messages) > 0 {
-			return messages
+			return messages, nil
 		}
 	}
-	return []anthropicMessage{{Role: "user", Content: anthropicMessageContent(input)}}
+	return []anthropicMessage{{Role: "user", Content: anthropicMessageContent(input)}}, nil
 }
 
 func anthropicMessageContent(value any) any {

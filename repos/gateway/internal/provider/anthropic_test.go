@@ -99,12 +99,15 @@ func TestAnthropicConvertsOpenAIVisionContent(t *testing.T) {
 }
 
 func TestAnthropicConvertsResponsesVisionInput(t *testing.T) {
-	request := anthropicResponsesRequest(openai.ResponseRequest{Input: []any{map[string]any{
+	request, err := anthropicResponsesRequest(openai.ResponseRequest{Input: []any{map[string]any{
 		"role": "user", "content": []any{
 			map[string]any{"type": "input_text", "text": "describe"},
 			map[string]any{"type": "input_image", "image_url": "data:image/jpeg;base64,/9j/"},
 		},
 	}}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	blocks, ok := request.Messages[0].Content.([]anthropicContent)
 	if !ok || len(blocks) != 2 || blocks[1].Type != "image" {
 		t.Fatalf("unexpected Responses vision conversion: %+v", request.Messages)

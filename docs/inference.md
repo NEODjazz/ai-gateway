@@ -916,3 +916,18 @@ conversion. Validation runs before upstream HTTP execution in both JSON and SSE
 paths. Regression tests verify zero upstream calls for those inputs and continued
 acceptance of ordinary message input. Native Responses forwarding remains the
 path for upstreams that understand their own encrypted continuation context.
+
+### Anthropic Responses tool history
+
+Responses `function_call` history items now become assistant `tool_use` blocks,
+and `function_call_output` items become user `tool_result` blocks linked by
+`call_id`. Consecutive calls or results of the same role are grouped into a single
+message. Arguments must be a JSON object and retain exact JSON numeric values;
+missing identifiers, names, invalid arguments or invalid output types fail with
+`400 invalid_request`, `param=input` before upstream execution. String and content
+array outputs use the existing message-content conversion.
+
+Tests verify parallel call/result grouping, preserved identifiers and large
+integer arguments, plus invalid histories in both JSON and streaming entry points
+with zero upstream calls. This conversion follows the native
+[tool-use message contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls).

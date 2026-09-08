@@ -38,6 +38,9 @@ func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) er
 }
 
 func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) error {
+	if err := validateAnthropicResponseHistory(request.Input); err != nil {
+		return err
+	}
 	return rejectParameters("anthropic",
 		parameterCheck{"input", hasOpaqueResponseContext(request.Input)},
 		parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil},
