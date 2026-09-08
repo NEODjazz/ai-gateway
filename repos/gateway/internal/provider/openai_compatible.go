@@ -539,7 +539,7 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			},
 		},
 	}
-	err := scanSSEEvents(body, func(event string, payload string) error {
+	err := scanSSEEvents(&responseStreamReader{source: body, remaining: maxResponseStreamBytes}, func(event string, payload string) error {
 		if payload == "[DONE]" {
 			return io.EOF
 		}
@@ -694,6 +694,9 @@ func scanSSEEvents(body io.Reader, handle func(event string, payload string) err
 			}
 			builder.WriteString(strings.TrimSpace(strings.TrimPrefix(line, "data:")))
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
 	}
 	if builder.Len() > 0 {
 		if err := handle(event, strings.TrimSpace(builder.String())); err != nil {

@@ -662,3 +662,21 @@ before allocation or forwarding; omitted values retain slot-zero compatibility.
 These limits do not bound cumulative text bytes. Regression tests cover named and
 JSON-typed events, interleaved text/refusal/tool output, unrelated deltas, refusal
 completion, invalid indices, and the highest valid content slot.
+
+### Native Responses SSE byte budget
+
+Native Responses SSE decoding now limits consumed wire data to 32 MiB per
+stream, including comments, event headers, multiline data, and unfinished frames.
+The decoder reads at most one byte beyond the boundary to distinguish an exact
+fit from an oversized stream. Exceeding it returns an explicit upstream protocol
+error rather than treating the boundary as successful EOF. Existing line-size
+limits still apply independently.
+
+This bounds stream-driven text/argument accumulation and frame buffering by the
+input budget; it is not a precise process RSS bound or a global concurrency limit.
+A response already partially sent to the client can end with an error. The limit
+does not change JSON response limits. The shared SSE scanner also discards an
+unfinished frame on a source I/O error instead of flushing it before reporting
+the error; this applies to all adapters using that scanner. Regression
+tests cover an oversized stream made of short lines, exact reader boundaries,
+limited upstream reads, terminal errors, and preservation of source I/O errors.
