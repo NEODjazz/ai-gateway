@@ -936,7 +936,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		return openai.ResponseResponse{}, false, nil
 	}
 	if len(candidates) == 0 {
-		return openai.ResponseResponse{}, false, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
+		return openai.ResponseResponse{}, false, nil
 	}
 
 	var errs []error

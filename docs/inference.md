@@ -594,3 +594,25 @@ this fallback is not an extra retry after a failed stream. If no non-streaming C
 route is eligible, the ordinary routing error is returned without opening SSE.
 Regression tests cover a JSON-only deployment, one upstream call on failure, and
 rejection of a deployment that lacks the Chat capability.
+
+### Synthetic Responses SSE
+
+When no native Responses streaming route is available, `stream=true` uses the
+ordinary JSON Responses pipeline and replays its result as named SSE events.
+This fixes the former JSON response to a streaming request. Authorization,
+capability checks, affinity, provider modules, and billing run before replay;
+there is no second generation. Native stream errors do not trigger JSON retries.
+
+Replay includes response creation, ordered output-item/content events, complete
+text deltas, function-call argument deltas, and the terminal response with usage.
+Events have increasing sequence numbers. Existing item IDs are preserved; missing
+IDs receive response-scoped IDs, and output_text-only results get a message item.
+The final status is preserved for completed, incomplete, and failed results;
+non-terminal results fail before SSE begins. A write failure stops replay without
+emitting a false completion. Events follow the
+[Responses event contract](https://developers.openai.com/api/reference/typescript/resources/beta/subresources/responses/methods/create).
+
+This is buffered replay, not live token streaming or background job support.
+Payloads remain limited to the gateway's existing response types. Regression tests
+cover JSON-only deployments, upstream errors, capability denial, text and function
+output ordering, usage, terminal statuses, and client write errors.

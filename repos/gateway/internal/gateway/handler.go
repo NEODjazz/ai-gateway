@@ -294,7 +294,8 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	if !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
-	if request.Stream {
+	stream := request.Stream
+	if stream {
 		streamStarted := false
 		writeStreamEvent := func(event string, payload string) error {
 			if !streamStarted {
@@ -327,6 +328,25 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	response, err := h.provider.Responses(r.Context(), reqCtx)
 	if err != nil {
 		writeProviderFailure(w, err)
+		return
+	}
+	if stream {
+		started := false
+		err := synthesizeResponseStream(response, func(event, payload string) error {
+			if !started {
+				writeStreamHeaders(w)
+				w.WriteHeader(http.StatusOK)
+				started = true
+			}
+			return writeSSEResponseEvent(w, event, payload)
+		})
+		if err != nil {
+			if !started {
+				writeProviderFailure(w, err)
+			}
+			return
+		}
+		writeSSEDone(w)
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
