@@ -61,6 +61,12 @@ func (Ollama) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error
 }
 
 func validateChatAdapter(client Client, request openai.ChatCompletionRequest) error {
+	if request.RequireMatchedStop {
+		reporter, ok := client.(interface{ ReportsMatchedStop() bool })
+		if !ok || !reporter.ReportsMatchedStop() {
+			return rejectParameters("provider", parameterCheck{"stop_sequences", true})
+		}
+	}
 	if validator, ok := client.(interface {
 		ValidateChatParameters(openai.ChatCompletionRequest) error
 	}); ok {

@@ -41,7 +41,7 @@ paths:
       summary: Create an Anthropic Messages response through the gateway pipeline
       description: |
         Supports text, base64 user images, function tools and text tool results.
-        Advanced blocks, stop_sequences, metadata, thinking, server tools and
+        Advanced blocks, metadata, thinking, server tools and
         assistant prefill are rejected. Provider capability checks still apply.
       security:
         - nativeAPIKey: []
@@ -2015,6 +2015,11 @@ components:
       properties:
         model: {type: string, minLength: 1}
         max_tokens: {type: integer, minimum: 1}
+        stop_sequences:
+          type: array
+          maxItems: 4
+          items: {type: string, minLength: 1}
+          description: Requires an adapter reporting exact matched stops; currently native Anthropic
         stream: {type: boolean, default: false}
         temperature: {type: number, minimum: 0, maximum: 1}
         top_p: {type: number, minimum: 0, maximum: 1}

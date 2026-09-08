@@ -361,7 +361,7 @@ func TestAnthropicMapsStopAndParallelControls(t *testing.T) {
 					if streaming {
 						_, _ = fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"test\",\"model\":\"test\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 					} else {
-						_, _ = fmt.Fprint(w, `{"id":"test","content":[],"stop_reason":"stop_sequence"}`)
+						_, _ = fmt.Fprint(w, `{"id":"test","content":[],"stop_reason":"stop_sequence","stop_sequence":"END"}`)
 					}
 				}))
 				defer server.Close()

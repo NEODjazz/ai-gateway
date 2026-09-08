@@ -12,15 +12,16 @@ import (
 )
 
 type messagesRequest struct {
-	Model       string              `json:"model"`
-	MaxTokens   int                 `json:"max_tokens"`
-	Messages    []messagesInput     `json:"messages"`
-	System      json.RawMessage     `json:"system,omitempty"`
-	Tools       []messagesTool      `json:"tools,omitempty"`
-	ToolChoice  *messagesToolChoice `json:"tool_choice,omitempty"`
-	Temperature *float64            `json:"temperature,omitempty"`
-	TopP        *float64            `json:"top_p,omitempty"`
-	Stream      bool                `json:"stream,omitempty"`
+	Model         string              `json:"model"`
+	MaxTokens     int                 `json:"max_tokens"`
+	Messages      []messagesInput     `json:"messages"`
+	System        json.RawMessage     `json:"system,omitempty"`
+	Tools         []messagesTool      `json:"tools,omitempty"`
+	ToolChoice    *messagesToolChoice `json:"tool_choice,omitempty"`
+	Temperature   *float64            `json:"temperature,omitempty"`
+	TopP          *float64            `json:"top_p,omitempty"`
+	Stream        bool                `json:"stream,omitempty"`
+	StopSequences []string            `json:"stop_sequences,omitempty"`
 }
 type messagesInput struct {
 	Role    string          `json:"role"`
@@ -51,6 +52,13 @@ func decodeMessagesValue(raw json.RawMessage, target any) error {
 
 func (request messagesRequest) chat() (openai.ChatCompletionRequest, error) {
 	result := openai.ChatCompletionRequest{Model: request.Model, MaxTokens: &request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP, Stream: request.Stream}
+	if len(request.StopSequences) > 0 {
+		if _, valid := openai.StopSequences(request.StopSequences); !valid {
+			return result, errors.New("stop_sequences must contain 1–4 non-empty strings")
+		}
+		result.Stop = request.StopSequences
+		result.RequireMatchedStop = true
+	}
 	if strings.TrimSpace(request.Model) == "" || request.MaxTokens <= 0 || len(request.Messages) == 0 || len(request.Messages) > 10000 {
 		return result, errors.New("model, positive max_tokens and 1–10000 messages are required")
 	}

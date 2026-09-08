@@ -284,3 +284,30 @@ func TestMessagesPreservesMatchedStopInJSONAndFallbackStream(t *testing.T) {
 		}
 	}
 }
+
+func TestMessagesStopSequencesThroughAnthropic(t *testing.T) {
+	for _, stream := range []string{"false", "true"} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			stops, ok := body["stop_sequences"].([]any)
+			if !ok || len(stops) != 1 || stops[0] != " END " {
+				t.Errorf("stop request lost: %v", body)
+			}
+			if stream == "false" {
+				_, _ = w.Write([]byte(`{"id":"m","model":"model","content":[{"type":"text","text":"hello"}],"stop_reason":"stop_sequence","stop_sequence":" END ","usage":{"input_tokens":2,"output_tokens":1}}`))
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("event: message_start\ndata: {\"message\":{\"id\":\"m\",\"model\":\"model\",\"usage\":{\"input_tokens\":2}}}\n\nevent: message_delta\ndata: {\"delta\":{\"stop_reason\":\"stop_sequence\",\"stop_sequence\":\" END \"},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {}\n\n"))
+		}))
+		router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "native", Type: "anthropic", BaseURL: server.URL, Models: []string{"model"}, Stream: true}}})
+		response := nativeMessageCall(Routes(NewHandler(modules.NewPipeline(nil), router)), `{"model":"model","max_tokens":10,"stop_sequences":[" END "],"stream":`+stream+`,"messages":[{"role":"user","content":"hi"}]}`, "")
+		server.Close()
+		if response.Code != 200 || !strings.Contains(response.Body.String(), `"stop_reason":"stop_sequence"`) || !strings.Contains(response.Body.String(), `"stop_sequence":" END "`) {
+			t.Fatalf("stop protocol: %d %s", response.Code, response.Body.String())
+		}
+	}
+}

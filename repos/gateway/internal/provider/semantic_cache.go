@@ -217,6 +217,9 @@ func (c *semanticResponseCache) pruneAndEvictLocked(now time.Time, incomingBytes
 
 func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, string, bool) {
 	request := req.Request
+	if request.RequireMatchedStop {
+		return "", "", false
+	}
 	if request.Logprobs != nil && *request.Logprobs {
 		return "", "", false
 	}

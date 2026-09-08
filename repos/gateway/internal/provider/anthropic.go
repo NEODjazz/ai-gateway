@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -13,6 +14,8 @@ import (
 )
 
 const defaultAnthropicMaxTokens = 1024
+
+func (Anthropic) ReportsMatchedStop() bool { return true }
 
 type Anthropic struct {
 	baseURL        string
@@ -98,6 +101,9 @@ func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompl
 		return openai.ChatCompletionResponse{}, err
 	}
 	converted := anthropicToChatCompletion(response, request.Model)
+	if response.StopReason == "stop_sequence" && response.StopSequence == nil {
+		return openai.ChatCompletionResponse{}, errors.New("Anthropic omitted matched stop sequence")
+	}
 	if request.ResponseFormat != nil {
 		converted = anthropicStructuredChat(converted)
 	}
@@ -683,6 +689,9 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 				response.Usage.TotalTokens = response.Usage.PromptTokens + response.Usage.CompletionTokens
 			}
 			if streamEvent.Delta.StopReason != "" {
+				if streamEvent.Delta.StopReason == "stop_sequence" && streamEvent.Delta.StopSequence == nil {
+					return errors.New("Anthropic omitted matched stop sequence")
+				}
 				finishReason := anthropicFinishReason(streamEvent.Delta.StopReason)
 				response.Choices[0].FinishReason = finishReason
 				response.Choices[0].StopSequence = anthropicMatchedStop(streamEvent.Delta.StopReason, streamEvent.Delta.StopSequence)

@@ -232,7 +232,7 @@ pipeline; this endpoint does not forward client credentials to providers.
 
 Supported input is text, text system blocks, base64 user images, function schemas,
 assistant tool-use history, text tool results, tool choice and parallel-tool
-control, temperature, top-p, positive max_tokens and stream. Provider-specific
+control, temperature, top-p, positive max_tokens, stop_sequences and stream. Provider-specific
 capability checks still apply after conversion. Responses contain native text or
 tool-use blocks and native usage fields. Cached prompt tokens are separated from
 uncached input tokens without changing the internal accounting totals.
@@ -248,7 +248,7 @@ stream without a finish reason fails.
 
 Compatibility is partial. Unsupported top-level fields and block fields fail
 with a native invalid_request_error. In particular, thinking, cache controls,
-server tools, documents, URL images, metadata, stop_sequences, top_k, assistant
+server tools, documents, URL images, metadata, top_k, assistant
 prefill, text after tool_use and is_error=true tool results are not supported.
 All tool-use history requires matching results. Opaque provider tool metadata
 that cannot be represented in Messages produces an explicit conversion error.
@@ -266,5 +266,16 @@ in the optional `stop_sequence` result field. Anthropic populates this only for
 its native `stop_sequence` reason; `end_turn` does not invent a match. JSON,
 stream accumulation and fallback SSE retain the value without trimming it.
 Messages then reports native `stop_reason: stop_sequence` with the exact value.
-This is an additive response-contract extension, not permission to accept inbound
-Messages `stop_sequences` on adapters that cannot report the matched delimiter.
+This is an additive response-contract extension.
+
+Inbound Messages `stop_sequences` accepts up to four non-empty delimiters. A
+non-empty list requires an adapter that reports exact matched stops (currently
+native Anthropic). The router rejects unsupported adapters before provider
+modules, billing reserve and cache lookup, including fallback attempts. Empty
+lists impose no additional requirement. An internal Go request flag carries this
+constraint; it is neither accepted as client JSON nor forwarded upstream.
+
+Requests requiring exact stop metadata use separate exact-cache keys and bypass
+semantic cache. A native stop-sequence reason without its matched delimiter is
+an upstream error rather than an inferred end_turn. JSON/SSE regressions cover
+native conversion, cache isolation and rejection before accounting modules.

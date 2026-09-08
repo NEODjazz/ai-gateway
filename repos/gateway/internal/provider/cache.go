@@ -97,6 +97,9 @@ func providerCacheKey(kind string, req modules.RequestContext) string {
 		request.Model = logicalModel
 	}
 	var value any = request
+	if kind == "chat" && request.RequireMatchedStop {
+		kind = "chat-matched-stop"
+	}
 	if kind == "responses" && req.ResponseRequest != nil {
 		responseRequest := *req.ResponseRequest
 		if logicalModel := req.Metadata["provider.requested_model"]; logicalModel != "" {
