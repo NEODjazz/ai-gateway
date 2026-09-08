@@ -547,13 +547,17 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 		if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
 			return err
 		}
+		outputIndex, err := responseOutputIndex(decoded)
+		if err != nil {
+			return err
+		}
 		if id, ok := decoded["response_id"].(string); ok && response.ID == "" {
 			response.ID = id
 		}
 		if delta, ok := decoded["delta"].(string); ok {
 			switch event {
 			case "response.function_call_arguments.delta":
-				item := ensureResponseOutputItem(&response, responseOutputIndex(decoded))
+				item := ensureResponseOutputItem(&response, outputIndex)
 				item.Type = "function_call"
 				item.Arguments += delta
 			default:
@@ -567,7 +571,7 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			if err != nil {
 				return err
 			}
-			item := ensureResponseOutputItem(&response, responseOutputIndex(decoded))
+			item := ensureResponseOutputItem(&response, outputIndex)
 			if err := json.Unmarshal(marshaled, item); err != nil {
 				return err
 			}
@@ -599,11 +603,19 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 	return response, nil
 }
 
-func responseOutputIndex(decoded map[string]any) int {
-	if value, ok := decoded["output_index"].(float64); ok && value >= 0 {
-		return int(value)
+const maxResponseStreamOutputItems = 1024
+
+func responseOutputIndex(decoded map[string]any) (int, error) {
+	raw, present := decoded["output_index"]
+	if !present {
+		return 0, nil
 	}
-	return 0
+	value, ok := raw.(float64)
+	// Check the small range before converting to int, including on 32-bit builds.
+	if !ok || !(value >= 0 && value < maxResponseStreamOutputItems) || value != float64(int(value)) {
+		return 0, fmt.Errorf("invalid upstream response output index")
+	}
+	return int(value), nil
 }
 
 func ensureResponseOutputItem(response *openai.ResponseResponse, index int) *openai.ResponseOutputItem {

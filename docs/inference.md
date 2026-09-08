@@ -633,3 +633,17 @@ not implement retries, background execution, or provider-specific error handling
 Regression tests cover JSON round trips, terminal SSE details, refusal events,
 and restoration of anonymized refusal text. Event fields follow the
 [Responses streaming reference](https://developers.openai.com/api/reference/resources/responses/streaming-events).
+
+### Responses stream output-index bound
+
+Native Responses SSE decoding accepts explicit `output_index` values only as
+integers from 0 through 1023. Validation occurs before integer conversion, slice
+expansion, or forwarding the event. Negative, fractional, nonnumeric, null, and
+oversized indices now fail with an upstream protocol error instead of silently
+using or allocating an output slot. An omitted index keeps the legacy slot-zero
+behavior; sparse indices within the bound remain supported.
+
+This intentionally limits stream output slots to 1024. It bounds allocation driven
+by an index, not total response bytes, text accumulation, or background lifecycle.
+Regression tests cover malformed values, numbers beyond machine integer range,
+the first rejected index, the highest accepted index, and omitted indices.
