@@ -34,6 +34,80 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /v1beta/models/{model}:generateContent:
+    post:
+      operationId: generateContent
+      tags: [Inference]
+      summary: Create native GenerateContent through the gateway pipeline
+      description: |
+        Uses gateway authorization, model/tool ACL, quotas, content policy and billing.
+        Supports one candidate; unsupported fields are rejected. Tool calls are
+        buffered until their JSON arguments are complete. Query credentials are rejected.
+      security:
+        - googleAPIKey: []
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: model
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 256}
+        - in: query
+          name: alt
+          required: false
+          schema: {type: string, enum: [json]}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GenerateContentRequest'}
+      responses:
+        '200':
+          description: Native response with provider-reported usage
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GenerateContentResponse'}
+        default:
+          description: Native error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GenerateContentError'}
+  /v1beta/models/{model}:streamGenerateContent:
+    post:
+      operationId: streamGenerateContent
+      tags: [Inference]
+      summary: Stream native GenerateContent through the gateway pipeline
+      description: |
+        Uses gateway authorization, model/tool ACL, quotas, content policy and billing.
+        Supports one candidate; unsupported fields are rejected. Tool calls are
+        buffered until their JSON arguments are complete. Query credentials are rejected.
+      security:
+        - googleAPIKey: []
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: model
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 256}
+        - in: query
+          name: alt
+          required: true
+          schema: {type: string, enum: [sse]}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GenerateContentRequest'}
+      responses:
+        '200':
+          description: Native SSE events; errors terminate the stream without a successful finishReason
+          content:
+            text/event-stream:
+              schema: {type: string}
+        default:
+          description: Native error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GenerateContentError'}
   /v1/messages/count_tokens:
     post:
       operationId: countMessageTokens
@@ -1884,6 +1958,11 @@ paths:
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
 components:
   securitySchemes:
+    googleAPIKey:
+      type: apiKey
+      in: header
+      name: x-goog-api-key
+      description: Gateway virtual key, not an upstream provider credential
     nativeAPIKey:
       type: apiKey
       in: header
@@ -2056,6 +2135,156 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    GenerateContentError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, status, message]
+          properties:
+            code: {type: integer}
+            status: {type: string}
+            message: {type: string}
+    GenerateContentRequest:
+      type: object
+      additionalProperties: false
+      required: [contents]
+      properties:
+        contents:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: {$ref: '#/components/schemas/GenerateContent'}
+        systemInstruction:
+          allOf:
+            - {$ref: '#/components/schemas/GenerateContent'}
+          description: Text parts only; role must be absent or system.
+        tools:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [functionDeclarations]
+            properties:
+              functionDeclarations:
+                type: array
+                minItems: 1
+                maxItems: 128
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [name]
+                  properties:
+                    name: {type: string, minLength: 1}
+                    description: {type: string}
+                    parameters:
+                      type: object
+                      description: Supported native Schema subset; mutually exclusive with parametersJsonSchema.
+                    parametersJsonSchema: {type: object}
+        toolConfig:
+          type: object
+          additionalProperties: false
+          properties:
+            functionCallingConfig:
+              type: object
+              additionalProperties: false
+              properties:
+                mode: {type: string, enum: [AUTO, NONE, ANY]}
+                allowedFunctionNames:
+                  type: array
+                  maxItems: 1
+                  items: {type: string}
+                  description: ANY requires exactly one declared function name.
+        generationConfig:
+          type: object
+          additionalProperties: false
+          properties:
+            maxOutputTokens: {type: integer, minimum: 1, maximum: 2147483647}
+            temperature: {type: number, minimum: 0, maximum: 2}
+            topP: {type: number, minimum: 0, maximum: 1}
+            seed: {type: integer, minimum: -2147483648, maximum: 2147483647}
+            candidateCount: {type: integer, enum: [1]}
+            stopSequences:
+              type: array
+              maxItems: 4
+              items: {type: string, minLength: 1}
+            responseMimeType: {type: string, enum: [text/plain, application/json]}
+            responseSchema:
+              type: object
+              description: Supported native Schema subset; mutually exclusive with responseJsonSchema. Requires application/json.
+            responseJsonSchema: {type: object}
+    GenerateContent:
+      type: object
+      additionalProperties: false
+      required: [parts]
+      properties:
+        role: {type: string, enum: [user, model, system]}
+        parts:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/GeneratePart'}
+    GeneratePart:
+      type: object
+      additionalProperties: false
+      oneOf:
+        - required: [text]
+        - required: [inlineData]
+        - required: [functionCall]
+        - required: [functionResponse]
+      properties:
+        text: {type: string}
+        thoughtSignature:
+          type: string
+          description: Only supported on functionCall parts.
+        inlineData:
+          type: object
+          additionalProperties: false
+          required: [mimeType, data]
+          properties:
+            mimeType: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp]}
+            data: {type: string, format: byte}
+        functionCall:
+          type: object
+          additionalProperties: false
+          required: [name, args]
+          properties:
+            id: {type: string}
+            name: {type: string, minLength: 1}
+            args: {type: object}
+        functionResponse:
+          type: object
+          additionalProperties: false
+          required: [name, response]
+          properties:
+            id: {type: string}
+            name: {type: string, minLength: 1}
+            response: {type: object}
+    GenerateContentResponse:
+      type: object
+      required: [responseId, modelVersion, candidates, usageMetadata]
+      properties:
+        responseId: {type: string}
+        modelVersion:
+          type: string
+          description: Provider-reported model version when available, otherwise the normalized model name.
+        candidates:
+          type: array
+          maxItems: 1
+          items:
+            type: object
+            properties:
+              index: {type: integer, enum: [0]}
+              content: {$ref: '#/components/schemas/GenerateContent'}
+              finishReason: {type: string, enum: [STOP, MAX_TOKENS, SAFETY]}
+        usageMetadata:
+          type: object
+          properties:
+            promptTokenCount: {type: integer, minimum: 0}
+            candidatesTokenCount: {type: integer, minimum: 0}
+            thoughtsTokenCount: {type: integer, minimum: 0}
+            cachedContentTokenCount: {type: integer, minimum: 0}
+            totalTokenCount: {type: integer, minimum: 0}
     MessageTokenCountRequest:
       type: object
       additionalProperties: false
@@ -2686,6 +2915,10 @@ components:
         prompt_tokens: {type: integer, minimum: 0}
         completion_tokens: {type: integer, minimum: 0}
         total_tokens: {type: integer, minimum: 0}
+        completion_tokens_details:
+          type: object
+          properties:
+            reasoning_tokens: {type: integer, minimum: 0}
         prompt_tokens_details:
           type: object
           properties:

@@ -292,6 +292,11 @@ func metricPath(path string) string {
 			return route.Path
 		}
 	}
+	for _, route := range generateRoutes {
+		if metricRouteMatches(route.Path, path) {
+			return route.Path
+		}
+	}
 	return "unmatched"
 }
 
@@ -302,6 +307,15 @@ func metricRouteMatches(pattern, path string) bool {
 		return false
 	}
 	for index, part := range patternParts {
+		if strings.HasPrefix(part, "{") {
+			if end := strings.IndexByte(part, '}'); end >= 0 {
+				suffix := part[end+1:]
+				if !strings.HasSuffix(pathParts[index], suffix) || len(pathParts[index]) <= len(suffix) {
+					return false
+				}
+				continue
+			}
+		}
 		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
 			if pathParts[index] == "" {
 				return false

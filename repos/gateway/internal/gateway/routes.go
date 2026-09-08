@@ -135,11 +135,12 @@ func DocumentedRoutes() []RouteContract {
 	for index, route := range gatewayRoutes {
 		routes[index] = route.RouteContract
 	}
-	return routes
+	return append(routes, generateRoutes...)
 }
 
 func Routes(handler Handler) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1beta/models/{modelAction}", handler.GenerateContent)
 	for _, route := range gatewayRoutes {
 		h := route.handler(handler)
 		if handler.adminState != nil && isDurableAdminStateRoute(route.Path) {

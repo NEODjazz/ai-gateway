@@ -416,6 +416,9 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 	if body.PromptFeedback.BlockReason != "" {
 		return openai.ChatCompletionResponse{}, &Error{Class: FailureContentPolicy, Provider: "gemini", StatusCode: 400, UpstreamCode: "content_policy_violation", Err: errors.New("upstream content policy rejected prompt")}
 	}
+	if body.Model != "" {
+		model = body.Model
+	}
 	result := openai.ChatCompletionResponse{ID: body.ID, Object: "chat.completion", Model: model}
 	if result.ID == "" {
 		result.ID = "chatcmpl-" + rand.Text()
@@ -429,6 +432,9 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 			return result, errors.New("inconsistent Gemini usage")
 		}
 		result.Usage = openai.Usage{PromptTokens: u.Prompt, CompletionTokens: u.Candidates + u.Thoughts, TotalTokens: u.Total}
+		if u.Thoughts > 0 {
+			result.Usage.CompletionTokensDetails = &openai.CompletionTokenDetails{ReasoningTokens: u.Thoughts}
+		}
 		if u.Cached > 0 {
 			result.Usage.PromptTokensDetails = &openai.PromptTokenDetails{CachedTokens: u.Cached}
 		}
@@ -524,10 +530,11 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			result.ID = body.ID
 		}
 		body.ID = result.ID
-		chunk, err := geminiToChat(body, request.Model)
+		chunk, err := geminiToChat(body, result.Model)
 		if err != nil {
 			return err
 		}
+		result.Model = chunk.Model
 		if body.Usage != nil {
 			result.Usage = chunk.Usage
 		}
@@ -558,7 +565,7 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			}
 			choices = append(choices, map[string]any{"index": choice.Index, "delta": choice.Message, "finish_reason": finish})
 		}
-		event := map[string]any{"id": result.ID, "object": "chat.completion.chunk", "model": request.Model, "choices": choices}
+		event := map[string]any{"id": result.ID, "object": "chat.completion.chunk", "model": result.Model, "choices": choices}
 		if body.Usage != nil {
 			event["usage"] = chunk.Usage
 		}

@@ -199,7 +199,7 @@ are limited to 32 MiB and the accumulated SSE wire payload to 64 MiB.
 Discovery follows native pagination with a 30-second overall deadline, a maximum
 of 100 pages/10,000 scanned models and repeated-token detection. Only models
 advertising `generateContent` are offered. Native Responses, embeddings, inbound
-GenerateContent/Interactions and cloud workload identity remain separate gaps.
+Advanced inbound GenerateContent options, Interactions and cloud workload identity remain separate gaps.
 Unsupported generation controls, parallel tool control and strict function
 schemas fail explicitly; seed/output limits must fit the native integer range.
 
@@ -325,12 +325,18 @@ The same 30-second deadline, inference request-body limit, 64 KiB response limit
 redirect refusal and invalid-count checks apply. Gemini-specific unsupported
 controls still fail before HTTP. Tests cover complete native context, model alias
 routing, malformed counts, redirect refusal and cancellation. This does not add
-inbound GenerateContent or cloud workload credentials.
+cloud workload credentials.
 Protocol: [Gemini token counting](https://ai.google.dev/api/tokens).
 
-## GenerateContent request conversion
+## Native GenerateContent API
 
-The internal GenerateContent converter maps native system/contents, inline user
+POST `/v1beta/models/{model}:generateContent` returns native JSON; POST
+`/v1beta/models/{model}:streamGenerateContent?alt=sse` returns native SSE.
+Send a gateway key in `x-goog-api-key` or Bearer authorization. Query credentials
+and conflicting authentication headers are rejected. Both endpoints use the shared
+Chat pipeline for authorization, model/tool ACL, quotas, content policy and billing.
+
+The GenerateContent converter maps native system/contents, inline user
 images, function declarations and results, tool choice, output limits,
 temperature/top-p/seed, stop sequences and JSON output configuration to Chat.
 Native Schema types are normalized to JSON Schema for the supported subset;
@@ -346,6 +352,13 @@ results, including strings containing JSON objects, directly as native response
 objects. Plain text and non-object JSON keep the result wrapper. This changes the
 native wire representation of object-valued tool results to avoid double wrapping.
 
-Regression tests cover native context/config conversion and function history
-round-trips through the adapter. This increment is conversion groundwork; no
-inbound GenerateContent HTTP route is exposed yet.
+Responses preserve function-call signatures and report reasoning tokens separately
+from candidate tokens, while billing includes both. The Gemini adapter preserves
+upstream modelVersion when provided; otherwise the normalized model name is used.
+SSE emits text incrementally and buffers function calls until their arguments are
+complete JSON objects. Frame and tool accumulation have separate 32 MiB limits.
+Stream failures emit a redacted native error without a successful finish reason.
+
+Regression tests cover conversion, JSON/SSE, authorization, quotas, native usage
+and billing, bounded stream accumulation and disconnects. Advanced safety, grounding,
+thought output, file/audio parts and Interactions remain unsupported.

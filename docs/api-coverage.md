@@ -27,7 +27,7 @@ availability is not inferred from these tests.
 | Text completions | Not implemented | Native completion execution and legacy response/SSE contracts |
 | Messages | Inbound `/v1/messages` JSON/SSE over the shared Chat pipeline; outbound Anthropic adapter | Thinking, prompt-cache controls, server tools and prefill |
 | Anthropic token counting | Native Anthropic/Gemini counters behind `/v1/messages/count_tokens` with authorization, policy, input quotas and bounded transport | Advanced native content blocks and additional provider counters |
-| GenerateContent | Outbound native Gemini chat/tools/vision, SSE and usage | Native inbound contract and broader provider options |
+| GenerateContent | Native inbound JSON/SSE through shared Chat policy and billing; outbound Gemini chat/tools/vision | Advanced native options and cloud credentials |
 | Interactions | Not implemented | Native lifecycle, resource ownership and accounting |
 | Image generation | Not implemented | Generation contract and image-specific pricing/usage |
 | Image edits | Not implemented | Multipart validation, AV, size limits and accounting |
