@@ -648,6 +648,13 @@ explicit code keeps precedence. The same safe identifier filter applies to both
 fields; raw messages remain excluded. Tests cover native types, precedence,
 whitespace, overlong/unsafe values and preservation of HTTP-based classification.
 
+Numeric `error.code` values no longer invalidate the error envelope. For envelopes
+with a numeric code, a safe `error.status` can supply the diagnostic identifier.
+Precedence is string code, type, then status; actual HTTP status still drives the
+base failure classification. Regression tests cover numeric codes, status/type
+precedence and filtering of unsafe status text. Numeric body codes are not used
+to override the HTTP status or retry classification.
+
 ### Responses stream output-index bound
 
 Native Responses SSE decoding accepts explicit `output_index` values only as

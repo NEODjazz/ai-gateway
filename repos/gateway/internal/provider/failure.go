@@ -86,17 +86,30 @@ func responseStatusError(provider string, response *http.Response) error {
 	}
 	var body struct {
 		Error struct {
-			Code  string `json:"code"`
-			Type  string `json:"type"`
-			Param string `json:"param"`
+			Code   json.RawMessage `json:"code"`
+			Status string          `json:"status"`
+			Type   string          `json:"type"`
+			Param  string          `json:"param"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(payload, &body) != nil {
 		return err
 	}
-	code := strings.TrimSpace(body.Error.Code)
+	var code string
+	if len(body.Error.Code) > 0 {
+		if decodeErr := json.Unmarshal(body.Error.Code, &code); decodeErr != nil {
+			var numeric json.Number
+			if json.Unmarshal(body.Error.Code, &numeric) != nil {
+				return err
+			}
+		}
+	}
+	code = strings.TrimSpace(code)
 	if code == "" {
 		code = strings.TrimSpace(body.Error.Type)
+	}
+	if code == "" {
+		code = strings.TrimSpace(body.Error.Status)
 	}
 	if safeUpstreamIdentifier.MatchString(code) {
 		providerErr.UpstreamCode = code
