@@ -196,3 +196,9 @@ func cacheIsolationScope(req modules.RequestContext) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
+
+// Cache transport success only when the response outcome is reusable. Empty
+// status retains compatibility with adapters that predate explicit statuses.
+func cacheableResponsesResult(response openai.ResponseResponse) bool {
+	return response.Error == nil && response.IncompleteDetails == nil && (response.Status == "" || response.Status == "completed")
+}

@@ -738,3 +738,21 @@ existing small-range index validation. Events must still contain a single JSON
 value; trailing documents or junk are rejected before forwarding. Regression tests
 compare JSON and SSE counters at precision boundaries and preserve trailing-data
 rejection and integer-valued index representations.
+
+### Responses cache outcome policy
+
+Responses exact-cache writes and reads now require `status="completed"` (or the
+legacy omitted status) and no `error` or `incomplete_details`. Failed, incomplete,
+cancelled, queued, and in-progress outcomes are not reusable cache results, even
+when the upstream HTTP request itself succeeded. Contradictory completed results
+with error/incomplete details are also excluded.
+
+Previously saved outcomes that do not satisfy this policy are ignored on read;
+they expire normally without destructive cache cleanup. The request executes the
+ordinary provider path and its reported usage reaches post-response billing.
+Successful cache hits retain zero generation usage. This policy does not add
+automatic retries or asynchronous job polling.
+
+Regression tests cover fresh and pre-seeded entries for every listed state,
+legacy status compatibility, repeated upstream calls for non-cacheable outcomes,
+and billing callbacks for both real execution and successful cache hits.

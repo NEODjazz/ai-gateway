@@ -668,7 +668,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		lastAttempt = &attemptCtx
 		cacheKey := providerCacheKey("responses", attemptCtx)
 		if payload, found, cacheErr := r.cacheGet(ctx, cacheKey); found {
-			if response, ok := decodeCached[openai.ResponseResponse](payload); ok {
+			if response, ok := decodeCached[openai.ResponseResponse](payload); ok && cacheableResponsesResult(response) {
 				attemptCtx.Metadata["provider.cache.status"] = "hit"
 				attemptCtx.Metadata["provider.cache.kind"] = "exact"
 				attemptCtx.Metadata["provider.status"] = "ok"
@@ -697,7 +697,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
 			attemptCtx.Metadata["provider.cache.status"] = "miss"
-			if payload, marshalErr := json.Marshal(response); marshalErr == nil {
+			if payload, marshalErr := json.Marshal(response); marshalErr == nil && cacheableResponsesResult(response) {
 				if cacheErr := r.cacheSet(ctx, cacheKey, payload); cacheErr != nil {
 					attemptCtx.Metadata["provider.cache.status"] = "error"
 					log.Printf("provider cache set failed: %v", cacheErr)
