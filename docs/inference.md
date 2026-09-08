@@ -634,6 +634,14 @@ Regression tests cover JSON round trips, terminal SSE details, refusal events,
 and restoration of anonymized refusal text. Event fields follow the
 [Responses streaming reference](https://developers.openai.com/api/reference/resources/responses/streaming-events).
 
+### Retry-After numeric bounds
+
+Provider retry headers are checked for a positive, finite, representable duration
+before integer conversion. Invalid or overflowing `Retry-After-Ms` values no
+longer suppress a valid `Retry-After` fallback. Existing fractional-unit support,
+HTTP-date parsing and scheduler wait limits remain in effect. Deterministic tests
+cover large values, infinity and NaN without sleeping or calling external services.
+
 ### Responses stream output-index bound
 
 Native Responses SSE decoding accepts explicit `output_index` values only as

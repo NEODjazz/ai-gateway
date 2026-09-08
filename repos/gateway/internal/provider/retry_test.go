@@ -119,3 +119,19 @@ func TestRetryStopsBeforeParentDeadline(t *testing.T) {
 		t.Fatalf("retries=%d calls=%d waits=%d err=%v", retries, client.calls, waits, err)
 	}
 }
+
+func TestRetryAfterRejectsOverflowAndNonFiniteValues(t *testing.T) {
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	for _, raw := range []string{"1e30", "+Inf", "Infinity", "NaN", "9223372036854775807"} {
+		for _, field := range []string{"Retry-After", "Retry-After-Ms"} {
+			headers := http.Header{field: []string{raw}}
+			if delay := retryAfterFromHeaders(headers, now); delay != 0 {
+				t.Errorf("field=%s raw=%s delay=%v", field, raw, delay)
+			}
+		}
+		headers := http.Header{"Retry-After-Ms": []string{raw}, "Retry-After": []string{"2"}}
+		if delay := retryAfterFromHeaders(headers, now); delay != 2*time.Second {
+			t.Errorf("invalid milliseconds blocked seconds fallback: raw=%s delay=%v", raw, delay)
+		}
+	}
+}

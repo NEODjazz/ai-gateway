@@ -110,21 +110,32 @@ func responseStatusError(provider string, response *http.Response) error {
 
 func retryAfterFromHeaders(headers http.Header, now time.Time) time.Duration {
 	if milliseconds := strings.TrimSpace(headers.Get("Retry-After-Ms")); milliseconds != "" {
-		if value, err := strconv.ParseFloat(milliseconds, 64); err == nil && value > 0 {
-			return time.Duration(value * float64(time.Millisecond))
+		if delay, ok := parseRetryAfterDuration(milliseconds, time.Millisecond); ok {
+			return delay
 		}
 	}
 	value := strings.TrimSpace(headers.Get("Retry-After"))
 	if value == "" {
 		return 0
 	}
-	if seconds, err := strconv.ParseFloat(value, 64); err == nil && seconds > 0 {
-		return time.Duration(seconds * float64(time.Second))
+	if delay, ok := parseRetryAfterDuration(value, time.Second); ok {
+		return delay
 	}
 	if retryAt, err := http.ParseTime(value); err == nil && retryAt.After(now) {
 		return retryAt.Sub(now)
 	}
 	return 0
+}
+
+// Validate in floating-point space before conversion: overflow, NaN and infinity
+// must not become a negative duration or suppress a valid fallback header.
+func parseRetryAfterDuration(raw string, unit time.Duration) (time.Duration, bool) {
+	value, err := strconv.ParseFloat(raw, 64)
+	scaled := value * float64(unit)
+	if err != nil || !(scaled > 0 && scaled < float64(int64(1<<63-1))) {
+		return 0, false
+	}
+	return time.Duration(scaled), true
 }
 
 func providerRetryAfter(err error) time.Duration {
