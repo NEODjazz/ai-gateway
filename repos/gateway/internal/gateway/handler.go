@@ -295,6 +295,36 @@ func (h Handler) Completions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "provider_failed", "text completions are not supported by the configured provider")
 		return
 	}
+	if request.Stream {
+		if streamingProvider, ok := h.provider.(provider.StreamingCompletionProvider); ok {
+			streamStarted := false
+			writeStreamPayload := func(payload string) error {
+				if !streamStarted {
+					writeStreamHeaders(w)
+					w.WriteHeader(http.StatusOK)
+					streamStarted = true
+				}
+				return writeSSEPayload(w, payload)
+			}
+			if response, streamed, err := streamingProvider.StreamCompletions(r.Context(), reqCtx, writeStreamPayload); streamed {
+				if err != nil {
+					if streamStarted {
+						_ = writeStreamPayload(errorStreamPayload(err))
+						writeSSEDone(w)
+						return
+					}
+					writeProviderFailure(w, err)
+					return
+				}
+				_ = response
+				writeSSEDone(w)
+				return
+			} else if err != nil {
+				writeProviderFailure(w, err)
+				return
+			}
+		}
+	}
 	response, err := completionProvider.Completions(r.Context(), reqCtx)
 	if err != nil {
 		writeProviderFailure(w, err)

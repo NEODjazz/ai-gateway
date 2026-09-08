@@ -8,7 +8,7 @@ Gateway реализует OpenAI-compatible endpoints:
 | --- | --- |
 | `GET /v1/models` | Модели, доступные текущему credential |
 | `POST /v1/chat/completions` | Chat, tools, structured output и vision |
-| `POST /v1/completions` | Native text completion для строковых и token-ID prompts; JSON и buffered SSE |
+| `POST /v1/completions` | Native text completion для строковых и token-ID prompts; JSON и SSE |
 | `POST /v1/responses` | Responses, continuity, function tools и MCP passthrough |
 | `POST /v1/responses/compact` | Native compaction с авторизацией модели и учетом фактического usage |
 | `GET /v1/responses/{id}` | Чтение сохраненного Response владельцем credential |
@@ -53,9 +53,12 @@ token IDs и передает параметры только адаптеру �
 умноженное на `n`, не может превышать 128. Текстовые элементы независимо проходят
 content policy и anonymization; token IDs сохраняются без преобразования и входят
 в input TPM по точному количеству. `n` и `best_of` входят в TPM и billing reserve
-для каждого prompt; provider usage закрывает фактическое списание. `stream=true` возвращает
-совместимые SSE events после завершения ограниченного JSON-вызова, поэтому это
-buffered stream без incremental upstream delivery.
+для каждого prompt; provider usage закрывает фактическое списание. `stream=true`
+проксирует native SSE у streaming-capable adapter. Gateway валидирует chunks,
+собирает итоговый usage для billing и запрещает retry/fallback после первой записи
+клиенту. Placeholder, разделённый между chunks, восстанавливается до отправки.
+Если выбранный adapter не поддерживает native stream, gateway выполняет один
+ограниченный JSON-вызов и возвращает его как buffered SSE.
 
 ## Capabilities
 

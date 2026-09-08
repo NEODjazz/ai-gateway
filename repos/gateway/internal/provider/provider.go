@@ -79,8 +79,16 @@ type CompletionProvider interface {
 	Completions(ctx context.Context, req modules.RequestContext) (openai.CompletionResponse, error)
 }
 
+type StreamingCompletionProvider interface {
+	StreamCompletions(ctx context.Context, req modules.RequestContext, write CompletionStreamWriter) (openai.CompletionResponse, bool, error)
+}
+
 type CompletionClient interface {
 	Completions(ctx context.Context, request openai.CompletionRequest) (openai.CompletionResponse, error)
+}
+
+type StreamingCompletionClient interface {
+	StreamCompletions(ctx context.Context, request openai.CompletionRequest, write CompletionStreamWriter) (openai.CompletionResponse, error)
 }
 
 type EmbeddingProvider interface {
@@ -108,6 +116,7 @@ type VisionClient interface {
 }
 
 type ChatCompletionStreamWriter func(payload string) error
+type CompletionStreamWriter func(payload string) error
 type ResponseStreamWriter func(event string, payload string) error
 
 type StreamingClient interface {
@@ -1508,6 +1517,13 @@ func (t *streamAttemptTracker) state() (bool, time.Duration) {
 }
 
 func (t *streamAttemptTracker) chatWriter(write ChatCompletionStreamWriter) ChatCompletionStreamWriter {
+	return func(payload string) error {
+		t.beforeWrite()
+		return write(payload)
+	}
+}
+
+func (t *streamAttemptTracker) completionWriter(write CompletionStreamWriter) CompletionStreamWriter {
 	return func(payload string) error {
 		t.beforeWrite()
 		return write(payload)

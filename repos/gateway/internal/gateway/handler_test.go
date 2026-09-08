@@ -211,6 +211,21 @@ type chatProvider struct {
 	request modules.RequestContext
 }
 
+type nativeCompletionStreamProvider struct {
+	chatProvider
+	streamCalls int
+}
+
+func (p *nativeCompletionStreamProvider) StreamCompletions(_ context.Context, req modules.RequestContext, write provider.CompletionStreamWriter) (openai.CompletionResponse, bool, error) {
+	p.streamCalls++
+	p.request = req
+	payload := `{"id":"cmpl-native","object":"text_completion","created":8,"model":"instruct","choices":[{"index":0,"text":"native","finish_reason":"stop"}]}`
+	if err := write(payload); err != nil {
+		return openai.CompletionResponse{}, true, err
+	}
+	return openai.CompletionResponse{ID: "cmpl-native", Object: "text_completion", Created: 8, Model: "instruct", Choices: []openai.CompletionChoice{{Index: 0, Text: "native", FinishReason: "stop"}}}, true, nil
+}
+
 func (p *chatProvider) Embeddings(_ context.Context, req modules.RequestContext) (openai.EmbeddingResponse, error) {
 	p.request = req
 	return openai.EmbeddingResponse{
@@ -334,6 +349,21 @@ func TestCompletionsUsesAuthenticatedInferencePipelineAndSyntheticSSE(t *testing
 		} else if !strings.Contains(response.Body.String(), `"text":"done"`) {
 			t.Fatalf("invalid completion JSON: %s", response.Body.String())
 		}
+	}
+}
+
+func TestCompletionsUsesNativeProviderStream(t *testing.T) {
+	llm := &nativeCompletionStreamProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), llm))
+	request := httptest.NewRequest(http.MethodPost, "/v1/completions", strings.NewReader(`{"model":"instruct","prompt":"complete me","stream":true}`))
+	request.Header.Set("Authorization", "Bearer client-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || llm.streamCalls != 1 || response.Header().Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("native stream not used: status=%d calls=%d body=%s", response.Code, llm.streamCalls, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"text":"native"`) || !strings.Contains(response.Body.String(), "data: [DONE]") {
+		t.Fatalf("invalid native completion stream: %s", response.Body.String())
 	}
 }
 

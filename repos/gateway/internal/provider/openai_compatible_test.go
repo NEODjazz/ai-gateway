@@ -165,6 +165,49 @@ func TestOpenAICompatibleForwardsNativeCompletionParameters(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleStreamsNativeCompletionsAndCollectsUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if r.URL.Path != "/v1/completions" || string(request["stream"]) != "true" || string(request["prompt"]) != `"complete"` {
+			t.Fatalf("unexpected stream request: path=%s request=%v", r.URL.Path, request)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"cmpl_stream\",\"object\":\"text_completion\",\"created\":7,\"model\":\"instruct\",\"choices\":[{\"index\":0,\"text\":\"hel\",\"finish_reason\":null,\"logprobs\":null}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"cmpl_stream\",\"object\":\"text_completion\",\"created\":7,\"model\":\"instruct\",\"choices\":[{\"index\":0,\"text\":\"lo\",\"finish_reason\":\"stop\",\"logprobs\":null}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"cmpl_stream\",\"object\":\"text_completion\",\"created\":7,\"model\":\"instruct\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+	var payloads []string
+	response, err := NewOpenAICompatible(server.URL+"/v1", "", true).StreamCompletions(t.Context(), openai.CompletionRequest{Model: "instruct", Prompt: "complete", Stream: true}, func(payload string) error {
+		payloads = append(payloads, payload)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payloads) != 3 || len(response.Choices) != 1 || response.Choices[0].Text != "hello" || response.Choices[0].FinishReason != "stop" || response.Usage.TotalTokens != 5 {
+		t.Fatalf("unexpected completion stream: payloads=%d response=%+v", len(payloads), response)
+	}
+}
+
+func TestCompletionStreamRejectsInvalidChunkBeforeForwarding(t *testing.T) {
+	for _, payload := range []string{
+		`{"id":"cmpl","object":"text_completion","created":1,"model":"m","choices":[{"index":128,"text":"bad","finish_reason":"stop"}]}`,
+		`{"id":"cmpl","object":"text_completion","created":1,"model":"m","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":4}}`,
+	} {
+		callbacks := 0
+		stream := strings.NewReader("data: " + payload + "\n\ndata: [DONE]\n\n")
+		_, err := streamCompletionData(stream, openai.CompletionRequest{Model: "m", Prompt: "x"}, func(string) error { callbacks++; return nil })
+		if err == nil || callbacks != 0 {
+			t.Fatalf("invalid chunk forwarded: err=%v callbacks=%d payload=%s", err, callbacks, payload)
+		}
+	}
+}
+
 func TestOpenAICompatibleRejectsInvalidCompactedResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"id":"cmp_1","object":"response.compaction","output":[null],"usage":{"input_tokens":-1}}`))

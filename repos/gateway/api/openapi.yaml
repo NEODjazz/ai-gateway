@@ -369,7 +369,7 @@ paths:
       operationId: createCompletion
       tags: [Inference]
       summary: Create a text completion
-      description: Supports a single string prompt and native completion parameters on adapters with a native completions operation. Streaming uses the text completion SSE contract after the bounded upstream JSON result has passed billing and post-processing.
+      description: Supports string/list and token-ID prompts with native completion parameters on adapters that expose a completions operation. Streaming is incremental when the selected adapter exposes native SSE; otherwise the bounded JSON result is replayed as compatible SSE after billing and post-processing.
       requestBody:
         required: true
         content:
@@ -381,7 +381,7 @@ paths:
               max_tokens: 16
       responses:
         '200':
-          description: Text completion JSON or buffered SSE when `stream=true`
+          description: Text completion JSON, native SSE, or buffered SSE fallback when `stream=true`
           headers:
             X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
             X-Request-ID: {$ref: '#/components/headers/XRequestID'}

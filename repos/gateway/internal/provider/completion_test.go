@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -33,6 +36,23 @@ func (c *completionTestClient) Completions(_ context.Context, request openai.Com
 type completionLifecycleModule struct {
 	pre, post int
 	response  *openai.CompletionResponse
+}
+
+type scriptedCompletionStreamClient struct {
+	completionTestClient
+	streamCalls int
+	payloads    []string
+	err         error
+}
+
+func (c *scriptedCompletionStreamClient) StreamCompletions(_ context.Context, _ openai.CompletionRequest, write CompletionStreamWriter) (openai.CompletionResponse, error) {
+	c.streamCalls++
+	for _, payload := range c.payloads {
+		if err := write(payload); err != nil {
+			return openai.CompletionResponse{}, err
+		}
+	}
+	return c.result, c.err
 }
 
 func (*completionLifecycleModule) Name() string   { return "completion-test" }
@@ -95,6 +115,72 @@ func TestValidateCompletionResultUsesPromptAndChoiceCounts(t *testing.T) {
 	response.Choices = response.Choices[:3]
 	if err := validateCompletionResult(response, request); err == nil {
 		t.Fatal("incomplete multi-prompt response was accepted")
+	}
+}
+
+func TestRouterCompletionStreamStopsFallbackAfterClientWrite(t *testing.T) {
+	first := &scriptedCompletionStreamClient{payloads: []string{`{"id":"cmpl","choices":[{"index":0,"text":"partial"}]}`}, err: errors.New("stream failed")}
+	second := &scriptedCompletionStreamClient{completionTestClient: completionTestClient{result: validCompletionResponse()}}
+	router := Router{
+		endpoints: []Endpoint{
+			{Name: "first", Type: "openai-compatible", Provider: first, Admission: newAdmissionController(0, 0, 0)},
+			{Name: "second", Type: "openai-compatible", Provider: second, Admission: newAdmissionController(0, 0, 0)},
+		},
+		modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	request := openai.CompletionRequest{Model: "model", Prompt: "input", Stream: true}
+	_, streamed, err := router.StreamCompletions(t.Context(), modules.RequestContext{
+		Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "input"}}}, CompletionRequest: &request,
+	}, func(string) error { return nil })
+	if err == nil || !streamed || first.streamCalls != 1 || second.streamCalls != 0 {
+		t.Fatalf("fallback crossed stream boundary: streamed=%v err=%v first=%d second=%d", streamed, err, first.streamCalls, second.streamCalls)
+	}
+}
+
+func TestRouterCompletionStreamRunsPostResponseBilling(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"cmpl_stream\",\"object\":\"text_completion\",\"created\":7,\"model\":\"instruct\",\"choices\":[{\"index\":0,\"text\":\"done\",\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2,\"total_tokens\":6}}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	module := &completionLifecycleModule{}
+	router := Router{
+		endpoints: []Endpoint{{Name: "completion", Type: "openai-compatible", Provider: NewOpenAICompatible(server.URL, "", true), Admission: newAdmissionController(0, 0, 0)}},
+		modules:   modules.NewPipeline([]modules.Module{module}), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	request := openai.CompletionRequest{Model: "instruct", Prompt: "private", Stream: true}
+	response, streamed, err := router.StreamCompletions(t.Context(), modules.RequestContext{
+		Request: openai.ChatCompletionRequest{Model: "instruct", Messages: []openai.Message{{Role: "user", Content: "private"}}}, CompletionRequest: &request,
+	}, func(string) error { return nil })
+	if err != nil || !streamed || module.post != 1 || module.response == nil || module.response.Usage.TotalTokens != 6 || response.Choices[0].Text != "done" {
+		t.Fatalf("stream lifecycle incomplete: streamed=%v err=%v module=%+v response=%+v", streamed, err, module, response)
+	}
+}
+
+func TestCompletionStreamDeanonymizerJoinsSplitPlaceholder(t *testing.T) {
+	var payloads []map[string]any
+	write := deanonymizingCompletionStreamWriter(map[string]string{"{{EMAIL_1}}": "user@example.com"}, func(payload string) error {
+		var decoded map[string]any
+		if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+			return err
+		}
+		payloads = append(payloads, decoded)
+		return nil
+	})
+	if err := write(`{"choices":[{"index":0,"text":"{{EMA","finish_reason":null}]}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := write(`{"choices":[{"index":0,"text":"IL_1}}","finish_reason":"stop"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	text := ""
+	for _, payload := range payloads {
+		choice := payload["choices"].([]any)[0].(map[string]any)
+		text += choice["text"].(string)
+	}
+	if text != "user@example.com" {
+		t.Fatalf("split completion placeholder was not restored: %q", text)
 	}
 }
 

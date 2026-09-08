@@ -105,6 +105,36 @@ func deanonymizingChatStreamWriter(replacements map[string]string, write ChatCom
 	}
 }
 
+func deanonymizingCompletionStreamWriter(replacements map[string]string, write CompletionStreamWriter) CompletionStreamWriter {
+	if write == nil || len(replacements) == 0 {
+		return write
+	}
+	deanonymizer := newStreamingTextDeanonymizer(replacements)
+	return func(payload string) error {
+		decoded, err := decodeJSONObject(payload)
+		if err != nil {
+			return err
+		}
+		choices, _ := decoded["choices"].([]any)
+		for order, rawChoice := range choices {
+			choice, _ := rawChoice.(map[string]any)
+			index := jsonInt(choice["index"], order)
+			key := fmt.Sprintf("completion:%d:text", index)
+			if content, ok := choice["text"].(string); ok {
+				choice["text"] = deanonymizer.consume(key, content)
+			}
+			if finish, ok := choice["finish_reason"].(string); ok && finish != "" {
+				choice["text"] = stringValue(choice["text"]) + deanonymizer.flush(key)
+			}
+		}
+		marshaled, err := json.Marshal(decoded)
+		if err != nil {
+			return err
+		}
+		return write(string(marshaled))
+	}
+}
+
 func deanonymizeToolCallDeltas(deanonymizer *streamingTextDeanonymizer, choiceIndex int, delta map[string]any) {
 	if delta == nil {
 		return

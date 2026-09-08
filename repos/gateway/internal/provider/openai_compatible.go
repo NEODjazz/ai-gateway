@@ -166,11 +166,22 @@ func (OpenAICompatible) SupportsMCP() bool    { return true }
 func (OpenAICompatible) SupportsVision() bool { return true }
 
 func (p OpenAICompatible) Completions(ctx context.Context, request openai.CompletionRequest) (openai.CompletionResponse, error) {
+	return p.completion(ctx, request, false, nil)
+}
+
+func (p OpenAICompatible) StreamCompletions(ctx context.Context, request openai.CompletionRequest, write CompletionStreamWriter) (openai.CompletionResponse, error) {
+	if !p.upstreamStream {
+		return openai.CompletionResponse{}, ErrStreamingUnsupported
+	}
+	return p.completion(ctx, request, true, write)
+}
+
+func (p OpenAICompatible) completion(ctx context.Context, request openai.CompletionRequest, stream bool, write CompletionStreamWriter) (openai.CompletionResponse, error) {
 	upstream := openAICompatibleCompletionRequest{
 		Model: request.Model, Prompt: request.Prompt, BestOf: request.BestOf, Echo: request.Echo,
 		FrequencyPenalty: request.FrequencyPenalty, LogitBias: request.LogitBias, Logprobs: request.Logprobs,
 		MaxTokens: request.MaxTokens, N: request.N, PresencePenalty: request.PresencePenalty, Seed: request.Seed,
-		Stop: request.Stop, Stream: false, Suffix: request.Suffix, Temperature: request.Temperature, TopP: request.TopP, User: request.User,
+		Stop: request.Stop, Stream: stream, Suffix: request.Suffix, Temperature: request.Temperature, TopP: request.TopP, User: request.User,
 	}
 	body, err := json.Marshal(upstream)
 	if err != nil {
@@ -192,7 +203,107 @@ func (p OpenAICompatible) Completions(ctx context.Context, request openai.Comple
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return openai.CompletionResponse{}, responseStatusError("openai-compatible", resp)
 	}
+	if stream {
+		return streamCompletionData(resp.Body, request, write)
+	}
 	return decodeCompletionResponse(resp.Body)
+}
+
+func streamCompletionData(body io.Reader, request openai.CompletionRequest, write CompletionStreamWriter) (openai.CompletionResponse, error) {
+	response := openai.CompletionResponse{}
+	objectSeen, createdSeen, modelSeen := false, false, false
+	err := scanSSEData(&responseStreamReader{source: body, remaining: maxResponseStreamBytes}, func(payload string) error {
+		if payload == "[DONE]" {
+			return io.EOF
+		}
+		var chunk struct {
+			ID                string                    `json:"id"`
+			Object            string                    `json:"object"`
+			Created           *int64                    `json:"created"`
+			Model             string                    `json:"model"`
+			SystemFingerprint string                    `json:"system_fingerprint"`
+			Choices           []openai.CompletionChoice `json:"choices"`
+			Usage             *openai.Usage             `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			return err
+		}
+		if chunk.ID != "" {
+			if response.ID != "" && response.ID != chunk.ID {
+				return errors.New("provider changed completion stream ID")
+			}
+			response.ID = chunk.ID
+		}
+		if chunk.Object != "" {
+			if chunk.Object != "text_completion" || objectSeen && response.Object != chunk.Object {
+				return errors.New("provider returned invalid completion stream object")
+			}
+			response.Object = chunk.Object
+			objectSeen = true
+		}
+		if chunk.Created != nil {
+			if *chunk.Created < 0 || createdSeen && response.Created != *chunk.Created {
+				return errors.New("provider returned invalid completion stream timestamp")
+			}
+			response.Created = *chunk.Created
+			createdSeen = true
+		}
+		if chunk.Model != "" {
+			if modelSeen && response.Model != chunk.Model {
+				return errors.New("provider changed completion stream model")
+			}
+			response.Model = chunk.Model
+			modelSeen = true
+		}
+		if chunk.SystemFingerprint != "" {
+			response.SystemFingerprint = chunk.SystemFingerprint
+		}
+		if chunk.Usage != nil {
+			if err := validateCompletionUsage(*chunk.Usage); err != nil {
+				return err
+			}
+			response.Usage = *chunk.Usage
+		}
+		for _, choice := range chunk.Choices {
+			if choice.Index < 0 || choice.Index >= 128 {
+				return errors.New("provider returned invalid completion stream choice index")
+			}
+			if err := validateCompletionLogprobs(choice.Logprobs); err != nil {
+				return err
+			}
+			for len(response.Choices) <= choice.Index {
+				response.Choices = append(response.Choices, openai.CompletionChoice{Index: len(response.Choices)})
+			}
+			current := &response.Choices[choice.Index]
+			current.Text += choice.Text
+			if choice.FinishReason != "" {
+				current.FinishReason = choice.FinishReason
+			}
+			if choice.Logprobs != nil {
+				if current.Logprobs == nil {
+					current.Logprobs = &openai.CompletionLogprobs{}
+				}
+				current.Logprobs.TextOffset = append(current.Logprobs.TextOffset, choice.Logprobs.TextOffset...)
+				current.Logprobs.TokenLogprobs = append(current.Logprobs.TokenLogprobs, choice.Logprobs.TokenLogprobs...)
+				current.Logprobs.Tokens = append(current.Logprobs.Tokens, choice.Logprobs.Tokens...)
+				current.Logprobs.TopLogprobs = append(current.Logprobs.TopLogprobs, choice.Logprobs.TopLogprobs...)
+			}
+		}
+		if write != nil {
+			return write(payload)
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, io.EOF) {
+		return openai.CompletionResponse{}, err
+	}
+	if !objectSeen || !createdSeen || !modelSeen {
+		return openai.CompletionResponse{}, errors.New("provider returned incomplete completion stream identity")
+	}
+	if err := validateCompletionResult(response, request); err != nil {
+		return openai.CompletionResponse{}, err
+	}
+	return response, nil
 }
 
 func (p OpenAICompatible) CompactResponse(ctx context.Context, request openai.ResponseCompactRequest) (openai.CompactedResponse, error) {

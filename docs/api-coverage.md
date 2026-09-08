@@ -24,7 +24,7 @@ availability is not inferred from these tests.
 | Response compaction | Native compact contract, bounded opaque output, model authorization and usage settlement | Additional provider-native compact request options as demand is confirmed |
 | Embeddings | String/list input, float output, compatible and native adapters | Provider compatibility matrix, additional input/output encodings |
 | Rerank | Query/documents, compatible adapter | Provider-specific request and usage matrix |
-| Text completions | Native string/list and token-ID prompt execution, legacy parameters/response/logprobs, bounded JSON and buffered SSE | Native incremental upstream streaming |
+| Text completions | Native string/list and token-ID prompts, legacy parameters/response/logprobs, bounded JSON, incremental SSE and buffered fallback | Additional native provider adapters |
 | Messages | Inbound `/v1/messages` JSON/SSE over the shared Chat pipeline; outbound Anthropic adapter | Thinking, prompt-cache controls, server tools and prefill |
 | Anthropic token counting | Native Anthropic/Gemini counters behind `/v1/messages/count_tokens` with authorization, policy, input quotas and bounded transport | Advanced native content blocks and additional provider counters |
 | GenerateContent | Native inbound JSON/SSE and context token counting through shared policy; outbound Gemini chat/tools/vision | Advanced native options and cloud credentials |
@@ -132,8 +132,8 @@ The recorded local deployment is source 5d10695, Helm revision 118. Later change
 through 04462e5 are tested and committed but are not covered by that rollout.
 PostgreSQL integration last passed at source 63dbfa9 using three isolated databases.
 
-The major remaining API work is background Responses execution, text completions,
-media APIs, async jobs, resource
+The major remaining API work is background Responses execution, media APIs,
+async jobs, resource
 storage, search, MCP execution and A2A. Provider workload identity and native cloud
 authentication also remain unimplemented. Further parameter additions alone cannot
 close these families; each needs its execution, authorization and settlement path.
