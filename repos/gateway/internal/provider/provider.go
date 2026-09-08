@@ -75,6 +75,14 @@ type ResponseCompactClient interface {
 	CompactResponse(ctx context.Context, request openai.ResponseCompactRequest) (openai.CompactedResponse, error)
 }
 
+type ResponseInputTokenCountProvider interface {
+	CountResponseInputTokens(ctx context.Context, req modules.RequestContext) (openai.ResponseInputTokenCount, error)
+}
+
+type ResponseInputTokenCountClient interface {
+	CountResponseInputTokens(ctx context.Context, request openai.ResponseInputTokenCountRequest) (openai.ResponseInputTokenCount, error)
+}
+
 type CompletionProvider interface {
 	Completions(ctx context.Context, req modules.RequestContext) (openai.CompletionResponse, error)
 }

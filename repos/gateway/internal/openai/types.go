@@ -358,6 +358,34 @@ type ResponseRequest struct {
 	TopP              *float64           `json:"top_p,omitempty"`
 }
 
+type ResponseInputTokenCountRequest struct {
+	Provider          string             `json:"provider,omitempty"`
+	Model             string             `json:"model"`
+	Input             any                `json:"input"`
+	Instructions      string             `json:"instructions,omitempty"`
+	Tools             []ResponseTool     `json:"tools,omitempty"`
+	ToolChoice        any                `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool              `json:"parallel_tool_calls,omitempty"`
+	Text              any                `json:"text,omitempty"`
+	PreviousResponse  string             `json:"previous_response_id,omitempty"`
+	Reasoning         *ResponseReasoning `json:"reasoning,omitempty"`
+	Truncation        *string            `json:"truncation,omitempty"`
+}
+
+func (r ResponseInputTokenCountRequest) ResponseRequest() ResponseRequest {
+	return ResponseRequest{
+		Provider: r.Provider, Model: r.Model, Input: r.Input, Instructions: r.Instructions,
+		Tools: r.Tools, ToolChoice: r.ToolChoice, ParallelToolCalls: r.ParallelToolCalls,
+		Text: r.Text, PreviousResponse: r.PreviousResponse, Reasoning: r.Reasoning,
+		Truncation: r.Truncation,
+	}
+}
+
+type ResponseInputTokenCount struct {
+	Object      string `json:"object"`
+	InputTokens int    `json:"input_tokens"`
+}
+
 type ResponseTool struct {
 	Type              string            `json:"type"`
 	Name              string            `json:"name,omitempty"`

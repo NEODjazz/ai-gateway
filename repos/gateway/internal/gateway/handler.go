@@ -914,6 +914,10 @@ func writeProviderFailure(w http.ResponseWriter, err error) {
 		writeProviderParameterError(w, http.StatusBadRequest, "unsupported_operation", "response compaction is incompatible with an anonymizing policy", "")
 		return
 	}
+	if errors.Is(err, provider.ErrResponseInputTokenCountUnsupported) {
+		writeProviderParameterError(w, http.StatusBadRequest, "unsupported_operation", "response input token counting is not supported by the selected deployment", "")
+		return
+	}
 	if errors.Is(err, provider.ErrResponseNotFound) {
 		writeError(w, http.StatusNotFound, "response_not_found", "response not found")
 		return

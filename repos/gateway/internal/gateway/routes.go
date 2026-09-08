@@ -26,6 +26,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/v1/messages"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Messages) }},
 	{RouteContract{http.MethodPost, "/v1/messages/count_tokens"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CountMessageTokens) }},
 	{RouteContract{http.MethodPost, "/v1/responses"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Responses) }},
+	{RouteContract{http.MethodPost, "/v1/responses/input_tokens"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CountResponseInputTokens) }},
 	{RouteContract{http.MethodPost, "/v1/responses/compact"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CompactResponse) }},
 	{RouteContract{http.MethodGet, "/v1/responses/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetResponse) }},
 	{RouteContract{http.MethodDelete, "/v1/responses/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteResponse) }},

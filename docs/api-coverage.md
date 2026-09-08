@@ -20,7 +20,7 @@ availability is not inferred from these tests.
 | Family | Current implementation | Remaining work |
 | --- | --- | --- |
 | Chat completions | JSON, tools, structured output, vision input, SSE, generation controls | Additional controls, model-specific policy and multi-choice accounting |
-| Responses | Create, indexed SSE assembly, scoped deployment affinity, function tools, MCP passthrough, stateless reasoning history, owned retrieve/delete/cancel/input-items, generation options and metadata | Durable background lifecycle; remaining provider-specific parameters |
+| Responses | Create, indexed SSE assembly, scoped deployment affinity, function tools, MCP passthrough, stateless reasoning history, native input-token count, owned retrieve/delete/cancel/input-items, generation options and metadata | Durable background lifecycle; remaining provider-specific parameters and counters |
 | Response compaction | Native compact contract, bounded opaque output, model authorization and usage settlement | Additional provider-native compact request options as demand is confirmed |
 | Embeddings | String/list input, float output, compatible and native adapters | Provider compatibility matrix, additional input/output encodings |
 | Rerank | Query/documents, compatible adapter | Provider-specific request and usage matrix |

@@ -10,6 +10,7 @@ Gateway реализует OpenAI-compatible endpoints:
 | `POST /v1/chat/completions` | Chat, tools, structured output и vision |
 | `POST /v1/completions` | Native text completion для строковых и token-ID prompts; JSON и SSE |
 | `POST /v1/responses` | Responses, continuity, function tools и MCP passthrough |
+| `POST /v1/responses/input_tokens` | Native-подсчет полного Responses input без generation billing lifecycle |
 | `POST /v1/responses/compact` | Native compaction с авторизацией модели и учетом фактического usage |
 | `GET /v1/responses/{id}` | Чтение сохраненного Response владельцем credential |
 | `DELETE /v1/responses/{id}` | Удаление сохраненного Response и ownership binding |
@@ -36,6 +37,7 @@ upstream. Новые поддерживаемые параметры переч�
 | `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
 | `/v1/completions` | `provider`, `model`, `prompt`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `n`, `presence_penalty`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
 | `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
+| `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
 | `/v1/responses/compact` | `provider`, `model`, `input`, `instructions` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `encoding_format`, `dimensions`, `user` |
 | `/v1/rerank` | `provider`, `model`, `query`, `documents`, `top_n`, `rank_fields`, `return_documents`, `max_chunks_per_doc`, `max_tokens_per_doc` |
