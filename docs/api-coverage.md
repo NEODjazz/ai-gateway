@@ -25,7 +25,7 @@ availability is not inferred from these tests.
 | Embeddings | String/list input, float output, compatible and native adapters | Provider compatibility matrix, additional input/output encodings |
 | Rerank | Query/documents, compatible adapter | Provider-specific request and usage matrix |
 | Text completions | Not implemented | Native completion execution and legacy response/SSE contracts |
-| Messages | Outbound Anthropic adapter | Native inbound message protocol and errors |
+| Messages | Inbound `/v1/messages` JSON/SSE over the shared Chat pipeline; outbound Anthropic adapter | Thinking, prompt-cache controls, server tools, stop sequences and prefill |
 | Anthropic token counting | Not implemented | Authenticated native counter; distinguish exact count from estimate |
 | GenerateContent | Outbound native Gemini chat/tools/vision, SSE and usage | Native inbound contract and broader provider options |
 | Interactions | Not implemented | Native lifecycle, resource ownership and accounting |

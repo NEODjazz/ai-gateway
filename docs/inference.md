@@ -220,3 +220,43 @@ duplicates). Invalid continuation cursors, empty continuing pages and pagination
 cycles fail explicitly. Caller cancellation also stops the current request.
 This does not publish the inbound Messages API or automatically change pricing.
 Protocol: [Anthropic Models API](https://platform.claude.com/docs/en/api/models/list).
+
+
+## Inbound Messages API
+
+`POST /v1/messages` accepts a gateway virtual key in `x-api-key` or the existing
+Bearer header and requires `anthropic-version: 2023-06-01`. Conflicting keys and
+beta headers are rejected. The model is a gateway model/alias. Requests enter the
+same Chat authorization, tool ACL, TPM/RPM, routing, content policy and billing
+pipeline; this endpoint does not forward client credentials to providers.
+
+Supported input is text, text system blocks, base64 user images, function schemas,
+assistant tool-use history, text tool results, tool choice and parallel-tool
+control, temperature, top-p, positive max_tokens and stream. Provider-specific
+capability checks still apply after conversion. Responses contain native text or
+tool-use blocks and native usage fields. Cached prompt tokens are separated from
+uncached input tokens without changing the internal accounting totals.
+
+SSE emits message_start, content_block_start/delta/stop, message_delta and
+message_stop. Function argument fragments use input_json_delta. Errors after
+stream start emit an error event without successful completion. Native streaming
+and the ordinary-response fallback both use the same output conversion. The
+conversion buffers at most 32 MiB per JSON response or unfinished SSE frame and
+at most 128 concurrent tool identities. Accumulated function arguments have a
+separate 32 MiB total limit and must form JSON objects before completion. A
+stream without a finish reason fails.
+
+Compatibility is partial. Unsupported top-level fields and block fields fail
+with a native invalid_request_error. In particular, thinking, cache controls,
+server tools, documents, URL images, metadata, stop_sequences, top_k, assistant
+prefill, text after tool_use and is_error=true tool results are not supported.
+All tool-use history requires matching results. Opaque provider tool metadata
+that cannot be represented in Messages produces an explicit conversion error.
+The endpoint does not provide count_tokens or background jobs.
+
+Regressions cover request/response conversion, native and fallback SSE, stream
+failure, model/tool authorization, TPM, unknown input, response-size bounds and
+reported usage reaching the accounting stage through Router. No live paid
+provider calls were used. Protocol references:
+[Messages](https://platform.claude.com/docs/en/api/messages/create) and
+[streaming](https://platform.claude.com/docs/en/build-with-claude/streaming).

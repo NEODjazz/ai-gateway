@@ -145,6 +145,10 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !decodeInferenceRequest(w, r, &request) {
 		return
 	}
+	h.serveChat(w, r, request)
+}
+
+func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest) {
 	if message := request.ChatGenerationOptions.Validate(); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
@@ -212,7 +216,11 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 				writeProviderFailure(w, err)
 				return
 			}
-			_ = response
+			if sink, ok := w.(interface {
+				chatStreamResult(openai.ChatCompletionResponse)
+			}); ok {
+				sink.chatStreamResult(response)
+			}
 			writeSSEDone(w)
 			return
 		} else if err != nil {
