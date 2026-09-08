@@ -156,3 +156,8 @@ Anthropic adapter преобразует chat `stop` (строка или мас
 forced tool choice и structured output. При отсутствии tools параметр не создаёт
 искусственного tool choice. Проверено для обычных и streaming wire requests.
 Native семантика: [parallel tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use).
+
+OpenAI-compatible chat stream допускает индексы choices и tool calls от 0 до 127.
+Отрицательные и выходящие за пределы индексы upstream возвращают ошибку до
+выделения массивов и передачи некорректного события клиенту. Это ограничение
+накопления stream, а не объявление поддержки параметра `n` в публичном API.

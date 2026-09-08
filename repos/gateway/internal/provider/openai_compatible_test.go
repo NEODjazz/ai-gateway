@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -509,5 +511,38 @@ func TestChatStreamPreservesReportedUsage(t *testing.T) {
 		if streaming && (len(forwarded) != 2 || !strings.Contains(forwarded[1], "cached_tokens")) {
 			t.Fatalf("usage event not forwarded: %v", forwarded)
 		}
+	}
+}
+
+func TestChatStreamRejectsInvalidIndicesBeforeWriting(t *testing.T) {
+	for _, index := range []int{-1, 128, math.MaxInt} {
+		for _, tool := range []bool{false, true} {
+			t.Run(fmt.Sprintf("index=%d/tool=%v", index, tool), func(t *testing.T) {
+				choice := map[string]any{"index": index, "delta": map[string]any{}}
+				if tool {
+					choice = map[string]any{"index": 0, "delta": map[string]any{"tool_calls": []any{map[string]any{"index": index, "function": map[string]any{"arguments": "{}"}}}}}
+				}
+				encoded, err := json.Marshal(map[string]any{"choices": []any{choice}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				wrote := false
+				_, err = streamChatCompletionData(strings.NewReader("data: "+string(encoded)+"\n\n"), "test", func(string) error { wrote = true; return nil })
+				if err == nil || wrote {
+					t.Fatalf("invalid index accepted: err=%v wrote=%v", err, wrote)
+				}
+			})
+		}
+	}
+}
+
+func TestChatStreamIndexBoundaries(t *testing.T) {
+	payload := `data: {"choices":[{"index":127,"delta":{"tool_calls":[{"index":127,"function":{"arguments":"{}"}}]}}]}` + "\n\n"
+	response, err := decodeChatCompletionStream(strings.NewReader(payload), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Choices) != 128 || len(response.Choices[127].Message.ToolCalls) != 128 {
+		t.Fatal("valid boundary index rejected")
 	}
 }

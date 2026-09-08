@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -380,6 +381,9 @@ func decodeChatCompletionStream(body io.Reader, fallbackModel string) (openai.Ch
 	return streamChatCompletionData(body, fallbackModel, nil)
 }
 
+const maxChatStreamChoices = 128
+const maxChatStreamToolCalls = 128
+
 func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	response := openai.ChatCompletionResponse{
 		Object: "chat.completion",
@@ -424,6 +428,9 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			response.Usage = *chunk.Usage
 		}
 		for _, choice := range chunk.Choices {
+			if choice.Index < 0 || choice.Index >= maxChatStreamChoices {
+				return fmt.Errorf("invalid upstream choice index")
+			}
 			for len(response.Choices) <= choice.Index {
 				response.Choices = append(response.Choices, openai.Choice{Index: len(response.Choices), Message: openai.Message{Role: "assistant"}})
 			}
@@ -442,7 +449,9 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			if choice.Delta.Content != "" {
 				current.Message.Content = openai.ContentText(current.Message.Content) + choice.Delta.Content
 			}
-			mergeToolCallDeltas(&current.Message.ToolCalls, choice.Delta.ToolCalls)
+			if err := mergeToolCallDeltas(&current.Message.ToolCalls, choice.Delta.ToolCalls); err != nil {
+				return err
+			}
 			if choice.FinishReason != nil && *choice.FinishReason != "" {
 				current.FinishReason = *choice.FinishReason
 			}
@@ -458,11 +467,14 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 	return response, nil
 }
 
-func mergeToolCallDeltas(target *[]openai.ToolCall, deltas []openai.ToolCall) {
+func mergeToolCallDeltas(target *[]openai.ToolCall, deltas []openai.ToolCall) error {
 	for order, delta := range deltas {
 		index := order
-		if delta.Index != nil && *delta.Index >= 0 {
+		if delta.Index != nil {
 			index = *delta.Index
+		}
+		if index < 0 || index >= maxChatStreamToolCalls {
+			return fmt.Errorf("invalid upstream tool call index")
 		}
 		for len(*target) <= index {
 			*target = append(*target, openai.ToolCall{Type: "function"})
@@ -479,6 +491,7 @@ func mergeToolCallDeltas(target *[]openai.ToolCall, deltas []openai.ToolCall) {
 		}
 		current.Function.Arguments += delta.Function.Arguments
 	}
+	return nil
 }
 
 func decodeResponseStream(body io.Reader, fallbackModel string) (openai.ResponseResponse, error) {
