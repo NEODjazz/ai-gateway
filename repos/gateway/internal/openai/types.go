@@ -357,6 +357,21 @@ type ResponseDeletion struct {
 	Deleted bool   `json:"deleted"`
 }
 
+type ResponseCompactRequest struct {
+	Provider     string `json:"provider,omitempty"`
+	Model        string `json:"model"`
+	Input        any    `json:"input"`
+	Instructions string `json:"instructions,omitempty"`
+}
+
+type CompactedResponse struct {
+	ID        string            `json:"id"`
+	Object    string            `json:"object"`
+	CreatedAt int64             `json:"created_at,omitempty"`
+	Output    []json.RawMessage `json:"output"`
+	Usage     ResponseUsage     `json:"usage"`
+}
+
 type ResponseError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

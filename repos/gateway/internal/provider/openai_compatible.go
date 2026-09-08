@@ -53,6 +53,12 @@ type openAICompatibleResponseRequest struct {
 	TopP              *float64                  `json:"top_p,omitempty"`
 }
 
+type openAICompatibleCompactRequest struct {
+	Model        string `json:"model"`
+	Input        any    `json:"input"`
+	Instructions string `json:"instructions,omitempty"`
+}
+
 type openAICompatibleEmbeddingRequest struct {
 	Model          string `json:"model"`
 	Input          any    `json:"input"`
@@ -138,6 +144,30 @@ func (p OpenAICompatible) Rerank(ctx context.Context, request openai.RerankReque
 
 func (OpenAICompatible) SupportsMCP() bool    { return true }
 func (OpenAICompatible) SupportsVision() bool { return true }
+
+func (p OpenAICompatible) CompactResponse(ctx context.Context, request openai.ResponseCompactRequest) (openai.CompactedResponse, error) {
+	body, err := json.Marshal(openAICompatibleCompactRequest{Model: request.Model, Input: request.Input, Instructions: request.Instructions})
+	if err != nil {
+		return openai.CompactedResponse{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(p.baseURL, "responses/compact"), bytes.NewReader(body))
+	if err != nil {
+		return openai.CompactedResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return openai.CompactedResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return openai.CompactedResponse{}, responseStatusError("openai-compatible", resp)
+	}
+	return decodeCompactedResponse(resp.Body)
+}
 
 func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	if err := p.ValidateChatParameters(request); err != nil {

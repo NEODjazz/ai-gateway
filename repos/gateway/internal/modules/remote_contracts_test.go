@@ -232,6 +232,21 @@ func TestRemoteBillingMarksFallbackTokenCountAsEstimated(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingCommitsCompactionUsageSeparately(t *testing.T) {
+	req := sensitiveContext()
+	req.ResponseRequest = &openai.ResponseRequest{Provider: "provider", Model: "compact-model", Input: "private input", Instructions: "private instructions"}
+	req.Metadata = map[string]string{"gateway.api_type": "responses_compact"}
+	reserved := billingRequest(&req)
+	if reserved.APIType != "responses_compact" || reserved.PromptTokensEstimated != openai.ResponseInputTokens(*req.ResponseRequest) || reserved.TotalTokens <= reserved.InputTokens {
+		t.Fatalf("unexpected compaction reserve: %+v", reserved)
+	}
+	req.CompactedResponse = &openai.CompactedResponse{ID: "cmp_1", Object: "response.compaction", Usage: openai.ResponseUsage{InputTokens: 14, OutputTokens: 3, TotalTokens: 17}}
+	committed := billingRequest(&req)
+	if committed.APIType != "responses_compact" || committed.Phase != "commit" || committed.InputTokens != 14 || committed.OutputTokens != 3 || committed.TotalTokens != 17 || committed.UsageEstimated {
+		t.Fatalf("unexpected compaction commit: %+v", committed)
+	}
+}
+
 func TestRemoteBillingRerankPayloadContainsNoQueryOrDocuments(t *testing.T) {
 	req := sensitiveContext()
 	req.RerankRequest = &openai.RerankRequest{Provider: "p", Model: "reranker", Query: "private query", Documents: []any{"private document"}}

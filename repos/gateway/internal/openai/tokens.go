@@ -80,6 +80,13 @@ func ResponseInputTokens(r ResponseRequest) int {
 	}{r.Input, r.Instructions, r.Tools, r.ToolChoice, r.Text})
 }
 
+func ResponseCompactInputTokens(r ResponseCompactRequest) int {
+	return EstimateContextTokens(struct {
+		Input        any    `json:"input"`
+		Instructions string `json:"instructions,omitempty"`
+	}{r.Input, r.Instructions})
+}
+
 // ReserveTokens saturates instead of overflowing for an untrusted output cap.
 func ReserveTokens(input, output int) int {
 	if output <= 0 {

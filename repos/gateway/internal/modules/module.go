@@ -40,6 +40,7 @@ type RequestContext struct {
 	RerankRequest           *openai.RerankRequest          `json:"rerank_request,omitempty"`
 	Response                *openai.ChatCompletionResponse `json:"response,omitempty"`
 	ResponsesResponse       *openai.ResponseResponse       `json:"responses_response,omitempty"`
+	CompactedResponse       *openai.CompactedResponse      `json:"compacted_response,omitempty"`
 	EmbeddingResponse       *openai.EmbeddingResponse      `json:"embedding_response,omitempty"`
 	RerankResponse          *openai.RerankResponse         `json:"rerank_response,omitempty"`
 	Usage                   *openai.Usage                  `json:"usage,omitempty"`

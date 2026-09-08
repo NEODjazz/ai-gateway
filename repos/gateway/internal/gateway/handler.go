@@ -357,6 +357,79 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h Handler) CompactResponse(w http.ResponseWriter, r *http.Request) {
+	var request openai.ResponseCompactRequest
+	if !decodeInferenceRequest(w, r, &request) {
+		return
+	}
+	if message := validateResponseCompactRequest(request); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
+	responseRequest := openai.ResponseRequest{Provider: request.Provider, Model: request.Model, Input: request.Input, Instructions: request.Instructions}
+	reqCtx := modules.RequestContext{
+		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r),
+		ResponseRequest: &responseRequest,
+		Request:         openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model, Messages: responseMessages(responseRequest)},
+		Metadata:        map[string]string{"gateway.api_type": "responses_compact"},
+	}
+	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
+		return
+	}
+	reqCtx.APIKey = ""
+	if reqCtx.ResponseRequest == nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module removed response compaction request")
+		return
+	}
+	request = openai.ResponseCompactRequest{
+		Provider: reqCtx.ResponseRequest.Provider, Model: reqCtx.ResponseRequest.Model,
+		Input: reqCtx.ResponseRequest.Input, Instructions: reqCtx.ResponseRequest.Instructions,
+	}
+	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateResponseCompactTokens(request)) {
+		return
+	}
+	if !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+		return
+	}
+	compactProvider, ok := h.provider.(provider.ResponseCompactProvider)
+	if !ok {
+		writeError(w, http.StatusBadGateway, "provider_failed", "response compaction is not supported by the configured provider")
+		return
+	}
+	response, err := compactProvider.CompactResponse(r.Context(), reqCtx)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func validateResponseCompactRequest(request openai.ResponseCompactRequest) string {
+	if strings.TrimSpace(request.Model) == "" {
+		return "model is required"
+	}
+	switch input := request.Input.(type) {
+	case string:
+		if strings.TrimSpace(input) == "" {
+			return "input is required"
+		}
+	case []any:
+		if len(input) == 0 {
+			return "input is required"
+		}
+	case nil:
+		return "input is required"
+	default:
+		return "input must be a string or a non-empty array"
+	}
+	return ""
+}
+
 func (h Handler) GetResponse(w http.ResponseWriter, r *http.Request) {
 	resourceProvider, ok := h.provider.(provider.ResponseResourceProvider)
 	if !ok {
@@ -684,6 +757,14 @@ func decodeInferenceRequest(w http.ResponseWriter, r *http.Request, target any) 
 }
 
 func writeProviderFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, provider.ErrResponseCompactionUnsupported) {
+		writeProviderParameterError(w, http.StatusBadRequest, "unsupported_operation", "response compaction is not supported by the selected deployment", "")
+		return
+	}
+	if errors.Is(err, provider.ErrResponseCompactionAnonymized) {
+		writeProviderParameterError(w, http.StatusBadRequest, "unsupported_operation", "response compaction is incompatible with an anonymizing policy", "")
+		return
+	}
 	if errors.Is(err, provider.ErrResponseNotFound) {
 		writeError(w, http.StatusNotFound, "response_not_found", "response not found")
 		return

@@ -28,6 +28,10 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	if ResponseInputTokens(response) < 1000 {
 		t.Fatal("instructions omitted")
 	}
+	compact := ResponseCompactRequest{Input: "test", Instructions: strings.Repeat("compact", 1000)}
+	if ResponseCompactInputTokens(compact) < 1000 {
+		t.Fatal("compaction instructions omitted")
+	}
 	if ReserveTokens(20, 0) != 20+DefaultOutputTokenReserve {
 		t.Fatal("missing default reserve")
 	}

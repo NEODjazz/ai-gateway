@@ -67,6 +67,14 @@ type ResponseDeletionProvider interface {
 	DeleteResponse(ctx context.Context, req modules.RequestContext, id string) (openai.ResponseDeletion, error)
 }
 
+type ResponseCompactProvider interface {
+	CompactResponse(ctx context.Context, req modules.RequestContext) (openai.CompactedResponse, error)
+}
+
+type ResponseCompactClient interface {
+	CompactResponse(ctx context.Context, request openai.ResponseCompactRequest) (openai.CompactedResponse, error)
+}
+
 type EmbeddingProvider interface {
 	Embeddings(ctx context.Context, req modules.RequestContext) (openai.EmbeddingResponse, error)
 }
@@ -1207,6 +1215,7 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 	}
 	attemptCtx.Response = nil
 	attemptCtx.ResponsesResponse = nil
+	attemptCtx.CompactedResponse = nil
 	attemptCtx.EmbeddingResponse = nil
 	attemptCtx.RerankResponse = nil
 	attemptCtx.Usage = nil

@@ -224,6 +224,14 @@ func (p *chatProvider) Rerank(_ context.Context, req modules.RequestContext) (op
 	return openai.RerankResponse{ID: "rerank-test", Results: []openai.RerankResult{{Index: 1, RelevanceScore: 0.9}}}, nil
 }
 
+func (p *chatProvider) CompactResponse(_ context.Context, req modules.RequestContext) (openai.CompactedResponse, error) {
+	p.request = req
+	return openai.CompactedResponse{
+		ID: "cmp-test", Object: "response.compaction", Output: []json.RawMessage{json.RawMessage(`{"type":"compaction","encrypted_content":"opaque"}`)},
+		Usage: openai.ResponseUsage{InputTokens: 8, OutputTokens: 2, TotalTokens: 10},
+	}, nil
+}
+
 func (p *chatProvider) ChatCompletions(_ context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
 	p.request = req
 	return openai.ChatCompletionResponse{
@@ -272,6 +280,40 @@ func TestEmbeddingsUsesAuthenticatedProviderPipeline(t *testing.T) {
 	}
 	if input := openai.EmbeddingInputText(llm.request.EmbeddingRequest.Input); input != "hello\nworld" {
 		t.Fatalf("unexpected embedding input: %q", input)
+	}
+}
+
+func TestCompactResponseUsesAuthenticatedInferencePipeline(t *testing.T) {
+	llm := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), llm))
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{"model":"compact-model","input":[{"role":"user","content":"hello"}],"instructions":"shorten"}`))
+	request.Header.Set("Authorization", "Bearer client-secret")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String())
+	}
+	if llm.request.APIKey != "" || llm.request.ResponseRequest == nil || llm.request.ResponseRequest.Model != "compact-model" {
+		t.Fatalf("unsafe or missing compact provider context: %+v", llm.request)
+	}
+	if llm.request.Metadata["gateway.api_type"] != "responses_compact" || !strings.Contains(response.Body.String(), `"object":"response.compaction"`) {
+		t.Fatalf("compact contract was not preserved: context=%+v body=%s", llm.request, response.Body.String())
+	}
+}
+
+func TestCompactResponseRejectsUnsupportedFieldsAndEmptyInput(t *testing.T) {
+	handler := Routes(NewHandler(modules.NewPipeline(nil), &chatProvider{}))
+	for _, body := range []string{
+		`{"model":"m","input":"x","stream":true}`,
+		`{"model":"m","input":[]}`,
+		`{"model":"m","input":null}`,
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body %s: status=%d response=%s", body, response.Code, response.Body.String())
+		}
 	}
 }
 

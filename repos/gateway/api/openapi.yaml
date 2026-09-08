@@ -424,6 +424,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/responses/compact:
+    post:
+      operationId: compactResponse
+      tags: [Inference]
+      summary: Compact a Responses conversation
+      description: Routes compaction only to adapters with a native compact operation. The opaque output is preserved and provider-reported usage settles billing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResponseCompactRequest'
+            example:
+              model: gpt-5-mini
+              input: Summarize the conversation state.
+      responses:
+        '200':
+          description: Compacted response output
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompactedResponse'
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/RequestTooLarge'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '451': {$ref: '#/components/responses/ContentRejected'}
+        '502': {$ref: '#/components/responses/ProviderFailed'}
   /v1/responses/{id}:
     get:
       operationId: retrieveResponse
@@ -3375,6 +3407,41 @@ components:
         type: {type: string}
         text: {type: string}
         refusal: {type: string}
+    ResponseCompactRequest:
+      type: object
+      additionalProperties: false
+      required: [model, input]
+      properties:
+        provider: {type: string}
+        model: {type: string, minLength: 1}
+        input:
+          oneOf:
+            - type: string
+              minLength: 1
+            - type: array
+              minItems: 1
+              items:
+                oneOf:
+                  - {$ref: '#/components/schemas/ResponseInputMessage'}
+                  - type: object
+                    additionalProperties: true
+        instructions: {type: string}
+    CompactedResponse:
+      type: object
+      additionalProperties: false
+      required: [id, object, output, usage]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 512}
+        object: {type: string, const: response.compaction}
+        created_at: {type: integer, minimum: 0}
+        output:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items:
+            type: object
+            additionalProperties: true
+        usage: {$ref: '#/components/schemas/ResponseUsage'}
     ResponseOutputItem:
       type: object
       required: [type]

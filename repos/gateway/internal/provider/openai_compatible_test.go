@@ -109,6 +109,43 @@ func TestOpenAICompatiblePreservesResponseCacheTokenDetails(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleCompactsResponseWithoutLosingOpaqueOutput(t *testing.T) {
+	var upstream map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses/compact" || r.Header.Get("Authorization") != "Bearer provider-key" {
+			t.Fatalf("unexpected compact request: path=%q authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"id":"cmp_1","object":"response.compaction","created_at":7,"output":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]},{"type":"compaction","encrypted_content":"opaque","future":{"kept":true}}],"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}}`))
+	}))
+	defer server.Close()
+
+	response, err := NewOpenAICompatible(server.URL+"/v1", "provider-key", false).CompactResponse(t.Context(), openai.ResponseCompactRequest{
+		Provider: "route-only", Model: "gpt-compact", Input: []any{map[string]any{"role": "user", "content": "hello"}}, Instructions: "shorten",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := upstream["provider"]; found || string(upstream["model"]) != `"gpt-compact"` || string(upstream["instructions"]) != `"shorten"` {
+		t.Fatalf("unexpected upstream payload: %+v", upstream)
+	}
+	if response.Usage.TotalTokens != 15 || len(response.Output) != 2 || !strings.Contains(string(response.Output[1]), `"future":{"kept":true}`) {
+		t.Fatalf("opaque compacted response was not preserved: %+v output=%s", response, response.Output[1])
+	}
+}
+
+func TestOpenAICompatibleRejectsInvalidCompactedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"cmp_1","object":"response.compaction","output":[null],"usage":{"input_tokens":-1}}`))
+	}))
+	defer server.Close()
+	if _, err := NewOpenAICompatible(server.URL, "", false).CompactResponse(t.Context(), openai.ResponseCompactRequest{Model: "m", Input: "x"}); err == nil {
+		t.Fatal("invalid compacted response was accepted")
+	}
+}
+
 func TestOpenAICompatibleCapturesSafeUpstreamParameterError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

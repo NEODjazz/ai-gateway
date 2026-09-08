@@ -158,6 +158,9 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.Provider = req.ResponseRequest.Provider
 		request.Model = req.ResponseRequest.Model
 		request.APIType = "responses"
+		if metadataValue(req.Metadata, "gateway.api_type") == "responses_compact" {
+			request.APIType = "responses_compact"
+		}
 	}
 	if req.EmbeddingRequest != nil {
 		request.Provider = req.EmbeddingRequest.Provider
@@ -193,6 +196,18 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.UpstreamModel = req.ResponsesResponse.Model
 		request.UsageEstimated = request.TotalTokens == 0
 		if details := req.ResponsesResponse.Usage.InputTokensDetails; details != nil {
+			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
+			request.CacheWriteInputTokens = nonNegative(firstNonZero(details.CacheWriteTokens, details.CacheCreationTokens))
+		}
+	}
+	if req.CompactedResponse != nil {
+		request.Phase = "commit"
+		request.InputTokens = req.CompactedResponse.Usage.InputTokens
+		request.OutputTokens = req.CompactedResponse.Usage.OutputTokens
+		request.TotalTokens = req.CompactedResponse.Usage.TotalTokens
+		request.UpstreamModel = request.Model
+		request.UsageEstimated = request.TotalTokens == 0
+		if details := req.CompactedResponse.Usage.InputTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
 			request.CacheWriteInputTokens = nonNegative(firstNonZero(details.CacheWriteTokens, details.CacheCreationTokens))
 		}

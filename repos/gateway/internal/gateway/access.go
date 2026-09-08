@@ -230,6 +230,10 @@ func estimateResponseTokens(request openai.ResponseRequest) int {
 	return openai.ReserveTokens(openai.ResponseInputTokens(request), openai.ResponseOutputLimit(request))
 }
 
+func estimateResponseCompactTokens(request openai.ResponseCompactRequest) int {
+	return openai.ReserveTokens(openai.ResponseCompactInputTokens(request), 0)
+}
+
 func estimateEmbeddingTokens(request openai.EmbeddingRequest) int {
 	return openai.EstimateContextTokens(request.Input)
 }

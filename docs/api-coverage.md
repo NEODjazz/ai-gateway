@@ -20,8 +20,8 @@ availability is not inferred from these tests.
 | Family | Current implementation | Remaining work |
 | --- | --- | --- |
 | Chat completions | JSON, tools, structured output, vision input, SSE, generation controls | Additional controls, model-specific policy and multi-choice accounting |
-| Responses | Create, indexed SSE assembly, scoped deployment affinity, function tools, MCP passthrough, stateless reasoning history, generation options and metadata | Owned retrieve/delete/cancel/input-items; durable background lifecycle; remaining provider-specific parameters |
-| Response compaction | Not implemented | Native compact contract, usage settlement and model authorization |
+| Responses | Create, indexed SSE assembly, scoped deployment affinity, function tools, MCP passthrough, stateless reasoning history, owned retrieve/delete/cancel/input-items, generation options and metadata | Durable background lifecycle; remaining provider-specific parameters |
+| Response compaction | Native compact contract, bounded opaque output, model authorization and usage settlement | Additional provider-native compact request options as demand is confirmed |
 | Embeddings | String/list input, float output, compatible and native adapters | Provider compatibility matrix, additional input/output encodings |
 | Rerank | Query/documents, compatible adapter | Provider-specific request and usage matrix |
 | Text completions | Not implemented | Native completion execution and legacy response/SSE contracts |
@@ -132,8 +132,8 @@ The recorded local deployment is source 5d10695, Helm revision 118. Later change
 through 04462e5 are tested and committed but are not covered by that rollout.
 PostgreSQL integration last passed at source 63dbfa9 using three isolated databases.
 
-The major remaining API work is unchanged: owned Responses resource operations and
-background execution, compaction, text completions, media APIs, async jobs, resource
+The major remaining API work is background Responses execution, text completions,
+media APIs, async jobs, resource
 storage, search, MCP execution and A2A. Provider workload identity and native cloud
 authentication also remain unimplemented. Further parameter additions alone cannot
 close these families; each needs its execution, authorization and settlement path.
