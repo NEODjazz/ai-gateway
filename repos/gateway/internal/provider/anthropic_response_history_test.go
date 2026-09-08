@@ -94,3 +94,29 @@ func TestAnthropicResponsesRejectsInvalidToolHistoryBeforeHTTP(t *testing.T) {
 		t.Fatalf("upstream calls=%d", calls.Load())
 	}
 }
+
+func TestAnthropicResponsesOrdersToolResultsBeforeUserText(t *testing.T) {
+	input := []any{
+		map[string]any{"type": "function_call", "call_id": "a", "name": "tool", "arguments": "{}"},
+		map[string]any{"type": "function_call", "call_id": "b", "name": "tool", "arguments": "{}"},
+		map[string]any{"role": "user", "content": "before"},
+		map[string]any{"type": "function_call_output", "call_id": "a", "output": "A"},
+		map[string]any{"role": "user", "content": "between"},
+		map[string]any{"type": "function_call_output", "call_id": "b", "output": "B"},
+		map[string]any{"role": "user", "content": "after"},
+	}
+	messages, err := anthropicResponseMessages(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("messages=%+v", messages)
+	}
+	blocks, ok := messages[1].Content.([]anthropicContent)
+	if !ok || len(blocks) != 5 {
+		t.Fatalf("content=%+v", messages[1].Content)
+	}
+	if blocks[0].Type != "tool_result" || blocks[0].ToolUseID != "a" || blocks[1].Type != "tool_result" || blocks[1].ToolUseID != "b" || blocks[2].Text != "before" || blocks[3].Text != "between" || blocks[4].Text != "after" {
+		t.Fatalf("blocks=%+v", blocks)
+	}
+}

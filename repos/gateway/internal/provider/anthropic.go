@@ -389,16 +389,7 @@ func anthropicResponseMessages(input any) ([]anthropicMessage, error) {
 				if err != nil {
 					return nil, err
 				}
-				if len(messages) > 0 && messages[len(messages)-1].Role == message.Role {
-					previous := &messages[len(messages)-1]
-					blocks, ok := previous.Content.([]anthropicContent)
-					if !ok {
-						blocks = []anthropicContent{{Type: "text", Text: openai.ContentText(previous.Content)}}
-					}
-					previous.Content = append(blocks, message.Content.([]anthropicContent)...)
-				} else {
-					messages = append(messages, message)
-				}
+				messages = appendAnthropicResponseMessage(messages, message)
 				continue
 			}
 			role, _ := object["role"].(string)
@@ -406,10 +397,10 @@ func anthropicResponseMessages(input any) ([]anthropicMessage, error) {
 				messages = nil
 				break
 			}
-			messages = append(messages, anthropicMessage{Role: role, Content: anthropicMessageContent(object["content"])})
+			messages = appendAnthropicResponseMessage(messages, anthropicMessage{Role: role, Content: anthropicMessageContent(object["content"])})
 		}
 		if len(messages) > 0 {
-			return messages, nil
+			return orderAnthropicToolResults(messages), nil
 		}
 	}
 	return []anthropicMessage{{Role: "user", Content: anthropicMessageContent(input)}}, nil

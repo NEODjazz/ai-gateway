@@ -52,3 +52,58 @@ func validateAnthropicResponseHistory(input any) error {
 	}
 	return nil
 }
+
+func appendAnthropicResponseMessage(messages []anthropicMessage, message anthropicMessage) []anthropicMessage {
+	if len(messages) == 0 || messages[len(messages)-1].Role != message.Role {
+		return append(messages, message)
+	}
+	previous := &messages[len(messages)-1]
+	previous.Content = append(anthropicResponseBlocks(previous.Content), anthropicResponseBlocks(message.Content)...)
+	return messages
+}
+
+func anthropicResponseBlocks(content any) []anthropicContent {
+	if blocks, ok := content.([]anthropicContent); ok {
+		return blocks
+	}
+	if text, ok := content.(string); ok && text != "" {
+		return []anthropicContent{{Type: "text", Text: text}}
+	}
+	return nil
+}
+
+// The native protocol requires tool results before other user content.
+func orderAnthropicToolResults(messages []anthropicMessage) []anthropicMessage {
+	for i := range messages {
+		if messages[i].Role != "user" {
+			continue
+		}
+		blocks, ok := messages[i].Content.([]anthropicContent)
+		if !ok {
+			continue
+		}
+		hasResult := false
+		for _, block := range blocks {
+			if block.Type == "tool_result" {
+				hasResult = true
+				break
+			}
+		}
+		if !hasResult {
+			continue
+		}
+		ordered := make([]anthropicContent, 0, len(blocks))
+		for _, block := range blocks {
+			if block.Type == "tool_result" {
+				ordered = append(ordered, block)
+			}
+		}
+		for _, block := range blocks {
+			if block.Type != "tool_result" {
+				ordered = append(ordered, block)
+			}
+		}
+		messages[i].Content = ordered
+	}
+	return messages
+}

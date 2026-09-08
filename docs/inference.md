@@ -938,3 +938,9 @@ input during merging, including when a remote processor returns replacement IDs.
 Tool-result text remains transformable. Regression tests verify both identifiers
 through local transformation and remote projection merging, preventing
 anonymization from breaking the call/result association.
+
+Anthropic Responses history coalesces adjacent messages of the same role.
+Within a user turn, tool results precede other content as required by the native
+protocol; relative order among results and among other blocks is preserved.
+This handles parallel results interleaved with additional user text. A regression
+test verifies grouping and block order for text before, between and after results.
