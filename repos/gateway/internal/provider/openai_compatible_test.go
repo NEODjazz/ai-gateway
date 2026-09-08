@@ -485,3 +485,29 @@ func TestOpenAICompatibleCollectsStreamingToolCallArguments(t *testing.T) {
 		t.Fatalf("unexpected accumulated tool call: %+v", call)
 	}
 }
+
+func TestChatStreamPreservesReportedUsage(t *testing.T) {
+	payload := "data: {\"id\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chat-test\",\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120,\"prompt_tokens_details\":{\"cached_tokens\":80}}}\n\n" +
+		"data: [DONE]\n\n"
+	for _, streaming := range []bool{false, true} {
+		var writer ChatCompletionStreamWriter
+		var forwarded []string
+		if streaming {
+			writer = func(payload string) error { forwarded = append(forwarded, payload); return nil }
+		}
+		response, err := streamChatCompletionData(strings.NewReader(payload), "model", writer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.Usage.PromptTokens != 100 || response.Usage.CompletionTokens != 20 || response.Usage.TotalTokens != 120 || response.Usage.PromptTokensDetails == nil || response.Usage.PromptTokensDetails.CachedTokens != 80 {
+			t.Fatalf("reported stream usage lost: %+v", response.Usage)
+		}
+		if len(response.Choices) != 1 || response.Choices[0].Message.Content != "hello" {
+			t.Fatalf("usage-only event changed content: %+v", response)
+		}
+		if streaming && (len(forwarded) != 2 || !strings.Contains(forwarded[1], "cached_tokens")) {
+			t.Fatalf("usage event not forwarded: %v", forwarded)
+		}
+	}
+}

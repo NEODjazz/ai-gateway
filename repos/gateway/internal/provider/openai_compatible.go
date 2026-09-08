@@ -388,8 +388,9 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			return io.EOF
 		}
 		var chunk struct {
-			ID      string `json:"id"`
-			Model   string `json:"model"`
+			ID      string        `json:"id"`
+			Model   string        `json:"model"`
+			Usage   *openai.Usage `json:"usage"`
 			Choices []struct {
 				Index int `json:"index"`
 				Delta struct {
@@ -408,6 +409,9 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 		}
 		if chunk.Model != "" {
 			response.Model = chunk.Model
+		}
+		if chunk.Usage != nil {
+			response.Usage = *chunk.Usage
 		}
 		for _, choice := range chunk.Choices {
 			for len(response.Choices) <= choice.Index {
