@@ -196,7 +196,7 @@ func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.Embeddi
 			TotalTokens  *int `json:"total_tokens"`
 		} `json:"usage"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&upstream); err != nil {
+	if err := decodeEmbeddingResponse(resp.Body, &upstream); err != nil {
 		return openai.EmbeddingResponse{}, err
 	}
 	response := upstream.EmbeddingResponse
@@ -208,6 +208,9 @@ func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.Embeddi
 		response.Usage.PromptTokens = *usage.PromptTokens
 		response.Usage.TotalTokens = *usage.TotalTokens
 		response.UsageReported = true
+	}
+	if err := validateEmbeddingVectors(request, response.Data); err != nil {
+		return openai.EmbeddingResponse{}, err
 	}
 	return response, nil
 }

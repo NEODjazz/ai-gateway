@@ -456,3 +456,13 @@ at least prompt and no completion tokens; malformed objects now return an error.
 Ollama rejects negative prompt_eval_count. This is a stricter upstream response
 validation rule; the public request/response schema is unchanged. Regression tests
 exercise missing, zero, positive and malformed counts for both adapters.
+
+OpenAI-compatible and Ollama embedding responses are limited to 32 MiB before
+JSON decoding. Trailing JSON, truncated payloads and read errors fail explicitly.
+Responses must have one nonempty float vector per input, unique indices in the
+input range, consistent dimensions no greater than 65536, and the requested
+`dimensions` when provided. Valid out-of-order indexed vectors retain their order.
+This tightens acceptance of malformed or oversized upstream responses; valid
+responses below these limits retain their existing public representation.
+Regression tests verify bounded reads and adapter-level rejection, plus vector
+count/index/dimension checks.

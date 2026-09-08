@@ -174,7 +174,7 @@ func (p Ollama) Embeddings(ctx context.Context, request openai.EmbeddingRequest)
 		return openai.EmbeddingResponse{}, responseStatusError("ollama", resp)
 	}
 	var upstream ollamaEmbeddingResponse
-	if err := json.NewDecoder(resp.Body).Decode(&upstream); err != nil {
+	if err := decodeEmbeddingResponse(resp.Body, &upstream); err != nil {
 		return openai.EmbeddingResponse{}, err
 	}
 	tokens := 0
@@ -187,6 +187,9 @@ func (p Ollama) Embeddings(ctx context.Context, request openai.EmbeddingRequest)
 	data := make([]openai.Embedding, len(upstream.Embeddings))
 	for index, vector := range upstream.Embeddings {
 		data[index] = openai.Embedding{Object: "embedding", Embedding: vector, Index: index}
+	}
+	if err := validateEmbeddingVectors(request, data); err != nil {
+		return openai.EmbeddingResponse{}, err
 	}
 	return openai.EmbeddingResponse{
 		Object: "list", Data: data, Model: upstream.Model,
