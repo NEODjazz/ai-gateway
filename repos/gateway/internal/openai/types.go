@@ -291,6 +291,7 @@ func EmbeddingInputText(value any) string {
 }
 
 type ResponseRequest struct {
+	Truncation        *string            `json:"truncation,omitempty"`
 	Reasoning         *ResponseReasoning `json:"reasoning,omitempty"`
 	Store             *bool              `json:"store,omitempty"`
 	Include           []string           `json:"include,omitempty"`

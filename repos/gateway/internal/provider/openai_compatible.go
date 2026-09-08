@@ -33,6 +33,7 @@ type openAICompatibleChatRequest struct {
 }
 
 type openAICompatibleResponseRequest struct {
+	Truncation        *string                   `json:"truncation,omitempty"`
 	Reasoning         *openai.ResponseReasoning `json:"reasoning,omitempty"`
 	Store             *bool                     `json:"store,omitempty"`
 	Include           []string                  `json:"include,omitempty"`
@@ -290,7 +291,7 @@ func useMaxCompletionTokens(request *openAICompatibleChatRequest, err error) boo
 
 func (p OpenAICompatible) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning,
+		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: false,
@@ -329,7 +330,7 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 	}
 
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning,
+		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: true,

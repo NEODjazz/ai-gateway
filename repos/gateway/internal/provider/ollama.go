@@ -380,7 +380,7 @@ func ollamaResponseFormat(format *openai.ResponseFormat) any {
 
 func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning,
+		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: false,
@@ -421,7 +421,7 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 	}
 
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning,
+		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: true,

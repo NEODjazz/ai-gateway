@@ -28,7 +28,7 @@ upstream. Новые поддерживаемые параметры переч�
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
 | `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
-| `/v1/responses` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
+| `/v1/responses` | `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `encoding_format`, `dimensions`, `user` |
 | `/v1/rerank` | `provider`, `model`, `query`, `documents`, `top_n`, `rank_fields`, `return_documents`, `max_chunks_per_doc`, `max_tokens_per_doc` |
 
@@ -1003,3 +1003,13 @@ completed content part; the added part starts with an empty array. Tests verify
 JSON preservation, indexed native events, invalid indices and fallback payloads.
 The public response schema includes the annotation array. Event fields follow the
 [Responses streaming reference](https://developers.openai.com/api/reference/resources/responses/streaming-events).
+
+### Responses context truncation
+
+Responses accepts optional `truncation` (`auto` or `disabled`) and forwards the
+explicit value through OpenAI-compatible and Ollama native Responses requests,
+including streaming. Omission leaves the upstream default unchanged. The upstream
+validates the value and implements context truncation; the gateway still reserves
+tokens against the complete input context before execution. Anthropic conversion
+and the demo adapter reject explicit truncation with `400 unsupported_parameter`
+and `param=truncation` rather than discarding the requested behavior.

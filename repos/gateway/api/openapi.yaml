@@ -3151,6 +3151,7 @@ components:
             generate_summary: {type: string}
             context: {type: string}
             mode: {type: string}
+        truncation: {type: string, enum: [auto, disabled]}
         store: {type: boolean}
         include:
           type: array
