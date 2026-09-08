@@ -931,3 +931,10 @@ Tests verify parallel call/result grouping, preserved identifiers and large
 integer arguments, plus invalid histories in both JSON and streaming entry points
 with zero upstream calls. This conversion follows the native
 [tool-use message contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls).
+
+Text processing preserves `call_id` and `tool_call_id` as protocol identifiers.
+They are excluded from the remote text projection and retained from the original
+input during merging, including when a remote processor returns replacement IDs.
+Tool-result text remains transformable. Regression tests verify both identifiers
+through local transformation and remote projection merging, preventing
+anonymization from breaking the call/result association.
