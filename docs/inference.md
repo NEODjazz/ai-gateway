@@ -695,3 +695,18 @@ Regression tests exercise the actual HTTP adapter with invalid documents and an
 oversized body, plus exact-size, read-limit, and I/O-error cases. The limit applies
 to Responses JSON only; it does not change Chat, embedding, or native adapter
 contracts, and is separate from the native Responses SSE wire budget.
+
+### Responses usage range validation
+
+The OpenAI-compatible Responses JSON and native SSE decoders reject negative
+input, output, total, cached, cache-write, and cache-creation token counters.
+They also reject input/output values whose sum exceeds the platform integer
+range, using subtraction before any addition. SSE validation happens before the
+containing response event is forwarded; JSON validation happens before the
+adapter returns a successful result to provider post-response modules.
+
+This preserves the existing treatment of absent or partial usage, and does not
+assert that every provider's total equals the input/output sum. Usage estimation
+and missing-versus-explicit-zero handling are separate concerns. Regression tests
+cover both decoders, invalid cache detail counters, overflowing sums, exact integer
+boundaries, and compatible missing/partial usage.
