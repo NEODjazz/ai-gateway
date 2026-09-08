@@ -63,6 +63,9 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 	if managed.Type == "gemini" {
 		return discoverGeminiModels(ctx, managed.BaseURL, secret)
 	}
+	if managed.Type == "anthropic" {
+		return discoverAnthropicModels(ctx, managed.BaseURL, secret)
+	}
 	endpoint, err := discoveryURL(managed)
 	if err != nil {
 		return nil, ErrProviderProbeFailed

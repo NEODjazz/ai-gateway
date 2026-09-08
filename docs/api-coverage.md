@@ -100,3 +100,8 @@ through the router into accounting, tool signature round-trips, redirect refusal
 truncated streams and discovery pagination limits. Go vet, tests, race tests and
 build passed, as did UI tests, type checking and the production UI build. No live
 paid inference or cloud credential validation was performed.
+
+Anthropic model discovery now follows native pagination with bounded time, page
+size and record counts. Tests cover sorted/deduplicated results across pages,
+later-page failures, cancellation, redirects, pagination limits and credential
+isolation through the managed-provider entry point.

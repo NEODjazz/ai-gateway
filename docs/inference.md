@@ -199,3 +199,18 @@ schemas fail explicitly; seed/output limits must fit the native integer range.
 
 Protocol references: [GenerateContent](https://ai.google.dev/api/generate-content)
 and [tool signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures).
+
+## Native Anthropic model discovery
+
+Managed Anthropic discovery follows `has_more` and `last_id` using `after_id`
+instead of returning only the first page. It uses the selected provider-scoped
+credential in `x-api-key` and the native version header. Redirects are rejected.
+The result is sorted and deduplicated only after all pages succeed; a later-page
+failure returns an error rather than a partial catalog.
+
+Discovery has a 30-second overall deadline, a 10-second request timeout, a 2 MiB
+page limit, and limits of 100 pages and 10,000 scanned records (including
+duplicates). Invalid continuation cursors, empty continuing pages and pagination
+cycles fail explicitly. Caller cancellation also stops the current request.
+This does not publish the inbound Messages API or automatically change pricing.
+Protocol: [Anthropic Models API](https://platform.claude.com/docs/en/api/models/list).
