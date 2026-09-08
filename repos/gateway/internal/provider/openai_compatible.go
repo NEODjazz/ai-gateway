@@ -316,12 +316,7 @@ func (p OpenAICompatible) Responses(ctx context.Context, request openai.Response
 		return openai.ResponseResponse{}, responseStatusError("openai-compatible", resp)
 	}
 
-	var response openai.ResponseResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return openai.ResponseResponse{}, err
-	}
-	response.OutputText = responseText(response)
-	return response, nil
+	return decodeResponseJSON(resp.Body)
 }
 
 func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.ResponseRequest, write ResponseStreamWriter) (openai.ResponseResponse, error) {

@@ -680,3 +680,18 @@ unfinished frame on a source I/O error instead of flushing it before reporting
 the error; this applies to all adapters using that scanner. Regression
 tests cover an oversized stream made of short lines, exact reader boundaries,
 limited upstream reads, terminal errors, and preservation of source I/O errors.
+
+### Responses JSON body bound
+
+The OpenAI-compatible Responses adapter accepts one non-null JSON object of at
+most 32 MiB, including surrounding whitespace. It reads no more than the limit
+plus one byte, rejects oversized bodies, trailing documents/data and null, and
+preserves source I/O errors. A valid response exactly at the boundary remains
+accepted with its output and usage intact. This tightens acceptance of malformed
+upstream bodies; unknown fields inside an otherwise valid object retain the
+existing decoding behavior.
+
+Regression tests exercise the actual HTTP adapter with invalid documents and an
+oversized body, plus exact-size, read-limit, and I/O-error cases. The limit applies
+to Responses JSON only; it does not change Chat, embedding, or native adapter
+contracts, and is separate from the native Responses SSE wire budget.
