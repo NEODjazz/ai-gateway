@@ -1040,3 +1040,9 @@ explicit zero. The documented range is 0–20; the upstream validates the range 
 model compatibility. Omission leaves the upstream default unchanged. Anthropic
 conversion and demo reject supplied values with `400 unsupported_parameter` and
 `param=top_logprobs`, including zero.
+
+Anthropic Responses conversion rejects non-null `phase` on input items with
+`400 unsupported_parameter` and `param=input.phase` before issuing an upstream
+request. Its native message contract cannot preserve this assistant state.
+Omitted or null phase keeps existing conversion behavior. OpenAI-compatible
+Responses replay continues to preserve phase unchanged.

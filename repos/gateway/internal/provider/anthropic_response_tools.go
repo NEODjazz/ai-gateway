@@ -43,6 +43,9 @@ func anthropicResponseToolMessage(item map[string]any) (anthropicMessage, error)
 func validateAnthropicResponseHistory(input any) error {
 	if items, ok := input.([]any); ok {
 		for _, value := range items {
+			if item, ok := value.(map[string]any); ok && item["phase"] != nil {
+				return rejectParameters("anthropic", parameterCheck{"input.phase", true})
+			}
 			if item, ok := value.(map[string]any); ok && (item["type"] == "function_call" || item["type"] == "function_call_output") {
 				if _, err := anthropicResponseToolMessage(item); err != nil {
 					return err
