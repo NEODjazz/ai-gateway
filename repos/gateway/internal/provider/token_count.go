@@ -95,7 +95,7 @@ func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (
 }
 
 func validateTokenCountRequest(request openai.ChatCompletionRequest) error {
-	invalid := func(field string) error { return rejectParameters("anthropic", parameterCheck{field, true}) }
+	invalid := func(field string) error { return rejectParameters("provider", parameterCheck{field, true}) }
 	if strings.TrimSpace(request.Model) == "" || len(request.Messages) == 0 || len(request.Messages) > 10000 || len(request.Tools) > 128 {
 		return invalid("messages")
 	}

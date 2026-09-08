@@ -26,7 +26,7 @@ availability is not inferred from these tests.
 | Rerank | Query/documents, compatible adapter | Provider-specific request and usage matrix |
 | Text completions | Not implemented | Native completion execution and legacy response/SSE contracts |
 | Messages | Inbound `/v1/messages` JSON/SSE over the shared Chat pipeline; outbound Anthropic adapter | Thinking, prompt-cache controls, server tools and prefill |
-| Anthropic token counting | Native adapter and `/v1/messages/count_tokens` with authorization, policy, input quotas and bounded transport | Advanced native content blocks and additional provider counters |
+| Anthropic token counting | Native Anthropic/Gemini counters behind `/v1/messages/count_tokens` with authorization, policy, input quotas and bounded transport | Advanced native content blocks and additional provider counters |
 | GenerateContent | Outbound native Gemini chat/tools/vision, SSE and usage | Native inbound contract and broader provider options |
 | Interactions | Not implemented | Native lifecycle, resource ownership and accounting |
 | Image generation | Not implemented | Generation contract and image-specific pricing/usage |
@@ -65,7 +65,7 @@ availability is not inferred from these tests.
 | Native provider catalog | Anthropic, Ollama, Gemini; compatible HTTP adapter | Additional native providers with protocol tests |
 | Azure | Compatible HTTP scenarios only | Native endpoint/version behavior, Entra identity and refresh |
 | Workload identity | Not implemented | AWS signing, GCP credentials, Azure refresh and cancellation |
-| Model tokenization | Context estimate including tool schemas | Exact model tokenizers/counters with versioned provenance |
+| Model tokenization | Context estimate including tool schemas; native Anthropic/Gemini counter API | Exact model tokenizers/counters with versioned provenance |
 | Catalog synchronization | Versioned catalog and hot update | Validated upstream sync, rollback and price provenance |
 | Arbitrary passthrough | Not implemented | Explicit route allowlists, identity isolation and accounting |
 | Parameter policy | Strict unknown-field decoding; native adapter rejection; generation control validation | Complete provider/model matrices and policy for new API families |

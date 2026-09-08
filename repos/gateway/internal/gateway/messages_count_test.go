@@ -134,3 +134,19 @@ func TestCountEndpointEnforcesToolACLAndSharedRPM(t *testing.T) {
 		t.Fatal("limited count reached provider")
 	}
 }
+
+func TestCountEndpointUsesNativeGeminiCounter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models/gemini-upstream:countTokens" || r.Header.Get("x-goog-api-key") != "upstream-key" || r.Header.Get("Authorization") != "" {
+			t.Error("Gemini counter routing/auth lost")
+		}
+		_, _ = w.Write([]byte(`{"totalTokens":37}`))
+	}))
+	defer server.Close()
+	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "gemini", Type: "gemini", BaseURL: server.URL, APIKey: "upstream-key", Models: []string{"public-model"}, ModelAliases: map[string]string{"public-model": "gemini-upstream"}}}})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"public-model"}}}}), router))
+	response := countEndpointCall(handler, `{"model":"public-model","messages":[{"role":"user","content":"hi"}]}`, "gateway-test-key")
+	if response.Code != 200 || !strings.Contains(response.Body.String(), `"input_tokens":37`) {
+		t.Fatalf("Gemini public count: %d %s", response.Code, response.Body.String())
+	}
+}

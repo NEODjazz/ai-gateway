@@ -42,7 +42,7 @@ paths:
       description: |
         Applies authorization, tool ACL, input TPM/RPM and pre-inference policy.
         Does not generate output or open a billing lifecycle. Currently requires
-        native Anthropic. No automatic retry, mirror or response cache is used.
+        native Anthropic or Gemini. No automatic retry, mirror or response cache is used.
       security:
         - nativeAPIKey: []
         - bearerAuth: []

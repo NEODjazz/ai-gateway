@@ -311,3 +311,19 @@ response cache runs. Counter errors never become successful estimated counts.
 The Router operation has a 30-second deadline. Unsupported selected adapters fail
 explicitly before provider modules. Observer metrics use operation count_tokens.
 Protocol: [native token counting](https://platform.claude.com/docs/en/api/messages/count_tokens).
+
+
+Gemini also implements `TokenCountClient` and is selectable through the same
+`/v1/messages/count_tokens` gateway route. It calls native `models.countTokens`
+with `generateContentRequest`, including system instructions and function schemas
+as well as message contents and inline images. The nested model is the resolved
+provider model. Only x-goog-api-key carries the provider credential; no key is
+placed in the URL. Results use totalTokens as the counted input, including cached
+context, without creating generation usage or altering reserve estimation.
+
+The same 30-second deadline, inference request-body limit, 64 KiB response limit,
+redirect refusal and invalid-count checks apply. Gemini-specific unsupported
+controls still fail before HTTP. Tests cover complete native context, model alias
+routing, malformed counts, redirect refusal and cancellation. This does not add
+inbound GenerateContent or cloud workload credentials.
+Protocol: [Gemini token counting](https://ai.google.dev/api/tokens).
