@@ -870,3 +870,13 @@ not decrypt or rewrite it. Regression tests reproduce its former loss in each of
 these paths. Absent or null values remain omitted on serialization; an explicitly
 empty string remains present. This change preserves returned context; it does not
 add a response-storage or background-job lifecycle API.
+
+The Responses request contract now accepts optional `include` string arrays.
+OpenAI-compatible and Ollama Responses adapters forward them in both JSON and
+streaming requests; supported values remain an upstream capability. This enables
+clients to request `reasoning.encrypted_content` where the upstream supports it.
+Anthropic and Demo reject nonempty `include` with `unsupported_parameter` instead
+of silently dropping the option. Empty or omitted arrays preserve prior behavior.
+Local HTTP regression tests check the actual upstream payload in all four
+forwarding paths and adapter rejection. The public OpenAPI schema includes the
+new optional request field.

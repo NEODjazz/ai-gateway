@@ -39,6 +39,7 @@ func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) er
 
 func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) error {
 	return rejectParameters("anthropic",
+		parameterCheck{"include", len(request.Include) > 0},
 		parameterCheck{"previous_response_id", request.PreviousResponse != ""},
 	)
 }
@@ -127,4 +128,8 @@ func rejectToolCallMetadata(adapter string, messages []openai.Message) error {
 		}
 	}
 	return nil
+}
+
+func (Demo) ValidateResponseParameters(request openai.ResponseRequest) error {
+	return rejectParameters("demo", parameterCheck{"include", len(request.Include) > 0})
 }

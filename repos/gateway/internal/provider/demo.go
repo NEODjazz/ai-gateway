@@ -72,7 +72,10 @@ func (d Demo) ChatCompletions(_ context.Context, request openai.ChatCompletionRe
 	}, nil
 }
 
-func (Demo) Responses(_ context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
+func (p Demo) Responses(_ context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
+	if err := p.ValidateResponseParameters(request); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	content := "Gateway accepted response request for model " + request.Model + ". Input: " + responseInputText(request.Input)
 	outputTokens := len(strings.Fields(content))
 	return openai.ResponseResponse{

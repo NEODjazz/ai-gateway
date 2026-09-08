@@ -33,6 +33,7 @@ type openAICompatibleChatRequest struct {
 }
 
 type openAICompatibleResponseRequest struct {
+	Include           []string              `json:"include,omitempty"`
 	Model             string                `json:"model"`
 	Input             any                   `json:"input"`
 	Instructions      string                `json:"instructions,omitempty"`
@@ -287,7 +288,8 @@ func useMaxCompletionTokens(request *openAICompatibleChatRequest, err error) boo
 
 func (p OpenAICompatible) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
+		Include: request.Include,
+		Model:   request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: false,
 		MaxOutputTokens: request.MaxOutputTokens, MaxTokens: request.MaxTokens,
@@ -325,7 +327,8 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 	}
 
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
+		Include: request.Include,
+		Model:   request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: true,
 		MaxOutputTokens: request.MaxOutputTokens, MaxTokens: request.MaxTokens,
