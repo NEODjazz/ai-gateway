@@ -637,6 +637,10 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 	w.WriteHeader(http.StatusOK)
 
 	for _, choice := range response.Choices {
+		calls := append([]openai.ToolCall(nil), choice.Message.ToolCalls...)
+		for index := range calls {
+			calls[index].Index = &index
+		}
 		writeSSE(w, map[string]any{
 			"id":      response.ID,
 			"object":  "chat.completion.chunk",
@@ -647,8 +651,9 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 					"index":    choice.Index,
 					"logprobs": choice.Logprobs,
 					"delta": map[string]any{
-						"role":    choice.Message.Role,
-						"content": openai.ContentText(choice.Message.Content),
+						"role":       choice.Message.Role,
+						"content":    openai.ContentText(choice.Message.Content),
+						"tool_calls": calls,
 					},
 					"finish_reason": nil,
 				},
@@ -669,6 +674,14 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 		})
 	}
 
+	writeSSE(w, map[string]any{
+		"id":      response.ID,
+		"object":  "chat.completion.chunk",
+		"model":   response.Model,
+		"created": time.Now().UTC().Unix(),
+		"choices": []any{},
+		"usage":   response.Usage,
+	})
 	writeSSEDone(w)
 }
 

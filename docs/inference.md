@@ -158,6 +158,12 @@ forced tool choice и structured output. При отсутствии tools па�
 искусственного tool choice. Проверено для обычных и streaming wire requests.
 Native семантика: [parallel tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use).
 
+Когда adapter не поддерживает native streaming, Chat SSE формируется из одного
+обычного provider response. Этот fallback сохраняет tool calls, их аргументы и
+служебные метаданные, а также возвращает итоговый usage отдельным событием с
+пустым `choices` перед `[DONE]`. Индексы tool calls назначаются для SSE без
+изменения исходного ответа. Повторного inference или отдельного списания нет.
+
 OpenAI-compatible chat stream допускает индексы choices и tool calls от 0 до 127.
 Отрицательные и выходящие за пределы индексы upstream возвращают ошибку до
 выделения массивов и передачи некорректного события клиенту. Это ограничение
