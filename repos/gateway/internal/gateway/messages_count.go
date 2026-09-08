@@ -77,6 +77,7 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 		writeError(w, 400, "invalid_image", err.Error())
 		return 0, false
 	}
+	request = req.Request
 	tools, valid := chatToolIdentifiers(request.Tools)
 	if !h.authorizeTools(w, req, tools, valid) || !h.authorizeAccess(w, r.Context(), req, request.Model, openai.ChatInputTokens(request)) {
 		return 0, false

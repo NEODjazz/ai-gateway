@@ -383,3 +383,16 @@ Anthropic. Modality-specific breakdowns are not synthesized.
 Regression tests verify native system/tools delivery, alias routing, validation,
 authorization, shared quotas and absence of generation billing.
 Protocol reference: [Gemini token counting](https://ai.google.dev/api/tokens).
+
+### Admission after gateway modules
+
+Model/tool authorization, token reservation and model policy attachment use the
+request produced by the gateway pre-inference pipeline. Replacing a request or
+its context in a module does not leave admission checking an earlier copy. This
+applies to Chat (including native generation protocols), Responses, Embeddings,
+Rerank and both native token counters. A module that removes a typed inference
+request causes a 502 module error before provider execution.
+
+Regression tests cover rewritten models, added tools, expanded input context and
+replacement/removal of typed requests. Provider-specific modules still run in
+their existing provider execution phase.

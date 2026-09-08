@@ -186,6 +186,7 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
 		return
 	}
+	request = reqCtx.Request
 	toolIdentifiers, validTools := chatToolIdentifiers(request.Tools)
 	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) {
 		return
@@ -271,6 +272,11 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.APIKey = ""
+	if reqCtx.ResponseRequest == nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
+		return
+	}
+	request = *reqCtx.ResponseRequest
 	if !h.prepareAccessGroups(w, &reqCtx) {
 		return
 	}
@@ -367,6 +373,11 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.APIKey = ""
+	if reqCtx.EmbeddingRequest == nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
+		return
+	}
+	request = *reqCtx.EmbeddingRequest
 	if !h.prepareAccessGroups(w, &reqCtx) {
 		return
 	}
@@ -411,6 +422,11 @@ func (h Handler) Rerank(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.APIKey = ""
+	if reqCtx.RerankRequest == nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
+		return
+	}
+	request = *reqCtx.RerankRequest
 	if !h.prepareAccessGroups(w, &reqCtx) {
 		return
 	}
