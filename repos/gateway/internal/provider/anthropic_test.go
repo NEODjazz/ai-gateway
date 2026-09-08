@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -344,5 +345,65 @@ func TestAnthropicStreamsToolCallArguments(t *testing.T) {
 	}
 	if len(payloads) != 4 || !strings.Contains(payloads[0], `"tool_calls"`) || !strings.Contains(payloads[3], `"finish_reason":"tool_calls"`) {
 		t.Fatalf("unexpected OpenAI tool stream: %v", payloads)
+	}
+}
+
+func TestAnthropicMapsStopAndParallelControls(t *testing.T) {
+	for _, parallel := range []bool{false, true} {
+		for _, streaming := range []bool{false, true} {
+			t.Run(fmt.Sprintf("parallel=%v/stream=%v", parallel, streaming), func(t *testing.T) {
+				var upstream anthropicRequest
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+						t.Error(err)
+						return
+					}
+					if streaming {
+						_, _ = fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"test\",\"model\":\"test\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+					} else {
+						_, _ = fmt.Fprint(w, `{"id":"test","content":[],"stop_reason":"stop_sequence"}`)
+					}
+				}))
+				defer server.Close()
+				client := NewAnthropic(server.URL, "", true)
+				request := openai.ChatCompletionRequest{Model: "test", Stop: []any{"\n", "END"}, ParallelToolCalls: &parallel, Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup"}}}, ToolChoice: "required"}
+				var err error
+				if streaming {
+					_, err = client.StreamChatCompletions(context.Background(), request, func(string) error { return nil })
+				} else {
+					_, err = client.ChatCompletions(context.Background(), request)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(upstream.StopSequences) != 2 || upstream.StopSequences[0] != "\n" || upstream.StopSequences[1] != "END" || upstream.ToolChoice["disable_parallel_tool_use"] != !parallel || upstream.ToolChoice["type"] != "any" {
+					t.Fatalf("native controls lost: %+v", upstream)
+				}
+				responseRequest := openai.ResponseRequest{Model: "test", ParallelToolCalls: &parallel, Tools: []openai.ResponseTool{{Type: "function", Name: "lookup"}}, ToolChoice: "required"}
+				if streaming {
+					_, err = client.StreamResponses(context.Background(), responseRequest, func(string, string) error { return nil })
+				} else {
+					_, err = client.Responses(context.Background(), responseRequest)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if upstream.ToolChoice["disable_parallel_tool_use"] != !parallel {
+					t.Fatalf("Responses parallel control lost: %+v", upstream)
+				}
+			})
+		}
+	}
+}
+
+func TestAnthropicParallelControlWithoutTools(t *testing.T) {
+	parallel := false
+	request := anthropicChatRequest(openai.ChatCompletionRequest{ParallelToolCalls: &parallel}, false)
+	if request.ToolChoice != nil {
+		t.Fatal("parallel control invented tool choice")
+	}
+	request = anthropicChatRequest(openai.ChatCompletionRequest{ParallelToolCalls: &parallel, ResponseFormat: &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "answer", Schema: map[string]any{"type": "object"}}}}, false)
+	if request.ToolChoice["disable_parallel_tool_use"] != true {
+		t.Fatal("structured output lost parallel control")
 	}
 }

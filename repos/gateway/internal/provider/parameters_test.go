@@ -23,9 +23,8 @@ func TestNativeAdaptersRejectUnrepresentableChatParameters(t *testing.T) {
 		field   string
 		request openai.ChatCompletionRequest
 	}{
-		{"anthropic", "stop", openai.ChatCompletionRequest{Stop: []string{"END"}}},
+		{"anthropic", "stop", openai.ChatCompletionRequest{Stop: 42}},
 		{"anthropic", "seed", openai.ChatCompletionRequest{Seed: &seed}},
-		{"anthropic", "parallel_tool_calls", openai.ChatCompletionRequest{ParallelToolCalls: &parallel}},
 		{"ollama", "tool_choice", openai.ChatCompletionRequest{ToolChoice: "required"}},
 		{"ollama", "parallel_tool_calls", openai.ChatCompletionRequest{ParallelToolCalls: &parallel}},
 	} {
@@ -51,13 +50,11 @@ func TestNativeAdaptersRejectUnrepresentableChatParameters(t *testing.T) {
 }
 
 func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
-	parallel := false
 	for _, tc := range []struct {
 		field   string
 		request openai.ResponseRequest
 	}{
 		{"previous_response_id", openai.ResponseRequest{PreviousResponse: "resp_other"}},
-		{"parallel_tool_calls", openai.ResponseRequest{ParallelToolCalls: &parallel}},
 	} {
 		client := NewAnthropic("http://unused.invalid", "test", true)
 		_, err := client.Responses(context.Background(), tc.request)
@@ -93,10 +90,9 @@ func TestRouterValidatesParametersBeforeProviderModules(t *testing.T) {
 	assertUnsupportedParameter(t, err, "seed")
 	_, _, err = router.StreamChatCompletions(context.Background(), req, func(string) error { return nil })
 	assertUnsupportedParameter(t, err, "seed")
-	parallel := false
-	req.ResponseRequest = &openai.ResponseRequest{Model: "test", ParallelToolCalls: &parallel}
+	req.ResponseRequest = &openai.ResponseRequest{Model: "test", PreviousResponse: "resp_old"}
 	_, err = router.Responses(context.Background(), req)
-	assertUnsupportedParameter(t, err, "parallel_tool_calls")
+	assertUnsupportedParameter(t, err, "previous_response_id")
 	_, _, err = router.StreamResponses(context.Background(), req, func(string, string) error { return nil })
-	assertUnsupportedParameter(t, err, "parallel_tool_calls")
+	assertUnsupportedParameter(t, err, "previous_response_id")
 }

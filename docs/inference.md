@@ -115,8 +115,8 @@ adapter используют те же проверки, включая streamin
 
 | Adapter / endpoint | Явно отклоняемые поля |
 | --- | --- |
-| Anthropic chat | `stop`, `seed`, `parallel_tool_calls` |
-| Anthropic Responses | `previous_response_id`, `parallel_tool_calls` |
+| Anthropic chat | `seed`; `stop` неверного типа или более четырёх последовательностей |
+| Anthropic Responses | `previous_response_id` |
 | Ollama native chat | `tool_choice`, `parallel_tool_calls` |
 | Ollama embeddings | `user`; `encoding_format`, отличный от `float` |
 
@@ -148,3 +148,11 @@ stream и синтетическом SSE. Semantic cache отключён при
 ключ. Reasoning tokens входят в общий completion usage, а не прибавляются повторно.
 
 Контракт: [Chat API reference](https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create).
+
+
+Anthropic adapter преобразует chat `stop` (строка или массив до четырёх строк)
+в native `stop_sequences`. `parallel_tool_calls` для Chat и Responses передаётся
+как инвертированный `tool_choice.disable_parallel_tool_use`, в том числе при
+forced tool choice и structured output. При отсутствии tools параметр не создаёт
+искусственного tool choice. Проверено для обычных и streaming wire requests.
+Native семантика: [parallel tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use).

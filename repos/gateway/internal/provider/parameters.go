@@ -27,17 +27,16 @@ func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) er
 	if err := rejectGenerationOptions("anthropic", request.ChatGenerationOptions); err != nil {
 		return err
 	}
+	_, validStop := openai.StopSequences(request.Stop)
 	return rejectParameters("anthropic",
-		parameterCheck{"stop", request.Stop != nil},
+		parameterCheck{"stop", !validStop},
 		parameterCheck{"seed", request.Seed != nil},
-		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 	)
 }
 
 func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) error {
 	return rejectParameters("anthropic",
 		parameterCheck{"previous_response_id", request.PreviousResponse != ""},
-		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 	)
 }
 

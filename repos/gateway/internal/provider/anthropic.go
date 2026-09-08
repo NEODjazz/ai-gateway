@@ -22,15 +22,16 @@ type Anthropic struct {
 }
 
 type anthropicRequest struct {
-	Model       string             `json:"model"`
-	System      string             `json:"system,omitempty"`
-	Messages    []anthropicMessage `json:"messages"`
-	Tools       []anthropicTool    `json:"tools,omitempty"`
-	ToolChoice  map[string]any     `json:"tool_choice,omitempty"`
-	MaxTokens   int                `json:"max_tokens"`
-	Stream      bool               `json:"stream,omitempty"`
-	Temperature *float64           `json:"temperature,omitempty"`
-	TopP        *float64           `json:"top_p,omitempty"`
+	StopSequences []string           `json:"stop_sequences,omitempty"`
+	Model         string             `json:"model"`
+	System        string             `json:"system,omitempty"`
+	Messages      []anthropicMessage `json:"messages"`
+	Tools         []anthropicTool    `json:"tools,omitempty"`
+	ToolChoice    map[string]any     `json:"tool_choice,omitempty"`
+	MaxTokens     int                `json:"max_tokens"`
+	Stream        bool               `json:"stream,omitempty"`
+	Temperature   *float64           `json:"temperature,omitempty"`
+	TopP          *float64           `json:"top_p,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -223,16 +224,18 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		tools = append(tools, anthropicTool{Name: name, Description: "Return the response using the required JSON schema.", InputSchema: schema})
 		toolChoice = map[string]any{"type": "tool", "name": name}
 	}
+	stop, _ := openai.StopSequences(request.Stop)
 	return anthropicRequest{
-		Model:       request.Model,
-		System:      system,
-		Messages:    messages,
-		Tools:       tools,
-		ToolChoice:  toolChoice,
-		MaxTokens:   requestMaxTokens(request.MaxTokens, request.MaxCompletionTokens),
-		Stream:      stream,
-		Temperature: request.Temperature,
-		TopP:        request.TopP,
+		StopSequences: stop,
+		Model:         request.Model,
+		System:        system,
+		Messages:      messages,
+		Tools:         tools,
+		ToolChoice:    anthropicParallelChoice(toolChoice, request.ParallelToolCalls),
+		MaxTokens:     requestMaxTokens(request.MaxTokens, request.MaxCompletionTokens),
+		Stream:        stream,
+		Temperature:   request.Temperature,
+		TopP:          request.TopP,
 	}
 }
 
@@ -261,7 +264,7 @@ func anthropicResponsesRequest(request openai.ResponseRequest, stream bool) anth
 		System:      request.Instructions,
 		Messages:    messages,
 		Tools:       tools,
-		ToolChoice:  toolChoice,
+		ToolChoice:  anthropicParallelChoice(toolChoice, request.ParallelToolCalls),
 		MaxTokens:   maxTokens,
 		Stream:      stream,
 		Temperature: request.Temperature,
@@ -845,4 +848,11 @@ func responseEventPayload(eventType string, response openai.ResponseResponse, de
 		return "{}"
 	}
 	return string(marshaled)
+}
+
+func anthropicParallelChoice(choice map[string]any, parallel *bool) map[string]any {
+	if choice != nil && parallel != nil {
+		choice["disable_parallel_tool_use"] = !*parallel
+	}
+	return choice
 }
