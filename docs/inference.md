@@ -710,3 +710,17 @@ assert that every provider's total equals the input/output sum. Usage estimation
 and missing-versus-explicit-zero handling are separate concerns. Regression tests
 cover both decoders, invalid cache detail counters, overflowing sums, exact integer
 boundaries, and compatible missing/partial usage.
+
+### Reported zero versus missing Responses input usage
+
+The OpenAI-compatible JSON and native SSE decoders retain an internal
+`InputTokensReported` flag when `usage.input_tokens` is present and non-null,
+including zero. Provider post-processing no longer substitutes an estimate for
+that zero or increases total_tokens because of it. Missing/null usage and
+output-only usage retain the previous estimation behavior. Partial SSE response
+snapshots retain a count already reported earlier in the same stream.
+
+The Go response type gains an additive internal field excluded from JSON; clients
+see no new wire field. Other native adapters keep their existing presence behavior.
+Regression tests cover missing, null, output-only, zero and positive usage in both
+JSON and SSE, partial snapshots, and exclusion of the internal marker from JSON.

@@ -1497,7 +1497,7 @@ func mergeChatUsage(response *openai.ChatCompletionResponse, usage *openai.Usage
 }
 
 func mergeResponseUsage(response *openai.ResponseResponse, usage *openai.Usage) {
-	if usage == nil || response.Usage.InputTokens != 0 {
+	if usage == nil || response.InputTokensReported || response.Usage.InputTokens != 0 {
 		return
 	}
 	response.Usage.InputTokens = usage.PromptTokens

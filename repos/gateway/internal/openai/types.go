@@ -322,16 +322,18 @@ type ResponseTool struct {
 }
 
 type ResponseResponse struct {
-	Error             *ResponseError             `json:"error,omitempty"`
-	IncompleteDetails *ResponseIncompleteDetails `json:"incomplete_details,omitempty"`
-	ID                string                     `json:"id"`
-	Object            string                     `json:"object"`
-	CreatedAt         int64                      `json:"created_at,omitempty"`
-	Status            string                     `json:"status,omitempty"`
-	Model             string                     `json:"model"`
-	Output            []ResponseOutputItem       `json:"output,omitempty"`
-	OutputText        string                     `json:"output_text,omitempty"`
-	Usage             ResponseUsage              `json:"usage,omitempty"`
+	// InputTokensReported distinguishes an explicit upstream zero from absent usage.
+	InputTokensReported bool                       `json:"-"`
+	Error               *ResponseError             `json:"error,omitempty"`
+	IncompleteDetails   *ResponseIncompleteDetails `json:"incomplete_details,omitempty"`
+	ID                  string                     `json:"id"`
+	Object              string                     `json:"object"`
+	CreatedAt           int64                      `json:"created_at,omitempty"`
+	Status              string                     `json:"status,omitempty"`
+	Model               string                     `json:"model"`
+	Output              []ResponseOutputItem       `json:"output,omitempty"`
+	OutputText          string                     `json:"output_text,omitempty"`
+	Usage               ResponseUsage              `json:"usage,omitempty"`
 }
 
 type ResponseError struct {

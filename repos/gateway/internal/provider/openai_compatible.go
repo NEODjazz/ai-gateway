@@ -605,6 +605,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			if err := json.Unmarshal(marshaled, &response); err != nil {
 				return err
 			}
+			if err := recordResponseInputUsage(marshaled, &response); err != nil {
+				return err
+			}
 			if err := validateResponseUsage(response.Usage); err != nil {
 				return err
 			}

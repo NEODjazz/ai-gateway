@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"errors"
 
 	"ai-gateway-gateway/internal/openai"
@@ -17,6 +18,23 @@ func validateResponseUsage(usage openai.ResponseUsage) error {
 		if details.CachedTokens < 0 || details.CacheWriteTokens < 0 || details.CacheCreationTokens < 0 {
 			return errors.New("invalid negative Responses cache token usage")
 		}
+	}
+	return nil
+}
+
+// Preserve a count already reported by an earlier SSE response snapshot when a
+// later partial snapshot omits usage or input_tokens.
+func recordResponseInputUsage(payload []byte, response *openai.ResponseResponse) error {
+	var wire struct {
+		Usage *struct {
+			InputTokens *int `json:"input_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(payload, &wire); err != nil {
+		return err
+	}
+	if wire.Usage != nil && wire.Usage.InputTokens != nil {
+		response.InputTokensReported = true
 	}
 	return nil
 }

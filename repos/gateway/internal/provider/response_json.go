@@ -25,6 +25,9 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 	if response == nil {
 		return openai.ResponseResponse{}, errors.New("upstream Responses JSON must be an object")
 	}
+	if err := recordResponseInputUsage(payload, response); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	if err := validateResponseUsage(response.Usage); err != nil {
 		return openai.ResponseResponse{}, err
 	}
