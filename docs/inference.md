@@ -60,7 +60,9 @@ content policy и anonymization; token IDs сохраняются без пре�
 Если выбранный adapter не поддерживает native stream, gateway выполняет один
 ограниченный JSON-вызов и возвращает его как buffered SSE.
 Ollama выполняет строковые prompts через свой `/v1/completions` endpoint с
-provider-reported usage и native SSE. Его текущий provider contract не принимает
+provider-reported usage и native SSE. Для stream gateway запрашивает финальный
+usage через provider-specific `stream_options.include_usage`; generic compatible
+adapter не получает этот параметр автоматически. Текущий Ollama contract не принимает
 prompt arrays; gateway возвращает terminal `unsupported_parameter` до policy
 modules, billing reserve и сетевого вызова.
 

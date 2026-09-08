@@ -171,7 +171,8 @@ func TestOpenAICompatibleStreamsNativeCompletionsAndCollectsUsage(t *testing.T) 
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		if r.URL.Path != "/v1/completions" || string(request["stream"]) != "true" || string(request["prompt"]) != `"complete"` {
+		_, hasStreamOptions := request["stream_options"]
+		if r.URL.Path != "/v1/completions" || string(request["stream"]) != "true" || string(request["prompt"]) != `"complete"` || hasStreamOptions {
 			t.Fatalf("unexpected stream request: path=%s request=%v", r.URL.Path, request)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")

@@ -53,6 +53,9 @@ func TestOllamaStreamsProviderCompletions(t *testing.T) {
 		if !upstream.Stream {
 			t.Fatal("native completion stream was not requested")
 		}
+		if upstream.StreamOptions == nil || !upstream.StreamOptions.IncludeUsage {
+			t.Fatal("completion stream usage was not requested")
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"id\":\"cmpl-ollama\",\"object\":\"text_completion\",\"created\":7,\"model\":\"phi3\",\"choices\":[{\"index\":0,\"text\":\"hello\",\"finish_reason\":\"stop\"}]}\n\n"))
 		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}\n\ndata: [DONE]\n\n"))

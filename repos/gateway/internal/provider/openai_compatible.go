@@ -60,23 +60,28 @@ type openAICompatibleCompactRequest struct {
 }
 
 type openAICompatibleCompletionRequest struct {
-	Model            string         `json:"model"`
-	Prompt           any            `json:"prompt,omitempty"`
-	BestOf           *int           `json:"best_of,omitempty"`
-	Echo             *bool          `json:"echo,omitempty"`
-	FrequencyPenalty *float64       `json:"frequency_penalty,omitempty"`
-	LogitBias        map[string]int `json:"logit_bias,omitempty"`
-	Logprobs         *int           `json:"logprobs,omitempty"`
-	MaxTokens        *int           `json:"max_tokens,omitempty"`
-	N                *int           `json:"n,omitempty"`
-	PresencePenalty  *float64       `json:"presence_penalty,omitempty"`
-	Seed             *int64         `json:"seed,omitempty"`
-	Stop             any            `json:"stop,omitempty"`
-	Stream           bool           `json:"stream"`
-	Suffix           string         `json:"suffix,omitempty"`
-	Temperature      *float64       `json:"temperature,omitempty"`
-	TopP             *float64       `json:"top_p,omitempty"`
-	User             string         `json:"user,omitempty"`
+	Model            string                         `json:"model"`
+	Prompt           any                            `json:"prompt,omitempty"`
+	BestOf           *int                           `json:"best_of,omitempty"`
+	Echo             *bool                          `json:"echo,omitempty"`
+	FrequencyPenalty *float64                       `json:"frequency_penalty,omitempty"`
+	LogitBias        map[string]int                 `json:"logit_bias,omitempty"`
+	Logprobs         *int                           `json:"logprobs,omitempty"`
+	MaxTokens        *int                           `json:"max_tokens,omitempty"`
+	N                *int                           `json:"n,omitempty"`
+	PresencePenalty  *float64                       `json:"presence_penalty,omitempty"`
+	Seed             *int64                         `json:"seed,omitempty"`
+	Stop             any                            `json:"stop,omitempty"`
+	Stream           bool                           `json:"stream"`
+	StreamOptions    *openAICompatibleStreamOptions `json:"stream_options,omitempty"`
+	Suffix           string                         `json:"suffix,omitempty"`
+	Temperature      *float64                       `json:"temperature,omitempty"`
+	TopP             *float64                       `json:"top_p,omitempty"`
+	User             string                         `json:"user,omitempty"`
+}
+
+type openAICompatibleStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type openAICompatibleEmbeddingRequest struct {
@@ -99,11 +104,12 @@ type openAICompatibleRerankRequest struct {
 }
 
 type OpenAICompatible struct {
-	baseURL        string
-	apiKey         string
-	upstreamStream bool
-	rerankPath     string
-	client         *http.Client
+	baseURL               string
+	apiKey                string
+	upstreamStream        bool
+	rerankPath            string
+	completionStreamUsage bool
+	client                *http.Client
 }
 
 func NewOpenAICompatible(baseURL string, apiKey string, upstreamStream bool) OpenAICompatible {
@@ -182,6 +188,9 @@ func (p OpenAICompatible) completion(ctx context.Context, request openai.Complet
 		FrequencyPenalty: request.FrequencyPenalty, LogitBias: request.LogitBias, Logprobs: request.Logprobs,
 		MaxTokens: request.MaxTokens, N: request.N, PresencePenalty: request.PresencePenalty, Seed: request.Seed,
 		Stop: request.Stop, Stream: stream, Suffix: request.Suffix, Temperature: request.Temperature, TopP: request.TopP, User: request.User,
+	}
+	if stream && p.completionStreamUsage {
+		upstream.StreamOptions = &openAICompatibleStreamOptions{IncludeUsage: true}
 	}
 	body, err := json.Marshal(upstream)
 	if err != nil {
