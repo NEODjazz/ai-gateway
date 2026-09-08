@@ -20,7 +20,7 @@ availability is not inferred from these tests.
 | Family | Current implementation | Remaining work |
 | --- | --- | --- |
 | Chat completions | JSON, tools, structured output, vision input, SSE, generation controls | Additional controls, model-specific policy and multi-choice accounting |
-| Responses | Create, SSE, scoped deployment affinity, function tools, MCP passthrough | More parameters; owned retrieve/delete/cancel/input-items; durable background lifecycle |
+| Responses | Create, indexed SSE assembly, scoped deployment affinity, function tools, MCP passthrough, stateless reasoning history, generation options and metadata | Owned retrieve/delete/cancel/input-items; durable background lifecycle; remaining provider-specific parameters |
 | Response compaction | Not implemented | Native compact contract, usage settlement and model authorization |
 | Embeddings | String/list input, float output, compatible and native adapters | Provider compatibility matrix, additional input/output encodings |
 | Rerank | Query/documents, compatible adapter | Provider-specific request and usage matrix |
@@ -87,11 +87,13 @@ availability is not inferred from these tests.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control
-increment. These commits have not been rolled out to the local deployment.
+increment. Deployment evidence is recorded in `production-reliability.md`;
+implementation and rollout coverage must be checked separately.
 
 The native Gemini provider now has explicit protocol conversion, reported usage,
-parameter rejection and bounded model discovery. Native inbound protocols and
-Responses lifecycle remain next implementation areas. The
+parameter rejection and bounded model discovery. Native inbound Messages and
+GenerateContent are implemented as listed above. Responses resource lifecycle and
+advanced native protocol features remain open. The
 remaining lifecycle and media families stay open until their own acceptance
 checks pass; this inventory does not declare overall completion.
 
@@ -105,3 +107,33 @@ Anthropic model discovery now follows native pagination with bounded time, page
 size and record counts. Tests cover sorted/deduplicated results across pages,
 later-page failures, cancellation, redirects, pagination limits and credential
 isolation through the managed-provider entry point.
+
+## Responses implementation reconciliation (source 04462e5)
+
+The current request type and adapter regressions establish support for `include`,
+`store`, `reasoning`, `truncation`, `top_logprobs` and string-valued `metadata` in
+native-compatible JSON/SSE execution. Output parsing retains encrypted reasoning,
+reasoning summaries, assistant phase, annotations, token probabilities and reasoning
+usage details. Indexed snapshots replace stale fields; terminal events end collection.
+
+HTTP and router validation reject invalid generation options and conflicting or
+nonpositive output limits. The legacy max_tokens alias becomes max_output_tokens
+on native Responses requests. Metadata has entry and Unicode length limits.
+Anthropic conversion explicitly rejects unsupported phase and generation metadata.
+These checks do not imply support for arbitrary hosted tools or native cloud auth.
+
+Evidence is in `internal/provider/response_*_test.go`,
+`internal/gateway/response_stateless_test.go`, and
+`internal/openai/response_*_test.go` under `repos/gateway`. The stateless handler
+regression executes two turns with auth policy, anonymization and separate usage
+lifecycles against a fake upstream. It is not a live-provider integration test.
+
+The recorded local deployment is source 5d10695, Helm revision 118. Later changes
+through 04462e5 are tested and committed but are not covered by that rollout.
+PostgreSQL integration last passed at source 63dbfa9 using three isolated databases.
+
+The major remaining API work is unchanged: owned Responses resource operations and
+background execution, compaction, text completions, media APIs, async jobs, resource
+storage, search, MCP execution and A2A. Provider workload identity and native cloud
+authentication also remain unimplemented. Further parameter additions alone cannot
+close these families; each needs its execution, authorization and settlement path.
