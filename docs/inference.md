@@ -899,3 +899,12 @@ returns a replacement. Reasoning summary text remains transformable. Regression
 tests cover transformation, projection, hostile replacement, original-input
 preservation and text restoration. This prevents text anonymization from
 corrupting provider-encrypted continuation context.
+
+An HTTP-handler regression now exercises two stateless turns in JSON, native SSE
+and JSON-to-SSE fallback modes. The client reuses the returned reasoning item as
+input alongside new user text. A local fake upstream verifies unchanged opaque
+context, `store=false`, `include`, and anonymized user email. The post-response
+recorder verifies two usage callbacks with reported totals and distinct internal
+execution IDs despite identical external request IDs. This verifies gateway
+transport and pipeline integration; it does not exercise real provider encryption,
+remote authorization or durable PostgreSQL billing.
