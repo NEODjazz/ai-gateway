@@ -8,7 +8,7 @@ Gateway реализует OpenAI-compatible endpoints:
 | --- | --- |
 | `GET /v1/models` | Модели, доступные текущему credential |
 | `POST /v1/chat/completions` | Chat, tools, structured output и vision |
-| `POST /v1/completions` | Native text completion для одного строкового prompt; JSON и buffered SSE |
+| `POST /v1/completions` | Native text completion для строковых и token-ID prompts; JSON и buffered SSE |
 | `POST /v1/responses` | Responses, continuity, function tools и MCP passthrough |
 | `POST /v1/responses/compact` | Native compaction с авторизацией модели и учетом фактического usage |
 | `GET /v1/responses/{id}` | Чтение сохраненного Response владельцем credential |
@@ -47,9 +47,13 @@ adapter дополнительно ограничивают допустимые
 имена полей пользовательской схемы не считаются параметрами inference.
 
 `/v1/completions` следует legacy [text completion contract](https://developers.openai.com/api/reference/java/resources/completions/methods/create).
-Gateway принимает один строковый prompt и передает параметры только адаптеру с
-native completion operation. `n` и `best_of` входят в TPM и billing reserve;
-provider usage закрывает фактическое списание. `stream=true` возвращает
+Gateway принимает строку, массив строк, массив token IDs или массив массивов
+token IDs и передает параметры только адаптеру с native completion operation.
+Пустой или отсутствующий prompt означает начало нового документа. Число prompts,
+умноженное на `n`, не может превышать 128. Текстовые элементы независимо проходят
+content policy и anonymization; token IDs сохраняются без преобразования и входят
+в input TPM по точному количеству. `n` и `best_of` входят в TPM и billing reserve
+для каждого prompt; provider usage закрывает фактическое списание. `stream=true` возвращает
 совместимые SSE events после завершения ограниченного JSON-вызова, поэтому это
 buffered stream без incremental upstream delivery.
 

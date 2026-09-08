@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -339,7 +340,9 @@ func TestCompletionsUsesAuthenticatedInferencePipelineAndSyntheticSSE(t *testing
 func TestCompletionsRejectsInvalidAndUnsupportedRequestShapes(t *testing.T) {
 	handler := Routes(NewHandler(modules.NewPipeline(nil), &chatProvider{}))
 	for _, body := range []string{
-		`{"model":"m","prompt":["one","two"]}`,
+		`{"model":"m","prompt":["one",2]}`,
+		`{"model":"m","prompt":[1,-1]}`,
+		`{"model":"m","prompt":[[1],[2]],"n":65}`,
 		`{"model":"m","prompt":"x","unknown":true}`,
 		`{"model":"m","prompt":"x","n":2,"best_of":1}`,
 		`{"model":"m","prompt":"x","logprobs":6}`,
@@ -350,6 +353,35 @@ func TestCompletionsRejectsInvalidAndUnsupportedRequestShapes(t *testing.T) {
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("body=%s status=%d response=%s", body, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestCompletionsAcceptsTextAndTokenPromptArrays(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		body   string
+		prompt any
+	}{
+		{name: "omitted", body: `{"model":"m"}`, prompt: ""},
+		{name: "strings", body: `{"model":"m","prompt":["first@example.com","second@example.com"]}`, prompt: []string{"{{EMAIL_1}}", "{{EMAIL_2}}"}},
+		{name: "tokens", body: `{"model":"m","prompt":[10,11,12]}`, prompt: []any{10.0, 11.0, 12.0}},
+		{name: "token arrays", body: `{"model":"m","prompt":[[10,11],[12]]}`, prompt: []any{[]any{10.0, 11.0}, []any{12.0}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			llm := &chatProvider{}
+			pipeline := modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}, modules.NewAnonymizerModule(true, modules.RuleEmail)})
+			handler := Routes(NewHandler(pipeline, llm))
+			request := httptest.NewRequest(http.MethodPost, "/v1/completions", strings.NewReader(test.body))
+			request.Header.Set("Authorization", "Bearer client-secret")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusOK || llm.request.CompletionRequest == nil {
+				t.Fatalf("status=%d body=%s context=%+v", response.Code, response.Body.String(), llm.request)
+			}
+			if !reflect.DeepEqual(llm.request.CompletionRequest.Prompt, test.prompt) {
+				t.Fatalf("unexpected prompt: got=%#v want=%#v", llm.request.CompletionRequest.Prompt, test.prompt)
+			}
+		})
 	}
 }
 

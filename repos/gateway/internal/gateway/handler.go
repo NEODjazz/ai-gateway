@@ -258,7 +258,7 @@ func (h Handler) Completions(w http.ResponseWriter, r *http.Request) {
 		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r),
 		CompletionRequest: &request,
 		Request: openai.ChatCompletionRequest{
-			Provider: request.Provider, Model: request.Model, Messages: []openai.Message{{Role: "user", Content: request.Prompt}},
+			Provider: request.Provider, Model: request.Model, Messages: []openai.Message{{Role: "user", Content: openai.CompletionPromptPolicyContent(request.Prompt)}},
 		},
 	}
 	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
@@ -277,7 +277,12 @@ func (h Handler) Completions(w http.ResponseWriter, r *http.Request) {
 	request = *reqCtx.CompletionRequest
 	request.Provider = reqCtx.Request.Provider
 	request.Model = reqCtx.Request.Model
-	request.Prompt = openai.ContentText(reqCtx.Request.Messages[0].Content)
+	effectivePrompt, err := openai.ApplyCompletionPromptPolicyContent(request.Prompt, reqCtx.Request.Messages[0].Content)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
+		return
+	}
+	request.Prompt = effectivePrompt
 	*reqCtx.CompletionRequest = request
 	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateCompletionTokens(request)) {
 		return
@@ -306,8 +311,8 @@ func validateCompletionRequest(request openai.CompletionRequest) string {
 	if strings.TrimSpace(request.Model) == "" {
 		return "model is required"
 	}
-	if request.Prompt == "" {
-		return "prompt is required and must be a string"
+	if _, err := openai.InspectCompletionPrompt(request.Prompt); err != nil {
+		return err.Error()
 	}
 	if request.MaxTokens != nil && *request.MaxTokens < 0 {
 		return "max_tokens must be nonnegative"
@@ -318,6 +323,9 @@ func validateCompletionRequest(request openai.CompletionRequest) string {
 		if n < 1 || n > 128 {
 			return "n must be between 1 and 128"
 		}
+	}
+	if _, err := openai.CompletionChoiceCount(request.Prompt, request.N); err != nil {
+		return err.Error()
 	}
 	if request.BestOf != nil {
 		if *request.BestOf < 1 || *request.BestOf > 20 || *request.BestOf < n {

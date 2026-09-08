@@ -93,9 +93,9 @@ func validateCompletionResult(response openai.CompletionResponse, request openai
 	if err := validateCompletionResponse(response); err != nil {
 		return err
 	}
-	want := 1
-	if request.N != nil {
-		want = *request.N
+	want, err := openai.CompletionChoiceCount(request.Prompt, request.N)
+	if err != nil {
+		return err
 	}
 	if len(response.Choices) != want {
 		return errors.New("provider returned an unexpected number of completion choices")
@@ -113,6 +113,9 @@ func (r Router) Completions(ctx context.Context, req modules.RequestContext) (op
 		return openai.CompletionResponse{}, errors.New("missing completion request")
 	}
 	request := *req.CompletionRequest
+	if _, err := openai.CompletionChoiceCount(request.Prompt, request.N); err != nil {
+		return openai.CompletionResponse{}, err
+	}
 	candidates := r.routeCandidates(ctx, req, req.Request, "chat")
 	if len(candidates) == 0 {
 		return openai.CompletionResponse{}, fmt.Errorf("no completion endpoint for provider=%q model=%q", request.Provider, request.Model)
@@ -161,7 +164,11 @@ func (r Router) Completions(ctx context.Context, req modules.RequestContext) (op
 		if attemptCtx.CompletionRequest == nil || len(attemptCtx.Request.Messages) != 1 {
 			return openai.CompletionResponse{}, errors.New("module removed completion request")
 		}
-		attemptCtx.CompletionRequest.Prompt = openai.ContentText(attemptCtx.Request.Messages[0].Content)
+		effectivePrompt, err := openai.ApplyCompletionPromptPolicyContent(attemptCtx.CompletionRequest.Prompt, attemptCtx.Request.Messages[0].Content)
+		if err != nil {
+			return openai.CompletionResponse{}, err
+		}
+		attemptCtx.CompletionRequest.Prompt = effectivePrompt
 		started := time.Now()
 		lastAttempt = &attemptCtx
 		client := endpoint.Provider.(CompletionClient)

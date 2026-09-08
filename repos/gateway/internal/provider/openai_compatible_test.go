@@ -151,13 +151,13 @@ func TestOpenAICompatibleForwardsNativeCompletionParameters(t *testing.T) {
 	bestOf, n, maxTokens, logprobs := 2, 1, 9, 1
 	echo := true
 	response, err := NewOpenAICompatible(server.URL+"/v1", "provider-key", true).Completions(t.Context(), openai.CompletionRequest{
-		Provider: "route-only", Model: "instruct", Prompt: "complete", BestOf: &bestOf, N: &n, MaxTokens: &maxTokens,
+		Provider: "route-only", Model: "instruct", Prompt: []any{[]any{10, 11}, []any{12}}, BestOf: &bestOf, N: &n, MaxTokens: &maxTokens,
 		Logprobs: &logprobs, Echo: &echo, Suffix: "suffix", Stop: []any{"END"}, User: "user-1", Stream: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, found := upstream["provider"]; found || string(upstream["stream"]) != "false" || string(upstream["best_of"]) != "2" || string(upstream["suffix"]) != `"suffix"` {
+	if _, found := upstream["provider"]; found || string(upstream["prompt"]) != `[[10,11],[12]]` || string(upstream["stream"]) != "false" || string(upstream["best_of"]) != "2" || string(upstream["suffix"]) != `"suffix"` {
 		t.Fatalf("unexpected upstream payload: %+v", upstream)
 	}
 	if response.Usage.TotalTokens != 4 || response.Choices[0].Logprobs == nil || response.Choices[0].Logprobs.Tokens[0] != " done" {

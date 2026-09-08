@@ -3278,11 +3278,25 @@ components:
     CompletionRequest:
       type: object
       additionalProperties: false
-      required: [model, prompt]
+      required: [model]
       properties:
         provider: {type: string}
         model: {type: string, minLength: 1}
-        prompt: {type: string, minLength: 1}
+        prompt:
+          description: A string, strings, token IDs or token-ID arrays. At most 128 prompts and 128 returned choices after multiplying by n.
+          anyOf:
+            - type: string
+            - type: array
+              maxItems: 128
+              items: {type: string}
+            - type: array
+              items: {type: integer, minimum: 0, maximum: 2147483647}
+            - type: array
+              minItems: 1
+              maxItems: 128
+              items:
+                type: array
+                items: {type: integer, minimum: 0, maximum: 2147483647}
         best_of: {type: integer, minimum: 1, maximum: 20, description: Must be at least n and cannot exceed 1 with stream=true.}
         echo: {type: boolean}
         frequency_penalty: {type: number, minimum: -2, maximum: 2}

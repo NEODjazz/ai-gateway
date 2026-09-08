@@ -88,7 +88,22 @@ func ResponseCompactInputTokens(r ResponseCompactRequest) int {
 }
 
 func CompletionInputTokens(r CompletionRequest) int {
-	return EstimateContextTokens(r.Prompt)
+	info, err := InspectCompletionPrompt(r.Prompt)
+	if err != nil {
+		return 1
+	}
+	if info.Kind == CompletionPromptTokens || info.Kind == CompletionPromptTokenArrays {
+		return max(1, info.TokenCount)
+	}
+	total := 0
+	for _, prompt := range info.Texts {
+		count := EstimateContextTokens(prompt)
+		if total > intMax()-count {
+			return intMax()
+		}
+		total += count
+	}
+	return max(1, total)
 }
 
 func CompletionReserveTokens(r CompletionRequest) int {
@@ -96,14 +111,19 @@ func CompletionReserveTokens(r CompletionRequest) int {
 	if r.MaxTokens != nil {
 		output = max(0, *r.MaxTokens)
 	}
-	candidates := 1
+	prompts := CompletionPromptCount(r.Prompt)
+	candidatesPerPrompt := 1
 	if r.N != nil {
-		candidates = max(candidates, *r.N)
+		candidatesPerPrompt = max(candidatesPerPrompt, *r.N)
 	}
 	if r.BestOf != nil {
-		candidates = max(candidates, *r.BestOf)
+		candidatesPerPrompt = max(candidatesPerPrompt, *r.BestOf)
 	}
-	limit := int(^uint(0) >> 1)
+	if candidatesPerPrompt > intMax()/prompts {
+		return intMax()
+	}
+	candidates := prompts * candidatesPerPrompt
+	limit := intMax()
 	if candidates > 0 && output > limit/candidates {
 		return limit
 	}

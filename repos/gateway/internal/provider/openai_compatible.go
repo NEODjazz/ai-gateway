@@ -61,7 +61,7 @@ type openAICompatibleCompactRequest struct {
 
 type openAICompatibleCompletionRequest struct {
 	Model            string         `json:"model"`
-	Prompt           string         `json:"prompt"`
+	Prompt           any            `json:"prompt,omitempty"`
 	BestOf           *int           `json:"best_of,omitempty"`
 	Echo             *bool          `json:"echo,omitempty"`
 	FrequencyPenalty *float64       `json:"frequency_penalty,omitempty"`

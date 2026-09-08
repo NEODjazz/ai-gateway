@@ -250,10 +250,10 @@ func TestRemoteBillingCommitsCompactionUsageSeparately(t *testing.T) {
 func TestRemoteBillingReservesAllCompletionCandidatesAndCommitsUsage(t *testing.T) {
 	maxTokens, bestOf := 100, 3
 	req := sensitiveContext()
-	req.CompletionRequest = &openai.CompletionRequest{Provider: "provider", Model: "instruct", Prompt: "private prompt", MaxTokens: &maxTokens, BestOf: &bestOf}
+	req.CompletionRequest = &openai.CompletionRequest{Provider: "provider", Model: "instruct", Prompt: []string{"private prompt", "second prompt"}, MaxTokens: &maxTokens, BestOf: &bestOf}
 	reserved := billingRequest(&req)
 	input := openai.CompletionInputTokens(*req.CompletionRequest)
-	if reserved.APIType != "completions" || reserved.InputTokens != input || reserved.OutputTokens != 300 || reserved.TotalTokens != input+300 {
+	if reserved.APIType != "completions" || reserved.InputTokens != input || reserved.OutputTokens != 600 || reserved.TotalTokens != input+600 {
 		t.Fatalf("unexpected completion reserve: %+v", reserved)
 	}
 	req.CompletionResponse = &openai.CompletionResponse{Model: "instruct-v2", Usage: openai.Usage{PromptTokens: 11, CompletionTokens: 9, TotalTokens: 20}}
@@ -263,7 +263,7 @@ func TestRemoteBillingReservesAllCompletionCandidatesAndCommitsUsage(t *testing.
 	}
 	req.CompletionResponse = &openai.CompletionResponse{Model: "instruct-v2"}
 	estimated := billingRequest(&req)
-	if !estimated.UsageEstimated || estimated.InputTokens != input || estimated.OutputTokens != 300 || estimated.TotalTokens != input+300 {
+	if !estimated.UsageEstimated || estimated.InputTokens != input || estimated.OutputTokens != 600 || estimated.TotalTokens != input+600 {
 		t.Fatalf("completion fallback lost reserved candidates: %+v", estimated)
 	}
 }

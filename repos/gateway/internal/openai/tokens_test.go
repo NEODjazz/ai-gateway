@@ -37,6 +37,10 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	if CompletionReserveTokens(completion) != CompletionInputTokens(completion)+300 {
 		t.Fatal("completion best_of reserve omitted generated candidates")
 	}
+	multiPrompt := CompletionRequest{Prompt: []any{[]any{10.0, 11.0}, []any{12.0}}, MaxTokens: &maxTokens, BestOf: &bestOf}
+	if CompletionInputTokens(multiPrompt) != 3 || CompletionReserveTokens(multiPrompt) != 603 {
+		t.Fatalf("multi-prompt token accounting is incorrect: input=%d reserve=%d", CompletionInputTokens(multiPrompt), CompletionReserveTokens(multiPrompt))
+	}
 	zero := 0
 	completion.MaxTokens, completion.BestOf = &zero, nil
 	if CompletionReserveTokens(completion) != CompletionInputTokens(completion) {

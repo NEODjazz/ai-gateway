@@ -79,6 +79,25 @@ func TestRouterCompletionsRunsProviderLifecycleWithEffectivePrompt(t *testing.T)
 	}
 }
 
+func TestValidateCompletionResultUsesPromptAndChoiceCounts(t *testing.T) {
+	n := 2
+	request := openai.CompletionRequest{Prompt: []string{"one", "two"}, N: &n}
+	response := validCompletionResponse()
+	response.Choices = []openai.CompletionChoice{
+		{Index: 0, Text: "a", FinishReason: "stop"},
+		{Index: 1, Text: "b", FinishReason: "stop"},
+		{Index: 2, Text: "c", FinishReason: "stop"},
+		{Index: 3, Text: "d", FinishReason: "stop"},
+	}
+	if err := validateCompletionResult(response, request); err != nil {
+		t.Fatal(err)
+	}
+	response.Choices = response.Choices[:3]
+	if err := validateCompletionResult(response, request); err == nil {
+		t.Fatal("incomplete multi-prompt response was accepted")
+	}
+}
+
 func TestRouterCompletionsRequiresNativeAdapter(t *testing.T) {
 	client := &affinityResponseClient{id: "regular"}
 	router := Router{
