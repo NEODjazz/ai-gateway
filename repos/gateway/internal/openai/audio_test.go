@@ -11,12 +11,20 @@ func testAudioAttachment() AudioAttachment {
 	return AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: base64.StdEncoding.EncodeToString([]byte("RIFF....WAVEdata"))}
 }
 
+func testSpeakerReference() AudioAttachment {
+	attachment, err := ParseDataAudioURL("data:audio/wav;base64," + testAudioAttachment().Data)
+	if err != nil {
+		panic(err)
+	}
+	return attachment
+}
+
 func TestAudioTranscriptionRequestValidationAndReserve(t *testing.T) {
 	temperature := 0.5
 	prefix := 300
 	silence := 500
 	threshold := 0.45
-	request := AudioTranscriptionRequest{Model: "transcribe", File: testAudioAttachment(), Prompt: "speaker names", ResponseFormat: "verbose_json", Temperature: &temperature, TimestampGranularities: []string{"word", "segment"}, Languages: []string{"en", "pt-BR"}, Keywords: []string{"Acme", "Jane Doe"}, ChunkingStrategy: &AudioChunkingStrategy{Type: "server_vad", PrefixPaddingMS: &prefix, SilenceDurationMS: &silence, Threshold: &threshold}}
+	request := AudioTranscriptionRequest{Model: "transcribe", File: testAudioAttachment(), Prompt: "speaker names", ResponseFormat: "verbose_json", Temperature: &temperature, TimestampGranularities: []string{"word", "segment"}, Languages: []string{"en", "pt-BR"}, Keywords: []string{"Acme", "Jane Doe"}, ChunkingStrategy: &AudioChunkingStrategy{Type: "server_vad", PrefixPaddingMS: &prefix, SilenceDurationMS: &silence, Threshold: &threshold}, KnownSpeakerNames: []string{"Jane"}, KnownSpeakerReferences: []AudioAttachment{testSpeakerReference()}}
 	if message := request.Validate(); message != "" {
 		t.Fatal(message)
 	}
@@ -24,12 +32,32 @@ func TestAudioTranscriptionRequestValidationAndReserve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantInput := EstimateContextTokens(strings.Join([]string{"speaker names", "en", "pt-BR", "Acme", "Jane Doe", chunking}, "\n")) + (len([]byte("RIFF....WAVEdata"))+3)/4
+	wantInput := EstimateContextTokens(strings.Join([]string{"speaker names", "en", "pt-BR", "Acme", "Jane Doe", "Jane", chunking}, "\n")) + 2*((len([]byte("RIFF....WAVEdata"))+3)/4)
 	if got := AudioTranscriptionInputTokens(request); got != wantInput {
 		t.Fatalf("input tokens=%d want %d", got, wantInput)
 	}
 	if got := AudioTranscriptionReserveTokens(request); got != wantInput+DefaultOutputTokenReserve {
 		t.Fatalf("reserve=%d", got)
+	}
+}
+
+func TestKnownSpeakerReferencesAreBoundedDataAudioURLs(t *testing.T) {
+	reference := testSpeakerReference()
+	if reference.MediaType != "audio/wav" || reference.DataURL() != "data:audio/wav;base64,"+testAudioAttachment().Data {
+		t.Fatalf("reference=%+v", reference)
+	}
+	for _, value := range []string{"https://example.test/sample.wav", "data:text/plain;base64,SGVsbG8=", "data:audio/wav;base64,bm90IGF1ZGlv", "data:audio/wav;base64,%%%"} {
+		if _, err := ParseDataAudioURL(value); err == nil {
+			t.Fatalf("accepted %q", value)
+		}
+	}
+	oversized := append([]byte("RIFF....WAVE"), make([]byte, MaxKnownSpeakerReferenceBytes)...)
+	if _, err := ParseDataAudioURL("data:audio/wav;base64," + base64.StdEncoding.EncodeToString(oversized)); err == nil {
+		t.Fatal("oversized speaker reference was accepted")
+	}
+	five := []AudioAttachment{reference, reference, reference, reference, reference}
+	if err := ValidateKnownSpeakerReferences(five); err == nil {
+		t.Fatal("too many speaker references were accepted")
 	}
 }
 
@@ -67,6 +95,8 @@ func TestAudioTranscriptionRequestRejectsUnsafeInput(t *testing.T) {
 		{Model: "m", File: testAudioAttachment(), Languages: []string{"english"}},
 		{Model: "m", File: testAudioAttachment(), Keywords: []string{" "}},
 		{Model: "m", File: testAudioAttachment(), ChunkingStrategy: &AudioChunkingStrategy{Type: "server_vad", Threshold: &badThreshold}},
+		{Model: "m", File: testAudioAttachment(), KnownSpeakerNames: []string{"Jane"}},
+		{Model: "m", File: testAudioAttachment(), KnownSpeakerNames: []string{" "}, KnownSpeakerReferences: []AudioAttachment{testSpeakerReference()}},
 	} {
 		if message := request.Validate(); message == "" {
 			t.Fatalf("accepted invalid request: %+v", request)

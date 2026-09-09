@@ -190,15 +190,22 @@ M4A, OGG, WAV или WebM размером до 20 MiB для deployment и mode
 `languages[]` и `keywords[]` ограничены по количеству и размеру. Стратегия
 `chunking_strategy` принимает `auto` или строгий JSON-объект `server_vad` с
 bounded `prefix_padding_ms`, `silence_duration_ms` и `threshold`. Все эти поля
-учитываются в TPM и billing reserve. Неизвестные и повторные scalar fields, а
-также превышающие лимиты bounded array fields отклоняются.
+учитываются в TPM и billing reserve. `known_speaker_names[]` и
+`known_speaker_references[]` принимаются только парами до четырех элементов.
+Reference должен быть inline base64 data URL поддерживаемого аудиоформата с
+корректной сигнатурой; лимит составляет 512 KiB на образец и 2 MiB суммарно.
+Все reference-аудио передается в AV, имена — в DLP, а их текст и байты входят в
+TPM и billing reserve. Требование провайдера к длительности образца проверяется
+upstream, поскольку оно не выводится надежно из bounded bytes для всех сжатых
+форматов. Неизвестные и повторные scalar fields, а также превышающие лимиты
+bounded array fields отклоняются.
 
 Поддерживаются JSON-форматы `json`, `verbose_json` и `diarized_json`. Успешный
 ответ ограничен 8 MiB, transcript — 1 MiB текста, words и segments — 100 000
 элементов суммарно. Provider обязан вернуть точный token usage с согласованной
 суммой; duration-only usage отклоняется, поскольку существующий TPM и billing
-контракт начисляет токены. Streaming, duration-priced models, known-speaker
-references и дополнительные native adapters остаются отдельными контрактами.
+контракт начисляет токены. Streaming, duration-priced models и дополнительные
+native adapters остаются отдельными контрактами.
 
 `POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
 

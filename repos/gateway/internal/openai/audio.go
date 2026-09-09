@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"path/filepath"
 	"regexp"
@@ -16,8 +17,11 @@ const MaxAudioBytes = 20 << 20
 const maxAudioTranscriptRunes = 1 << 20
 
 const (
-	MaxAudioLanguages = 64
-	MaxAudioKeywords  = 100
+	MaxAudioLanguages             = 64
+	MaxAudioKeywords              = 100
+	MaxKnownSpeakerReferences     = 4
+	MaxKnownSpeakerReferenceBytes = 512 << 10
+	MaxKnownSpeakerTotalBytes     = 2 << 20
 )
 
 var audioLanguagePattern = regexp.MustCompile(`^[A-Za-z]{2,3}(?:-[A-Za-z]{2,8})?$`)
@@ -41,6 +45,8 @@ type AudioTranscriptionRequest struct {
 	Languages              []string               `json:"languages,omitempty"`
 	Keywords               []string               `json:"keywords,omitempty"`
 	ChunkingStrategy       *AudioChunkingStrategy `json:"chunking_strategy,omitempty"`
+	KnownSpeakerNames      []string               `json:"known_speaker_names,omitempty"`
+	KnownSpeakerReferences []AudioAttachment      `json:"known_speaker_references,omitempty"`
 }
 
 type AudioChunkingStrategy struct {
@@ -152,7 +158,58 @@ func (r AudioTranscriptionRequest) Validate() string {
 	if r.ChunkingStrategy != nil && r.ChunkingStrategy.validate() != "" {
 		return r.ChunkingStrategy.validate()
 	}
+	if len(r.KnownSpeakerNames) != len(r.KnownSpeakerReferences) || len(r.KnownSpeakerNames) > MaxKnownSpeakerReferences {
+		return "known speaker names and references must have the same length up to 4"
+	}
+	for _, name := range r.KnownSpeakerNames {
+		if strings.TrimSpace(name) == "" || utf8.RuneCountInString(name) > 64 {
+			return "invalid known speaker name"
+		}
+	}
+	if err := ValidateKnownSpeakerReferences(r.KnownSpeakerReferences); err != nil {
+		return err.Error()
+	}
 	return ""
+}
+
+func ParseDataAudioURL(value string) (AudioAttachment, error) {
+	header, data, found := strings.Cut(value, ",")
+	if !found || !strings.HasPrefix(header, "data:") || !strings.HasSuffix(header, ";base64") {
+		return AudioAttachment{}, fmt.Errorf("%w: only base64 data audio URLs are supported", ErrInvalidAudio)
+	}
+	mediaType := strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64")
+	extension := audioExtension(mediaType)
+	if extension == "" || data == "" || base64.StdEncoding.DecodedLen(len(data)) > MaxKnownSpeakerReferenceBytes {
+		return AudioAttachment{}, ErrInvalidAudio
+	}
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil || len(decoded) == 0 || len(decoded) > MaxKnownSpeakerReferenceBytes || !validAudioSignature(mediaType, decoded) {
+		return AudioAttachment{}, ErrInvalidAudio
+	}
+	return AudioAttachment{Filename: "reference" + extension, MediaType: mediaType, Data: data}, nil
+}
+
+func (a AudioAttachment) DataURL() string {
+	return "data:" + a.MediaType + ";base64," + a.Data
+}
+
+func ValidateKnownSpeakerReferences(references []AudioAttachment) error {
+	if len(references) > MaxKnownSpeakerReferences {
+		return ErrInvalidAudio
+	}
+	total := 0
+	for _, reference := range references {
+		parsed, err := ParseDataAudioURL(reference.DataURL())
+		if err != nil || parsed.MediaType != reference.MediaType {
+			return ErrInvalidAudio
+		}
+		decoded, err := base64.StdEncoding.DecodeString(reference.Data)
+		if err != nil || total > MaxKnownSpeakerTotalBytes-len(decoded) {
+			return ErrInvalidAudio
+		}
+		total += len(decoded)
+	}
+	return nil
 }
 
 func ValidateAudioAttachment(attachment AudioAttachment) error {
@@ -171,10 +228,11 @@ func AudioTranscriptionInputTokens(r AudioTranscriptionRequest) int {
 	if err != nil {
 		return int(^uint(0) >> 1)
 	}
-	contextParts := make([]string, 0, 1+len(r.Languages)+len(r.Keywords))
+	contextParts := make([]string, 0, 1+len(r.Languages)+len(r.Keywords)+len(r.KnownSpeakerNames))
 	contextParts = append(contextParts, r.Prompt)
 	contextParts = append(contextParts, r.Languages...)
 	contextParts = append(contextParts, r.Keywords...)
+	contextParts = append(contextParts, r.KnownSpeakerNames...)
 	if r.ChunkingStrategy != nil {
 		if value, marshalErr := r.ChunkingStrategy.MultipartValue(); marshalErr == nil {
 			contextParts = append(contextParts, value)
@@ -184,11 +242,42 @@ func AudioTranscriptionInputTokens(r AudioTranscriptionRequest) int {
 	}
 	promptTokens := EstimateContextTokens(strings.Join(contextParts, "\n"))
 	audioTokens := bytesTokenEstimate(data)
+	for _, reference := range r.KnownSpeakerReferences {
+		decoded, decodeErr := base64.StdEncoding.DecodeString(reference.Data)
+		if decodeErr != nil {
+			return int(^uint(0) >> 1)
+		}
+		referenceTokens := bytesTokenEstimate(decoded)
+		maxInt := int(^uint(0) >> 1)
+		if audioTokens > maxInt-referenceTokens {
+			return maxInt
+		}
+		audioTokens += referenceTokens
+	}
 	maxInt := int(^uint(0) >> 1)
 	if promptTokens > maxInt-audioTokens {
 		return maxInt
 	}
 	return promptTokens + audioTokens
+}
+
+func audioExtension(mediaType string) string {
+	switch strings.ToLower(mediaType) {
+	case "audio/wav", "audio/wave", "audio/x-wav":
+		return ".wav"
+	case "audio/flac":
+		return ".flac"
+	case "audio/ogg":
+		return ".ogg"
+	case "audio/webm", "video/webm":
+		return ".webm"
+	case "audio/mpeg", "audio/mp3":
+		return ".mp3"
+	case "audio/mp4", "video/mp4", "audio/x-m4a":
+		return ".m4a"
+	default:
+		return ""
+	}
 }
 
 func AudioTranscriptionReserveTokens(r AudioTranscriptionRequest) int {

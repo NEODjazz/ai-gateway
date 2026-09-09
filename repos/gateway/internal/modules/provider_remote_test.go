@@ -72,14 +72,15 @@ func TestImageVariationProjectsAttachmentToAV(t *testing.T) {
 	}
 }
 
-func TestAudioTranscriptionProjectsFileToAVAndHintsToDLP(t *testing.T) {
-	request := openai.AudioTranscriptionRequest{Model: "audio", File: openai.AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: "UklGRi4uLi5XQVZFZGF0YQ=="}, Prompt: "private speaker", Keywords: []string{"private company", "private person"}}
+func TestAudioTranscriptionProjectsFilesToAVAndHintsToDLP(t *testing.T) {
+	file := openai.AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: "UklGRi4uLi5XQVZFZGF0YQ=="}
+	request := openai.AudioTranscriptionRequest{Model: "audio", File: file, Prompt: "private speaker", Keywords: []string{"private company", "private person"}, KnownSpeakerNames: []string{"Jane"}, KnownSpeakerReferences: []openai.AudioAttachment{{Filename: "reference.wav", MediaType: file.MediaType, Data: file.Data}}}
 	req := RequestContext{AudioTranscriptionRequest: &request}
 	attachments, err := requestImageAttachments(&req)
-	if err != nil || len(attachments) != 1 || attachments[0].MediaType != "audio/wav" || attachments[0].Data != request.File.Data {
+	if err != nil || len(attachments) != 2 || attachments[0].MediaType != "audio/wav" || attachments[0].Data != request.File.Data || attachments[1].Data != request.KnownSpeakerReferences[0].Data {
 		t.Fatalf("attachments=%+v err=%v", attachments, err)
 	}
-	if payload := scanPayload(&req); payload != "transcription_prompt: private speaker\ntranscription_keyword: private company\ntranscription_keyword: private person" {
+	if payload := scanPayload(&req); payload != "transcription_prompt: private speaker\ntranscription_keyword: private company\ntranscription_keyword: private person\nknown_speaker_name: Jane" {
 		t.Fatalf("payload=%q", payload)
 	}
 }

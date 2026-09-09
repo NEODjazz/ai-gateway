@@ -1696,6 +1696,8 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		audioRequest.Include = append([]string(nil), req.AudioTranscriptionRequest.Include...)
 		audioRequest.Languages = append([]string(nil), req.AudioTranscriptionRequest.Languages...)
 		audioRequest.Keywords = append([]string(nil), req.AudioTranscriptionRequest.Keywords...)
+		audioRequest.KnownSpeakerNames = append([]string(nil), req.AudioTranscriptionRequest.KnownSpeakerNames...)
+		audioRequest.KnownSpeakerReferences = append([]openai.AudioAttachment(nil), req.AudioTranscriptionRequest.KnownSpeakerReferences...)
 		if req.AudioTranscriptionRequest.ChunkingStrategy != nil {
 			strategy := *req.AudioTranscriptionRequest.ChunkingStrategy
 			if strategy.PrefixPaddingMS != nil {

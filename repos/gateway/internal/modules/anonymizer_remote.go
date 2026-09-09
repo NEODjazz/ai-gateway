@@ -16,6 +16,7 @@ type AnonymizeRequest struct {
 	Query        string           `json:"query,omitempty"`
 	Documents    []any            `json:"documents,omitempty"`
 	Keywords     []string         `json:"keywords,omitempty"`
+	SpeakerNames []string         `json:"speaker_names,omitempty"`
 }
 
 type AnonymizeResponse struct {
@@ -25,6 +26,7 @@ type AnonymizeResponse struct {
 	Query        string            `json:"query,omitempty"`
 	Documents    []any             `json:"documents,omitempty"`
 	Keywords     []string          `json:"keywords,omitempty"`
+	SpeakerNames []string          `json:"speaker_names,omitempty"`
 	Replacements map[string]string `json:"replacements,omitempty"`
 }
 
@@ -71,6 +73,7 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 			request.Input = req.AudioTranscriptionRequest.Prompt
 		}
 		request.Keywords = append([]string(nil), req.AudioTranscriptionRequest.Keywords...)
+		request.SpeakerNames = append([]string(nil), req.AudioTranscriptionRequest.KnownSpeakerNames...)
 	}
 	response, err := callRemote[AnonymizeRequest, AnonymizeResponse](ctx, m.client, m.endpoint, request)
 	if err != nil {
@@ -126,6 +129,10 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 			return errors.New("anonymizer returned an invalid transcription keyword projection")
 		}
 		req.AudioTranscriptionRequest.Keywords = append([]string(nil), response.Keywords...)
+		if len(response.SpeakerNames) != len(req.AudioTranscriptionRequest.KnownSpeakerNames) {
+			return errors.New("anonymizer returned an invalid known speaker name projection")
+		}
+		req.AudioTranscriptionRequest.KnownSpeakerNames = append([]string(nil), response.SpeakerNames...)
 	}
 	req.AnonymizationValues = cloneStringMap(response.Replacements)
 	return nil

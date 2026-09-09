@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.99
+  version: 0.1.100
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4399,6 +4399,15 @@ components:
                 prefix_padding_ms: {type: integer, minimum: 0, maximum: 10000}
                 silence_duration_ms: {type: integer, minimum: 0, maximum: 10000}
                 threshold: {type: number, minimum: 0, maximum: 1}
+        known_speaker_names[]:
+          type: array
+          maxItems: 4
+          items: {type: string, minLength: 1, maxLength: 64}
+        known_speaker_references[]:
+          type: array
+          maxItems: 4
+          description: Must contain the same number of entries as known_speaker_names[]. Each entry is a supported base64 data audio URL up to 512 KiB decoded; the combined decoded limit is 2 MiB. Providers validate the required sample duration.
+          items: {type: string, format: uri, pattern: '^data:(?:audio|video)/[^;,]+;base64,'}
     AudioTranscriptionResponse:
       type: object
       additionalProperties: false

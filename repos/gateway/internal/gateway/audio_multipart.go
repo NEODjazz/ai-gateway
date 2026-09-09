@@ -32,8 +32,14 @@ func decodeAudioTranscriptionRequest(w http.ResponseWriter, r *http.Request) (op
 			return openai.AudioTranscriptionRequest{}, false
 		}
 		name := part.FormName()
-		if name == "timestamp_granularities[]" || name == "include[]" || name == "languages[]" || name == "keywords[]" {
-			value, ok := readAudioScalar(part)
+		if name == "timestamp_granularities[]" || name == "include[]" || name == "languages[]" || name == "keywords[]" || name == "known_speaker_names[]" || name == "known_speaker_references[]" {
+			var value string
+			var ok bool
+			if name == "known_speaker_references[]" {
+				value, ok = readAudioReference(part)
+			} else {
+				value, ok = readAudioScalar(part)
+			}
 			if !ok || !appendAudioArrayField(&request, name, value) {
 				writeError(w, http.StatusBadRequest, "invalid_request", "invalid multipart field "+strconv.Quote(name))
 				return openai.AudioTranscriptionRequest{}, false
@@ -74,6 +80,21 @@ func decodeAudioTranscriptionRequest(w http.ResponseWriter, r *http.Request) (op
 		return openai.AudioTranscriptionRequest{}, false
 	}
 	return request, true
+}
+
+func readAudioReference(part interface {
+	Read([]byte) (int, error)
+	Close() error
+	FileName() string
+}) (string, bool) {
+	if part.FileName() != "" {
+		_ = part.Close()
+		return "", false
+	}
+	limit := int64(base64.StdEncoding.EncodedLen(openai.MaxKnownSpeakerReferenceBytes) + 64)
+	value, err := io.ReadAll(io.LimitReader(part, limit+1))
+	_ = part.Close()
+	return string(value), err == nil && int64(len(value)) <= limit
 }
 
 func readAudioScalar(part interface {
@@ -134,6 +155,16 @@ func appendAudioArrayField(request *openai.AudioTranscriptionRequest, name, valu
 	case "keywords[]":
 		request.Keywords = append(request.Keywords, value)
 		return len(request.Keywords) <= openai.MaxAudioKeywords
+	case "known_speaker_names[]":
+		request.KnownSpeakerNames = append(request.KnownSpeakerNames, value)
+		return len(request.KnownSpeakerNames) <= openai.MaxKnownSpeakerReferences
+	case "known_speaker_references[]":
+		reference, err := openai.ParseDataAudioURL(value)
+		if err != nil {
+			return false
+		}
+		request.KnownSpeakerReferences = append(request.KnownSpeakerReferences, reference)
+		return len(request.KnownSpeakerReferences) <= openai.MaxKnownSpeakerReferences
 	default:
 		return false
 	}

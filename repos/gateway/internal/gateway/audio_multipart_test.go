@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"encoding/base64"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -39,7 +40,8 @@ func TestAudioTranscriptionUsesAuthenticatedPipelineAndReservesTPM(t *testing.T)
 	llm := &chatProvider{}
 	rates := &embeddingTokenRateStore{}
 	handler := Routes(NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"audio-*"}}}), llm, rates))
-	body, contentType := audioHTTPBody(t, [][2]string{{"provider", "speech"}, {"model", "audio-model"}, {"prompt", "speaker@example.com"}, {"response_format", "json"}, {"languages[]", "en"}, {"languages[]", "de"}, {"keywords[]", "Acme"}, {"keywords[]", "Jane"}, {"chunking_strategy", `{"type":"server_vad","threshold":0.4}`}}, "sample.wav", []byte("RIFF....WAVEdata"))
+	reference := "data:audio/wav;base64," + base64.StdEncoding.EncodeToString([]byte("RIFF....WAVEdata"))
+	body, contentType := audioHTTPBody(t, [][2]string{{"provider", "speech"}, {"model", "audio-model"}, {"prompt", "speaker@example.com"}, {"response_format", "json"}, {"languages[]", "en"}, {"languages[]", "de"}, {"keywords[]", "Acme"}, {"keywords[]", "Jane"}, {"chunking_strategy", `{"type":"server_vad","threshold":0.4}`}, {"known_speaker_names[]", "Jane"}, {"known_speaker_references[]", reference}}, "sample.wav", []byte("RIFF....WAVEdata"))
 	request := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", body)
 	request.Header.Set("Content-Type", contentType)
 	request.Header.Set("Authorization", "Bearer client-secret")
@@ -51,7 +53,7 @@ func TestAudioTranscriptionUsesAuthenticatedPipelineAndReservesTPM(t *testing.T)
 	if rates.tokens != openai.AudioTranscriptionReserveTokens(*llm.request.AudioTranscriptionRequest) {
 		t.Fatalf("TPM reserve=%d", rates.tokens)
 	}
-	if got := llm.request.AudioTranscriptionRequest; len(got.Languages) != 2 || len(got.Keywords) != 2 || got.ChunkingStrategy == nil || got.ChunkingStrategy.Type != "server_vad" {
+	if got := llm.request.AudioTranscriptionRequest; len(got.Languages) != 2 || len(got.Keywords) != 2 || got.ChunkingStrategy == nil || got.ChunkingStrategy.Type != "server_vad" || len(got.KnownSpeakerNames) != 1 || len(got.KnownSpeakerReferences) != 1 {
 		t.Fatalf("request=%+v", got)
 	}
 }
@@ -68,6 +70,8 @@ func TestAudioTranscriptionRejectsMalformedMultipartBeforeProvider(t *testing.T)
 		{name: "duplicate scalar", fields: [][2]string{{"model", "audio"}, {"model", "duplicate"}}, filename: "sample.wav", data: []byte("RIFF....WAVEdata")},
 		{name: "invalid chunking", fields: [][2]string{{"model", "audio"}, {"chunking_strategy", `{"type":"server_vad","threshold":2}`}}, filename: "sample.wav", data: []byte("RIFF....WAVEdata")},
 		{name: "invalid language", fields: [][2]string{{"model", "audio"}, {"languages[]", "english"}}, filename: "sample.wav", data: []byte("RIFF....WAVEdata")},
+		{name: "speaker mismatch", fields: [][2]string{{"model", "audio"}, {"known_speaker_names[]", "Jane"}}, filename: "sample.wav", data: []byte("RIFF....WAVEdata")},
+		{name: "remote speaker reference", fields: [][2]string{{"model", "audio"}, {"known_speaker_names[]", "Jane"}, {"known_speaker_references[]", "https://example.test/sample.wav"}}, filename: "sample.wav", data: []byte("RIFF....WAVEdata")},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			llm := &chatProvider{}

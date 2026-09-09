@@ -107,13 +107,13 @@ func TestAnonymizerMasksImageGenerationPrompt(t *testing.T) {
 }
 
 func TestAnonymizerMasksAudioTranscriptionHints(t *testing.T) {
-	request := openai.AudioTranscriptionRequest{Model: "audio", Prompt: "speaker user@example.com", Keywords: []string{"customer@example.com", "Acme"}}
+	request := openai.AudioTranscriptionRequest{Model: "audio", Prompt: "speaker user@example.com", Keywords: []string{"customer@example.com", "Acme"}, KnownSpeakerNames: []string{"person@example.com"}}
 	req := RequestContext{AudioTranscriptionRequest: &request}
 	module := NewAnonymizerModule(true, RuleEmail)
 	if err := module.Handle(context.Background(), &req); err != nil {
 		t.Fatal(err)
 	}
-	if request.Prompt != "speaker {{EMAIL_1}}" || request.Keywords[0] != "{{EMAIL_2}}" || request.Keywords[1] != "Acme" {
+	if request.Prompt != "speaker {{EMAIL_1}}" || request.Keywords[0] != "{{EMAIL_2}}" || request.Keywords[1] != "Acme" || request.KnownSpeakerNames[0] != "{{EMAIL_3}}" {
 		t.Fatalf("request=%+v", request)
 	}
 }
