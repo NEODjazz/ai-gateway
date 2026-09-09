@@ -595,7 +595,10 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
 			attemptCtx.Metadata["provider.cache.status"] = "miss"
-			cachePayload, _ := json.Marshal(response)
+			var cachePayload []byte
+			if !chatResponseHasNativeContent(response) {
+				cachePayload, _ = json.Marshal(response)
+			}
 			mergeChatUsage(&response, attemptCtx.Usage)
 			attemptCtx.Response = &response
 			modules.DeanonymizeResponse(&attemptCtx, &response)
@@ -654,6 +657,9 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 	if outputDLPRequired(req, candidates) {
 		// Output policies need the complete response before any bytes are sent.
 		// The handler will use the regular path and synthesize SSE after scanning.
+		return openai.ChatCompletionResponse{}, false, nil
+	}
+	if req.Metadata["gateway.api_type"] == "messages" && (request.WebSearchOptions != nil || request.WebFetchOptions != nil) {
 		return openai.ChatCompletionResponse{}, false, nil
 	}
 
@@ -1982,6 +1988,15 @@ func outputDLPRequired(req modules.RequestContext, endpoints []Endpoint) bool {
 	}
 	for _, endpoint := range endpoints {
 		if endpoint.OutputDLPEnabled {
+			return true
+		}
+	}
+	return false
+}
+
+func chatResponseHasNativeContent(response openai.ChatCompletionResponse) bool {
+	for _, choice := range response.Choices {
+		if len(choice.Message.NativeContent) > 0 {
 			return true
 		}
 	}

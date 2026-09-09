@@ -43,10 +43,20 @@ type messagesInput struct {
 	Content json.RawMessage `json:"content"`
 }
 type messagesTool struct {
-	Name         string                `json:"name"`
-	Description  string                `json:"description,omitempty"`
-	InputSchema  map[string]any        `json:"input_schema"`
-	CacheControl *messagesCacheControl `json:"cache_control,omitempty"`
+	Type             string                            `json:"type,omitempty"`
+	Name             string                            `json:"name"`
+	Description      string                            `json:"description,omitempty"`
+	InputSchema      map[string]any                    `json:"input_schema,omitempty"`
+	CacheControl     *messagesCacheControl             `json:"cache_control,omitempty"`
+	MaxUses          *int                              `json:"max_uses,omitempty"`
+	UserLocation     *openai.ChatWebSearchUserLocation `json:"user_location,omitempty"`
+	AllowedDomains   []string                          `json:"allowed_domains,omitempty"`
+	MaxContentTokens int                               `json:"max_content_tokens,omitempty"`
+	Citations        *messagesCitations                `json:"citations,omitempty"`
+}
+
+type messagesCitations struct {
+	Enabled bool `json:"enabled"`
 }
 type messagesToolChoice struct {
 	Type            string `json:"type"`
@@ -282,9 +292,29 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 	if len(request.Tools) > 128 {
 		return result, errors.New("too many tools")
 	}
+	searchTool, fetchTool := false, false
 	for _, tool := range request.Tools {
-		if tool.Name == "" || tool.InputSchema == nil {
-			return result, errors.New("tools require name and input_schema")
+		switch tool.Type {
+		case "web_search_20250305":
+			if searchTool || tool.Name != "web_search" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || len(tool.AllowedDomains) > 0 || tool.MaxContentTokens != 0 || tool.Citations != nil {
+				return result, errors.New("invalid or duplicate web search tool")
+			}
+			searchTool = true
+			result.WebSearchOptions = &openai.ChatWebSearchOptions{MaxUses: tool.MaxUses, UserLocation: tool.UserLocation}
+			continue
+		case "web_fetch_20250910":
+			if fetchTool || tool.Name != "web_fetch" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.UserLocation != nil || (tool.Citations != nil && !tool.Citations.Enabled) {
+				return result, errors.New("invalid or duplicate web fetch tool")
+			}
+			fetchTool = true
+			result.WebFetchOptions = &openai.ChatWebFetchOptions{AllowedDomains: tool.AllowedDomains, MaxUses: tool.MaxUses, MaxContentTokens: tool.MaxContentTokens}
+			continue
+		case "":
+		default:
+			return result, errors.New("unsupported server tool")
+		}
+		if tool.Name == "" || tool.InputSchema == nil || tool.MaxUses != nil || tool.UserLocation != nil || len(tool.AllowedDomains) > 0 || tool.MaxContentTokens != 0 || tool.Citations != nil {
+			return result, errors.New("function tools require name and input_schema")
 		}
 		var breakpoint *openai.PromptCacheBreakpoint
 		if tool.CacheControl != nil {
@@ -295,6 +325,9 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 			}
 		}
 		result.Tools = append(result.Tools, openai.Tool{Type: "function", Function: openai.FunctionDefinition{Name: tool.Name, Description: tool.Description, Parameters: tool.InputSchema, PromptCacheBreakpoint: breakpoint}})
+	}
+	if message := result.ChatGenerationOptions.Validate(); message != "" {
+		return result, errors.New(message)
 	}
 	if choice := request.ToolChoice; choice != nil {
 		if choice.Name != "" && choice.Type != "tool" {

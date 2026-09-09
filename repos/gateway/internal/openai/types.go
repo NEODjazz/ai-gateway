@@ -49,6 +49,9 @@ type Message struct {
 	ToolCalls    []ToolCall       `json:"tool_calls,omitempty"`
 	FunctionCall *FunctionCall    `json:"function_call,omitempty"`
 	Reasoning    []ReasoningBlock `json:"reasoning,omitempty"`
+	// NativeContent is an internal, validated response representation used by
+	// protocol adapters that must preserve provider-native content block order.
+	NativeContent []json.RawMessage `json:"-"`
 }
 
 // ReasoningBlock preserves signed and redacted reasoning returned by native

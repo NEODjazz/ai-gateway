@@ -311,6 +311,12 @@ func (h Handler) serveChatAs(w http.ResponseWriter, r *http.Request, request ope
 		writeProviderFailure(w, err)
 		return
 	}
+	if sink, ok := w.(interface {
+		chatResult(openai.ChatCompletionResponse, bool)
+	}); ok {
+		sink.chatResult(response, stream)
+		return
+	}
 
 	if stream {
 		writeChatCompletionStream(w, response, request.StreamOptions)

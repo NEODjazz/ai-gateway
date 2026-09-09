@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"ai-gateway-gateway/internal/openai"
@@ -291,6 +293,15 @@ func scanResponsePayload(req *RequestContext) (string, error) {
 					return "", err
 				}
 			}
+			for _, block := range choice.Message.NativeContent {
+				var value any
+				if err := json.Unmarshal(block, &value); err != nil {
+					return "", fmt.Errorf("decode native output: %w", err)
+				}
+				if err := appendText("native_output: ", nativeOutputText(value)); err != nil {
+					return "", err
+				}
+			}
 		}
 	}
 	if req.CompletionResponse != nil {
@@ -366,6 +377,40 @@ func scanResponsePayload(req *RequestContext) (string, error) {
 		}
 	}
 	return result.String(), nil
+}
+
+func nativeOutputText(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if part := nativeOutputText(item); part != "" {
+				parts = append(parts, part)
+			}
+		}
+		return strings.Join(parts, " ")
+	case map[string]any:
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			switch key {
+			case "encrypted_content", "signature":
+				continue
+			}
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, key := range keys {
+			if part := nativeOutputText(typed[key]); part != "" {
+				parts = append(parts, part)
+			}
+		}
+		return strings.Join(parts, " ")
+	default:
+		return ""
+	}
 }
 
 func metadataBool(metadata map[string]string, key string) bool {

@@ -61,6 +61,7 @@ type messagesWriter struct {
 	blocks            int
 	textBlock         *int
 	err               error
+	directResponse    *openai.ChatCompletionResponse
 }
 
 func (w *messagesWriter) Header() http.Header    { return w.headers }
@@ -153,6 +154,28 @@ func messagesStop(reason string) (string, error) {
 	}
 }
 func messagesContent(message openai.Message) ([]any, error) {
+	if len(message.NativeContent) > 0 {
+		if len(message.NativeContent) > 128 {
+			return nil, errors.New("too many native content blocks")
+		}
+		content := make([]any, 0, len(message.NativeContent))
+		total := 0
+		for _, raw := range message.NativeContent {
+			if len(raw) > 4<<20 || total > (32<<20)-len(raw) {
+				return nil, errors.New("native content exceeds limit")
+			}
+			total += len(raw)
+			var block map[string]any
+			if err := json.Unmarshal(raw, &block); err != nil || block == nil {
+				return nil, errors.New("invalid native content block")
+			}
+			if err := validateNativeMessageBlock(block); err != nil {
+				return nil, err
+			}
+			content = append(content, block)
+		}
+		return content, nil
+	}
 	content := []any{}
 	if err := openai.ValidateReasoningBlocks(message.Reasoning); err != nil {
 		return nil, err
@@ -178,6 +201,159 @@ func messagesContent(message openai.Message) ([]any, error) {
 		content = append(content, map[string]any{"type": "tool_use", "id": call.ID, "name": call.Function.Name, "input": input})
 	}
 	return content, nil
+}
+
+func validateNativeMessageBlock(block map[string]any) error {
+	typeName, _ := block["type"].(string)
+	stringField := func(name string) bool {
+		value, ok := block[name].(string)
+		return ok && value != ""
+	}
+	switch typeName {
+	case "text":
+		if _, ok := block["text"].(string); !ok {
+			return errors.New("native text block requires text")
+		}
+		if citations, found := block["citations"]; found {
+			if _, ok := citations.([]any); !ok {
+				return errors.New("native text citations must be an array")
+			}
+		}
+	case "thinking":
+		if !stringField("thinking") || !stringField("signature") {
+			return errors.New("native thinking block requires thinking and signature")
+		}
+	case "redacted_thinking":
+		if !stringField("data") {
+			return errors.New("native redacted thinking block requires data")
+		}
+	case "tool_use", "server_tool_use":
+		if !stringField("id") || !stringField("name") || block["input"] == nil {
+			return errors.New("native tool block requires id, name and input")
+		}
+		if _, ok := block["input"].(map[string]any); !ok {
+			return errors.New("native tool input must be an object")
+		}
+	case "web_search_tool_result", "web_fetch_tool_result":
+		if !stringField("tool_use_id") || block["content"] == nil {
+			return errors.New("native tool result requires tool_use_id and content")
+		}
+	default:
+		return errors.New("unsupported native content block")
+	}
+	return nil
+}
+
+func (w *messagesWriter) chatResult(response openai.ChatCompletionResponse, stream bool) {
+	if !stream {
+		w.directResponse = &response
+		return
+	}
+	if err := w.streamResult(response); err != nil {
+		w.err = err
+	}
+}
+
+func (w *messagesWriter) streamResult(response openai.ChatCompletionResponse) error {
+	if !validMessagesUsage(response.Usage) || !validMessagesServiceTier(response.ServiceTier) || len(response.Choices) != 1 {
+		return errors.New("invalid message response")
+	}
+	content, err := messagesContent(response.Choices[0].Message)
+	if err != nil {
+		return err
+	}
+	reason, err := messagesStop(response.Choices[0].FinishReason)
+	if err != nil {
+		return err
+	}
+	if response.Choices[0].StopSequence != nil {
+		reason = "stop_sequence"
+	}
+	startUsage := messagesUsage(response.Usage, response.ServiceTier)
+	startUsage["output_tokens"] = 0
+	if err := w.event("message_start", map[string]any{"message": map[string]any{"id": response.ID, "type": "message", "role": "assistant", "model": response.Model, "content": []any{}, "stop_reason": nil, "stop_sequence": nil, "usage": startUsage}}); err != nil {
+		return err
+	}
+	for index, value := range content {
+		block, ok := value.(map[string]any)
+		if !ok {
+			return errors.New("invalid native content block")
+		}
+		start := cloneMessageBlock(block)
+		typeName, _ := block["type"].(string)
+		switch typeName {
+		case "text":
+			text, _ := block["text"].(string)
+			delete(start, "citations")
+			start["text"] = ""
+			if err := w.event("content_block_start", map[string]any{"index": index, "content_block": start}); err != nil {
+				return err
+			}
+			if text != "" {
+				if err := w.event("content_block_delta", map[string]any{"index": index, "delta": map[string]any{"type": "text_delta", "text": text}}); err != nil {
+					return err
+				}
+			}
+			if citations, ok := block["citations"].([]any); ok {
+				for _, citation := range citations {
+					if err := w.event("content_block_delta", map[string]any{"index": index, "delta": map[string]any{"type": "citations_delta", "citation": citation}}); err != nil {
+						return err
+					}
+				}
+			}
+		case "thinking":
+			thinking, _ := block["thinking"].(string)
+			signature, _ := block["signature"].(string)
+			start["thinking"] = ""
+			delete(start, "signature")
+			if err := w.event("content_block_start", map[string]any{"index": index, "content_block": start}); err != nil {
+				return err
+			}
+			if thinking != "" {
+				if err := w.event("content_block_delta", map[string]any{"index": index, "delta": map[string]any{"type": "thinking_delta", "thinking": thinking}}); err != nil {
+					return err
+				}
+			}
+			if signature != "" {
+				if err := w.event("content_block_delta", map[string]any{"index": index, "delta": map[string]any{"type": "signature_delta", "signature": signature}}); err != nil {
+					return err
+				}
+			}
+		case "tool_use":
+			input := block["input"]
+			start["input"] = map[string]any{}
+			if err := w.event("content_block_start", map[string]any{"index": index, "content_block": start}); err != nil {
+				return err
+			}
+			encoded, marshalErr := json.Marshal(input)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if err := w.event("content_block_delta", map[string]any{"index": index, "delta": map[string]any{"type": "input_json_delta", "partial_json": string(encoded)}}); err != nil {
+				return err
+			}
+		default:
+			if err := w.event("content_block_start", map[string]any{"index": index, "content_block": start}); err != nil {
+				return err
+			}
+		}
+		if err := w.event("content_block_stop", map[string]any{"index": index}); err != nil {
+			return err
+		}
+	}
+	if err := w.event("message_delta", map[string]any{"delta": map[string]any{"stop_reason": reason, "stop_sequence": response.Choices[0].StopSequence}, "usage": messagesUsage(response.Usage, response.ServiceTier)}); err != nil {
+		return err
+	}
+	w.terminal = true
+	return w.event("message_stop", map[string]any{})
+}
+
+func cloneMessageBlock(block map[string]any) map[string]any {
+	result := make(map[string]any, len(block))
+	for key, value := range block {
+		result[key] = value
+	}
+	return result
 }
 func (w *messagesWriter) chunk(payload string) error {
 	if w.terminal {
@@ -388,7 +564,12 @@ func (w *messagesWriter) finish() {
 		return
 	}
 	var response openai.ChatCompletionResponse
-	err := json.Unmarshal(w.buffer.Bytes(), &response)
+	var err error
+	if w.directResponse != nil {
+		response = *w.directResponse
+	} else {
+		err = json.Unmarshal(w.buffer.Bytes(), &response)
+	}
 	if !validMessagesUsage(response.Usage) {
 		err = errors.New("invalid message usage")
 	}

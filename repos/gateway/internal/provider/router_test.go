@@ -748,6 +748,50 @@ func TestOutputDLPUsesBufferedStreamingFallback(t *testing.T) {
 	}
 }
 
+func TestNativeMessagesServerToolsUseBufferedStreamingFallback(t *testing.T) {
+	client := &scriptedStreamingProvider{}
+	router := Router{
+		endpoints: []Endpoint{{Name: "native", Type: "anthropic", Models: []string{"model"}, Capabilities: []string{"chat", "stream", "web_fetch"}, Provider: client}},
+		modules:   modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	maximum := 1
+	request := openai.ChatCompletionRequest{Model: "model", Stream: true, ChatGenerationOptions: openai.ChatGenerationOptions{WebFetchOptions: &openai.ChatWebFetchOptions{AllowedDomains: []string{"example.com"}, MaxUses: &maximum, MaxContentTokens: 100}}}
+	context := modules.RequestContext{Request: request, Metadata: map[string]string{"gateway.api_type": "messages"}}
+	writes := 0
+	_, streamed, err := router.StreamChatCompletions(t.Context(), context, func(string) error { writes++; return nil })
+	if err != nil || streamed || writes != 0 || client.chatCalls != 0 {
+		t.Fatalf("native content streamed before validation: streamed=%v writes=%d calls=%d err=%v", streamed, writes, client.chatCalls, err)
+	}
+}
+
+type nativeContentProvider struct{ calls int }
+
+func (p *nativeContentProvider) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	p.calls++
+	return openai.ChatCompletionResponse{ID: "native", Model: "model", Choices: []openai.Choice{{FinishReason: "stop", Message: openai.Message{Role: "assistant", NativeContent: []json.RawMessage{json.RawMessage(`{"type":"web_search_tool_result","tool_use_id":"id","content":[]}`)}}}}}, nil
+}
+
+func (p *nativeContentProvider) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {
+	return openai.ResponseResponse{}, errors.New("unexpected Responses call")
+}
+
+func TestRouterDoesNotCacheNativeMessageContent(t *testing.T) {
+	upstream := &nativeContentProvider{}
+	router := Router{
+		cache: newExactCache(time.Minute), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, modules: modules.NewPipeline(nil),
+		endpoints: []Endpoint{{Name: "native", Type: "anthropic", Models: []string{"model"}, Provider: upstream}},
+	}
+	request := modules.RequestContext{CredentialID: "tenant", Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "same"}}}}
+	for range 2 {
+		if _, err := router.ChatCompletions(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if upstream.calls != 2 {
+		t.Fatalf("native content was cached without its blocks: calls=%d", upstream.calls)
+	}
+}
+
 func TestRouterRejectsProviderOutputAfterInputDLPAllows(t *testing.T) {
 	scans := 0
 	scanner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

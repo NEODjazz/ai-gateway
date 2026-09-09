@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"regexp"
 	"strings"
@@ -167,17 +168,28 @@ func DeanonymizeResponse(req *RequestContext, response *openai.ChatCompletionRes
 	}
 
 	for index := range response.Choices {
-		response.Choices[index].Message.Content = DeanonymizeAny(response.Choices[index].Message.Content, req.AnonymizationValues)
-		if response.Choices[index].Message.Refusal != nil {
-			value := DeanonymizeText(*response.Choices[index].Message.Refusal, req.AnonymizationValues)
-			response.Choices[index].Message.Refusal = &value
+		message := &response.Choices[index].Message
+		message.Content = DeanonymizeAny(message.Content, req.AnonymizationValues)
+		if message.Refusal != nil {
+			value := DeanonymizeText(*message.Refusal, req.AnonymizationValues)
+			message.Refusal = &value
 		}
-		if audio := response.Choices[index].Message.Audio; audio != nil && audio.Transcript != nil {
+		if audio := message.Audio; audio != nil && audio.Transcript != nil {
 			value := DeanonymizeText(*audio.Transcript, req.AnonymizationValues)
 			audio.Transcript = &value
 		}
-		for callIndex := range response.Choices[index].Message.ToolCalls {
-			response.Choices[index].Message.ToolCalls[callIndex].Function.Arguments = DeanonymizeText(response.Choices[index].Message.ToolCalls[callIndex].Function.Arguments, req.AnonymizationValues)
+		for callIndex := range message.ToolCalls {
+			message.ToolCalls[callIndex].Function.Arguments = DeanonymizeText(message.ToolCalls[callIndex].Function.Arguments, req.AnonymizationValues)
+		}
+		for blockIndex, raw := range message.NativeContent {
+			var block any
+			if json.Unmarshal(raw, &block) != nil {
+				continue
+			}
+			encoded, err := json.Marshal(DeanonymizeAny(block, req.AnonymizationValues))
+			if err == nil {
+				message.NativeContent[blockIndex] = encoded
+			}
 		}
 	}
 }

@@ -241,14 +241,15 @@ func TestDLPScansProviderOutputAndRejectsBeforeDelivery(t *testing.T) {
 		Request:   openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "request secret"}}},
 		Response: &openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{
 			Role: "assistant", Content: "response secret", Refusal: &refusal,
-			ToolCalls: []openai.ToolCall{{Function: openai.FunctionCall{Arguments: `{"email":"user@example.com"}`}}},
+			ToolCalls:     []openai.ToolCall{{Function: openai.FunctionCall{Arguments: `{"email":"user@example.com"}`}}},
+			NativeContent: []json.RawMessage{json.RawMessage(`{"type":"web_fetch_tool_result","content":{"type":"document","source":{"type":"text","data":"native document secret"}}}`)},
 		}}}},
 	}
 	err := NewPipeline([]Module{module}).RunPostResponse(context.Background(), &req)
 	if !errors.Is(err, ErrContentRejected) {
 		t.Fatalf("expected output rejection, got %v", err)
 	}
-	if received.RequestID != "execution-1" || !strings.Contains(received.Content, "response secret") || !strings.Contains(received.Content, "user@example.com") || strings.Contains(received.Content, "request secret") {
+	if received.RequestID != "execution-1" || !strings.Contains(received.Content, "response secret") || !strings.Contains(received.Content, "user@example.com") || !strings.Contains(received.Content, "native document secret") || strings.Contains(received.Content, "request secret") {
 		t.Fatalf("unexpected output projection: %+v", received)
 	}
 }

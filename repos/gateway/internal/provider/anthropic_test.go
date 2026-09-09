@@ -175,6 +175,10 @@ func TestAnthropicMapsWebSearchAndBillsActualUsage(t *testing.T) {
 	if response.Usage.SearchRequests != 2 || len(annotations) != 1 || annotations[0].URLCitation.StartIndex != 9 || annotations[0].URLCitation.EndIndex != 14 || annotations[0].URLCitation.URL != "https://example.com/weather" {
 		t.Fatalf("response=%+v", response)
 	}
+	native := response.Choices[0].Message.NativeContent
+	if len(native) != 3 || !strings.Contains(string(native[0]), `"type":"server_tool_use"`) || !strings.Contains(string(native[1]), `"encrypted_content":"safe"`) || !strings.Contains(string(native[2]), `"type":"text"`) {
+		t.Fatalf("native content order or fields changed: %q", native)
+	}
 }
 
 func TestAnthropicRejectsUnrepresentableSearchContextSize(t *testing.T) {
@@ -202,6 +206,10 @@ func TestAnthropicMapsBoundedWebFetch(t *testing.T) {
 	if err != nil || response.Usage.PromptTokens != 25 || len(response.Choices[0].Message.Annotations) != 1 || response.Choices[0].Message.Annotations[0].URLCitation.URL != "https://docs.example.com/page" {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
+	native := response.Choices[0].Message.NativeContent
+	if len(native) != 2 || !strings.Contains(string(native[0]), `"type":"web_fetch_tool_result"`) || !strings.Contains(string(native[0]), `"data":"source"`) || !strings.Contains(string(native[1]), `"text":"Fetched."`) {
+		t.Fatalf("native fetch content changed: %q", native)
+	}
 	tools, ok := upstream["tools"].([]any)
 	if !ok || len(tools) != 1 {
 		t.Fatalf("tools=%#v", upstream["tools"])
@@ -217,6 +225,29 @@ func TestAnthropicMapsBoundedWebFetch(t *testing.T) {
 func TestAnthropicRejectsInvalidWebFetchUsage(t *testing.T) {
 	if err := validateAnthropicUsage(anthropicUsage{ServerToolUse: &anthropicServerToolUsage{WebFetchRequests: openai.WebFetchMaxUses + 1}}); err == nil {
 		t.Fatal("invalid web fetch usage accepted")
+	}
+}
+
+func TestAnthropicRejectsUsageAboveRequestedServerToolLimit(t *testing.T) {
+	searchLimit, fetchLimit := 1, 2
+	usage := anthropicUsage{ServerToolUse: &anthropicServerToolUsage{WebSearchRequests: 2}}
+	if err := validateAnthropicRequestedToolUsage(usage, &openai.ChatWebSearchOptions{MaxUses: &searchLimit}, nil); err == nil {
+		t.Fatal("search usage above requested limit accepted")
+	}
+	usage.ServerToolUse = &anthropicServerToolUsage{WebFetchRequests: 3}
+	if err := validateAnthropicRequestedToolUsage(usage, nil, &openai.ChatWebFetchOptions{MaxUses: &fetchLimit}); err == nil {
+		t.Fatal("fetch usage above requested limit accepted")
+	}
+}
+
+func TestAnthropicRejectsUnsafeNativeContent(t *testing.T) {
+	for _, content := range [][]anthropicContent{
+		{{Type: "server_tool_use"}, {Type: "unknown"}},
+		{{Type: "web_search_tool_result", Content: strings.Repeat("x", 4<<20)}},
+	} {
+		if err := validateAnthropicNativeMessageContent(content); err == nil {
+			t.Fatalf("unsafe native content accepted: %+v", content)
+		}
 	}
 }
 

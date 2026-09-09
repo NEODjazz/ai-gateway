@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.113
+  version: 0.1.114
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -204,7 +204,8 @@ paths:
       summary: Create an Anthropic Messages response through the gateway pipeline
       description: |
         Supports text, base64 user images, function tools and text tool results.
-        Advanced blocks, metadata, thinking and additional server tools are rejected.
+        Bounded native web-search and web-fetch result blocks are preserved in provider order.
+        Other advanced input blocks and server-tool types are rejected.
         Assistant prefill requires an explicitly capable deployment and model.
       security:
         - nativeAPIKey: []
@@ -3003,20 +3004,62 @@ components:
         tools:
           type: array
           items:
-            type: object
-            additionalProperties: false
-            required: [name, input_schema]
-            properties:
-              name: {type: string, minLength: 1}
-              description: {type: string}
-              input_schema: {type: object, additionalProperties: true}
-              cache_control:
-                type: object
+            oneOf:
+              - type: object
                 additionalProperties: false
-                required: [type]
+                required: [name, input_schema]
                 properties:
-                  type: {type: string, const: ephemeral}
-                  ttl: {type: string, enum: [5m, 1h]}
+                  name: {type: string, minLength: 1}
+                  description: {type: string}
+                  input_schema: {type: object, additionalProperties: true}
+                  cache_control:
+                    type: object
+                    additionalProperties: false
+                    required: [type]
+                    properties:
+                      type: {type: string, const: ephemeral}
+                      ttl: {type: string, enum: [5m, 1h]}
+              - type: object
+                additionalProperties: false
+                required: [type, name]
+                properties:
+                  type: {type: string, const: web_search_20250305}
+                  name: {type: string, const: web_search}
+                  max_uses: {type: integer, minimum: 1, maximum: 5, default: 5}
+                  user_location:
+                    type: object
+                    additionalProperties: false
+                    required: [type, approximate]
+                    properties:
+                      type: {type: string, const: approximate}
+                      approximate:
+                        type: object
+                        additionalProperties: false
+                        properties:
+                          city: {type: string}
+                          country: {type: string}
+                          region: {type: string}
+                          timezone: {type: string}
+              - type: object
+                additionalProperties: false
+                required: [type, name, allowed_domains, max_content_tokens]
+                properties:
+                  type: {type: string, const: web_fetch_20250910}
+                  name: {type: string, const: web_fetch}
+                  allowed_domains:
+                    type: array
+                    minItems: 1
+                    maxItems: 20
+                    uniqueItems: true
+                    items: {type: string, minLength: 1, maxLength: 253, pattern: '^[A-Za-z0-9.-]+$'}
+                  max_uses: {type: integer, minimum: 1, maximum: 5, default: 5}
+                  max_content_tokens: {type: integer, minimum: 1, maximum: 100000}
+                  citations:
+                    type: object
+                    additionalProperties: false
+                    required: [enabled]
+                    properties:
+                      enabled: {type: boolean, const: true}
         tool_choice:
           type: object
           additionalProperties: false
@@ -3775,6 +3818,7 @@ components:
           additionalProperties: false
           properties:
             search_context_size: {type: string, enum: [low, medium, high]}
+            max_uses: {type: integer, minimum: 1, maximum: 5, default: 5}
             user_location:
               type: object
               additionalProperties: false

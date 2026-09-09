@@ -116,6 +116,18 @@ type anthropicContent struct {
 	Thinking     string                 `json:"thinking,omitempty"`
 	Signature    string                 `json:"signature,omitempty"`
 	Data         string                 `json:"data,omitempty"`
+	Raw          json.RawMessage        `json:"-"`
+}
+
+func (c *anthropicContent) UnmarshalJSON(data []byte) error {
+	type content anthropicContent
+	var decoded content
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*c = anthropicContent(decoded)
+	c.Raw = append(c.Raw[:0], data...)
+	return nil
 }
 
 type anthropicCitation struct {
@@ -174,10 +186,16 @@ func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompl
 	if err := validateAnthropicUsage(response.Usage); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	if err := validateAnthropicRequestedToolUsage(response.Usage, request.WebSearchOptions, request.WebFetchOptions); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	if err := validateAnthropicFetchContent(response.Content, request.WebFetchOptions); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 	if _, err := anthropicAnnotations(response); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	if err := validateAnthropicNativeMessageContent(response.Content); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 	converted := anthropicToChatCompletion(response, request.Model)
@@ -207,7 +225,7 @@ func (p Anthropic) StreamChatCompletions(ctx context.Context, request openai.Cha
 	}
 	defer resp.Body.Close()
 
-	return streamAnthropicChat(resp.Body, request.Model, anthropicUsesStructuredTool(request.ResponseFormat), request.WebFetchOptions, write)
+	return streamAnthropicChat(resp.Body, request.Model, anthropicUsesStructuredTool(request.ResponseFormat), request.WebSearchOptions, request.WebFetchOptions, write)
 }
 
 func (p Anthropic) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
@@ -371,6 +389,9 @@ func anthropicWebFetchTool(options *openai.ChatWebFetchOptions) anthropicTool {
 
 func anthropicWebSearchTool(options *openai.ChatWebSearchOptions) anthropicTool {
 	tool := anthropicTool{Type: "web_search_20250305", Name: "web_search", MaxUses: openai.WebSearchMaxUses}
+	if options != nil && options.MaxUses != nil {
+		tool.MaxUses = *options.MaxUses
+	}
 	if options == nil || options.UserLocation == nil || options.UserLocation.Approximate == nil {
 		return tool
 	}
@@ -720,7 +741,7 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 		Choices: []openai.Choice{
 			{
 				Index:        0,
-				Message:      openai.Message{Role: "assistant", Content: content, ToolCalls: toolCalls, Annotations: annotations, Reasoning: anthropicReasoning(response)},
+				Message:      openai.Message{Role: "assistant", Content: content, ToolCalls: toolCalls, Annotations: annotations, Reasoning: anthropicReasoning(response), NativeContent: anthropicNativeMessageContent(response.Content)},
 				FinishReason: anthropicFinishReason(response.StopReason),
 				StopSequence: anthropicMatchedStop(response.StopReason, response.StopSequence),
 			},
@@ -737,6 +758,69 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 			CompletionTokensDetails: anthropicCompletionTokenDetails(response.Usage),
 		},
 	}
+}
+
+func anthropicNativeMessageContent(content []anthropicContent) []json.RawMessage {
+	native := false
+	for _, block := range content {
+		if block.Type == "server_tool_use" || block.Type == "web_search_tool_result" || block.Type == "web_fetch_tool_result" {
+			native = true
+			break
+		}
+	}
+	if !native || len(content) > 128 {
+		return nil
+	}
+	result := make([]json.RawMessage, 0, len(content))
+	total := 0
+	for _, block := range content {
+		encoded, err := anthropicContentJSON(block)
+		if err != nil || len(encoded) > 4<<20 || total > (32<<20)-len(encoded) {
+			return nil
+		}
+		total += len(encoded)
+		result = append(result, append(json.RawMessage(nil), encoded...))
+	}
+	return result
+}
+
+func validateAnthropicNativeMessageContent(content []anthropicContent) error {
+	native := false
+	for _, block := range content {
+		if block.Type == "server_tool_use" || block.Type == "web_search_tool_result" || block.Type == "web_fetch_tool_result" {
+			native = true
+		}
+	}
+	if !native {
+		return nil
+	}
+	if len(content) > 128 {
+		return errors.New("Anthropic returned too many content blocks")
+	}
+	total := 0
+	for _, block := range content {
+		switch block.Type {
+		case "text", "thinking", "redacted_thinking", "tool_use", "server_tool_use", "web_search_tool_result", "web_fetch_tool_result":
+		default:
+			return errors.New("Anthropic returned unsupported native content")
+		}
+		encoded, err := anthropicContentJSON(block)
+		if err != nil || len(encoded) > 4<<20 || total > (32<<20)-len(encoded) {
+			return errors.New("Anthropic native content exceeds limit")
+		}
+		total += len(encoded)
+	}
+	return nil
+}
+
+func anthropicContentJSON(block anthropicContent) ([]byte, error) {
+	if len(block.Raw) > 0 {
+		if !json.Valid(block.Raw) {
+			return nil, errors.New("invalid Anthropic content block")
+		}
+		return block.Raw, nil
+	}
+	return json.Marshal(block)
 }
 
 func anthropicReasoning(response anthropicResponse) []openai.ReasoningBlock {
@@ -771,6 +855,21 @@ func validateAnthropicUsage(usage anthropicUsage) error {
 	}
 	if usage.ServiceTier != "" && usage.ServiceTier != "standard" && usage.ServiceTier != "priority" && usage.ServiceTier != "batch" {
 		return errors.New("invalid Anthropic service tier")
+	}
+	return nil
+}
+
+func validateAnthropicRequestedToolUsage(usage anthropicUsage, search *openai.ChatWebSearchOptions, fetch *openai.ChatWebFetchOptions) error {
+	searchLimit := openai.WebSearchMaxUses
+	if search != nil && search.MaxUses != nil {
+		searchLimit = *search.MaxUses
+	}
+	fetchLimit := openai.WebFetchMaxUses
+	if fetch != nil && fetch.MaxUses != nil {
+		fetchLimit = *fetch.MaxUses
+	}
+	if anthropicSearchRequests(usage) > searchLimit || (usage.ServerToolUse != nil && usage.ServerToolUse.WebFetchRequests > fetchLimit) {
+		return errors.New("Anthropic exceeded requested server tool usage")
 	}
 	return nil
 }
@@ -964,7 +1063,7 @@ func anthropicFinishReason(reason string) string {
 	}
 }
 
-func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, webFetch *openai.ChatWebFetchOptions, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, webSearch *openai.ChatWebSearchOptions, webFetch *openai.ChatWebFetchOptions, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	response := openai.ChatCompletionResponse{
 		Object: "chat.completion",
 		Model:  fallbackModel,
@@ -988,6 +1087,9 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 		switch event {
 		case "message_start":
 			if err := validateAnthropicUsage(streamEvent.Message.Usage); err != nil {
+				return err
+			}
+			if err := validateAnthropicRequestedToolUsage(streamEvent.Message.Usage, webSearch, webFetch); err != nil {
 				return err
 			}
 			response.ID = streamEvent.Message.ID
@@ -1081,6 +1183,9 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			}
 		case "message_delta":
 			if err := validateAnthropicUsage(streamEvent.Usage); err != nil {
+				return err
+			}
+			if err := validateAnthropicRequestedToolUsage(streamEvent.Usage, webSearch, webFetch); err != nil {
 				return err
 			}
 			if streamEvent.Usage.OutputTokens != 0 {

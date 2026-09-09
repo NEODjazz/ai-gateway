@@ -40,6 +40,7 @@ type ChatGenerationOptions struct {
 type ChatWebSearchOptions struct {
 	SearchContextSize string                     `json:"search_context_size,omitempty"`
 	UserLocation      *ChatWebSearchUserLocation `json:"user_location,omitempty"`
+	MaxUses           *int                       `json:"max_uses,omitempty"`
 }
 
 type ChatWebFetchOptions struct {
@@ -140,6 +141,9 @@ func (o ChatGenerationOptions) Validate() string {
 		}
 		if location := o.WebSearchOptions.UserLocation; location != nil && (location.Type != "approximate" || location.Approximate == nil) {
 			return "web_search_options.user_location requires type=approximate and approximate"
+		}
+		if o.WebSearchOptions.MaxUses != nil && (*o.WebSearchOptions.MaxUses < 1 || *o.WebSearchOptions.MaxUses > WebSearchMaxUses) {
+			return "web_search_options.max_uses must be between 1 and 5"
 		}
 	}
 	if options := o.WebFetchOptions; options != nil {

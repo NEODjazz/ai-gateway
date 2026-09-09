@@ -3,6 +3,7 @@ package modules
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -218,8 +219,9 @@ func TestDeanonymizeResponseRestoresOriginalValues(t *testing.T) {
 		Choices: []openai.Choice{
 			{
 				Message: openai.Message{
-					Role:    "assistant",
-					Content: "I will use {{EMAIL_1}} and {{PHONE_1}}.",
+					Role:          "assistant",
+					Content:       "I will use {{EMAIL_1}} and {{PHONE_1}}.",
+					NativeContent: []json.RawMessage{json.RawMessage(`{"type":"text","text":"Native {{EMAIL_1}}"}`)},
 				},
 			},
 		},
@@ -233,6 +235,9 @@ func TestDeanonymizeResponseRestoresOriginalValues(t *testing.T) {
 	}
 	if !strings.Contains(content, "+7 999 123-45-67") {
 		t.Fatalf("expected phone to be restored: %s", content)
+	}
+	if !strings.Contains(string(response.Choices[0].Message.NativeContent[0]), "user@example.com") {
+		t.Fatalf("expected native content to be restored: %s", response.Choices[0].Message.NativeContent[0])
 	}
 }
 

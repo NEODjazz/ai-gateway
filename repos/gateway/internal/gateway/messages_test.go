@@ -78,6 +78,86 @@ func TestMessagesConvertsMetadataOutputConfigAndUsageDetails(t *testing.T) {
 	}
 }
 
+func nativeServerToolResponse() openai.ChatCompletionResponse {
+	return openai.ChatCompletionResponse{
+		ID: "msg-native", Model: "model",
+		Choices: []openai.Choice{{Index: 0, FinishReason: "stop", Message: openai.Message{Role: "assistant", NativeContent: []json.RawMessage{
+			json.RawMessage(`{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{"query":"weather"}}`),
+			json.RawMessage(`{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","url":"https://example.com","title":"Weather","encrypted_content":"opaque"}]}`),
+			json.RawMessage(`{"type":"text","text":"Sunny","citations":[{"type":"web_search_result_location","url":"https://example.com","title":"Weather","cited_text":"Sunny"}]}`),
+		}}}},
+		Usage: openai.Usage{PromptTokens: 4, CompletionTokens: 3, TotalTokens: 7, SearchRequests: 1},
+	}
+}
+
+func TestMessagesPreservesNativeServerToolBlocks(t *testing.T) {
+	upstream := &fallbackChatProvider{response: nativeServerToolResponse()}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":"weather"}]}`, "")
+	if response.Code != http.StatusOK || upstream.calls != 1 {
+		t.Fatalf("response=%d body=%s calls=%d", response.Code, response.Body.String(), upstream.calls)
+	}
+	var body struct {
+		Content []map[string]any `json:"content"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Content) != 3 || body.Content[0]["type"] != "server_tool_use" || body.Content[1]["type"] != "web_search_tool_result" || body.Content[2]["type"] != "text" || !strings.Contains(response.Body.String(), `"encrypted_content":"opaque"`) {
+		t.Fatalf("native blocks changed: %s", response.Body.String())
+	}
+}
+
+func TestMessagesSynthesizesNativeServerToolSSE(t *testing.T) {
+	upstream := &fallbackChatProvider{response: nativeServerToolResponse()}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"stream":true,"tools":[{"type":"web_search_20250305","name":"web_search","max_uses":2}],"messages":[{"role":"user","content":"weather"}]}`, "")
+	body := response.Body.String()
+	if response.Code != http.StatusOK || upstream.calls != 1 || upstream.request.Request.Stream || upstream.request.Request.WebSearchOptions == nil || upstream.request.Request.WebSearchOptions.MaxUses == nil || *upstream.request.Request.WebSearchOptions.MaxUses != 2 {
+		t.Fatalf("response=%d body=%s calls=%d stream=%v", response.Code, body, upstream.calls, upstream.request.Request.Stream)
+	}
+	for _, expected := range []string{
+		"event: message_start", `"type":"server_tool_use"`, `"type":"web_search_tool_result"`, `"encrypted_content":"opaque"`,
+		`"type":"text_delta"`, `"text":"Sunny"`, `"type":"citations_delta"`, `"stop_reason":"end_turn"`, "event: message_stop",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("missing %q in %s", expected, body)
+		}
+	}
+	if strings.Index(body, `"type":"server_tool_use"`) > strings.Index(body, `"type":"web_search_tool_result"`) || strings.Index(body, `"type":"web_search_tool_result"`) > strings.Index(body, `"type":"text_delta"`) {
+		t.Fatalf("native stream order changed: %s", body)
+	}
+}
+
+func TestMessagesConvertsBoundedNativeServerTools(t *testing.T) {
+	upstream := &fallbackChatProvider{response: nativeServerToolResponse()}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"tools":[{"type":"web_search_20250305","name":"web_search","max_uses":2,"user_location":{"type":"approximate","approximate":{"country":"FR"}}},{"type":"web_fetch_20250910","name":"web_fetch","allowed_domains":["docs.example.com"],"max_uses":1,"max_content_tokens":500,"citations":{"enabled":true}}],"messages":[{"role":"user","content":"research"}]}`, "")
+	request := upstream.request.Request
+	if response.Code != http.StatusOK || upstream.calls != 1 || request.WebSearchOptions == nil || request.WebSearchOptions.MaxUses == nil || *request.WebSearchOptions.MaxUses != 2 || request.WebSearchOptions.UserLocation == nil || request.WebSearchOptions.UserLocation.Approximate.Country != "FR" {
+		t.Fatalf("search tool conversion failed: status=%d body=%s request=%+v", response.Code, response.Body.String(), request)
+	}
+	if request.WebFetchOptions == nil || request.WebFetchOptions.MaxUses == nil || *request.WebFetchOptions.MaxUses != 1 || request.WebFetchOptions.MaxContentTokens != 500 || len(request.WebFetchOptions.AllowedDomains) != 1 || request.WebFetchOptions.AllowedDomains[0] != "docs.example.com" {
+		t.Fatalf("fetch tool conversion failed: %+v", request.WebFetchOptions)
+	}
+}
+
+func TestMessagesRejectsInvalidNativeProviderBlocks(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		upstream := &fallbackChatProvider{response: nativeServerToolResponse()}
+		upstream.response.Choices[0].Message.NativeContent = []json.RawMessage{json.RawMessage(`{"type":"server_tool_use","id":"missing-input","name":"web_search"}`)}
+		handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+		body := `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":"weather"}]}`
+		if stream {
+			body = `{"model":"model","max_tokens":20,"stream":true,"tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"weather"}]}`
+		}
+		response := nativeMessageCall(handler, body, "")
+		if response.Code != http.StatusBadGateway || strings.Contains(response.Body.String(), "missing-input") {
+			t.Fatalf("stream=%v response=%d body=%s", stream, response.Code, response.Body.String())
+		}
+	}
+}
+
 type messagesAuth struct{ accessPolicyModule }
 
 func (m messagesAuth) Handle(ctx context.Context, req *modules.RequestContext) error {

@@ -139,7 +139,11 @@ Anthropic Chat Completions may enable bounded native web retrieval with
 `max_content_tokens` limit; the gateway caps fetches at five, always enables
 citations, requires an explicitly `web_fetch` capable deployment, includes the
 tool configuration in TPM reserve, and disables exact and semantic response
-caching for the request.
+caching for the request. The native `/v1/messages` route accepts the bounded
+`web_search_20250305` and `web_fetch_20250910` tool forms and preserves their
+validated server-tool result blocks in provider order. Streaming requests use a
+bounded buffered response so output policy checks complete before the gateway
+emits native SSE events.
 Project details remain access-policy metadata rather than a synthetic billing
 identity. The console joins owner teams, project access groups and their
 virtual-key impact. Repeated `access_group_id` key-list query parameters use
