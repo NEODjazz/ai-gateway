@@ -226,7 +226,7 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if request.Logprobs != nil && *request.Logprobs {
 		return "", "", false
 	}
-	if request.WebSearchOptions != nil {
+	if request.WebSearchOptions != nil || request.WebFetchOptions != nil {
 		return "", "", false
 	}
 	if openai.ChatRequestsAudio(request) {

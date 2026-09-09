@@ -76,6 +76,7 @@ func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) er
 		}
 		options.WebSearchOptions = nil
 	}
+	options.WebFetchOptions = nil
 	if err := rejectGenerationOptions("anthropic", options); err != nil {
 		return err
 	}
@@ -259,6 +260,7 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 		parameterCheck{"user", options.User != ""},
 		parameterCheck{"verbosity", options.Verbosity != ""},
 		parameterCheck{"web_search_options", options.WebSearchOptions != nil},
+		parameterCheck{"web_fetch_options", options.WebFetchOptions != nil},
 		parameterCheck{"logprobs", options.Logprobs != nil},
 		parameterCheck{"top_logprobs", options.TopLogprobs != nil},
 		parameterCheck{"frequency_penalty", options.FrequencyPenalty != nil},

@@ -21,7 +21,7 @@ func TestAnthropicMatchedStopIsPreservedInJSONAndStream(t *testing.T) {
 	}
 	var payloads []string
 	stream := "event: message_start\ndata: {\"message\":{\"id\":\"id\",\"model\":\"m\"}}\n\nevent: message_delta\ndata: {\"delta\":{\"stop_reason\":\"stop_sequence\",\"stop_sequence\":\" END \"},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {}\n\n"
-	result, err := streamAnthropicChat(strings.NewReader(stream), "model", false, func(payload string) error { payloads = append(payloads, payload); return nil })
+	result, err := streamAnthropicChat(strings.NewReader(stream), "model", false, nil, func(payload string) error { payloads = append(payloads, payload); return nil })
 	if err != nil || result.Choices[0].StopSequence == nil || *result.Choices[0].StopSequence != sequence || !strings.Contains(strings.Join(payloads, ""), `"stop_sequence":" END "`) {
 		t.Fatalf("stream metadata lost: %+v %v %v", result, err, payloads)
 	}
@@ -35,7 +35,7 @@ func TestAnthropicRejectsMissingMatchedSequence(t *testing.T) {
 	if _, err := NewAnthropic(server.URL, "", false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "m"}); err == nil {
 		t.Fatal("missing JSON delimiter accepted")
 	}
-	if _, err := streamAnthropicChat(strings.NewReader("event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"stop_sequence\"}}\n\n"), "m", false, func(string) error { return nil }); err == nil {
+	if _, err := streamAnthropicChat(strings.NewReader("event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"stop_sequence\"}}\n\n"), "m", false, nil, func(string) error { return nil }); err == nil {
 		t.Fatal("missing SSE delimiter accepted")
 	}
 }

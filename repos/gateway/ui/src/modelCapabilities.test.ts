@@ -22,6 +22,7 @@ describe("modelCapabilityOptions", () => {
       "mcp",
       "vision",
       "web_search",
+      "web_fetch",
       "audio",
       "prompt_cache",
       "assistant_prefill"

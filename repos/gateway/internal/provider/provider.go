@@ -2509,6 +2509,9 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	if request.WebSearchOptions != nil {
 		required = append(required, "web_search")
 	}
+	if request.WebFetchOptions != nil {
+		required = append(required, "web_fetch")
+	}
 	if openai.ChatRequestsAudio(request) || openai.ChatHasAudioHistory(request) {
 		required = append(required, "audio")
 	}
@@ -2644,6 +2647,12 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 			return false
 		}
 	}
+	if hasCapability(required, "web_fetch") {
+		client, ok := e.Provider.(interface{ SupportsWebFetch() bool })
+		if !ok || !client.SupportsWebFetch() {
+			return false
+		}
+	}
 	if len(e.Capabilities) == 0 {
 		return true
 	}
@@ -2698,11 +2707,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "web_search") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill")
+	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_speech", "ocr", "search", "web_search", "audio", "prompt_cache", "assistant_prefill"} {
+	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_speech", "ocr", "search", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

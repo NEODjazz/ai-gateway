@@ -185,6 +185,53 @@ func TestAnthropicRejectsUnrepresentableSearchContextSize(t *testing.T) {
 	}
 }
 
+func TestAnthropicMapsBoundedWebFetch(t *testing.T) {
+	var upstream map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"id":"msg-fetch","type":"message","role":"assistant","model":"claude-test","stop_reason":"end_turn","content":[{"type":"web_fetch_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"web_fetch_result","url":"https://docs.example.com/page","content":{"type":"document","source":{"type":"text","data":"source"}}}},{"type":"text","text":"Fetched.","citations":[{"type":"char_location","document_index":0,"document_title":"Page","cited_text":"Fetched"}]}],"usage":{"input_tokens":25,"output_tokens":3,"server_tool_use":{"web_fetch_requests":2}}}`))
+	}))
+	defer server.Close()
+	maximum := 2
+	response, err := NewAnthropic(server.URL, "", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "claude-test", Messages: []openai.Message{{Role: "user", Content: "Read https://docs.example.com/page"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{WebFetchOptions: &openai.ChatWebFetchOptions{AllowedDomains: []string{"docs.example.com"}, MaxUses: &maximum, MaxContentTokens: 20000}},
+	})
+	if err != nil || response.Usage.PromptTokens != 25 || len(response.Choices[0].Message.Annotations) != 1 || response.Choices[0].Message.Annotations[0].URLCitation.URL != "https://docs.example.com/page" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+	tools, ok := upstream["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools=%#v", upstream["tools"])
+	}
+	fetch := tools[0].(map[string]any)
+	citations := fetch["citations"].(map[string]any)
+	domains := fetch["allowed_domains"].([]any)
+	if fetch["type"] != "web_fetch_20250910" || fetch["name"] != "web_fetch" || fetch["max_uses"] != float64(2) || fetch["max_content_tokens"] != float64(20000) || citations["enabled"] != true || len(domains) != 1 || domains[0] != "docs.example.com" {
+		t.Fatalf("fetch=%#v", fetch)
+	}
+}
+
+func TestAnthropicRejectsInvalidWebFetchUsage(t *testing.T) {
+	if err := validateAnthropicUsage(anthropicUsage{ServerToolUse: &anthropicServerToolUsage{WebFetchRequests: openai.WebFetchMaxUses + 1}}); err == nil {
+		t.Fatal("invalid web fetch usage accepted")
+	}
+}
+
+func TestAnthropicRejectsFetchOutsideAllowedDomains(t *testing.T) {
+	content := []anthropicContent{{Type: "web_fetch_tool_result", Content: map[string]any{"type": "web_fetch_result", "url": "https://private.example.net/page"}}}
+	options := &openai.ChatWebFetchOptions{AllowedDomains: []string{"example.com"}, MaxContentTokens: 1000}
+	if err := validateAnthropicFetchContent(content, options); err == nil {
+		t.Fatal("fetch outside allowed domains accepted")
+	}
+	content[0].Content = map[string]any{"type": "web_fetch_result", "url": "https://docs.example.com/page"}
+	if err := validateAnthropicFetchContent(content, options); err != nil {
+		t.Fatalf("allowed subdomain rejected: %v", err)
+	}
+}
+
 func TestAnthropicConvertsOpenAIVisionContent(t *testing.T) {
 	_, messages := anthropicMessages([]openai.Message{{Role: "user", Content: []any{
 		map[string]any{"type": "text", "text": "describe"},

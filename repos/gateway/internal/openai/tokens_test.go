@@ -49,6 +49,17 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	if ChatInputTokens(withAudio) <= ChatInputTokens(base)+100 {
 		t.Fatal("assistant audio reference omitted")
 	}
+	maximumFetches := 3
+	withFetch := base
+	withFetch.WebFetchOptions = &ChatWebFetchOptions{AllowedDomains: []string{"docs.example.com"}, MaxUses: &maximumFetches, MaxContentTokens: 20000}
+	if ChatInputTokens(withFetch) <= ChatInputTokens(base) {
+		t.Fatal("web fetch configuration was omitted from the input-token reserve")
+	}
+	withSearch := base
+	withSearch.WebSearchOptions = &ChatWebSearchOptions{SearchContextSize: "medium"}
+	if ChatInputTokens(withSearch) <= ChatInputTokens(base) {
+		t.Fatal("web search configuration was omitted from the input-token reserve")
+	}
 	response := ResponseRequest{Input: "test", Instructions: strings.Repeat("system", 1000)}
 	if ResponseInputTokens(response) < 1000 {
 		t.Fatal("instructions omitted")

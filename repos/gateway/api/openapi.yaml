@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.110
+  version: 0.1.111
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3099,7 +3099,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_speech, ocr, search, stream, tools, structured_output, mcp, vision, web_search, audio]}
+          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_speech, ocr, search, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -3788,6 +3788,20 @@ components:
                     country: {type: string}
                     region: {type: string}
                     timezone: {type: string}
+        web_fetch_options:
+          type: object
+          additionalProperties: false
+          required: [allowed_domains, max_content_tokens]
+          description: Enables bounded native server-side retrieval. A non-empty domain allowlist is required to constrain data-exfiltration exposure; citations are always enabled by the gateway.
+          properties:
+            allowed_domains:
+              type: array
+              minItems: 1
+              maxItems: 20
+              uniqueItems: true
+              items: {type: string, minLength: 1, maxLength: 253, pattern: '^[A-Za-z0-9.-]+$'}
+            max_uses: {type: integer, minimum: 1, maximum: 5, default: 5}
+            max_content_tokens: {type: integer, minimum: 1, maximum: 100000}
         logprobs: {type: boolean}
         top_logprobs: {type: integer, minimum: 0, maximum: 20, description: Requires logprobs=true.}
         frequency_penalty: {type: number, minimum: -2, maximum: 2}

@@ -535,3 +535,16 @@ func TestMistralRejectsChatWebSearchBeforeExecution(t *testing.T) {
 		t.Fatalf("unsupported search reached Mistral: %d", calls.Load())
 	}
 }
+
+func TestMistralRejectsChatWebFetchBeforeExecution(t *testing.T) {
+	maximum := 1
+	request := openai.ChatCompletionRequest{
+		Model: "mistral-small", Messages: []openai.Message{{Role: "user", Content: "read https://example.com"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{WebFetchOptions: &openai.ChatWebFetchOptions{AllowedDomains: []string{"example.com"}, MaxUses: &maximum, MaxContentTokens: 1000}},
+	}
+	err := validateChatAdapter(NewMistral("https://example.test", "provider-key", false), request)
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.Param != "web_fetch_options" || failure.UpstreamCode != "unsupported_parameter" {
+		t.Fatalf("error=%v failure=%+v", err, failure)
+	}
+}

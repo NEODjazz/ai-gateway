@@ -93,7 +93,9 @@ func ChatInputTokens(r ChatCompletionRequest) int {
 		Tools        []Tool                `json:"tools,omitempty"`
 		ToolChoice   any                   `json:"tool_choice,omitempty"`
 		Format       *ResponseFormat       `json:"response_format,omitempty"`
-	}{r.Messages, r.Functions, r.FunctionCall, r.Tools, r.ToolChoice, r.ResponseFormat})
+		WebSearch    *ChatWebSearchOptions `json:"web_search_options,omitempty"`
+		WebFetch     *ChatWebFetchOptions  `json:"web_fetch_options,omitempty"`
+	}{r.Messages, r.Functions, r.FunctionCall, r.Tools, r.ToolChoice, r.ResponseFormat, r.WebSearchOptions, r.WebFetchOptions})
 }
 
 func ResponseInputTokens(r ResponseRequest) int {

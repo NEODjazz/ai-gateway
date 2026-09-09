@@ -6,6 +6,8 @@ import (
 )
 
 const WebSearchMaxUses = 5
+const WebFetchMaxUses = 5
+const WebFetchMaxContentTokens = 100000
 
 // ChatGenerationOptions contains optional controls shared with compatible wire
 // requests. Pointer fields preserve explicitly supplied false and zero values.
@@ -27,6 +29,7 @@ type ChatGenerationOptions struct {
 	User                 string                `json:"user,omitempty"`
 	Verbosity            string                `json:"verbosity,omitempty"`
 	WebSearchOptions     *ChatWebSearchOptions `json:"web_search_options,omitempty"`
+	WebFetchOptions      *ChatWebFetchOptions  `json:"web_fetch_options,omitempty"`
 	Logprobs             *bool                 `json:"logprobs,omitempty"`
 	TopLogprobs          *int                  `json:"top_logprobs,omitempty"`
 	FrequencyPenalty     *float64              `json:"frequency_penalty,omitempty"`
@@ -37,6 +40,12 @@ type ChatGenerationOptions struct {
 type ChatWebSearchOptions struct {
 	SearchContextSize string                     `json:"search_context_size,omitempty"`
 	UserLocation      *ChatWebSearchUserLocation `json:"user_location,omitempty"`
+}
+
+type ChatWebFetchOptions struct {
+	AllowedDomains   []string `json:"allowed_domains"`
+	MaxUses          *int     `json:"max_uses,omitempty"`
+	MaxContentTokens int      `json:"max_content_tokens"`
 }
 
 type ChatWebSearchUserLocation struct {
@@ -131,6 +140,24 @@ func (o ChatGenerationOptions) Validate() string {
 		}
 		if location := o.WebSearchOptions.UserLocation; location != nil && (location.Type != "approximate" || location.Approximate == nil) {
 			return "web_search_options.user_location requires type=approximate and approximate"
+		}
+	}
+	if options := o.WebFetchOptions; options != nil {
+		if len(options.AllowedDomains) == 0 || len(options.AllowedDomains) > MaxSearchDomains {
+			return "web_fetch_options.allowed_domains must contain between 1 and 20 domains"
+		}
+		seen := map[string]bool{}
+		for _, domain := range options.AllowedDomains {
+			if !validSearchDomain(domain) || seen[domain] {
+				return "web_fetch_options.allowed_domains contains an invalid or duplicate domain"
+			}
+			seen[domain] = true
+		}
+		if options.MaxUses != nil && (*options.MaxUses < 1 || *options.MaxUses > WebFetchMaxUses) {
+			return "web_fetch_options.max_uses must be between 1 and 5"
+		}
+		if options.MaxContentTokens < 1 || options.MaxContentTokens > WebFetchMaxContentTokens {
+			return "web_fetch_options.max_content_tokens must be between 1 and 100000"
 		}
 	}
 	switch o.ReasoningEffort {

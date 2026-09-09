@@ -129,6 +129,13 @@ settles the reserved page count from the provider's exact `pages_processed`
 usage. Inline binary data is sent to configured AV scanning; annotation prompts
 pass through the normal text policy. Provider file references are rejected
 until an owner-scoped Files API is available.
+
+Anthropic Chat Completions may enable bounded native web retrieval with
+`web_fetch_options`. The caller must supply one to twenty allowed domains and a
+`max_content_tokens` limit; the gateway caps fetches at five, always enables
+citations, requires an explicitly `web_fetch` capable deployment, includes the
+tool configuration in TPM reserve, and disables exact and semantic response
+caching for the request.
 Project details remain access-policy metadata rather than a synthetic billing
 identity. The console joins owner teams, project access groups and their
 virtual-key impact. Repeated `access_group_id` key-list query parameters use

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -61,13 +62,20 @@ type anthropicMessage struct {
 }
 
 type anthropicTool struct {
-	Type         string                 `json:"type,omitempty"`
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description,omitempty"`
-	InputSchema  any                    `json:"input_schema,omitempty"`
-	MaxUses      int                    `json:"max_uses,omitempty"`
-	UserLocation *anthropicUserLocation `json:"user_location,omitempty"`
-	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+	Type             string                 `json:"type,omitempty"`
+	Name             string                 `json:"name"`
+	Description      string                 `json:"description,omitempty"`
+	InputSchema      any                    `json:"input_schema,omitempty"`
+	MaxUses          int                    `json:"max_uses,omitempty"`
+	UserLocation     *anthropicUserLocation `json:"user_location,omitempty"`
+	AllowedDomains   []string               `json:"allowed_domains,omitempty"`
+	Citations        *anthropicCitations    `json:"citations,omitempty"`
+	MaxContentTokens int                    `json:"max_content_tokens,omitempty"`
+	CacheControl     *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
+type anthropicCitations struct {
+	Enabled bool `json:"enabled"`
 }
 
 type anthropicUserLocation struct {
@@ -111,10 +119,12 @@ type anthropicContent struct {
 }
 
 type anthropicCitation struct {
-	Type      string `json:"type"`
-	URL       string `json:"url"`
-	Title     string `json:"title"`
-	CitedText string `json:"cited_text"`
+	Type          string `json:"type"`
+	URL           string `json:"url"`
+	Title         string `json:"title"`
+	DocumentTitle string `json:"document_title"`
+	DocumentIndex int    `json:"document_index"`
+	CitedText     string `json:"cited_text"`
 }
 
 type anthropicUsage struct {
@@ -129,6 +139,7 @@ type anthropicUsage struct {
 
 type anthropicServerToolUsage struct {
 	WebSearchRequests int `json:"web_search_requests"`
+	WebFetchRequests  int `json:"web_fetch_requests"`
 }
 
 type anthropicOutputTokenDetails struct {
@@ -149,6 +160,7 @@ func NewAnthropic(baseURL string, apiKey string, upstreamStream bool) Anthropic 
 
 func (Anthropic) SupportsVision() bool          { return true }
 func (Anthropic) SupportsReasoningBlocks() bool { return true }
+func (Anthropic) SupportsWebFetch() bool        { return true }
 
 func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	if err := p.ValidateChatParameters(request); err != nil {
@@ -160,6 +172,9 @@ func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompl
 		return openai.ChatCompletionResponse{}, err
 	}
 	if err := validateAnthropicUsage(response.Usage); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	if err := validateAnthropicFetchContent(response.Content, request.WebFetchOptions); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 	if _, err := anthropicAnnotations(response); err != nil {
@@ -192,7 +207,7 @@ func (p Anthropic) StreamChatCompletions(ctx context.Context, request openai.Cha
 	}
 	defer resp.Body.Close()
 
-	return streamAnthropicChat(resp.Body, request.Model, anthropicUsesStructuredTool(request.ResponseFormat), write)
+	return streamAnthropicChat(resp.Body, request.Model, anthropicUsesStructuredTool(request.ResponseFormat), request.WebFetchOptions, write)
 }
 
 func (p Anthropic) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
@@ -297,6 +312,9 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 	if request.WebSearchOptions != nil {
 		tools = append(tools, anthropicWebSearchTool(request.WebSearchOptions))
 	}
+	if request.WebFetchOptions != nil {
+		tools = append(tools, anthropicWebFetchTool(request.WebFetchOptions))
+	}
 	var outputConfig *anthropicOutputConfig
 	if request.ResponseFormat != nil && request.ResponseFormat.Type == "json_schema" {
 		outputConfig = &anthropicOutputConfig{}
@@ -341,6 +359,14 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		Metadata:      metadata,
 		OutputConfig:  outputConfig,
 	}
+}
+
+func anthropicWebFetchTool(options *openai.ChatWebFetchOptions) anthropicTool {
+	maxUses := openai.WebFetchMaxUses
+	if options.MaxUses != nil {
+		maxUses = *options.MaxUses
+	}
+	return anthropicTool{Type: "web_fetch_20250910", Name: "web_fetch", MaxUses: maxUses, AllowedDomains: append([]string(nil), options.AllowedDomains...), Citations: &anthropicCitations{Enabled: true}, MaxContentTokens: options.MaxContentTokens}
 }
 
 func anthropicWebSearchTool(options *openai.ChatWebSearchOptions) anthropicTool {
@@ -740,6 +766,9 @@ func validateAnthropicUsage(usage anthropicUsage) error {
 	if searches := anthropicSearchRequests(usage); searches < 0 || searches > openai.WebSearchMaxUses {
 		return errors.New("invalid Anthropic server tool usage")
 	}
+	if usage.ServerToolUse != nil && (usage.ServerToolUse.WebFetchRequests < 0 || usage.ServerToolUse.WebFetchRequests > openai.WebFetchMaxUses) {
+		return errors.New("invalid Anthropic server tool usage")
+	}
 	if usage.ServiceTier != "" && usage.ServiceTier != "standard" && usage.ServiceTier != "priority" && usage.ServiceTier != "batch" {
 		return errors.New("invalid Anthropic service tier")
 	}
@@ -834,13 +863,14 @@ func anthropicText(response anthropicResponse) string {
 
 func anthropicAnnotations(response anthropicResponse) ([]openai.ChatAnnotation, error) {
 	annotations := make([]openai.ChatAnnotation, 0)
+	fetchURLs := anthropicFetchURLs(response.Content)
 	offset := 0
 	for _, content := range response.Content {
 		if content.Type != "text" {
 			continue
 		}
 		for _, citation := range content.Citations {
-			annotation, err := anthropicCitationAnnotation(citation, content.Text, offset)
+			annotation, err := anthropicCitationAnnotation(citation, content.Text, offset, fetchURLs)
 			if err != nil {
 				return nil, err
 			}
@@ -854,8 +884,14 @@ func anthropicAnnotations(response anthropicResponse) ([]openai.ChatAnnotation, 
 	return annotations, nil
 }
 
-func anthropicCitationAnnotation(citation anthropicCitation, text string, offset int) (openai.ChatAnnotation, error) {
-	if citation.Type != "web_search_result_location" {
+func anthropicCitationAnnotation(citation anthropicCitation, text string, offset int, fetchURLs []string) (openai.ChatAnnotation, error) {
+	if citation.Type == "char_location" {
+		if citation.DocumentIndex < 0 || citation.DocumentIndex >= len(fetchURLs) {
+			return openai.ChatAnnotation{}, errors.New("Anthropic fetch citation has no source URL")
+		}
+		citation.URL = fetchURLs[citation.DocumentIndex]
+		citation.Title = citation.DocumentTitle
+	} else if citation.Type != "web_search_result_location" {
 		return openai.ChatAnnotation{}, errors.New("unsupported Anthropic citation")
 	}
 	start, end := 0, utf8.RuneCountInString(text)
@@ -872,6 +908,49 @@ func anthropicCitationAnnotation(citation anthropicCitation, text string, offset
 	}}, nil
 }
 
+func anthropicFetchURLs(content []anthropicContent) []string {
+	var urls []string
+	for _, block := range content {
+		if block.Type != "web_fetch_tool_result" {
+			continue
+		}
+		result, ok := block.Content.(map[string]any)
+		if !ok || result["type"] != "web_fetch_result" {
+			continue
+		}
+		value, _ := result["url"].(string)
+		if value != "" {
+			urls = append(urls, value)
+		}
+	}
+	return urls
+}
+
+func validateAnthropicFetchContent(content []anthropicContent, options *openai.ChatWebFetchOptions) error {
+	if options == nil {
+		return nil
+	}
+	for _, value := range anthropicFetchURLs(content) {
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || len(value) > 8192 {
+			return errors.New("Anthropic returned an invalid web fetch URL")
+		}
+		host := strings.ToLower(parsed.Hostname())
+		allowed := false
+		for _, domain := range options.AllowedDomains {
+			domain = strings.ToLower(domain)
+			if host == domain || strings.HasSuffix(host, "."+domain) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return errors.New("Anthropic returned a web fetch URL outside the allowed domains")
+		}
+	}
+	return nil
+}
+
 func anthropicFinishReason(reason string) string {
 	switch reason {
 	case "end_turn", "stop_sequence":
@@ -885,7 +964,7 @@ func anthropicFinishReason(reason string) string {
 	}
 }
 
-func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, webFetch *openai.ChatWebFetchOptions, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	response := openai.ChatCompletionResponse{
 		Object: "chat.completion",
 		Model:  fallbackModel,
@@ -897,6 +976,7 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 	reasoningIndexes := map[int]int{}
 	textBlockOffsets := map[int]int{}
 	textBlockContents := map[int]string{}
+	var fetchURLs []string
 	err := scanSSEEvents(body, func(event string, payload string) error {
 		if event == "message_stop" {
 			return io.EOF
@@ -924,6 +1004,12 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 				}
 			}
 		case "content_block_start":
+			if streamEvent.ContentBlock.Type == "web_fetch_tool_result" {
+				if err := validateAnthropicFetchContent([]anthropicContent{streamEvent.ContentBlock}, webFetch); err != nil {
+					return err
+				}
+				fetchURLs = append(fetchURLs, anthropicFetchURLs([]anthropicContent{streamEvent.ContentBlock})...)
+			}
 			if streamEvent.ContentBlock.Type == "thinking" || streamEvent.ContentBlock.Type == "redacted_thinking" {
 				reasoningIndex := len(response.Choices[0].Message.Reasoning)
 				reasoningIndexes[streamEvent.Index] = reasoningIndex
@@ -968,7 +1054,7 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 				}
 			}
 			if streamEvent.Delta.Type == "citations_delta" {
-				annotation, err := anthropicCitationAnnotation(streamEvent.Delta.Citation, textBlockContents[streamEvent.Index], textBlockOffsets[streamEvent.Index])
+				annotation, err := anthropicCitationAnnotation(streamEvent.Delta.Citation, textBlockContents[streamEvent.Index], textBlockOffsets[streamEvent.Index], fetchURLs)
 				if err != nil {
 					return err
 				}

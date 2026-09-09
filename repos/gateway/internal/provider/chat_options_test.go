@@ -395,6 +395,19 @@ func TestChatWebSearchDisablesResponseCaches(t *testing.T) {
 	}
 }
 
+func TestChatWebFetchDisablesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "read https://example.com"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebFetchOptions: &openai.ChatWebFetchOptions{AllowedDomains: []string{"example.com"}, MaxContentTokens: 1000}}}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache allowed a web fetch request")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed a web fetch request")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, true), ","); got != "chat,stream,web_fetch" {
+		t.Fatalf("web fetch routing requirements=%s", got)
+	}
+}
+
 func TestPromptCacheKeyScopesCaches(t *testing.T) {
 	base := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "hello"}}}}
 	changed := base

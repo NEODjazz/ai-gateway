@@ -1558,6 +1558,25 @@ func TestChatWebSearchRequiresExplicitEndpointCapability(t *testing.T) {
 	}
 }
 
+func TestChatWebFetchRequiresExplicitEndpointCapability(t *testing.T) {
+	legacy := &modelCaptureProvider{content: "legacy"}
+	fetch := &webFetchModelProvider{modelCaptureProvider: modelCaptureProvider{content: "fetch"}}
+	router := Router{health: newEndpointHealthTracker(), endpoints: []Endpoint{
+		{Name: "legacy", Type: "openai-compatible", Priority: 1, Provider: legacy},
+		{Name: "fetch", Type: "openai-compatible", Priority: 2, Capabilities: []string{"chat", "web_fetch"}, Provider: fetch},
+	}}
+	_, err := router.ChatCompletions(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{
+		Model: "model", ChatGenerationOptions: openai.ChatGenerationOptions{WebFetchOptions: &openai.ChatWebFetchOptions{AllowedDomains: []string{"example.com"}, MaxContentTokens: 1000}},
+	}})
+	if err != nil || legacy.seenModel != "" || fetch.seenModel != "model" {
+		t.Fatalf("web fetch routing used an undeclared endpoint: legacy=%q fetch=%q err=%v", legacy.seenModel, fetch.seenModel, err)
+	}
+}
+
+type webFetchModelProvider struct{ modelCaptureProvider }
+
+func (*webFetchModelProvider) SupportsWebFetch() bool { return true }
+
 func TestRuntimeCatalogPricingSnapshotIsAttachedToProviderAttempt(t *testing.T) {
 	catalog, err := modelcatalog.Parse(`{"version":"runtime-v2","models":[{"provider":"endpoint-a","model":"upstream","input_cost_per_1m":1.5,"output_cost_per_1m":3,"search_cost_per_1k":10,"currency":"USD"}]}`)
 	if err != nil {
