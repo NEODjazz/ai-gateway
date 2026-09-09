@@ -29,7 +29,7 @@ func TestManagedCohereDiscoveryUsesScopedCredentialAndFiltersModels(t *testing.T
 		}
 	}
 	models, err := router.DiscoverProviderModels(context.Background(), "native", "native-key")
-	if err != nil || len(models) != 3 || models[0].ID != "embed-a" || models[1].ID != "rerank-a" || models[2].ID != "rerank-z" || calls.Load() != 1 {
+	if err != nil || len(models) != 4 || models[0].ID != "chat" || models[1].ID != "embed-a" || models[2].ID != "rerank-a" || models[3].ID != "rerank-z" || calls.Load() != 1 {
 		t.Fatalf("models=%v calls=%d err=%v", models, calls.Load(), err)
 	}
 	if _, err := router.DiscoverProviderModels(context.Background(), "native", "other-key"); err == nil {

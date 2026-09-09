@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.78
+  version: 0.1.79
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -309,7 +309,8 @@ paths:
         Supports function tools, structured outputs, SSE streaming, and bounded
         inline image input. Vision requests accept at most 8 JPEG, PNG, GIF, or
         WebP data URLs, at most 8 MiB decoded each and 16 MiB decoded total.
-        Remote image URLs are rejected.
+        Remote image URLs are rejected. The native Cohere adapter supports
+        text-only JSON execution and buffered SSE with provider-reported usage.
       requestBody:
         required: true
         content:

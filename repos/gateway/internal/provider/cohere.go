@@ -42,6 +42,49 @@ type cohereEmbeddingRequest struct {
 	OutputDimension *int     `json:"output_dimension,omitempty"`
 }
 
+type cohereChatRequest struct {
+	Model          string                `json:"model"`
+	Messages       []cohereChatMessage   `json:"messages"`
+	ResponseFormat *cohereResponseFormat `json:"response_format,omitempty"`
+	MaxTokens      *int                  `json:"max_tokens,omitempty"`
+	StopSequences  []string              `json:"stop_sequences,omitempty"`
+	Temperature    *float64              `json:"temperature,omitempty"`
+	P              *float64              `json:"p,omitempty"`
+}
+
+type cohereChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type cohereResponseFormat struct {
+	Type   string `json:"type"`
+	Schema any    `json:"schema,omitempty"`
+}
+
+type cohereChatUsageValue struct {
+	InputTokens  *int `json:"input_tokens"`
+	OutputTokens *int `json:"output_tokens"`
+}
+
+type cohereChatUsageResponse struct {
+	BilledUnits *cohereChatUsageValue `json:"billed_units"`
+	Tokens      *cohereChatUsageValue `json:"tokens"`
+}
+
+type cohereChatResponse struct {
+	ID           string `json:"id"`
+	FinishReason string `json:"finish_reason"`
+	Message      struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"message"`
+	Usage *cohereChatUsageResponse `json:"usage"`
+}
+
 func NewCohere(baseURL, apiKey string) Cohere {
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = "https://api.cohere.com"
@@ -53,8 +96,221 @@ func NewCohere(baseURL, apiKey string) Cohere {
 
 func (Cohere) SupportsResponses() bool { return false }
 
-func (Cohere) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
-	return openai.ChatCompletionResponse{}, rejectParameters("cohere", parameterCheck{"chat_completions", true})
+func (Cohere) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if strings.TrimSpace(request.Model) == "" {
+		return cohereChatError("model", "model is required")
+	}
+	if len(request.Messages) == 0 {
+		return cohereChatError("messages", "messages are required")
+	}
+	if err := rejectLegacyFunctionCalling("cohere", request); err != nil {
+		return err
+	}
+	if err := rejectChatMessageAudio("cohere", request.Messages); err != nil {
+		return err
+	}
+	if err := validateChatPromptCacheBreakpoints("cohere", request, false); err != nil {
+		return err
+	}
+	if request.MaxTokens != nil && request.MaxCompletionTokens != nil {
+		return cohereChatError("max_tokens", "max_tokens and max_completion_tokens cannot be combined")
+	}
+	if (request.MaxTokens != nil && *request.MaxTokens <= 0) || (request.MaxCompletionTokens != nil && *request.MaxCompletionTokens <= 0) {
+		return cohereChatError("max_tokens", "output token limit must be positive")
+	}
+	if request.Temperature != nil && (*request.Temperature < 0 || *request.Temperature > 1) {
+		return cohereChatError("temperature", "temperature must be between 0 and 1")
+	}
+	if request.TopP != nil && (*request.TopP < 0.01 || *request.TopP > 0.99) {
+		return cohereChatError("top_p", "top_p must be between 0.01 and 0.99")
+	}
+	if _, ok := openai.StopSequences(request.Stop); !ok {
+		return cohereChatError("stop", "stop must contain at most five non-empty strings")
+	}
+	if format := request.ResponseFormat; format != nil {
+		if format.Type != "text" && format.Type != "json_object" && format.Type != "json_schema" {
+			return cohereChatError("response_format", "response_format is not supported")
+		}
+		if format.Type == "json_schema" && (format.JSONSchema == nil || format.JSONSchema.Schema == nil) {
+			return cohereChatError("response_format", "json_schema response_format requires a schema")
+		}
+	}
+	for _, message := range request.Messages {
+		if message.Role != "system" && message.Role != "developer" && message.Role != "user" && message.Role != "assistant" {
+			return rejectParameters("cohere", parameterCheck{"messages", true})
+		}
+		if message.Role == "function" || message.Role == "tool" || len(message.ToolCalls) > 0 || message.FunctionCall != nil || message.Refusal != nil || len(message.Annotations) > 0 {
+			return rejectParameters("cohere", parameterCheck{"messages", true})
+		}
+		if attachments, err := openai.ChatImageAttachments([]openai.Message{message}); err != nil || len(attachments) > 0 {
+			return rejectParameters("cohere", parameterCheck{"messages", true})
+		}
+		if _, err := cohereChatText(message.Content); err != nil {
+			return rejectParameters("cohere", parameterCheck{"messages", true})
+		}
+	}
+	return rejectParameters("cohere",
+		parameterCheck{"tools", len(request.Tools) > 0}, parameterCheck{"tool_choice", request.ToolChoice != nil}, parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
+		parameterCheck{"seed", request.Seed != nil},
+		parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"store", request.Store != nil}, parameterCheck{"modalities", request.Modalities != nil}, parameterCheck{"audio", request.Audio != nil},
+		parameterCheck{"reasoning_effort", request.ReasoningEffort != ""}, parameterCheck{"n", request.N != nil}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
+		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},
+		parameterCheck{"prediction", request.Prediction != nil}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"user", request.User != ""}, parameterCheck{"verbosity", request.Verbosity != ""},
+		parameterCheck{"web_search_options", request.WebSearchOptions != nil}, parameterCheck{"logprobs", request.Logprobs != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
+		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil}, parameterCheck{"logit_bias", request.LogitBias != nil},
+	)
+}
+
+func (p Cohere) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	if err := p.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	messages := make([]cohereChatMessage, len(request.Messages))
+	for index, message := range request.Messages {
+		role := message.Role
+		if role == "developer" {
+			role = "system"
+		}
+		content, err := cohereChatText(message.Content)
+		if err != nil {
+			return openai.ChatCompletionResponse{}, err
+		}
+		messages[index] = cohereChatMessage{Role: role, Content: content}
+	}
+	maxTokens := request.MaxCompletionTokens
+	if maxTokens == nil {
+		maxTokens = request.MaxTokens
+	}
+	stop, _ := openai.StopSequences(request.Stop)
+	native := cohereChatRequest{Model: request.Model, Messages: messages, MaxTokens: maxTokens, StopSequences: stop, Temperature: request.Temperature, P: request.TopP}
+	if format := request.ResponseFormat; format != nil && format.Type != "text" {
+		native.ResponseFormat = &cohereResponseFormat{Type: "json_object"}
+		if format.Type == "json_schema" && format.JSONSchema != nil {
+			native.ResponseFormat.Schema = format.JSONSchema.Schema
+		}
+	}
+	body, err := json.Marshal(native)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	if len(body) > openai.MaxInferenceBodyBytes {
+		return openai.ChatCompletionResponse{}, cohereChatError("messages", "chat request exceeds limit")
+	}
+	endpoint, err := cohereEndpoint(p.baseURL, "v2/chat")
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	httpRequest.Header.Set("Accept", "application/json")
+	if p.apiKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	response, err := p.client.Do(httpRequest)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return openai.ChatCompletionResponse{}, responseStatusError("cohere", response)
+	}
+	var upstream cohereChatResponse
+	if err := decodeCohereChatResponse(response.Body, &upstream); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	if upstream.ID == "" || upstream.Message.Role != "assistant" || len(upstream.Message.Content) == 0 {
+		return openai.ChatCompletionResponse{}, errors.New("invalid Cohere chat response")
+	}
+	var content strings.Builder
+	for _, block := range upstream.Message.Content {
+		if block.Type != "text" {
+			return openai.ChatCompletionResponse{}, errors.New("unsupported Cohere chat content block")
+		}
+		content.WriteString(block.Text)
+	}
+	finishReason, err := cohereFinishReason(upstream.FinishReason)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	usage, err := cohereChatUsage(upstream.Usage)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	return openai.ChatCompletionResponse{ID: upstream.ID, Object: "chat.completion", Created: time.Now().Unix(), Model: request.Model, Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: content.String()}, FinishReason: finishReason}}, Usage: usage}, nil
+}
+
+func cohereChatError(param, message string) error {
+	return &Error{Class: FailureClientRequest, Provider: "cohere", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_parameter", Param: param, Err: errors.New(message)}
+}
+
+func cohereChatText(value any) (string, error) {
+	switch content := value.(type) {
+	case string:
+		if content == "" {
+			return "", errors.New("Cohere chat message content is empty")
+		}
+		return content, nil
+	case []any:
+		var text strings.Builder
+		for _, item := range content {
+			block, ok := item.(map[string]any)
+			if !ok || block["type"] != "text" || len(block) != 2 {
+				return "", errors.New("Cohere chat accepts text content blocks only")
+			}
+			value, ok := block["text"].(string)
+			if !ok || value == "" {
+				return "", errors.New("Cohere chat text content is invalid")
+			}
+			text.WriteString(value)
+		}
+		if text.Len() == 0 {
+			return "", errors.New("Cohere chat message content is empty")
+		}
+		return text.String(), nil
+	default:
+		return "", errors.New("Cohere chat message content must be text")
+	}
+}
+
+func cohereFinishReason(value string) (string, error) {
+	switch strings.ToUpper(value) {
+	case "COMPLETE", "STOP_SEQUENCE":
+		return "stop", nil
+	case "MAX_TOKENS":
+		return "length", nil
+	default:
+		return "", errors.New("invalid Cohere finish reason")
+	}
+}
+
+func cohereChatUsage(value *cohereChatUsageResponse) (openai.Usage, error) {
+	if value == nil {
+		return openai.Usage{}, errors.New("Cohere chat response is missing usage")
+	}
+	input, output := (*int)(nil), (*int)(nil)
+	if value.BilledUnits != nil {
+		input, output = value.BilledUnits.InputTokens, value.BilledUnits.OutputTokens
+	} else if value.Tokens != nil {
+		input, output = value.Tokens.InputTokens, value.Tokens.OutputTokens
+	}
+	if input == nil || output == nil || *input < 0 || *output < 0 || *input > int(^uint(0)>>1)-*output {
+		return openai.Usage{}, errors.New("invalid Cohere chat usage")
+	}
+	return openai.Usage{PromptTokens: *input, CompletionTokens: *output, TotalTokens: *input + *output}, nil
+}
+
+func decodeCohereChatResponse(reader io.Reader, target *cohereChatResponse) error {
+	payload, err := io.ReadAll(io.LimitReader(reader, maxChatCompletionResponseBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(payload) > maxChatCompletionResponseBytes {
+		return errors.New("Cohere chat response exceeds limit")
+	}
+	return json.Unmarshal(payload, target)
 }
 
 func (Cohere) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {

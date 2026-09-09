@@ -69,8 +69,18 @@ Float vectors are validated for count, consistent dimensions and finite values;
 `encoding_format: base64` is encoded locally from the validated float response.
 Provider-reported billed input tokens take precedence over the bounded local
 estimate, including an explicitly reported zero, and flow into post-response
-billing. Model discovery includes non-deprecated models advertising either the
-native Embed or Rerank endpoint.
+billing.
+
+Native Cohere Chat uses `/v2/chat` with Bearer credentials. It accepts text-only
+`system`, `developer`, `user` and `assistant` messages, maps `developer` to the
+native `system` role, and supports `max_tokens` or `max_completion_tokens`,
+`temperature`, `top_p`, stop sequences, JSON object output and JSON Schema
+output. Provider-reported billed input and output tokens are required and flow
+into post-response billing; incomplete counters and malformed response content
+fail the request. Deployments without the `stream` capability use the gateway's
+buffered SSE projection. Native Cohere SSE, tools, media and other unsupported
+Chat parameters are rejected or excluded by deployment capabilities. Discovery
+includes non-deprecated models advertising the Chat, Embed or Rerank endpoint.
 
 Provider type `mistral` uses the compatible Chat and Embeddings transports and
 implements text completion as native FIM at
