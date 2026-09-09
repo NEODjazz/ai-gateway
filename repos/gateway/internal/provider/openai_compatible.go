@@ -35,6 +35,7 @@ type openAICompatibleChatRequest struct {
 	TopP                *float64                       `json:"top_p,omitempty"`
 	Stop                any                            `json:"stop,omitempty"`
 	Seed                *int64                         `json:"seed,omitempty"`
+	RandomSeed          *int64                         `json:"random_seed,omitempty"`
 }
 
 type openAICompatibleResponseRequest struct {
@@ -119,6 +120,7 @@ type openAICompatibleModerationRequest struct {
 type OpenAICompatible struct {
 	baseURL               string
 	apiKey                string
+	errorProvider         string
 	upstreamStream        bool
 	rerankPath            string
 	completionStreamUsage bool
@@ -133,9 +135,24 @@ func NewOpenAICompatibleWithRerankPath(baseURL string, apiKey string, upstreamSt
 	return OpenAICompatible{
 		baseURL:        strings.TrimRight(baseURL, "/"),
 		apiKey:         apiKey,
+		errorProvider:  "openai-compatible",
 		upstreamStream: upstreamStream,
 		rerankPath:     rerankPath,
 		client:         newProviderHTTPClient(180 * time.Second),
+	}
+}
+
+func (p OpenAICompatible) providerName() string {
+	if p.errorProvider == "" {
+		return "openai-compatible"
+	}
+	return p.errorProvider
+}
+
+func (p OpenAICompatible) mapChatSeed(request *openAICompatibleChatRequest) {
+	if p.providerName() == "mistral" {
+		request.RandomSeed = request.Seed
+		request.Seed = nil
 	}
 }
 
@@ -172,7 +189,7 @@ func (p OpenAICompatible) Rerank(ctx context.Context, request openai.RerankReque
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.RerankResponse{}, responseStatusError("openai-compatible", resp)
+		return openai.RerankResponse{}, responseStatusError(p.providerName(), resp)
 	}
 	var response openai.RerankResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&response); err != nil {
@@ -200,7 +217,7 @@ func (p OpenAICompatible) Moderations(ctx context.Context, request openai.Modera
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ModerationResponse{}, responseStatusError("openai-compatible", resp)
+		return openai.ModerationResponse{}, responseStatusError(p.providerName(), resp)
 	}
 	response, err := decodeModerationResponse(resp.Body)
 	if err != nil {
@@ -258,7 +275,7 @@ func (p OpenAICompatible) completion(ctx context.Context, request openai.Complet
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.CompletionResponse{}, responseStatusError("openai-compatible", resp)
+		return openai.CompletionResponse{}, responseStatusError(p.providerName(), resp)
 	}
 	if stream {
 		return streamCompletionData(resp.Body, request, write)
@@ -382,7 +399,7 @@ func (p OpenAICompatible) CompactResponse(ctx context.Context, request openai.Re
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.CompactedResponse{}, responseStatusError("openai-compatible", resp)
+		return openai.CompactedResponse{}, responseStatusError(p.providerName(), resp)
 	}
 	return decodeCompactedResponse(resp.Body)
 }
@@ -400,6 +417,7 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 		Temperature: request.Temperature, TopP: request.TopP,
 		Stop: request.Stop, Seed: request.Seed,
 	}
+	p.mapChatSeed(&upstreamRequest)
 	if upstreamRequest.Stream {
 		upstreamRequest.StreamOptions = chatStreamOptions(request)
 	}
@@ -527,7 +545,7 @@ func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.Embeddi
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.EmbeddingResponse{}, responseStatusError("openai-compatible", resp)
+		return openai.EmbeddingResponse{}, responseStatusError(p.providerName(), resp)
 	}
 	var upstream struct {
 		openai.EmbeddingResponse
@@ -573,6 +591,7 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 		Temperature: request.Temperature, TopP: request.TopP,
 		Stop: request.Stop, Seed: request.Seed,
 	}
+	p.mapChatSeed(&upstreamRequest)
 	upstreamRequest.StreamOptions = chatStreamOptions(request)
 	resp, err := p.chatCompletionResponse(ctx, &upstreamRequest)
 	if err != nil {
@@ -625,14 +644,14 @@ func (p OpenAICompatible) chatCompletionResponse(ctx context.Context, request *o
 		if response.StatusCode >= 200 && response.StatusCode < 300 {
 			return response, nil
 		}
-		providerErr := responseStatusError("openai-compatible", response)
+		providerErr := responseStatusError(p.providerName(), response)
 		_ = response.Body.Close()
 		if attempt == 0 && useMaxCompletionTokens(request, providerErr) {
 			continue
 		}
 		return nil, providerErr
 	}
-	return nil, errors.New("openai-compatible chat compatibility retry exhausted")
+	return nil, fmt.Errorf("%s chat compatibility retry exhausted", p.providerName())
 }
 
 func useMaxCompletionTokens(request *openAICompatibleChatRequest, err error) bool {
@@ -680,7 +699,7 @@ func (p OpenAICompatible) Responses(ctx context.Context, request openai.Response
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ResponseResponse{}, responseStatusError("openai-compatible", resp)
+		return openai.ResponseResponse{}, responseStatusError(p.providerName(), resp)
 	}
 
 	return decodeResponseJSON(resp.Body)
@@ -722,7 +741,7 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openai.ResponseResponse{}, responseStatusError("openai-compatible", resp)
+		return openai.ResponseResponse{}, responseStatusError(p.providerName(), resp)
 	}
 
 	return streamResponseData(resp.Body, request.Model, write)

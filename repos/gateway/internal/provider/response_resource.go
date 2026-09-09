@@ -59,7 +59,7 @@ func (p OpenAICompatible) ListResponseInputItems(ctx context.Context, id string,
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return openai.ResponseInputItemList{}, responseStatusError("openai-compatible", response)
+		return openai.ResponseInputItemList{}, responseStatusError(p.providerName(), response)
 	}
 	return decodeResponseInputItems(response.Body)
 }
@@ -142,7 +142,7 @@ func (p OpenAICompatible) DeleteResponse(ctx context.Context, id string) (openai
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return openai.ResponseDeletion{}, responseStatusError("openai-compatible", response)
+		return openai.ResponseDeletion{}, responseStatusError(p.providerName(), response)
 	}
 	payload, err := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
 	if err != nil {
@@ -185,7 +185,7 @@ func (p OpenAICompatible) responseResourceRequest(ctx context.Context, method, i
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return openai.ResponseResponse{}, responseStatusError("openai-compatible", response)
+		return openai.ResponseResponse{}, responseStatusError(p.providerName(), response)
 	}
 	result, err := decodeResponseJSON(response.Body)
 	if err != nil {

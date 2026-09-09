@@ -137,3 +137,79 @@ func TestMistralFIMRejectsNonStringContentAndChangedStreamIdentity(t *testing.T)
 		t.Fatalf("changed stream identity accepted: %v", err)
 	}
 }
+
+func TestMistralChatUsesNativeRandomSeedInJSONAndStreaming(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer provider-key" {
+			t.Errorf("unexpected request: %s headers=%v", r.URL.Path, r.Header)
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request["random_seed"] != float64(17) {
+			t.Fatalf("random_seed=%#v", request["random_seed"])
+		}
+		if _, found := request["seed"]; found {
+			t.Fatalf("generic seed leaked into Mistral request: %#v", request)
+		}
+		if request["stream"] == true {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-stream\",\"object\":\"chat.completion.chunk\",\"created\":20,\"model\":\"mistral-small\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"streamed\"},\"finish_reason\":null}]}\n\n")
+			_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-stream\",\"object\":\"chat.completion.chunk\",\"created\":20,\"model\":\"mistral-small\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}\n\n")
+			_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat-json","object":"chat.completion","created":10,"model":"mistral-small","choices":[{"index":0,"message":{"role":"assistant","content":"json"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+	}))
+	defer server.Close()
+
+	seed := int64(17)
+	client := NewMistral(server.URL, "provider-key", true)
+	request := openai.ChatCompletionRequest{Model: "mistral-small", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Seed: &seed}
+	response, err := client.ChatCompletions(t.Context(), request)
+	if err != nil || openai.ContentText(response.Choices[0].Message.Content) != "json" || response.Usage.TotalTokens != 3 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+	payloads := []string{}
+	streamed, err := client.StreamChatCompletions(t.Context(), request, func(payload string) error {
+		payloads = append(payloads, payload)
+		return nil
+	})
+	if err != nil || streamed.Usage.TotalTokens != 4 || openai.ContentText(streamed.Choices[0].Message.Content) != "streamed" || len(payloads) != 2 || calls.Load() != 2 {
+		t.Fatalf("streamed=%+v payloads=%v calls=%d err=%v", streamed, payloads, calls.Load(), err)
+	}
+}
+
+func TestMistralEmbeddingsAndErrorsUseNativeProviderIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/embeddings":
+			_, _ = fmt.Fprint(w, `{"object":"list","model":"mistral-embed","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}],"usage":{"prompt_tokens":2,"total_tokens":2}}`)
+		case "/v1/chat/completions":
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = fmt.Fprint(w, `{"error":{"type":"rate_limit_error"}}`)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewMistral(server.URL, "provider-key", false)
+	embedding, err := client.Embeddings(t.Context(), openai.EmbeddingRequest{Model: "mistral-embed", Input: "hello"})
+	if err != nil || !embedding.UsageReported || embedding.Usage.TotalTokens != 2 || len(embedding.Data) != 1 || len(embedding.Data[0].Embedding) != 2 {
+		t.Fatalf("embedding=%+v err=%v", embedding, err)
+	}
+	_, err = client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "mistral-small", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.Class != FailureRateLimit || failure.UpstreamCode != "rate_limit_error" || failure.RetryAfter <= 0 {
+		t.Fatalf("error=%v failure=%+v", err, failure)
+	}
+	inputType := openai.EmbeddingRequest{Model: "mistral-embed", Input: "hello", InputType: "search_query"}
+	if err := client.ValidateEmbeddingParameters(inputType); !errors.As(err, &failure) || failure.Provider != "mistral" || failure.Param != "input_type" {
+		t.Fatalf("validation error=%v", err)
+	}
+}

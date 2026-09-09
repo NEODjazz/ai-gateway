@@ -46,7 +46,9 @@ func NewMistral(baseURL, apiKey string, upstreamStream bool) Mistral {
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = "https://api.mistral.ai"
 	}
-	return Mistral{OpenAICompatible: NewOpenAICompatible(baseURL, apiKey, upstreamStream)}
+	compatible := NewOpenAICompatible(baseURL, apiKey, upstreamStream)
+	compatible.errorProvider = "mistral"
+	return Mistral{OpenAICompatible: compatible}
 }
 
 func (Mistral) SupportsResponses() bool { return false }

@@ -133,8 +133,8 @@ func (Demo) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
 	return rejectParameters("demo", parameterCheck{"input", err != nil || input.Tokenized()}, parameterCheck{"input_type", request.InputType != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"})
 }
 
-func (OpenAICompatible) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
-	return rejectParameters("openai-compatible", parameterCheck{"input_type", request.InputType != ""})
+func (p OpenAICompatible) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
+	return rejectParameters(p.providerName(), parameterCheck{"input_type", request.InputType != ""})
 }
 
 func validateChatAdapter(client Client, request openai.ChatCompletionRequest) error {
@@ -231,27 +231,28 @@ func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	return rejectGenerationOptions("demo", request.ChatGenerationOptions)
 }
 
-func (OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+func (p OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	providerName := p.providerName()
 	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
-		return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "functions", Err: err}
+		return &Error{Class: FailureClientRequest, Provider: providerName, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "functions", Err: err}
 	}
-	if err := validateChatPromptCacheBreakpoints("openai-compatible", request, true); err != nil {
+	if err := validateChatPromptCacheBreakpoints(providerName, request, true); err != nil {
 		return err
 	}
 	for _, message := range request.Messages {
 		if message.Audio != nil {
 			if message.Role != "assistant" {
-				return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.audio", Err: errors.New("messages.audio requires role=assistant")}
+				return &Error{Class: FailureClientRequest, Provider: providerName, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.audio", Err: errors.New("messages.audio requires role=assistant")}
 			}
 			if err := openai.ValidateChatAudioReference(message.Audio); err != nil {
-				return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.audio", Err: err}
+				return &Error{Class: FailureClientRequest, Provider: providerName, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.audio", Err: err}
 			}
 		}
 	}
 	if message := request.ChatGenerationOptions.Validate(); message != "" {
-		return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
+		return &Error{Class: FailureClientRequest, Provider: providerName, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
 	}
-	return rejectParameters("openai-compatible",
+	return rejectParameters(providerName,
 		parameterCheck{"store", request.Store != nil && *request.Store},
 		parameterCheck{"service_tier", request.ServiceTier != ""},
 	)
@@ -280,11 +281,11 @@ func validateChatPromptCacheBreakpoints(adapter string, request openai.ChatCompl
 	return rejectParameters(adapter, parameterCheck{"messages.prompt_cache_breakpoint", count > 0 && !supported})
 }
 
-func (OpenAICompatible) ValidateResponseParameters(request openai.ResponseRequest) error {
+func (p OpenAICompatible) ValidateResponseParameters(request openai.ResponseRequest) error {
 	if message := request.Validate(); message != "" {
-		return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
+		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
 	}
-	return rejectParameters("openai-compatible", parameterCheck{"service_tier", request.ServiceTier != ""})
+	return rejectParameters(p.providerName(), parameterCheck{"service_tier", request.ServiceTier != ""})
 }
 
 func rejectToolCallMetadata(adapter string, messages []openai.Message) error {

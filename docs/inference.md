@@ -154,12 +154,16 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `anthropic` | Преобразование chat/tools/vision в native Messages API |
 | `ollama` | Native chat/stream/embeddings и provider completions JSON/SSE для строкового prompt |
 | `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output, text embeddings; API key |
+| `mistral` | Native Chat JSON/SSE and embeddings wire contract; FIM completions; Bearer API key |
 | `demo` | Локальный deterministic fallback для разработки |
 
 OpenAI-compatible adapter один раз повторяет запрос с
 `max_completion_tokens`, только когда upstream явно отверг legacy
 `max_tokens`. Unsupported non-default `temperature` не переписывается
 молча: клиент должен отправить допустимое для модели значение.
+Mistral Chat преобразует публичный `seed` в native `random_seed`; JSON, SSE и
+embeddings responses проходят общую bounded validation и reported usage accounting.
+Ошибки transport и parameter validation сохраняют provider identity `mistral`.
 
 ## Routing и модели
 

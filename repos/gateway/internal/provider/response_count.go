@@ -19,7 +19,7 @@ var ErrResponseInputTokenCountUnsupported = errors.New("response input token cou
 
 func (p OpenAICompatible) CountResponseInputTokens(ctx context.Context, request openai.ResponseInputTokenCountRequest) (openai.ResponseInputTokenCount, error) {
 	if strings.TrimSpace(request.Model) == "" || request.Input == nil {
-		return openai.ResponseInputTokenCount{}, &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New("model and input are required")}
+		return openai.ResponseInputTokenCount{}, &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New("model and input are required")}
 	}
 	body, err := json.Marshal(struct {
 		Model             string                    `json:"model"`
@@ -62,7 +62,7 @@ func (p OpenAICompatible) CountResponseInputTokens(ctx context.Context, request 
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return openai.ResponseInputTokenCount{}, responseStatusError("openai-compatible", response)
+		return openai.ResponseInputTokenCount{}, responseStatusError(p.providerName(), response)
 	}
 	payload, err := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
 	if err != nil {
