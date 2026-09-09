@@ -19,7 +19,7 @@ availability is not inferred from these tests.
 
 | Family | Current implementation | Remaining work |
 | --- | --- | --- |
-| Chat completions | JSON, tools, structured output, vision input, SSE, generation controls, bounded multi-choice with aggregate reserve; native Cohere v2 text, structured JSON/SSE, generation controls and JSON function tools/history | Additional controls, model-specific policy and native Cohere streaming tools |
+| Chat completions | JSON, tools, structured output, vision input, SSE, generation controls, bounded multi-choice with aggregate reserve; native Cohere v2 text, structured JSON/SSE, generation controls and JSON/SSE function tools/history | Additional controls and model-specific policy |
 | Responses | Create, indexed SSE assembly, scoped deployment affinity, function tools, MCP passthrough, stateless reasoning history, native input-token count, owned retrieve/delete/cancel/input-items, generation options and metadata | Durable background lifecycle; remaining provider-specific parameters and counters |
 | Response compaction | Native compact contract, bounded opaque output, model authorization and usage settlement | Additional provider-native compact request options as demand is confirmed |
 | Embeddings | String/list and bounded token-ID input, exact token-ID accounting, float/base64 output, compatible adapters and native Gemini, Ollama and Cohere v2 adapters | Additional provider compatibility |

@@ -111,8 +111,9 @@ type cohereChatStreamEvent struct {
 	Index *int   `json:"index"`
 	Delta struct {
 		Message struct {
-			Role    string `json:"role"`
-			Content struct {
+			Role      string           `json:"role"`
+			ToolCalls *openai.ToolCall `json:"tool_calls"`
+			Content   struct {
 				Type string `json:"type"`
 				Text string `json:"text"`
 			} `json:"content"`
@@ -439,6 +440,8 @@ func streamCohereChat(body io.Reader, model string, write ChatCompletionStreamWr
 	result := openai.ChatCompletionResponse{Object: "chat.completion", Created: time.Now().Unix(), Model: model, Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant"}}}}
 	started, active, ended := false, false, false
 	nextIndex := 0
+	toolIndexes := make(map[int]int)
+	activeTools := make(map[int]bool)
 	err := scanSSEEvents(body, func(event, payload string) error {
 		var item cohereChatStreamEvent
 		if err := json.Unmarshal([]byte(payload), &item); err != nil {
@@ -456,7 +459,7 @@ func streamCohereChat(body io.Reader, model string, write ChatCompletionStreamWr
 			result.ID = item.ID
 			return write(openAIChatCompletionChunkPayload(result.ID, result.Model, 0, "assistant", "", nil))
 		case "content-start":
-			if !started || active || item.Index == nil || *item.Index != nextIndex || item.Delta.Message.Content.Type != "text" {
+			if !started || active || len(toolIndexes) > 0 || item.Index == nil || *item.Index != nextIndex || item.Delta.Message.Content.Type != "text" {
 				return errors.New("invalid Cohere content-start event")
 			}
 			active = true
@@ -476,13 +479,71 @@ func streamCohereChat(body io.Reader, model string, write ChatCompletionStreamWr
 			}
 			active = false
 			nextIndex++
+		case "tool-plan-delta":
+			if !started || active || nextIndex > 0 || len(toolIndexes) > 0 {
+				return errors.New("invalid Cohere tool-plan-delta event")
+			}
+		case "tool-call-start":
+			if !started || active || nextIndex > 0 || item.Index == nil || *item.Index < 0 || *item.Index >= maxChatStreamToolCalls || item.Delta.Message.ToolCalls == nil {
+				return errors.New("invalid Cohere tool-call-start event")
+			}
+			upstreamIndex := *item.Index
+			if _, exists := toolIndexes[upstreamIndex]; exists {
+				return errors.New("duplicate Cohere tool call index")
+			}
+			call := *item.Delta.Message.ToolCalls
+			if call.ID == "" || call.Type != "function" || strings.TrimSpace(call.Function.Name) == "" || call.Index != nil || call.ExtraContent != nil || len(call.Function.Arguments) > openai.MaxChatFunctionArgumentsChars {
+				return errors.New("invalid Cohere tool-call-start event")
+			}
+			toolIndex := len(result.Choices[0].Message.ToolCalls)
+			toolIndexes[upstreamIndex] = toolIndex
+			activeTools[upstreamIndex] = true
+			result.Choices[0].Message.ToolCalls = append(result.Choices[0].Message.ToolCalls, call)
+			return write(openAIChatToolCallChunkPayload(result.ID, result.Model, toolIndex, call))
+		case "tool-call-delta":
+			if !started || item.Index == nil || item.Delta.Message.ToolCalls == nil || !activeTools[*item.Index] {
+				return errors.New("invalid Cohere tool-call-delta event")
+			}
+			delta := *item.Delta.Message.ToolCalls
+			if delta.ID != "" || delta.Type != "" || delta.Function.Name != "" || delta.Index != nil || delta.ExtraContent != nil {
+				return errors.New("invalid Cohere tool-call-delta event")
+			}
+			toolIndex := toolIndexes[*item.Index]
+			current := &result.Choices[0].Message.ToolCalls[toolIndex]
+			if len(delta.Function.Arguments) > openai.MaxChatFunctionArgumentsChars-len(current.Function.Arguments) {
+				return errors.New("Cohere tool call arguments exceed limit")
+			}
+			current.Function.Arguments += delta.Function.Arguments
+			return write(openAIChatToolCallChunkPayload(result.ID, result.Model, toolIndex, delta))
+		case "tool-call-end":
+			if !started || item.Index == nil || !activeTools[*item.Index] {
+				return errors.New("invalid Cohere tool-call-end event")
+			}
+			call := result.Choices[0].Message.ToolCalls[toolIndexes[*item.Index]]
+			if err := validateCohereToolCall(call); err != nil {
+				return err
+			}
+			activeTools[*item.Index] = false
 		case "message-end":
-			if !started || active || nextIndex == 0 {
+			if !started || active || (nextIndex == 0 && len(toolIndexes) == 0) {
 				return errors.New("invalid Cohere message-end event")
 			}
-			finish, err := cohereFinishReason(item.Delta.FinishReason)
-			if err != nil {
-				return err
+			for _, toolActive := range activeTools {
+				if toolActive {
+					return errors.New("Cohere tool call ended before tool-call-end")
+				}
+			}
+			finish := "tool_calls"
+			if len(toolIndexes) > 0 {
+				if !strings.EqualFold(item.Delta.FinishReason, "TOOL_CALL") {
+					return errors.New("Cohere tool calls ended without TOOL_CALL finish reason")
+				}
+			} else {
+				var err error
+				finish, err = cohereFinishReason(item.Delta.FinishReason)
+				if err != nil {
+					return err
+				}
 			}
 			usage, err := cohereChatUsage(item.Delta.Usage)
 			if err != nil {

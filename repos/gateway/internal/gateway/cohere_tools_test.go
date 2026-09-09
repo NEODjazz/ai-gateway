@@ -43,3 +43,36 @@ func TestCohereToolsPreserveACLTokenReserveAndBilling(t *testing.T) {
 		t.Fatalf("lifecycle mismatch: status=%d upstream=%d reserve=%d billing=%+v body=%s", response.Code, upstreamCalls, rates.tokens, billing, response.Body.String())
 	}
 }
+
+func TestCohereStreamingToolsPreserveLifecycleAndBilling(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Accept") != "text/event-stream" {
+			t.Errorf("unexpected accept header: %s", r.Header.Get("Accept"))
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: message-start\ndata: {\"type\":\"message-start\",\"id\":\"chat-tools\",\"delta\":{\"message\":{\"role\":\"assistant\"}}}\n\n"+
+			"event: tool-call-start\ndata: {\"type\":\"tool-call-start\",\"index\":3,\"delta\":{\"message\":{\"tool_calls\":{\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"weather\",\"arguments\":\"\"}}}}}\n\n"+
+			"event: tool-call-delta\ndata: {\"type\":\"tool-call-delta\",\"index\":3,\"delta\":{\"message\":{\"tool_calls\":{\"function\":{\"arguments\":\"{\\\"city\\\":\\\"Paris\\\"}\"}}}}}\n\n"+
+			"event: tool-call-end\ndata: {\"type\":\"tool-call-end\",\"index\":3}\n\n"+
+			"event: message-end\ndata: {\"type\":\"message-end\",\"delta\":{\"finish_reason\":\"TOOL_CALL\",\"usage\":{\"billed_units\":{\"input_tokens\":12,\"output_tokens\":3}}}}\n\n")
+	}))
+	defer upstream.Close()
+
+	billing := &messagesUsageRecorder{}
+	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "cohere", Type: "cohere", BaseURL: upstream.URL, Models: []string{"command"}, Capabilities: []string{"chat", "stream", "tools"}, Stream: true,
+	}}, Modules: modules.NewPipeline([]modules.Module{billing})})
+	handler := Routes(NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"command"}, tools: []string{"weather"}, tpm: 100000}}}), router, NewMemoryRateLimitStore()))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"command","messages":[{"role":"user","content":"weather"}],"tools":[{"type":"function","function":{"name":"weather","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}}],"tool_choice":"required","stream":true,"stream_options":{"include_usage":true}}`))
+	request.Header.Set("Authorization", "Bearer gateway-test-key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"tool_calls":[{"index":0`) || !strings.Contains(body, `"finish_reason":"tool_calls"`) || !strings.Contains(body, `"total_tokens":15`) || !strings.Contains(body, "data: [DONE]") {
+		t.Fatalf("invalid tool stream: status=%d body=%s", response.Code, body)
+	}
+	if billing.calls != 1 || billing.usage.PromptTokens != 12 || billing.usage.CompletionTokens != 3 || billing.usage.TotalTokens != 15 {
+		t.Fatalf("billing mismatch: %+v", billing)
+	}
+}

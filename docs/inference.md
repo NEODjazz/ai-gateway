@@ -91,8 +91,10 @@ assistant tool-call history and document-wrapped tool results. Tool names remain
 subject to the gateway ACL and tool schemas participate in TPM and billing
 reservation. Malformed arguments, unknown history IDs, mixed strict settings,
 named tool selection and requests that disable parallel calls fail before the
-upstream request. Native tool-call SSE remains disabled until its indexed
-argument lifecycle is normalized with the same guarantees.
+upstream request. Native tool-call SSE maps sparse upstream indices to stable
+output indices, assembles bounded argument fragments, validates complete JSON
+objects and settles provider-reported billed usage only after every tool call
+has ended successfully.
 
 Provider type `mistral` uses the compatible Chat and Embeddings transports and
 implements text completion as native FIM at
