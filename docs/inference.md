@@ -175,6 +175,8 @@ Mistral embeddings принимает только строку или масс�
 `input_type` и `user` отклоняются до provider modules, billing и upstream.
 Mistral не объявляет унаследованный compatible rerank transport: даже ошибочно
 настроенная capability исключается router до modules, billing и network call.
+Chat `web_search_options` также отклоняется до выполнения: provider-managed web
+search не представлен native Chat Completions transport этого adapter.
 
 ## Routing и модели
 

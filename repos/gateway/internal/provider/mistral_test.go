@@ -292,3 +292,30 @@ func TestMistralDoesNotAdvertiseInheritedRerankTransport(t *testing.T) {
 		t.Fatalf("error=%v upstream calls=%d", err, calls.Load())
 	}
 }
+
+func TestMistralRejectsChatWebSearchBeforeExecution(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	client := NewMistral(server.URL, "provider-key", true)
+	request := openai.ChatCompletionRequest{
+		Model: "mistral-small", Messages: []openai.Message{{Role: "user", Content: "latest news"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{}},
+	}
+	for name, call := range map[string]func() error{
+		"adapter validation": func() error { return validateChatAdapter(client, request) },
+		"json":               func() error { _, err := client.ChatCompletions(t.Context(), request); return err },
+		"stream":             func() error { _, err := client.StreamChatCompletions(t.Context(), request, nil); return err },
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.Param != "web_search_options" || failure.UpstreamCode != "unsupported_parameter" {
+				t.Fatalf("error=%v failure=%+v", err, failure)
+			}
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unsupported search reached Mistral: %d", calls.Load())
+	}
+}

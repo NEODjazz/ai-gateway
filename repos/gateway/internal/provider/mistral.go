@@ -54,6 +54,27 @@ func NewMistral(baseURL, apiKey string, upstreamStream bool) Mistral {
 func (Mistral) SupportsResponses() bool { return false }
 func (Mistral) SupportsRerank() bool    { return false }
 
+func (p Mistral) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := p.OpenAICompatible.ValidateChatParameters(request); err != nil {
+		return err
+	}
+	return rejectParameters("mistral", parameterCheck{"web_search_options", request.WebSearchOptions != nil})
+}
+
+func (p Mistral) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	if err := p.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	return p.OpenAICompatible.ChatCompletions(ctx, request)
+}
+
+func (p Mistral) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+	if err := p.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	return p.OpenAICompatible.StreamChatCompletions(ctx, request, write)
+}
+
 func (Mistral) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
 	input, err := openai.InspectEmbeddingInput(request.Input)
 	return rejectParameters("mistral",
