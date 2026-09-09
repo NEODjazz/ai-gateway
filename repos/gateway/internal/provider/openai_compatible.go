@@ -94,11 +94,12 @@ type openAICompatibleStreamOptions struct {
 }
 
 type openAICompatibleEmbeddingRequest struct {
-	Model          string `json:"model"`
-	Input          any    `json:"input"`
-	EncodingFormat string `json:"encoding_format,omitempty"`
-	Dimensions     *int   `json:"dimensions,omitempty"`
-	User           string `json:"user,omitempty"`
+	Model           string `json:"model"`
+	Input           any    `json:"input"`
+	EncodingFormat  string `json:"encoding_format,omitempty"`
+	Dimensions      *int   `json:"dimensions,omitempty"`
+	OutputDimension *int   `json:"output_dimension,omitempty"`
+	User            string `json:"user,omitempty"`
 }
 
 type openAICompatibleRerankRequest struct {
@@ -153,6 +154,13 @@ func (p OpenAICompatible) mapChatSeed(request *openAICompatibleChatRequest) {
 	if p.providerName() == "mistral" {
 		request.RandomSeed = request.Seed
 		request.Seed = nil
+	}
+}
+
+func (p OpenAICompatible) mapEmbeddingDimensions(request *openAICompatibleEmbeddingRequest) {
+	if p.providerName() == "mistral" {
+		request.OutputDimension = request.Dimensions
+		request.Dimensions = nil
 	}
 }
 
@@ -524,10 +532,12 @@ func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.Embeddi
 	if err := p.ValidateEmbeddingParameters(request); err != nil {
 		return openai.EmbeddingResponse{}, err
 	}
-	body, err := json.Marshal(openAICompatibleEmbeddingRequest{
+	upstreamRequest := openAICompatibleEmbeddingRequest{
 		Model: request.Model, Input: request.Input, EncodingFormat: request.EncodingFormat,
 		Dimensions: request.Dimensions, User: request.User,
-	})
+	}
+	p.mapEmbeddingDimensions(&upstreamRequest)
+	body, err := json.Marshal(upstreamRequest)
 	if err != nil {
 		return openai.EmbeddingResponse{}, err
 	}
