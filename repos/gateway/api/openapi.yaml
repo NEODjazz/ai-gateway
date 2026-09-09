@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.104
+  version: 0.1.105
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -2885,6 +2885,7 @@ components:
             include_obfuscation: {type: boolean, default: true, description: Add random padding to streaming delta events to reduce payload-size side channels.}
         temperature: {type: number, minimum: 0, maximum: 1}
         top_p: {type: number, minimum: 0, maximum: 1}
+        service_tier: {type: string, enum: [auto, standard_only], description: "Native capacity selection. The assigned standard, priority or batch tier is returned in usage.service_tier."}
         metadata:
           type: object
           additionalProperties: false
@@ -2973,6 +2974,7 @@ components:
             output_tokens: {type: integer, minimum: 0}
             cache_read_input_tokens: {type: integer, minimum: 0}
             cache_creation_input_tokens: {type: integer, minimum: 0}
+            service_tier: {type: string, enum: [standard, priority, batch], description: Provider-assigned tier when reported.}
             output_tokens_details:
               type: object
               additionalProperties: false
@@ -3683,7 +3685,7 @@ components:
                         required: [mode]
                         properties:
                           mode: {type: string, const: explicit}
-        service_tier: {type: string, enum: [auto, default, flex, scale, priority, fast, ultrafast], description: Recognized but rejected until tier-aware billing rates are configured.}
+        service_tier: {type: string, enum: [auto, default, flex, scale, priority, fast, ultrafast, standard_only], description: Forwarded by compatible adapters. Native Anthropic accepts auto and standard_only; other native adapters may reject it.}
         user: {type: string, description: "Legacy provider hint; never used as gateway authorization, rate-limit, or billing identity."}
         verbosity: {type: string, enum: [low, medium, high]}
         web_search_options:
@@ -4000,7 +4002,7 @@ components:
         previous_response_id: {type: string}
         safety_identifier: {type: string, maxLength: 64}
         prompt_cache_key: {type: string}
-        service_tier: {type: string, enum: [auto, default, flex, scale, priority, fast, ultrafast], description: Recognized but rejected until tier-aware billing rates are configured.}
+        service_tier: {type: string, enum: [auto, default, flex, scale, priority, fast, ultrafast, standard_only], description: Forwarded by compatible adapters; native adapters may reject it.}
         stream: {type: boolean, default: false}
         max_output_tokens: {type: integer, minimum: 1}
         max_tokens: {type: integer, minimum: 1}

@@ -21,6 +21,7 @@ type messagesRequest struct {
 	ToolChoice    *messagesToolChoice   `json:"tool_choice,omitempty"`
 	Metadata      *messagesMetadata     `json:"metadata,omitempty"`
 	OutputConfig  *messagesOutputConfig `json:"output_config,omitempty"`
+	ServiceTier   string                `json:"service_tier,omitempty"`
 	Temperature   *float64              `json:"temperature,omitempty"`
 	TopP          *float64              `json:"top_p,omitempty"`
 	Stream        bool                  `json:"stream,omitempty"`
@@ -75,6 +76,12 @@ func (request messagesRequest) chat() (openai.ChatCompletionRequest, error) {
 
 func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatCompletionRequest, error) {
 	result := openai.ChatCompletionRequest{Model: request.Model, MaxTokens: &request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP, Stream: request.Stream}
+	switch request.ServiceTier {
+	case "", "auto", "standard_only":
+		result.ServiceTier = request.ServiceTier
+	default:
+		return result, errors.New("service_tier must be auto or standard_only")
+	}
 	if request.Metadata != nil {
 		if utf8.RuneCountInString(request.Metadata.UserID) > 512 {
 			return result, errors.New("metadata.user_id must contain at most 512 characters")

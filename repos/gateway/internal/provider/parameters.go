@@ -52,6 +52,12 @@ func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) er
 		return err
 	}
 	options := request.ChatGenerationOptions
+	switch options.ServiceTier {
+	case "", "auto", "standard_only":
+		options.ServiceTier = ""
+	default:
+		return rejectParameters("anthropic", parameterCheck{"service_tier", true})
+	}
 	if options.Metadata != nil {
 		if len(options.Metadata) != 1 || options.Metadata["user_id"] == "" || utf8.RuneCountInString(options.Metadata["user_id"]) > 512 {
 			return &Error{Class: FailureClientRequest, Provider: "anthropic", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "metadata", Err: errors.New("metadata requires one non-empty user_id of at most 512 characters")}

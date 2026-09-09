@@ -36,6 +36,7 @@ type anthropicRequest struct {
 	Stream        bool                   `json:"stream,omitempty"`
 	Temperature   *float64               `json:"temperature,omitempty"`
 	TopP          *float64               `json:"top_p,omitempty"`
+	ServiceTier   string                 `json:"service_tier,omitempty"`
 	Metadata      *anthropicMetadata     `json:"metadata,omitempty"`
 	OutputConfig  *anthropicOutputConfig `json:"output_config,omitempty"`
 }
@@ -123,6 +124,7 @@ type anthropicUsage struct {
 	CacheCreationInputTokens int                          `json:"cache_creation_input_tokens,omitempty"`
 	OutputTokensDetails      *anthropicOutputTokenDetails `json:"output_tokens_details,omitempty"`
 	ServerToolUse            *anthropicServerToolUsage    `json:"server_tool_use,omitempty"`
+	ServiceTier              string                       `json:"service_tier,omitempty"`
 }
 
 type anthropicServerToolUsage struct {
@@ -335,6 +337,7 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		Stream:        stream,
 		Temperature:   request.Temperature,
 		TopP:          request.TopP,
+		ServiceTier:   request.ServiceTier,
 		Metadata:      metadata,
 		OutputConfig:  outputConfig,
 	}
@@ -684,9 +687,10 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 	toolCalls := anthropicToolCalls(response)
 	inputTokens := anthropicInputTokens(response.Usage)
 	return openai.ChatCompletionResponse{
-		ID:     response.ID,
-		Object: "chat.completion",
-		Model:  model,
+		ID:          response.ID,
+		Object:      "chat.completion",
+		Model:       model,
+		ServiceTier: response.Usage.ServiceTier,
 		Choices: []openai.Choice{
 			{
 				Index:        0,
@@ -735,6 +739,9 @@ func validateAnthropicUsage(usage anthropicUsage) error {
 	}
 	if searches := anthropicSearchRequests(usage); searches < 0 || searches > openai.WebSearchMaxUses {
 		return errors.New("invalid Anthropic server tool usage")
+	}
+	if usage.ServiceTier != "" && usage.ServiceTier != "standard" && usage.ServiceTier != "priority" && usage.ServiceTier != "batch" {
+		return errors.New("invalid Anthropic service tier")
 	}
 	return nil
 }
@@ -910,6 +917,12 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			response.Usage.PromptTokens = anthropicInputTokens(streamEvent.Message.Usage)
 			response.Usage.SearchRequests = anthropicSearchRequests(streamEvent.Message.Usage)
 			response.Usage.PromptTokensDetails = &openai.PromptTokenDetails{CachedTokens: streamEvent.Message.Usage.CacheReadInputTokens, CacheWriteTokens: streamEvent.Message.Usage.CacheCreationInputTokens}
+			response.ServiceTier = streamEvent.Message.Usage.ServiceTier
+			if response.ServiceTier != "" {
+				if err := write(openAIChatServiceTierChunkPayload(response.ID, response.Model, response.ServiceTier)); err != nil {
+					return err
+				}
+			}
 		case "content_block_start":
 			if streamEvent.ContentBlock.Type == "thinking" || streamEvent.ContentBlock.Type == "redacted_thinking" {
 				reasoningIndex := len(response.Choices[0].Message.Reasoning)
@@ -994,6 +1007,17 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			if streamEvent.Usage.ServerToolUse != nil {
 				response.Usage.SearchRequests = anthropicSearchRequests(streamEvent.Usage)
 			}
+			if streamEvent.Usage.ServiceTier != "" {
+				if response.ServiceTier != "" && response.ServiceTier != streamEvent.Usage.ServiceTier {
+					return errors.New("Anthropic changed service tier during stream")
+				}
+				if response.ServiceTier == "" {
+					response.ServiceTier = streamEvent.Usage.ServiceTier
+					if err := write(openAIChatServiceTierChunkPayload(response.ID, response.Model, response.ServiceTier)); err != nil {
+						return err
+					}
+				}
+			}
 			if streamEvent.Delta.StopReason != "" {
 				if streamEvent.Delta.StopReason == "stop_sequence" && streamEvent.Delta.StopSequence == nil {
 					return errors.New("Anthropic omitted matched stop sequence")
@@ -1022,6 +1046,17 @@ func openAIChatReasoningChunkPayload(id, model string, block openai.ReasoningBlo
 	payload, err := json.Marshal(map[string]any{
 		"id": id, "object": "chat.completion.chunk", "created": time.Now().UTC().Unix(), "model": model,
 		"choices": []map[string]any{{"index": 0, "delta": map[string]any{"reasoning": []openai.ReasoningBlock{block}}, "finish_reason": nil}},
+	})
+	if err != nil {
+		return "{}"
+	}
+	return string(payload)
+}
+
+func openAIChatServiceTierChunkPayload(id, model, serviceTier string) string {
+	payload, err := json.Marshal(map[string]any{
+		"id": id, "object": "chat.completion.chunk", "created": time.Now().UTC().Unix(), "model": model, "service_tier": serviceTier,
+		"choices": []map[string]any{{"index": 0, "delta": map[string]any{"role": "assistant"}, "finish_reason": nil}},
 	})
 	if err != nil {
 		return "{}"

@@ -49,6 +49,7 @@ type messagesWriter struct {
 	buffer            bytes.Buffer
 	started, terminal bool
 	model             string
+	serviceTier       string
 	finishReason      string
 	stopSequence      *string
 	usage             openai.Usage
@@ -111,7 +112,7 @@ func (w *messagesWriter) event(kind string, data map[string]any) error {
 	}
 	return writeSSEResponseEvent(w.destination, kind, string(payload))
 }
-func messagesUsage(usage openai.Usage) map[string]any {
+func messagesUsage(usage openai.Usage, serviceTier ...string) map[string]any {
 	read, write := 0, 0
 	if details := usage.PromptTokensDetails; details != nil {
 		read = details.CachedTokens
@@ -125,10 +126,17 @@ func messagesUsage(usage openai.Usage) map[string]any {
 		input = 0
 	}
 	result := map[string]any{"input_tokens": input, "output_tokens": usage.CompletionTokens, "cache_read_input_tokens": read, "cache_creation_input_tokens": write}
+	if len(serviceTier) > 0 && serviceTier[0] != "" {
+		result["service_tier"] = serviceTier[0]
+	}
 	if details := usage.CompletionTokensDetails; details != nil {
 		result["output_tokens_details"] = map[string]int{"thinking_tokens": details.ReasoningTokens}
 	}
 	return result
+}
+
+func validMessagesServiceTier(value string) bool {
+	return value == "" || value == "standard" || value == "priority" || value == "batch"
 }
 func messagesStop(reason string) (string, error) {
 	switch reason {
@@ -192,16 +200,17 @@ func (w *messagesWriter) chunk(payload string) error {
 				return err
 			}
 		}
-		if err := w.event("message_delta", map[string]any{"delta": map[string]any{"stop_reason": w.finishReason, "stop_sequence": w.stopSequence}, "usage": messagesUsage(w.usage)}); err != nil {
+		if err := w.event("message_delta", map[string]any{"delta": map[string]any{"stop_reason": w.finishReason, "stop_sequence": w.stopSequence}, "usage": messagesUsage(w.usage, w.serviceTier)}); err != nil {
 			return err
 		}
 		w.terminal = true
 		return w.event("message_stop", map[string]any{})
 	}
 	var chunk struct {
-		ID      string `json:"id"`
-		Model   string `json:"model"`
-		Choices []struct {
+		ID          string `json:"id"`
+		Model       string `json:"model"`
+		ServiceTier string `json:"service_tier"`
+		Choices     []struct {
 			Index        int            `json:"index"`
 			Delta        openai.Message `json:"delta"`
 			Finish       string         `json:"finish_reason"`
@@ -223,11 +232,17 @@ func (w *messagesWriter) chunk(payload string) error {
 		}
 		w.usage = *chunk.Usage
 	}
+	if chunk.ServiceTier != "" {
+		if !validMessagesServiceTier(chunk.ServiceTier) || (w.serviceTier != "" && w.serviceTier != chunk.ServiceTier) {
+			return errors.New("invalid or inconsistent message service tier")
+		}
+		w.serviceTier = chunk.ServiceTier
+	}
 	if !w.started {
 		if chunk.Model != "" {
 			w.model = chunk.Model
 		}
-		if err := w.event("message_start", map[string]any{"message": map[string]any{"id": chunk.ID, "type": "message", "role": "assistant", "model": w.model, "content": []any{}, "stop_reason": nil, "stop_sequence": nil, "usage": messagesUsage(w.usage)}}); err != nil {
+		if err := w.event("message_start", map[string]any{"message": map[string]any{"id": chunk.ID, "type": "message", "role": "assistant", "model": w.model, "content": []any{}, "stop_reason": nil, "stop_sequence": nil, "usage": messagesUsage(w.usage, w.serviceTier)}}); err != nil {
 			return err
 		}
 	}
@@ -377,6 +392,9 @@ func (w *messagesWriter) finish() {
 	if !validMessagesUsage(response.Usage) {
 		err = errors.New("invalid message usage")
 	}
+	if !validMessagesServiceTier(response.ServiceTier) {
+		err = errors.New("invalid message service tier")
+	}
 	var content []any
 	var reason string
 	if err == nil && len(response.Choices) == 1 {
@@ -394,7 +412,7 @@ func (w *messagesWriter) finish() {
 		writeJSON(w.destination, 502, map[string]any{"type": "error", "error": map[string]any{"type": "api_error", "message": "provider response cannot be represented as Messages"}})
 		return
 	}
-	writeJSON(w.destination, 200, map[string]any{"id": response.ID, "type": "message", "role": "assistant", "model": response.Model, "content": content, "stop_reason": reason, "stop_sequence": response.Choices[0].StopSequence, "usage": messagesUsage(response.Usage)})
+	writeJSON(w.destination, 200, map[string]any{"id": response.ID, "type": "message", "role": "assistant", "model": response.Model, "content": content, "stop_reason": reason, "stop_sequence": response.Choices[0].StopSequence, "usage": messagesUsage(response.Usage, response.ServiceTier)})
 }
 
 func validMessagesUsage(usage openai.Usage) bool {

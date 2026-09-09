@@ -325,7 +325,7 @@ adapter используют те же проверки, включая streamin
 | Ollama native chat | `tool_choice`, `parallel_tool_calls` |
 | Ollama embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
 | Gemini embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
-| Все Chat и Responses adapters | `service_tier`, пока схема каталога не поддерживает отдельные billing rates по tier |
+| Native adapters without a tier contract | `service_tier`; Anthropic Chat accepts only `auto` and `standard_only` |
 | Anthropic, Ollama, Gemini и demo Chat | `prompt_cache_key` |
 | Anthropic, Ollama и demo Responses | `prompt_cache_key` |
 | Anthropic, Ollama, Gemini и demo Chat | `verbosity` |
@@ -518,7 +518,7 @@ pipeline; this endpoint does not forward client credentials to providers.
 
 Supported input is text, text system blocks, base64 user images, function schemas,
 assistant tool-use history, text tool results, tool choice and parallel-tool
-control, temperature, top-p, positive max_tokens, stop_sequences, stream, opaque
+control, temperature, top-p, positive max_tokens, stop_sequences, stream, `service_tier=auto|standard_only`, opaque
 `metadata.user_id`, output effort, signed/redacted thinking history and JSON Schema formatting. Provider-specific
 capability checks still apply after conversion. Responses contain native text or
 tool-use blocks, signed `thinking` blocks, opaque `redacted_thinking` blocks and
@@ -547,7 +547,9 @@ that cannot be represented in Messages produces an explicit conversion error.
 `metadata.user_id` is limited to 512 Unicode characters and remains request
 metadata; it does not replace gateway authorization or billing identities.
 Supported effort values are `low`, `medium`, `high`, `xhigh`, and `max`.
-Provider-reported `output_tokens_details.thinking_tokens` is retained in JSON,
+The provider-assigned `standard`, `priority` or `batch` service tier is retained
+in JSON and SSE usage. Unknown reported tiers fail the response instead of being
+accepted as trusted accounting metadata. Provider-reported `output_tokens_details.thinking_tokens` is retained in JSON,
 SSE final usage, and the internal response usage presented to billing settlement;
 the total output-token charge remains unchanged.
 Token counting is a separate endpoint; background jobs are not supported.
@@ -1470,12 +1472,11 @@ retrieve or delete. Native adapters reject both controls when their contracts
 cannot preserve them. Both fields participate in cache scope, while authenticated
 billing identity remains independent of client metadata.
 
-Chat и Responses распознают `service_tier` и проверяют значения `auto`,
-`default`, `flex`, `scale`, `priority`, `fast` и `ultrafast`. Все adapters пока
-возвращают `400 unsupported_parameter` до provider modules, TPM, cache, billing и
-upstream. Текущий model catalog хранит одну пару input/output rates и не может
-достоверно резервировать или начислять стоимость, зависящую от tier. Передача
-параметра должна включаться одновременно с tier-aware pricing configuration.
+Chat и Responses распознают `service_tier` и проверяют известные значения.
+OpenAI-compatible adapters передают их upstream. Native Anthropic Chat и inbound
+Messages принимают `auto` и `standard_only`; остальные native adapters возвращают
+`400 unsupported_parameter` до provider modules, TPM, cache, billing и upstream.
+Назначенный Anthropic tier сохраняется в Chat envelope и native Messages usage.
 
 ### Native prompt caching
 
