@@ -6,6 +6,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "embeddings", label: "Embeddings", description: "Vector embeddings" },
   { value: "rerank", label: "Rerank", description: "Document reranking" },
   { value: "moderation", label: "Moderation", description: "Text and image safety classification" },
+  { value: "image_generation", label: "Image generation", description: "Generate images from prompts" },
   { value: "stream", label: "Stream", description: "Streaming responses" },
   { value: "tools", label: "Tools", description: "Function and tool calling" },
   { value: "structured_output", label: "Structured output", description: "Structured JSON output" },

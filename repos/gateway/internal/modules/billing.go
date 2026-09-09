@@ -43,6 +43,10 @@ func (m BillingModule) Handle(_ context.Context, req *RequestContext) error {
 		usage := req.EmbeddingResponse.Usage
 		req.Usage = &usage
 	}
+	if req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil {
+		usage := req.ImageGenerationResponse.Usage
+		req.Usage = &openai.Usage{PromptTokens: usage.InputTokens, CompletionTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens}
+	}
 
 	if req.Metadata == nil {
 		req.Metadata = map[string]string{}

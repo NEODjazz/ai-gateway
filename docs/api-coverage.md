@@ -29,7 +29,7 @@ availability is not inferred from these tests.
 | Anthropic token counting | Native Anthropic/Gemini counters behind `/v1/messages/count_tokens` with authorization, policy, input quotas and bounded transport | Advanced native content blocks and additional provider counters |
 | GenerateContent | Native inbound JSON/SSE and context token counting through shared policy; outbound Gemini chat/tools/vision | Advanced native options and cloud credentials |
 | Interactions | Not implemented | Native lifecycle, resource ownership and accounting |
-| Image generation | Not implemented | Generation contract and image-specific pricing/usage |
+| Image generation | Authenticated `/v1/images/generations`, explicit capability routing, compatible/Azure transport, bounded URL/base64 results, retries and token-usage settlement | Native provider adapters, streaming and image-specific non-token pricing |
 | Image edits | Not implemented | Multipart validation, AV, size limits and accounting |
 | Image variations | Not implemented | Multipart contract and image accounting |
 | Audio transcription | Not implemented | Multipart audio validation, duration limits and accounting |

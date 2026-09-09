@@ -44,6 +44,13 @@ func TestScanPayloadIncludesEmbeddingText(t *testing.T) {
 	}
 }
 
+func TestScanPayloadIncludesImageGenerationPrompt(t *testing.T) {
+	req := RequestContext{ImageGenerationRequest: &openai.ImageGenerationRequest{Model: "image", Prompt: "private image prompt"}}
+	if payload := scanPayload(&req); payload != "image_prompt: private image prompt" {
+		t.Fatalf("image prompt missing from scan projection: %q", payload)
+	}
+}
+
 func TestScanPayloadIncludesRerankTextOnly(t *testing.T) {
 	req := RequestContext{RerankRequest: &openai.RerankRequest{Model: "rerank", Query: "private query", Documents: []any{"private document", map[string]any{"text": "object document", "binary": []byte{1, 2}}}}}
 	payload := scanPayload(&req)

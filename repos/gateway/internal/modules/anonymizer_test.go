@@ -95,6 +95,17 @@ func TestAnonymizerMasksEmbeddingInput(t *testing.T) {
 	}
 }
 
+func TestAnonymizerMasksImageGenerationPrompt(t *testing.T) {
+	request := openai.ImageGenerationRequest{Model: "image", Prompt: "draw user@example.com"}
+	req := RequestContext{ImageGenerationRequest: &request}
+	if err := NewAnonymizerModule(true, RuleEmail).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if request.Prompt != "draw {{EMAIL_1}}" {
+		t.Fatalf("prompt=%q", request.Prompt)
+	}
+}
+
 func TestAnonymizerModerationInputPreservesImages(t *testing.T) {
 	request := openai.ModerationRequest{Input: []any{map[string]any{"type": "text", "text": "send to user@example.com"}, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.test/image.png"}}}}
 	req := RequestContext{ModerationRequest: &request}

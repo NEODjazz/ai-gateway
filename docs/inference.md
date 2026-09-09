@@ -43,6 +43,7 @@ upstream. Распознаваемые параметры перечислены
 | `/v1/embeddings` | `provider`, `model`, `input`, `metadata`, `input_type`, `encoding_format`, `dimensions`, `output_dtype`, `user` |
 | `/v1/rerank` | `provider`, `model`, `query`, `documents`, `top_n`, `rank_fields`, `return_documents`, `max_chunks_per_doc`, `max_tokens_per_doc` |
 | `/v1/moderations` | `provider`, `model`, `input`, `metadata` |
+| `/v1/images/generations` | `provider`, `model`, `prompt`, `n`, `quality`, `response_format`, `size`, `style`, `user`, `background`, `output_format`, `output_compression` |
 
 Матрица описывает входной контракт gateway; возможности конкретной модели и
 adapter дополнительно ограничивают допустимые запросы. `provider` управляет
@@ -146,6 +147,22 @@ Bounded `metadata` передается native Mistral Moderations; осталь
 Provider categories и scores проходят общий validator; отсутствующий native
 `category_applied_input_types` нормализуется в `text` только для этого
 предварительно проверенного text-only запроса.
+
+### Image generation
+
+`POST /v1/images/generations` выполняется только через deployment и model с
+capability `image_generation`. Gateway проверяет prompt и параметры до policy
+pipeline, учитывает prompt при TPM, резервирует output на каждый запрошенный
+image и запускает обычные admission, retry, failure и billing phases. Первый
+adapter использует совместимый JSON transport, включая Azure transport.
+
+Ответ ограничен 64 MiB, содержит ровно запрошенное число результатов и для
+каждого результата допускает ровно один источник: HTTP(S) URL без credentials
+либо корректный base64 размером до 20 MiB после декодирования. Token usage
+обязателен и должен быть неотрицательным с точной суммой; ответ без usage
+отклоняется, поскольку gateway не может надежно начислить такой вызов. Streaming,
+multipart edits/variations и модели с оплатой только за image остаются отдельными
+контрактами.
 
 `POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
 

@@ -267,6 +267,11 @@ func (p *chatProvider) Moderations(_ context.Context, req modules.RequestContext
 	return openai.ModerationResponse{ID: "modr-test", Model: req.ModerationRequest.Model, Results: []openai.ModerationResult{{Flagged: false, Categories: map[string]*bool{"violence": &value}, CategoryScores: map[string]float64{"violence": 0.01}, CategoryAppliedInputTypes: map[string][]string{"violence": {"text"}}}}}, nil
 }
 
+func (p *chatProvider) GenerateImage(_ context.Context, req modules.RequestContext) (openai.ImageGenerationResponse, error) {
+	p.request = req
+	return openai.ImageGenerationResponse{Created: 7, Data: []openai.ImageData{{URL: "https://images.example/result.png"}}, Usage: &openai.ImageUsage{InputTokens: 2, OutputTokens: 5, TotalTokens: 7}}, nil
+}
+
 func (p *chatProvider) CompactResponse(_ context.Context, req modules.RequestContext) (openai.CompactedResponse, error) {
 	p.request = req
 	return openai.CompactedResponse{
@@ -553,6 +558,34 @@ func TestModerationsRejectsInvalidNestedInput(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/moderations", strings.NewReader(`{"input":[{"type":"text","text":"hello","extra":true}]}`)))
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestImageGenerationUsesAuthenticatedPipeline(t *testing.T) {
+	llm := &chatProvider{}
+	rates := &embeddingTokenRateStore{}
+	handler := Routes(NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"image-*"}}}), llm, rates))
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"provider":"image-deployment","model":"image-model","prompt":"draw a circle","n":1}`))
+	request.Header.Set("Authorization", "Bearer client-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || llm.request.ImageGenerationRequest == nil || llm.request.ImageGenerationRequest.Prompt != "draw a circle" || llm.request.APIKey != "" {
+		t.Fatalf("status=%d body=%s context=%+v", response.Code, response.Body.String(), llm.request)
+	}
+	n := 1
+	wantTokens := openai.ImageGenerationReserveTokens(openai.ImageGenerationRequest{Prompt: "draw a circle", N: &n})
+	if rates.tokens != wantTokens {
+		t.Fatalf("TPM reserve=%d want=%d", rates.tokens, wantTokens)
+	}
+}
+
+func TestImageGenerationRejectsInvalidRequestBeforeProvider(t *testing.T) {
+	llm := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), llm))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"image-model","prompt":"","n":11}`)))
+	if response.Code != http.StatusBadRequest || llm.request.ImageGenerationRequest != nil {
+		t.Fatalf("status=%d body=%s context=%+v", response.Code, response.Body.String(), llm.request)
 	}
 }
 

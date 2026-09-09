@@ -58,6 +58,9 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 	if req.ModerationRequest != nil {
 		request.Input = openai.TextOnlyProjection(req.ModerationRequest.Input)
 	}
+	if req.ImageGenerationRequest != nil {
+		request.Input = req.ImageGenerationRequest.Prompt
+	}
 	response, err := callRemote[AnonymizeRequest, AnonymizeResponse](ctx, m.client, m.endpoint, request)
 	if err != nil {
 		return err
@@ -85,6 +88,13 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 	}
 	if req.ModerationRequest != nil {
 		req.ModerationRequest.Input = openai.MergeTextProjection(req.ModerationRequest.Input, response.Input)
+	}
+	if req.ImageGenerationRequest != nil {
+		prompt, ok := response.Input.(string)
+		if !ok {
+			return errors.New("anonymizer returned an invalid image prompt projection")
+		}
+		req.ImageGenerationRequest.Prompt = prompt
 	}
 	req.AnonymizationValues = cloneStringMap(response.Replacements)
 	return nil

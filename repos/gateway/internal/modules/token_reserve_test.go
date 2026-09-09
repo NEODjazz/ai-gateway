@@ -1,9 +1,11 @@
 package modules
 
 import (
-	"ai-gateway-gateway/internal/openai"
+	"context"
 	"strings"
 	"testing"
+
+	"ai-gateway-gateway/internal/openai"
 )
 
 func TestBillingReserveIncludesModernCapAndToolSchema(t *testing.T) {
@@ -18,6 +20,17 @@ func TestBillingReserveIncludesModernCapAndToolSchema(t *testing.T) {
 	}
 	if modern.InputTokens != openai.ChatInputTokens(req.Request) {
 		t.Fatal("billing/TPM input estimate mismatch")
+	}
+}
+
+func TestLocalBillingUsesImageGenerationUsage(t *testing.T) {
+	response := openai.ImageGenerationResponse{Usage: &openai.ImageUsage{InputTokens: 3, OutputTokens: 9, TotalTokens: 12}}
+	req := RequestContext{ImageGenerationResponse: &response}
+	if err := NewBillingModule(true).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Usage == nil || req.Usage.PromptTokens != 3 || req.Usage.CompletionTokens != 9 || req.Usage.TotalTokens != 12 {
+		t.Fatalf("usage=%+v", req.Usage)
 	}
 }
 

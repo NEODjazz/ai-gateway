@@ -159,6 +159,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.APIType = "messages"
 	case "generate_content":
 		request.APIType = "generate_content"
+	case "image_generation":
+		request.APIType = "image_generation"
 	}
 	if request.OutputTokens == 0 && req.CompletionRequest == nil {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
@@ -205,6 +207,11 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.APIType = "moderations"
 		request.OutputTokens = 0
 		request.TotalTokens = request.InputTokens
+	}
+	if req.ImageGenerationRequest != nil {
+		request.Provider = req.ImageGenerationRequest.Provider
+		request.Model = req.ImageGenerationRequest.Model
+		request.APIType = "image_generation"
 	}
 	if req.Response != nil {
 		request.Phase = "commit"
@@ -287,13 +294,27 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.UpstreamModel = req.ModerationResponse.Model
 		request.UsageEstimated = true
 	}
+	if req.ImageGenerationResponse != nil {
+		request.Phase = "commit"
+		if usage := req.ImageGenerationResponse.Usage; usage != nil {
+			request.InputTokens = usage.InputTokens
+			request.OutputTokens = usage.OutputTokens
+			request.TotalTokens = usage.TotalTokens
+			request.UsageEstimated = false
+		} else {
+			request.InputTokens = request.PromptTokensEstimated
+			request.TotalTokens = request.InputTokens
+			request.UsageEstimated = true
+		}
+	}
 	if originalModel := metadataValue(req.Metadata, "provider.original_model"); originalModel != "" {
 		request.Model = originalModel
 	}
 	if request.CacheStatus == "hit" {
 		request.UsageEstimated = false
 	}
-	if request.TotalTokens == 0 && request.CacheStatus != "hit" {
+	providerReportedImageUsage := req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil
+	if request.TotalTokens == 0 && request.CacheStatus != "hit" && !providerReportedImageUsage {
 		if req.CompletionRequest != nil {
 			request.InputTokens = openai.CompletionInputTokens(*req.CompletionRequest)
 			request.TotalTokens = openai.CompletionReserveTokens(*req.CompletionRequest)
@@ -329,6 +350,9 @@ func requestedOutputTokens(req *RequestContext) int {
 	if req.ResponseRequest != nil {
 		return openai.ResponseOutputLimit(*req.ResponseRequest)
 	}
+	if req.ImageGenerationRequest != nil {
+		return openai.ImageGenerationOutputReserve(*req.ImageGenerationRequest)
+	}
 	return openai.ChatOutputReserve(req.Request)
 }
 
@@ -350,6 +374,9 @@ func estimateRequestTokens(req *RequestContext) int {
 	}
 	if req.ModerationRequest != nil {
 		return openai.ModerationInputTokenCount(req.ModerationRequest.Input)
+	}
+	if req.ImageGenerationRequest != nil {
+		return openai.EstimateContextTokens(req.ImageGenerationRequest.Prompt)
 	}
 	return openai.ChatInputTokens(req.Request)
 }

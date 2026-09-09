@@ -57,8 +57,13 @@ func NewMistral(baseURL, apiKey string, upstreamStream bool) Mistral {
 	return Mistral{OpenAICompatible: compatible}
 }
 
-func (Mistral) SupportsResponses() bool { return false }
-func (Mistral) SupportsRerank() bool    { return false }
+func (Mistral) SupportsResponses() bool       { return false }
+func (Mistral) SupportsRerank() bool          { return false }
+func (Mistral) SupportsImageGeneration() bool { return false }
+
+func (Mistral) GenerateImage(context.Context, openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
+	return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_operation", Err: errors.New("image generation is not supported by this adapter")}
+}
 
 func (p Mistral) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := rejectLegacyFunctionCalling("mistral", request); err != nil {

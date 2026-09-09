@@ -250,6 +250,29 @@ func TestRemoteBillingMarksFallbackTokenCountAsEstimated(t *testing.T) {
 	}
 }
 
+func TestImageGenerationBillingReserveAndSettlement(t *testing.T) {
+	n := 3
+	req := &RequestContext{
+		Request:                openai.ChatCompletionRequest{Model: "image-model"},
+		ImageGenerationRequest: &openai.ImageGenerationRequest{Model: "image-model", Prompt: "draw", N: &n},
+		Metadata:               map[string]string{"gateway.api_type": "image_generation"},
+	}
+	reserved := billingRequest(req)
+	if reserved.APIType != "image_generation" || reserved.OutputTokens != 3*openai.DefaultOutputTokenReserve || reserved.TotalTokens != reserved.InputTokens+reserved.OutputTokens {
+		t.Fatalf("reserve=%+v", reserved)
+	}
+	req.ImageGenerationResponse = &openai.ImageGenerationResponse{Usage: &openai.ImageUsage{InputTokens: 7, OutputTokens: 11, TotalTokens: 18}}
+	settled := billingRequest(req)
+	if settled.Phase != "commit" || settled.InputTokens != 7 || settled.OutputTokens != 11 || settled.TotalTokens != 18 || settled.UsageEstimated {
+		t.Fatalf("settlement=%+v", settled)
+	}
+	req.ImageGenerationResponse = &openai.ImageGenerationResponse{Usage: &openai.ImageUsage{}}
+	settled = billingRequest(req)
+	if settled.InputTokens != 0 || settled.OutputTokens != 0 || settled.TotalTokens != 0 || settled.UsageEstimated {
+		t.Fatalf("provider-reported zero usage must remain exact: %+v", settled)
+	}
+}
+
 func TestRemoteBillingCommitsCompactionUsageSeparately(t *testing.T) {
 	req := sensitiveContext()
 	req.ResponseRequest = &openai.ResponseRequest{Provider: "provider", Model: "compact-model", Input: "private input", Instructions: "private instructions"}
@@ -453,6 +476,25 @@ func TestRemoteAnonymizerUsesEmbeddingInputWithoutIdentity(t *testing.T) {
 	}
 	if got := openai.EmbeddingInputText(req.EmbeddingRequest.Input); got != "masked" {
 		t.Fatalf("unexpected anonymized embedding input: %q", got)
+	}
+}
+
+func TestRemoteAnonymizerUsesImageGenerationPrompt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body AnonymizeRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Input != "private prompt" || len(body.Messages) != 0 {
+			t.Fatalf("body=%+v err=%v", body, err)
+		}
+		_ = json.NewEncoder(w).Encode(AnonymizeResponse{Input: "masked prompt"})
+	}))
+	defer server.Close()
+	request := openai.ImageGenerationRequest{Model: "image", Prompt: "private prompt"}
+	req := RequestContext{ImageGenerationRequest: &request}
+	if err := NewRemoteAnonymizerModule(true, server.URL).Handle(t.Context(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if request.Prompt != "masked prompt" {
+		t.Fatalf("prompt=%q", request.Prompt)
 	}
 }
 

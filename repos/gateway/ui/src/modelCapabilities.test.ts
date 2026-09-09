@@ -9,6 +9,7 @@ describe("modelCapabilityOptions", () => {
       "embeddings",
       "rerank",
       "moderation",
+      "image_generation",
       "stream",
       "tools",
       "structured_output",

@@ -41,6 +41,12 @@ func TestModelDeploymentUpdateChangesRuntimeCandidates(t *testing.T) {
 	}
 }
 
+func TestDeploymentCapabilitiesAcceptImageGeneration(t *testing.T) {
+	if !validDeploymentCapabilities([]string{"image_generation"}) {
+		t.Fatal("image generation capability was rejected")
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

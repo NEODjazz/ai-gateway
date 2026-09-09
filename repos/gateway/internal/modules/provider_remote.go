@@ -148,6 +148,9 @@ func scanPayload(req *RequestContext) string {
 			parts = append(parts, "moderation_input: "+text)
 		}
 	}
+	if req.ImageGenerationRequest != nil && req.ImageGenerationRequest.Prompt != "" {
+		parts = append(parts, "image_prompt: "+req.ImageGenerationRequest.Prompt)
+	}
 	return strings.Join(parts, "\n")
 }
 
