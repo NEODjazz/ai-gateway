@@ -8,23 +8,41 @@ import (
 // ChatGenerationOptions contains optional controls shared with compatible wire
 // requests. Pointer fields preserve explicitly supplied false and zero values.
 type ChatGenerationOptions struct {
-	Metadata             map[string]string   `json:"metadata,omitempty"`
-	Store                *bool               `json:"store,omitempty"`
-	ReasoningEffort      string              `json:"reasoning_effort,omitempty"`
-	N                    *int                `json:"n,omitempty"`
-	SafetyIdentifier     string              `json:"safety_identifier,omitempty"`
-	PromptCacheKey       string              `json:"prompt_cache_key,omitempty"`
-	PromptCacheOptions   *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
-	PromptCacheRetention string              `json:"prompt_cache_retention,omitempty"`
-	Prediction           *ChatPrediction     `json:"prediction,omitempty"`
-	ServiceTier          string              `json:"service_tier,omitempty"`
-	User                 string              `json:"user,omitempty"`
-	Verbosity            string              `json:"verbosity,omitempty"`
-	Logprobs             *bool               `json:"logprobs,omitempty"`
-	TopLogprobs          *int                `json:"top_logprobs,omitempty"`
-	FrequencyPenalty     *float64            `json:"frequency_penalty,omitempty"`
-	PresencePenalty      *float64            `json:"presence_penalty,omitempty"`
-	LogitBias            map[string]int      `json:"logit_bias,omitempty"`
+	Metadata             map[string]string     `json:"metadata,omitempty"`
+	Store                *bool                 `json:"store,omitempty"`
+	ReasoningEffort      string                `json:"reasoning_effort,omitempty"`
+	N                    *int                  `json:"n,omitempty"`
+	SafetyIdentifier     string                `json:"safety_identifier,omitempty"`
+	PromptCacheKey       string                `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions   *PromptCacheOptions   `json:"prompt_cache_options,omitempty"`
+	PromptCacheRetention string                `json:"prompt_cache_retention,omitempty"`
+	Prediction           *ChatPrediction       `json:"prediction,omitempty"`
+	ServiceTier          string                `json:"service_tier,omitempty"`
+	User                 string                `json:"user,omitempty"`
+	Verbosity            string                `json:"verbosity,omitempty"`
+	WebSearchOptions     *ChatWebSearchOptions `json:"web_search_options,omitempty"`
+	Logprobs             *bool                 `json:"logprobs,omitempty"`
+	TopLogprobs          *int                  `json:"top_logprobs,omitempty"`
+	FrequencyPenalty     *float64              `json:"frequency_penalty,omitempty"`
+	PresencePenalty      *float64              `json:"presence_penalty,omitempty"`
+	LogitBias            map[string]int        `json:"logit_bias,omitempty"`
+}
+
+type ChatWebSearchOptions struct {
+	SearchContextSize string                     `json:"search_context_size,omitempty"`
+	UserLocation      *ChatWebSearchUserLocation `json:"user_location,omitempty"`
+}
+
+type ChatWebSearchUserLocation struct {
+	Type        string                            `json:"type"`
+	Approximate *ChatWebSearchApproximateLocation `json:"approximate"`
+}
+
+type ChatWebSearchApproximateLocation struct {
+	City     string `json:"city,omitempty"`
+	Country  string `json:"country,omitempty"`
+	Region   string `json:"region,omitempty"`
+	Timezone string `json:"timezone,omitempty"`
 }
 
 type PromptCacheOptions struct {
@@ -68,6 +86,16 @@ func (o ChatGenerationOptions) Validate() string {
 	}
 	if !validVerbosity(o.Verbosity) {
 		return "verbosity must be low, medium, or high"
+	}
+	if o.WebSearchOptions != nil {
+		switch o.WebSearchOptions.SearchContextSize {
+		case "", "low", "medium", "high":
+		default:
+			return "web_search_options.search_context_size must be low, medium, or high"
+		}
+		if location := o.WebSearchOptions.UserLocation; location != nil && (location.Type != "approximate" || location.Approximate == nil) {
+			return "web_search_options.user_location requires type=approximate and approximate"
+		}
 	}
 	switch o.ReasoningEffort {
 	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":

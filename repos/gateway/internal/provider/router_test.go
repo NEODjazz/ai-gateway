@@ -1506,6 +1506,21 @@ func TestResponsesCatalogRequirementsIncludeToolsStructuredOutputAndStream(t *te
 	}
 }
 
+func TestChatWebSearchRequiresExplicitEndpointCapability(t *testing.T) {
+	legacy := &modelCaptureProvider{content: "legacy"}
+	search := &modelCaptureProvider{content: "search"}
+	router := Router{health: newEndpointHealthTracker(), endpoints: []Endpoint{
+		{Name: "legacy", Type: "openai-compatible", Priority: 1, Provider: legacy},
+		{Name: "search", Type: "openai-compatible", Priority: 2, Capabilities: []string{"chat", "web_search"}, Provider: search},
+	}}
+	_, err := router.ChatCompletions(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{
+		Model: "model", ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{}},
+	}})
+	if err != nil || legacy.seenModel != "" || search.seenModel != "model" {
+		t.Fatalf("web search routing used an undeclared endpoint: legacy=%q search=%q err=%v", legacy.seenModel, search.seenModel, err)
+	}
+}
+
 func TestRuntimeCatalogPricingSnapshotIsAttachedToProviderAttempt(t *testing.T) {
 	catalog, err := modelcatalog.Parse(`{"version":"runtime-v2","models":[{"provider":"endpoint-a","model":"upstream","input_cost_per_1m":1.5,"output_cost_per_1m":3,"currency":"USD"}]}`)
 	if err != nil {

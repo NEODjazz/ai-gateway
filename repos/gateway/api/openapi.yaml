@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.64
+  version: 0.1.65
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -2804,7 +2804,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, embeddings, rerank, stream, tools, structured_output, mcp, vision]}
+          items: {type: string, enum: [chat, responses, embeddings, rerank, stream, tools, structured_output, mcp, vision, web_search]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -3335,6 +3335,25 @@ components:
         service_tier: {type: string, enum: [auto, default, flex, scale, priority, fast, ultrafast], description: Recognized but rejected until tier-aware billing rates are configured.}
         user: {type: string, description: "Legacy provider hint; never used as gateway authorization, rate-limit, or billing identity."}
         verbosity: {type: string, enum: [low, medium, high]}
+        web_search_options:
+          type: object
+          additionalProperties: false
+          properties:
+            search_context_size: {type: string, enum: [low, medium, high]}
+            user_location:
+              type: object
+              additionalProperties: false
+              required: [type, approximate]
+              properties:
+                type: {type: string, const: approximate}
+                approximate:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    city: {type: string}
+                    country: {type: string}
+                    region: {type: string}
+                    timezone: {type: string}
         logprobs: {type: boolean}
         top_logprobs: {type: integer, minimum: 0, maximum: 20, description: Requires logprobs=true.}
         frequency_penalty: {type: number, minimum: -2, maximum: 2}

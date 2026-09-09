@@ -34,7 +34,7 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 			}))
 			defer server.Close()
 			var request openai.ChatCompletionRequest
-			if err := json.Unmarshal([]byte(`{"model":"test","messages":[{"role":"user","content":[{"type":"text","text":"hello","prompt_cache_breakpoint":{"mode":"explicit"}}]}],"stream_options":{"include_usage":false,"include_obfuscation":false},"metadata":{"trace":"one"},"store":false,"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","prompt_cache_key":"tenant-thread","prompt_cache_options":{"mode":"explicit","ttl":"30m"},"prompt_cache_retention":"24h","prediction":{"type":"content","content":"expected"},"user":"legacy-user","verbosity":"low","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-1,"logit_bias":{"10":-100}}`), &request); err != nil {
+			if err := json.Unmarshal([]byte(`{"model":"test","messages":[{"role":"user","content":[{"type":"text","text":"hello","prompt_cache_breakpoint":{"mode":"explicit"}}]}],"stream_options":{"include_usage":false,"include_obfuscation":false},"metadata":{"trace":"one"},"store":false,"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","prompt_cache_key":"tenant-thread","prompt_cache_options":{"mode":"explicit","ttl":"30m"},"prompt_cache_retention":"24h","prediction":{"type":"content","content":"expected"},"user":"legacy-user","verbosity":"low","web_search_options":{"search_context_size":"high","user_location":{"type":"approximate","approximate":{"country":"FR"}}},"logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-1,"logit_bias":{"10":-100}}`), &request); err != nil {
 				t.Fatal(err)
 			}
 			client := NewOpenAICompatible(server.URL, "", true)
@@ -49,7 +49,7 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for name, want := range map[string]string{"metadata": `{"trace":"one"}`, "store": "false", "reasoning_effort": `"high"`, "n": "2", "safety_identifier": `"hashed-user"`, "prompt_cache_key": `"tenant-thread"`, "prompt_cache_options": `{"mode":"explicit","ttl":"30m"}`, "prompt_cache_retention": `"24h"`, "prediction": `{"content":"expected","type":"content"}`, "user": `"legacy-user"`, "verbosity": `"low"`, "logprobs": "true", "top_logprobs": "0", "frequency_penalty": "0", "presence_penalty": "-1", "logit_bias": `{"10":-100}`} {
+			for name, want := range map[string]string{"metadata": `{"trace":"one"}`, "store": "false", "reasoning_effort": `"high"`, "n": "2", "safety_identifier": `"hashed-user"`, "prompt_cache_key": `"tenant-thread"`, "prompt_cache_options": `{"mode":"explicit","ttl":"30m"}`, "prompt_cache_retention": `"24h"`, "prediction": `{"content":"expected","type":"content"}`, "user": `"legacy-user"`, "verbosity": `"low"`, "web_search_options": `{"search_context_size":"high","user_location":{"type":"approximate","approximate":{"country":"FR"}}}`, "logprobs": "true", "top_logprobs": "0", "frequency_penalty": "0", "presence_penalty": "-1", "logit_bias": `{"10":-100}`} {
 				if string(received[name]) != want {
 					t.Fatalf("%s=%s, want %s", name, received[name], want)
 				}
@@ -196,7 +196,7 @@ func TestCompatibleChatRejectsInvalidUsageBeforeDelivery(t *testing.T) {
 }
 
 func TestGenerationControlsAreRejectedByNativeAdapters(t *testing.T) {
-	for _, body := range []string{`{"metadata":{"trace":"one"}}`, `{"store":false}`, `{"reasoning_effort":"high"}`, `{"n":2}`, `{"safety_identifier":"hashed-user"}`, `{"prompt_cache_key":"tenant-thread"}`, `{"prompt_cache_options":{"mode":"explicit"}}`, `{"prompt_cache_retention":"24h"}`, `{"prediction":{"type":"content","content":"expected"}}`, `{"service_tier":"priority"}`, `{"user":"legacy-user"}`, `{"verbosity":"low"}`, `{"logprobs":false}`, `{"top_logprobs":0}`, `{"frequency_penalty":0}`, `{"presence_penalty":0}`, `{"logit_bias":{"1":0}}`} {
+	for _, body := range []string{`{"metadata":{"trace":"one"}}`, `{"store":false}`, `{"reasoning_effort":"high"}`, `{"n":2}`, `{"safety_identifier":"hashed-user"}`, `{"prompt_cache_key":"tenant-thread"}`, `{"prompt_cache_options":{"mode":"explicit"}}`, `{"prompt_cache_retention":"24h"}`, `{"prediction":{"type":"content","content":"expected"}}`, `{"service_tier":"priority"}`, `{"user":"legacy-user"}`, `{"verbosity":"low"}`, `{"web_search_options":{}}`, `{"logprobs":false}`, `{"top_logprobs":0}`, `{"frequency_penalty":0}`, `{"presence_penalty":0}`, `{"logit_bias":{"1":0}}`} {
 		var request openai.ChatCompletionRequest
 		if err := json.Unmarshal([]byte(body), &request); err != nil {
 			t.Fatal(err)
@@ -256,6 +256,19 @@ func TestChatUserScopesCaches(t *testing.T) {
 	changedScope, _, changedOK := semanticRequest(changed, Endpoint{Name: "test"})
 	if !baseOK || !changedOK || baseScope == changedScope {
 		t.Fatal("semantic cache ignored user")
+	}
+}
+
+func TestChatWebSearchDisablesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "latest news"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{SearchContextSize: "high"}}}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache allowed a web search request")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed a web search request")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, true), ","); got != "chat,stream,web_search" {
+		t.Fatalf("web search routing requirements=%s", got)
 	}
 }
 

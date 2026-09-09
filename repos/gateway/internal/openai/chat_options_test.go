@@ -13,6 +13,11 @@ func TestChatGenerationOptionValidation(t *testing.T) {
 	}{
 		{`{}`, true},
 		{`{"metadata":{"trace":"one"},"store":false,"prompt_cache_options":{"mode":"explicit","ttl":"30m"},"prompt_cache_retention":"24h","prediction":{"type":"content","content":"expected"},"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","user":"legacy-user","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-2,"logit_bias":{"10":-100}}`, true},
+		{`{"web_search_options":{"search_context_size":"high","user_location":{"type":"approximate","approximate":{"city":"Paris","country":"FR","region":"Ile-de-France","timezone":"Europe/Paris"}}}}`, true},
+		{`{"web_search_options":{}}`, true},
+		{`{"web_search_options":{"search_context_size":"huge"}}`, false},
+		{`{"web_search_options":{"user_location":{"type":"precise","approximate":{}}}}`, false},
+		{`{"web_search_options":{"user_location":{"type":"approximate"}}}`, false},
 		{`{"prompt_cache_retention":"in_memory"}`, true},
 		{`{"prompt_cache_retention":"1h"}`, false},
 		{`{"prediction":{"type":"content","content":[{"type":"text","text":"one","prompt_cache_breakpoint":{"mode":"explicit"}},{"type":"text","text":"two"}]}}`, true},

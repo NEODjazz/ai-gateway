@@ -226,6 +226,9 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if request.Logprobs != nil && *request.Logprobs {
 		return "", "", false
 	}
+	if request.WebSearchOptions != nil {
+		return "", "", false
+	}
 	if req.CredentialID == "" || len(request.Messages) == 0 || len(request.Tools) > 0 || request.ToolChoice != nil || request.ResponseFormat != nil {
 		return "", "", false
 	}

@@ -35,7 +35,7 @@ upstream. Распознаваемые параметры перечислены
 
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
-| `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `stream_options`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `prompt_cache_retention`, `prediction`, `service_tier`, `user`, `verbosity`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
+| `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `stream_options`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `prompt_cache_retention`, `prediction`, `service_tier`, `user`, `verbosity`, `web_search_options`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
 | `/v1/completions` | `provider`, `model`, `prompt`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `n`, `presence_penalty`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
 | `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
@@ -72,12 +72,12 @@ modules, billing reserve и сетевого вызова.
 ## Capabilities
 
 Поддерживаемые значения: `chat`, `responses`, `embeddings`, `rerank`, `stream`,
-`tools`, `structured_output`, `mcp`, `vision`. Gateway выводит требования из
+`tools`, `structured_output`, `mcp`, `vision`, `web_search`. Gateway выводит требования из
 request и исключает несовместимые deployments до provider call.
 
 Legacy endpoint без capabilities сохраняет совместимость с базовыми chat,
-responses и embeddings flows, но не является неявным opt-in для `mcp`, `vision`
-или `rerank`. Для новых deployments задавайте capabilities явно.
+responses и embeddings flows, но не является неявным opt-in для `mcp`, `vision`,
+`web_search` или `rerank`. Для новых deployments задавайте capabilities явно.
 
 Vision принимает только inline `data:image/{jpeg,png,gif,webp};base64,...`.
 Remote URLs запрещены. AV должен быть включён; media type проверяется по
@@ -191,6 +191,12 @@ upstream obfuscation или добавляет случайное padding-пол
 выравнивает их размер по 256-byte buckets. Это одинаково работает для compatible,
 native и synthetic streams. Явное `false` передаётся compatible upstream и
 удаляет obfuscation из клиентского потока; поле не влияет на token usage и billing.
+
+Chat `web_search_options` принимает `search_context_size=low|medium|high` и
+optional approximate location. Поле передаётся только compatible adapter;
+native adapters возвращают `unsupported_parameter`. Маршрутизация требует явно
+заявленную deployment/model capability `web_search`. Exact и semantic response
+cache отключены, поскольку результат зависит от внешнего состояния веба.
 
 
 ## Chat generation controls

@@ -1805,6 +1805,9 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	if openai.HasChatImages(request) {
 		required = append(required, "vision")
 	}
+	if request.WebSearchOptions != nil {
+		required = append(required, "web_search")
+	}
 	return required
 }
 
@@ -1915,11 +1918,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank")
+	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "web_search")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"mcp", "vision", "rerank"} {
+	for _, capability := range []string{"mcp", "vision", "rerank", "web_search"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}
