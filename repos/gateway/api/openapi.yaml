@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.90
+  version: 0.1.91
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4079,6 +4079,12 @@ components:
                 minItems: 1
                 maxItems: 8192
                 items: {type: integer, minimum: 0, maximum: 2147483647}
+        metadata:
+          type: object
+          maxProperties: 16
+          propertyNames: {maxLength: 64}
+          additionalProperties: {type: string, maxLength: 512}
+          description: Provider metadata supported by native Mistral deployments and rejected by other adapters.
         input_type: {type: string, enum: [search_document, search_query, classification, clustering], description: Required by the native Cohere embedding adapter and rejected by adapters that do not support it.}
         encoding_format: {type: string, enum: [float, base64]}
         dimensions: {type: integer, minimum: 1}

@@ -94,12 +94,13 @@ type openAICompatibleStreamOptions struct {
 }
 
 type openAICompatibleEmbeddingRequest struct {
-	Model           string `json:"model"`
-	Input           any    `json:"input"`
-	EncodingFormat  string `json:"encoding_format,omitempty"`
-	Dimensions      *int   `json:"dimensions,omitempty"`
-	OutputDimension *int   `json:"output_dimension,omitempty"`
-	User            string `json:"user,omitempty"`
+	Model           string            `json:"model"`
+	Input           any               `json:"input"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+	EncodingFormat  string            `json:"encoding_format,omitempty"`
+	Dimensions      *int              `json:"dimensions,omitempty"`
+	OutputDimension *int              `json:"output_dimension,omitempty"`
+	User            string            `json:"user,omitempty"`
 }
 
 type openAICompatibleRerankRequest struct {
@@ -560,7 +561,7 @@ func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.Embeddi
 		return openai.EmbeddingResponse{}, err
 	}
 	upstreamRequest := openAICompatibleEmbeddingRequest{
-		Model: request.Model, Input: request.Input, EncodingFormat: request.EncodingFormat,
+		Model: request.Model, Input: request.Input, Metadata: request.Metadata, EncodingFormat: request.EncodingFormat,
 		Dimensions: request.Dimensions, User: request.User,
 	}
 	p.mapEmbeddingDimensions(&upstreamRequest)

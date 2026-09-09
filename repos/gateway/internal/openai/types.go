@@ -290,13 +290,14 @@ type PromptTokenDetails struct {
 }
 
 type EmbeddingRequest struct {
-	Provider       string `json:"provider,omitempty"`
-	Model          string `json:"model"`
-	Input          any    `json:"input"`
-	InputType      string `json:"input_type,omitempty"`
-	EncodingFormat string `json:"encoding_format,omitempty"`
-	Dimensions     *int   `json:"dimensions,omitempty"`
-	User           string `json:"user,omitempty"`
+	Provider       string            `json:"provider,omitempty"`
+	Model          string            `json:"model"`
+	Input          any               `json:"input"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+	InputType      string            `json:"input_type,omitempty"`
+	EncodingFormat string            `json:"encoding_format,omitempty"`
+	Dimensions     *int              `json:"dimensions,omitempty"`
+	User           string            `json:"user,omitempty"`
 }
 
 type EmbeddingResponse struct {

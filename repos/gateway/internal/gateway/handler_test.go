@@ -319,7 +319,7 @@ func (*chatProvider) Models() []openai.Model {
 func TestEmbeddingsUsesAuthenticatedProviderPipeline(t *testing.T) {
 	llm := &chatProvider{}
 	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), llm)
-	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embed-model","input":["hello","world"]}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embed-model","input":["hello","world"],"metadata":{"trace":"embed"}}`))
 	request.Header.Set("Authorization", "Bearer test-key")
 	response := httptest.NewRecorder()
 
@@ -332,6 +332,9 @@ func TestEmbeddingsUsesAuthenticatedProviderPipeline(t *testing.T) {
 	}
 	if input := openai.EmbeddingInputText(llm.request.EmbeddingRequest.Input); input != "hello\nworld" {
 		t.Fatalf("unexpected embedding input: %q", input)
+	}
+	if llm.request.EmbeddingRequest.Metadata["trace"] != "embed" {
+		t.Fatalf("embedding metadata was not preserved: %+v", llm.request.EmbeddingRequest.Metadata)
 	}
 }
 

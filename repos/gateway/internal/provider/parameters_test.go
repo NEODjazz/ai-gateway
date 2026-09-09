@@ -173,6 +173,38 @@ func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
 	}
 }
 
+func TestOtherEmbeddingAdaptersRejectMistralMetadata(t *testing.T) {
+	request := openai.EmbeddingRequest{Model: "embed", Input: "text", Metadata: map[string]string{"trace": "one"}}
+	for name, call := range map[string]func() error{
+		"openai-compatible": func() error {
+			_, err := NewOpenAICompatible("http://unused.invalid", "", false).Embeddings(t.Context(), request)
+			return err
+		},
+		"ollama": func() error {
+			_, err := NewOllama("http://unused.invalid", false).Embeddings(t.Context(), request)
+			return err
+		},
+		"demo": func() error {
+			_, err := (Demo{}).Embeddings(t.Context(), request)
+			return err
+		},
+		"gemini": func() error {
+			_, err := NewGemini("http://unused.invalid", "", false).Embeddings(t.Context(), request)
+			return err
+		},
+		"cohere": func() error {
+			cohereRequest := request
+			cohereRequest.InputType = "search_query"
+			_, err := NewCohere("http://unused.invalid", "").Embeddings(t.Context(), cohereRequest)
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertUnsupportedParameter(t, call(), "metadata")
+		})
+	}
+}
+
 func TestOtherCompletionAdaptersRejectMistralFIMControlsBeforeUpstream(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))

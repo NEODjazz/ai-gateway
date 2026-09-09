@@ -650,6 +650,9 @@ func (Cohere) Responses(context.Context, openai.ResponseRequest) (openai.Respons
 }
 
 func (Cohere) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
+	if err := rejectParameters("cohere", parameterCheck{"metadata", request.Metadata != nil}); err != nil {
+		return err
+	}
 	input, err := openai.InspectEmbeddingInput(request.Input)
 	if err != nil || input.Tokenized() || len(input.Texts) > maxCohereEmbeddingInputs {
 		return cohereEmbeddingError("input", "Cohere v2 embed requires at most 96 text inputs")

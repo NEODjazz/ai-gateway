@@ -795,6 +795,10 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	if message := openai.ValidateMetadata(request.Metadata); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
 	if request.EncodingFormat != "" && request.EncodingFormat != "float" && request.EncodingFormat != "base64" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "encoding_format must be float or base64")
 		return

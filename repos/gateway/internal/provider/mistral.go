@@ -117,6 +117,9 @@ func (p Mistral) StreamChatCompletions(ctx context.Context, request openai.ChatC
 }
 
 func (Mistral) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
+	if message := openai.ValidateMetadata(request.Metadata); message != "" {
+		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "metadata", Err: errors.New(message)}
+	}
 	input, err := openai.InspectEmbeddingInput(request.Input)
 	return rejectParameters("mistral",
 		parameterCheck{"input", err != nil || input.Tokenized()},

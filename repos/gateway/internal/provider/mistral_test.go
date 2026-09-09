@@ -340,7 +340,7 @@ func TestMistralEmbeddingsAndErrorsUseNativeProviderIdentity(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Fatal(err)
 			}
-			if request["output_dimension"] != float64(2) || request["encoding_format"] != "float" {
+			if request["output_dimension"] != float64(2) || request["encoding_format"] != "float" || request["metadata"].(map[string]any)["trace"] != "embed" {
 				t.Fatalf("native embedding request=%#v", request)
 			}
 			if _, found := request["dimensions"]; found {
@@ -359,7 +359,7 @@ func TestMistralEmbeddingsAndErrorsUseNativeProviderIdentity(t *testing.T) {
 
 	client := NewMistral(server.URL, "provider-key", false)
 	dimensions := 2
-	embedding, err := client.Embeddings(t.Context(), openai.EmbeddingRequest{Model: "mistral-embed", Input: "hello", EncodingFormat: "float", Dimensions: &dimensions})
+	embedding, err := client.Embeddings(t.Context(), openai.EmbeddingRequest{Model: "mistral-embed", Input: "hello", Metadata: map[string]string{"trace": "embed"}, EncodingFormat: "float", Dimensions: &dimensions})
 	if err != nil || !embedding.UsageReported || embedding.Usage.TotalTokens != 2 || len(embedding.Data) != 1 || len(embedding.Data[0].Embedding) != 2 {
 		t.Fatalf("embedding=%+v err=%v", embedding, err)
 	}
@@ -397,6 +397,12 @@ func TestMistralEmbeddingsRejectUnsupportedInputBeforeUpstream(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("unsupported embedding requests reached Mistral: %d", calls.Load())
+	}
+	invalid := openai.EmbeddingRequest{Model: "mistral-embed", Input: "text", Metadata: map[string]string{strings.Repeat("k", 65): "value"}}
+	_, err := client.Embeddings(t.Context(), invalid)
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.Param != "metadata" || failure.UpstreamCode != "invalid_request" || calls.Load() != 0 {
+		t.Fatalf("invalid metadata error=%v failure=%+v calls=%d", err, failure, calls.Load())
 	}
 }
 
