@@ -36,7 +36,7 @@ upstream. Новые поддерживаемые параметры переч�
 | --- | --- |
 | `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
 | `/v1/completions` | `provider`, `model`, `prompt`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `n`, `presence_penalty`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
-| `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
+| `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
 | `/v1/responses/compact` | `provider`, `model`, `input`, `instructions` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `encoding_format`, `dimensions`, `user` |
@@ -147,7 +147,8 @@ adapter используют те же проверки, включая streamin
 | Adapter / endpoint | Явно отклоняемые поля |
 | --- | --- |
 | Anthropic chat | `seed`; `stop` неверного типа или более четырёх последовательностей |
-| Anthropic Responses | `previous_response_id` |
+| Anthropic Responses | `previous_response_id`, `safety_identifier` |
+| Ollama Responses | `safety_identifier` |
 | Ollama native chat | `tool_choice`, `parallel_tool_calls` |
 | Ollama embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
 | Gemini embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
@@ -1149,6 +1150,12 @@ entries, 64 Unicode code points per key and 512 per value before execution. Anth
 with `400 unsupported_parameter`; it is not silently mapped to unrelated native
 metadata semantics. Gateway authorization and billing identities are not derived
 from this client-supplied object.
+
+Responses also accepts `safety_identifier` with a maximum of 64 Unicode
+characters. OpenAI-compatible JSON and streaming requests forward it unchanged.
+The identifier participates in exact and semantic cache keys but never replaces
+authenticated user or credential identity in billing. Anthropic, Ollama and demo
+Responses adapters reject it explicitly when they cannot preserve its meaning.
 
 ### Stored Responses lifecycle
 

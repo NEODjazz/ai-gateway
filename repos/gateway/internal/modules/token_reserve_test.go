@@ -36,3 +36,11 @@ func TestChatSafetyIdentifierDoesNotReplaceBillingIdentity(t *testing.T) {
 		t.Fatalf("request identifier replaced billing identity: %+v", reserved)
 	}
 }
+
+func TestResponseSafetyIdentifierDoesNotReplaceBillingIdentity(t *testing.T) {
+	response := openai.ResponseRequest{SafetyIdentifier: "provider-user"}
+	req := RequestContext{UserID: "authenticated-user", ResponseRequest: &response}
+	if reserved := billingRequest(&req); reserved.UserID != "authenticated-user" {
+		t.Fatalf("request identifier replaced billing identity: %+v", reserved)
+	}
+}

@@ -397,6 +397,9 @@ func ollamaResponseFormat(format *openai.ResponseFormat) any {
 }
 
 func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
+	if err := p.ValidateResponseParameters(request); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	body, err := json.Marshal(openAICompatibleResponseRequest{
 		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
@@ -434,6 +437,9 @@ func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (
 }
 
 func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequest, write ResponseStreamWriter) (openai.ResponseResponse, error) {
+	if err := p.ValidateResponseParameters(request); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	if !p.upstreamStream {
 		return openai.ResponseResponse{}, ErrStreamingUnsupported
 	}

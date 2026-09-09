@@ -4,13 +4,14 @@ import (
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"errors"
+	"strings"
 	"testing"
 )
 
 func TestRouterRejectsInvalidResponseOptionsBeforeRouting(t *testing.T) {
 	badCount := 21
 	badTruncation := "unknown"
-	for _, request := range []openai.ResponseRequest{{TopLogprobs: &badCount}, {Truncation: &badTruncation}} {
+	for _, request := range []openai.ResponseRequest{{TopLogprobs: &badCount}, {Truncation: &badTruncation}, {SafetyIdentifier: strings.Repeat("я", 65)}} {
 		ctx := modules.RequestContext{ResponseRequest: &request}
 		router := New(Config{})
 		_, err := router.Responses(t.Context(), ctx)

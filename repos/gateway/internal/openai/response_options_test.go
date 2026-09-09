@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -14,6 +15,24 @@ func TestResponseOptionsValidation(t *testing.T) {
 		if message := request.Validate(); message != "" {
 			t.Fatalf("%s: %s", body, message)
 		}
+	}
+}
+
+func TestResponseSafetyIdentifierUsesUnicodeCharacterLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		identifier string
+		valid      bool
+	}{
+		{name: "64 Unicode characters", identifier: strings.Repeat("я", 64), valid: true},
+		{name: "65 Unicode characters", identifier: strings.Repeat("я", 65), valid: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			message := (ResponseRequest{SafetyIdentifier: tc.identifier}).Validate()
+			if (message == "") != tc.valid {
+				t.Fatalf("validation result %q, valid=%v", message, tc.valid)
+			}
+		})
 	}
 }
 

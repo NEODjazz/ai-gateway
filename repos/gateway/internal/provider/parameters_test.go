@@ -59,17 +59,31 @@ func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
 		assertUnsupportedParameter(t, err, "prompt")
 	}
 	for _, tc := range []struct {
+		adapter string
 		field   string
 		request openai.ResponseRequest
 	}{
-		{"previous_response_id", openai.ResponseRequest{PreviousResponse: "resp_other"}},
+		{"anthropic", "previous_response_id", openai.ResponseRequest{PreviousResponse: "resp_other"}},
+		{"anthropic", "safety_identifier", openai.ResponseRequest{SafetyIdentifier: "provider-user"}},
+		{"ollama", "safety_identifier", openai.ResponseRequest{SafetyIdentifier: "provider-user"}},
 	} {
-		client := NewAnthropic("http://unused.invalid", "test", true)
+		var client interface {
+			Client
+			StreamingResponseClient
+		}
+		switch tc.adapter {
+		case "anthropic":
+			client = NewAnthropic("http://unused.invalid", "test", true)
+		case "ollama":
+			client = NewOllama("http://unused.invalid", true)
+		}
 		_, err := client.Responses(context.Background(), tc.request)
 		assertUnsupportedParameter(t, err, tc.field)
 		_, err = client.StreamResponses(context.Background(), tc.request, func(string, string) error { t.Error("unexpected event"); return nil })
 		assertUnsupportedParameter(t, err, tc.field)
 	}
+	_, err := (Demo{}).Responses(context.Background(), openai.ResponseRequest{SafetyIdentifier: "provider-user"})
+	assertUnsupportedParameter(t, err, "safety_identifier")
 	for _, tc := range []struct {
 		field   string
 		request openai.EmbeddingRequest

@@ -561,7 +561,7 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	var payloads []string
 	provider := NewOpenAICompatible(server.URL, "", true)
 	response, err := provider.StreamResponses(context.Background(), openai.ResponseRequest{
-		Model: "test-model", Input: "hello", Stream: true, PreviousResponse: "resp-previous",
+		Model: "test-model", Input: "hello", Stream: true, PreviousResponse: "resp-previous", SafetyIdentifier: "provider-user",
 		Tools: []openai.ResponseTool{
 			{Type: "function", Name: "weather", Parameters: map[string]any{"type": "object"}},
 			{Type: "mcp", ServerLabel: "weather-prod", ServerURL: "https://mcp.example.test", AllowedTools: []string{"forecast"}, RequireApproval: "never", Headers: map[string]string{"X-MCP-Key": "scoped"}},
@@ -578,7 +578,7 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	if !upstreamRequest.Stream {
 		t.Fatal("expected responses upstream stream to be enabled")
 	}
-	if upstreamRequest.PreviousResponse != "resp-previous" || len(upstreamRequest.Tools) != 2 || upstreamRequest.Tools[0].Name != "weather" || upstreamRequest.Tools[1].ServerLabel != "weather-prod" || upstreamRequest.Tools[1].Headers["X-MCP-Key"] != "scoped" || upstreamRequest.Text == nil {
+	if upstreamRequest.PreviousResponse != "resp-previous" || upstreamRequest.SafetyIdentifier != "provider-user" || len(upstreamRequest.Tools) != 2 || upstreamRequest.Tools[0].Name != "weather" || upstreamRequest.Tools[1].ServerLabel != "weather-prod" || upstreamRequest.Tools[1].Headers["X-MCP-Key"] != "scoped" || upstreamRequest.Text == nil {
 		t.Fatalf("responses tools/state/format were not forwarded: %+v", upstreamRequest)
 	}
 	if len(payloads) != 4 {
@@ -589,6 +589,28 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	}
 	if response.OutputText != "hello" {
 		t.Fatalf("expected collected output_text, got %q", response.OutputText)
+	}
+}
+
+func TestOpenAICompatibleForwardsResponseSafetyIdentifier(t *testing.T) {
+	var upstreamRequest openAICompatibleResponseRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstreamRequest); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(openai.ResponseResponse{
+			ID: "resp-test", Object: "response", Status: "completed", Model: "test-model",
+			Output: []openai.ResponseOutputItem{{Type: "message", Status: "completed", Role: "assistant", Content: []openai.ResponseOutputContent{{Type: "output_text", Text: "ok"}}}},
+		})
+	}))
+	defer server.Close()
+
+	provider := NewOpenAICompatible(server.URL, "", false)
+	if _, err := provider.Responses(context.Background(), openai.ResponseRequest{Model: "test-model", Input: "hello", SafetyIdentifier: "provider-user"}); err != nil {
+		t.Fatal(err)
+	}
+	if upstreamRequest.SafetyIdentifier != "provider-user" {
+		t.Fatalf("safety identifier was not forwarded: %+v", upstreamRequest)
 	}
 }
 

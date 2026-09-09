@@ -79,6 +79,18 @@ func TestResponsesCacheSeparatesUpstreamAliasTargets(t *testing.T) {
 	}
 }
 
+func TestResponsesCacheSeparatesSafetyIdentifiers(t *testing.T) {
+	request := openai.ResponseRequest{Model: "model", Input: "hello", SafetyIdentifier: "first"}
+	first := modules.RequestContext{CredentialID: "tenant", Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}
+	secondRequest := request
+	secondRequest.SafetyIdentifier = "second"
+	second := first
+	second.ResponseRequest = &secondRequest
+	if providerCacheKey("responses", first) == providerCacheKey("responses", second) {
+		t.Fatal("Responses cache shared across safety identifiers")
+	}
+}
+
 func TestResponsesCacheHitStoresAffinityBeforeBilling(t *testing.T) {
 	affinity := &orderingAffinity{}
 	billing := &affinityOrderingModule{affinity: affinity}
