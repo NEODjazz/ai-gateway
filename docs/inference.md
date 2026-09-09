@@ -1176,6 +1176,14 @@ semantic gateway cache keys include it, so requests with different upstream
 prompt-cache policies do not share a cached response. Native adapters reject the
 object explicitly when they cannot represent its semantics.
 
+Chat text content parts may mark up to four exact prefix boundaries with
+`prompt_cache_breakpoint: {"mode":"explicit"}`. The gateway validates the
+placement and count before authorization modules, preserves the marker through
+text anonymization, and forwards it only to compatible adapters. Native adapters
+reject it rather than silently dropping the boundary. Exact cache keys retain the
+full request; semantic response reuse is disabled because it would bypass the
+requested provider prefix-cache boundary.
+
 Chat and Responses usage preserve provider-reported modality and predicted-output
 breakdowns: input/prompt `audio_tokens`, `image_tokens`, `text_tokens`, and output
 `accepted_prediction_tokens`, `rejected_prediction_tokens`, `audio_tokens`,

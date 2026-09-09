@@ -34,7 +34,7 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 			}))
 			defer server.Close()
 			var request openai.ChatCompletionRequest
-			if err := json.Unmarshal([]byte(`{"model":"test","metadata":{"trace":"one"},"store":false,"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","prompt_cache_key":"tenant-thread","prompt_cache_options":{"mode":"explicit","ttl":"30m"},"prediction":{"type":"content","content":"expected"},"verbosity":"low","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-1,"logit_bias":{"10":-100}}`), &request); err != nil {
+			if err := json.Unmarshal([]byte(`{"model":"test","messages":[{"role":"user","content":[{"type":"text","text":"hello","prompt_cache_breakpoint":{"mode":"explicit"}}]}],"metadata":{"trace":"one"},"store":false,"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","prompt_cache_key":"tenant-thread","prompt_cache_options":{"mode":"explicit","ttl":"30m"},"prediction":{"type":"content","content":"expected"},"verbosity":"low","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-1,"logit_bias":{"10":-100}}`), &request); err != nil {
 				t.Fatal(err)
 			}
 			client := NewOpenAICompatible(server.URL, "", true)
@@ -53,6 +53,9 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 				if string(received[name]) != want {
 					t.Fatalf("%s=%s, want %s", name, received[name], want)
 				}
+			}
+			if !strings.Contains(string(received["messages"]), `"prompt_cache_breakpoint":{"mode":"explicit"}`) {
+				t.Fatalf("prompt cache breakpoint was not forwarded: %s", received["messages"])
 			}
 			if streaming {
 				if string(received["stream_options"]) != `{"include_usage":true}` {
@@ -75,6 +78,20 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 				t.Fatalf("response envelope lost: %+v", response)
 			}
 		})
+	}
+}
+
+func TestPromptCacheBreakpointsAreRejectedByNativeAdapters(t *testing.T) {
+	var request openai.ChatCompletionRequest
+	if err := json.Unmarshal([]byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"hello","prompt_cache_breakpoint":{"mode":"explicit"}}]}]}`), &request); err != nil {
+		t.Fatal(err)
+	}
+	for _, client := range []Client{NewAnthropic("http://unused.invalid", "", false), NewOllama("http://unused.invalid", false), NewGemini("http://unused.invalid", "", false), Demo{}} {
+		var failure *Error
+		err := validateChatAdapter(client, request)
+		if !errors.As(err, &failure) || failure.Param != "messages.prompt_cache_breakpoint" || failure.UpstreamCode != "unsupported_parameter" {
+			t.Fatalf("%T silently accepted breakpoint: %v", client, err)
+		}
 	}
 }
 
@@ -253,6 +270,18 @@ func TestPromptCacheOptionsScopeCaches(t *testing.T) {
 	changedScope, _, changedOK := semanticRequest(changed, Endpoint{Name: "test"})
 	if !baseOK || !changedOK || baseScope == changedScope {
 		t.Fatal("semantic cache ignored prompt_cache_options")
+	}
+}
+
+func TestPromptCacheBreakpointsDisableSemanticCacheAndScopeExactCache(t *testing.T) {
+	base := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: []any{map[string]any{"type": "text", "text": "hello"}}}}}}
+	changed := base
+	changed.Request.Messages = []openai.Message{{Role: "user", Content: []any{map[string]any{"type": "text", "text": "hello", "prompt_cache_breakpoint": map[string]any{"mode": "explicit"}}}}}
+	if providerCacheKey("chat", base) == providerCacheKey("chat", changed) {
+		t.Fatal("exact cache ignored prompt_cache_breakpoint")
+	}
+	if _, _, ok := semanticRequest(changed, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache bypassed explicit prompt cache breakpoint")
 	}
 }
 

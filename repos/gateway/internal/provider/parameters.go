@@ -24,6 +24,9 @@ func rejectParameters(adapter string, checks ...parameterCheck) error {
 }
 
 func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := validateChatPromptCacheBreakpoints("anthropic", request.Messages, false); err != nil {
+		return err
+	}
 	if err := rejectToolCallMetadata("anthropic", request.Messages); err != nil {
 		return err
 	}
@@ -59,6 +62,9 @@ func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := validateChatPromptCacheBreakpoints("ollama", request.Messages, false); err != nil {
+		return err
+	}
 	if err := rejectToolCallMetadata("ollama", request.Messages); err != nil {
 		return err
 	}
@@ -152,6 +158,9 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 }
 
 func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := validateChatPromptCacheBreakpoints("demo", request.Messages, false); err != nil {
+		return err
+	}
 	if err := rejectToolCallMetadata("demo", request.Messages); err != nil {
 		return err
 	}
@@ -159,6 +168,9 @@ func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 }
 
 func (OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := validateChatPromptCacheBreakpoints("openai-compatible", request.Messages, true); err != nil {
+		return err
+	}
 	if message := request.ChatGenerationOptions.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
 	}
@@ -166,6 +178,14 @@ func (OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequ
 		parameterCheck{"store", request.Store != nil && *request.Store},
 		parameterCheck{"service_tier", request.ServiceTier != ""},
 	)
+}
+
+func validateChatPromptCacheBreakpoints(adapter string, messages []openai.Message, supported bool) error {
+	count, message := openai.ChatPromptCacheBreakpoints(messages)
+	if message != "" {
+		return &Error{Class: FailureClientRequest, Provider: adapter, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.prompt_cache_breakpoint", Err: fmt.Errorf("%s", message)}
+	}
+	return rejectParameters(adapter, parameterCheck{"messages.prompt_cache_breakpoint", count > 0 && !supported})
 }
 
 func (OpenAICompatible) ValidateResponseParameters(request openai.ResponseRequest) error {
