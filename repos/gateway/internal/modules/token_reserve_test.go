@@ -20,3 +20,12 @@ func TestBillingReserveIncludesModernCapAndToolSchema(t *testing.T) {
 		t.Fatal("billing/TPM input estimate mismatch")
 	}
 }
+
+func TestBillingReserveIncludesEveryChatChoice(t *testing.T) {
+	maxTokens, choices := 200, 3
+	req := RequestContext{Request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{N: &choices}, MaxCompletionTokens: &maxTokens, Messages: []openai.Message{{Role: "user", Content: "test"}}}}
+	reserved := billingRequest(&req)
+	if reserved.OutputTokens != 600 || reserved.TotalTokens != reserved.InputTokens+600 {
+		t.Fatalf("multi-choice output was not fully reserved: %+v", reserved)
+	}
+}

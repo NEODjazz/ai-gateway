@@ -298,7 +298,7 @@ func requestedOutputTokens(req *RequestContext) int {
 	if req.ResponseRequest != nil {
 		return openai.ResponseOutputLimit(*req.ResponseRequest)
 	}
-	return openai.ChatOutputLimit(req.Request)
+	return openai.ChatOutputReserve(req.Request)
 }
 
 func estimateRequestTokens(req *RequestContext) int {

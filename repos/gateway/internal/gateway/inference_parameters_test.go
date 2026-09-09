@@ -79,11 +79,35 @@ func TestSyntheticChatStreamPreservesLogprobs(t *testing.T) {
 }
 
 func TestChatRejectsInvalidGenerationOptionsBeforePipeline(t *testing.T) {
-	access := &countingAccessModule{}
-	handler := NewHandler(modules.NewPipeline([]modules.Module{access}), &chatProvider{})
+	for _, test := range []struct{ body, message string }{
+		{`{"model":"test","messages":[],"top_logprobs":2}`, "requires logprobs=true"},
+		{`{"model":"test","messages":[],"n":0}`, "n must be between 1 and 128"},
+	} {
+		access := &countingAccessModule{}
+		handler := NewHandler(modules.NewPipeline([]modules.Module{access}), &chatProvider{})
+		response := httptest.NewRecorder()
+		handler.ChatCompletions(response, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(test.body)))
+		if response.Code != 400 || !strings.Contains(response.Body.String(), test.message) || access.calls != 0 {
+			t.Fatalf("invalid generation options: status=%d body=%s pipeline=%d", response.Code, response.Body.String(), access.calls)
+		}
+	}
+}
+
+func TestChatMultiChoiceUsesAggregateTPMReserve(t *testing.T) {
+	store := &embeddingTokenRateStore{}
+	maxTokens, choices := 20, 3
+	request := openai.ChatCompletionRequest{
+		ChatGenerationOptions: openai.ChatGenerationOptions{N: &choices},
+		Model:                 "test", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxCompletionTokens: &maxTokens,
+	}
+	handler := NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tpm: 1000}}), &chatProvider{}, store)
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
 	response := httptest.NewRecorder()
-	handler.ChatCompletions(response, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[],"top_logprobs":2}`)))
-	if response.Code != 400 || !strings.Contains(response.Body.String(), "requires logprobs=true") || access.calls != 0 {
-		t.Fatalf("invalid generation options: status=%d body=%s pipeline=%d", response.Code, response.Body.String(), access.calls)
+	handler.ChatCompletions(response, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body))))
+	if response.Code != http.StatusOK || store.tokens != openai.ChatReserveTokens(request) {
+		t.Fatalf("multi-choice TPM reserve mismatch: status=%d tokens=%d want=%d body=%s", response.Code, store.tokens, openai.ChatReserveTokens(request), response.Body.String())
 	}
 }

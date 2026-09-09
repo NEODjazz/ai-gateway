@@ -11,7 +11,9 @@ func TestChatGenerationOptionValidation(t *testing.T) {
 		valid bool
 	}{
 		{`{}`, true},
-		{`{"reasoning_effort":"high","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-2,"logit_bias":{"10":-100}}`, true},
+		{`{"reasoning_effort":"high","n":2,"logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-2,"logit_bias":{"10":-100}}`, true},
+		{`{"n":0}`, false},
+		{`{"n":129}`, false},
 		{`{"reasoning_effort":"unexpected"}`, false},
 		{`{"logprobs":true,"top_logprobs":21}`, false},
 		{`{"logprobs":true,"top_logprobs":-1}`, false},

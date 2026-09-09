@@ -14,6 +14,20 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	if ReserveTokens(ChatInputTokens(legacy), ChatOutputLimit(legacy)) != ReserveTokens(ChatInputTokens(modern), ChatOutputLimit(modern)) {
 		t.Fatal("output limit aliases differ")
 	}
+	choices := 3
+	modern.N = &choices
+	if ChatOutputReserve(modern) != 30000 || ChatReserveTokens(modern) != ChatInputTokens(modern)+30000 {
+		t.Fatal("chat choices were omitted from output reserve")
+	}
+	modern.MaxCompletionTokens = nil
+	if ChatOutputReserve(modern) != DefaultOutputTokenReserve*choices {
+		t.Fatal("default output reserve was not applied to every choice")
+	}
+	maximum := int(^uint(0) >> 1)
+	modern.MaxCompletionTokens = &maximum
+	if ChatOutputReserve(modern) != maximum || ChatReserveTokens(modern) != maximum {
+		t.Fatal("chat choice reserve overflow")
+	}
 	withTools := base
 	withTools.Tools = []Tool{{Type: "function", Function: FunctionDefinition{Name: "tool", Parameters: map[string]any{"description": strings.Repeat("schema", 1000)}}}}
 	if ChatInputTokens(withTools) <= ChatInputTokens(base)+1000 {

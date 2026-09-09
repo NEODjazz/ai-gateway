@@ -24,16 +24,16 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 				}
 				if streaming {
 					for _, token := range []string{"one", "two"} {
-						_, _ = fmt.Fprintf(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":%q},\"logprobs\":{\"content\":[{\"token\":%q,\"logprob\":-0.5,\"bytes\":[1],\"top_logprobs\":[]}]}}]}\n\n", token, token)
+						_, _ = fmt.Fprintf(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":%q},\"logprobs\":{\"content\":[{\"token\":%q,\"logprob\":-0.5,\"bytes\":[1],\"top_logprobs\":[]}]}},{\"index\":1,\"delta\":{\"content\":%q}}]}\n\n", token, token, token)
 					}
 					_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 				} else {
-					_, _ = fmt.Fprint(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"one"},"logprobs":{"content":[{"token":"one","logprob":-0.5,"bytes":[1],"top_logprobs":[]}]}}]}`)
+					_, _ = fmt.Fprint(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"one"},"logprobs":{"content":[{"token":"one","logprob":-0.5,"bytes":[1],"top_logprobs":[]}]}},{"index":1,"message":{"role":"assistant","content":"two"}}]}`)
 				}
 			}))
 			defer server.Close()
 			var request openai.ChatCompletionRequest
-			if err := json.Unmarshal([]byte(`{"model":"test","reasoning_effort":"high","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-1,"logit_bias":{"10":-100}}`), &request); err != nil {
+			if err := json.Unmarshal([]byte(`{"model":"test","reasoning_effort":"high","n":2,"logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-1,"logit_bias":{"10":-100}}`), &request); err != nil {
 				t.Fatal(err)
 			}
 			client := NewOpenAICompatible(server.URL, "", true)
@@ -48,7 +48,7 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for name, want := range map[string]string{"reasoning_effort": `"high"`, "logprobs": "true", "top_logprobs": "0", "frequency_penalty": "0", "presence_penalty": "-1", "logit_bias": `{"10":-100}`} {
+			for name, want := range map[string]string{"reasoning_effort": `"high"`, "n": "2", "logprobs": "true", "top_logprobs": "0", "frequency_penalty": "0", "presence_penalty": "-1", "logit_bias": `{"10":-100}`} {
 				if string(received[name]) != want {
 					t.Fatalf("%s=%s, want %s", name, received[name], want)
 				}
@@ -60,15 +60,70 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 					t.Fatal("SSE logprobs lost")
 				}
 			}
-			if len(response.Choices) != 1 || response.Choices[0].Logprobs == nil || len(response.Choices[0].Logprobs.Content) != wantCount {
+			if len(response.Choices) != 2 || response.Choices[0].Logprobs == nil || len(response.Choices[0].Logprobs.Content) != wantCount {
 				t.Fatalf("response logprobs lost: %+v", response)
 			}
 		})
 	}
 }
 
+func TestCompatibleChatRejectsIncompleteMultiChoiceResponse(t *testing.T) {
+	choices := 2
+	request := openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{N: &choices}, Model: "test"}
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprint(streaming), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if streaming {
+					_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"one\"}}]}\n\ndata: [DONE]\n\n")
+					return
+				}
+				_, _ = fmt.Fprint(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"one"}}]}`)
+			}))
+			defer server.Close()
+			client := NewOpenAICompatible(server.URL, "", streaming)
+			var err error
+			if streaming {
+				_, err = client.StreamChatCompletions(t.Context(), request, func(string) error { return nil })
+			} else {
+				_, err = client.ChatCompletions(t.Context(), request)
+			}
+			if err == nil || !strings.Contains(err.Error(), "choice count") {
+				t.Fatalf("incomplete multi-choice response accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestRequestedChatChoiceIndicesAreExact(t *testing.T) {
+	choices := 2
+	request := openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{N: &choices}}
+	if err := validateRequestedChatChoices(request, openai.ChatCompletionResponse{Choices: []openai.Choice{{Index: 1}, {Index: 0}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, response := range []openai.ChatCompletionResponse{
+		{Choices: []openai.Choice{{Index: 0}}},
+		{Choices: []openai.Choice{{Index: 0}, {Index: 0}}},
+		{Choices: []openai.Choice{{Index: 0}, {Index: 2}}},
+	} {
+		if err := validateRequestedChatChoices(request, response); err == nil {
+			t.Fatalf("invalid choices accepted: %+v", response.Choices)
+		}
+	}
+}
+
+func TestChatCompletionJSONResponseIsBoundedAndExact(t *testing.T) {
+	var response openai.ChatCompletionResponse
+	if err := decodeChatCompletionResponse(strings.NewReader(`{"choices":[]} {}`), &response); err == nil {
+		t.Fatal("trailing chat completion JSON accepted")
+	}
+	reader := &embeddingLimitReader{}
+	if err := decodeChatCompletionResponse(reader, &response); err == nil || reader.read != maxChatCompletionResponseBytes+1 {
+		t.Fatalf("unbounded chat completion response: bytes=%d err=%v", reader.read, err)
+	}
+}
+
 func TestGenerationControlsAreRejectedByNativeAdapters(t *testing.T) {
-	for _, body := range []string{`{"reasoning_effort":"high"}`, `{"logprobs":false}`, `{"top_logprobs":0}`, `{"frequency_penalty":0}`, `{"presence_penalty":0}`, `{"logit_bias":{"1":0}}`} {
+	for _, body := range []string{`{"reasoning_effort":"high"}`, `{"n":2}`, `{"logprobs":false}`, `{"top_logprobs":0}`, `{"frequency_penalty":0}`, `{"presence_penalty":0}`, `{"logit_bias":{"1":0}}`} {
 		var request openai.ChatCompletionRequest
 		if err := json.Unmarshal([]byte(body), &request); err != nil {
 			t.Fatal(err)

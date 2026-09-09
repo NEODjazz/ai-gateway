@@ -359,14 +359,51 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	defer resp.Body.Close()
 
 	if request.Stream && p.upstreamStream {
-		return decodeChatCompletionStream(resp.Body, request.Model)
+		response, err := decodeChatCompletionStream(resp.Body, request.Model)
+		if err == nil {
+			err = validateRequestedChatChoices(request, response)
+		}
+		return response, err
 	}
 
 	var response openai.ChatCompletionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	if err := decodeChatCompletionResponse(resp.Body, &response); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	if err := validateRequestedChatChoices(request, response); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 	return response, nil
+}
+
+const maxChatCompletionResponseBytes = 32 << 20
+
+func decodeChatCompletionResponse(reader io.Reader, target *openai.ChatCompletionResponse) error {
+	payload, err := io.ReadAll(io.LimitReader(reader, maxChatCompletionResponseBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(payload) > maxChatCompletionResponseBytes {
+		return errors.New("chat completion response exceeds limit")
+	}
+	return json.Unmarshal(payload, target)
+}
+
+func validateRequestedChatChoices(request openai.ChatCompletionRequest, response openai.ChatCompletionResponse) error {
+	if request.N == nil {
+		return nil
+	}
+	if len(response.Choices) != *request.N {
+		return errors.New("chat completion choice count does not match n")
+	}
+	seen := make([]bool, len(response.Choices))
+	for _, choice := range response.Choices {
+		if choice.Index < 0 || choice.Index >= len(seen) || seen[choice.Index] {
+			return errors.New("invalid chat completion choice index")
+		}
+		seen[choice.Index] = true
+	}
+	return nil
 }
 
 func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
@@ -443,7 +480,11 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 	}
 	defer resp.Body.Close()
 
-	return streamChatCompletionData(resp.Body, request.Model, write)
+	response, err := streamChatCompletionData(resp.Body, request.Model, write)
+	if err == nil {
+		err = validateRequestedChatChoices(request, response)
+	}
+	return response, err
 }
 
 func (p OpenAICompatible) chatCompletionResponse(ctx context.Context, request *openAICompatibleChatRequest) (*http.Response, error) {

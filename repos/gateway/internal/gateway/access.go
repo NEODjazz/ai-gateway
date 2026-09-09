@@ -223,7 +223,7 @@ func filterModels(models []openai.Model, grants []string) []openai.Model {
 }
 
 func estimateChatTokens(request openai.ChatCompletionRequest) int {
-	return openai.ReserveTokens(openai.ChatInputTokens(request), openai.ChatOutputLimit(request))
+	return openai.ChatReserveTokens(request)
 }
 
 func estimateCompletionTokens(request openai.CompletionRequest) int {

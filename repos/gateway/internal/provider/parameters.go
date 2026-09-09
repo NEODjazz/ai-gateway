@@ -124,6 +124,7 @@ func (Ollama) ValidateCompletionParameters(request openai.CompletionRequest) err
 func rejectGenerationOptions(adapter string, options openai.ChatGenerationOptions) error {
 	return rejectParameters(adapter,
 		parameterCheck{"reasoning_effort", options.ReasoningEffort != ""},
+		parameterCheck{"n", options.N != nil},
 		parameterCheck{"logprobs", options.Logprobs != nil},
 		parameterCheck{"top_logprobs", options.TopLogprobs != nil},
 		parameterCheck{"frequency_penalty", options.FrequencyPenalty != nil},
