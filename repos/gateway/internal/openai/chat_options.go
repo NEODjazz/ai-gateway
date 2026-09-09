@@ -11,6 +11,7 @@ type ChatGenerationOptions struct {
 	ReasoningEffort  string         `json:"reasoning_effort,omitempty"`
 	N                *int           `json:"n,omitempty"`
 	SafetyIdentifier string         `json:"safety_identifier,omitempty"`
+	ServiceTier      string         `json:"service_tier,omitempty"`
 	Logprobs         *bool          `json:"logprobs,omitempty"`
 	TopLogprobs      *int           `json:"top_logprobs,omitempty"`
 	FrequencyPenalty *float64       `json:"frequency_penalty,omitempty"`
@@ -24,6 +25,9 @@ func (o ChatGenerationOptions) Validate() string {
 	}
 	if utf8.RuneCountInString(o.SafetyIdentifier) > 64 {
 		return "safety_identifier must contain at most 64 characters"
+	}
+	if !validServiceTier(o.ServiceTier) {
+		return "unsupported service_tier value"
 	}
 	switch o.ReasoningEffort {
 	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
@@ -49,6 +53,15 @@ func (o ChatGenerationOptions) Validate() string {
 		}
 	}
 	return ""
+}
+
+func validServiceTier(value string) bool {
+	switch value {
+	case "", "auto", "default", "flex", "scale", "priority", "fast", "ultrafast":
+		return true
+	default:
+		return false
+	}
 }
 
 type ChoiceLogprobs struct {

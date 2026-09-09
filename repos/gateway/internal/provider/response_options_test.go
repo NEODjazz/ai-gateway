@@ -11,7 +11,7 @@ import (
 func TestRouterRejectsInvalidResponseOptionsBeforeRouting(t *testing.T) {
 	badCount := 21
 	badTruncation := "unknown"
-	for _, request := range []openai.ResponseRequest{{TopLogprobs: &badCount}, {Truncation: &badTruncation}, {SafetyIdentifier: strings.Repeat("я", 65)}} {
+	for _, request := range []openai.ResponseRequest{{TopLogprobs: &badCount}, {Truncation: &badTruncation}, {SafetyIdentifier: strings.Repeat("я", 65)}, {ServiceTier: "unknown"}} {
 		ctx := modules.RequestContext{ResponseRequest: &request}
 		router := New(Config{})
 		_, err := router.Responses(t.Context(), ctx)

@@ -146,7 +146,7 @@ func TestCompatibleChatRejectsInvalidUsageBeforeDelivery(t *testing.T) {
 }
 
 func TestGenerationControlsAreRejectedByNativeAdapters(t *testing.T) {
-	for _, body := range []string{`{"reasoning_effort":"high"}`, `{"n":2}`, `{"safety_identifier":"hashed-user"}`, `{"logprobs":false}`, `{"top_logprobs":0}`, `{"frequency_penalty":0}`, `{"presence_penalty":0}`, `{"logit_bias":{"1":0}}`} {
+	for _, body := range []string{`{"reasoning_effort":"high"}`, `{"n":2}`, `{"safety_identifier":"hashed-user"}`, `{"service_tier":"priority"}`, `{"logprobs":false}`, `{"top_logprobs":0}`, `{"frequency_penalty":0}`, `{"presence_penalty":0}`, `{"logit_bias":{"1":0}}`} {
 		var request openai.ChatCompletionRequest
 		if err := json.Unmarshal([]byte(body), &request); err != nil {
 			t.Fatal(err)

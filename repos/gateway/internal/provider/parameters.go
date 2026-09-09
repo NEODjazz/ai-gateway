@@ -45,12 +45,13 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 		parameterCheck{"input", hasOpaqueResponseContext(request.Input)},
 		parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
+		parameterCheck{"service_tier", request.ServiceTier != ""},
 		parameterCheck{"previous_response_id", request.PreviousResponse != ""},
 	)
 }
 
 func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
-	return rejectParameters("ollama", parameterCheck{"safety_identifier", request.SafetyIdentifier != ""})
+	return rejectParameters("ollama", parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"service_tier", request.ServiceTier != ""})
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
@@ -131,6 +132,7 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 		parameterCheck{"reasoning_effort", options.ReasoningEffort != ""},
 		parameterCheck{"n", options.N != nil},
 		parameterCheck{"safety_identifier", options.SafetyIdentifier != ""},
+		parameterCheck{"service_tier", options.ServiceTier != ""},
 		parameterCheck{"logprobs", options.Logprobs != nil},
 		parameterCheck{"top_logprobs", options.TopLogprobs != nil},
 		parameterCheck{"frequency_penalty", options.FrequencyPenalty != nil},
@@ -150,7 +152,14 @@ func (OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequ
 	if message := request.ChatGenerationOptions.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
 	}
-	return nil
+	return rejectParameters("openai-compatible", parameterCheck{"service_tier", request.ServiceTier != ""})
+}
+
+func (OpenAICompatible) ValidateResponseParameters(request openai.ResponseRequest) error {
+	if message := request.Validate(); message != "" {
+		return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
+	}
+	return rejectParameters("openai-compatible", parameterCheck{"service_tier", request.ServiceTier != ""})
 }
 
 func rejectToolCallMetadata(adapter string, messages []openai.Message) error {
@@ -165,7 +174,7 @@ func rejectToolCallMetadata(adapter string, messages []openai.Message) error {
 }
 
 func (Demo) ValidateResponseParameters(request openai.ResponseRequest) error {
-	return rejectParameters("demo", parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""})
+	return rejectParameters("demo", parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"service_tier", request.ServiceTier != ""})
 }
 
 // Provider-specific reasoning and compaction cannot be flattened into messages.

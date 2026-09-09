@@ -15,6 +15,9 @@ func (r ResponseRequest) Validate() string {
 	if utf8.RuneCountInString(r.SafetyIdentifier) > 64 {
 		return "safety_identifier must contain at most 64 characters"
 	}
+	if !validServiceTier(r.ServiceTier) {
+		return "unsupported service_tier value"
+	}
 	if r.MaxOutputTokens != nil && r.MaxTokens != nil {
 		return "max_output_tokens and max_tokens are mutually exclusive"
 	}

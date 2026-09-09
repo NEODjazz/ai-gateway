@@ -7,7 +7,7 @@ import (
 )
 
 func TestResponseOptionsValidation(t *testing.T) {
-	for _, body := range []string{`{"max_output_tokens":1}`, `{"max_tokens":1}`, `{"max_output_tokens":null,"max_tokens":null}`, `{}`, `{"top_logprobs":null,"truncation":null}`, `{"top_logprobs":0,"truncation":"auto"}`, `{"top_logprobs":20,"truncation":"disabled"}`} {
+	for _, body := range []string{`{"max_output_tokens":1}`, `{"max_tokens":1}`, `{"max_output_tokens":null,"max_tokens":null}`, `{}`, `{"top_logprobs":null,"truncation":null}`, `{"top_logprobs":0,"truncation":"auto"}`, `{"top_logprobs":20,"truncation":"disabled"}`, `{"service_tier":"priority"}`} {
 		var request ResponseRequest
 		if err := json.Unmarshal([]byte(body), &request); err != nil {
 			t.Fatal(err)
@@ -15,6 +15,23 @@ func TestResponseOptionsValidation(t *testing.T) {
 		if message := request.Validate(); message != "" {
 			t.Fatalf("%s: %s", body, message)
 		}
+	}
+}
+
+func TestResponseRejectsUnknownServiceTier(t *testing.T) {
+	if message := (ResponseRequest{ServiceTier: "unknown"}).Validate(); message != "unsupported service_tier value" {
+		t.Fatalf("unexpected validation result: %q", message)
+	}
+}
+
+func TestServiceTierValues(t *testing.T) {
+	for _, value := range []string{"", "auto", "default", "flex", "scale", "priority", "fast", "ultrafast"} {
+		if !validServiceTier(value) {
+			t.Fatalf("documented service tier rejected: %q", value)
+		}
+	}
+	if validServiceTier("unknown") {
+		t.Fatal("unknown service tier accepted")
 	}
 }
 

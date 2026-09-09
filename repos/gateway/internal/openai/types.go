@@ -326,6 +326,7 @@ type ResponseRequest struct {
 	Text              any                `json:"text,omitempty"`
 	PreviousResponse  string             `json:"previous_response_id,omitempty"`
 	SafetyIdentifier  string             `json:"safety_identifier,omitempty"`
+	ServiceTier       string             `json:"service_tier,omitempty"`
 	Stream            bool               `json:"stream,omitempty"`
 	MaxOutputTokens   *int               `json:"max_output_tokens,omitempty"`
 	MaxTokens         *int               `json:"max_tokens,omitempty"`

@@ -12,7 +12,7 @@ import (
 )
 
 func TestInferenceEndpointsRejectUnsupportedParameters(t *testing.T) {
-	for field, value := range map[string]string{"unsupported_future_option": `"high"`, "background": "true", "service_tier": `"priority"`} {
+	for field, value := range map[string]string{"unsupported_future_option": `"high"`, "background": "true"} {
 		for _, endpoint := range []string{"chat", "responses", "embeddings", "rerank"} {
 			t.Run(endpoint+"/"+field, func(t *testing.T) {
 				access := &countingAccessModule{}
@@ -38,6 +38,20 @@ func TestInferenceEndpointsRejectUnsupportedParameters(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestNonGenerationEndpointsStillRejectServiceTierAsUnknown(t *testing.T) {
+	for _, endpoint := range []string{"embeddings", "rerank"} {
+		t.Run(endpoint, func(t *testing.T) {
+			handler := NewHandler(modules.NewPipeline(nil), &chatProvider{})
+			invoke := map[string]http.HandlerFunc{"embeddings": handler.Embeddings, "rerank": handler.Rerank}[endpoint]
+			response := httptest.NewRecorder()
+			invoke(response, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"model":"test","service_tier":"priority"}`)))
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "unknown field") || !strings.Contains(response.Body.String(), "service_tier") {
+				t.Fatalf("service tier unexpectedly entered %s contract: %d %s", endpoint, response.Code, response.Body.String())
+			}
+		})
 	}
 }
 
@@ -83,6 +97,7 @@ func TestChatRejectsInvalidGenerationOptionsBeforePipeline(t *testing.T) {
 		{`{"model":"test","messages":[],"top_logprobs":2}`, "requires logprobs=true"},
 		{`{"model":"test","messages":[],"n":0}`, "n must be between 1 and 128"},
 		{`{"model":"test","messages":[],"safety_identifier":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, "at most 64 characters"},
+		{`{"model":"test","messages":[],"service_tier":"unknown"}`, "unsupported service_tier value"},
 	} {
 		access := &countingAccessModule{}
 		handler := NewHandler(modules.NewPipeline([]modules.Module{access}), &chatProvider{})

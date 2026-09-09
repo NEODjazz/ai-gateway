@@ -29,14 +29,15 @@ JSON decoder применяет закрытый контракт request types,
 (`additionalProperties: false`). Неизвестные поля верхнего уровня возвращают HTTP 400 `invalid_request` с сообщением
 `json: unknown field "имя"` до выполнения pipeline и provider call.
 Это намеренное изменение совместимости: раньше неизвестные поля игнорировались.
-Например, `service_tier` и `background` пока не поддерживаются и не передаются
-upstream. Новые поддерживаемые параметры перечислены ниже.
+Например, `background` пока не поддерживается и не передаётся
+upstream. Распознаваемые параметры перечислены ниже; adapter policy может
+отклонить поле до выполнения запроса.
 
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
-| `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
+| `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `service_tier`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
 | `/v1/completions` | `provider`, `model`, `prompt`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `n`, `presence_penalty`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
-| `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
+| `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `service_tier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
 | `/v1/responses/compact` | `provider`, `model`, `input`, `instructions` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `encoding_format`, `dimensions`, `user` |
@@ -152,6 +153,7 @@ adapter используют те же проверки, включая streamin
 | Ollama native chat | `tool_choice`, `parallel_tool_calls` |
 | Ollama embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
 | Gemini embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
+| Все Chat и Responses adapters | `service_tier`, пока схема каталога не поддерживает отдельные billing rates по tier |
 
 Остальные верхнеуровневые поля действующего OpenAI-compatible контракта
 передаются соответствующим upstream wire request. Это не подтверждает поддержку
@@ -1156,6 +1158,13 @@ characters. OpenAI-compatible JSON and streaming requests forward it unchanged.
 The identifier participates in exact and semantic cache keys but never replaces
 authenticated user or credential identity in billing. Anthropic, Ollama and demo
 Responses adapters reject it explicitly when they cannot preserve its meaning.
+
+Chat и Responses распознают `service_tier` и проверяют значения `auto`,
+`default`, `flex`, `scale`, `priority`, `fast` и `ultrafast`. Все adapters пока
+возвращают `400 unsupported_parameter` до provider modules, TPM, cache, billing и
+upstream. Текущий model catalog хранит одну пару input/output rates и не может
+достоверно резервировать или начислять стоимость, зависящую от tier. Передача
+параметра должна включаться одновременно с tier-aware pricing configuration.
 
 ### Stored Responses lifecycle
 
