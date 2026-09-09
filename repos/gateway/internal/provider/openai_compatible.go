@@ -527,6 +527,9 @@ func validateChatCompletionEnvelope(response openai.ChatCompletionResponse) erro
 		if err := openai.ValidateChatAudioResponse(choice.Message.Audio); err != nil {
 			return fmt.Errorf("provider returned invalid chat completion audio: %w", err)
 		}
+		if err := openai.ValidateReasoningBlocks(choice.Message.Reasoning); err != nil {
+			return fmt.Errorf("provider returned invalid chat completion reasoning: %w", err)
+		}
 	}
 	return nil
 }

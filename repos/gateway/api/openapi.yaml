@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.103
+  version: 0.1.104
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -2925,6 +2925,7 @@ components:
                   - type: array
                     minItems: 1
                     items: {type: object}
+                    description: Supports text, image, tool_use, tool_result, thinking and redacted_thinking blocks. Thinking history is accepted only for assistant messages and routed only to an adapter with an explicit signed-reasoning contract.
         tools:
           type: array
           items:
@@ -2961,6 +2962,7 @@ components:
         content:
           type: array
           items: {type: object}
+          description: Text, tool, signed thinking and redacted thinking content blocks returned in provider order.
         stop_reason: {type: string, enum: [end_turn, max_tokens, tool_use, refusal, stop_sequence]}
         stop_sequence: {type: [string, 'null']}
         usage:
@@ -3478,6 +3480,28 @@ components:
         function_call:
           $ref: '#/components/schemas/LegacyFunctionCall'
           description: Legacy assistant function call. Supported by compatible deployments; native adapters reject it explicitly.
+        reasoning:
+          type: array
+          maxItems: 128
+          description: Signed or redacted native reasoning history. Supported only by deployments with an explicit reasoning-block contract.
+          items: {$ref: '#/components/schemas/ReasoningBlock'}
+    ReasoningBlock:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [type, thinking, signature]
+          properties:
+            index: {type: integer, minimum: 0, maximum: 127, readOnly: true}
+            type: {type: string, const: thinking}
+            thinking: {type: string, minLength: 1, maxLength: 1048576}
+            signature: {type: string, minLength: 1, maxLength: 1048576}
+        - type: object
+          additionalProperties: false
+          required: [type, data]
+          properties:
+            index: {type: integer, minimum: 0, maximum: 127, readOnly: true}
+            type: {type: string, const: redacted_thinking}
+            data: {type: string, minLength: 1, maxLength: 1048576}
     ChatAnnotation:
       type: object
       additionalProperties: false

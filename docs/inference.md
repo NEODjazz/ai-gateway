@@ -519,13 +519,16 @@ pipeline; this endpoint does not forward client credentials to providers.
 Supported input is text, text system blocks, base64 user images, function schemas,
 assistant tool-use history, text tool results, tool choice and parallel-tool
 control, temperature, top-p, positive max_tokens, stop_sequences, stream, opaque
-`metadata.user_id`, output effort and JSON Schema formatting. Provider-specific
+`metadata.user_id`, output effort, signed/redacted thinking history and JSON Schema formatting. Provider-specific
 capability checks still apply after conversion. Responses contain native text or
-tool-use blocks and native usage fields. Cached prompt tokens are separated from
+tool-use blocks, signed `thinking` blocks, opaque `redacted_thinking` blocks and
+native usage fields. Thinking is never projected into ordinary response text.
+Cached prompt tokens are separated from
 uncached input tokens without changing the internal accounting totals.
 
 SSE emits message_start, content_block_start/delta/stop, message_delta and
-message_stop. Function argument fragments use input_json_delta. Errors after
+message_stop. Function argument fragments use input_json_delta; reasoning uses
+thinking_delta and signature_delta while redacted payloads remain opaque. Errors after
 stream start emit an error event without successful completion. Native streaming
 and the ordinary-response fallback both use the same output conversion. The
 conversion buffers at most 32 MiB per JSON response or unfinished SSE frame and
@@ -534,9 +537,11 @@ separate 32 MiB total limit and must form JSON objects before completion. A
 stream without a finish reason fails.
 
 Compatibility is partial. Unsupported top-level fields and block fields fail
-with a native invalid_request_error. In particular, thinking content blocks,
-server tools, documents, URL images, top_k, assistant
-prefill, text after tool_use and is_error=true tool results are not supported.
+with a native invalid_request_error. Thinking blocks are accepted only in
+assistant history, must precede text/tool blocks, retain their provider signature,
+and have a 1 MiB aggregate payload limit. Adapters without an explicit reasoning
+block contract reject them before upstream execution. Server tools, documents,
+URL images, top_k, text after tool_use and is_error=true tool results are not supported.
 All tool-use history requires matching results. Opaque provider tool metadata
 that cannot be represented in Messages produces an explicit conversion error.
 `metadata.user_id` is limited to 512 Unicode characters and remains request

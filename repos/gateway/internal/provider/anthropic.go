@@ -104,6 +104,9 @@ type anthropicContent struct {
 	Content      any                    `json:"content,omitempty"`
 	Citations    []anthropicCitation    `json:"citations,omitempty"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+	Thinking     string                 `json:"thinking,omitempty"`
+	Signature    string                 `json:"signature,omitempty"`
+	Data         string                 `json:"data,omitempty"`
 }
 
 type anthropicCitation struct {
@@ -142,7 +145,8 @@ func NewAnthropic(baseURL string, apiKey string, upstreamStream bool) Anthropic 
 	}
 }
 
-func (Anthropic) SupportsVision() bool { return true }
+func (Anthropic) SupportsVision() bool          { return true }
+func (Anthropic) SupportsReasoningBlocks() bool { return true }
 
 func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	if err := p.ValidateChatParameters(request); err != nil {
@@ -160,6 +164,9 @@ func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompl
 		return openai.ChatCompletionResponse{}, err
 	}
 	converted := anthropicToChatCompletion(response, request.Model)
+	if err := openai.ValidateReasoningBlocks(converted.Choices[0].Message.Reasoning); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	if response.StopReason == "stop_sequence" && response.StopSequence == nil {
 		return openai.ChatCompletionResponse{}, errors.New("Anthropic omitted matched stop sequence")
 	}
@@ -445,7 +452,8 @@ func anthropicMessages(messages []openai.Message) (any, []anthropicMessage) {
 			systemBlocks = append(systemBlocks, blocks...)
 			structuredSystem = structuredSystem || anthropicBlocksUseCache(blocks)
 		case "assistant":
-			blocks := anthropicContentBlocks(message.Content)
+			blocks := anthropicReasoningBlocks(message.Reasoning)
+			blocks = append(blocks, anthropicContentBlocks(message.Content)...)
 			for _, call := range message.ToolCalls {
 				var input any = map[string]any{}
 				if call.Function.Arguments != "" {
@@ -475,6 +483,14 @@ func anthropicMessages(messages []openai.Message) (any, []anthropicMessage) {
 		return systemBlocks, converted
 	}
 	return strings.Join(systemText, "\n\n"), converted
+}
+
+func anthropicReasoningBlocks(blocks []openai.ReasoningBlock) []anthropicContent {
+	result := make([]anthropicContent, 0, len(blocks))
+	for _, block := range blocks {
+		result = append(result, anthropicContent{Type: block.Type, Thinking: block.Thinking, Signature: block.Signature, Data: block.Data})
+	}
+	return result
 }
 
 func anthropicContentBlocks(value any) []anthropicContent {
@@ -674,7 +690,7 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 		Choices: []openai.Choice{
 			{
 				Index:        0,
-				Message:      openai.Message{Role: "assistant", Content: content, ToolCalls: toolCalls, Annotations: annotations},
+				Message:      openai.Message{Role: "assistant", Content: content, ToolCalls: toolCalls, Annotations: annotations, Reasoning: anthropicReasoning(response)},
 				FinishReason: anthropicFinishReason(response.StopReason),
 				StopSequence: anthropicMatchedStop(response.StopReason, response.StopSequence),
 			},
@@ -691,6 +707,16 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 			CompletionTokensDetails: anthropicCompletionTokenDetails(response.Usage),
 		},
 	}
+}
+
+func anthropicReasoning(response anthropicResponse) []openai.ReasoningBlock {
+	var result []openai.ReasoningBlock
+	for _, block := range response.Content {
+		if block.Type == "thinking" || block.Type == "redacted_thinking" {
+			result = append(result, openai.ReasoningBlock{Type: block.Type, Thinking: block.Thinking, Signature: block.Signature, Data: block.Data})
+		}
+	}
+	return result
 }
 
 func anthropicCompletionTokenDetails(usage anthropicUsage) *openai.CompletionTokenDetails {
@@ -861,6 +887,7 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 		},
 	}
 	toolIndexes := map[int]int{}
+	reasoningIndexes := map[int]int{}
 	textBlockOffsets := map[int]int{}
 	textBlockContents := map[int]string{}
 	err := scanSSEEvents(body, func(event string, payload string) error {
@@ -884,6 +911,16 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			response.Usage.SearchRequests = anthropicSearchRequests(streamEvent.Message.Usage)
 			response.Usage.PromptTokensDetails = &openai.PromptTokenDetails{CachedTokens: streamEvent.Message.Usage.CacheReadInputTokens, CacheWriteTokens: streamEvent.Message.Usage.CacheCreationInputTokens}
 		case "content_block_start":
+			if streamEvent.ContentBlock.Type == "thinking" || streamEvent.ContentBlock.Type == "redacted_thinking" {
+				reasoningIndex := len(response.Choices[0].Message.Reasoning)
+				reasoningIndexes[streamEvent.Index] = reasoningIndex
+				index := reasoningIndex
+				block := openai.ReasoningBlock{Index: &index, Type: streamEvent.ContentBlock.Type, Thinking: streamEvent.ContentBlock.Thinking, Signature: streamEvent.ContentBlock.Signature, Data: streamEvent.ContentBlock.Data}
+				response.Choices[0].Message.Reasoning = append(response.Choices[0].Message.Reasoning, block)
+				if err := write(openAIChatReasoningChunkPayload(response.ID, response.Model, block)); err != nil {
+					return err
+				}
+			}
 			if streamEvent.ContentBlock.Type == "text" {
 				textBlockOffsets[streamEvent.Index] = utf8.RuneCountInString(openai.ContentText(response.Choices[0].Message.Content))
 				textBlockContents[streamEvent.Index] = ""
@@ -898,6 +935,18 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 				}
 			}
 		case "content_block_delta":
+			if streamEvent.Delta.Type == "thinking_delta" || streamEvent.Delta.Type == "signature_delta" {
+				reasoningIndex, found := reasoningIndexes[streamEvent.Index]
+				if !found || reasoningIndex >= len(response.Choices[0].Message.Reasoning) {
+					return errors.New("Anthropic reasoning delta has no content block")
+				}
+				stored := &response.Choices[0].Message.Reasoning[reasoningIndex]
+				index := reasoningIndex
+				delta := openai.ReasoningBlock{Index: &index, Type: stored.Type, Thinking: streamEvent.Delta.Thinking, Signature: streamEvent.Delta.Signature}
+				stored.Thinking += streamEvent.Delta.Thinking
+				stored.Signature += streamEvent.Delta.Signature
+				return write(openAIChatReasoningChunkPayload(response.ID, response.Model, delta))
+			}
 			if streamEvent.Delta.Type == "text_delta" && streamEvent.Delta.Text != "" {
 				response.Choices[0].Message.Content = openai.ContentText(response.Choices[0].Message.Content) + streamEvent.Delta.Text
 				textBlockContents[streamEvent.Index] += streamEvent.Delta.Text
@@ -960,10 +1009,24 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 	if err != nil && err != io.EOF {
 		return openai.ChatCompletionResponse{}, err
 	}
+	if err := openai.ValidateReasoningBlocks(response.Choices[0].Message.Reasoning); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	if structured {
 		response = anthropicStructuredChat(response)
 	}
 	return response, nil
+}
+
+func openAIChatReasoningChunkPayload(id, model string, block openai.ReasoningBlock) string {
+	payload, err := json.Marshal(map[string]any{
+		"id": id, "object": "chat.completion.chunk", "created": time.Now().UTC().Unix(), "model": model,
+		"choices": []map[string]any{{"index": 0, "delta": map[string]any{"reasoning": []openai.ReasoningBlock{block}}, "finish_reason": nil}},
+	})
+	if err != nil {
+		return "{}"
+	}
+	return string(payload)
 }
 
 func openAIChatAnnotationChunkPayload(id, model string, annotation openai.ChatAnnotation) string {
@@ -1097,6 +1160,8 @@ type anthropicStreamEvent struct {
 	Delta        struct {
 		Type         string            `json:"type"`
 		Text         string            `json:"text"`
+		Thinking     string            `json:"thinking"`
+		Signature    string            `json:"signature"`
 		PartialJSON  string            `json:"partial_json"`
 		StopReason   string            `json:"stop_reason"`
 		StopSequence *string           `json:"stop_sequence"`

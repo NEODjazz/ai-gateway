@@ -141,7 +141,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		converted := openai.Message{Role: message.Role}
 		parts := []any{}
 		flush := func() {
-			if len(parts) > 0 || len(converted.ToolCalls) > 0 {
+			if len(parts) > 0 || len(converted.ToolCalls) > 0 || len(converted.Reasoning) > 0 {
 				converted.Content = parts
 				result.Messages = append(result.Messages, converted)
 				converted = openai.Message{Role: message.Role}
@@ -156,6 +156,31 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 				return result, errors.New("invalid content block")
 			}
 			switch kind.Type {
+			case "thinking":
+				var block struct {
+					Type      string `json:"type"`
+					Thinking  string `json:"thinking"`
+					Signature string `json:"signature"`
+				}
+				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "assistant" || len(parts) > 0 || len(converted.ToolCalls) > 0 {
+					return result, errors.New("invalid or misplaced thinking block")
+				}
+				converted.Reasoning = append(converted.Reasoning, openai.ReasoningBlock{Type: block.Type, Thinking: block.Thinking, Signature: block.Signature})
+				if err := openai.ValidateReasoningBlocks(converted.Reasoning); err != nil {
+					return result, err
+				}
+			case "redacted_thinking":
+				var block struct {
+					Type string `json:"type"`
+					Data string `json:"data"`
+				}
+				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "assistant" || len(parts) > 0 || len(converted.ToolCalls) > 0 {
+					return result, errors.New("invalid or misplaced redacted_thinking block")
+				}
+				converted.Reasoning = append(converted.Reasoning, openai.ReasoningBlock{Type: block.Type, Data: block.Data})
+				if err := openai.ValidateReasoningBlocks(converted.Reasoning); err != nil {
+					return result, err
+				}
 			case "text":
 				if len(converted.ToolCalls) > 0 {
 					return result, errors.New("text after tool_use is not supported")

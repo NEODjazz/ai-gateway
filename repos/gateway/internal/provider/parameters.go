@@ -144,6 +144,21 @@ func (p OpenAICompatible) ValidateEmbeddingParameters(request openai.EmbeddingRe
 }
 
 func validateChatAdapter(client Client, request openai.ChatCompletionRequest) error {
+	for _, message := range request.Messages {
+		if len(message.Reasoning) == 0 {
+			continue
+		}
+		if message.Role != "assistant" {
+			return &Error{Class: FailureClientRequest, Provider: "provider", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.reasoning", Err: errors.New("reasoning blocks require an assistant message")}
+		}
+		if err := openai.ValidateReasoningBlocks(message.Reasoning); err != nil {
+			return &Error{Class: FailureClientRequest, Provider: "provider", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.reasoning", Err: err}
+		}
+		support, ok := client.(interface{ SupportsReasoningBlocks() bool })
+		if !ok || !support.SupportsReasoningBlocks() {
+			return rejectParameters("provider", parameterCheck{"messages.reasoning", true})
+		}
+	}
 	if request.RequireMatchedStop {
 		reporter, ok := client.(interface{ ReportsMatchedStop() bool })
 		if !ok || !reporter.ReportsMatchedStop() {

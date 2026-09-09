@@ -1662,6 +1662,10 @@ func (r Router) Models() []openai.Model {
 func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modules.RequestContext {
 	attemptCtx := req
 	attemptCtx.Request = req.Request
+	attemptCtx.Request.Messages = append([]openai.Message(nil), req.Request.Messages...)
+	for index := range attemptCtx.Request.Messages {
+		attemptCtx.Request.Messages[index].Reasoning = append([]openai.ReasoningBlock(nil), req.Request.Messages[index].Reasoning...)
+	}
 	if req.CompletionRequest != nil {
 		completionRequest := *req.CompletionRequest
 		attemptCtx.CompletionRequest = &completionRequest

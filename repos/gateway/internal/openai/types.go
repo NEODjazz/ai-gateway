@@ -48,6 +48,54 @@ type Message struct {
 	ToolCallID   string           `json:"tool_call_id,omitempty"`
 	ToolCalls    []ToolCall       `json:"tool_calls,omitempty"`
 	FunctionCall *FunctionCall    `json:"function_call,omitempty"`
+	Reasoning    []ReasoningBlock `json:"reasoning,omitempty"`
+}
+
+// ReasoningBlock preserves signed and redacted reasoning returned by native
+// providers so it can be supplied on a later turn without exposing it as text.
+type ReasoningBlock struct {
+	Index     *int   `json:"index,omitempty"`
+	Type      string `json:"type"`
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Data      string `json:"data,omitempty"`
+}
+
+func ValidateReasoningBlocks(blocks []ReasoningBlock) error {
+	if len(blocks) > 128 {
+		return errors.New("message contains more than 128 reasoning blocks")
+	}
+	total := 0
+	indexes := map[int]bool{}
+	for _, block := range blocks {
+		if block.Index != nil && (*block.Index < 0 || *block.Index >= 128) {
+			return errors.New("reasoning block index is outside the supported range")
+		}
+		if block.Index != nil {
+			if indexes[*block.Index] {
+				return errors.New("reasoning block indexes must be unique")
+			}
+			indexes[*block.Index] = true
+		}
+		switch block.Type {
+		case "thinking":
+			if block.Thinking == "" || block.Signature == "" || block.Data != "" {
+				return errors.New("thinking blocks require thinking and signature")
+			}
+			total += len(block.Thinking) + len(block.Signature)
+		case "redacted_thinking":
+			if block.Data == "" || block.Thinking != "" || block.Signature != "" {
+				return errors.New("redacted_thinking blocks require data")
+			}
+			total += len(block.Data)
+		default:
+			return errors.New("unsupported reasoning block type")
+		}
+		if total > 1<<20 {
+			return errors.New("reasoning blocks exceed their size limit")
+		}
+	}
+	return nil
 }
 
 type LegacyFunctionChoice struct {

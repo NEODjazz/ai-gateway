@@ -53,6 +53,8 @@ type messagesWriter struct {
 	stopSequence      *string
 	usage             openai.Usage
 	tools             map[int]int
+	reasoning         map[int]int
+	reasoningTypes    map[int]string
 	toolArguments     [128]strings.Builder
 	argumentBytes     int
 	blocks            int
@@ -144,6 +146,16 @@ func messagesStop(reason string) (string, error) {
 }
 func messagesContent(message openai.Message) ([]any, error) {
 	content := []any{}
+	if err := openai.ValidateReasoningBlocks(message.Reasoning); err != nil {
+		return nil, err
+	}
+	for _, block := range message.Reasoning {
+		if block.Type == "thinking" {
+			content = append(content, map[string]any{"type": block.Type, "thinking": block.Thinking, "signature": block.Signature})
+		} else {
+			content = append(content, map[string]any{"type": block.Type, "data": block.Data})
+		}
+	}
 	if text := openai.ContentText(message.Content); text != "" {
 		content = append(content, map[string]any{"type": "text", "text": text})
 	}
@@ -272,6 +284,46 @@ func (w *messagesWriter) chunk(payload string) error {
 				w.argumentBytes += len(call.Function.Arguments)
 				w.toolArguments[*call.Index].WriteString(call.Function.Arguments)
 				if err := w.event("content_block_delta", map[string]any{"index": index, "delta": map[string]any{"type": "input_json_delta", "partial_json": call.Function.Arguments}}); err != nil {
+					return err
+				}
+			}
+		}
+		for _, block := range choice.Delta.Reasoning {
+			if block.Index == nil || *block.Index < 0 || *block.Index >= 128 || (block.Type != "thinking" && block.Type != "redacted_thinking") {
+				return errors.New("invalid reasoning delta")
+			}
+			if w.reasoning == nil {
+				w.reasoning = map[int]int{}
+				w.reasoningTypes = map[int]string{}
+			}
+			index, found := w.reasoning[*block.Index]
+			if !found {
+				index = w.blocks
+				w.blocks++
+				w.reasoning[*block.Index] = index
+				w.reasoningTypes[*block.Index] = block.Type
+				content := map[string]any{"type": block.Type}
+				if block.Type == "thinking" {
+					content["thinking"] = ""
+				} else {
+					if block.Data == "" {
+						return errors.New("redacted reasoning block requires data")
+					}
+					content["data"] = block.Data
+				}
+				if err := w.event("content_block_start", map[string]any{"index": index, "content_block": content}); err != nil {
+					return err
+				}
+			} else if w.reasoningTypes[*block.Index] != block.Type || block.Data != "" {
+				return errors.New("inconsistent reasoning delta")
+			}
+			if block.Thinking != "" {
+				if err := w.event("content_block_delta", map[string]any{"index": index, "delta": map[string]any{"type": "thinking_delta", "thinking": block.Thinking}}); err != nil {
+					return err
+				}
+			}
+			if block.Signature != "" {
+				if err := w.event("content_block_delta", map[string]any{"index": index, "delta": map[string]any{"type": "signature_delta", "signature": block.Signature}}); err != nil {
 					return err
 				}
 			}
