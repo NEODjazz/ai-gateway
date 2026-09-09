@@ -125,6 +125,7 @@ type OpenAICompatible struct {
 	upstreamStream        bool
 	rerankPath            string
 	completionStreamUsage bool
+	supportsSafePrompt    bool
 	client                *http.Client
 }
 

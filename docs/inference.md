@@ -177,6 +177,8 @@ Mistral не объявляет унаследованный compatible rerank t
 настроенная capability исключается router до modules, billing и network call.
 Chat `web_search_options` также отклоняется до выполнения: provider-managed web
 search не представлен native Chat Completions transport этого adapter.
+Mistral Chat принимает `safe_prompt` и передает явно заданные `true` и `false`
+в native request. Другие adapters отклоняют этот provider-specific параметр.
 
 ## Routing и модели
 

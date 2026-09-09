@@ -194,6 +194,7 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 		parameterCheck{"modalities", options.Modalities != nil},
 		parameterCheck{"audio", options.Audio != nil},
 		parameterCheck{"reasoning_effort", options.ReasoningEffort != ""},
+		parameterCheck{"safe_prompt", options.SafePrompt != nil},
 		parameterCheck{"n", options.N != nil},
 		parameterCheck{"safety_identifier", options.SafetyIdentifier != ""},
 		parameterCheck{"prompt_cache_key", options.PromptCacheKey != ""},
@@ -254,6 +255,7 @@ func (p OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRe
 	}
 	return rejectParameters(providerName,
 		parameterCheck{"store", request.Store != nil && *request.Store},
+		parameterCheck{"safe_prompt", request.SafePrompt != nil && !p.supportsSafePrompt},
 		parameterCheck{"service_tier", request.ServiceTier != ""},
 	)
 }

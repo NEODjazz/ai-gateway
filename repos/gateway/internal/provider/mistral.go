@@ -48,6 +48,7 @@ func NewMistral(baseURL, apiKey string, upstreamStream bool) Mistral {
 	}
 	compatible := NewOpenAICompatible(baseURL, apiKey, upstreamStream)
 	compatible.errorProvider = "mistral"
+	compatible.supportsSafePrompt = true
 	return Mistral{OpenAICompatible: compatible}
 }
 

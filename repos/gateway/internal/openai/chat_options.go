@@ -15,6 +15,7 @@ type ChatGenerationOptions struct {
 	Modalities           []string              `json:"modalities,omitempty"`
 	Audio                *ChatAudioOptions     `json:"audio,omitempty"`
 	ReasoningEffort      string                `json:"reasoning_effort,omitempty"`
+	SafePrompt           *bool                 `json:"safe_prompt,omitempty"`
 	N                    *int                  `json:"n,omitempty"`
 	SafetyIdentifier     string                `json:"safety_identifier,omitempty"`
 	PromptCacheKey       string                `json:"prompt_cache_key,omitempty"`
