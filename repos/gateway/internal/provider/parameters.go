@@ -139,6 +139,7 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 		parameterCheck{"n", options.N != nil},
 		parameterCheck{"safety_identifier", options.SafetyIdentifier != ""},
 		parameterCheck{"prompt_cache_key", options.PromptCacheKey != ""},
+		parameterCheck{"prompt_cache_options", options.PromptCacheOptions != nil},
 		parameterCheck{"service_tier", options.ServiceTier != ""},
 		parameterCheck{"verbosity", options.Verbosity != ""},
 		parameterCheck{"logprobs", options.Logprobs != nil},

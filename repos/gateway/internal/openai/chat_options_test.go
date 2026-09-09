@@ -12,7 +12,10 @@ func TestChatGenerationOptionValidation(t *testing.T) {
 		valid bool
 	}{
 		{`{}`, true},
-		{`{"metadata":{"trace":"one"},"store":false,"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-2,"logit_bias":{"10":-100}}`, true},
+		{`{"metadata":{"trace":"one"},"store":false,"prompt_cache_options":{"mode":"explicit","ttl":"30m"},"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-2,"logit_bias":{"10":-100}}`, true},
+		{`{"prompt_cache_options":{}}`, true},
+		{`{"prompt_cache_options":{"mode":"invalid"}}`, false},
+		{`{"prompt_cache_options":{"ttl":"24h"}}`, false},
 		{`{"metadata":{"trace":"` + strings.Repeat("я", 512) + `"}}`, true},
 		{`{"metadata":{"trace":"` + strings.Repeat("я", 513) + `"}}`, false},
 		{`{"n":0}`, false},

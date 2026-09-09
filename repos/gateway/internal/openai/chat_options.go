@@ -8,19 +8,25 @@ import (
 // ChatGenerationOptions contains optional controls shared with compatible wire
 // requests. Pointer fields preserve explicitly supplied false and zero values.
 type ChatGenerationOptions struct {
-	Metadata         map[string]string `json:"metadata,omitempty"`
-	Store            *bool             `json:"store,omitempty"`
-	ReasoningEffort  string            `json:"reasoning_effort,omitempty"`
-	N                *int              `json:"n,omitempty"`
-	SafetyIdentifier string            `json:"safety_identifier,omitempty"`
-	PromptCacheKey   string            `json:"prompt_cache_key,omitempty"`
-	ServiceTier      string            `json:"service_tier,omitempty"`
-	Verbosity        string            `json:"verbosity,omitempty"`
-	Logprobs         *bool             `json:"logprobs,omitempty"`
-	TopLogprobs      *int              `json:"top_logprobs,omitempty"`
-	FrequencyPenalty *float64          `json:"frequency_penalty,omitempty"`
-	PresencePenalty  *float64          `json:"presence_penalty,omitempty"`
-	LogitBias        map[string]int    `json:"logit_bias,omitempty"`
+	Metadata           map[string]string   `json:"metadata,omitempty"`
+	Store              *bool               `json:"store,omitempty"`
+	ReasoningEffort    string              `json:"reasoning_effort,omitempty"`
+	N                  *int                `json:"n,omitempty"`
+	SafetyIdentifier   string              `json:"safety_identifier,omitempty"`
+	PromptCacheKey     string              `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
+	ServiceTier        string              `json:"service_tier,omitempty"`
+	Verbosity          string              `json:"verbosity,omitempty"`
+	Logprobs           *bool               `json:"logprobs,omitempty"`
+	TopLogprobs        *int                `json:"top_logprobs,omitempty"`
+	FrequencyPenalty   *float64            `json:"frequency_penalty,omitempty"`
+	PresencePenalty    *float64            `json:"presence_penalty,omitempty"`
+	LogitBias          map[string]int      `json:"logit_bias,omitempty"`
+}
+
+type PromptCacheOptions struct {
+	Mode string `json:"mode,omitempty"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 func (o ChatGenerationOptions) Validate() string {
@@ -32,6 +38,16 @@ func (o ChatGenerationOptions) Validate() string {
 	}
 	if utf8.RuneCountInString(o.SafetyIdentifier) > 64 {
 		return "safety_identifier must contain at most 64 characters"
+	}
+	if o.PromptCacheOptions != nil {
+		switch o.PromptCacheOptions.Mode {
+		case "", "implicit", "explicit":
+		default:
+			return "prompt_cache_options.mode must be implicit or explicit"
+		}
+		if o.PromptCacheOptions.TTL != "" && o.PromptCacheOptions.TTL != "30m" {
+			return "prompt_cache_options.ttl must be 30m"
+		}
 	}
 	if !validServiceTier(o.ServiceTier) {
 		return "unsupported service_tier value"
