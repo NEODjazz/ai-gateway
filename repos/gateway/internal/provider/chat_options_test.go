@@ -24,11 +24,11 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 				}
 				if streaming {
 					for _, token := range []string{"one", "two"} {
-						_, _ = fmt.Fprintf(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":%q},\"logprobs\":{\"content\":[{\"token\":%q,\"logprob\":-0.5,\"bytes\":[1],\"top_logprobs\":[]}]}},{\"index\":1,\"delta\":{\"content\":%q}}]}\n\n", token, token, token)
+						_, _ = fmt.Fprintf(w, "data: {\"id\":\"chat-test\",\"created\":123,\"model\":\"test\",\"metadata\":{\"trace\":\"one\"},\"service_tier\":\"priority\",\"system_fingerprint\":\"fp-test\",\"choices\":[{\"index\":0,\"delta\":{\"content\":%q},\"logprobs\":{\"content\":[{\"token\":%q,\"logprob\":-0.5,\"bytes\":[1],\"top_logprobs\":[]}]}},{\"index\":1,\"delta\":{\"content\":%q}}]}\n\n", token, token, token)
 					}
 					_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 				} else {
-					_, _ = fmt.Fprint(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"one"},"logprobs":{"content":[{"token":"one","logprob":-0.5,"bytes":[1],"top_logprobs":[]}]}},{"index":1,"message":{"role":"assistant","content":"two"}}]}`)
+					_, _ = fmt.Fprint(w, `{"id":"chat-test","object":"chat.completion","created":123,"model":"test","metadata":{"trace":"one"},"service_tier":"priority","system_fingerprint":"fp-test","choices":[{"index":0,"message":{"role":"assistant","content":"one"},"logprobs":{"content":[{"token":"one","logprob":-0.5,"bytes":[1],"top_logprobs":[]}]}},{"index":1,"message":{"role":"assistant","content":"two"}}]}`)
 				}
 			}))
 			defer server.Close()
@@ -69,6 +69,9 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 			}
 			if len(response.Choices) != 2 || response.Choices[0].Logprobs == nil || len(response.Choices[0].Logprobs.Content) != wantCount {
 				t.Fatalf("response logprobs lost: %+v", response)
+			}
+			if response.ID != "chat-test" || response.Created != 123 || response.Model != "test" || response.Metadata["trace"] != "one" || response.ServiceTier != "priority" || response.SystemFingerprint != "fp-test" {
+				t.Fatalf("response envelope lost: %+v", response)
 			}
 		})
 	}
@@ -126,6 +129,23 @@ func TestChatCompletionJSONResponseIsBoundedAndExact(t *testing.T) {
 	reader := &embeddingLimitReader{}
 	if err := decodeChatCompletionResponse(reader, &response); err == nil || reader.read != maxChatCompletionResponseBytes+1 {
 		t.Fatalf("unbounded chat completion response: bytes=%d err=%v", reader.read, err)
+	}
+}
+
+func TestCompatibleChatRejectsInvalidResponseEnvelope(t *testing.T) {
+	for name, payload := range map[string]string{
+		"negative timestamp": `{"created":-1,"choices":[]}`,
+		"oversized metadata": `{"metadata":{"trace":"` + strings.Repeat("x", 513) + `"},"choices":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprint(w, payload)
+			}))
+			defer server.Close()
+			if _, err := NewOpenAICompatible(server.URL, "", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test"}); err == nil {
+				t.Fatal("invalid response envelope accepted")
+			}
+		})
 	}
 }
 

@@ -1175,6 +1175,13 @@ OpenAI-compatible JSON and streaming requests preserve the supplied value.
 Exact and semantic cache keys include it because verbosity changes output
 semantics. Native adapters reject it explicitly before execution.
 
+OpenAI-compatible Chat responses preserve the upstream `created`, `metadata`,
+`service_tier` and `system_fingerprint` envelope in JSON and in responses
+assembled from SSE. The stream collector rejects a provider stream that changes
+one of these identities between events. Synthetic SSE reuses the collected
+upstream timestamp and envelope for every generated event; when `created` is
+absent, it selects one timestamp for the whole synthetic stream.
+
 Chat и Responses распознают `service_tier` и проверяют значения `auto`,
 `default`, `flex`, `scale`, `priority`, `fast` и `ultrafast`. Все adapters пока
 возвращают `400 unsupported_parameter` до provider modules, TPM, cache, billing и

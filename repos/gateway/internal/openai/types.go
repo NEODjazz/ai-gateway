@@ -103,11 +103,15 @@ type JSONSchemaFormat struct {
 }
 
 type ChatCompletionResponse struct {
-	ID      string   `json:"id"`
-	Object  string   `json:"object"`
-	Model   string   `json:"model"`
-	Choices []Choice `json:"choices"`
-	Usage   Usage    `json:"usage"`
+	ID                string            `json:"id"`
+	Object            string            `json:"object"`
+	Created           int64             `json:"created,omitempty"`
+	Model             string            `json:"model"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
+	ServiceTier       string            `json:"service_tier,omitempty"`
+	SystemFingerprint string            `json:"system_fingerprint,omitempty"`
+	Choices           []Choice          `json:"choices"`
+	Usage             Usage             `json:"usage"`
 }
 
 type CompletionRequest struct {

@@ -4,13 +4,8 @@ import "unicode/utf8"
 
 // Validate checks provider-independent Responses generation options.
 func (r ResponseRequest) Validate() string {
-	if len(r.Metadata) > 16 {
-		return "metadata must contain at most 16 entries"
-	}
-	for key, value := range r.Metadata {
-		if utf8.RuneCountInString(key) > 64 || utf8.RuneCountInString(value) > 512 {
-			return "metadata keys must be at most 64 characters and values at most 512 characters"
-		}
+	if message := ValidateMetadata(r.Metadata); message != "" {
+		return message
 	}
 	if utf8.RuneCountInString(r.SafetyIdentifier) > 64 {
 		return "safety_identifier must contain at most 64 characters"
@@ -35,6 +30,19 @@ func (r ResponseRequest) Validate() string {
 	}
 	if r.Truncation != nil && *r.Truncation != "auto" && *r.Truncation != "disabled" {
 		return "truncation must be auto or disabled"
+	}
+	return ""
+}
+
+// ValidateMetadata checks the shared metadata limits used by inference contracts.
+func ValidateMetadata(metadata map[string]string) string {
+	if len(metadata) > 16 {
+		return "metadata must contain at most 16 entries"
+	}
+	for key, value := range metadata {
+		if utf8.RuneCountInString(key) > 64 || utf8.RuneCountInString(value) > 512 {
+			return "metadata keys must be at most 64 characters and values at most 512 characters"
+		}
 	}
 	return ""
 }

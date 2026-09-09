@@ -1087,54 +1087,61 @@ func writeError(w http.ResponseWriter, status int, code string, message string) 
 func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatCompletionResponse) {
 	writeStreamHeaders(w)
 	w.WriteHeader(http.StatusOK)
+	created := response.Created
+	if created == 0 {
+		created = time.Now().UTC().Unix()
+	}
+	envelope := func() map[string]any {
+		chunk := map[string]any{
+			"id": response.ID, "object": "chat.completion.chunk", "model": response.Model, "created": created,
+		}
+		if len(response.Metadata) > 0 {
+			chunk["metadata"] = response.Metadata
+		}
+		if response.ServiceTier != "" {
+			chunk["service_tier"] = response.ServiceTier
+		}
+		if response.SystemFingerprint != "" {
+			chunk["system_fingerprint"] = response.SystemFingerprint
+		}
+		return chunk
+	}
 
 	for _, choice := range response.Choices {
 		calls := append([]openai.ToolCall(nil), choice.Message.ToolCalls...)
 		for index := range calls {
 			calls[index].Index = &index
 		}
-		writeSSE(w, map[string]any{
-			"id":      response.ID,
-			"object":  "chat.completion.chunk",
-			"model":   response.Model,
-			"created": time.Now().UTC().Unix(),
-			"choices": []map[string]any{
-				{
-					"index":    choice.Index,
-					"logprobs": choice.Logprobs,
-					"delta": map[string]any{
-						"role":       choice.Message.Role,
-						"content":    openai.ContentText(choice.Message.Content),
-						"tool_calls": calls,
-					},
-					"finish_reason": nil,
+		content := envelope()
+		content["choices"] = []map[string]any{
+			{
+				"index":    choice.Index,
+				"logprobs": choice.Logprobs,
+				"delta": map[string]any{
+					"role":       choice.Message.Role,
+					"content":    openai.ContentText(choice.Message.Content),
+					"tool_calls": calls,
 				},
+				"finish_reason": nil,
 			},
-		})
-		writeSSE(w, map[string]any{
-			"id":      response.ID,
-			"object":  "chat.completion.chunk",
-			"model":   response.Model,
-			"created": time.Now().UTC().Unix(),
-			"choices": []map[string]any{
-				{
-					"index":         choice.Index,
-					"delta":         map[string]any{},
-					"finish_reason": choice.FinishReason,
-					"stop_sequence": choice.StopSequence,
-				},
+		}
+		writeSSE(w, content)
+		finished := envelope()
+		finished["choices"] = []map[string]any{
+			{
+				"index":         choice.Index,
+				"delta":         map[string]any{},
+				"finish_reason": choice.FinishReason,
+				"stop_sequence": choice.StopSequence,
 			},
-		})
+		}
+		writeSSE(w, finished)
 	}
 
-	writeSSE(w, map[string]any{
-		"id":      response.ID,
-		"object":  "chat.completion.chunk",
-		"model":   response.Model,
-		"created": time.Now().UTC().Unix(),
-		"choices": []any{},
-		"usage":   response.Usage,
-	})
+	usage := envelope()
+	usage["choices"] = []any{}
+	usage["usage"] = response.Usage
+	writeSSE(w, usage)
 	writeSSEDone(w)
 }
 

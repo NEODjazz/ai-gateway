@@ -86,9 +86,20 @@ func TestInferenceDecoderRejectsUnknownMessageField(t *testing.T) {
 
 func TestSyntheticChatStreamPreservesLogprobs(t *testing.T) {
 	response := httptest.NewRecorder()
-	writeChatCompletionStream(response, openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "hello"}, Logprobs: &openai.ChoiceLogprobs{Content: []openai.TokenLogprob{{Token: "hello", Logprob: -0.5}}}}}})
+	writeChatCompletionStream(response, openai.ChatCompletionResponse{
+		ID: "chat-test", Created: 123, Model: "test", Metadata: map[string]string{"trace": "one"}, ServiceTier: "priority", SystemFingerprint: "fp-test",
+		Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "hello"}, Logprobs: &openai.ChoiceLogprobs{Content: []openai.TokenLogprob{{Token: "hello", Logprob: -0.5}}}}},
+	})
 	if !strings.Contains(response.Body.String(), `"logprobs":{"content":[{"token":"hello","logprob":-0.5`) {
 		t.Fatalf("synthetic SSE dropped logprobs: %s", response.Body.String())
+	}
+	for _, field := range []string{`"metadata":{"trace":"one"}`, `"service_tier":"priority"`, `"system_fingerprint":"fp-test"`} {
+		if !strings.Contains(response.Body.String(), field) {
+			t.Fatalf("synthetic SSE dropped response envelope %s: %s", field, response.Body.String())
+		}
+	}
+	if count := strings.Count(response.Body.String(), `"created":123`); count != 3 {
+		t.Fatalf("synthetic SSE did not reuse the upstream timestamp in every event: count=%d body=%s", count, response.Body.String())
 	}
 }
 

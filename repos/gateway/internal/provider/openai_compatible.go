@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -376,6 +377,9 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	if err := decodeChatCompletionResponse(resp.Body, &response); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	if err := validateChatCompletionEnvelope(response); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	if err := validateCompletionUsage(response.Usage); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
@@ -383,6 +387,16 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 		return openai.ChatCompletionResponse{}, err
 	}
 	return response, nil
+}
+
+func validateChatCompletionEnvelope(response openai.ChatCompletionResponse) error {
+	if response.Created < 0 {
+		return errors.New("provider returned invalid chat completion timestamp")
+	}
+	if message := openai.ValidateMetadata(response.Metadata); message != "" {
+		return fmt.Errorf("provider returned invalid chat completion metadata: %s", message)
+	}
+	return nil
 }
 
 const maxChatCompletionResponseBytes = 32 << 20
@@ -673,15 +687,20 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			},
 		},
 	}
+	var idSeen, modelSeen, createdSeen, metadataSeen, serviceTierSeen, fingerprintSeen bool
 	err := scanSSEData(body, func(payload string) error {
 		if payload == "[DONE]" {
 			return io.EOF
 		}
 		var chunk struct {
-			ID      string        `json:"id"`
-			Model   string        `json:"model"`
-			Usage   *openai.Usage `json:"usage"`
-			Choices []struct {
+			ID                string             `json:"id"`
+			Created           *int64             `json:"created"`
+			Model             string             `json:"model"`
+			Metadata          *map[string]string `json:"metadata"`
+			ServiceTier       string             `json:"service_tier"`
+			SystemFingerprint string             `json:"system_fingerprint"`
+			Usage             *openai.Usage      `json:"usage"`
+			Choices           []struct {
 				Index int `json:"index"`
 				Delta struct {
 					Role      string            `json:"role"`
@@ -697,10 +716,52 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			return err
 		}
 		if chunk.ID != "" {
+			if idSeen && response.ID != chunk.ID {
+				return errors.New("provider changed chat completion ID during stream")
+			}
 			response.ID = chunk.ID
+			idSeen = true
 		}
 		if chunk.Model != "" {
+			if modelSeen && response.Model != chunk.Model {
+				return errors.New("provider changed chat completion model during stream")
+			}
 			response.Model = chunk.Model
+			modelSeen = true
+		}
+		if chunk.Created != nil {
+			if *chunk.Created < 0 {
+				return errors.New("provider returned invalid chat completion timestamp")
+			}
+			if createdSeen && response.Created != *chunk.Created {
+				return errors.New("provider changed chat completion timestamp during stream")
+			}
+			response.Created = *chunk.Created
+			createdSeen = true
+		}
+		if chunk.Metadata != nil {
+			if message := openai.ValidateMetadata(*chunk.Metadata); message != "" {
+				return fmt.Errorf("provider returned invalid chat completion metadata: %s", message)
+			}
+			if metadataSeen && !maps.Equal(response.Metadata, *chunk.Metadata) {
+				return errors.New("provider changed chat completion metadata during stream")
+			}
+			response.Metadata = *chunk.Metadata
+			metadataSeen = true
+		}
+		if chunk.ServiceTier != "" {
+			if serviceTierSeen && response.ServiceTier != chunk.ServiceTier {
+				return errors.New("provider changed chat completion service tier during stream")
+			}
+			response.ServiceTier = chunk.ServiceTier
+			serviceTierSeen = true
+		}
+		if chunk.SystemFingerprint != "" {
+			if fingerprintSeen && response.SystemFingerprint != chunk.SystemFingerprint {
+				return errors.New("provider changed chat completion system fingerprint during stream")
+			}
+			response.SystemFingerprint = chunk.SystemFingerprint
+			fingerprintSeen = true
 		}
 		if chunk.Usage != nil {
 			if err := validateCompletionUsage(*chunk.Usage); err != nil {

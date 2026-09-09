@@ -715,6 +715,42 @@ func TestChatStreamRejectsInvalidIndicesBeforeWriting(t *testing.T) {
 	}
 }
 
+func TestChatStreamRejectsChangingResponseEnvelope(t *testing.T) {
+	first := `{"id":"chat-one","created":123,"model":"model-one","metadata":{"trace":"one"},"service_tier":"priority","system_fingerprint":"fp-one","choices":[]}`
+	for name, second := range map[string]string{
+		"id":                 `{"id":"chat-two","choices":[]}`,
+		"created":            `{"created":124,"choices":[]}`,
+		"model":              `{"model":"model-two","choices":[]}`,
+		"metadata":           `{"metadata":{"trace":"two"},"choices":[]}`,
+		"service tier":       `{"service_tier":"scale","choices":[]}`,
+		"system fingerprint": `{"system_fingerprint":"fp-two","choices":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			callbacks := 0
+			payload := "data: " + first + "\n\ndata: " + second + "\n\n"
+			_, err := streamChatCompletionData(strings.NewReader(payload), "fallback", func(string) error { callbacks++; return nil })
+			if err == nil || callbacks != 1 {
+				t.Fatalf("changing envelope was forwarded: err=%v callbacks=%d", err, callbacks)
+			}
+		})
+	}
+}
+
+func TestChatStreamRejectsInvalidResponseEnvelope(t *testing.T) {
+	for name, payload := range map[string]string{
+		"negative timestamp": `{"created":-1,"choices":[]}`,
+		"oversized metadata": `{"metadata":{"trace":"` + strings.Repeat("x", 513) + `"},"choices":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			wrote := false
+			_, err := streamChatCompletionData(strings.NewReader("data: "+payload+"\n\n"), "test", func(string) error { wrote = true; return nil })
+			if err == nil || wrote {
+				t.Fatalf("invalid response envelope was forwarded: err=%v wrote=%v", err, wrote)
+			}
+		})
+	}
+}
+
 func TestChatStreamIndexBoundaries(t *testing.T) {
 	payload := `data: {"choices":[{"index":127,"delta":{"tool_calls":[{"index":127,"function":{"arguments":"{}"}}]}}]}` + "\n\n"
 	response, err := decodeChatCompletionStream(strings.NewReader(payload), "test")
