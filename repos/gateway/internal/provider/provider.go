@@ -115,6 +115,14 @@ type RerankClient interface {
 	Rerank(ctx context.Context, request openai.RerankRequest) (openai.RerankResponse, error)
 }
 
+type ModerationProvider interface {
+	Moderations(ctx context.Context, req modules.RequestContext) (openai.ModerationResponse, error)
+}
+
+type ModerationClient interface {
+	Moderations(ctx context.Context, request openai.ModerationRequest) (openai.ModerationResponse, error)
+}
+
 type MCPClient interface {
 	SupportsMCP() bool
 }
@@ -1014,6 +1022,101 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 	return openai.RerankResponse{}, joined
 }
 
+func (r Router) Moderations(ctx context.Context, req modules.RequestContext) (openai.ModerationResponse, error) {
+	if req.ModerationRequest == nil {
+		return openai.ModerationResponse{}, errors.New("missing moderation request")
+	}
+	request := *req.ModerationRequest
+	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "moderation")
+	if len(candidates) == 0 {
+		return openai.ModerationResponse{}, fmt.Errorf("no moderation endpoint for provider=%q model=%q", request.Provider, request.Model)
+	}
+	_, err := openai.InspectModerationInput(request.Input)
+	if err != nil {
+		return openai.ModerationResponse{}, err
+	}
+	var errs []error
+	var lastAttempt *modules.RequestContext
+	mirrored := false
+	totalRetries, fallbackCount := 0, 0
+	progress := newRouteProgress(candidates)
+	if progress.initialFailure != nil {
+		errs = append(errs, progress.initialFailure)
+		fallbackCount = 1
+	}
+	for candidateIndex, endpoint := range candidates {
+		if !progress.allows(endpoint) {
+			continue
+		}
+		client, ok := endpoint.Provider.(ModerationClient)
+		if !ok {
+			continue
+		}
+		progress.enter(endpoint)
+		attemptCtx := providerAttemptContext(req, endpoint)
+		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
+		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
+			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
+			errs = append(errs, err)
+			progress.fail(err)
+			continue
+		}
+		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
+			if terminalModuleError(err) || ctx.Err() != nil {
+				return openai.ModerationResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			}
+			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			errs = append(errs, wrapped)
+			progress.fail(err)
+			continue
+		}
+		if attemptCtx.ModerationRequest == nil {
+			return openai.ModerationResponse{}, fmt.Errorf("%s/%s modules removed moderation request", endpoint.Type, endpoint.Name)
+		}
+		attemptInfo, err := openai.InspectModerationInput(attemptCtx.ModerationRequest.Input)
+		if err != nil {
+			return openai.ModerationResponse{}, fmt.Errorf("%s/%s modules returned invalid moderation input: %w", endpoint.Type, endpoint.Name, err)
+		}
+		started := time.Now()
+		lastAttempt = &attemptCtx
+		if !mirrored {
+			r.mirrorModerations(ctx, req.RequestID, *attemptCtx.ModerationRequest, request.Model)
+			mirrored = true
+		}
+		response, retries, err := r.callModerations(ctx, endpoint, client, *attemptCtx.ModerationRequest)
+		totalRetries += retries
+		setAttemptMetadata(&attemptCtx, started, err)
+		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
+		if err == nil {
+			if validationErr := validateModerationResponse(response, attemptInfo.ResultCount); validationErr != nil {
+				err = validationErr
+			} else {
+				attemptCtx.ModerationResponse = &response
+				if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
+					return openai.ModerationResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+				}
+				return response, nil
+			}
+		}
+		errs = append(errs, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err))
+		progress.fail(err)
+		if ctx.Err() != nil || !progress.hasNext(candidates[candidateIndex+1:]) {
+			joined := errors.Join(errs...)
+			r.modules.RunFailure(ctx, lastAttempt, joined)
+			return openai.ModerationResponse{}, joined
+		}
+		fallbackCount++
+	}
+	if len(errs) == 0 {
+		errs = append(errs, errors.New("no selected endpoint implements moderations"))
+	}
+	joined := errors.Join(errs...)
+	if lastAttempt != nil {
+		r.modules.RunFailure(ctx, lastAttempt, joined)
+	}
+	return openai.ModerationResponse{}, joined
+}
+
 func validateRerankResponse(response openai.RerankResponse, documentCount int) error {
 	if response.Meta != nil {
 		if units := response.Meta.BilledUnits; units != nil && (units.SearchUnits != units.SearchUnits || units.SearchUnits < 0 || units.SearchUnits > 1.7976931348623157e308 || units.TotalTokens < 0) {
@@ -1272,12 +1375,19 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 			attemptCtx.RerankRequest = &rerankRequest
 		}
 	}
+	if req.ModerationRequest != nil {
+		moderationRequest, ok := cloneMirrorRequest(*req.ModerationRequest)
+		if ok {
+			attemptCtx.ModerationRequest = &moderationRequest
+		}
+	}
 	attemptCtx.Response = nil
 	attemptCtx.CompletionResponse = nil
 	attemptCtx.ResponsesResponse = nil
 	attemptCtx.CompactedResponse = nil
 	attemptCtx.EmbeddingResponse = nil
 	attemptCtx.RerankResponse = nil
+	attemptCtx.ModerationResponse = nil
 	attemptCtx.Usage = nil
 	attemptCtx.AnonymizationValues = nil
 	attemptCtx.Metadata = cloneMetadata(req.Metadata)
@@ -1310,6 +1420,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		if attemptCtx.RerankRequest != nil {
 			attemptCtx.RerankRequest.Model = routingModel
 		}
+		if attemptCtx.ModerationRequest != nil {
+			attemptCtx.ModerationRequest.Model = routingModel
+		}
 		attemptCtx.Metadata["provider.original_model"] = originalModel
 		attemptCtx.Metadata["provider.routed_model"] = routingModel
 		attemptCtx.Metadata["provider.fallback_type"] = endpoint.FallbackType
@@ -1328,6 +1441,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		}
 		if attemptCtx.RerankRequest != nil {
 			attemptCtx.RerankRequest.Model = upstreamModel
+		}
+		if attemptCtx.ModerationRequest != nil {
+			attemptCtx.ModerationRequest.Model = upstreamModel
 		}
 		attemptCtx.Metadata["provider.requested_model"] = requestedModel
 		attemptCtx.Metadata["provider.upstream_model"] = upstreamModel
@@ -1525,6 +1641,36 @@ func (r Router) callRerank(ctx context.Context, endpoint Endpoint, client Rerank
 		}
 	}
 	return openai.RerankResponse{}, endpointMaxRetries(endpoint), err
+}
+
+func (r Router) callModerations(ctx context.Context, endpoint Endpoint, client ModerationClient, request openai.ModerationRequest) (openai.ModerationResponse, int, error) {
+	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	if err != nil {
+		return openai.ModerationResponse{}, 0, err
+	}
+	defer release()
+	if err := r.health.permit(ctx, endpoint); err != nil {
+		return openai.ModerationResponse{}, 0, err
+	}
+	var response openai.ModerationResponse
+	for attempt := 0; attempt <= endpointMaxRetries(endpoint); attempt++ {
+		providerCtx, finish := r.startProviderCall(ctx, endpoint, "moderations")
+		response, err = client.Moderations(providerCtx, request)
+		finish(err)
+		if err == nil {
+			r.health.success(ctx, endpoint)
+			return response, attempt, nil
+		}
+		if ctx.Err() != nil || attempt >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
+			r.health.failure(ctx, endpoint, err)
+			return openai.ModerationResponse{}, attempt, err
+		}
+		if waitErr := r.retry.beforeRetry(ctx, err, attempt); waitErr != nil {
+			r.health.failure(ctx, endpoint, waitErr)
+			return openai.ModerationResponse{}, attempt, waitErr
+		}
+	}
+	return openai.ModerationResponse{}, endpointMaxRetries(endpoint), err
 }
 
 type streamAttemptTracker struct {
@@ -1977,11 +2123,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "web_search") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache")
+	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "web_search") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"mcp", "vision", "rerank", "web_search", "audio", "prompt_cache"} {
+	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "web_search", "audio", "prompt_cache"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

@@ -34,6 +34,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/v1/responses/{id}/input_items"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListResponseInputItems) }},
 	{RouteContract{http.MethodPost, "/v1/embeddings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Embeddings) }},
 	{RouteContract{http.MethodPost, "/v1/rerank"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Rerank) }},
+	{RouteContract{http.MethodPost, "/v1/moderations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Moderations) }},
 	{RouteContract{http.MethodGet, "/admin/v1/session"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetAdminSession) }},
 	{RouteContract{http.MethodGet, "/admin/v1/keys"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListVirtualKeys) }},
 	{RouteContract{http.MethodPost, "/admin/v1/keys"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateVirtualKey) }},

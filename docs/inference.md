@@ -98,7 +98,9 @@ request и исключает несовместимые deployments до provid
 
 Legacy endpoint без capabilities сохраняет совместимость с базовыми chat,
 responses и embeddings flows, но не является неявным opt-in для `mcp`, `vision`,
-`web_search` или `rerank`. Для новых deployments задавайте capabilities явно.
+`web_search`, `rerank` или `moderation`. Для новых deployments задавайте capabilities явно.
+
+`POST /v1/moderations` принимает одиночный текст, batch строк либо массив `text`/`image_url` частей. Пустые, смешанные и неизвестные вложенные формы отклоняются до provider call. Запрос проходит общие authentication, access, TPM, guardrail, retry и billing стадии. Routing требует явную deployment и model capability `moderation`; при отсутствии model используется `omni-moderation-latest`. Provider response ограничен по размеру и проверяется на число результатов, диапазон scores, одинаковые category keys, допустимые input types и согласованность общего `flagged`. Так как публичный ответ не содержит token usage, billing commit использует консервативную оценку входного текста и помечает usage как estimated. При включенном AV remote image URL отклоняется fail-closed, поскольку gateway не загружает внешний контент от имени scanner; проверенные data image URL передаются scanner как bounded attachment.
 
 Vision принимает только inline `data:image/{jpeg,png,gif,webp};base64,...`.
 Remote URLs запрещены. AV должен быть включён; media type проверяется по

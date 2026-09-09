@@ -893,6 +893,62 @@ func (h Handler) Rerank(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h Handler) Moderations(w http.ResponseWriter, r *http.Request) {
+	var request openai.ModerationRequest
+	if !decodeInferenceRequest(w, r, &request) {
+		return
+	}
+	if strings.TrimSpace(request.Model) == "" {
+		request.Model = "omni-moderation-latest"
+	}
+	if _, err := openai.InspectModerationInput(request.Input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	reqCtx := modules.RequestContext{
+		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r), ModerationRequest: &request,
+		Request: openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model},
+	}
+	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
+		return
+	}
+	reqCtx.APIKey = ""
+	if reqCtx.ModerationRequest == nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
+		return
+	}
+	request = *reqCtx.ModerationRequest
+	if _, err := openai.InspectModerationInput(request.Input); err != nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid moderation input")
+		return
+	}
+	if !h.prepareAccessGroups(w, &reqCtx) {
+		return
+	}
+	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, openai.ModerationInputTokenCount(request.Input)) {
+		return
+	}
+	if !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+		return
+	}
+	moderationProvider, ok := h.provider.(provider.ModerationProvider)
+	if !ok {
+		writeError(w, http.StatusBadGateway, "provider_failed", "moderations are not supported by the configured provider")
+		return
+	}
+	response, err := moderationProvider.Moderations(r.Context(), reqCtx)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func validateRerankRequest(request openai.RerankRequest) string {
 	if strings.TrimSpace(request.Model) == "" {
 		return "model is required"

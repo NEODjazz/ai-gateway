@@ -52,6 +52,16 @@ func TestScanPayloadIncludesRerankTextOnly(t *testing.T) {
 	}
 }
 
+func TestModerationPayloadAndImageScanning(t *testing.T) {
+	req := RequestContext{ModerationRequest: &openai.ModerationRequest{Input: []any{map[string]any{"type": "text", "text": "private moderation text"}, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.test/image.png"}}}}}
+	if payload := scanPayload(&req); !strings.Contains(payload, "private moderation text") {
+		t.Fatalf("moderation text missing: %q", payload)
+	}
+	if _, err := requestImageAttachments(&req); err == nil {
+		t.Fatal("expected remote moderation image to fail closed for AV scanning")
+	}
+}
+
 func TestScanPayloadIncludesToolArgumentsAndResponseFunctionOutput(t *testing.T) {
 	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{
 		Role: "assistant", ToolCalls: []openai.ToolCall{{Function: openai.FunctionCall{Arguments: `{"email":"user@example.com"}`}}},

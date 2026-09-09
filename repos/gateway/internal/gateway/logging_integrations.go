@@ -268,6 +268,9 @@ func loggingEvent(req *modules.RequestContext, status string) LoggingEvent {
 	if req.RerankRequest != nil {
 		event.Model = req.RerankRequest.Model
 	}
+	if req.ModerationRequest != nil {
+		event.Model = req.ModerationRequest.Model
+	}
 	if req.Usage != nil {
 		event.InputTokens = req.Usage.PromptTokens
 		event.OutputTokens = req.Usage.CompletionTokens

@@ -111,6 +111,11 @@ type openAICompatibleRerankRequest struct {
 	MaxTokensPerDoc *int     `json:"max_tokens_per_doc,omitempty"`
 }
 
+type openAICompatibleModerationRequest struct {
+	Model string `json:"model,omitempty"`
+	Input any    `json:"input"`
+}
+
 type OpenAICompatible struct {
 	baseURL               string
 	apiKey                string
@@ -172,6 +177,41 @@ func (p OpenAICompatible) Rerank(ctx context.Context, request openai.RerankReque
 	var response openai.RerankResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&response); err != nil {
 		return openai.RerankResponse{}, err
+	}
+	return response, nil
+}
+
+func (p OpenAICompatible) Moderations(ctx context.Context, request openai.ModerationRequest) (openai.ModerationResponse, error) {
+	body, err := json.Marshal(openAICompatibleModerationRequest{Model: request.Model, Input: request.Input})
+	if err != nil {
+		return openai.ModerationResponse{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(p.baseURL, "moderations"), bytes.NewReader(body))
+	if err != nil {
+		return openai.ModerationResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return openai.ModerationResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return openai.ModerationResponse{}, responseStatusError("openai-compatible", resp)
+	}
+	response, err := decodeModerationResponse(resp.Body)
+	if err != nil {
+		return openai.ModerationResponse{}, err
+	}
+	info, err := openai.InspectModerationInput(request.Input)
+	if err != nil {
+		return openai.ModerationResponse{}, err
+	}
+	if err := validateModerationResponse(response, info.ResultCount); err != nil {
+		return openai.ModerationResponse{}, err
 	}
 	return response, nil
 }

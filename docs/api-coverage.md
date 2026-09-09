@@ -37,7 +37,7 @@ availability is not inferred from these tests.
 | Realtime | Not implemented | Session authorization, WebSocket lifecycle, quotas and usage settlement |
 | Videos | Not implemented | Durable owned jobs, polling/cancellation and artifact accounting |
 | OCR | Not implemented | Document validation, native execution and page accounting |
-| Moderation | Not implemented | Public moderation contract independent of internal DLP/AV |
+| Moderation | Text batches and text/image input through the shared authentication, policy, routing, retry, observability and billing lifecycle; compatible provider adapter | Additional native provider protocols and credentialed image conformance tests |
 | Apply guardrail | Internal scans only | Public policy execution contract and audit/authorization |
 | Batches | Not implemented | Durable jobs, files/results, quotas and idempotent batch settlement |
 | Fine tuning | Not implemented | Owned training jobs, model ownership and training accounting |

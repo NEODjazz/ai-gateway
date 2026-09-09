@@ -302,6 +302,19 @@ func TestRemoteBillingRerankPayloadContainsNoQueryOrDocuments(t *testing.T) {
 	}
 }
 
+func TestBillingRequestModerations(t *testing.T) {
+	req := RequestContext{RequestID: "execution-1", ModerationRequest: &openai.ModerationRequest{Provider: "p", Model: "safe", Input: []any{"one", "two"}}}
+	reserved := billingRequest(&req)
+	if reserved.APIType != "moderations" || reserved.OutputTokens != 0 || reserved.InputTokens <= 0 || reserved.TotalTokens != reserved.InputTokens || reserved.Phase != "reserve" {
+		t.Fatalf("unexpected moderation reserve: %+v", reserved)
+	}
+	req.ModerationResponse = &openai.ModerationResponse{ID: "modr-1", Model: "safe-upstream"}
+	committed := billingRequest(&req)
+	if committed.Phase != "commit" || committed.UpstreamModel != "safe-upstream" || committed.TotalTokens != reserved.InputTokens || !committed.UsageEstimated {
+		t.Fatalf("unexpected moderation commit: %+v", committed)
+	}
+}
+
 func TestRemoteBillingUsesScopedServiceSecretNotBearer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "" || r.Header.Get("X-Service-Token") != "billing-secret" {

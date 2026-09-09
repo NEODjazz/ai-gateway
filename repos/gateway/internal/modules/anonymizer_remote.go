@@ -55,6 +55,9 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 			request.Documents[index] = openai.TextOnlyProjection(document)
 		}
 	}
+	if req.ModerationRequest != nil {
+		request.Input = openai.TextOnlyProjection(req.ModerationRequest.Input)
+	}
 	response, err := callRemote[AnonymizeRequest, AnonymizeResponse](ctx, m.client, m.endpoint, request)
 	if err != nil {
 		return err
@@ -79,6 +82,9 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 		for index := range req.RerankRequest.Documents {
 			req.RerankRequest.Documents[index] = openai.MergeTextProjection(req.RerankRequest.Documents[index], response.Documents[index])
 		}
+	}
+	if req.ModerationRequest != nil {
+		req.ModerationRequest.Input = openai.MergeTextProjection(req.ModerationRequest.Input, response.Input)
 	}
 	req.AnonymizationValues = cloneStringMap(response.Replacements)
 	return nil

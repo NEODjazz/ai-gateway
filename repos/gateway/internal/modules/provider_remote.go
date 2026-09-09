@@ -85,13 +85,28 @@ func requestImageAttachments(req *RequestContext) ([]openai.ImageAttachment, err
 		return nil, err
 	}
 	if req.ResponseRequest == nil {
-		return attachments, nil
+		if req.ModerationRequest == nil {
+			return attachments, nil
+		}
+		moderationAttachments, err := openai.ModerationImageAttachments(req.ModerationRequest.Input)
+		if err != nil {
+			return nil, err
+		}
+		return append(attachments, moderationAttachments...), nil
 	}
 	responseAttachments, err := openai.ResponseImageAttachments(req.ResponseRequest.Input)
 	if err != nil {
 		return nil, err
 	}
-	return append(attachments, responseAttachments...), nil
+	attachments = append(attachments, responseAttachments...)
+	if req.ModerationRequest != nil {
+		moderationAttachments, err := openai.ModerationImageAttachments(req.ModerationRequest.Input)
+		if err != nil {
+			return nil, err
+		}
+		attachments = append(attachments, moderationAttachments...)
+	}
+	return attachments, nil
 }
 
 type ScanResponse struct {
@@ -126,6 +141,11 @@ func scanPayload(req *RequestContext) string {
 	if req.RerankRequest != nil {
 		if text, ok := openai.RerankDocumentText(*req.RerankRequest); ok {
 			parts = append(parts, "rerank: "+text)
+		}
+	}
+	if req.ModerationRequest != nil {
+		if text := openai.ModerationInputText(req.ModerationRequest.Input); text != "" {
+			parts = append(parts, "moderation_input: "+text)
 		}
 	}
 	return strings.Join(parts, "\n")

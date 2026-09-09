@@ -92,6 +92,9 @@ func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 			req.RerankRequest.Documents[index] = m.anonymizeAny(req, req.RerankRequest.Documents[index])
 		}
 	}
+	if req.ModerationRequest != nil {
+		req.ModerationRequest.Input = m.anonymizeAny(req, req.ModerationRequest.Input)
+	}
 	return nil
 }
 

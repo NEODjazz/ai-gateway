@@ -261,6 +261,12 @@ func (p *chatProvider) Rerank(_ context.Context, req modules.RequestContext) (op
 	return openai.RerankResponse{ID: "rerank-test", Results: []openai.RerankResult{{Index: 1, RelevanceScore: 0.9}}}, nil
 }
 
+func (p *chatProvider) Moderations(_ context.Context, req modules.RequestContext) (openai.ModerationResponse, error) {
+	p.request = req
+	value := false
+	return openai.ModerationResponse{ID: "modr-test", Model: req.ModerationRequest.Model, Results: []openai.ModerationResult{{Flagged: false, Categories: map[string]*bool{"violence": &value}, CategoryScores: map[string]float64{"violence": 0.01}, CategoryAppliedInputTypes: map[string][]string{"violence": {"text"}}}}}, nil
+}
+
 func (p *chatProvider) CompactResponse(_ context.Context, req modules.RequestContext) (openai.CompactedResponse, error) {
 	p.request = req
 	return openai.CompactedResponse{
@@ -489,6 +495,30 @@ func TestRerankRejectsInvalidDocuments(t *testing.T) {
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("body %s: status=%d response=%s", body, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestModerationsUsesDefaultModelAndAuthenticatedPipeline(t *testing.T) {
+	llm := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), llm))
+	request := httptest.NewRequest(http.MethodPost, "/v1/moderations", strings.NewReader(`{"input":["first","second"]}`))
+	request.Header.Set("Authorization", "Bearer client-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || llm.request.ModerationRequest == nil {
+		t.Fatalf("status=%d body=%s context=%+v", response.Code, response.Body.String(), llm.request)
+	}
+	if llm.request.APIKey != "" || llm.request.ModerationRequest.Model != "omni-moderation-latest" {
+		t.Fatalf("unsafe or incorrect provider context: %+v", llm.request)
+	}
+}
+
+func TestModerationsRejectsInvalidNestedInput(t *testing.T) {
+	handler := Routes(NewHandler(modules.NewPipeline(nil), &chatProvider{}))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/moderations", strings.NewReader(`{"input":[{"type":"text","text":"hello","extra":true}]}`)))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

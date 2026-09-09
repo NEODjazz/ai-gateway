@@ -95,6 +95,21 @@ func TestAnonymizerMasksEmbeddingInput(t *testing.T) {
 	}
 }
 
+func TestAnonymizerModerationInputPreservesImages(t *testing.T) {
+	request := openai.ModerationRequest{Input: []any{map[string]any{"type": "text", "text": "send to user@example.com"}, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.test/image.png"}}}}
+	req := RequestContext{ModerationRequest: &request}
+	if err := NewAnonymizerModule(true, RuleEmail).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if got := openai.ModerationInputText(req.ModerationRequest.Input); got != "send to {{EMAIL_1}}" {
+		t.Fatalf("unexpected text: %q", got)
+	}
+	parts := req.ModerationRequest.Input.([]any)
+	if parts[1].(map[string]any)["image_url"].(map[string]any)["url"] != "https://example.test/image.png" {
+		t.Fatal("image URL changed")
+	}
+}
+
 func TestAnonymizerRulesCanBeLimited(t *testing.T) {
 	module := NewAnonymizerModule(true, RuleEmail)
 	req := RequestContext{

@@ -60,6 +60,7 @@ func TestAdmissionUsesReplacedTypedRequests(t *testing.T) {
 		{"/v1/responses", `{"model":"m","input":"hi","max_output_tokens":1}`},
 		{"/v1/embeddings", `{"model":"m","input":"hi"}`},
 		{"/v1/rerank", `{"model":"m","query":"hi","documents":["one"]}`},
+		{"/v1/moderations", `{"model":"m","input":"hi"}`},
 	} {
 		for _, change := range []string{"model", "tokens", "nil"} {
 			t.Run(endpoint.path+"/"+change, func(t *testing.T) {
@@ -105,6 +106,18 @@ func TestAdmissionUsesReplacedTypedRequests(t *testing.T) {
 						req.RerankRequest = &replacement
 						if change == "nil" {
 							req.RerankRequest = nil
+						}
+					}
+					if req.ModerationRequest != nil {
+						replacement := *req.ModerationRequest
+						if change == "model" {
+							replacement.Model = "forbidden"
+						} else {
+							replacement.Input = strings.Repeat("large context ", 1000)
+						}
+						req.ModerationRequest = &replacement
+						if change == "nil" {
+							req.ModerationRequest = nil
 						}
 					}
 				}

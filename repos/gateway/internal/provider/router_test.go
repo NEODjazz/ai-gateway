@@ -35,6 +35,24 @@ type rerankTestClient struct {
 	model string
 }
 
+type moderationTestClient struct {
+	calls int
+	model string
+}
+
+func (p *moderationTestClient) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	return openai.ChatCompletionResponse{}, nil
+}
+func (p *moderationTestClient) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {
+	return openai.ResponseResponse{}, nil
+}
+func (p *moderationTestClient) Moderations(_ context.Context, request openai.ModerationRequest) (openai.ModerationResponse, error) {
+	p.calls++
+	p.model = request.Model
+	value := false
+	return openai.ModerationResponse{ID: "modr-1", Model: request.Model, Results: []openai.ModerationResult{{Categories: map[string]*bool{"violence": &value}, CategoryScores: map[string]float64{"violence": .1}, CategoryAppliedInputTypes: map[string][]string{"violence": {"text"}}}}}, nil
+}
+
 func (p *rerankTestClient) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	return openai.ChatCompletionResponse{}, nil
 }
@@ -254,6 +272,25 @@ func TestRouterRerankFailoverAliasAndRestoresOriginalDocument(t *testing.T) {
 	document, ok := response.Results[0].Document.(map[string]any)
 	if !ok || document["id"] != "doc-2" {
 		t.Fatalf("original document not restored: %+v", response.Results[0].Document)
+	}
+}
+
+func TestRouterModerationsRequiresCapabilityAndAppliesAlias(t *testing.T) {
+	client := &moderationTestClient{}
+	router := Router{
+		endpoints: []Endpoint{
+			{Name: "chat-only", Type: "openai-compatible", Capabilities: []string{"chat"}, Provider: client, Admission: newAdmissionController(0, 0, 0)},
+			{Name: "moderation", Type: "openai-compatible", Capabilities: []string{"moderation"}, ModelAliases: map[string]string{"safe": "safe-upstream"}, Provider: client, Admission: newAdmissionController(0, 0, 0)},
+		},
+		modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	request := openai.ModerationRequest{Model: "safe", Input: "inspect"}
+	response, err := router.Moderations(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, ModerationRequest: &request})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 1 || client.model != "safe-upstream" || response.Model != "safe-upstream" {
+		t.Fatalf("calls=%d model=%q response=%+v", client.calls, client.model, response)
 	}
 }
 

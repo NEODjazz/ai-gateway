@@ -101,6 +101,26 @@ func (r Router) mirrorRerank(ctx context.Context, requestID string, request open
 	}
 }
 
+func (r Router) mirrorModerations(ctx context.Context, requestID string, request openai.ModerationRequest, requestedModel string) {
+	catalog := r.catalog.Current(ctx)
+	for _, endpoint := range r.shadowEndpoints(catalog, requestedModel, "moderation") {
+		client, ok := endpoint.Provider.(ModerationClient)
+		if !ok || !mirrorSample(requestID, requestedModel, endpoint) {
+			continue
+		}
+		mirrored, cloned := cloneMirrorRequest(request)
+		if !cloned {
+			continue
+		}
+		mirrored.Provider = ""
+		mirrored.Model = requestedModel
+		if upstream, found := endpoint.ModelAliases[mirrored.Model]; found {
+			mirrored.Model = upstream
+		}
+		go r.runMirror(ctx, endpoint, "moderations.mirror", func(callCtx context.Context) error { _, err := client.Moderations(callCtx, mirrored); return err })
+	}
+}
+
 func (r Router) shadowEndpoints(catalog modelcatalog.Catalog, model string, capabilities ...string) []Endpoint {
 	result := make([]Endpoint, 0)
 	for _, endpoint := range r.runtimeEndpoints() {

@@ -55,7 +55,7 @@ OpenAPI, а не в этом документе.
 `web_search`, `audio`.
 Capability names are exact and cannot be duplicated; deployment mutations reject
 unknown or misspelled values.
-Route выбирает endpoint только при наличии capabilities, выведенных из запроса.
+Route выбирает endpoint только при наличии capabilities, выведенных из запроса. Moderation deployments должны явно указывать capability `moderation`; она не выводится из совместимого URL автоматически.
 
 Provider API key в static config можно передать полем `api_key` или переменной
 `PROVIDER_API_KEY_<NORMALIZED_ENDPOINT_NAME>`. Managed credentials шифруются в

@@ -191,6 +191,13 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = 0
 		request.TotalTokens = request.InputTokens
 	}
+	if req.ModerationRequest != nil {
+		request.Provider = req.ModerationRequest.Provider
+		request.Model = req.ModerationRequest.Model
+		request.APIType = "moderations"
+		request.OutputTokens = 0
+		request.TotalTokens = request.InputTokens
+	}
 	if req.Response != nil {
 		request.Phase = "commit"
 		request.InputTokens = req.Response.Usage.PromptTokens
@@ -262,6 +269,14 @@ func billingRequest(req *RequestContext) UsageRequest {
 		}
 		request.UsageEstimated = request.TotalTokens == 0
 	}
+	if req.ModerationResponse != nil {
+		request.Phase = "commit"
+		request.InputTokens = request.PromptTokensEstimated
+		request.OutputTokens = 0
+		request.TotalTokens = request.InputTokens
+		request.UpstreamModel = req.ModerationResponse.Model
+		request.UsageEstimated = true
+	}
 	if originalModel := metadataValue(req.Metadata, "provider.original_model"); originalModel != "" {
 		request.Model = originalModel
 	}
@@ -322,6 +337,9 @@ func estimateRequestTokens(req *RequestContext) int {
 			Query     string
 			Documents []any
 		}{req.RerankRequest.Query, req.RerankRequest.Documents})
+	}
+	if req.ModerationRequest != nil {
+		return openai.ModerationInputTokenCount(req.ModerationRequest.Input)
 	}
 	return openai.ChatInputTokens(req.Request)
 }
