@@ -18,6 +18,7 @@ type ChatGenerationOptions struct {
 	PromptCacheRetention string              `json:"prompt_cache_retention,omitempty"`
 	Prediction           *ChatPrediction     `json:"prediction,omitempty"`
 	ServiceTier          string              `json:"service_tier,omitempty"`
+	User                 string              `json:"user,omitempty"`
 	Verbosity            string              `json:"verbosity,omitempty"`
 	Logprobs             *bool               `json:"logprobs,omitempty"`
 	TopLogprobs          *int                `json:"top_logprobs,omitempty"`

@@ -35,7 +35,7 @@ upstream. Распознаваемые параметры перечислены
 
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
-| `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `prompt_cache_retention`, `prediction`, `service_tier`, `verbosity`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
+| `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `prompt_cache_retention`, `prediction`, `service_tier`, `user`, `verbosity`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
 | `/v1/completions` | `provider`, `model`, `prompt`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `n`, `presence_penalty`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
 | `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
@@ -191,6 +191,12 @@ reserve умножают per-choice output limit (включая default reserve
 characters. Он входит в exact и semantic cache keys, но не заменяет
 аутентифицированные `user_id`/credential identity в billing. Native adapters
 возвращают явный `unsupported_parameter`.
+
+Legacy Chat `user` передаётся OpenAI-compatible adapter в JSON и streaming
+requests. Поле входит в exact и semantic cache scopes, чтобы локальный cache не
+объединял разные provider hints. Оно никогда не заменяет аутентифицированные user
+или credential identity при authorization, rate limiting и billing. Native
+adapters возвращают явный `unsupported_parameter`.
 
 OpenAI-compatible chat передаёт `reasoning_effort`, `logprobs`, `top_logprobs`,
 `frequency_penalty`, `presence_penalty` и `logit_bias` в обычном и streaming flow.

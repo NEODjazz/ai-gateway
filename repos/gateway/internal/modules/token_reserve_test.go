@@ -30,10 +30,15 @@ func TestBillingReserveIncludesEveryChatChoice(t *testing.T) {
 	}
 }
 
-func TestChatSafetyIdentifierDoesNotReplaceBillingIdentity(t *testing.T) {
-	req := RequestContext{UserID: "authenticated-user", Request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{SafetyIdentifier: "provider-user"}}}
-	if reserved := billingRequest(&req); reserved.UserID != "authenticated-user" {
-		t.Fatalf("request identifier replaced billing identity: %+v", reserved)
+func TestChatProviderIdentifiersDoNotReplaceBillingIdentity(t *testing.T) {
+	for _, options := range []openai.ChatGenerationOptions{
+		{SafetyIdentifier: "provider-user"},
+		{User: "legacy-user"},
+	} {
+		req := RequestContext{UserID: "authenticated-user", Request: openai.ChatCompletionRequest{ChatGenerationOptions: options}}
+		if reserved := billingRequest(&req); reserved.UserID != "authenticated-user" {
+			t.Fatalf("request identifier replaced billing identity: %+v", reserved)
+		}
 	}
 }
 
