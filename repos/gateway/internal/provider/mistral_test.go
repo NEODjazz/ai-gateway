@@ -250,3 +250,31 @@ func TestMistralEmbeddingsRejectUnsupportedInputBeforeUpstream(t *testing.T) {
 		t.Fatalf("unsupported embedding requests reached Mistral: %d", calls.Load())
 	}
 }
+
+func TestMistralModerationsNormalizeTextContractAndRejectStructuredInput(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/moderations" || r.Header.Get("Authorization") != "Bearer provider-key" {
+			t.Fatalf("unexpected moderation request: %s %s", r.Method, r.URL.Path)
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["model"] != "mistral-moderation" || request["input"] != "inspect me" {
+			t.Fatalf("request=%#v err=%v", request, err)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"mod-1","model":"mistral-moderation","results":[{"flagged":false,"categories":{"violence":false,"pii":false},"category_scores":{"violence":0.1,"pii":0.2}}]}`)
+	}))
+	defer server.Close()
+
+	client := NewMistral(server.URL, "provider-key", false)
+	response, err := client.Moderations(t.Context(), openai.ModerationRequest{Model: "mistral-moderation", Input: "inspect me"})
+	if err != nil || response.ID != "mod-1" || len(response.Results) != 1 || len(response.Results[0].CategoryAppliedInputTypes) != 2 || response.Results[0].CategoryAppliedInputTypes["violence"][0] != "text" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+	structured := []any{map[string]any{"type": "text", "text": "inspect me"}}
+	_, err = client.Moderations(t.Context(), openai.ModerationRequest{Model: "mistral-moderation", Input: structured})
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.Param != "input" || failure.UpstreamCode != "unsupported_parameter" || calls.Load() != 1 {
+		t.Fatalf("error=%v failure=%+v calls=%d", err, failure, calls.Load())
+	}
+}

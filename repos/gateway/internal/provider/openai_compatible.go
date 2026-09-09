@@ -231,6 +231,7 @@ func (p OpenAICompatible) Moderations(ctx context.Context, request openai.Modera
 	if err != nil {
 		return openai.ModerationResponse{}, err
 	}
+	p.normalizeModerationResponse(&response)
 	info, err := openai.InspectModerationInput(request.Input)
 	if err != nil {
 		return openai.ModerationResponse{}, err
@@ -239,6 +240,22 @@ func (p OpenAICompatible) Moderations(ctx context.Context, request openai.Modera
 		return openai.ModerationResponse{}, err
 	}
 	return response, nil
+}
+
+func (p OpenAICompatible) normalizeModerationResponse(response *openai.ModerationResponse) {
+	if p.providerName() != "mistral" {
+		return
+	}
+	for index := range response.Results {
+		result := &response.Results[index]
+		if len(result.CategoryAppliedInputTypes) != 0 {
+			continue
+		}
+		result.CategoryAppliedInputTypes = make(map[string][]string, len(result.Categories))
+		for category := range result.Categories {
+			result.CategoryAppliedInputTypes[category] = []string{"text"}
+		}
+	}
 }
 
 func (OpenAICompatible) SupportsMCP() bool    { return true }

@@ -37,7 +37,7 @@ availability is not inferred from these tests.
 | Realtime | Not implemented | Session authorization, WebSocket lifecycle, quotas and usage settlement |
 | Videos | Not implemented | Durable owned jobs, polling/cancellation and artifact accounting |
 | OCR | Not implemented | Document validation, native execution and page accounting |
-| Moderation | Text batches and text/image input through the shared authentication, policy, routing, retry, observability and billing lifecycle; compatible provider adapter | Additional native provider protocols and credentialed image conformance tests |
+| Moderation | Text batches and text/image input through the shared authentication, policy, routing, retry, observability and billing lifecycle; compatible and native Mistral provider adapters | Additional native provider protocols and credentialed image conformance tests |
 | Apply guardrail | Authenticated public execution with attached-policy authorization, access groups, RPM/TPM, fail-closed durable audit, bounded DLP/AV scans and metadata-only monitoring | Additional scanner protocols when justified by configured policy needs |
 | Batches | Not implemented | Durable jobs, files/results, quotas and idempotent batch settlement |
 | Fine tuning | Not implemented | Owned training jobs, model ownership and training accounting |

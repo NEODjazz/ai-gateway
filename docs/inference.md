@@ -138,6 +138,12 @@ responses и embeddings flows, но не является неявным opt-in 
 
 `POST /v1/moderations` принимает одиночный текст, batch строк либо массив `text`/`image_url` частей. Пустые, смешанные и неизвестные вложенные формы отклоняются до provider call. Запрос проходит общие authentication, access, TPM, guardrail, retry и billing стадии. Routing требует явную deployment и model capability `moderation`; при отсутствии model используется `omni-moderation-latest`. Provider response ограничен по размеру и проверяется на число результатов, диапазон scores, одинаковые category keys, допустимые input types и согласованность общего `flagged`. Так как публичный ответ не содержит token usage, billing commit использует консервативную оценку входного текста и помечает usage как estimated. При включенном AV remote image URL отклоняется fail-closed, поскольку gateway не загружает внешний контент от имени scanner; проверенные data image URL передаются scanner как bounded attachment.
 
+Native Mistral moderation принимает только строку или массив строк и отклоняет
+структурированные text/image parts до provider modules, billing и upstream.
+Provider categories и scores проходят общий validator; отсутствующий native
+`category_applied_input_types` нормализуется в `text` только для этого
+предварительно проверенного text-only запроса.
+
 `POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
 
 Vision принимает только inline `data:image/{jpeg,png,gif,webp};base64,...`.

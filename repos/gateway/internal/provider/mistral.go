@@ -69,6 +69,43 @@ func (p Mistral) Embeddings(ctx context.Context, request openai.EmbeddingRequest
 	return p.OpenAICompatible.Embeddings(ctx, request)
 }
 
+func (p Mistral) Moderations(ctx context.Context, request openai.ModerationRequest) (openai.ModerationResponse, error) {
+	if !mistralModerationTextInput(request.Input) {
+		return openai.ModerationResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "input", Err: errors.New("Mistral moderation requires text input")}
+	}
+	return p.OpenAICompatible.Moderations(ctx, request)
+}
+
+func mistralModerationTextInput(input any) bool {
+	switch value := input.(type) {
+	case string:
+		return strings.TrimSpace(value) != ""
+	case []string:
+		if len(value) == 0 || len(value) > openai.MaxModerationInputs {
+			return false
+		}
+		for _, item := range value {
+			if strings.TrimSpace(item) == "" {
+				return false
+			}
+		}
+		return true
+	case []any:
+		if len(value) == 0 || len(value) > openai.MaxModerationInputs {
+			return false
+		}
+		for _, item := range value {
+			text, ok := item.(string)
+			if !ok || strings.TrimSpace(text) == "" {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
 func (Mistral) ValidateCompletionParameters(request openai.CompletionRequest) error {
 	prompt, err := openai.InspectCompletionPrompt(request.Prompt)
 	if err != nil || prompt.Kind != openai.CompletionPromptText {
