@@ -157,6 +157,10 @@ func parseRetryAfterDuration(raw string, unit time.Duration) (time.Duration, boo
 }
 
 func providerRetryAfter(err error) time.Duration {
+	var quotaErr *DeploymentQuotaError
+	if errors.As(err, &quotaErr) {
+		return quotaErr.RetryAfter
+	}
 	var providerErr *Error
 	if errors.As(err, &providerErr) {
 		return providerErr.RetryAfter
@@ -165,6 +169,10 @@ func providerRetryAfter(err error) time.Duration {
 }
 
 func failureClass(err error) FailureClass {
+	var quotaErr *DeploymentQuotaError
+	if errors.As(err, &quotaErr) {
+		return FailureRateLimit
+	}
 	var admissionErr *AdmissionError
 	if errors.As(err, &admissionErr) {
 		return FailureRateLimit

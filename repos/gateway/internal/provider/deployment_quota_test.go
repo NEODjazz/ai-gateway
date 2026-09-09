@@ -85,8 +85,8 @@ func TestRedisDeploymentQuotaIsSharedAcrossRouters(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := makeRouter(secondClient).ChatCompletions(context.Background(), request)
-	var admission *AdmissionError
-	if !errors.As(err, &admission) || secondClient.calls != 0 || admission.RetryAfter <= 0 {
+	var quota *DeploymentQuotaError
+	if !errors.As(err, &quota) || secondClient.calls != 0 || quota.RetryAfter <= 0 {
 		t.Fatalf("shared quota was not enforced: calls=%d err=%v", secondClient.calls, err)
 	}
 }

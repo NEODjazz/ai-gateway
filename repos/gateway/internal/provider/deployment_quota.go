@@ -17,6 +17,15 @@ type DeploymentQuotaStore interface {
 	Allow(context.Context, string, int, int, int, time.Duration) (bool, time.Duration, error)
 }
 
+type DeploymentQuotaError struct {
+	Deployment string
+	RetryAfter time.Duration
+}
+
+func (e *DeploymentQuotaError) Error() string {
+	return e.Deployment + " deployment rate limit exceeded"
+}
+
 type deploymentQuotaWindow struct {
 	started  time.Time
 	requests int
@@ -104,7 +113,7 @@ func (r Router) acquireEndpoint(ctx context.Context, endpoint Endpoint, tokens i
 	}
 	if !allowed {
 		release()
-		return nil, &AdmissionError{Provider: endpoint.Name, RetryAfter: retryAfter}
+		return nil, &DeploymentQuotaError{Deployment: endpoint.Name, RetryAfter: retryAfter}
 	}
 	return release, nil
 }

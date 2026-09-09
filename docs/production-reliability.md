@@ -71,7 +71,8 @@ Quota exhaustion skips the limited deployment and remains eligible for routing
 fallback. Cache hits do not consume deployment quota. Shadow calls and response
 lifecycle operations consume the quota of the deployment they contact. The
 memory implementation fails closed after 10,000 active deployment identities;
-Redis shares counters across gateway replicas.
+Redis shares counters across gateway replicas. Exhaustion returns HTTP 429 with
+`deployment_rate_limit_exceeded` and the fixed window's remaining `Retry-After`.
 
 ## Billing delivery and failure behavior
 
