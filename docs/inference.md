@@ -170,6 +170,11 @@ OpenAI-compatible adapter один раз повторяет запрос с
 Mistral Chat преобразует публичные `seed` и `max_completion_tokens` в native
 `random_seed` и `max_tokens`, а embeddings `dimensions` в `output_dimension`; JSON, SSE и embeddings responses проходят
 общую bounded validation и reported usage accounting.
+Native Chat передает `metadata`, `n`, `prediction`, `prompt_cache_key`,
+`reasoning_effort` до `xhigh`, а также frequency и presence penalties.
+Параметры compatible API, отсутствующие в native Chat contract, отклоняются до
+modules, billing и provider call. Публичный `stream_options.include_usage`
+управляет только gateway-ответом и не отправляется provider-у.
 Ошибки transport и parameter validation сохраняют provider identity `mistral`.
 Mistral embeddings принимает только строку или массив строк; token-ID input,
 `input_type` и `user` отклоняются до provider modules, billing и upstream.

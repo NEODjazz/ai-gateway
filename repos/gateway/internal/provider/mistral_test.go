@@ -196,6 +196,18 @@ func TestMistralChatUsesNativeRandomSeedInJSONAndStreaming(t *testing.T) {
 		if request["prompt_mode"] != "reasoning" {
 			t.Fatalf("prompt_mode=%#v", request["prompt_mode"])
 		}
+		if request["reasoning_effort"] != "xhigh" || request["n"] != float64(1) || request["prompt_cache_key"] != "shared-prefix" || request["frequency_penalty"] != float64(0.5) || request["presence_penalty"] != float64(-0.25) {
+			t.Fatalf("native generation controls=%#v", request)
+		}
+		if metadata, ok := request["metadata"].(map[string]any); !ok || metadata["trace"] != "chat" {
+			t.Fatalf("metadata=%#v", request["metadata"])
+		}
+		if prediction, ok := request["prediction"].(map[string]any); !ok || prediction["type"] != "content" || prediction["content"] != "expected" {
+			t.Fatalf("prediction=%#v", request["prediction"])
+		}
+		if _, found := request["stream_options"]; found {
+			t.Fatalf("compatible stream_options leaked into native Mistral request: %#v", request)
+		}
 		messages, ok := request["messages"].([]any)
 		if !ok || len(messages) != 2 || messages[1].(map[string]any)["prefix"] != true {
 			t.Fatalf("messages=%#v", request["messages"])
@@ -218,8 +230,10 @@ func TestMistralChatUsesNativeRandomSeedInJSONAndStreaming(t *testing.T) {
 	maxCompletionTokens := 64
 	safePrompt := true
 	prefix := true
+	n := 1
+	frequencyPenalty, presencePenalty := 0.5, -0.25
 	client := NewMistral(server.URL, "provider-key", true)
-	request := openai.ChatCompletionRequest{Model: "mistral-small", Messages: []openai.Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "The answer is", Prefix: &prefix}}, Seed: &seed, MaxCompletionTokens: &maxCompletionTokens, ChatGenerationOptions: openai.ChatGenerationOptions{SafePrompt: &safePrompt, PromptMode: "reasoning"}}
+	request := openai.ChatCompletionRequest{Model: "mistral-small", Messages: []openai.Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "The answer is", Prefix: &prefix}}, Seed: &seed, MaxCompletionTokens: &maxCompletionTokens, StreamOptions: &openai.ChatStreamOptions{IncludeUsage: true}, ChatGenerationOptions: openai.ChatGenerationOptions{Metadata: map[string]string{"trace": "chat"}, SafePrompt: &safePrompt, N: &n, PromptCacheKey: "shared-prefix", PromptMode: "reasoning", Prediction: &openai.ChatPrediction{Type: "content", Content: "expected"}, ReasoningEffort: "xhigh", FrequencyPenalty: &frequencyPenalty, PresencePenalty: &presencePenalty}}
 	response, err := client.ChatCompletions(t.Context(), request)
 	if err != nil || openai.ContentText(response.Choices[0].Message.Content) != "json" || response.Usage.TotalTokens != 3 {
 		t.Fatalf("response=%+v err=%v", response, err)
@@ -232,6 +246,66 @@ func TestMistralChatUsesNativeRandomSeedInJSONAndStreaming(t *testing.T) {
 	})
 	if err != nil || streamed.Usage.TotalTokens != 4 || openai.ContentText(streamed.Choices[0].Message.Content) != "streamed" || len(payloads) != 2 || calls.Load() != 2 {
 		t.Fatalf("streamed=%+v payloads=%v calls=%d err=%v", streamed, payloads, calls.Load(), err)
+	}
+}
+
+func TestMistralRejectsUnsupportedChatParametersBeforeUpstream(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	client := NewMistral(server.URL, "provider-key", true)
+	base := func() openai.ChatCompletionRequest {
+		return openai.ChatCompletionRequest{Model: "mistral-small", Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	}
+	boolean := false
+	for _, test := range []struct {
+		name, param string
+		mutate      func(*openai.ChatCompletionRequest)
+	}{
+		{name: "store", param: "store", mutate: func(r *openai.ChatCompletionRequest) { r.Store = &boolean }},
+		{name: "modalities", param: "modalities", mutate: func(r *openai.ChatCompletionRequest) { r.Modalities = []string{"text"} }},
+		{name: "audio", param: "audio", mutate: func(r *openai.ChatCompletionRequest) { r.Audio = &openai.ChatAudioOptions{} }},
+		{name: "safety identifier", param: "safety_identifier", mutate: func(r *openai.ChatCompletionRequest) { r.SafetyIdentifier = "customer" }},
+		{name: "prompt cache options", param: "prompt_cache_options", mutate: func(r *openai.ChatCompletionRequest) {
+			r.PromptCacheOptions = &openai.PromptCacheOptions{Mode: "implicit"}
+		}},
+		{name: "prompt cache retention", param: "prompt_cache_retention", mutate: func(r *openai.ChatCompletionRequest) { r.PromptCacheRetention = "24h" }},
+		{name: "user", param: "user", mutate: func(r *openai.ChatCompletionRequest) { r.User = "customer" }},
+		{name: "verbosity", param: "verbosity", mutate: func(r *openai.ChatCompletionRequest) { r.Verbosity = "low" }},
+		{name: "top logprobs", param: "top_logprobs", mutate: func(r *openai.ChatCompletionRequest) {
+			one, enabled := 1, true
+			r.TopLogprobs, r.Logprobs = &one, &enabled
+		}},
+		{name: "logprobs", param: "logprobs", mutate: func(r *openai.ChatCompletionRequest) { r.Logprobs = &boolean }},
+		{name: "logit bias", param: "logit_bias", mutate: func(r *openai.ChatCompletionRequest) { r.LogitBias = map[string]int{"1": 1} }},
+		{name: "stream obfuscation", param: "stream_options.include_obfuscation", mutate: func(r *openai.ChatCompletionRequest) {
+			r.StreamOptions = &openai.ChatStreamOptions{IncludeUsage: true, IncludeObfuscation: &boolean}
+		}},
+		{name: "legacy functions", param: "functions", mutate: func(r *openai.ChatCompletionRequest) { r.Functions = []openai.FunctionDefinition{{Name: "lookup"}} }},
+		{name: "message cache breakpoint", param: "messages.prompt_cache_breakpoint", mutate: func(r *openai.ChatCompletionRequest) {
+			r.Messages[0].Content = []any{map[string]any{"type": "text", "text": "hello", "prompt_cache_breakpoint": map[string]any{"mode": "explicit"}}}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := base()
+			test.mutate(&request)
+			_, err := client.ChatCompletions(t.Context(), request)
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.UpstreamCode != "unsupported_parameter" || failure.Param != test.param {
+				t.Fatalf("error=%v failure=%+v", err, failure)
+			}
+		})
+	}
+
+	request := base()
+	request.ReasoningEffort = "max"
+	_, err := client.ChatCompletions(t.Context(), request)
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.UpstreamCode != "invalid_request" || failure.Param != "reasoning_effort" {
+		t.Fatalf("reasoning error=%v failure=%+v", err, failure)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unsupported Mistral Chat parameters reached upstream: %d", calls.Load())
 	}
 }
 

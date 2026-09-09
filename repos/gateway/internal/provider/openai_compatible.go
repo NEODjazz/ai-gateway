@@ -454,7 +454,7 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	}
 	p.mapChatParameters(&upstreamRequest)
 	if upstreamRequest.Stream {
-		upstreamRequest.StreamOptions = chatStreamOptions(request)
+		upstreamRequest.StreamOptions = p.chatStreamOptions(request)
 	}
 	resp, err := p.chatCompletionResponse(ctx, &upstreamRequest)
 	if err != nil {
@@ -629,7 +629,7 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 		Stop: request.Stop, Seed: request.Seed,
 	}
 	p.mapChatParameters(&upstreamRequest)
-	upstreamRequest.StreamOptions = chatStreamOptions(request)
+	upstreamRequest.StreamOptions = p.chatStreamOptions(request)
 	resp, err := p.chatCompletionResponse(ctx, &upstreamRequest)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -652,7 +652,10 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 	return response, err
 }
 
-func chatStreamOptions(request openai.ChatCompletionRequest) *openAICompatibleStreamOptions {
+func (p OpenAICompatible) chatStreamOptions(request openai.ChatCompletionRequest) *openAICompatibleStreamOptions {
+	if p.providerName() == "mistral" {
+		return nil
+	}
 	options := &openAICompatibleStreamOptions{IncludeUsage: true}
 	if request.StreamOptions != nil {
 		options.IncludeObfuscation = request.StreamOptions.IncludeObfuscation

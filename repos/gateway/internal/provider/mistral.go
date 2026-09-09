@@ -61,8 +61,43 @@ func (Mistral) SupportsResponses() bool { return false }
 func (Mistral) SupportsRerank() bool    { return false }
 
 func (p Mistral) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectLegacyFunctionCalling("mistral", request); err != nil {
+		return err
+	}
+	if err := validateChatPromptCacheBreakpoints("mistral", request, false); err != nil {
+		return err
+	}
+	if err := rejectToolCallMetadata("mistral", request.Messages); err != nil {
+		return err
+	}
+	if err := rejectChatMessageRefusals("mistral", request.Messages); err != nil {
+		return err
+	}
+	if err := rejectChatMessageAudio("mistral", request.Messages); err != nil {
+		return err
+	}
+	options := request.ChatGenerationOptions
+	if err := rejectParameters("mistral",
+		parameterCheck{"store", options.Store != nil},
+		parameterCheck{"modalities", options.Modalities != nil},
+		parameterCheck{"audio", options.Audio != nil},
+		parameterCheck{"safety_identifier", options.SafetyIdentifier != ""},
+		parameterCheck{"prompt_cache_options", options.PromptCacheOptions != nil},
+		parameterCheck{"prompt_cache_retention", options.PromptCacheRetention != ""},
+		parameterCheck{"user", options.User != ""},
+		parameterCheck{"verbosity", options.Verbosity != ""},
+		parameterCheck{"top_logprobs", options.TopLogprobs != nil},
+		parameterCheck{"logprobs", options.Logprobs != nil},
+		parameterCheck{"logit_bias", options.LogitBias != nil},
+		parameterCheck{"stream_options.include_obfuscation", request.StreamOptions != nil && request.StreamOptions.IncludeObfuscation != nil},
+	); err != nil {
+		return err
+	}
 	if err := p.OpenAICompatible.ValidateChatParameters(request); err != nil {
 		return err
+	}
+	if request.ReasoningEffort == "max" {
+		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "reasoning_effort", Err: errors.New("reasoning_effort must be none, minimal, low, medium, high, or xhigh")}
 	}
 	return rejectParameters("mistral", parameterCheck{"web_search_options", request.WebSearchOptions != nil})
 }
