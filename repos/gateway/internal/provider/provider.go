@@ -2213,7 +2213,7 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 	case "anthropic":
 		return NewAnthropic(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "cohere":
-		return NewCohere(endpoint.BaseURL, endpoint.APIKey)
+		return NewCohere(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "mistral":
 		return NewMistral(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "demo":

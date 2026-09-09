@@ -77,10 +77,12 @@ native `system` role, and supports `max_tokens` or `max_completion_tokens`,
 `temperature`, `top_p`, stop sequences, JSON object output and JSON Schema
 output. Provider-reported billed input and output tokens are required and flow
 into post-response billing; incomplete counters and malformed response content
-fail the request. Deployments without the `stream` capability use the gateway's
-buffered SSE projection. Native Cohere SSE, tools, media and other unsupported
-Chat parameters are rejected or excluded by deployment capabilities. Discovery
-includes non-deprecated models advertising the Chat, Embed or Rerank endpoint.
+fail the request. Deployments with streaming enabled and the `stream` capability
+use the native event stream; its lifecycle, content indices, terminal reason and
+billed usage are validated before settlement. Other deployments use the gateway's
+buffered SSE projection. Cohere tools, media and other unsupported Chat parameters
+are rejected or excluded by deployment capabilities. Discovery includes
+non-deprecated models advertising the Chat, Embed or Rerank endpoint.
 
 Provider type `mistral` uses the compatible Chat and Embeddings transports and
 implements text completion as native FIM at

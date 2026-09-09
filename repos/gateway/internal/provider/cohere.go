@@ -21,9 +21,10 @@ const maxCohereRerankResponseBytes = 8 << 20
 const maxCohereEmbeddingInputs = 96
 
 type Cohere struct {
-	baseURL string
-	apiKey  string
-	client  *http.Client
+	baseURL        string
+	apiKey         string
+	upstreamStream bool
+	client         *http.Client
 }
 
 type cohereRerankRequest struct {
@@ -50,6 +51,7 @@ type cohereChatRequest struct {
 	StopSequences  []string              `json:"stop_sequences,omitempty"`
 	Temperature    *float64              `json:"temperature,omitempty"`
 	P              *float64              `json:"p,omitempty"`
+	Stream         bool                  `json:"stream,omitempty"`
 }
 
 type cohereChatMessage struct {
@@ -85,13 +87,30 @@ type cohereChatResponse struct {
 	Usage *cohereChatUsageResponse `json:"usage"`
 }
 
-func NewCohere(baseURL, apiKey string) Cohere {
+type cohereChatStreamEvent struct {
+	Type  string `json:"type"`
+	ID    string `json:"id"`
+	Index *int   `json:"index"`
+	Delta struct {
+		Message struct {
+			Role    string `json:"role"`
+			Content struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"message"`
+		FinishReason string                   `json:"finish_reason"`
+		Usage        *cohereChatUsageResponse `json:"usage"`
+	} `json:"delta"`
+}
+
+func NewCohere(baseURL, apiKey string, stream ...bool) Cohere {
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = "https://api.cohere.com"
 	}
 	client := newProviderHTTPClient(180 * time.Second)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return Cohere{baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey, client: client}
+	return Cohere{baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey, upstreamStream: len(stream) > 0 && stream[0], client: client}
 }
 
 func (Cohere) SupportsResponses() bool { return false }
@@ -165,58 +184,15 @@ func (p Cohere) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if err := p.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	messages := make([]cohereChatMessage, len(request.Messages))
-	for index, message := range request.Messages {
-		role := message.Role
-		if role == "developer" {
-			role = "system"
-		}
-		content, err := cohereChatText(message.Content)
-		if err != nil {
-			return openai.ChatCompletionResponse{}, err
-		}
-		messages[index] = cohereChatMessage{Role: role, Content: content}
-	}
-	maxTokens := request.MaxCompletionTokens
-	if maxTokens == nil {
-		maxTokens = request.MaxTokens
-	}
-	stop, _ := openai.StopSequences(request.Stop)
-	native := cohereChatRequest{Model: request.Model, Messages: messages, MaxTokens: maxTokens, StopSequences: stop, Temperature: request.Temperature, P: request.TopP}
-	if format := request.ResponseFormat; format != nil && format.Type != "text" {
-		native.ResponseFormat = &cohereResponseFormat{Type: "json_object"}
-		if format.Type == "json_schema" && format.JSONSchema != nil {
-			native.ResponseFormat.Schema = format.JSONSchema.Schema
-		}
-	}
-	body, err := json.Marshal(native)
+	native, err := cohereNativeChatRequest(request, false)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	if len(body) > openai.MaxInferenceBodyBytes {
-		return openai.ChatCompletionResponse{}, cohereChatError("messages", "chat request exceeds limit")
-	}
-	endpoint, err := cohereEndpoint(p.baseURL, "v2/chat")
-	if err != nil {
-		return openai.ChatCompletionResponse{}, err
-	}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return openai.ChatCompletionResponse{}, err
-	}
-	httpRequest.Header.Set("Content-Type", "application/json")
-	httpRequest.Header.Set("Accept", "application/json")
-	if p.apiKey != "" {
-		httpRequest.Header.Set("Authorization", "Bearer "+p.apiKey)
-	}
-	response, err := p.client.Do(httpRequest)
+	response, err := p.doChat(ctx, native, "application/json")
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 	defer response.Body.Close()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return openai.ChatCompletionResponse{}, responseStatusError("cohere", response)
-	}
 	var upstream cohereChatResponse
 	if err := decodeCohereChatResponse(response.Body, &upstream); err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -240,6 +216,161 @@ func (p Cohere) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 		return openai.ChatCompletionResponse{}, err
 	}
 	return openai.ChatCompletionResponse{ID: upstream.ID, Object: "chat.completion", Created: time.Now().Unix(), Model: request.Model, Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: content.String()}, FinishReason: finishReason}}, Usage: usage}, nil
+}
+
+func cohereNativeChatRequest(request openai.ChatCompletionRequest, stream bool) (cohereChatRequest, error) {
+	messages := make([]cohereChatMessage, len(request.Messages))
+	for index, message := range request.Messages {
+		role := message.Role
+		if role == "developer" {
+			role = "system"
+		}
+		content, err := cohereChatText(message.Content)
+		if err != nil {
+			return cohereChatRequest{}, err
+		}
+		messages[index] = cohereChatMessage{Role: role, Content: content}
+	}
+	maxTokens := request.MaxCompletionTokens
+	if maxTokens == nil {
+		maxTokens = request.MaxTokens
+	}
+	stop, _ := openai.StopSequences(request.Stop)
+	native := cohereChatRequest{Model: request.Model, Messages: messages, MaxTokens: maxTokens, StopSequences: stop, Temperature: request.Temperature, P: request.TopP, Stream: stream}
+	if format := request.ResponseFormat; format != nil && format.Type != "text" {
+		native.ResponseFormat = &cohereResponseFormat{Type: "json_object"}
+		if format.Type == "json_schema" && format.JSONSchema != nil {
+			native.ResponseFormat.Schema = format.JSONSchema.Schema
+		}
+	}
+	return native, nil
+}
+
+func (p Cohere) doChat(ctx context.Context, native cohereChatRequest, accept string) (*http.Response, error) {
+	body, err := json.Marshal(native)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > openai.MaxInferenceBodyBytes {
+		return nil, cohereChatError("messages", "chat request exceeds limit")
+	}
+	endpoint, err := cohereEndpoint(p.baseURL, "v2/chat")
+	if err != nil {
+		return nil, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	httpRequest.Header.Set("Accept", accept)
+	if p.apiKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	response, err := p.client.Do(httpRequest)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		defer response.Body.Close()
+		return nil, responseStatusError("cohere", response)
+	}
+	return response, nil
+}
+
+func (p Cohere) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+	if err := p.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	if !p.upstreamStream {
+		return openai.ChatCompletionResponse{}, ErrStreamingUnsupported
+	}
+	native, err := cohereNativeChatRequest(request, true)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	response, err := p.doChat(ctx, native, "text/event-stream")
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	defer response.Body.Close()
+	if !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
+		return openai.ChatCompletionResponse{}, errors.New("Cohere chat stream returned non-SSE content")
+	}
+	return streamCohereChat(&responseStreamReader{source: response.Body, remaining: maxResponseStreamBytes}, request.Model, write)
+}
+
+func streamCohereChat(body io.Reader, model string, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+	result := openai.ChatCompletionResponse{Object: "chat.completion", Created: time.Now().Unix(), Model: model, Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant"}}}}
+	started, active, ended := false, false, false
+	nextIndex := 0
+	err := scanSSEEvents(body, func(event, payload string) error {
+		var item cohereChatStreamEvent
+		if err := json.Unmarshal([]byte(payload), &item); err != nil {
+			return err
+		}
+		if event == "" || item.Type != event || ended {
+			return errors.New("invalid Cohere chat stream event")
+		}
+		switch event {
+		case "message-start":
+			if started || item.ID == "" || item.Delta.Message.Role != "assistant" {
+				return errors.New("invalid Cohere message-start event")
+			}
+			started = true
+			result.ID = item.ID
+			return write(openAIChatCompletionChunkPayload(result.ID, result.Model, 0, "assistant", "", nil))
+		case "content-start":
+			if !started || active || item.Index == nil || *item.Index != nextIndex || item.Delta.Message.Content.Type != "text" {
+				return errors.New("invalid Cohere content-start event")
+			}
+			active = true
+		case "content-delta":
+			if !active || item.Index == nil || *item.Index != nextIndex {
+				return errors.New("invalid Cohere content-delta event")
+			}
+			text := item.Delta.Message.Content.Text
+			if text == "" {
+				return nil
+			}
+			result.Choices[0].Message.Content = openai.ContentText(result.Choices[0].Message.Content) + text
+			return write(openAIChatCompletionChunkPayload(result.ID, result.Model, 0, "", text, nil))
+		case "content-end":
+			if !active || item.Index == nil || *item.Index != nextIndex {
+				return errors.New("invalid Cohere content-end event")
+			}
+			active = false
+			nextIndex++
+		case "message-end":
+			if !started || active || nextIndex == 0 {
+				return errors.New("invalid Cohere message-end event")
+			}
+			finish, err := cohereFinishReason(item.Delta.FinishReason)
+			if err != nil {
+				return err
+			}
+			usage, err := cohereChatUsage(item.Delta.Usage)
+			if err != nil {
+				return err
+			}
+			result.Choices[0].FinishReason = finish
+			result.Usage = usage
+			ended = true
+			return write(openAIChatCompletionChunkPayload(result.ID, result.Model, 0, "", "", &finish))
+		case "debug":
+			return nil
+		default:
+			return errors.New("unsupported Cohere chat stream event")
+		}
+		return nil
+	})
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	if !ended {
+		return openai.ChatCompletionResponse{}, errors.New("Cohere chat stream ended before message-end")
+	}
+	return result, nil
 }
 
 func cohereChatError(param, message string) error {

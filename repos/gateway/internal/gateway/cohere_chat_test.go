@@ -13,13 +13,14 @@ import (
 	"ai-gateway-gateway/internal/provider"
 )
 
-func TestCohereChatEndpointAuthorizationRateLimitStreamingAndBilling(t *testing.T) {
+func TestCohereChatEndpointAuthorizationRateLimitNativeStreamingAndBilling(t *testing.T) {
 	upstreamCalls := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamCalls++
 		var request struct {
 			Model          string `json:"model"`
 			MaxTokens      int    `json:"max_tokens"`
+			Stream         bool   `json:"stream"`
 			ResponseFormat *struct {
 				Type string `json:"type"`
 			} `json:"response_format"`
@@ -30,6 +31,11 @@ func TestCohereChatEndpointAuthorizationRateLimitStreamingAndBilling(t *testing.
 		if r.URL.Path != "/v2/chat" || r.Header.Get("Authorization") != "Bearer provider-test-key" || request.Model != "command-upstream" || request.MaxTokens != 7 || request.ResponseFormat == nil || request.ResponseFormat.Type != "json_object" {
 			t.Errorf("native request mismatch: path=%s headers=%v body=%+v", r.URL.Path, r.Header, request)
 		}
+		if request.Stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(w, "event: message-start\ndata: {\"type\":\"message-start\",\"id\":\"chat-stream\",\"delta\":{\"message\":{\"role\":\"assistant\"}}}\n\nevent: content-start\ndata: {\"type\":\"content-start\",\"index\":0,\"delta\":{\"message\":{\"content\":{\"type\":\"text\",\"text\":\"\"}}}}\n\nevent: content-delta\ndata: {\"type\":\"content-delta\",\"index\":0,\"delta\":{\"message\":{\"content\":{\"text\":\"hello\"}}}}\n\nevent: content-end\ndata: {\"type\":\"content-end\",\"index\":0}\n\nevent: message-end\ndata: {\"type\":\"message-end\",\"delta\":{\"finish_reason\":\"COMPLETE\",\"usage\":{\"billed_units\":{\"input_tokens\":4,\"output_tokens\":2}}}}\n\n")
+			return
+		}
 		_, _ = fmt.Fprintf(w, `{"id":"chat-%d","finish_reason":"COMPLETE","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]},"usage":{"billed_units":{"input_tokens":4,"output_tokens":2}}}`, upstreamCalls)
 	}))
 	defer upstream.Close()
@@ -37,7 +43,7 @@ func TestCohereChatEndpointAuthorizationRateLimitStreamingAndBilling(t *testing.
 	billing := &messagesUsageRecorder{}
 	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{
 		Name: "cohere-native", Type: "cohere", BaseURL: upstream.URL, APIKey: "provider-test-key",
-		Models: []string{"command-public"}, ModelAliases: map[string]string{"command-public": "command-upstream"}, Capabilities: []string{"chat", "structured_output"},
+		Models: []string{"command-public"}, ModelAliases: map[string]string{"command-public": "command-upstream"}, Capabilities: []string{"chat", "stream", "structured_output"}, Stream: true,
 	}}, Modules: modules.NewPipeline([]modules.Module{billing})})
 	rates := NewMemoryRateLimitStore()
 	handler := Routes(NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"command-public"}, tpm: 100}}}), router, rates))
@@ -52,7 +58,7 @@ func TestCohereChatEndpointAuthorizationRateLimitStreamingAndBilling(t *testing.
 		{name: "forbidden model", requestBody: strings.Replace(body, "command-public", "other", 1), key: "gateway-test-key", status: http.StatusForbidden},
 		{name: "over tpm", requestBody: strings.Replace(body, `"max_completion_tokens":7`, `"max_completion_tokens":1000`, 1), key: "gateway-test-key", status: http.StatusTooManyRequests},
 		{name: "json", requestBody: body, key: "gateway-test-key", status: http.StatusOK},
-		{name: "buffered stream", requestBody: strings.TrimSuffix(bufferedBody, "}") + `,"stream":true,"stream_options":{"include_usage":true}}`, key: "gateway-test-key", status: http.StatusOK},
+		{name: "native stream", requestBody: strings.TrimSuffix(bufferedBody, "}") + `,"stream":true,"stream_options":{"include_usage":true}}`, key: "gateway-test-key", status: http.StatusOK},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(test.requestBody))
@@ -64,8 +70,8 @@ func TestCohereChatEndpointAuthorizationRateLimitStreamingAndBilling(t *testing.
 			if response.Code != test.status {
 				t.Fatalf("expected %d got %d: %s", test.status, response.Code, response.Body.String())
 			}
-			if test.name == "buffered stream" && (!strings.Contains(response.Body.String(), `"content":"hello"`) || !strings.Contains(response.Body.String(), `"total_tokens":6`) || !strings.Contains(response.Body.String(), "data: [DONE]")) {
-				t.Fatalf("invalid buffered stream: %s", response.Body.String())
+			if test.name == "native stream" && (!strings.Contains(response.Body.String(), `"content":"hello"`) || !strings.Contains(response.Body.String(), `"total_tokens":6`) || !strings.Contains(response.Body.String(), "data: [DONE]")) {
+				t.Fatalf("invalid native stream: %s", response.Body.String())
 			}
 		})
 	}
