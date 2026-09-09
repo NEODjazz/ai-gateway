@@ -44,14 +44,17 @@ type cohereEmbeddingRequest struct {
 }
 
 type cohereChatRequest struct {
-	Model          string                `json:"model"`
-	Messages       []cohereChatMessage   `json:"messages"`
-	ResponseFormat *cohereResponseFormat `json:"response_format,omitempty"`
-	MaxTokens      *int                  `json:"max_tokens,omitempty"`
-	StopSequences  []string              `json:"stop_sequences,omitempty"`
-	Temperature    *float64              `json:"temperature,omitempty"`
-	P              *float64              `json:"p,omitempty"`
-	Stream         bool                  `json:"stream,omitempty"`
+	Model            string                `json:"model"`
+	Messages         []cohereChatMessage   `json:"messages"`
+	ResponseFormat   *cohereResponseFormat `json:"response_format,omitempty"`
+	MaxTokens        *int                  `json:"max_tokens,omitempty"`
+	StopSequences    []string              `json:"stop_sequences,omitempty"`
+	Temperature      *float64              `json:"temperature,omitempty"`
+	P                *float64              `json:"p,omitempty"`
+	Seed             *int64                `json:"seed,omitempty"`
+	FrequencyPenalty *float64              `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float64              `json:"presence_penalty,omitempty"`
+	Stream           bool                  `json:"stream,omitempty"`
 }
 
 type cohereChatMessage struct {
@@ -143,6 +146,15 @@ func (Cohere) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	if request.TopP != nil && (*request.TopP < 0.01 || *request.TopP > 0.99) {
 		return cohereChatError("top_p", "top_p must be between 0.01 and 0.99")
 	}
+	if request.Seed != nil && *request.Seed < 0 {
+		return cohereChatError("seed", "seed must be nonnegative")
+	}
+	if request.FrequencyPenalty != nil && (*request.FrequencyPenalty < 0 || *request.FrequencyPenalty > 1) {
+		return cohereChatError("frequency_penalty", "frequency_penalty must be between 0 and 1")
+	}
+	if request.PresencePenalty != nil && (*request.PresencePenalty < 0 || *request.PresencePenalty > 1) {
+		return cohereChatError("presence_penalty", "presence_penalty must be between 0 and 1")
+	}
 	if _, ok := openai.StopSequences(request.Stop); !ok {
 		return cohereChatError("stop", "stop must contain at most five non-empty strings")
 	}
@@ -170,13 +182,12 @@ func (Cohere) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	}
 	return rejectParameters("cohere",
 		parameterCheck{"tools", len(request.Tools) > 0}, parameterCheck{"tool_choice", request.ToolChoice != nil}, parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
-		parameterCheck{"seed", request.Seed != nil},
 		parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"store", request.Store != nil}, parameterCheck{"modalities", request.Modalities != nil}, parameterCheck{"audio", request.Audio != nil},
 		parameterCheck{"reasoning_effort", request.ReasoningEffort != ""}, parameterCheck{"n", request.N != nil}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},
 		parameterCheck{"prediction", request.Prediction != nil}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"user", request.User != ""}, parameterCheck{"verbosity", request.Verbosity != ""},
 		parameterCheck{"web_search_options", request.WebSearchOptions != nil}, parameterCheck{"logprobs", request.Logprobs != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
-		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil}, parameterCheck{"logit_bias", request.LogitBias != nil},
+		parameterCheck{"logit_bias", request.LogitBias != nil},
 	)
 }
 
@@ -236,7 +247,11 @@ func cohereNativeChatRequest(request openai.ChatCompletionRequest, stream bool) 
 		maxTokens = request.MaxTokens
 	}
 	stop, _ := openai.StopSequences(request.Stop)
-	native := cohereChatRequest{Model: request.Model, Messages: messages, MaxTokens: maxTokens, StopSequences: stop, Temperature: request.Temperature, P: request.TopP, Stream: stream}
+	native := cohereChatRequest{
+		Model: request.Model, Messages: messages, MaxTokens: maxTokens, StopSequences: stop,
+		Temperature: request.Temperature, P: request.TopP, Seed: request.Seed,
+		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty, Stream: stream,
+	}
 	if format := request.ResponseFormat; format != nil && format.Type != "text" {
 		native.ResponseFormat = &cohereResponseFormat{Type: "json_object"}
 		if format.Type == "json_schema" && format.JSONSchema != nil {

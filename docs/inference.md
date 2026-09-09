@@ -75,7 +75,8 @@ Native Cohere Chat uses `/v2/chat` with Bearer credentials. It accepts text-only
 `system`, `developer`, `user` and `assistant` messages, maps `developer` to the
 native `system` role, and supports `max_tokens` or `max_completion_tokens`,
 `temperature`, `top_p`, stop sequences, JSON object output and JSON Schema
-output. Provider-reported billed input and output tokens are required and flow
+output. Nonnegative `seed` and native-range frequency and presence penalties are
+forwarded explicitly. Provider-reported billed input and output tokens flow
 into post-response billing; incomplete counters and malformed response content
 fail the request. Deployments with streaming enabled and the `stream` capability
 use the native event stream; its lifecycle, content indices, terminal reason and
