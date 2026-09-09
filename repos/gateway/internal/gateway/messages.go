@@ -109,7 +109,7 @@ func (w *messagesWriter) event(kind string, data map[string]any) error {
 	}
 	return writeSSEResponseEvent(w.destination, kind, string(payload))
 }
-func messagesUsage(usage openai.Usage) map[string]int {
+func messagesUsage(usage openai.Usage) map[string]any {
 	read, write := 0, 0
 	if details := usage.PromptTokensDetails; details != nil {
 		read = details.CachedTokens
@@ -122,7 +122,11 @@ func messagesUsage(usage openai.Usage) map[string]int {
 	if input < 0 {
 		input = 0
 	}
-	return map[string]int{"input_tokens": input, "output_tokens": usage.CompletionTokens, "cache_read_input_tokens": read, "cache_creation_input_tokens": write}
+	result := map[string]any{"input_tokens": input, "output_tokens": usage.CompletionTokens, "cache_read_input_tokens": read, "cache_creation_input_tokens": write}
+	if details := usage.CompletionTokensDetails; details != nil {
+		result["output_tokens_details"] = map[string]int{"thinking_tokens": details.ReasoningTokens}
+	}
+	return result
 }
 func messagesStop(reason string) (string, error) {
 	switch reason {
@@ -343,6 +347,9 @@ func (w *messagesWriter) finish() {
 
 func validMessagesUsage(usage openai.Usage) bool {
 	if usage.PromptTokens < 0 || usage.CompletionTokens < 0 {
+		return false
+	}
+	if details := usage.CompletionTokensDetails; details != nil && (details.ReasoningTokens < 0 || details.ReasoningTokens > usage.CompletionTokens) {
 		return false
 	}
 	if details := usage.PromptTokensDetails; details != nil {

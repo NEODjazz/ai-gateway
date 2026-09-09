@@ -7,21 +7,35 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"ai-gateway-gateway/internal/openai"
 )
 
 type messagesRequest struct {
-	Model         string              `json:"model"`
-	MaxTokens     int                 `json:"max_tokens"`
-	Messages      []messagesInput     `json:"messages"`
-	System        json.RawMessage     `json:"system,omitempty"`
-	Tools         []messagesTool      `json:"tools,omitempty"`
-	ToolChoice    *messagesToolChoice `json:"tool_choice,omitempty"`
-	Temperature   *float64            `json:"temperature,omitempty"`
-	TopP          *float64            `json:"top_p,omitempty"`
-	Stream        bool                `json:"stream,omitempty"`
-	StopSequences []string            `json:"stop_sequences,omitempty"`
+	Model         string                `json:"model"`
+	MaxTokens     int                   `json:"max_tokens"`
+	Messages      []messagesInput       `json:"messages"`
+	System        json.RawMessage       `json:"system,omitempty"`
+	Tools         []messagesTool        `json:"tools,omitempty"`
+	ToolChoice    *messagesToolChoice   `json:"tool_choice,omitempty"`
+	Metadata      *messagesMetadata     `json:"metadata,omitempty"`
+	OutputConfig  *messagesOutputConfig `json:"output_config,omitempty"`
+	Temperature   *float64              `json:"temperature,omitempty"`
+	TopP          *float64              `json:"top_p,omitempty"`
+	Stream        bool                  `json:"stream,omitempty"`
+	StopSequences []string              `json:"stop_sequences,omitempty"`
+}
+type messagesMetadata struct {
+	UserID string `json:"user_id,omitempty"`
+}
+type messagesOutputConfig struct {
+	Effort string                    `json:"effort,omitempty"`
+	Format *messagesJSONOutputFormat `json:"format,omitempty"`
+}
+type messagesJSONOutputFormat struct {
+	Type   string         `json:"type"`
+	Schema map[string]any `json:"schema"`
 }
 type messagesInput struct {
 	Role    string          `json:"role"`
@@ -61,6 +75,29 @@ func (request messagesRequest) chat() (openai.ChatCompletionRequest, error) {
 
 func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatCompletionRequest, error) {
 	result := openai.ChatCompletionRequest{Model: request.Model, MaxTokens: &request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP, Stream: request.Stream}
+	if request.Metadata != nil {
+		if utf8.RuneCountInString(request.Metadata.UserID) > 512 {
+			return result, errors.New("metadata.user_id must contain at most 512 characters")
+		}
+		if request.Metadata.UserID != "" {
+			result.Metadata = map[string]string{"user_id": request.Metadata.UserID}
+		}
+	}
+	if config := request.OutputConfig; config != nil {
+		switch config.Effort {
+		case "", "low", "medium", "high", "xhigh", "max":
+			result.ReasoningEffort = config.Effort
+		default:
+			return result, errors.New("output_config.effort must be low, medium, high, xhigh, or max")
+		}
+		if config.Format != nil {
+			if config.Format.Type != "json_schema" || config.Format.Schema == nil {
+				return result, errors.New("output_config.format requires type json_schema and schema")
+			}
+			strict := true
+			result.ResponseFormat = &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "messages_output", Schema: config.Format.Schema, Strict: &strict}}
+		}
+	}
 	if request.Stream {
 		result.StreamOptions = &openai.ChatStreamOptions{IncludeUsage: true}
 	}

@@ -25,7 +25,7 @@ availability is not inferred from these tests.
 | Embeddings | String/list and bounded token-ID input, exact token-ID accounting, float/base64 output, compatible and native adapters | Additional provider compatibility |
 | Rerank | Query/documents, compatible adapter | Provider-specific request and usage matrix |
 | Text completions | Compatible adapters accept string/list and token-ID prompts; Ollama provider execution accepts string prompts; legacy parameters/response/logprobs, bounded JSON, incremental SSE and buffered fallback | Additional native provider adapters and provider-specific prompt forms |
-| Messages | Inbound `/v1/messages` JSON/SSE over the shared Chat pipeline; outbound Anthropic adapter; explicit prompt-cache controls on system, message text and tools | Thinking, server tools and prefill |
+| Messages | Inbound `/v1/messages` JSON/SSE over the shared Chat pipeline; outbound Anthropic adapter; explicit prompt-cache controls; opaque user metadata; output effort and JSON Schema format; thinking-token usage details | Thinking content blocks, server tools and prefill |
 | Anthropic token counting | Native Anthropic/Gemini counters behind `/v1/messages/count_tokens` with authorization, policy, input quotas and bounded transport | Advanced native content blocks and additional provider counters |
 | GenerateContent | Native inbound JSON/SSE and context token counting through shared policy; outbound Gemini chat/tools/vision | Advanced native options and cloud credentials |
 | Interactions | Not implemented | Native lifecycle, resource ownership and accounting |

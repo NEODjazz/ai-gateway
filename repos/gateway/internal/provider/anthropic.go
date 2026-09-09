@@ -25,16 +25,32 @@ type Anthropic struct {
 }
 
 type anthropicRequest struct {
-	StopSequences []string           `json:"stop_sequences,omitempty"`
-	Model         string             `json:"model"`
-	System        any                `json:"system,omitempty"`
-	Messages      []anthropicMessage `json:"messages"`
-	Tools         []anthropicTool    `json:"tools,omitempty"`
-	ToolChoice    map[string]any     `json:"tool_choice,omitempty"`
-	MaxTokens     int                `json:"max_tokens"`
-	Stream        bool               `json:"stream,omitempty"`
-	Temperature   *float64           `json:"temperature,omitempty"`
-	TopP          *float64           `json:"top_p,omitempty"`
+	StopSequences []string               `json:"stop_sequences,omitempty"`
+	Model         string                 `json:"model"`
+	System        any                    `json:"system,omitempty"`
+	Messages      []anthropicMessage     `json:"messages"`
+	Tools         []anthropicTool        `json:"tools,omitempty"`
+	ToolChoice    map[string]any         `json:"tool_choice,omitempty"`
+	MaxTokens     int                    `json:"max_tokens"`
+	Stream        bool                   `json:"stream,omitempty"`
+	Temperature   *float64               `json:"temperature,omitempty"`
+	TopP          *float64               `json:"top_p,omitempty"`
+	Metadata      *anthropicMetadata     `json:"metadata,omitempty"`
+	OutputConfig  *anthropicOutputConfig `json:"output_config,omitempty"`
+}
+
+type anthropicMetadata struct {
+	UserID string `json:"user_id"`
+}
+
+type anthropicOutputConfig struct {
+	Effort string                     `json:"effort,omitempty"`
+	Format *anthropicJSONOutputFormat `json:"format,omitempty"`
+}
+
+type anthropicJSONOutputFormat struct {
+	Type   string `json:"type"`
+	Schema any    `json:"schema"`
 }
 
 type anthropicMessage struct {
@@ -78,10 +94,15 @@ type anthropicContent struct {
 }
 
 type anthropicUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	InputTokens              int                          `json:"input_tokens"`
+	OutputTokens             int                          `json:"output_tokens"`
+	CacheReadInputTokens     int                          `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int                          `json:"cache_creation_input_tokens,omitempty"`
+	OutputTokensDetails      *anthropicOutputTokenDetails `json:"output_tokens_details,omitempty"`
+}
+
+type anthropicOutputTokenDetails struct {
+	ThinkingTokens int `json:"thinking_tokens"`
 }
 
 func NewAnthropic(baseURL string, apiKey string, upstreamStream bool) Anthropic {
@@ -107,11 +128,14 @@ func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompl
 	if err := p.doMessages(ctx, upstreamRequest, &response); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	if err := validateAnthropicUsage(response.Usage); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	converted := anthropicToChatCompletion(response, request.Model)
 	if response.StopReason == "stop_sequence" && response.StopSequence == nil {
 		return openai.ChatCompletionResponse{}, errors.New("Anthropic omitted matched stop sequence")
 	}
-	if request.ResponseFormat != nil {
+	if anthropicUsesStructuredTool(request.ResponseFormat) {
 		converted = anthropicStructuredChat(converted)
 	}
 	return converted, nil
@@ -131,7 +155,7 @@ func (p Anthropic) StreamChatCompletions(ctx context.Context, request openai.Cha
 	}
 	defer resp.Body.Close()
 
-	return streamAnthropicChat(resp.Body, request.Model, request.ResponseFormat != nil, write)
+	return streamAnthropicChat(resp.Body, request.Model, anthropicUsesStructuredTool(request.ResponseFormat), write)
 }
 
 func (p Anthropic) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
@@ -233,7 +257,13 @@ func (p Anthropic) setHeaders(request *http.Request) {
 func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) anthropicRequest {
 	system, messages := anthropicMessages(request.Messages)
 	tools, toolChoice := anthropicChatTools(request.Tools, request.ToolChoice)
-	if request.ResponseFormat != nil {
+	var outputConfig *anthropicOutputConfig
+	if request.ResponseFormat != nil && request.ResponseFormat.Type == "json_schema" {
+		outputConfig = &anthropicOutputConfig{}
+		if request.ResponseFormat.JSONSchema != nil {
+			outputConfig.Format = &anthropicJSONOutputFormat{Type: "json_schema", Schema: request.ResponseFormat.JSONSchema.Schema}
+		}
+	} else if request.ResponseFormat != nil {
 		name := "structured_output"
 		schema := any(map[string]any{"type": "object"})
 		if request.ResponseFormat.JSONSchema != nil {
@@ -244,6 +274,16 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		}
 		tools = append(tools, anthropicTool{Name: name, Description: "Return the response using the required JSON schema.", InputSchema: schema})
 		toolChoice = map[string]any{"type": "tool", "name": name}
+	}
+	if request.ReasoningEffort != "" {
+		if outputConfig == nil {
+			outputConfig = &anthropicOutputConfig{}
+		}
+		outputConfig.Effort = request.ReasoningEffort
+	}
+	var metadata *anthropicMetadata
+	if userID := request.Metadata["user_id"]; userID != "" {
+		metadata = &anthropicMetadata{UserID: userID}
 	}
 	stop, _ := openai.StopSequences(request.Stop)
 	return anthropicRequest{
@@ -257,7 +297,13 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		Stream:        stream,
 		Temperature:   request.Temperature,
 		TopP:          request.TopP,
+		Metadata:      metadata,
+		OutputConfig:  outputConfig,
 	}
+}
+
+func anthropicUsesStructuredTool(format *openai.ResponseFormat) bool {
+	return format != nil && format.Type != "json_schema"
 }
 
 func anthropicStructuredChat(response openai.ChatCompletionResponse) openai.ChatCompletionResponse {
@@ -596,8 +642,26 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 				CachedTokens:     response.Usage.CacheReadInputTokens,
 				CacheWriteTokens: response.Usage.CacheCreationInputTokens,
 			},
+			CompletionTokensDetails: anthropicCompletionTokenDetails(response.Usage),
 		},
 	}
+}
+
+func anthropicCompletionTokenDetails(usage anthropicUsage) *openai.CompletionTokenDetails {
+	if usage.OutputTokensDetails == nil {
+		return nil
+	}
+	return &openai.CompletionTokenDetails{ReasoningTokens: usage.OutputTokensDetails.ThinkingTokens}
+}
+
+func validateAnthropicUsage(usage anthropicUsage) error {
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.CacheReadInputTokens < 0 || usage.CacheCreationInputTokens < 0 {
+		return errors.New("invalid Anthropic usage")
+	}
+	if details := usage.OutputTokensDetails; details != nil && (details.ThinkingTokens < 0 || details.ThinkingTokens > usage.OutputTokens) {
+		return errors.New("invalid Anthropic output token details")
+	}
+	return nil
 }
 
 func anthropicToResponse(response anthropicResponse, fallbackModel string) openai.ResponseResponse {
@@ -711,6 +775,9 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 		}
 		switch event {
 		case "message_start":
+			if err := validateAnthropicUsage(streamEvent.Message.Usage); err != nil {
+				return err
+			}
 			response.ID = streamEvent.Message.ID
 			if streamEvent.Message.Model != "" {
 				response.Model = streamEvent.Message.Model
@@ -750,9 +817,15 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 				return write(openAIChatToolCallChunkPayload(response.ID, response.Model, toolIndex, delta))
 			}
 		case "message_delta":
+			if err := validateAnthropicUsage(streamEvent.Usage); err != nil {
+				return err
+			}
 			if streamEvent.Usage.OutputTokens != 0 {
 				response.Usage.CompletionTokens = streamEvent.Usage.OutputTokens
 				response.Usage.TotalTokens = response.Usage.PromptTokens + response.Usage.CompletionTokens
+			}
+			if streamEvent.Usage.OutputTokensDetails != nil {
+				response.Usage.CompletionTokensDetails = anthropicCompletionTokenDetails(streamEvent.Usage)
 			}
 			if streamEvent.Delta.StopReason != "" {
 				if streamEvent.Delta.StopReason == "stop_sequence" && streamEvent.Delta.StopSequence == nil {

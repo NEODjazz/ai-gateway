@@ -341,7 +341,8 @@ pipeline; this endpoint does not forward client credentials to providers.
 
 Supported input is text, text system blocks, base64 user images, function schemas,
 assistant tool-use history, text tool results, tool choice and parallel-tool
-control, temperature, top-p, positive max_tokens, stop_sequences and stream. Provider-specific
+control, temperature, top-p, positive max_tokens, stop_sequences, stream, opaque
+`metadata.user_id`, output effort and JSON Schema formatting. Provider-specific
 capability checks still apply after conversion. Responses contain native text or
 tool-use blocks and native usage fields. Cached prompt tokens are separated from
 uncached input tokens without changing the internal accounting totals.
@@ -356,11 +357,17 @@ separate 32 MiB total limit and must form JSON objects before completion. A
 stream without a finish reason fails.
 
 Compatibility is partial. Unsupported top-level fields and block fields fail
-with a native invalid_request_error. In particular, thinking, server tools,
-documents, URL images, metadata, top_k, assistant
+with a native invalid_request_error. In particular, thinking content blocks,
+server tools, documents, URL images, top_k, assistant
 prefill, text after tool_use and is_error=true tool results are not supported.
 All tool-use history requires matching results. Opaque provider tool metadata
 that cannot be represented in Messages produces an explicit conversion error.
+`metadata.user_id` is limited to 512 Unicode characters and remains request
+metadata; it does not replace gateway authorization or billing identities.
+Supported effort values are `low`, `medium`, `high`, `xhigh`, and `max`.
+Provider-reported `output_tokens_details.thinking_tokens` is retained in JSON,
+SSE final usage, and the internal response usage presented to billing settlement;
+the total output-token charge remains unchanged.
 Token counting is a separate endpoint; background jobs are not supported.
 
 Regressions cover request/response conversion, native and fallback SSE, stream

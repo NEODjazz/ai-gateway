@@ -24,6 +24,30 @@ func anthropicCachedCountTestRequest() TokenCountRequest {
 	request.Tools[0].Function.PromptCacheBreakpoint = &openai.PromptCacheBreakpoint{Mode: "explicit", TTL: "5m"}
 	return request
 }
+
+func TestAnthropicTokenCountPreservesOutputConfig(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			OutputConfig *anthropicOutputConfig `json:"output_config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.OutputConfig == nil || body.OutputConfig.Effort != "high" || body.OutputConfig.Format == nil || body.OutputConfig.Format.Type != "json_schema" {
+			t.Fatalf("output config lost: %+v", body.OutputConfig)
+		}
+		_, _ = w.Write([]byte(`{"input_tokens":7}`))
+	}))
+	defer server.Close()
+	result, err := NewAnthropic(server.URL, "", false).CountTokens(context.Background(), TokenCountRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hi"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "high"},
+		ResponseFormat:        &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Schema: map[string]any{"type": "object"}}},
+	})
+	if err != nil || result.InputTokens != 7 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
 func TestAnthropicCountTokensIncludesNativeContext(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages/count_tokens" || r.Method != "POST" || r.Header.Get("x-api-key") != "test-key" || r.Header.Get("anthropic-version") != "2023-06-01" || r.Header.Get("Authorization") != "" {

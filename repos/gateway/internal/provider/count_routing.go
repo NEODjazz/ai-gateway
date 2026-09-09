@@ -46,7 +46,7 @@ func (r Router) CountTokens(ctx context.Context, req modules.RequestContext) (To
 			return TokenCountResult{}, err
 		}
 		started := time.Now()
-		result, err := counter.CountTokens(ctx, TokenCountRequest{Model: attempt.Request.Model, Messages: attempt.Request.Messages, Tools: attempt.Request.Tools, ToolChoice: attempt.Request.ToolChoice, ParallelToolCalls: attempt.Request.ParallelToolCalls})
+		result, err := counter.CountTokens(ctx, TokenCountRequest{Model: attempt.Request.Model, Messages: attempt.Request.Messages, Tools: attempt.Request.Tools, ToolChoice: attempt.Request.ToolChoice, ParallelToolCalls: attempt.Request.ParallelToolCalls, ChatGenerationOptions: attempt.Request.ChatGenerationOptions, ResponseFormat: attempt.Request.ResponseFormat})
 		release()
 		if r.observer != nil {
 			outcome := "ok"

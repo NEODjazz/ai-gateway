@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"unicode/utf8"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -47,7 +48,20 @@ func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) er
 	if err := rejectChatMessageAudio("anthropic", request.Messages); err != nil {
 		return err
 	}
-	if err := rejectGenerationOptions("anthropic", request.ChatGenerationOptions); err != nil {
+	options := request.ChatGenerationOptions
+	if options.Metadata != nil {
+		if len(options.Metadata) != 1 || options.Metadata["user_id"] == "" || utf8.RuneCountInString(options.Metadata["user_id"]) > 512 {
+			return &Error{Class: FailureClientRequest, Provider: "anthropic", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "metadata", Err: errors.New("metadata requires one non-empty user_id of at most 512 characters")}
+		}
+		options.Metadata = nil
+	}
+	switch options.ReasoningEffort {
+	case "", "low", "medium", "high", "xhigh", "max":
+		options.ReasoningEffort = ""
+	default:
+		return &Error{Class: FailureClientRequest, Provider: "anthropic", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "reasoning_effort", Err: errors.New("reasoning_effort must be low, medium, high, xhigh, or max")}
+	}
+	if err := rejectGenerationOptions("anthropic", options); err != nil {
 		return err
 	}
 	_, validStop := openai.StopSequences(request.Stop)

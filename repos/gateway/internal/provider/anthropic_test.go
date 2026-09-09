@@ -316,15 +316,16 @@ func TestAnthropicTranslatesToolCalls(t *testing.T) {
 	}
 }
 
-func TestAnthropicEmulatesStructuredOutputWithForcedTool(t *testing.T) {
+func TestAnthropicUsesNativeOutputConfigAndMetadata(t *testing.T) {
 	var upstream anthropicRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
 			t.Fatal(err)
 		}
 		_ = json.NewEncoder(w).Encode(anthropicResponse{
-			ID: "msg-json", Model: upstream.Model, StopReason: "tool_use",
-			Content: []anthropicContent{{Type: "tool_use", ID: "toolu-json", Name: "answer", Input: map[string]any{"ok": true}}},
+			ID: "msg-json", Model: upstream.Model, StopReason: "end_turn",
+			Content: []anthropicContent{{Type: "text", Text: `{"ok":true}`}},
+			Usage:   anthropicUsage{InputTokens: 4, OutputTokens: 5, OutputTokensDetails: &anthropicOutputTokenDetails{ThinkingTokens: 3}},
 		})
 	}))
 	defer server.Close()
@@ -332,15 +333,16 @@ func TestAnthropicEmulatesStructuredOutputWithForcedTool(t *testing.T) {
 	strict := true
 	response, err := NewAnthropic(server.URL, "key", false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{
 		Model: "claude-test", Messages: []openai.Message{{Role: "user", Content: "return json"}},
-		ResponseFormat: &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "answer", Schema: map[string]any{"type": "object"}, Strict: &strict}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{Metadata: map[string]string{"user_id": "customer-42"}, ReasoningEffort: "high"},
+		ResponseFormat:        &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "answer", Schema: map[string]any{"type": "object"}, Strict: &strict}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if upstream.ToolChoice["name"] != "answer" || len(upstream.Tools) != 1 {
-		t.Fatalf("structured output tool was not forced: %+v", upstream)
+	if upstream.Metadata == nil || upstream.Metadata.UserID != "customer-42" || upstream.OutputConfig == nil || upstream.OutputConfig.Effort != "high" || upstream.OutputConfig.Format == nil || upstream.OutputConfig.Format.Type != "json_schema" || len(upstream.Tools) != 0 || upstream.ToolChoice != nil {
+		t.Fatalf("native controls were not preserved: %+v", upstream)
 	}
-	if openai.ContentText(response.Choices[0].Message.Content) != `{"ok":true}` || len(response.Choices[0].Message.ToolCalls) != 0 {
+	if openai.ContentText(response.Choices[0].Message.Content) != `{"ok":true}` || len(response.Choices[0].Message.ToolCalls) != 0 || response.Usage.CompletionTokensDetails == nil || response.Usage.CompletionTokensDetails.ReasoningTokens != 3 {
 		t.Fatalf("structured response was not normalized: %+v", response)
 	}
 }
@@ -357,7 +359,7 @@ func TestAnthropicStreamsToolCallArguments(t *testing.T) {
 		_, _ = w.Write([]byte("event: content_block_delta\n"))
 		_, _ = w.Write([]byte(`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"Moscow\"}"}}` + "\n\n"))
 		_, _ = w.Write([]byte("event: message_delta\n"))
-		_, _ = w.Write([]byte(`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":4}}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":4,"output_tokens_details":{"thinking_tokens":2}}}` + "\n\n"))
 		_, _ = w.Write([]byte("event: message_stop\n"))
 		_, _ = w.Write([]byte(`data: {"type":"message_stop"}` + "\n\n"))
 	}))
@@ -377,6 +379,9 @@ func TestAnthropicStreamsToolCallArguments(t *testing.T) {
 	}
 	if len(payloads) != 4 || !strings.Contains(payloads[0], `"tool_calls"`) || !strings.Contains(payloads[3], `"finish_reason":"tool_calls"`) {
 		t.Fatalf("unexpected OpenAI tool stream: %v", payloads)
+	}
+	if response.Usage.CompletionTokensDetails == nil || response.Usage.CompletionTokensDetails.ReasoningTokens != 2 {
+		t.Fatalf("stream usage details lost: %+v", response.Usage)
 	}
 }
 
@@ -435,7 +440,25 @@ func TestAnthropicParallelControlWithoutTools(t *testing.T) {
 		t.Fatal("parallel control invented tool choice")
 	}
 	request = anthropicChatRequest(openai.ChatCompletionRequest{ParallelToolCalls: &parallel, ResponseFormat: &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "answer", Schema: map[string]any{"type": "object"}}}}, false)
-	if request.ToolChoice["disable_parallel_tool_use"] != true {
-		t.Fatal("structured output lost parallel control")
+	if request.ToolChoice != nil || request.OutputConfig == nil || request.OutputConfig.Format == nil {
+		t.Fatal("native structured output invented a tool choice")
+	}
+}
+
+func TestAnthropicRejectsInvalidNativeMetadataAndUsageDetails(t *testing.T) {
+	for _, request := range []openai.ChatCompletionRequest{
+		{ChatGenerationOptions: openai.ChatGenerationOptions{Metadata: map[string]string{"other": "value"}}},
+		{ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "minimal"}},
+	} {
+		if err := (Anthropic{}).ValidateChatParameters(request); err == nil {
+			t.Fatalf("invalid controls accepted: %+v", request)
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(anthropicResponse{ID: "bad", StopReason: "end_turn", Usage: anthropicUsage{OutputTokens: 2, OutputTokensDetails: &anthropicOutputTokenDetails{ThinkingTokens: 3}}})
+	}))
+	defer server.Close()
+	if _, err := NewAnthropic(server.URL, "", false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "model"}); err == nil {
+		t.Fatal("invalid usage details accepted")
 	}
 }

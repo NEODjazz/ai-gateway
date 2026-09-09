@@ -52,6 +52,32 @@ func TestMessagesConvertsToolsAndResponse(t *testing.T) {
 	}
 }
 
+func TestMessagesConvertsMetadataOutputConfigAndUsageDetails(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{
+		ID: "message", Model: "model", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: `{"ok":true}`}, FinishReason: "stop"}},
+		Usage: openai.Usage{PromptTokens: 8, CompletionTokens: 5, TotalTokens: 13, CompletionTokensDetails: &openai.CompletionTokenDetails{ReasoningTokens: 3}},
+	}}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"metadata":{"user_id":"customer-42"},"output_config":{"effort":"high","format":{"type":"json_schema","schema":{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}}},"messages":[{"role":"user","content":"answer"}]}`, "")
+	if response.Code != http.StatusOK || upstream.calls != 1 {
+		t.Fatalf("response=%d body=%s calls=%d", response.Code, response.Body.String(), upstream.calls)
+	}
+	request := upstream.request.Request
+	if request.Metadata["user_id"] != "customer-42" || request.ReasoningEffort != "high" || request.ResponseFormat == nil || request.ResponseFormat.Type != "json_schema" || request.ResponseFormat.JSONSchema == nil {
+		t.Fatalf("native controls lost: %+v", request)
+	}
+	var body struct {
+		Usage struct {
+			OutputTokensDetails struct {
+				ThinkingTokens int `json:"thinking_tokens"`
+			} `json:"output_tokens_details"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.Usage.OutputTokensDetails.ThinkingTokens != 3 {
+		t.Fatalf("usage details lost: err=%v body=%s", err, response.Body.String())
+	}
+}
+
 type messagesAuth struct{ accessPolicyModule }
 
 func (m messagesAuth) Handle(ctx context.Context, req *modules.RequestContext) error {
@@ -89,6 +115,10 @@ func TestMessagesRejectsUnsupportedInputBeforeInference(t *testing.T) {
 		`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"unknown","content":"x"}]}]}`,
 		`{"model":"m","max_tokens":0,"messages":[{"role":"user","content":"hi"}]}`,
 		`{"model":"m","max_tokens":10,"messages":[]} {}`,
+		`{"model":"m","max_tokens":10,"metadata":{"user_id":"ok","extra":"no"},"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"metadata":{"user_id":"` + strings.Repeat("я", 513) + `"},"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"output_config":{"effort":"minimal"},"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"output_config":{"format":{"type":"json_schema"}},"messages":[{"role":"user","content":"hi"}]}`,
 	} {
 		upstream := &fallbackChatProvider{}
 		handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
@@ -133,7 +163,7 @@ func (p *nativeMessagesStreamProvider) StreamChatCompletions(ctx context.Context
 	for _, payload := range []string{
 		`{"id":"msg-test","model":"model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"tool-a","type":"function","function":{"name":"weather","arguments":"{\"city\":"}}]},"finish_reason":null}]}`,
 		`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"Paris\"}"}}]},"finish_reason":"tool_calls"}]}`,
-		`{"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}`,
+		`{"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15,"completion_tokens_details":{"reasoning_tokens":2}}}`,
 	} {
 		if err := write(payload); err != nil {
 			return openai.ChatCompletionResponse{}, true, err
@@ -142,7 +172,7 @@ func (p *nativeMessagesStreamProvider) StreamChatCompletions(ctx context.Context
 			return openai.ChatCompletionResponse{}, true, errors.New("sensitive upstream error")
 		}
 	}
-	return openai.ChatCompletionResponse{Usage: openai.Usage{PromptTokens: 12, CompletionTokens: 3, TotalTokens: 15}}, true, nil
+	return openai.ChatCompletionResponse{Usage: openai.Usage{PromptTokens: 12, CompletionTokens: 3, TotalTokens: 15, CompletionTokensDetails: &openai.CompletionTokenDetails{ReasoningTokens: 2}}}, true, nil
 }
 func TestMessagesNativeSSE(t *testing.T) {
 	for _, fail := range []bool{false, true} {
@@ -209,14 +239,14 @@ func TestMessagesRouterRetainsBillingUsage(t *testing.T) {
 			t.Error("native request limits or streaming lost")
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"id\":\"id-test\",\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3,\"total_tokens\":15}}\n\ndata: [DONE]\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"id-test\",\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3,\"total_tokens\":15,\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\ndata: [DONE]\n\n"))
 	}))
 	defer server.Close()
 	recorder := &messagesUsageRecorder{}
 	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "native-test", Type: "openai-compatible", BaseURL: server.URL, APIKey: "upstream-test-key", Stream: true, Models: []string{"model"}, Capabilities: []string{"chat", "stream"}}}, Modules: modules.NewPipeline([]modules.Module{recorder})})
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}}}}), router))
 	response := nativeMessageCall(handler, `{"model":"model","max_tokens":10,"stream":true,"messages":[{"role":"user","content":"hi"}]}`, "gateway-test-key")
-	if response.Code != 200 || upstreamCalls != 1 || recorder.calls != 1 || recorder.usage.TotalTokens != 15 || !strings.Contains(response.Body.String(), `"output_tokens":3`) {
+	if response.Code != 200 || upstreamCalls != 1 || recorder.calls != 1 || recorder.usage.TotalTokens != 15 || recorder.usage.CompletionTokensDetails == nil || recorder.usage.CompletionTokensDetails.ReasoningTokens != 2 || !strings.Contains(response.Body.String(), `"output_tokens":3`) || !strings.Contains(response.Body.String(), `"thinking_tokens":2`) {
 		t.Fatalf("billing: code=%d calls=%d usage=%+v body=%s", response.Code, recorder.calls, recorder.usage, response.Body.String())
 	}
 }

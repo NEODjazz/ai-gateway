@@ -11,11 +11,12 @@ import (
 )
 
 type messagesCountRequest struct {
-	Model      string              `json:"model"`
-	Messages   []messagesInput     `json:"messages"`
-	System     json.RawMessage     `json:"system,omitempty"`
-	Tools      []messagesTool      `json:"tools,omitempty"`
-	ToolChoice *messagesToolChoice `json:"tool_choice,omitempty"`
+	Model        string                `json:"model"`
+	Messages     []messagesInput       `json:"messages"`
+	System       json.RawMessage       `json:"system,omitempty"`
+	Tools        []messagesTool        `json:"tools,omitempty"`
+	ToolChoice   *messagesToolChoice   `json:"tool_choice,omitempty"`
+	OutputConfig *messagesOutputConfig `json:"output_config,omitempty"`
 }
 
 func (h Handler) CountMessageTokens(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +35,7 @@ func (h Handler) CountMessageTokens(w http.ResponseWriter, r *http.Request) {
 	if !decodeInferenceRequest(output, r, &native) {
 		return
 	}
-	request, err := (messagesRequest{Model: native.Model, MaxTokens: 1, Messages: native.Messages, System: native.System, Tools: native.Tools, ToolChoice: native.ToolChoice}).chatContext(true)
+	request, err := (messagesRequest{Model: native.Model, MaxTokens: 1, Messages: native.Messages, System: native.System, Tools: native.Tools, ToolChoice: native.ToolChoice, OutputConfig: native.OutputConfig}).chatContext(true)
 	if err != nil {
 		writeError(output, 400, "invalid_request", err.Error())
 		return

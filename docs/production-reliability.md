@@ -7,6 +7,10 @@ TPM and remote billing reserve use the same context estimator. For chat, it incl
 Native Messages and GenerateContent requests retain their API family in billing
 reserve, commit and failure events. The gateway sets this classification before
 the policy pipeline runs; arbitrary client request metadata cannot override it.
+Messages `metadata.user_id` is bounded to 512 Unicode characters and remains
+separate from the authenticated credential, user, organization, and execution
+identities used for policy and billing. Provider-reported thinking-token details
+are accepted only when nonnegative and no greater than total output tokens.
 
 Explicit prompt-cache breakpoints are limited to four across Chat messages and
 tools. They are part of token reservation and exact cache identity. Semantic
