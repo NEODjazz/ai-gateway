@@ -12,6 +12,7 @@ describe("modelCapabilityOptions", () => {
       "image_generation",
       "image_edit",
       "image_variation",
+      "audio_transcription",
       "stream",
       "tools",
       "structured_output",

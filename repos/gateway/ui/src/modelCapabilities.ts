@@ -9,6 +9,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "image_generation", label: "Image generation", description: "Generate images from prompts" },
   { value: "image_edit", label: "Image editing", description: "Edit uploaded images from prompts" },
   { value: "image_variation", label: "Image variations", description: "Create variations of uploaded images" },
+  { value: "audio_transcription", label: "Audio transcription", description: "Transcribe uploaded audio" },
   { value: "stream", label: "Stream", description: "Streaming responses" },
   { value: "tools", label: "Tools", description: "Function and tool calling" },
   { value: "structured_output", label: "Structured output", description: "Structured JSON output" },

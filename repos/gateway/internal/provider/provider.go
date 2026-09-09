@@ -148,6 +148,14 @@ type ImageVariationClient interface {
 	CreateImageVariation(ctx context.Context, request openai.ImageVariationRequest) (openai.ImageGenerationResponse, error)
 }
 
+type AudioTranscriptionProvider interface {
+	TranscribeAudio(ctx context.Context, req modules.RequestContext) (openai.AudioTranscriptionResponse, error)
+}
+
+type AudioTranscriptionClient interface {
+	TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error)
+}
+
 type MCPClient interface {
 	SupportsMCP() bool
 }
@@ -1682,6 +1690,12 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		imageVariationRequest := *req.ImageVariationRequest
 		attemptCtx.ImageVariationRequest = &imageVariationRequest
 	}
+	if req.AudioTranscriptionRequest != nil {
+		audioRequest := *req.AudioTranscriptionRequest
+		audioRequest.TimestampGranularities = append([]string(nil), req.AudioTranscriptionRequest.TimestampGranularities...)
+		audioRequest.Include = append([]string(nil), req.AudioTranscriptionRequest.Include...)
+		attemptCtx.AudioTranscriptionRequest = &audioRequest
+	}
 	attemptCtx.Response = nil
 	attemptCtx.CompletionResponse = nil
 	attemptCtx.ResponsesResponse = nil
@@ -1690,6 +1704,7 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 	attemptCtx.RerankResponse = nil
 	attemptCtx.ModerationResponse = nil
 	attemptCtx.ImageGenerationResponse = nil
+	attemptCtx.AudioTranscriptionResponse = nil
 	attemptCtx.Usage = nil
 	attemptCtx.AnonymizationValues = nil
 	attemptCtx.Metadata = cloneMetadata(req.Metadata)
@@ -1734,6 +1749,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		if attemptCtx.ImageVariationRequest != nil {
 			attemptCtx.ImageVariationRequest.Model = routingModel
 		}
+		if attemptCtx.AudioTranscriptionRequest != nil {
+			attemptCtx.AudioTranscriptionRequest.Model = routingModel
+		}
 		attemptCtx.Metadata["provider.original_model"] = originalModel
 		attemptCtx.Metadata["provider.routed_model"] = routingModel
 		attemptCtx.Metadata["provider.fallback_type"] = endpoint.FallbackType
@@ -1764,6 +1782,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		}
 		if attemptCtx.ImageVariationRequest != nil {
 			attemptCtx.ImageVariationRequest.Model = upstreamModel
+		}
+		if attemptCtx.AudioTranscriptionRequest != nil {
+			attemptCtx.AudioTranscriptionRequest.Model = upstreamModel
 		}
 		attemptCtx.Metadata["provider.requested_model"] = requestedModel
 		attemptCtx.Metadata["provider.upstream_model"] = upstreamModel
@@ -2503,6 +2524,11 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 			return false
 		}
 	}
+	if hasCapability(required, "audio_transcription") {
+		if client, ok := e.Provider.(interface{ SupportsAudioTranscription() bool }); ok && !client.SupportsAudioTranscription() {
+			return false
+		}
+	}
 	if len(e.Capabilities) == 0 {
 		return true
 	}
@@ -2557,11 +2583,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "web_search") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill")
+	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "web_search") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "web_search", "audio", "prompt_cache", "assistant_prefill"} {
+	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "web_search", "audio", "prompt_cache", "assistant_prefill"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

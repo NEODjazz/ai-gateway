@@ -47,6 +47,10 @@ func (m BillingModule) Handle(_ context.Context, req *RequestContext) error {
 		usage := req.ImageGenerationResponse.Usage
 		req.Usage = &openai.Usage{PromptTokens: usage.InputTokens, CompletionTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens}
 	}
+	if req.AudioTranscriptionResponse != nil && req.AudioTranscriptionResponse.Usage != nil {
+		usage := req.AudioTranscriptionResponse.Usage
+		req.Usage = &openai.Usage{PromptTokens: usage.InputTokens, CompletionTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens}
+	}
 
 	if req.Metadata == nil {
 		req.Metadata = map[string]string{}

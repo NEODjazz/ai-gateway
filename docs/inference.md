@@ -181,6 +181,22 @@ provider response обязан содержать точный token usage.
 image input и число запрошенных результатов; успешный ответ проходит общий
 validator количества, URL/base64 и точного token usage.
 
+### Audio transcription
+
+`POST /v1/audio/transcriptions` принимает один файл FLAC, MP3, MP4, MPEG, MPGA,
+M4A, OGG, WAV или WebM размером до 20 MiB для deployment и model с capability
+`audio_transcription`. Gateway сверяет расширение, MIME type и сигнатуру файла,
+передает optional prompt в DLP, а аудиоданные — в AV. Неизвестные и повторные
+scalar fields, а также повторные значения bounded array fields отклоняются.
+
+Поддерживаются JSON-форматы `json`, `verbose_json` и `diarized_json`. Успешный
+ответ ограничен 8 MiB, transcript — 1 MiB текста, words и segments — 100 000
+элементов суммарно. Provider обязан вернуть точный token usage с согласованной
+суммой; duration-only usage отклоняется, поскольку существующий TPM и billing
+контракт начисляет токены. Streaming, duration-priced models, chunking,
+multilingual/known-speaker hints и дополнительные native adapters остаются
+отдельными контрактами.
+
 `POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
 
 Vision принимает только inline `data:image/{jpeg,png,gif,webp};base64,...`.

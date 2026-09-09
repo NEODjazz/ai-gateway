@@ -311,6 +311,24 @@ func TestImageVariationBillingReserveAndSettlement(t *testing.T) {
 	}
 }
 
+func TestAudioTranscriptionBillingReserveAndSettlement(t *testing.T) {
+	attachment := openai.AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: "UklGRi4uLi5XQVZFZGF0YQ=="}
+	req := &RequestContext{
+		Request:                   openai.ChatCompletionRequest{Model: "audio-model"},
+		AudioTranscriptionRequest: &openai.AudioTranscriptionRequest{Model: "audio-model", File: attachment, Prompt: "names"},
+		Metadata:                  map[string]string{"gateway.api_type": "audio_transcription"},
+	}
+	reserved := billingRequest(req)
+	if reserved.APIType != "audio_transcription" || reserved.InputTokens != openai.AudioTranscriptionInputTokens(*req.AudioTranscriptionRequest) || reserved.OutputTokens != openai.DefaultOutputTokenReserve || reserved.TotalTokens != reserved.InputTokens+reserved.OutputTokens {
+		t.Fatalf("reserve=%+v", reserved)
+	}
+	req.AudioTranscriptionResponse = &openai.AudioTranscriptionResponse{Text: "hello", Usage: &openai.AudioTranscriptionUsage{Type: "tokens", InputTokens: 5, OutputTokens: 2, TotalTokens: 7}}
+	settled := billingRequest(req)
+	if settled.Phase != "commit" || settled.APIType != "audio_transcription" || settled.InputTokens != 5 || settled.OutputTokens != 2 || settled.TotalTokens != 7 || settled.UsageEstimated {
+		t.Fatalf("settlement=%+v", settled)
+	}
+}
+
 func TestRemoteBillingCommitsCompactionUsageSeparately(t *testing.T) {
 	req := sensitiveContext()
 	req.ResponseRequest = &openai.ResponseRequest{Provider: "provider", Model: "compact-model", Input: "private input", Instructions: "private instructions"}
@@ -533,6 +551,25 @@ func TestRemoteAnonymizerUsesImageGenerationPrompt(t *testing.T) {
 	}
 	if request.Prompt != "masked prompt" {
 		t.Fatalf("prompt=%q", request.Prompt)
+	}
+}
+
+func TestRemoteAnonymizerUsesAudioTranscriptionPromptOnly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body AnonymizeRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Input != "private speaker" || len(body.Messages) != 0 {
+			t.Fatalf("body=%+v err=%v", body, err)
+		}
+		_ = json.NewEncoder(w).Encode(AnonymizeResponse{Input: "masked speaker"})
+	}))
+	defer server.Close()
+	request := openai.AudioTranscriptionRequest{Model: "audio", Prompt: "private speaker", File: openai.AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: "UklGRi4uLi5XQVZFZGF0YQ=="}}
+	req := RequestContext{AudioTranscriptionRequest: &request}
+	if err := NewRemoteAnonymizerModule(true, server.URL).Handle(t.Context(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if request.Prompt != "masked speaker" || request.File.Data == "" {
+		t.Fatalf("request=%+v", request)
 	}
 }
 

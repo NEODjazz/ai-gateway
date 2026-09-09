@@ -1110,6 +1110,51 @@ func (h Handler) CreateImageVariation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h Handler) TranscribeAudio(w http.ResponseWriter, r *http.Request) {
+	request, ok := decodeAudioTranscriptionRequest(w, r)
+	if !ok {
+		return
+	}
+	reqCtx := modules.RequestContext{
+		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r),
+		AudioTranscriptionRequest: &request,
+		Request:                   openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model},
+		Metadata:                  map[string]string{"gateway.api_type": "audio_transcription"},
+	}
+	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
+		return
+	}
+	reqCtx.APIKey = ""
+	if reqCtx.AudioTranscriptionRequest == nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
+		return
+	}
+	request = *reqCtx.AudioTranscriptionRequest
+	if message := request.Validate(); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid audio transcription request")
+		return
+	}
+	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateAudioTranscriptionTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+		return
+	}
+	audioProvider, ok := h.provider.(provider.AudioTranscriptionProvider)
+	if !ok {
+		writeError(w, http.StatusBadGateway, "provider_failed", "audio transcription is not supported by the configured provider")
+		return
+	}
+	response, err := audioProvider.TranscribeAudio(r.Context(), reqCtx)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func validateRerankRequest(request openai.RerankRequest) string {
 	if strings.TrimSpace(request.Model) == "" {
 		return "model is required"

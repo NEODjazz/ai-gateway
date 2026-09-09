@@ -64,6 +64,9 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 	if req.ImageEditRequest != nil {
 		request.Input = req.ImageEditRequest.Prompt
 	}
+	if req.AudioTranscriptionRequest != nil {
+		request.Input = req.AudioTranscriptionRequest.Prompt
+	}
 	response, err := callRemote[AnonymizeRequest, AnonymizeResponse](ctx, m.client, m.endpoint, request)
 	if err != nil {
 		return err
@@ -105,6 +108,13 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 			return errors.New("anonymizer returned an invalid image edit prompt projection")
 		}
 		req.ImageEditRequest.Prompt = prompt
+	}
+	if req.AudioTranscriptionRequest != nil {
+		prompt, ok := response.Input.(string)
+		if !ok {
+			return errors.New("anonymizer returned an invalid transcription prompt projection")
+		}
+		req.AudioTranscriptionRequest.Prompt = prompt
 	}
 	req.AnonymizationValues = cloneStringMap(response.Replacements)
 	return nil

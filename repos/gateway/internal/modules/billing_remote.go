@@ -227,6 +227,11 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.Model = req.ImageVariationRequest.Model
 		request.APIType = "image_variation"
 	}
+	if req.AudioTranscriptionRequest != nil {
+		request.Provider = req.AudioTranscriptionRequest.Provider
+		request.Model = req.AudioTranscriptionRequest.Model
+		request.APIType = "audio_transcription"
+	}
 	if req.Response != nil {
 		request.Phase = "commit"
 		request.InputTokens = req.Response.Usage.PromptTokens
@@ -321,14 +326,23 @@ func billingRequest(req *RequestContext) UsageRequest {
 			request.UsageEstimated = true
 		}
 	}
+	if req.AudioTranscriptionResponse != nil {
+		request.Phase = "commit"
+		if usage := req.AudioTranscriptionResponse.Usage; usage != nil {
+			request.InputTokens = usage.InputTokens
+			request.OutputTokens = usage.OutputTokens
+			request.TotalTokens = usage.TotalTokens
+			request.UsageEstimated = false
+		}
+	}
 	if originalModel := metadataValue(req.Metadata, "provider.original_model"); originalModel != "" {
 		request.Model = originalModel
 	}
 	if request.CacheStatus == "hit" {
 		request.UsageEstimated = false
 	}
-	providerReportedImageUsage := req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil
-	if request.TotalTokens == 0 && request.CacheStatus != "hit" && !providerReportedImageUsage {
+	providerReportedExactUsage := (req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil) || (req.AudioTranscriptionResponse != nil && req.AudioTranscriptionResponse.Usage != nil)
+	if request.TotalTokens == 0 && request.CacheStatus != "hit" && !providerReportedExactUsage {
 		if req.CompletionRequest != nil {
 			request.InputTokens = openai.CompletionInputTokens(*req.CompletionRequest)
 			request.TotalTokens = openai.CompletionReserveTokens(*req.CompletionRequest)
@@ -373,6 +387,9 @@ func requestedOutputTokens(req *RequestContext) int {
 	if req.ImageVariationRequest != nil {
 		return openai.ImageGenerationOutputReserve(req.ImageVariationRequest.GenerationRequest())
 	}
+	if req.AudioTranscriptionRequest != nil {
+		return openai.DefaultOutputTokenReserve
+	}
 	return openai.ChatOutputReserve(req.Request)
 }
 
@@ -403,6 +420,9 @@ func estimateRequestTokens(req *RequestContext) int {
 	}
 	if req.ImageVariationRequest != nil {
 		return openai.ImageVariationInputTokens(*req.ImageVariationRequest)
+	}
+	if req.AudioTranscriptionRequest != nil {
+		return openai.AudioTranscriptionInputTokens(*req.AudioTranscriptionRequest)
 	}
 	return openai.ChatInputTokens(req.Request)
 }

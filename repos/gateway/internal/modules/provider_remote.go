@@ -99,6 +99,12 @@ func requestImageAttachments(req *RequestContext) ([]openai.ImageAttachment, err
 			return nil, err
 		}
 	}
+	if req.AudioTranscriptionRequest != nil {
+		if err := openai.ValidateAudioAttachment(req.AudioTranscriptionRequest.File); err != nil {
+			return nil, err
+		}
+		attachments = append(attachments, openai.ImageAttachment{MediaType: req.AudioTranscriptionRequest.File.MediaType, Data: req.AudioTranscriptionRequest.File.Data})
+	}
 	if req.ResponseRequest == nil {
 		if req.ModerationRequest == nil {
 			return attachments, nil
@@ -168,6 +174,9 @@ func scanPayload(req *RequestContext) string {
 	}
 	if req.ImageEditRequest != nil && req.ImageEditRequest.Prompt != "" {
 		parts = append(parts, "image_edit_prompt: "+req.ImageEditRequest.Prompt)
+	}
+	if req.AudioTranscriptionRequest != nil && req.AudioTranscriptionRequest.Prompt != "" {
+		parts = append(parts, "transcription_prompt: "+req.AudioTranscriptionRequest.Prompt)
 	}
 	return strings.Join(parts, "\n")
 }

@@ -34,6 +34,18 @@ func TestLocalBillingUsesImageGenerationUsage(t *testing.T) {
 	}
 }
 
+func TestLocalBillingUsesAudioTranscriptionUsage(t *testing.T) {
+	request := openai.AudioTranscriptionRequest{Model: "audio", Prompt: "names", File: openai.AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: "UklGRi4uLi5XQVZFZGF0YQ=="}}
+	response := openai.AudioTranscriptionResponse{Text: "hello", Usage: &openai.AudioTranscriptionUsage{Type: "tokens", InputTokens: 5, OutputTokens: 2, TotalTokens: 7}}
+	req := RequestContext{AudioTranscriptionRequest: &request, AudioTranscriptionResponse: &response}
+	if err := NewBillingModule(true).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Usage == nil || req.Usage.PromptTokens != 5 || req.Usage.CompletionTokens != 2 || req.Usage.TotalTokens != 7 {
+		t.Fatalf("usage=%+v", req.Usage)
+	}
+}
+
 func TestBillingReserveIncludesEveryChatChoice(t *testing.T) {
 	maxTokens, choices := 200, 3
 	req := RequestContext{Request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{N: &choices}, MaxCompletionTokens: &maxTokens, Messages: []openai.Message{{Role: "user", Content: "test"}}}}

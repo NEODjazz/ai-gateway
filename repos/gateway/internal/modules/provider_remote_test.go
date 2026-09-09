@@ -72,6 +72,18 @@ func TestImageVariationProjectsAttachmentToAV(t *testing.T) {
 	}
 }
 
+func TestAudioTranscriptionProjectsFileToAVAndPromptToDLP(t *testing.T) {
+	request := openai.AudioTranscriptionRequest{Model: "audio", File: openai.AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: "UklGRi4uLi5XQVZFZGF0YQ=="}, Prompt: "private speaker"}
+	req := RequestContext{AudioTranscriptionRequest: &request}
+	attachments, err := requestImageAttachments(&req)
+	if err != nil || len(attachments) != 1 || attachments[0].MediaType != "audio/wav" || attachments[0].Data != request.File.Data {
+		t.Fatalf("attachments=%+v err=%v", attachments, err)
+	}
+	if payload := scanPayload(&req); payload != "transcription_prompt: private speaker" {
+		t.Fatalf("payload=%q", payload)
+	}
+}
+
 func TestScanPayloadIncludesRerankTextOnly(t *testing.T) {
 	req := RequestContext{RerankRequest: &openai.RerankRequest{Model: "rerank", Query: "private query", Documents: []any{"private document", map[string]any{"text": "object document", "binary": []byte{1, 2}}}}}
 	payload := scanPayload(&req)

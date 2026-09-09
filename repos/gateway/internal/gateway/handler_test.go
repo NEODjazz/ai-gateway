@@ -282,6 +282,11 @@ func (p *chatProvider) CreateImageVariation(_ context.Context, req modules.Reque
 	return openai.ImageGenerationResponse{Created: 7, Data: []openai.ImageData{{URL: "https://images.example/variation.png"}}, Usage: &openai.ImageUsage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8}}, nil
 }
 
+func (p *chatProvider) TranscribeAudio(_ context.Context, req modules.RequestContext) (openai.AudioTranscriptionResponse, error) {
+	p.request = req
+	return openai.AudioTranscriptionResponse{Text: "hello", Usage: &openai.AudioTranscriptionUsage{Type: "tokens", InputTokens: 3, OutputTokens: 1, TotalTokens: 4}}, nil
+}
+
 func (p *chatProvider) CompactResponse(_ context.Context, req modules.RequestContext) (openai.CompactedResponse, error) {
 	p.request = req
 	return openai.CompactedResponse{

@@ -106,6 +106,18 @@ func TestAnonymizerMasksImageGenerationPrompt(t *testing.T) {
 	}
 }
 
+func TestAnonymizerMasksAudioTranscriptionPrompt(t *testing.T) {
+	request := openai.AudioTranscriptionRequest{Model: "audio", Prompt: "speaker user@example.com"}
+	req := RequestContext{AudioTranscriptionRequest: &request}
+	module := NewAnonymizerModule(true, RuleEmail)
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if request.Prompt != "speaker {{EMAIL_1}}" {
+		t.Fatalf("prompt=%q", request.Prompt)
+	}
+}
+
 func TestAnonymizerMasksImageEditPromptWithoutChangingAttachments(t *testing.T) {
 	attachment := openai.ImageAttachment{MediaType: "image/png", Data: "iVBORw0KGgpmaXh0dXJl"}
 	request := openai.ImageEditRequest{Model: "image", Prompt: "remove user@example.com", Images: []openai.ImageAttachment{attachment}}

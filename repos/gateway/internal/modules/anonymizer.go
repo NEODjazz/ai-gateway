@@ -101,6 +101,9 @@ func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 	if req.ImageEditRequest != nil {
 		req.ImageEditRequest.Prompt = m.anonymize(req, req.ImageEditRequest.Prompt)
 	}
+	if req.AudioTranscriptionRequest != nil {
+		req.AudioTranscriptionRequest.Prompt = m.anonymize(req, req.AudioTranscriptionRequest.Prompt)
+	}
 	return nil
 }
 
