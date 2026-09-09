@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -26,5 +27,26 @@ func TestManagedMistralDiscoveryUsesScopedCredential(t *testing.T) {
 	models, err := router.DiscoverProviderModels(context.Background(), "native", "native-key")
 	if err != nil || len(models) != 2 || models[0].ID != "codestral-latest" || models[1].ID != "mistral-small" {
 		t.Fatalf("models=%v err=%v", models, err)
+	}
+}
+
+func TestManagedMistralDiscoveryRejectsRedirect(t *testing.T) {
+	var targetCalls atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { targetCalls.Add(1) }))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+
+	router := New(Config{CredentialEncryptionKey: []byte("mistral-redirect-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "native", Type: "mistral", BaseURL: source.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "native-key", ProviderID: "native", Secret: "test-secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.DiscoverProviderModels(t.Context(), "native", "native-key"); err == nil || targetCalls.Load() != 0 {
+		t.Fatalf("redirect accepted: err=%v target calls=%d", err, targetCalls.Load())
 	}
 }
