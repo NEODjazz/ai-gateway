@@ -127,6 +127,7 @@ type OpenAICompatible struct {
 	completionStreamUsage bool
 	supportsSafePrompt    bool
 	supportsPromptMode    bool
+	supportsMessagePrefix bool
 	client                *http.Client
 }
 

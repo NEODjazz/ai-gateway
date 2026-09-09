@@ -159,6 +159,10 @@ func TestMistralChatUsesNativeRandomSeedInJSONAndStreaming(t *testing.T) {
 		if request["prompt_mode"] != "reasoning" {
 			t.Fatalf("prompt_mode=%#v", request["prompt_mode"])
 		}
+		messages, ok := request["messages"].([]any)
+		if !ok || len(messages) != 2 || messages[1].(map[string]any)["prefix"] != true {
+			t.Fatalf("messages=%#v", request["messages"])
+		}
 		if _, found := request["seed"]; found {
 			t.Fatalf("generic seed leaked into Mistral request: %#v", request)
 		}
@@ -175,8 +179,9 @@ func TestMistralChatUsesNativeRandomSeedInJSONAndStreaming(t *testing.T) {
 
 	seed := int64(17)
 	safePrompt := true
+	prefix := true
 	client := NewMistral(server.URL, "provider-key", true)
-	request := openai.ChatCompletionRequest{Model: "mistral-small", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Seed: &seed, ChatGenerationOptions: openai.ChatGenerationOptions{SafePrompt: &safePrompt, PromptMode: "reasoning"}}
+	request := openai.ChatCompletionRequest{Model: "mistral-small", Messages: []openai.Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "The answer is", Prefix: &prefix}}, Seed: &seed, ChatGenerationOptions: openai.ChatGenerationOptions{SafePrompt: &safePrompt, PromptMode: "reasoning"}}
 	response, err := client.ChatCompletions(t.Context(), request)
 	if err != nil || openai.ContentText(response.Choices[0].Message.Content) != "json" || response.Usage.TotalTokens != 3 {
 		t.Fatalf("response=%+v err=%v", response, err)
@@ -189,6 +194,29 @@ func TestMistralChatUsesNativeRandomSeedInJSONAndStreaming(t *testing.T) {
 	})
 	if err != nil || streamed.Usage.TotalTokens != 4 || openai.ContentText(streamed.Choices[0].Message.Content) != "streamed" || len(payloads) != 2 || calls.Load() != 2 {
 		t.Fatalf("streamed=%+v payloads=%v calls=%d err=%v", streamed, payloads, calls.Load(), err)
+	}
+}
+
+func TestMistralRejectsInvalidAssistantPrefixBeforeUpstream(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	prefix := true
+	for name, messages := range map[string][]openai.Message{
+		"user prefix":       {{Role: "user", Content: "hello", Prefix: &prefix}},
+		"non-final prefix":  {{Role: "assistant", Content: "start", Prefix: &prefix}, {Role: "user", Content: "continue"}},
+		"empty prefix text": {{Role: "assistant", Content: "", Prefix: &prefix}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewMistral(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: messages})
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.Param != "messages.prefix" || failure.UpstreamCode != "invalid_request" {
+				t.Fatalf("error=%v failure=%+v", err, failure)
+			}
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("invalid prefix reached Mistral: %d", calls.Load())
 	}
 }
 

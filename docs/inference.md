@@ -181,6 +181,8 @@ Mistral Chat принимает `safe_prompt` и передает явно за�
 в native request. Другие adapters отклоняют этот provider-specific параметр.
 `prompt_mode=reasoning` передается только в native Mistral Chat; прочие значения
 и другие adapters получают явную ошибку до выполнения.
+Для Mistral доступен assistant prefix: `prefix=true` разрешен только у последнего
+assistant message с непустым текстом. Другие adapters отклоняют `messages.prefix`.
 
 ## Routing и модели
 

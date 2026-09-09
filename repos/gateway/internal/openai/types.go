@@ -40,6 +40,7 @@ type ChatStreamOptions struct {
 type Message struct {
 	Role         string           `json:"role"`
 	Content      any              `json:"content"`
+	Prefix       *bool            `json:"prefix,omitempty"`
 	Refusal      *string          `json:"refusal,omitempty"`
 	Annotations  []ChatAnnotation `json:"annotations,omitempty"`
 	Audio        *ChatAudio       `json:"audio,omitempty"`

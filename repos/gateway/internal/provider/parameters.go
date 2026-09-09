@@ -26,6 +26,9 @@ func rejectParameters(adapter string, checks ...parameterCheck) error {
 }
 
 func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := validateChatMessagePrefix("anthropic", request.Messages, false); err != nil {
+		return err
+	}
 	if err := rejectLegacyFunctionCalling("anthropic", request); err != nil {
 		return err
 	}
@@ -99,6 +102,9 @@ func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := validateChatMessagePrefix("ollama", request.Messages, false); err != nil {
+		return err
+	}
 	if err := rejectLegacyFunctionCalling("ollama", request); err != nil {
 		return err
 	}
@@ -215,6 +221,9 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 }
 
 func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := validateChatMessagePrefix("demo", request.Messages, false); err != nil {
+		return err
+	}
 	if err := rejectLegacyFunctionCalling("demo", request); err != nil {
 		return err
 	}
@@ -235,6 +244,9 @@ func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 
 func (p OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	providerName := p.providerName()
+	if err := validateChatMessagePrefix(providerName, request.Messages, p.supportsMessagePrefix); err != nil {
+		return err
+	}
 	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
 		return &Error{Class: FailureClientRequest, Provider: providerName, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "functions", Err: err}
 	}
@@ -260,6 +272,21 @@ func (p OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRe
 		parameterCheck{"prompt_mode", request.PromptMode != "" && !p.supportsPromptMode},
 		parameterCheck{"service_tier", request.ServiceTier != ""},
 	)
+}
+
+func validateChatMessagePrefix(adapter string, messages []openai.Message, supported bool) error {
+	for index, message := range messages {
+		if message.Prefix == nil {
+			continue
+		}
+		if !supported {
+			return rejectParameters(adapter, parameterCheck{"messages.prefix", true})
+		}
+		if message.Role != "assistant" || (*message.Prefix && (index != len(messages)-1 || openai.ContentText(message.Content) == "")) {
+			return &Error{Class: FailureClientRequest, Provider: adapter, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.prefix", Err: errors.New("prefix requires an assistant message and prefix=true requires the final message with non-empty text")}
+		}
+	}
+	return nil
 }
 
 func rejectLegacyFunctionCalling(adapter string, request openai.ChatCompletionRequest) error {
