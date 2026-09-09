@@ -35,9 +35,9 @@ upstream. Распознаваемые параметры перечислены
 
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
-| `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `service_tier`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
+| `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
 | `/v1/completions` | `provider`, `model`, `prompt`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `n`, `presence_penalty`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
-| `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `service_tier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
+| `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
 | `/v1/responses/compact` | `provider`, `model`, `input`, `instructions` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `encoding_format`, `dimensions`, `user` |
@@ -154,6 +154,8 @@ adapter используют те же проверки, включая streamin
 | Ollama embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
 | Gemini embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
 | Все Chat и Responses adapters | `service_tier`, пока схема каталога не поддерживает отдельные billing rates по tier |
+| Anthropic, Ollama, Gemini и demo Chat | `prompt_cache_key` |
+| Anthropic, Ollama и demo Responses | `prompt_cache_key` |
 
 Остальные верхнеуровневые поля действующего OpenAI-compatible контракта
 передаются соответствующим upstream wire request. Это не подтверждает поддержку
@@ -1158,6 +1160,13 @@ characters. OpenAI-compatible JSON and streaming requests forward it unchanged.
 The identifier participates in exact and semantic cache keys but never replaces
 authenticated user or credential identity in billing. Anthropic, Ollama and demo
 Responses adapters reject it explicitly when they cannot preserve its meaning.
+
+`prompt_cache_key` is forwarded unchanged by the OpenAI-compatible Chat and
+Responses adapters in JSON and streaming requests. It scopes exact and semantic
+gateway cache entries so an explicit upstream cache partition is not bypassed by
+local reuse. It never replaces authenticated user or credential identity in
+billing. Native adapters return `400 unsupported_parameter` instead of silently
+discarding the key.
 
 Chat и Responses распознают `service_tier` и проверяют значения `auto`,
 `default`, `flex`, `scale`, `priority`, `fast` и `ultrafast`. Все adapters пока

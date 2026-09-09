@@ -28,6 +28,7 @@ func TestNativeAdaptersRejectUnrepresentableChatParameters(t *testing.T) {
 		{"ollama", "tool_choice", openai.ChatCompletionRequest{ToolChoice: "required"}},
 		{"ollama", "parallel_tool_calls", openai.ChatCompletionRequest{ParallelToolCalls: &parallel}},
 		{"anthropic", "service_tier", openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "priority"}}},
+		{"ollama", "prompt_cache_key", openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{PromptCacheKey: "tenant-thread"}}},
 	} {
 		t.Run(tc.adapter+"/"+tc.field, func(t *testing.T) {
 			var client interface {
@@ -69,6 +70,8 @@ func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
 		{"ollama", "safety_identifier", openai.ResponseRequest{SafetyIdentifier: "provider-user"}},
 		{"anthropic", "service_tier", openai.ResponseRequest{ServiceTier: "priority"}},
 		{"ollama", "service_tier", openai.ResponseRequest{ServiceTier: "priority"}},
+		{"anthropic", "prompt_cache_key", openai.ResponseRequest{PromptCacheKey: "tenant-thread"}},
+		{"ollama", "prompt_cache_key", openai.ResponseRequest{PromptCacheKey: "tenant-thread"}},
 	} {
 		var client interface {
 			Client
@@ -89,6 +92,8 @@ func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
 	assertUnsupportedParameter(t, err, "safety_identifier")
 	_, err = (Demo{}).Responses(context.Background(), openai.ResponseRequest{ServiceTier: "priority"})
 	assertUnsupportedParameter(t, err, "service_tier")
+	_, err = (Demo{}).Responses(context.Background(), openai.ResponseRequest{PromptCacheKey: "tenant-thread"})
+	assertUnsupportedParameter(t, err, "prompt_cache_key")
 	_, err = NewOpenAICompatible("http://unused.invalid", "", true).ChatCompletions(context.Background(), openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "priority"}})
 	assertUnsupportedParameter(t, err, "service_tier")
 	_, err = NewOpenAICompatible("http://unused.invalid", "", true).StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "priority"}}, func(string) error { t.Error("unexpected event"); return nil })

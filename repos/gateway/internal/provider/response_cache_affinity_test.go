@@ -91,6 +91,18 @@ func TestResponsesCacheSeparatesSafetyIdentifiers(t *testing.T) {
 	}
 }
 
+func TestResponsesCacheSeparatesPromptCacheKeys(t *testing.T) {
+	request := openai.ResponseRequest{Model: "model", Input: "hello", PromptCacheKey: "first"}
+	first := modules.RequestContext{CredentialID: "tenant", Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}
+	secondRequest := request
+	secondRequest.PromptCacheKey = "second"
+	second := first
+	second.ResponseRequest = &secondRequest
+	if providerCacheKey("responses", first) == providerCacheKey("responses", second) {
+		t.Fatal("Responses cache shared across prompt cache keys")
+	}
+}
+
 func TestResponsesCacheHitStoresAffinityBeforeBilling(t *testing.T) {
 	affinity := &orderingAffinity{}
 	billing := &affinityOrderingModule{affinity: affinity}

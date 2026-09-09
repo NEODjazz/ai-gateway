@@ -11,6 +11,7 @@ type ChatGenerationOptions struct {
 	ReasoningEffort  string         `json:"reasoning_effort,omitempty"`
 	N                *int           `json:"n,omitempty"`
 	SafetyIdentifier string         `json:"safety_identifier,omitempty"`
+	PromptCacheKey   string         `json:"prompt_cache_key,omitempty"`
 	ServiceTier      string         `json:"service_tier,omitempty"`
 	Logprobs         *bool          `json:"logprobs,omitempty"`
 	TopLogprobs      *int           `json:"top_logprobs,omitempty"`

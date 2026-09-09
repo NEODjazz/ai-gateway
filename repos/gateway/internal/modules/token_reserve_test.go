@@ -44,3 +44,15 @@ func TestResponseSafetyIdentifierDoesNotReplaceBillingIdentity(t *testing.T) {
 		t.Fatalf("request identifier replaced billing identity: %+v", reserved)
 	}
 }
+
+func TestPromptCacheKeyDoesNotReplaceBillingIdentity(t *testing.T) {
+	response := openai.ResponseRequest{PromptCacheKey: "provider-cache"}
+	for _, req := range []RequestContext{
+		{UserID: "authenticated-user", Request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{PromptCacheKey: "provider-cache"}}},
+		{UserID: "authenticated-user", ResponseRequest: &response},
+	} {
+		if reserved := billingRequest(&req); reserved.UserID != "authenticated-user" {
+			t.Fatalf("prompt cache key replaced billing identity: %+v", reserved)
+		}
+	}
+}
