@@ -18,6 +18,9 @@ func (r ResponseRequest) Validate() string {
 	if !validServiceTier(r.ServiceTier) {
 		return "unsupported service_tier value"
 	}
+	if _, _, valid := responseTextVerbosity(r.Text); !valid {
+		return "text.verbosity must be low, medium, or high"
+	}
 	if r.MaxOutputTokens != nil && r.MaxTokens != nil {
 		return "max_output_tokens and max_tokens are mutually exclusive"
 	}

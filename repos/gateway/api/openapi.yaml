@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.53
+  version: 0.1.54
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3285,6 +3285,7 @@ components:
         safety_identifier: {type: string, maxLength: 64}
         prompt_cache_key: {type: string}
         service_tier: {type: string, enum: [auto, default, flex, scale, priority, fast, ultrafast], description: Recognized but rejected until tier-aware billing rates are configured.}
+        verbosity: {type: string, enum: [low, medium, high]}
         logprobs: {type: boolean}
         top_logprobs: {type: integer, minimum: 0, maximum: 20, description: Requires logprobs=true.}
         frequency_penalty: {type: number, minimum: -2, maximum: 2}
@@ -3549,7 +3550,11 @@ components:
               - $ref: '#/components/schemas/MCPResponseTool'
         tool_choice: {}
         parallel_tool_calls: {type: boolean}
-        text: {}
+        text:
+          type: object
+          additionalProperties: true
+          properties:
+            verbosity: {type: string, enum: [low, medium, high]}
         previous_response_id: {type: string}
         safety_identifier: {type: string, maxLength: 64}
         prompt_cache_key: {type: string}
@@ -3587,7 +3592,11 @@ components:
               - $ref: '#/components/schemas/MCPResponseTool'
         tool_choice: {}
         parallel_tool_calls: {type: boolean}
-        text: {}
+        text:
+          type: object
+          additionalProperties: true
+          properties:
+            verbosity: {type: string, enum: [low, medium, high]}
         previous_response_id: {type: string}
         reasoning:
           type: object

@@ -24,7 +24,8 @@ func TestOpenAICompatibleCountsResponseInputTokens(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body["model"] != "model" || body["instructions"] != "be concise" || body["input"] != "hello" {
+		text, _ := body["text"].(map[string]any)
+		if body["model"] != "model" || body["instructions"] != "be concise" || body["input"] != "hello" || text["verbosity"] != "high" {
 			t.Fatalf("request fields were lost: %#v", body)
 		}
 		if _, found := body["provider"]; found {
@@ -37,6 +38,7 @@ func TestOpenAICompatibleCountsResponseInputTokens(t *testing.T) {
 	result, err := NewOpenAICompatible(server.URL+"/v1", "provider-key", false).CountResponseInputTokens(t.Context(), openai.ResponseInputTokenCountRequest{
 		Provider: "deployment", Model: "model", Input: "hello", Instructions: "be concise",
 		Tools: []openai.ResponseTool{{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}}},
+		Text:  map[string]any{"verbosity": "high"},
 	})
 	if err != nil || result.Object != "response.input_tokens" || result.InputTokens != 37 {
 		t.Fatalf("unexpected result: %+v err=%v", result, err)

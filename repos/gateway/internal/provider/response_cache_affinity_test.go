@@ -103,6 +103,18 @@ func TestResponsesCacheSeparatesPromptCacheKeys(t *testing.T) {
 	}
 }
 
+func TestResponsesCacheSeparatesTextVerbosity(t *testing.T) {
+	request := openai.ResponseRequest{Model: "model", Input: "hello", Text: map[string]any{"verbosity": "low"}}
+	first := modules.RequestContext{CredentialID: "tenant", Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}
+	secondRequest := request
+	secondRequest.Text = map[string]any{"verbosity": "high"}
+	second := first
+	second.ResponseRequest = &secondRequest
+	if providerCacheKey("responses", first) == providerCacheKey("responses", second) {
+		t.Fatal("Responses cache shared across text verbosity")
+	}
+}
+
 func TestResponsesCacheHitStoresAffinityBeforeBilling(t *testing.T) {
 	affinity := &orderingAffinity{}
 	billing := &affinityOrderingModule{affinity: affinity}

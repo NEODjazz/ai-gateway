@@ -13,6 +13,7 @@ type ChatGenerationOptions struct {
 	SafetyIdentifier string         `json:"safety_identifier,omitempty"`
 	PromptCacheKey   string         `json:"prompt_cache_key,omitempty"`
 	ServiceTier      string         `json:"service_tier,omitempty"`
+	Verbosity        string         `json:"verbosity,omitempty"`
 	Logprobs         *bool          `json:"logprobs,omitempty"`
 	TopLogprobs      *int           `json:"top_logprobs,omitempty"`
 	FrequencyPenalty *float64       `json:"frequency_penalty,omitempty"`
@@ -29,6 +30,9 @@ func (o ChatGenerationOptions) Validate() string {
 	}
 	if !validServiceTier(o.ServiceTier) {
 		return "unsupported service_tier value"
+	}
+	if !validVerbosity(o.Verbosity) {
+		return "verbosity must be low, medium, or high"
 	}
 	switch o.ReasoningEffort {
 	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
@@ -54,6 +58,38 @@ func (o ChatGenerationOptions) Validate() string {
 		}
 	}
 	return ""
+}
+
+func validVerbosity(value string) bool {
+	switch value {
+	case "", "low", "medium", "high":
+		return true
+	default:
+		return false
+	}
+}
+
+// ResponseTextVerbosity returns a Responses text verbosity value and whether
+// the field was supplied. JSON null is treated as omitted.
+func ResponseTextVerbosity(text any) (string, bool) {
+	verbosity, supplied, _ := responseTextVerbosity(text)
+	return verbosity, supplied
+}
+
+func responseTextVerbosity(text any) (string, bool, bool) {
+	config, ok := text.(map[string]any)
+	if !ok {
+		return "", false, true
+	}
+	value, supplied := config["verbosity"]
+	if !supplied || value == nil {
+		return "", false, true
+	}
+	verbosity, ok := value.(string)
+	if !ok {
+		return "", true, false
+	}
+	return verbosity, true, validVerbosity(verbosity)
 }
 
 func validServiceTier(value string) bool {

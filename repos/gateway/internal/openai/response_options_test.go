@@ -7,13 +7,22 @@ import (
 )
 
 func TestResponseOptionsValidation(t *testing.T) {
-	for _, body := range []string{`{"max_output_tokens":1}`, `{"max_tokens":1}`, `{"max_output_tokens":null,"max_tokens":null}`, `{}`, `{"top_logprobs":null,"truncation":null}`, `{"top_logprobs":0,"truncation":"auto"}`, `{"top_logprobs":20,"truncation":"disabled"}`, `{"service_tier":"priority"}`} {
+	for _, body := range []string{`{"max_output_tokens":1}`, `{"max_tokens":1}`, `{"max_output_tokens":null,"max_tokens":null}`, `{}`, `{"top_logprobs":null,"truncation":null}`, `{"top_logprobs":0,"truncation":"auto"}`, `{"top_logprobs":20,"truncation":"disabled"}`, `{"service_tier":"priority"}`, `{"text":{"verbosity":"low"}}`, `{"text":{"verbosity":null}}`} {
 		var request ResponseRequest
 		if err := json.Unmarshal([]byte(body), &request); err != nil {
 			t.Fatal(err)
 		}
 		if message := request.Validate(); message != "" {
 			t.Fatalf("%s: %s", body, message)
+		}
+	}
+}
+
+func TestResponseRejectsInvalidTextVerbosity(t *testing.T) {
+	for _, value := range []any{"unknown", 1, true} {
+		request := ResponseRequest{Text: map[string]any{"verbosity": value}}
+		if message := request.Validate(); message != "text.verbosity must be low, medium, or high" {
+			t.Fatalf("value=%v: %q", value, message)
 		}
 	}
 }
@@ -32,6 +41,17 @@ func TestServiceTierValues(t *testing.T) {
 	}
 	if validServiceTier("unknown") {
 		t.Fatal("unknown service tier accepted")
+	}
+}
+
+func TestVerbosityValues(t *testing.T) {
+	for _, value := range []string{"", "low", "medium", "high"} {
+		if !validVerbosity(value) {
+			t.Fatalf("documented verbosity rejected: %q", value)
+		}
+	}
+	if validVerbosity("unknown") {
+		t.Fatal("unknown verbosity accepted")
 	}
 }
 

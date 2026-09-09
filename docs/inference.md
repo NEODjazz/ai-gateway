@@ -35,7 +35,7 @@ upstream. Распознаваемые параметры перечислены
 
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
-| `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
+| `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `verbosity`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
 | `/v1/completions` | `provider`, `model`, `prompt`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `n`, `presence_penalty`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
 | `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
@@ -156,6 +156,8 @@ adapter используют те же проверки, включая streamin
 | Все Chat и Responses adapters | `service_tier`, пока схема каталога не поддерживает отдельные billing rates по tier |
 | Anthropic, Ollama, Gemini и demo Chat | `prompt_cache_key` |
 | Anthropic, Ollama и demo Responses | `prompt_cache_key` |
+| Anthropic, Ollama, Gemini и demo Chat | `verbosity` |
+| Anthropic, Ollama и demo Responses | `text.verbosity` |
 
 Остальные верхнеуровневые поля действующего OpenAI-compatible контракта
 передаются соответствующим upstream wire request. Это не подтверждает поддержку
@@ -1167,6 +1169,11 @@ gateway cache entries so an explicit upstream cache partition is not bypassed by
 local reuse. It never replaces authenticated user or credential identity in
 billing. Native adapters return `400 unsupported_parameter` instead of silently
 discarding the key.
+
+Chat `verbosity` and Responses `text.verbosity` accept `low`, `medium` or `high`.
+OpenAI-compatible JSON and streaming requests preserve the supplied value.
+Exact and semantic cache keys include it because verbosity changes output
+semantics. Native adapters reject it explicitly before execution.
 
 Chat и Responses распознают `service_tier` и проверяют значения `auto`,
 `default`, `flex`, `scale`, `priority`, `fast` и `ultrafast`. Все adapters пока

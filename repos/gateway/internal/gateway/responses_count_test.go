@@ -33,7 +33,8 @@ func TestResponseInputTokenCountUsesPolicyWithoutBilling(t *testing.T) {
 		"instructions":"be concise",
 		"input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}],
 		"tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],
-		"tool_choice":{"type":"function","name":"lookup"}
+		"tool_choice":{"type":"function","name":"lookup"},
+		"text":{"verbosity":"high"}
 	}`))
 	request.Header.Set("Authorization", "Bearer test-key")
 	response := httptest.NewRecorder()
@@ -47,6 +48,20 @@ func TestResponseInputTokenCountUsesPolicyWithoutBilling(t *testing.T) {
 	}
 	if counter.calls != 1 || counter.request.APIKey != "" || counter.request.ResponseRequest == nil || len(counter.request.ResponseRequest.Tools) != 1 {
 		t.Fatalf("unsafe or incomplete provider context: calls=%d request=%+v", counter.calls, counter.request)
+	}
+	text, _ := counter.request.ResponseRequest.Text.(map[string]any)
+	if text["verbosity"] != "high" {
+		t.Fatalf("text verbosity was lost: %+v", counter.request.ResponseRequest.Text)
+	}
+}
+
+func TestResponseInputTokenCountRejectsInvalidTextVerbosity(t *testing.T) {
+	counter := &responseInputTokenCountProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), counter))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", strings.NewReader(`{"model":"m","input":"x","text":{"verbosity":1}}`)))
+	if response.Code != http.StatusBadRequest || counter.calls != 0 || !strings.Contains(response.Body.String(), "text.verbosity") {
+		t.Fatalf("invalid verbosity was accepted: status=%d calls=%d body=%s", response.Code, counter.calls, response.Body.String())
 	}
 }
 

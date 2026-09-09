@@ -41,18 +41,21 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 	if err := validateAnthropicResponseHistory(request.Input); err != nil {
 		return err
 	}
+	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
 	return rejectParameters("anthropic",
 		parameterCheck{"input", hasOpaqueResponseContext(request.Input)},
 		parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
+		parameterCheck{"text.verbosity", verbositySupplied},
 		parameterCheck{"service_tier", request.ServiceTier != ""},
 		parameterCheck{"previous_response_id", request.PreviousResponse != ""},
 	)
 }
 
 func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
-	return rejectParameters("ollama", parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"service_tier", request.ServiceTier != ""})
+	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
+	return rejectParameters("ollama", parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"text.verbosity", verbositySupplied}, parameterCheck{"service_tier", request.ServiceTier != ""})
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
@@ -135,6 +138,7 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 		parameterCheck{"safety_identifier", options.SafetyIdentifier != ""},
 		parameterCheck{"prompt_cache_key", options.PromptCacheKey != ""},
 		parameterCheck{"service_tier", options.ServiceTier != ""},
+		parameterCheck{"verbosity", options.Verbosity != ""},
 		parameterCheck{"logprobs", options.Logprobs != nil},
 		parameterCheck{"top_logprobs", options.TopLogprobs != nil},
 		parameterCheck{"frequency_penalty", options.FrequencyPenalty != nil},
@@ -176,7 +180,8 @@ func rejectToolCallMetadata(adapter string, messages []openai.Message) error {
 }
 
 func (Demo) ValidateResponseParameters(request openai.ResponseRequest) error {
-	return rejectParameters("demo", parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"service_tier", request.ServiceTier != ""})
+	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
+	return rejectParameters("demo", parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"text.verbosity", verbositySupplied}, parameterCheck{"service_tier", request.ServiceTier != ""})
 }
 
 // Provider-specific reasoning and compaction cannot be flattened into messages.
