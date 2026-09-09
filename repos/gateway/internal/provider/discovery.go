@@ -123,6 +123,15 @@ func discoveryURL(managed ManagedProvider) (string, error) {
 	return base.String(), nil
 }
 
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
 func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredModel, error) {
 	ids := []string{}
 	if providerType == "ollama" {
@@ -141,6 +150,23 @@ func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredMod
 				id = item.Model
 			}
 			ids = append(ids, id)
+		}
+	} else if providerType == "cohere" {
+		var body struct {
+			Models []struct {
+				Name       string   `json:"name"`
+				Deprecated bool     `json:"is_deprecated"`
+				Endpoints  []string `json:"endpoints"`
+			} `json:"models"`
+		}
+		if err := json.Unmarshal(payload, &body); err != nil {
+			return nil, err
+		}
+		for _, item := range body.Models {
+			if item.Deprecated || !containsString(item.Endpoints, "rerank") {
+				continue
+			}
+			ids = append(ids, item.Name)
 		}
 	} else {
 		var body struct {

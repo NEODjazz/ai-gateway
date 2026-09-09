@@ -49,6 +49,17 @@ adapter дополнительно ограничивают допустимые
 и `response_format.json_schema.schema`, сохраняют произвольные свойства:
 имена полей пользовательской схемы не считаются параметрами inference.
 
+Provider type `cohere` implements the native v2 Rerank protocol. It sends
+Bearer credentials to `/v2/rerank`, preserves fractional billed search units,
+and discovers non-deprecated Rerank models through `/v1/models`. The v2 adapter
+accepts string documents, `top_n`, and `max_tokens_per_doc`. Object documents,
+`rank_fields`, and `max_chunks_per_doc` receive an explicit
+`unsupported_parameter` before an upstream call. `return_documents` remains a
+gateway response projection and is not forwarded. Responses are limited to
+8 MiB, reject trailing JSON, invalid indices, non-finite scores, and negative
+token or billed-unit counters. Search units remain observable provider usage;
+token-based catalog pricing continues to use the existing bounded input estimate.
+
 `/v1/completions` следует legacy [text completion contract](https://developers.openai.com/api/reference/java/resources/completions/methods/create).
 Gateway принимает строку, массив строк, массив token IDs или массив массивов
 token IDs и передает параметры только адаптеру с native completion operation.

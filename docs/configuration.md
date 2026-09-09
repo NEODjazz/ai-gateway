@@ -49,7 +49,7 @@ OpenAPI, а не в этом документе.
 абсолютным путём без query, fragment и `..`.
 
 Поддерживаемые static adapter types: `demo`, `ollama`, `openai`,
-`openai-compatible`, `openrouter`, `anthropic`. Capability задаётся явно для
+`openai-compatible`, `openrouter`, `anthropic`, `gemini`, `cohere`. Capability задаётся явно для
 ограниченных endpoints. Используемые значения: `chat`, `responses`,
 `embeddings`, `rerank`, `stream`, `tools`, `structured_output`, `mcp`, `vision`,
 `web_search`, `audio`.

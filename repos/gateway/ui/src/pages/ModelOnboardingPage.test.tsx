@@ -65,6 +65,7 @@ describe("ModelOnboardingPage", () => {
     render(<MemoryRouter><AuthProvider><ModelOnboardingPage /></AuthProvider></MemoryRouter>);
     await screen.findByRole("option", { name: "+ Create provider" });
     await userEvent.selectOptions(screen.getByLabelText("Provider"), "__new");
+    expect(screen.getByRole("option", { name: "cohere" })).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Provider type"), "gemini");
     expect(screen.getByLabelText("Provider type")).toHaveValue("gemini");
   });

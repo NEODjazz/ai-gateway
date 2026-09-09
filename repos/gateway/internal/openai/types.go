@@ -338,8 +338,8 @@ type RerankResponseMeta struct {
 }
 
 type RerankBilledUnits struct {
-	SearchUnits int `json:"search_units,omitempty"`
-	TotalTokens int `json:"total_tokens,omitempty"`
+	SearchUnits float64 `json:"search_units,omitempty"`
+	TotalTokens int     `json:"total_tokens,omitempty"`
 }
 
 type RerankTokens struct {

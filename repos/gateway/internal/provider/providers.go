@@ -147,7 +147,7 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 
 func validProviderType(value string) bool {
 	switch value {
-	case "demo", "ollama", "openai", "openai-compatible", "anthropic", "gemini":
+	case "demo", "ollama", "openai", "openai-compatible", "anthropic", "gemini", "cohere":
 		return true
 	default:
 		return false

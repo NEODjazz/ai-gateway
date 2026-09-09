@@ -1015,6 +1015,14 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 }
 
 func validateRerankResponse(response openai.RerankResponse, documentCount int) error {
+	if response.Meta != nil {
+		if units := response.Meta.BilledUnits; units != nil && (units.SearchUnits != units.SearchUnits || units.SearchUnits < 0 || units.SearchUnits > 1.7976931348623157e308 || units.TotalTokens < 0) {
+			return errors.New("provider returned invalid rerank billed units")
+		}
+		if tokens := response.Meta.Tokens; tokens != nil && (tokens.InputTokens < 0 || tokens.OutputTokens < 0) {
+			return errors.New("provider returned invalid rerank token usage")
+		}
+	}
 	seen := make(map[int]bool, len(response.Results))
 	for _, result := range response.Results {
 		if result.Index < 0 || result.Index >= documentCount || seen[result.Index] {
@@ -2052,6 +2060,8 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 		return NewGemini(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "anthropic":
 		return NewAnthropic(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
+	case "cohere":
+		return NewCohere(endpoint.BaseURL, endpoint.APIKey)
 	case "demo":
 		return Demo{}
 	default:
