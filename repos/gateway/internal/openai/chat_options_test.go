@@ -12,6 +12,10 @@ func TestChatGenerationOptionValidation(t *testing.T) {
 		valid bool
 	}{
 		{`{}`, true},
+		{`{"modalities":["text"]}`, true},
+		{`{"modalities":[]}`, false},
+		{`{"modalities":["audio"]}`, false},
+		{`{"modalities":["text","text"]}`, false},
 		{`{"metadata":{"trace":"one"},"store":false,"prompt_cache_options":{"mode":"explicit","ttl":"30m"},"prompt_cache_retention":"24h","prediction":{"type":"content","content":"expected"},"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","user":"legacy-user","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-2,"logit_bias":{"10":-100}}`, true},
 		{`{"web_search_options":{"search_context_size":"high","user_location":{"type":"approximate","approximate":{"city":"Paris","country":"FR","region":"Ile-de-France","timezone":"Europe/Paris"}}}}`, true},
 		{`{"web_search_options":{}}`, true},

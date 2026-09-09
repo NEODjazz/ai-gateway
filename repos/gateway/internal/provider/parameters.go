@@ -147,6 +147,7 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 	return rejectParameters(adapter,
 		parameterCheck{"metadata", options.Metadata != nil},
 		parameterCheck{"store", options.Store != nil},
+		parameterCheck{"modalities", options.Modalities != nil},
 		parameterCheck{"reasoning_effort", options.ReasoningEffort != ""},
 		parameterCheck{"n", options.N != nil},
 		parameterCheck{"safety_identifier", options.SafetyIdentifier != ""},

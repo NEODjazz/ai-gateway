@@ -10,6 +10,7 @@ import (
 type ChatGenerationOptions struct {
 	Metadata             map[string]string     `json:"metadata,omitempty"`
 	Store                *bool                 `json:"store,omitempty"`
+	Modalities           []string              `json:"modalities,omitempty"`
 	ReasoningEffort      string                `json:"reasoning_effort,omitempty"`
 	N                    *int                  `json:"n,omitempty"`
 	SafetyIdentifier     string                `json:"safety_identifier,omitempty"`
@@ -61,6 +62,9 @@ func (o ChatGenerationOptions) Validate() string {
 	}
 	if o.N != nil && (*o.N < 1 || *o.N > 128) {
 		return "n must be between 1 and 128"
+	}
+	if o.Modalities != nil && (len(o.Modalities) != 1 || o.Modalities[0] != "text") {
+		return "modalities currently supports exactly [\"text\"]"
 	}
 	if utf8.RuneCountInString(o.SafetyIdentifier) > 64 {
 		return "safety_identifier must contain at most 64 characters"

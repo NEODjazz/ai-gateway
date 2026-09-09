@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.67
+  version: 0.1.68
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3319,6 +3319,13 @@ components:
           propertyNames: {maxLength: 64}
           additionalProperties: {type: string, maxLength: 512}
         store: {type: boolean, description: false is forwarded by compatible adapters; true is rejected until stored Chat lifecycle routes are available.}
+        modalities:
+          type: array
+          minItems: 1
+          maxItems: 1
+          uniqueItems: true
+          items: {type: string, const: text}
+          description: Explicit text-only output modality. Audio output is not exposed by the current gateway contract.
         reasoning_effort: {type: string, enum: [none, minimal, low, medium, high, xhigh, max]}
         n: {type: integer, minimum: 1, maximum: 128, default: 1}
         safety_identifier: {type: string, maxLength: 64}
