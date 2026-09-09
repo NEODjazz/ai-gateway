@@ -52,6 +52,7 @@ func NewMistral(baseURL, apiKey string, upstreamStream bool) Mistral {
 }
 
 func (Mistral) SupportsResponses() bool { return false }
+func (Mistral) SupportsRerank() bool    { return false }
 
 func (Mistral) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
 	input, err := openai.InspectEmbeddingInput(request.Input)

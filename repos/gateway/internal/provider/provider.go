@@ -2074,6 +2074,11 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 			return false
 		}
 	}
+	if hasCapability(required, "rerank") {
+		if client, ok := e.Provider.(interface{ SupportsRerank() bool }); ok && !client.SupportsRerank() {
+			return false
+		}
+	}
 	if len(e.Capabilities) == 0 {
 		return true
 	}

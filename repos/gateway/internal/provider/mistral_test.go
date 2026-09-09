@@ -278,3 +278,17 @@ func TestMistralModerationsNormalizeTextContractAndRejectStructuredInput(t *test
 		t.Fatalf("error=%v failure=%+v calls=%d", err, failure, calls.Load())
 	}
 }
+
+func TestMistralDoesNotAdvertiseInheritedRerankTransport(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "mistral", Type: "mistral", BaseURL: server.URL, Models: []string{"mistral-rerank"}, Capabilities: []string{"rerank"},
+	}}}).(*Router)
+	request := openai.RerankRequest{Model: "mistral-rerank", Query: "query", Documents: []any{"document"}}
+	_, err := router.Rerank(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, RerankRequest: &request})
+	if err == nil || !strings.Contains(err.Error(), "no rerank endpoint") || calls.Load() != 0 {
+		t.Fatalf("error=%v upstream calls=%d", err, calls.Load())
+	}
+}

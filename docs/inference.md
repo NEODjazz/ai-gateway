@@ -173,6 +173,8 @@ Mistral Chat преобразует публичный `seed` в native `random_
 Ошибки transport и parameter validation сохраняют provider identity `mistral`.
 Mistral embeddings принимает только строку или массив строк; token-ID input,
 `input_type` и `user` отклоняются до provider modules, billing и upstream.
+Mistral не объявляет унаследованный compatible rerank transport: даже ошибочно
+настроенная capability исключается router до modules, billing и network call.
 
 ## Routing и модели
 
