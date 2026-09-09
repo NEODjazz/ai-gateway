@@ -406,3 +406,13 @@ func TestDurableBillingFailsClosedWithoutPostgresDSN(t *testing.T) {
 		t.Fatal("durable billing must fail closed without PostgreSQL")
 	}
 }
+
+func TestBillingRejectsInvalidSearchRequestCounts(t *testing.T) {
+	module := NewBillingModuleWithPricing(true, PricingConfig{Currency: "USD"})
+	for _, count := range []int{-1, maxBillableSearchRequests + 1} {
+		req := RequestContext{RequestID: "invalid-search-count", SearchRequests: count}
+		if err := module.Handle(context.Background(), &req); err == nil {
+			t.Fatalf("accepted search_requests=%d", count)
+		}
+	}
+}

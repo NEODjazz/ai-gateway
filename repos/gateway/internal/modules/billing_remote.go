@@ -10,45 +10,50 @@ import (
 )
 
 type UsageRequest struct {
-	RequestID             string   `json:"request_id,omitempty"`
-	SessionID             string   `json:"session_id,omitempty"`
-	TraceID               string   `json:"trace_id,omitempty"`
-	CredentialID          string   `json:"credential_id,omitempty"`
-	UserID                string   `json:"user_id,omitempty"`
-	TeamID                string   `json:"team_id,omitempty"`
-	OrganizationID        string   `json:"organization_id,omitempty"`
-	Roles                 []string `json:"roles,omitempty"`
-	Tags                  []string `json:"tags,omitempty"`
-	Provider              string   `json:"provider,omitempty"`
-	ProviderID            string   `json:"provider_id,omitempty"`
-	ProviderEndpointName  string   `json:"provider_endpoint_name,omitempty"`
-	ProviderEndpointType  string   `json:"provider_endpoint_type,omitempty"`
-	Model                 string   `json:"model,omitempty"`
-	UpstreamModel         string   `json:"upstream_model,omitempty"`
-	APIType               string   `json:"api_type"`
-	Phase                 string   `json:"phase"`
-	Status                string   `json:"status,omitempty"`
-	Error                 string   `json:"error,omitempty"`
-	FailureClass          string   `json:"failure_class,omitempty"`
-	LatencyMS             string   `json:"latency_ms,omitempty"`
-	FirstTokenLatencyMS   string   `json:"first_token_latency_ms,omitempty"`
-	RetryCount            int      `json:"retry_count"`
-	FallbackCount         int      `json:"fallback_count"`
-	CacheStatus           string   `json:"cache_status,omitempty"`
-	CacheKind             string   `json:"cache_kind,omitempty"`
-	UsageEstimated        bool     `json:"usage_estimated"`
-	PromptTokensEstimated int      `json:"prompt_tokens_estimated"`
-	InputTokens           int      `json:"input_tokens"`
-	OutputTokens          int      `json:"output_tokens"`
-	TotalTokens           int      `json:"total_tokens"`
-	CacheReadInputTokens  int      `json:"cache_read_input_tokens"`
-	CacheWriteInputTokens int      `json:"cache_write_input_tokens"`
-	CatalogVersion        string   `json:"catalog_version,omitempty"`
-	PricingKey            string   `json:"pricing_key,omitempty"`
-	InputCostPer1M        string   `json:"input_cost_per_1m,omitempty"`
-	OutputCostPer1M       string   `json:"output_cost_per_1m,omitempty"`
-	Currency              string   `json:"currency,omitempty"`
+	RequestID               string   `json:"request_id,omitempty"`
+	SessionID               string   `json:"session_id,omitempty"`
+	TraceID                 string   `json:"trace_id,omitempty"`
+	CredentialID            string   `json:"credential_id,omitempty"`
+	UserID                  string   `json:"user_id,omitempty"`
+	TeamID                  string   `json:"team_id,omitempty"`
+	OrganizationID          string   `json:"organization_id,omitempty"`
+	Roles                   []string `json:"roles,omitempty"`
+	Tags                    []string `json:"tags,omitempty"`
+	Provider                string   `json:"provider,omitempty"`
+	ProviderID              string   `json:"provider_id,omitempty"`
+	ProviderEndpointName    string   `json:"provider_endpoint_name,omitempty"`
+	ProviderEndpointType    string   `json:"provider_endpoint_type,omitempty"`
+	Model                   string   `json:"model,omitempty"`
+	UpstreamModel           string   `json:"upstream_model,omitempty"`
+	APIType                 string   `json:"api_type"`
+	Phase                   string   `json:"phase"`
+	Status                  string   `json:"status,omitempty"`
+	Error                   string   `json:"error,omitempty"`
+	FailureClass            string   `json:"failure_class,omitempty"`
+	LatencyMS               string   `json:"latency_ms,omitempty"`
+	FirstTokenLatencyMS     string   `json:"first_token_latency_ms,omitempty"`
+	RetryCount              int      `json:"retry_count"`
+	FallbackCount           int      `json:"fallback_count"`
+	CacheStatus             string   `json:"cache_status,omitempty"`
+	CacheKind               string   `json:"cache_kind,omitempty"`
+	UsageEstimated          bool     `json:"usage_estimated"`
+	PromptTokensEstimated   int      `json:"prompt_tokens_estimated"`
+	InputTokens             int      `json:"input_tokens"`
+	OutputTokens            int      `json:"output_tokens"`
+	TotalTokens             int      `json:"total_tokens"`
+	CacheReadInputTokens    int      `json:"cache_read_input_tokens"`
+	CacheWriteInputTokens   int      `json:"cache_write_input_tokens"`
+	SearchRequests          int      `json:"search_requests"`
+	SearchRequestsEstimated bool     `json:"search_requests_estimated"`
+	CatalogVersion          string   `json:"catalog_version,omitempty"`
+	PricingKey              string   `json:"pricing_key,omitempty"`
+	InputCostPer1M          string   `json:"input_cost_per_1m,omitempty"`
+	OutputCostPer1M         string   `json:"output_cost_per_1m,omitempty"`
+	SearchCostPer1K         string   `json:"search_cost_per_1k,omitempty"`
+	Currency                string   `json:"currency,omitempty"`
 }
+
+const defaultWebSearchRequestReserve = 5
 
 type UsageResponse struct {
 	Usage    *openai.Usage     `json:"usage,omitempty"`
@@ -146,6 +151,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		PricingKey:            metadataValue(req.Metadata, "model_catalog.pricing_key"),
 		InputCostPer1M:        metadataValue(req.Metadata, "model_catalog.input_cost_per_1m"),
 		OutputCostPer1M:       metadataValue(req.Metadata, "model_catalog.output_cost_per_1m"),
+		SearchCostPer1K:       metadataValue(req.Metadata, "model_catalog.search_cost_per_1k"),
 		Currency:              metadataValue(req.Metadata, "model_catalog.currency"),
 	}
 	request.InputTokens = request.PromptTokensEstimated
@@ -160,6 +166,10 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
 	}
 	request.TotalTokens = openai.ReserveTokens(request.InputTokens, request.OutputTokens)
+	if req.Request.WebSearchOptions != nil {
+		request.SearchRequests = defaultWebSearchRequestReserve
+		request.SearchRequestsEstimated = true
+	}
 	if req.CompletionRequest != nil {
 		request.Provider = req.CompletionRequest.Provider
 		request.Model = req.CompletionRequest.Model
@@ -205,6 +215,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.TotalTokens = req.Response.Usage.TotalTokens
 		request.UpstreamModel = req.Response.Model
 		request.UsageEstimated = request.TotalTokens == 0
+		request.SearchRequests = req.Response.Usage.SearchRequests
+		request.SearchRequestsEstimated = false
 		if details := req.Response.Usage.PromptTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
 			request.CacheWriteInputTokens = nonNegative(firstNonZero(details.CacheWriteTokens, details.CacheCreationTokens))

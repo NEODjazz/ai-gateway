@@ -238,6 +238,9 @@ data:
         ADD COLUMN IF NOT EXISTS organization_id TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_billing_budget_reservations_organization
         ON billing_budget_reservations(organization_id, created_at, state);
+  010_billing_server_tools.sql: |
+    ALTER TABLE billing_budget_reservations
+        ADD COLUMN IF NOT EXISTS search_cost_per_1k NUMERIC(18, 8) NOT NULL DEFAULT 0;
 
   003_virtual_keys.sql: |
     CREATE TABLE IF NOT EXISTS auth_virtual_keys

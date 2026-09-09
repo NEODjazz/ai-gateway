@@ -28,6 +28,8 @@ type PricingConfig struct {
 	Currency         string
 }
 
+const maxBillableSearchRequests = 1_000_000
+
 func NewBillingModule(required bool) BillingModule {
 	settings := SettingsFromEnv()
 	return NewBillingModuleWithSettings(required, settings)
@@ -128,6 +130,9 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	if m.initErr != nil {
 		return m.initErr
 	}
+	if req.SearchRequests < 0 || req.SearchRequests > maxBillableSearchRequests {
+		return errors.New("search_requests is outside the supported range")
+	}
 	phase := req.BillingPhase
 	if phase == "" {
 		if req.PostResponse || req.Response != nil || req.ResponsesResponse != nil {
@@ -143,6 +148,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	}
 
 	req.Usage = &openai.Usage{
+		SearchRequests:   req.SearchRequests,
 		PromptTokens:     inputTokens,
 		CompletionTokens: outputTokens,
 		TotalTokens:      totalTokens,
@@ -156,6 +162,8 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	req.Metadata["billing.output_tokens"] = strconv.Itoa(outputTokens)
 	req.Metadata["billing.total_tokens"] = strconv.Itoa(totalTokens)
 	req.Metadata["billing.usage_estimated"] = strconv.FormatBool(usageEstimated)
+	req.Metadata["billing.search_requests"] = strconv.Itoa(req.SearchRequests)
+	req.Metadata["billing.search_requests_estimated"] = strconv.FormatBool(req.SearchRequestsEstimated)
 
 	eventOutputTokens, eventTotalTokens := outputTokens, totalTokens
 	if phase == "reserve" && eventOutputTokens == 0 {
@@ -192,7 +200,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 			if err != nil {
 				cancelEvent := event
 				cancelEvent.Phase = "cancel"
-				cancelEvent.InputTokens, cancelEvent.OutputTokens, cancelEvent.TotalTokens, cancelEvent.Cost = 0, 0, 0, 0
+				cancelEvent.InputTokens, cancelEvent.OutputTokens, cancelEvent.TotalTokens, cancelEvent.SearchRequests, cancelEvent.Cost = 0, 0, 0, 0, 0
 				_ = m.policy.Apply(ctx, &cancelEvent)
 				return err
 			}
@@ -205,7 +213,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 			return errors.New("invalid billing phase: " + phase)
 		}
 		if phase == "cancel" {
-			event.InputTokens, event.OutputTokens, event.TotalTokens, event.Cost = 0, 0, 0, 0
+			event.InputTokens, event.OutputTokens, event.TotalTokens, event.SearchRequests, event.Cost = 0, 0, 0, 0, 0
 		}
 		created, err := m.durable.Enqueue(ctx, event)
 		if err != nil {
@@ -272,45 +280,48 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 	// Raw upstream error strings may contain request fragments or provider
 	// internals. Persist only the bounded failure class used by operators.
 	return BillingEvent{
-		RequestID:             requestID(req),
-		SessionID:             req.SessionID,
-		TraceID:               req.TraceID,
-		UserID:                req.UserID,
-		TeamID:                req.TeamID,
-		OrganizationID:        req.OrganizationID,
-		Roles:                 append([]string(nil), req.Roles...),
-		Tags:                  append([]string(nil), req.Tags...),
-		APIKeyFingerprint:     req.CredentialID,
-		Provider:              providerName,
-		ProviderID:            metadata(req, "provider.id"),
-		ProviderEndpointName:  metadata(req, "provider.endpoint.name"),
-		ProviderEndpointType:  metadata(req, "provider.endpoint.type"),
-		Model:                 model,
-		UpstreamModel:         upstreamModel(req),
-		APIType:               apiType,
-		Phase:                 req.BillingPhase,
-		Status:                metadataDefault(req, "provider.status", "ok"),
-		FailureClass:          metadata(req, "provider.failure_class"),
-		LatencyMS:             metadataInt(req, "provider.latency_ms"),
-		FirstTokenLatencyMS:   metadataInt(req, "provider.first_token_latency_ms"),
-		RetryCount:            metadataInt(req, "provider.retry_count"),
-		FallbackCount:         metadataInt(req, "provider.fallback_count"),
-		CacheStatus:           metadata(req, "provider.cache.status"),
-		CacheKind:             metadata(req, "provider.cache.kind"),
-		UsageEstimated:        usageEstimated,
-		PromptTokensEstimated: promptTokens,
-		InputTokens:           inputTokens,
-		OutputTokens:          outputTokens,
-		TotalTokens:           totalTokens,
-		CacheReadInputTokens:  cacheReadInputTokens(req),
-		CacheWriteInputTokens: cacheWriteInputTokens(req),
-		Cost:                  pricingCost(inputTokens, outputTokens, pricing),
-		Currency:              pricing.Currency,
-		CatalogVersion:        pricing.CatalogVersion,
-		PricingKey:            pricing.PricingKey,
-		InputCostPer1M:        pricing.InputCostPer1M,
-		OutputCostPer1M:       pricing.OutputCostPer1M,
-		Timestamp:             time.Now().UTC().Format(time.RFC3339),
+		RequestID:               requestID(req),
+		SessionID:               req.SessionID,
+		TraceID:                 req.TraceID,
+		UserID:                  req.UserID,
+		TeamID:                  req.TeamID,
+		OrganizationID:          req.OrganizationID,
+		Roles:                   append([]string(nil), req.Roles...),
+		Tags:                    append([]string(nil), req.Tags...),
+		APIKeyFingerprint:       req.CredentialID,
+		Provider:                providerName,
+		ProviderID:              metadata(req, "provider.id"),
+		ProviderEndpointName:    metadata(req, "provider.endpoint.name"),
+		ProviderEndpointType:    metadata(req, "provider.endpoint.type"),
+		Model:                   model,
+		UpstreamModel:           upstreamModel(req),
+		APIType:                 apiType,
+		Phase:                   req.BillingPhase,
+		Status:                  metadataDefault(req, "provider.status", "ok"),
+		FailureClass:            metadata(req, "provider.failure_class"),
+		LatencyMS:               metadataInt(req, "provider.latency_ms"),
+		FirstTokenLatencyMS:     metadataInt(req, "provider.first_token_latency_ms"),
+		RetryCount:              metadataInt(req, "provider.retry_count"),
+		FallbackCount:           metadataInt(req, "provider.fallback_count"),
+		CacheStatus:             metadata(req, "provider.cache.status"),
+		CacheKind:               metadata(req, "provider.cache.kind"),
+		UsageEstimated:          usageEstimated,
+		PromptTokensEstimated:   promptTokens,
+		InputTokens:             inputTokens,
+		OutputTokens:            outputTokens,
+		TotalTokens:             totalTokens,
+		CacheReadInputTokens:    cacheReadInputTokens(req),
+		CacheWriteInputTokens:   cacheWriteInputTokens(req),
+		SearchRequests:          req.SearchRequests,
+		SearchRequestsEstimated: req.SearchRequestsEstimated,
+		Cost:                    pricingCost(inputTokens, outputTokens, req.SearchRequests, pricing),
+		Currency:                pricing.Currency,
+		CatalogVersion:          pricing.CatalogVersion,
+		PricingKey:              pricing.PricingKey,
+		InputCostPer1M:          pricing.InputCostPer1M,
+		OutputCostPer1M:         pricing.OutputCostPer1M,
+		SearchCostPer1K:         pricing.SearchCostPer1K,
+		Timestamp:               time.Now().UTC().Format(time.RFC3339),
 	}, pricingErr
 }
 
@@ -367,10 +378,15 @@ func suppliedPricingSnapshot(req *RequestContext) (PricingSnapshot, bool, error)
 	currency := metadata(req, "model_catalog.currency")
 	input, inputErr := strconv.ParseFloat(metadata(req, "model_catalog.input_cost_per_1m"), 64)
 	output, outputErr := strconv.ParseFloat(metadata(req, "model_catalog.output_cost_per_1m"), 64)
-	if pricingKey == "" || len(currency) != 3 || inputErr != nil || outputErr != nil || input < 0 || output < 0 {
+	search := 0.0
+	searchErr := error(nil)
+	if raw := metadata(req, "model_catalog.search_cost_per_1k"); raw != "" {
+		search, searchErr = strconv.ParseFloat(raw, 64)
+	}
+	if pricingKey == "" || len(currency) != 3 || inputErr != nil || outputErr != nil || searchErr != nil || input < 0 || output < 0 || search < 0 {
 		return PricingSnapshot{}, true, errors.New("invalid supplied pricing snapshot")
 	}
-	return PricingSnapshot{CatalogVersion: version, PricingKey: pricingKey, Currency: currency, InputCostPer1M: input, OutputCostPer1M: output}, true, nil
+	return PricingSnapshot{CatalogVersion: version, PricingKey: pricingKey, Currency: currency, InputCostPer1M: input, OutputCostPer1M: output, SearchCostPer1K: search}, true, nil
 }
 
 func requestID(req *RequestContext) string {
@@ -507,7 +523,7 @@ func (m BillingModule) handleDurableBudget(ctx context.Context, req *RequestCont
 		created = tag.RowsAffected() == 1
 	} else {
 		if event.Phase == "cancel" {
-			event.InputTokens, event.OutputTokens, event.TotalTokens, event.Cost = 0, 0, 0, 0
+			event.InputTokens, event.OutputTokens, event.TotalTokens, event.SearchRequests, event.Cost = 0, 0, 0, 0, 0
 		}
 		created, err = repository.enqueueTx(ctx, tx, *event)
 		if err != nil {

@@ -212,7 +212,7 @@ func normalizeOnboardingCatalog(input modelcatalog.Catalog) (modelcatalog.Catalo
 			}
 			seen[capability] = true
 		}
-		if entry.Currency != "" && (len(entry.Currency) != 3 || entry.Currency != strings.ToUpper(entry.Currency)) || (entry.InputCostPer1M > 0 || entry.OutputCostPer1M > 0) && entry.Currency == "" {
+		if entry.Currency != "" && (len(entry.Currency) != 3 || entry.Currency != strings.ToUpper(entry.Currency)) || (entry.InputCostPer1M > 0 || entry.OutputCostPer1M > 0 || entry.SearchCostPer1K > 0) && entry.Currency == "" {
 			return modelcatalog.Catalog{}, ErrInvalidModelOnboarding
 		}
 	}

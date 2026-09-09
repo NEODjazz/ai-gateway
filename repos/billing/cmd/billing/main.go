@@ -70,26 +70,29 @@ func run() error {
 			return
 		}
 		ctx := modules.RequestContext{
-			RequestID:             request.RequestID,
-			SessionID:             request.SessionID,
-			TraceID:               request.TraceID,
-			CredentialID:          request.CredentialID,
-			UserID:                request.UserID,
-			TeamID:                request.TeamID,
-			OrganizationID:        request.OrganizationID,
-			Roles:                 request.Roles,
-			Tags:                  request.Tags,
-			PromptTokensEstimated: request.PromptTokensEstimated,
-			CacheReadInputTokens:  request.CacheReadInputTokens,
-			CacheWriteInputTokens: request.CacheWriteInputTokens,
-			PostResponse:          request.Phase == "commit",
-			BillingPhase:          request.Phase,
-			APIType:               request.APIType,
+			RequestID:               request.RequestID,
+			SessionID:               request.SessionID,
+			TraceID:                 request.TraceID,
+			CredentialID:            request.CredentialID,
+			UserID:                  request.UserID,
+			TeamID:                  request.TeamID,
+			OrganizationID:          request.OrganizationID,
+			Roles:                   request.Roles,
+			Tags:                    request.Tags,
+			PromptTokensEstimated:   request.PromptTokensEstimated,
+			CacheReadInputTokens:    request.CacheReadInputTokens,
+			CacheWriteInputTokens:   request.CacheWriteInputTokens,
+			SearchRequests:          request.SearchRequests,
+			SearchRequestsEstimated: request.SearchRequestsEstimated,
+			PostResponse:            request.Phase == "commit",
+			BillingPhase:            request.Phase,
+			APIType:                 request.APIType,
 			Request: openai.ChatCompletionRequest{
 				Provider: request.Provider,
 				Model:    request.Model,
 			},
 			Usage: &openai.Usage{
+				SearchRequests:   request.SearchRequests,
 				PromptTokens:     request.InputTokens,
 				CompletionTokens: request.OutputTokens,
 				TotalTokens:      request.TotalTokens,
@@ -112,6 +115,7 @@ func run() error {
 				"model_catalog.pricing_key":        request.PricingKey,
 				"model_catalog.input_cost_per_1m":  request.InputCostPer1M,
 				"model_catalog.output_cost_per_1m": request.OutputCostPer1M,
+				"model_catalog.search_cost_per_1k": request.SearchCostPer1K,
 				"model_catalog.currency":           request.Currency,
 				"provider.upstream_model":          request.UpstreamModel,
 			},
@@ -168,44 +172,47 @@ func authorizeBillingUsage(w http.ResponseWriter, r *http.Request, secret string
 }
 
 type usageRequest struct {
-	RequestID             string   `json:"request_id,omitempty"`
-	SessionID             string   `json:"session_id,omitempty"`
-	TraceID               string   `json:"trace_id,omitempty"`
-	CredentialID          string   `json:"credential_id,omitempty"`
-	UserID                string   `json:"user_id,omitempty"`
-	TeamID                string   `json:"team_id,omitempty"`
-	OrganizationID        string   `json:"organization_id,omitempty"`
-	Roles                 []string `json:"roles,omitempty"`
-	Tags                  []string `json:"tags,omitempty"`
-	Provider              string   `json:"provider,omitempty"`
-	ProviderID            string   `json:"provider_id,omitempty"`
-	ProviderEndpointName  string   `json:"provider_endpoint_name,omitempty"`
-	ProviderEndpointType  string   `json:"provider_endpoint_type,omitempty"`
-	Model                 string   `json:"model,omitempty"`
-	UpstreamModel         string   `json:"upstream_model,omitempty"`
-	APIType               string   `json:"api_type"`
-	Phase                 string   `json:"phase"`
-	Status                string   `json:"status,omitempty"`
-	Error                 string   `json:"error,omitempty"`
-	FailureClass          string   `json:"failure_class,omitempty"`
-	LatencyMS             string   `json:"latency_ms,omitempty"`
-	FirstTokenLatencyMS   string   `json:"first_token_latency_ms,omitempty"`
-	RetryCount            int      `json:"retry_count"`
-	FallbackCount         int      `json:"fallback_count"`
-	CacheStatus           string   `json:"cache_status,omitempty"`
-	CacheKind             string   `json:"cache_kind,omitempty"`
-	UsageEstimated        bool     `json:"usage_estimated"`
-	PromptTokensEstimated int      `json:"prompt_tokens_estimated"`
-	InputTokens           int      `json:"input_tokens"`
-	OutputTokens          int      `json:"output_tokens"`
-	TotalTokens           int      `json:"total_tokens"`
-	CacheReadInputTokens  int      `json:"cache_read_input_tokens"`
-	CacheWriteInputTokens int      `json:"cache_write_input_tokens"`
-	CatalogVersion        string   `json:"catalog_version,omitempty"`
-	PricingKey            string   `json:"pricing_key,omitempty"`
-	InputCostPer1M        string   `json:"input_cost_per_1m,omitempty"`
-	OutputCostPer1M       string   `json:"output_cost_per_1m,omitempty"`
-	Currency              string   `json:"currency,omitempty"`
+	RequestID               string   `json:"request_id,omitempty"`
+	SessionID               string   `json:"session_id,omitempty"`
+	TraceID                 string   `json:"trace_id,omitempty"`
+	CredentialID            string   `json:"credential_id,omitempty"`
+	UserID                  string   `json:"user_id,omitempty"`
+	TeamID                  string   `json:"team_id,omitempty"`
+	OrganizationID          string   `json:"organization_id,omitempty"`
+	Roles                   []string `json:"roles,omitempty"`
+	Tags                    []string `json:"tags,omitempty"`
+	Provider                string   `json:"provider,omitempty"`
+	ProviderID              string   `json:"provider_id,omitempty"`
+	ProviderEndpointName    string   `json:"provider_endpoint_name,omitempty"`
+	ProviderEndpointType    string   `json:"provider_endpoint_type,omitempty"`
+	Model                   string   `json:"model,omitempty"`
+	UpstreamModel           string   `json:"upstream_model,omitempty"`
+	APIType                 string   `json:"api_type"`
+	Phase                   string   `json:"phase"`
+	Status                  string   `json:"status,omitempty"`
+	Error                   string   `json:"error,omitempty"`
+	FailureClass            string   `json:"failure_class,omitempty"`
+	LatencyMS               string   `json:"latency_ms,omitempty"`
+	FirstTokenLatencyMS     string   `json:"first_token_latency_ms,omitempty"`
+	RetryCount              int      `json:"retry_count"`
+	FallbackCount           int      `json:"fallback_count"`
+	CacheStatus             string   `json:"cache_status,omitempty"`
+	CacheKind               string   `json:"cache_kind,omitempty"`
+	UsageEstimated          bool     `json:"usage_estimated"`
+	PromptTokensEstimated   int      `json:"prompt_tokens_estimated"`
+	InputTokens             int      `json:"input_tokens"`
+	OutputTokens            int      `json:"output_tokens"`
+	TotalTokens             int      `json:"total_tokens"`
+	CacheReadInputTokens    int      `json:"cache_read_input_tokens"`
+	CacheWriteInputTokens   int      `json:"cache_write_input_tokens"`
+	SearchRequests          int      `json:"search_requests"`
+	SearchRequestsEstimated bool     `json:"search_requests_estimated"`
+	CatalogVersion          string   `json:"catalog_version,omitempty"`
+	PricingKey              string   `json:"pricing_key,omitempty"`
+	InputCostPer1M          string   `json:"input_cost_per_1m,omitempty"`
+	OutputCostPer1M         string   `json:"output_cost_per_1m,omitempty"`
+	SearchCostPer1K         string   `json:"search_cost_per_1k,omitempty"`
+	Currency                string   `json:"currency,omitempty"`
 }
 
 type usageResponse struct {

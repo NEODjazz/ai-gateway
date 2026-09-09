@@ -36,6 +36,7 @@ describe("ModelCatalogPage", () => {
     await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     expect(await screen.findByRole("option", { name: "azure — openai-compatible" })).toBeInTheDocument();
     await userEvent.clear(screen.getByLabelText("Model")); await userEvent.type(screen.getByLabelText("Model"), "gpt-new");
+	await userEvent.type(screen.getByLabelText("Search cost / 1K"), "10");
     await userEvent.click(screen.getByLabelText("Capabilities"));
     await userEvent.click(screen.getByRole("option", { name: /Tools/ }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -45,6 +46,7 @@ describe("ModelCatalogPage", () => {
     expect(body.models).toHaveLength(1);
     expect(body.models[0].model).toBe("gpt-new");
     expect(body.models[0].capabilities).toEqual(["chat", "tools"]);
+	expect(body.models[0].search_cost_per_1k).toBe(10);
   });
 
   it("deletes only catalog metadata", async () => {

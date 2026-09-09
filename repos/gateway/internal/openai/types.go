@@ -258,6 +258,9 @@ type Choice struct {
 }
 
 type Usage struct {
+	// SearchRequests is internal provider usage used for billing. It is not part
+	// of the OpenAI-compatible response payload.
+	SearchRequests          int                     `json:"-"`
 	PromptTokens            int                     `json:"prompt_tokens"`
 	CompletionTokens        int                     `json:"completion_tokens"`
 	TotalTokens             int                     `json:"total_tokens"`

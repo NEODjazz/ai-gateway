@@ -45,6 +45,7 @@ func TestCatalogRejectsInvalidOrDuplicateEntries(t *testing.T) {
 		`{"models":[{"provider":"p","model":"m"}]}`,
 		`{"version":"v1","unknown_model_policy":"free"}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m","input_cost_per_1m":-1}]}`,
+		`{"version":"v1","models":[{"provider":"p","model":"m","search_cost_per_1k":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m"},{"provider":"p","model":"m"}]}`,
 	} {
 		if _, err := Parse(raw); err == nil {

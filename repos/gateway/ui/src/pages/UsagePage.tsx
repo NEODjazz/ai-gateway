@@ -16,7 +16,7 @@ import { GatewayButton } from "../components/GatewayButton";
 
 type UsageAggregate = {
   date?: string; name?: string; currency: string; requests: number; errors: number; input_tokens: number; output_tokens: number;
-  total_tokens: number; cache_read_input_tokens: number; cache_write_input_tokens: number; cost: number; avg_latency_ms: number; cache_hits: number; cost_per_request: number;
+  total_tokens: number; cache_read_input_tokens: number; cache_write_input_tokens: number; search_requests: number; cost: number; avg_latency_ms: number; cache_hits: number; cost_per_request: number;
 };
 type UsageReport = {
   days?: number; from?: string; to?: string; totals: UsageAggregate[]; daily: UsageAggregate[];
@@ -94,9 +94,9 @@ function usageRows(rows: UsageAggregate[]) {
 function aggregateDailyActivity(rows: UsageAggregate[]) {
   const grouped = new Map<string, UsageAggregate>();
   for (const row of rows) {
-    const date = row.date || "Unknown"; const current = grouped.get(date) || { date, currency: "", requests: 0, errors: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, cache_read_input_tokens: 0, cache_write_input_tokens: 0, cost: 0, avg_latency_ms: 0, cache_hits: 0, cost_per_request: 0 };
+    const date = row.date || "Unknown"; const current = grouped.get(date) || { date, currency: "", requests: 0, errors: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, cache_read_input_tokens: 0, cache_write_input_tokens: 0, search_requests: 0, cost: 0, avg_latency_ms: 0, cache_hits: 0, cost_per_request: 0 };
     const latencyTotal = current.avg_latency_ms * current.requests + row.avg_latency_ms * row.requests;
-    current.requests += row.requests; current.errors += row.errors; current.input_tokens += row.input_tokens; current.output_tokens += row.output_tokens; current.total_tokens += row.total_tokens; current.cache_read_input_tokens += row.cache_read_input_tokens || 0; current.cache_write_input_tokens += row.cache_write_input_tokens || 0; current.cache_hits += row.cache_hits;
+    current.requests += row.requests; current.errors += row.errors; current.input_tokens += row.input_tokens; current.output_tokens += row.output_tokens; current.total_tokens += row.total_tokens; current.cache_read_input_tokens += row.cache_read_input_tokens || 0; current.cache_write_input_tokens += row.cache_write_input_tokens || 0; current.search_requests += row.search_requests || 0; current.cache_hits += row.cache_hits;
     current.avg_latency_ms = current.requests ? latencyTotal / current.requests : 0; grouped.set(date, current);
   }
   return [...grouped.values()].sort((left, right) => String(left.date).localeCompare(String(right.date)));
@@ -105,7 +105,7 @@ function aggregateDailyActivity(rows: UsageAggregate[]) {
 const usageColumns = [
   { key: "name", label: "Name" }, { key: "requests", label: "Requests" }, { key: "successful", label: "Successful" }, { key: "errors", label: "Failed" },
   { key: "success_rate", label: "Success rate" }, { key: "total_tokens", label: "Total tokens" }, { key: "input_tokens", label: "Input tokens" },
-  { key: "output_tokens", label: "Output tokens" }, { key: "cache_read_input_tokens", label: "Cache read tokens" }, { key: "cache_write_input_tokens", label: "Cache write tokens" }, { key: "cache_hits", label: "Cache hits" }, { key: "latency", label: "Average latency" },
+  { key: "output_tokens", label: "Output tokens" }, { key: "cache_read_input_tokens", label: "Cache read tokens" }, { key: "cache_write_input_tokens", label: "Cache write tokens" }, { key: "search_requests", label: "Searches" }, { key: "cache_hits", label: "Cache hits" }, { key: "latency", label: "Average latency" },
   { key: "spend", label: "Spend" }, { key: "cost_per_request_display", label: "Cost / request" }, { key: "currency", label: "Currency" }
 ];
 
@@ -161,8 +161,8 @@ export function UsagePage() {
   }
   function exportCSV() {
     if (!report) return;
-    const lines = ["dimension,type,requests,errors,input_tokens,output_tokens,total_tokens,cache_read_input_tokens,cache_write_input_tokens,cache_hits,avg_latency_ms,cost,currency"];
-    for (const [type, rows] of [["public_model", report.by_model || []], ["upstream_model", report.by_upstream_model || []], ["provider", report.by_provider || []], ["endpoint", report.by_endpoint || []], ["tag", report.by_tag || []], ["key", report.by_key || []], ["user", report.by_user || []], ["team", report.by_team || []], ["organization", report.by_organization || []]] as const) for (const row of rows) lines.push([row.name || "", type, row.requests, row.errors, row.input_tokens, row.output_tokens, row.total_tokens, row.cache_read_input_tokens || 0, row.cache_write_input_tokens || 0, row.cache_hits, row.avg_latency_ms, row.cost, row.currency].map(csvCell).join(","));
+    const lines = ["dimension,type,requests,errors,input_tokens,output_tokens,total_tokens,cache_read_input_tokens,cache_write_input_tokens,search_requests,cache_hits,avg_latency_ms,cost,currency"];
+    for (const [type, rows] of [["public_model", report.by_model || []], ["upstream_model", report.by_upstream_model || []], ["provider", report.by_provider || []], ["endpoint", report.by_endpoint || []], ["tag", report.by_tag || []], ["key", report.by_key || []], ["user", report.by_user || []], ["team", report.by_team || []], ["organization", report.by_organization || []]] as const) for (const row of rows) lines.push([row.name || "", type, row.requests, row.errors, row.input_tokens, row.output_tokens, row.total_tokens, row.cache_read_input_tokens || 0, row.cache_write_input_tokens || 0, row.search_requests || 0, row.cache_hits, row.avg_latency_ms, row.cost, row.currency].map(csvCell).join(","));
     const url = URL.createObjectURL(new Blob([`${lines.join("\r\n")}\r\n`], { type: "text/csv" })); const link = document.createElement("a"); link.href = url; link.download = "ai-gateway-usage.csv"; link.click(); URL.revokeObjectURL(url);
   }
   return <><PageHeader eyebrow="Analytics" title="Usage & spend" description="Gateway activity, spend, token and reliability trends without combining currencies." actions={<><GravityThemeScope className="usage-window"><Select aria-label="Window" size="l" width="max" value={[draft.window]} options={[{ value: "7", content: "7 days" }, { value: "30", content: "30 days" }, { value: "90", content: "90 days" }, { value: "custom", content: "Custom range" }]} onUpdate={([window]) => setDraft({ ...draft, window })} /></GravityThemeScope><GatewayButton view="outlined" size="l" disabled={!report} onClick={exportCSV}>Export CSV</GatewayButton></>} />

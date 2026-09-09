@@ -1473,6 +1473,7 @@ func (r Router) applyCatalogPricing(ctx context.Context, req *modules.RequestCon
 	req.Metadata["model_catalog.pricing_key"] = entry.Provider + "/" + entry.Model
 	req.Metadata["model_catalog.input_cost_per_1m"] = strconv.FormatFloat(entry.InputCostPer1M, 'g', -1, 64)
 	req.Metadata["model_catalog.output_cost_per_1m"] = strconv.FormatFloat(entry.OutputCostPer1M, 'g', -1, 64)
+	req.Metadata["model_catalog.search_cost_per_1k"] = strconv.FormatFloat(entry.SearchCostPer1K, 'g', -1, 64)
 	req.Metadata["model_catalog.currency"] = entry.Currency
 }
 

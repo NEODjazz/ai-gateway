@@ -5,11 +5,12 @@
     {
       "provider": "azure-open-ai",
       "model": "deployment-gpt-example",
-      "capabilities": ["chat", "responses", "stream", "tools", "vision", "mcp", "structured_output"],
+      "capabilities": ["chat", "responses", "stream", "tools", "vision", "mcp", "structured_output", "web_search"],
       "max_input_tokens": 128000,
       "max_output_tokens": 16384,
       "input_cost_per_1m": 1.25,
       "output_cost_per_1m": 10.0,
+      "search_cost_per_1k": 10.0,
       "currency": "USD"
     },
     {
