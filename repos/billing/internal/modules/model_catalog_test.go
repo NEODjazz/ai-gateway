@@ -14,7 +14,7 @@ func TestModelCatalogPricingPrecedenceAndAuditFields(t *testing.T) {
 	catalogJSON := `{
 		"version":"2026-08-21.1","unknown_model_policy":"deny","models":[
 			{"provider":"openai","model":"gpt-test","input_cost_per_1m":1,"output_cost_per_1m":2,"currency":"USD"},
-			{"provider":"endpoint-a","model":"gpt-test","input_cost_per_1m":2,"output_cost_per_1m":4,"search_cost_per_1k":10,"character_cost_per_1m":15,"currency":"USD"}
+			{"provider":"endpoint-a","model":"gpt-test","input_cost_per_1m":2,"output_cost_per_1m":4,"search_cost_per_1k":10,"character_cost_per_1m":15,"page_cost_per_1k":100,"currency":"USD"}
 		]}`
 	module := NewBillingModuleWithSettings(true, Settings{
 		Pricing: PricingConfig{Currency: "USD"}, ModelCatalogJSON: catalogJSON,
@@ -25,6 +25,7 @@ func TestModelCatalogPricingPrecedenceAndAuditFields(t *testing.T) {
 		Usage:           &openai.Usage{PromptTokens: 1000, CompletionTokens: 500, TotalTokens: 1500},
 		SearchRequests:  2,
 		InputCharacters: 2000,
+		InputPages:      3,
 		Metadata: map[string]string{
 			"provider.endpoint.name": "endpoint-a", "provider.endpoint.type": "openai",
 		},
@@ -35,7 +36,7 @@ func TestModelCatalogPricingPrecedenceAndAuditFields(t *testing.T) {
 	if req.BillingEvent == nil || req.BillingEvent.CatalogVersion != "2026-08-21.1" || req.BillingEvent.PricingKey != "endpoint-a/gpt-test" {
 		t.Fatalf("missing catalog audit fields: %+v", req.BillingEvent)
 	}
-	if math.Abs(req.BillingEvent.Cost-0.054) > 1e-12 || req.BillingEvent.InputCostPer1M != 2 || req.BillingEvent.OutputCostPer1M != 4 || req.BillingEvent.SearchCostPer1K != 10 || req.BillingEvent.CharacterCostPer1M != 15 || req.BillingEvent.InputCharacters != 2000 {
+	if math.Abs(req.BillingEvent.Cost-0.354) > 1e-12 || req.BillingEvent.InputCostPer1M != 2 || req.BillingEvent.OutputCostPer1M != 4 || req.BillingEvent.SearchCostPer1K != 10 || req.BillingEvent.CharacterCostPer1M != 15 || req.BillingEvent.PageCostPer1K != 100 || req.BillingEvent.InputCharacters != 2000 || req.BillingEvent.InputPages != 3 {
 		t.Fatalf("unexpected catalog price: %+v", req.BillingEvent)
 	}
 }
@@ -64,7 +65,7 @@ func (pinnedPricingPolicy) Apply(_ context.Context, event *BillingEvent) error {
 		event.InputCostPer1M = 1
 		event.OutputCostPer1M = 2
 		event.Currency = "USD"
-		event.Cost = pricingCost(event.InputTokens, event.OutputTokens, event.InputCharacters, event.SearchRequests, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2})
+		event.Cost = pricingCost(event.InputTokens, event.OutputTokens, event.InputCharacters, event.InputPages, event.SearchRequests, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2})
 	}
 	return nil
 }
@@ -99,6 +100,7 @@ func TestModelCatalogRejectsInvalidEntries(t *testing.T) {
 		`{"version":"v1","models":[{"provider":"p","model":"m","output_cost_per_1m":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m","search_cost_per_1k":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m","character_cost_per_1m":-1}]}`,
+		`{"version":"v1","models":[{"provider":"p","model":"m","page_cost_per_1k":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m"},{"provider":"p","model":"m"}]}`,
 	} {
 		if _, err := ParseModelCatalog(raw); err == nil {

@@ -22,6 +22,7 @@ type UsageAggregate struct {
 	OutputTokens          uint64  `json:"output_tokens"`
 	TotalTokens           uint64  `json:"total_tokens"`
 	InputCharacters       uint64  `json:"input_characters"`
+	InputPages            uint64  `json:"input_pages"`
 	CacheReadInputTokens  uint64  `json:"cache_read_input_tokens"`
 	CacheWriteInputTokens uint64  `json:"cache_write_input_tokens"`
 	SearchRequests        uint64  `json:"search_requests"`

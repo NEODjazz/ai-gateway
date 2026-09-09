@@ -24,6 +24,7 @@ type Model struct {
 	OutputCostPer1M    float64  `json:"output_cost_per_1m,omitempty"`
 	SearchCostPer1K    float64  `json:"search_cost_per_1k,omitempty"`
 	CharacterCostPer1M float64  `json:"character_cost_per_1m,omitempty"`
+	PageCostPer1K      float64  `json:"page_cost_per_1k,omitempty"`
 	Currency           string   `json:"currency,omitempty"`
 }
 
@@ -51,7 +52,7 @@ func Parse(raw string) (Catalog, error) {
 		if model.Provider == "" || model.Model == "" {
 			return Catalog{}, fmt.Errorf("model catalog entry %d requires provider and model", index)
 		}
-		if model.MaxInputTokens < 0 || model.MaxOutputTokens < 0 || model.InputCostPer1M < 0 || model.OutputCostPer1M < 0 || model.SearchCostPer1K < 0 || model.CharacterCostPer1M < 0 {
+		if model.MaxInputTokens < 0 || model.MaxOutputTokens < 0 || model.InputCostPer1M < 0 || model.OutputCostPer1M < 0 || model.SearchCostPer1K < 0 || model.CharacterCostPer1M < 0 || model.PageCostPer1K < 0 {
 			return Catalog{}, fmt.Errorf("model catalog entry %s/%s contains a negative limit or price", model.Provider, model.Model)
 		}
 		key := catalogKey(model.Provider, model.Model)

@@ -38,6 +38,7 @@ describe("ModelCatalogPage", () => {
     await userEvent.clear(screen.getByLabelText("Model")); await userEvent.type(screen.getByLabelText("Model"), "gpt-new");
 	await userEvent.type(screen.getByLabelText("Search cost / 1K"), "10");
 	await userEvent.type(screen.getByLabelText("Character cost / 1M"), "15");
+	await userEvent.type(screen.getByLabelText("Page cost / 1K"), "100");
     await userEvent.click(screen.getByLabelText("Capabilities"));
     await userEvent.click(screen.getByRole("option", { name: /Tools/ }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -49,6 +50,7 @@ describe("ModelCatalogPage", () => {
     expect(body.models[0].capabilities).toEqual(["chat", "tools"]);
 	expect(body.models[0].search_cost_per_1k).toBe(10);
 	expect(body.models[0].character_cost_per_1m).toBe(15);
+	expect(body.models[0].page_cost_per_1k).toBe(100);
   });
 
   it("deletes only catalog metadata", async () => {

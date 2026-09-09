@@ -244,6 +244,9 @@ data:
   011_billing_characters.sql: |
     ALTER TABLE billing_budget_reservations
         ADD COLUMN IF NOT EXISTS character_cost_per_1m NUMERIC(18, 8) NOT NULL DEFAULT 0;
+  012_billing_pages.sql: |
+    ALTER TABLE billing_budget_reservations
+        ADD COLUMN IF NOT EXISTS page_cost_per_1k NUMERIC(18, 8) NOT NULL DEFAULT 0;
 
   003_virtual_keys.sql: |
     CREATE TABLE IF NOT EXISTS auth_virtual_keys

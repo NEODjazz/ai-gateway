@@ -16,6 +16,7 @@ type RequestContext struct {
 	TraceID                 string                         `json:"trace_id,omitempty"`
 	PromptTokensEstimated   int                            `json:"prompt_tokens_estimated,omitempty"`
 	InputCharacters         int                            `json:"input_characters,omitempty"`
+	InputPages              int                            `json:"input_pages,omitempty"`
 	CacheReadInputTokens    int                            `json:"cache_read_input_tokens,omitempty"`
 	CacheWriteInputTokens   int                            `json:"cache_write_input_tokens,omitempty"`
 	SearchRequests          int                            `json:"search_requests,omitempty"`
@@ -69,6 +70,7 @@ type BillingEvent struct {
 	UsageEstimated          bool     `json:"usage_estimated"`
 	PromptTokensEstimated   int      `json:"prompt_tokens_estimated"`
 	InputCharacters         int      `json:"input_characters"`
+	InputPages              int      `json:"input_pages"`
 	InputTokens             int      `json:"input_tokens"`
 	OutputTokens            int      `json:"output_tokens"`
 	TotalTokens             int      `json:"total_tokens"`
@@ -84,6 +86,7 @@ type BillingEvent struct {
 	OutputCostPer1M         float64  `json:"output_cost_per_1m,omitempty"`
 	SearchCostPer1K         float64  `json:"search_cost_per_1k,omitempty"`
 	CharacterCostPer1M      float64  `json:"character_cost_per_1m,omitempty"`
+	PageCostPer1K           float64  `json:"page_cost_per_1k,omitempty"`
 	Timestamp               string   `json:"timestamp"`
 }
 

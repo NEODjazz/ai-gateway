@@ -151,6 +151,12 @@ separately from estimated or provider-reported tokens. The model catalog field
 the reservation keeps the price snapshot so catalog changes cannot alter an
 in-flight request.
 
+Page-priced operations carry exact `input_pages` separately from token and
+character usage. The model catalog field `page_cost_per_1k` participates in
+reserve and commit calculation, and PostgreSQL reservations pin that price for
+the request lifecycle. Apply PostgreSQL migration `012_billing_pages.sql` and
+ClickHouse migration `011_usage_pages.sql` before deploying this version.
+
 `DELETE` is a soft disable. Summary includes committed usage and unexpired
 reservations, using the same period, scope, and currency calculation as
 enforcement. `expand=summaries` calculates every policy in one PostgreSQL query
@@ -191,6 +197,7 @@ migrations/clickhouse/007_usage_tags.sql
 migrations/clickhouse/008_usage_cache_tokens.sql
 migrations/clickhouse/009_usage_server_tools.sql
 migrations/clickhouse/010_usage_characters.sql
+migrations/clickhouse/011_usage_pages.sql
 ```
 
 Final usage events retain normalized provider/deployment identity, organization,
@@ -222,6 +229,7 @@ migrations/postgres/007_tag_budgets.sql
 migrations/postgres/008_organization_budgets.sql
 migrations/postgres/010_billing_server_tools.sql
 migrations/postgres/011_billing_characters.sql
+migrations/postgres/012_billing_pages.sql
 ```
 
 `management_audit_events` is an append-only management journal queried through

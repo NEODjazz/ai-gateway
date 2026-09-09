@@ -367,12 +367,13 @@ func TestBillingCacheHitDoesNotChargeProviderTokens(t *testing.T) {
 		RequestID: "req-cache-hit", BillingPhase: "commit", PostResponse: true,
 		Request:         openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "cached prompt"}}},
 		InputCharacters: 4096,
+		InputPages:      4,
 		Metadata:        map[string]string{"provider.cache.status": "hit"},
 	}
 	if err := module.Handle(context.Background(), &req); err != nil {
 		t.Fatal(err)
 	}
-	if len(writer.events) != 1 || writer.events[0].CacheStatus != "hit" || writer.events[0].TotalTokens != 0 || writer.events[0].InputCharacters != 0 || writer.events[0].Cost != 0 {
+	if len(writer.events) != 1 || writer.events[0].CacheStatus != "hit" || writer.events[0].TotalTokens != 0 || writer.events[0].InputCharacters != 0 || writer.events[0].InputPages != 0 || writer.events[0].Cost != 0 {
 		t.Fatalf("cache hit must not charge provider usage: %+v", writer.events)
 	}
 }
@@ -414,6 +415,16 @@ func TestBillingRejectsInvalidSearchRequestCounts(t *testing.T) {
 		req := RequestContext{RequestID: "invalid-search-count", SearchRequests: count}
 		if err := module.Handle(context.Background(), &req); err == nil {
 			t.Fatalf("accepted search_requests=%d", count)
+		}
+	}
+}
+
+func TestBillingRejectsInvalidInputPageCounts(t *testing.T) {
+	module := NewBillingModuleWithPricing(true, PricingConfig{Currency: "USD"})
+	for _, count := range []int{-1, maxBillableInputPages + 1} {
+		req := RequestContext{RequestID: "invalid-page-count", InputPages: count}
+		if err := module.Handle(context.Background(), &req); err == nil {
+			t.Fatalf("accepted input_pages=%d", count)
 		}
 	}
 }

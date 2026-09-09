@@ -251,24 +251,24 @@ func TestPostgresBudgetReservationsAreAtomicAndLifecycleAware(t *testing.T) {
 
 	pricingRequest := "pricing-snapshot-" + suffix
 	pricingReserve := budgetTestEvent(pricingRequest, "pricing-team-"+suffix, 300)
-	pricingReserve.InputTokens, pricingReserve.OutputTokens, pricingReserve.InputCharacters, pricingReserve.SearchRequests = 100, 200, 1000, 5
+	pricingReserve.InputTokens, pricingReserve.OutputTokens, pricingReserve.InputCharacters, pricingReserve.InputPages, pricingReserve.SearchRequests = 100, 200, 1000, 3, 5
 	pricingReserve.CatalogVersion, pricingReserve.PricingKey = "v1", "provider/model@v1"
-	pricingReserve.InputCostPer1M, pricingReserve.OutputCostPer1M, pricingReserve.SearchCostPer1K, pricingReserve.CharacterCostPer1M = 1, 2, 10, 15
-	pricingReserve.Cost = pricingCost(pricingReserve.InputTokens, pricingReserve.OutputTokens, pricingReserve.InputCharacters, pricingReserve.SearchRequests, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2, SearchCostPer1K: 10, CharacterCostPer1M: 15})
+	pricingReserve.InputCostPer1M, pricingReserve.OutputCostPer1M, pricingReserve.SearchCostPer1K, pricingReserve.CharacterCostPer1M, pricingReserve.PageCostPer1K = 1, 2, 10, 15, 100
+	pricingReserve.Cost = pricingCost(pricingReserve.InputTokens, pricingReserve.OutputTokens, pricingReserve.InputCharacters, pricingReserve.InputPages, pricingReserve.SearchRequests, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2, SearchCostPer1K: 10, CharacterCostPer1M: 15, PageCostPer1K: 100})
 	if err := checker.Apply(ctx, pricingReserve); err != nil {
 		t.Fatal(err)
 	}
 	pricingCommit := budgetTestEvent(pricingRequest, "pricing-team-"+suffix, 100)
 	pricingCommit.Phase = "commit"
-	pricingCommit.InputTokens, pricingCommit.OutputTokens, pricingCommit.InputCharacters, pricingCommit.SearchRequests = 50, 50, 500, 2
+	pricingCommit.InputTokens, pricingCommit.OutputTokens, pricingCommit.InputCharacters, pricingCommit.InputPages, pricingCommit.SearchRequests = 50, 50, 500, 2, 2
 	pricingCommit.CatalogVersion, pricingCommit.PricingKey = "v2", "provider/model@v2"
-	pricingCommit.InputCostPer1M, pricingCommit.OutputCostPer1M, pricingCommit.SearchCostPer1K, pricingCommit.CharacterCostPer1M = 100, 200, 1000, 1500
-	pricingCommit.Cost = pricingCost(50, 50, 500, 2, PricingSnapshot{InputCostPer1M: 100, OutputCostPer1M: 200, SearchCostPer1K: 1000, CharacterCostPer1M: 1500})
+	pricingCommit.InputCostPer1M, pricingCommit.OutputCostPer1M, pricingCommit.SearchCostPer1K, pricingCommit.CharacterCostPer1M, pricingCommit.PageCostPer1K = 100, 200, 1000, 1500, 2000
+	pricingCommit.Cost = pricingCost(50, 50, 500, 2, 2, PricingSnapshot{InputCostPer1M: 100, OutputCostPer1M: 200, SearchCostPer1K: 1000, CharacterCostPer1M: 1500, PageCostPer1K: 2000})
 	if err := checker.Apply(ctx, pricingCommit); err != nil {
 		t.Fatal(err)
 	}
-	expectedPinnedCost := pricingCost(50, 50, 500, 2, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2, SearchCostPer1K: 10, CharacterCostPer1M: 15})
-	if pricingCommit.CatalogVersion != "v1" || pricingCommit.PricingKey != "provider/model@v1" || pricingCommit.SearchCostPer1K != 10 || pricingCommit.CharacterCostPer1M != 15 || math.Abs(pricingCommit.Cost-expectedPinnedCost) > 1e-12 {
+	expectedPinnedCost := pricingCost(50, 50, 500, 2, 2, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2, SearchCostPer1K: 10, CharacterCostPer1M: 15, PageCostPer1K: 100})
+	if pricingCommit.CatalogVersion != "v1" || pricingCommit.PricingKey != "provider/model@v1" || pricingCommit.SearchCostPer1K != 10 || pricingCommit.CharacterCostPer1M != 15 || pricingCommit.PageCostPer1K != 100 || math.Abs(pricingCommit.Cost-expectedPinnedCost) > 1e-12 {
 		t.Fatalf("commit did not use reserved pricing snapshot: %+v", pricingCommit)
 	}
 }
@@ -381,7 +381,7 @@ func TestPostgresBudgetManagementLifecycleAndSummary(t *testing.T) {
 
 func applyBudgetTestMigration(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	for _, name := range []string{"004_budgets.sql", "005_pricing_snapshots.sql", "006_management_audit.sql", "007_tag_budgets.sql", "008_organization_budgets.sql", "010_billing_server_tools.sql", "011_billing_characters.sql"} {
+	for _, name := range []string{"004_budgets.sql", "005_pricing_snapshots.sql", "006_management_audit.sql", "007_tag_budgets.sql", "008_organization_budgets.sql", "010_billing_server_tools.sql", "011_billing_characters.sql", "012_billing_pages.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
 			t.Fatal(err)

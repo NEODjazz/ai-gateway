@@ -21,6 +21,7 @@ type ModelCatalogEntry struct {
 	OutputCostPer1M    float64 `json:"output_cost_per_1m,omitempty"`
 	SearchCostPer1K    float64 `json:"search_cost_per_1k,omitempty"`
 	CharacterCostPer1M float64 `json:"character_cost_per_1m,omitempty"`
+	PageCostPer1K      float64 `json:"page_cost_per_1k,omitempty"`
 	Currency           string  `json:"currency,omitempty"`
 }
 
@@ -31,6 +32,7 @@ type PricingSnapshot struct {
 	OutputCostPer1M    float64
 	SearchCostPer1K    float64
 	CharacterCostPer1M float64
+	PageCostPer1K      float64
 	Currency           string
 }
 
@@ -58,7 +60,7 @@ func ParseModelCatalog(raw string) (ModelCatalog, error) {
 		if entry.Provider == "" || entry.Model == "" {
 			return ModelCatalog{}, fmt.Errorf("model catalog entry %d requires provider and model", index)
 		}
-		if entry.InputCostPer1M < 0 || entry.OutputCostPer1M < 0 || entry.SearchCostPer1K < 0 || entry.CharacterCostPer1M < 0 {
+		if entry.InputCostPer1M < 0 || entry.OutputCostPer1M < 0 || entry.SearchCostPer1K < 0 || entry.CharacterCostPer1M < 0 || entry.PageCostPer1K < 0 {
 			return ModelCatalog{}, fmt.Errorf("model catalog entry %s/%s contains a negative price", entry.Provider, entry.Model)
 		}
 		key := modelCatalogKey(entry.Provider, entry.Model)
@@ -83,7 +85,7 @@ func (c ModelCatalog) Resolve(endpointName, endpointType, provider, model string
 				}
 				return PricingSnapshot{
 					CatalogVersion: c.Version, PricingKey: candidateProvider + "/" + candidateModel,
-					InputCostPer1M: entry.InputCostPer1M, OutputCostPer1M: entry.OutputCostPer1M, SearchCostPer1K: entry.SearchCostPer1K, CharacterCostPer1M: entry.CharacterCostPer1M, Currency: currency,
+					InputCostPer1M: entry.InputCostPer1M, OutputCostPer1M: entry.OutputCostPer1M, SearchCostPer1K: entry.SearchCostPer1K, CharacterCostPer1M: entry.CharacterCostPer1M, PageCostPer1K: entry.PageCostPer1K, Currency: currency,
 				}, nil
 			}
 		}
@@ -97,8 +99,8 @@ func (c ModelCatalog) Resolve(endpointName, endpointType, provider, model string
 	}, nil
 }
 
-func pricingCost(inputTokens, outputTokens, inputCharacters, searchRequests int, pricing PricingSnapshot) float64 {
-	return (float64(inputTokens)/1_000_000)*pricing.InputCostPer1M + (float64(outputTokens)/1_000_000)*pricing.OutputCostPer1M + (float64(inputCharacters)/1_000_000)*pricing.CharacterCostPer1M + (float64(searchRequests)/1_000)*pricing.SearchCostPer1K
+func pricingCost(inputTokens, outputTokens, inputCharacters, inputPages, searchRequests int, pricing PricingSnapshot) float64 {
+	return (float64(inputTokens)/1_000_000)*pricing.InputCostPer1M + (float64(outputTokens)/1_000_000)*pricing.OutputCostPer1M + (float64(inputCharacters)/1_000_000)*pricing.CharacterCostPer1M + (float64(inputPages)/1_000)*pricing.PageCostPer1K + (float64(searchRequests)/1_000)*pricing.SearchCostPer1K
 }
 
 func modelCatalogKey(provider, model string) string { return provider + "\x00" + model }

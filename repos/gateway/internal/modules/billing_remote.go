@@ -39,6 +39,7 @@ type UsageRequest struct {
 	UsageEstimated          bool     `json:"usage_estimated"`
 	PromptTokensEstimated   int      `json:"prompt_tokens_estimated"`
 	InputCharacters         int      `json:"input_characters"`
+	InputPages              int      `json:"input_pages"`
 	InputTokens             int      `json:"input_tokens"`
 	OutputTokens            int      `json:"output_tokens"`
 	TotalTokens             int      `json:"total_tokens"`
@@ -52,6 +53,7 @@ type UsageRequest struct {
 	OutputCostPer1M         string   `json:"output_cost_per_1m,omitempty"`
 	SearchCostPer1K         string   `json:"search_cost_per_1k,omitempty"`
 	CharacterCostPer1M      string   `json:"character_cost_per_1m,omitempty"`
+	PageCostPer1K           string   `json:"page_cost_per_1k,omitempty"`
 	Currency                string   `json:"currency,omitempty"`
 }
 
@@ -148,12 +150,14 @@ func billingRequest(req *RequestContext) UsageRequest {
 		UsageEstimated:        true,
 		PromptTokensEstimated: estimateRequestTokens(req),
 		InputCharacters:       req.InputCharacters,
+		InputPages:            req.InputPages,
 		CatalogVersion:        metadataValue(req.Metadata, "model_catalog.version"),
 		PricingKey:            metadataValue(req.Metadata, "model_catalog.pricing_key"),
 		InputCostPer1M:        metadataValue(req.Metadata, "model_catalog.input_cost_per_1m"),
 		OutputCostPer1M:       metadataValue(req.Metadata, "model_catalog.output_cost_per_1m"),
 		SearchCostPer1K:       metadataValue(req.Metadata, "model_catalog.search_cost_per_1k"),
 		CharacterCostPer1M:    metadataValue(req.Metadata, "model_catalog.character_cost_per_1m"),
+		PageCostPer1K:         metadataValue(req.Metadata, "model_catalog.page_cost_per_1k"),
 		Currency:              metadataValue(req.Metadata, "model_catalog.currency"),
 	}
 	request.InputTokens = request.PromptTokensEstimated
