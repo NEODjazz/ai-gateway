@@ -35,7 +35,7 @@ upstream. Распознаваемые параметры перечислены
 
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
-| `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `service_tier`, `verbosity`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
+| `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `prediction`, `service_tier`, `verbosity`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
 | `/v1/completions` | `provider`, `model`, `prompt`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `n`, `presence_penalty`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
 | `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
@@ -1183,6 +1183,14 @@ breakdowns: input/prompt `audio_tokens`, `image_tokens`, `text_tokens`, and outp
 JSON response or SSE event is delivered. Billing continues to settle from the
 provider's aggregate input/output counts, which already include rejected predicted
 tokens, so detail fields are observability data and are not added a second time.
+
+Chat `prediction` accepts static content as a string or as strict `text` parts,
+including an optional explicit prompt-cache breakpoint. OpenAI-compatible JSON
+and streaming requests forward it unchanged. Exact and semantic caches include
+the prediction, and native adapters return `400 unsupported_parameter` when they
+cannot preserve predicted-output behavior. Accepted and rejected prediction token
+details remain part of the aggregate provider completion count and are never added
+again during billing settlement.
 
 Chat `verbosity` and Responses `text.verbosity` accept `low`, `medium` or `high`.
 OpenAI-compatible JSON and streaming requests preserve the supplied value.

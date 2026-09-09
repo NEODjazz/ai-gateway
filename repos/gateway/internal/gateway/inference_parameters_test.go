@@ -113,6 +113,8 @@ func TestChatRejectsInvalidGenerationOptionsBeforePipeline(t *testing.T) {
 		{`{"model":"test","messages":[],"metadata":{"trace":"` + strings.Repeat("я", 513) + `"}}`, "metadata keys must be at most 64 characters and values at most 512 characters"},
 		{`{"model":"test","messages":[],"prompt_cache_options":{"mode":"invalid"}}`, "prompt_cache_options.mode must be implicit or explicit"},
 		{`{"model":"test","messages":[],"prompt_cache_options":{"ttl":"24h"}}`, "prompt_cache_options.ttl must be 30m"},
+		{`{"model":"test","messages":[],"prediction":{"type":"other","content":"expected"}}`, "prediction.type must be content"},
+		{`{"model":"test","messages":[],"prediction":{"type":"content","content":[{"type":"text","text":"x","extra":true}]}}`, "prediction.content must be text or an array of text parts"},
 	} {
 		access := &countingAccessModule{}
 		handler := NewHandler(modules.NewPipeline([]modules.Module{access}), &chatProvider{})

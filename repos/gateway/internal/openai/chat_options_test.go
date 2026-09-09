@@ -12,7 +12,13 @@ func TestChatGenerationOptionValidation(t *testing.T) {
 		valid bool
 	}{
 		{`{}`, true},
-		{`{"metadata":{"trace":"one"},"store":false,"prompt_cache_options":{"mode":"explicit","ttl":"30m"},"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-2,"logit_bias":{"10":-100}}`, true},
+		{`{"metadata":{"trace":"one"},"store":false,"prompt_cache_options":{"mode":"explicit","ttl":"30m"},"prediction":{"type":"content","content":"expected"},"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-2,"logit_bias":{"10":-100}}`, true},
+		{`{"prediction":{"type":"content","content":[{"type":"text","text":"one","prompt_cache_breakpoint":{"mode":"explicit"}},{"type":"text","text":"two"}]}}`, true},
+		{`{"prediction":{"type":"other","content":"expected"}}`, false},
+		{`{"prediction":{"type":"content"}}`, false},
+		{`{"prediction":{"type":"content","content":[{"type":"image","text":"x"}]}}`, false},
+		{`{"prediction":{"type":"content","content":[{"type":"text","text":"x","extra":true}]}}`, false},
+		{`{"prediction":{"type":"content","content":[{"type":"text","text":"x","prompt_cache_breakpoint":{"mode":"implicit"}}]}}`, false},
 		{`{"prompt_cache_options":{}}`, true},
 		{`{"prompt_cache_options":{"mode":"invalid"}}`, false},
 		{`{"prompt_cache_options":{"ttl":"24h"}}`, false},

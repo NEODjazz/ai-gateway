@@ -15,6 +15,7 @@ type ChatGenerationOptions struct {
 	SafetyIdentifier   string              `json:"safety_identifier,omitempty"`
 	PromptCacheKey     string              `json:"prompt_cache_key,omitempty"`
 	PromptCacheOptions *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
+	Prediction         *ChatPrediction     `json:"prediction,omitempty"`
 	ServiceTier        string              `json:"service_tier,omitempty"`
 	Verbosity          string              `json:"verbosity,omitempty"`
 	Logprobs           *bool               `json:"logprobs,omitempty"`
@@ -27,6 +28,11 @@ type ChatGenerationOptions struct {
 type PromptCacheOptions struct {
 	Mode string `json:"mode,omitempty"`
 	TTL  string `json:"ttl,omitempty"`
+}
+
+type ChatPrediction struct {
+	Content any    `json:"content"`
+	Type    string `json:"type"`
 }
 
 func (o ChatGenerationOptions) Validate() string {
@@ -48,6 +54,9 @@ func (o ChatGenerationOptions) Validate() string {
 		if o.PromptCacheOptions.TTL != "" && o.PromptCacheOptions.TTL != "30m" {
 			return "prompt_cache_options.ttl must be 30m"
 		}
+	}
+	if message := validateChatPrediction(o.Prediction); message != "" {
+		return message
 	}
 	if !validServiceTier(o.ServiceTier) {
 		return "unsupported service_tier value"
@@ -79,6 +88,52 @@ func (o ChatGenerationOptions) Validate() string {
 		}
 	}
 	return ""
+}
+
+func validateChatPrediction(prediction *ChatPrediction) string {
+	if prediction == nil {
+		return ""
+	}
+	if prediction.Type != "content" {
+		return "prediction.type must be content"
+	}
+	switch content := prediction.Content.(type) {
+	case string:
+		return ""
+	case []any:
+		for _, item := range content {
+			part, ok := item.(map[string]any)
+			if !ok || !validPredictionTextPart(part) {
+				return "prediction.content must be text or an array of text parts"
+			}
+		}
+		return ""
+	default:
+		return "prediction.content must be text or an array of text parts"
+	}
+}
+
+func validPredictionTextPart(part map[string]any) bool {
+	for key := range part {
+		if key != "type" && key != "text" && key != "prompt_cache_breakpoint" {
+			return false
+		}
+	}
+	typeName, typeOK := part["type"].(string)
+	_, textOK := part["text"].(string)
+	if !typeOK || typeName != "text" || !textOK {
+		return false
+	}
+	breakpoint, supplied := part["prompt_cache_breakpoint"]
+	if !supplied || breakpoint == nil {
+		return true
+	}
+	value, ok := breakpoint.(map[string]any)
+	if !ok || len(value) != 1 {
+		return false
+	}
+	mode, ok := value["mode"].(string)
+	return ok && mode == "explicit"
 }
 
 func validVerbosity(value string) bool {
