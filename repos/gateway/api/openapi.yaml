@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.92
+  version: 0.1.93
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4147,6 +4147,12 @@ components:
       properties:
         provider: {type: string}
         model: {type: string, default: omni-moderation-latest}
+        metadata:
+          type: object
+          maxProperties: 16
+          propertyNames: {maxLength: 64}
+          additionalProperties: {type: string, maxLength: 512}
+          description: Provider metadata supported by native Mistral deployments and rejected by other adapters.
         input:
           oneOf:
             - {type: string, minLength: 1}

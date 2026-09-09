@@ -1057,6 +1057,9 @@ func (r Router) Moderations(ctx context.Context, req modules.RequestContext) (op
 			continue
 		}
 		progress.enter(endpoint)
+		if err := validateModerationAdapter(client, request); err != nil {
+			return openai.ModerationResponse{}, err
+		}
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {

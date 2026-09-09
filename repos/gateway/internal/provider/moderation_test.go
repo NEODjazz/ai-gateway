@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,6 +35,20 @@ func TestOpenAICompatibleModerationsContract(t *testing.T) {
 	response, err := client.Moderations(context.Background(), openai.ModerationRequest{Model: "moderation-route", Input: "inspect me"})
 	if err != nil || response.ID != "modr-1" || response.Model != "moderation-upstream" {
 		t.Fatalf("unexpected response: %+v err=%v", response, err)
+	}
+}
+
+func TestOpenAICompatibleModerationsRejectsMetadataBeforeUpstream(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	client := NewOpenAICompatible(server.URL, "secret", false)
+	_, err := client.Moderations(t.Context(), openai.ModerationRequest{
+		Model: "moderation-route", Input: "inspect me", Metadata: map[string]string{"trace": "moderation"},
+	})
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Provider != "openai-compatible" || failure.Param != "metadata" || failure.UpstreamCode != "unsupported_parameter" || calls != 0 {
+		t.Fatalf("error=%v failure=%+v upstream calls=%d", err, failure, calls)
 	}
 }
 

@@ -116,8 +116,9 @@ type openAICompatibleRerankRequest struct {
 }
 
 type openAICompatibleModerationRequest struct {
-	Model string `json:"model,omitempty"`
-	Input any    `json:"input"`
+	Model    string            `json:"model,omitempty"`
+	Input    any               `json:"input"`
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 type OpenAICompatible struct {
@@ -216,7 +217,10 @@ func (p OpenAICompatible) Rerank(ctx context.Context, request openai.RerankReque
 }
 
 func (p OpenAICompatible) Moderations(ctx context.Context, request openai.ModerationRequest) (openai.ModerationResponse, error) {
-	body, err := json.Marshal(openAICompatibleModerationRequest{Model: request.Model, Input: request.Input})
+	if err := p.ValidateModerationParameters(request); err != nil {
+		return openai.ModerationResponse{}, err
+	}
+	body, err := json.Marshal(openAICompatibleModerationRequest{Model: request.Model, Input: request.Input, Metadata: request.Metadata})
 	if err != nil {
 		return openai.ModerationResponse{}, err
 	}

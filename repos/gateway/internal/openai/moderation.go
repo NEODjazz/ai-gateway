@@ -11,9 +11,10 @@ import (
 const MaxModerationInputs = 1000
 
 type ModerationRequest struct {
-	Provider string `json:"provider,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Input    any    `json:"input"`
+	Provider string            `json:"provider,omitempty"`
+	Model    string            `json:"model,omitempty"`
+	Input    any               `json:"input"`
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 type ModerationResponse struct {

@@ -524,15 +524,26 @@ func TestRerankRejectsInvalidDocuments(t *testing.T) {
 func TestModerationsUsesDefaultModelAndAuthenticatedPipeline(t *testing.T) {
 	llm := &chatProvider{}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), llm))
-	request := httptest.NewRequest(http.MethodPost, "/v1/moderations", strings.NewReader(`{"input":["first","second"]}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/moderations", strings.NewReader(`{"input":["first","second"],"metadata":{"trace":"moderation"}}`))
 	request.Header.Set("Authorization", "Bearer client-secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || llm.request.ModerationRequest == nil {
 		t.Fatalf("status=%d body=%s context=%+v", response.Code, response.Body.String(), llm.request)
 	}
-	if llm.request.APIKey != "" || llm.request.ModerationRequest.Model != "omni-moderation-latest" {
+	if llm.request.APIKey != "" || llm.request.ModerationRequest.Model != "omni-moderation-latest" || llm.request.ModerationRequest.Metadata["trace"] != "moderation" {
 		t.Fatalf("unsafe or incorrect provider context: %+v", llm.request)
+	}
+}
+
+func TestModerationsRejectsInvalidMetadataBeforeProvider(t *testing.T) {
+	llm := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), llm))
+	body := `{"input":"inspect me","metadata":{"` + strings.Repeat("k", 65) + `":"value"}}`
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/moderations", strings.NewReader(body)))
+	if response.Code != http.StatusBadRequest || llm.request.ModerationRequest != nil {
+		t.Fatalf("status=%d body=%s context=%+v", response.Code, response.Body.String(), llm.request)
 	}
 }
 

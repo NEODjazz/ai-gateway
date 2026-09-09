@@ -16,6 +16,17 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
+type moderationCountingModule struct {
+	calls atomic.Int64
+}
+
+func (*moderationCountingModule) Name() string   { return "moderation-counting" }
+func (*moderationCountingModule) Required() bool { return true }
+func (m *moderationCountingModule) Handle(context.Context, *modules.RequestContext) error {
+	m.calls.Add(1)
+	return nil
+}
+
 func TestMistralFIMThroughRouter(t *testing.T) {
 	if NewMistral("", "", false).SupportsResponses() {
 		t.Fatal("unverified Responses transport advertised")
@@ -433,12 +444,16 @@ func TestMistralModerationsNormalizeTextContractAndRejectStructuredInput(t *test
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["model"] != "mistral-moderation" || request["input"] != "inspect me" {
 			t.Fatalf("request=%#v err=%v", request, err)
 		}
+		metadata, ok := request["metadata"].(map[string]any)
+		if !ok || metadata["trace"] != "moderation" {
+			t.Fatalf("metadata=%#v", request["metadata"])
+		}
 		_, _ = fmt.Fprint(w, `{"id":"mod-1","model":"mistral-moderation","results":[{"flagged":false,"categories":{"violence":false,"pii":false},"category_scores":{"violence":0.1,"pii":0.2}}]}`)
 	}))
 	defer server.Close()
 
 	client := NewMistral(server.URL, "provider-key", false)
-	response, err := client.Moderations(t.Context(), openai.ModerationRequest{Model: "mistral-moderation", Input: "inspect me"})
+	response, err := client.Moderations(t.Context(), openai.ModerationRequest{Model: "mistral-moderation", Input: "inspect me", Metadata: map[string]string{"trace": "moderation"}})
 	if err != nil || response.ID != "mod-1" || len(response.Results) != 1 || len(response.Results[0].CategoryAppliedInputTypes) != 2 || response.Results[0].CategoryAppliedInputTypes["violence"][0] != "text" {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
@@ -447,6 +462,36 @@ func TestMistralModerationsNormalizeTextContractAndRejectStructuredInput(t *test
 	var failure *Error
 	if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.Param != "input" || failure.UpstreamCode != "unsupported_parameter" || calls.Load() != 1 {
 		t.Fatalf("error=%v failure=%+v calls=%d", err, failure, calls.Load())
+	}
+	invalidMetadata := map[string]string{strings.Repeat("k", 65): "value"}
+	_, err = client.Moderations(t.Context(), openai.ModerationRequest{Model: "mistral-moderation", Input: "inspect me", Metadata: invalidMetadata})
+	if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.Param != "metadata" || failure.UpstreamCode != "invalid_request" || calls.Load() != 1 {
+		t.Fatalf("error=%v failure=%+v calls=%d", err, failure, calls.Load())
+	}
+}
+
+func TestMistralModerationValidationRunsBeforeModulesAndUpstream(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	module := &moderationCountingModule{}
+	router := New(Config{
+		Endpoints: []config.ProviderEndpointConfig{{
+			Name: "mistral", Type: "mistral", BaseURL: server.URL,
+			Models: []string{"mistral-moderation"}, Capabilities: []string{"moderation"},
+		}},
+		Modules: modules.NewPipeline([]modules.Module{module}),
+	}).(*Router)
+	request := openai.ModerationRequest{
+		Model: "mistral-moderation",
+		Input: []any{map[string]any{"type": "text", "text": "inspect me"}},
+	}
+	_, err := router.Moderations(t.Context(), modules.RequestContext{
+		Request: openai.ChatCompletionRequest{Model: request.Model}, ModerationRequest: &request,
+	})
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.Param != "input" || module.calls.Load() != 0 || calls.Load() != 0 {
+		t.Fatalf("error=%v failure=%+v module calls=%d upstream calls=%d", err, failure, module.calls.Load(), calls.Load())
 	}
 }
 

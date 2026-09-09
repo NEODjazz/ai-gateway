@@ -176,6 +176,19 @@ func validateEmbeddingAdapter(client Client, request openai.EmbeddingRequest) er
 	return nil
 }
 
+func validateModerationAdapter(client ModerationClient, request openai.ModerationRequest) error {
+	if validator, ok := client.(interface {
+		ValidateModerationParameters(openai.ModerationRequest) error
+	}); ok {
+		return validator.ValidateModerationParameters(request)
+	}
+	return nil
+}
+
+func (p OpenAICompatible) ValidateModerationParameters(request openai.ModerationRequest) error {
+	return rejectParameters(p.providerName(), parameterCheck{"metadata", request.Metadata != nil && p.providerName() != "mistral"})
+}
+
 func validateCompletionAdapter(client CompletionClient, request openai.CompletionRequest) error {
 	if validator, ok := client.(interface {
 		ValidateCompletionParameters(openai.CompletionRequest) error

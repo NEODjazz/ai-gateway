@@ -146,9 +146,19 @@ func (p Mistral) Embeddings(ctx context.Context, request openai.EmbeddingRequest
 	return p.OpenAICompatible.Embeddings(ctx, request)
 }
 
-func (p Mistral) Moderations(ctx context.Context, request openai.ModerationRequest) (openai.ModerationResponse, error) {
+func (Mistral) ValidateModerationParameters(request openai.ModerationRequest) error {
+	if message := openai.ValidateMetadata(request.Metadata); message != "" {
+		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "metadata", Err: errors.New(message)}
+	}
 	if !mistralModerationTextInput(request.Input) {
-		return openai.ModerationResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "input", Err: errors.New("Mistral moderation requires text input")}
+		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "input", Err: errors.New("Mistral moderation requires text input")}
+	}
+	return nil
+}
+
+func (p Mistral) Moderations(ctx context.Context, request openai.ModerationRequest) (openai.ModerationResponse, error) {
+	if err := p.ValidateModerationParameters(request); err != nil {
+		return openai.ModerationResponse{}, err
 	}
 	return p.OpenAICompatible.Moderations(ctx, request)
 }

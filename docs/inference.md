@@ -42,6 +42,7 @@ upstream. Распознаваемые параметры перечислены
 | `/v1/responses/compact` | `provider`, `model`, `input`, `instructions` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `metadata`, `input_type`, `encoding_format`, `dimensions`, `output_dtype`, `user` |
 | `/v1/rerank` | `provider`, `model`, `query`, `documents`, `top_n`, `rank_fields`, `return_documents`, `max_chunks_per_doc`, `max_tokens_per_doc` |
+| `/v1/moderations` | `provider`, `model`, `input`, `metadata` |
 
 Матрица описывает входной контракт gateway; возможности конкретной модели и
 adapter дополнительно ограничивают допустимые запросы. `provider` управляет
@@ -140,6 +141,8 @@ responses и embeddings flows, но не является неявным opt-in 
 
 Native Mistral moderation принимает только строку или массив строк и отклоняет
 структурированные text/image parts до provider modules, billing и upstream.
+Bounded `metadata` передается native Mistral Moderations; остальные adapters
+отклоняют его до выполнения.
 Provider categories и scores проходят общий validator; отсутствующий native
 `category_applied_input_types` нормализуется в `text` только для этого
 предварительно проверенного text-only запроса.
