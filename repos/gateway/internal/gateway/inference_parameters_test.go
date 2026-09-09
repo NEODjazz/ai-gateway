@@ -87,15 +87,19 @@ func TestInferenceDecoderRejectsUnknownMessageField(t *testing.T) {
 func TestSyntheticChatStreamPreservesLogprobs(t *testing.T) {
 	response := httptest.NewRecorder()
 	refusal := "cannot help"
+	audioData, audioTranscript, audioExpiry := "aGVsbG8=", "hello", int64(123)
 	writeChatCompletionStream(response, openai.ChatCompletionResponse{
 		ID: "chat-test", Created: 123, Model: "test", Metadata: map[string]string{"trace": "one"}, ServiceTier: "priority", SystemFingerprint: "fp-test",
-		Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "hello", Refusal: &refusal}, Logprobs: &openai.ChoiceLogprobs{Content: []openai.TokenLogprob{{Token: "hello", Logprob: -0.5}}}}},
+		Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "hello", Refusal: &refusal, Audio: &openai.ChatAudio{ID: "audio-1", Data: &audioData, Transcript: &audioTranscript, ExpiresAt: &audioExpiry}}, Logprobs: &openai.ChoiceLogprobs{Content: []openai.TokenLogprob{{Token: "hello", Logprob: -0.5}}}}},
 	}, &openai.ChatStreamOptions{IncludeUsage: true})
 	if !strings.Contains(response.Body.String(), `"logprobs":{"content":[{"token":"hello","logprob":-0.5`) {
 		t.Fatalf("synthetic SSE dropped logprobs: %s", response.Body.String())
 	}
 	if !strings.Contains(response.Body.String(), `"refusal":"cannot help"`) {
 		t.Fatalf("synthetic SSE dropped refusal: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"audio":{"id":"audio-1","data":"aGVsbG8=","expires_at":123,"transcript":"hello"}`) {
+		t.Fatalf("synthetic SSE dropped audio: %s", response.Body.String())
 	}
 	for _, field := range []string{`"metadata":{"trace":"one"}`, `"service_tier":"priority"`, `"system_fingerprint":"fp-test"`} {
 		if !strings.Contains(response.Body.String(), field) {
@@ -125,8 +129,12 @@ func TestChatStreamUsageFilterRemovesNullAndFinalUsage(t *testing.T) {
 func TestChatRejectsInvalidGenerationOptionsBeforePipeline(t *testing.T) {
 	for _, test := range []struct{ body, message string }{
 		{`{"model":"test","messages":[],"top_logprobs":2}`, "requires logprobs=true"},
-		{`{"model":"test","messages":[],"modalities":[]}`, `modalities currently supports exactly [\"text\"]`},
-		{`{"model":"test","messages":[],"modalities":["audio"]}`, `modalities currently supports exactly [\"text\"]`},
+		{`{"model":"test","messages":[],"modalities":[]}`, "modalities must contain unique text or audio values"},
+		{`{"model":"test","messages":[],"modalities":["audio"]}`, "audio output requires audio format and voice"},
+		{`{"model":"test","messages":[],"modalities":["audio"],"audio":{"format":"ogg","voice":"alloy"}}`, "audio.format must be"},
+		{`{"model":"test","messages":[],"modalities":["text"],"audio":{"format":"mp3","voice":"alloy"}}`, "audio requires the audio output modality"},
+		{`{"model":"test","messages":[{"role":"user","content":"hello","audio":{"id":"audio-1"}}]}`, "messages.audio requires role=assistant"},
+		{`{"model":"test","messages":[{"role":"assistant","audio":{"id":"audio-1","data":"aA=="}}]}`, "messages.audio must contain only"},
 		{`{"model":"test","messages":[],"n":0}`, "n must be between 1 and 128"},
 		{`{"model":"test","messages":[],"safety_identifier":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, "at most 64 characters"},
 		{`{"model":"test","messages":[],"service_tier":"unknown"}`, "unsupported service_tier value"},

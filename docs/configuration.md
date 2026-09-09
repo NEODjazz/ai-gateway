@@ -52,7 +52,7 @@ OpenAPI, а не в этом документе.
 `openai-compatible`, `openrouter`, `anthropic`. Capability задаётся явно для
 ограниченных endpoints. Используемые значения: `chat`, `responses`,
 `embeddings`, `rerank`, `stream`, `tools`, `structured_output`, `mcp`, `vision`,
-`web_search`.
+`web_search`, `audio`.
 Capability names are exact and cannot be duplicated; deployment mutations reject
 unknown or misspelled values.
 Route выбирает endpoint только при наличии capabilities, выведенных из запроса.

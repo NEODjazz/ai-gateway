@@ -35,7 +35,7 @@ upstream. Распознаваемые параметры перечислены
 
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
-| `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `stream_options`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `modalities`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `prompt_cache_retention`, `prediction`, `service_tier`, `user`, `verbosity`, `web_search_options`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
+| `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `stream_options`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `modalities`, `audio`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `prompt_cache_retention`, `prediction`, `service_tier`, `user`, `verbosity`, `web_search_options`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
 | `/v1/completions` | `provider`, `model`, `prompt`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `n`, `presence_penalty`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
 | `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
@@ -214,12 +214,20 @@ so gateway does not add an incompatible SSE extension.
 
 ## Chat generation controls
 
-Chat `modalities` accepts exactly `["text"]`. The compatible adapter forwards
-the explicit selection, and exact and semantic cache scopes include it. Native
-adapters reject the field before execution because they do not preserve this
-wire control. Audio output remains outside the current contract: the gateway
-does not accept `["audio"]` without typed audio response lifecycle, capability
-routing and tier-aware token accounting.
+Chat `modalities` accepts unique `text` and `audio` values. Audio output requires
+a bounded `audio` object with a supported format and string or custom-ID voice.
+Compatible JSON and SSE responses preserve a validated audio ID, base64 data,
+expiry and transcript; SSE fragments are bounded and assembled for usage and
+post-processing. Assistant history may reference prior audio by ID only. Audio
+requests require explicit deployment/model capability `audio` and bypass exact
+and semantic response caches. Native adapters reject audio controls and history
+before execution. Reported `completion_tokens_details.audio_tokens` remains part
+of the validated usage used by billing.
+History containing an audio ID must set `provider` to the exact deployment name;
+weighted selection and model fallback are disabled because the ID is owned by
+the upstream deployment that created it.
+If request anonymization replaces any prompt value, audio generation stops before
+the upstream call because binary speech cannot be deanonymized consistently.
 
 `n` принимает от 1 до 128 choices для OpenAI-compatible adapter. TPM и budget
 reserve умножают per-choice output limit (включая default reserve) на `n` с

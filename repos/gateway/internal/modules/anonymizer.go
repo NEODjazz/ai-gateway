@@ -151,6 +151,10 @@ func DeanonymizeResponse(req *RequestContext, response *openai.ChatCompletionRes
 			value := DeanonymizeText(*response.Choices[index].Message.Refusal, req.AnonymizationValues)
 			response.Choices[index].Message.Refusal = &value
 		}
+		if audio := response.Choices[index].Message.Audio; audio != nil && audio.Transcript != nil {
+			value := DeanonymizeText(*audio.Transcript, req.AnonymizationValues)
+			audio.Transcript = &value
+		}
 		for callIndex := range response.Choices[index].Message.ToolCalls {
 			response.Choices[index].Message.ToolCalls[callIndex].Function.Arguments = DeanonymizeText(response.Choices[index].Message.ToolCalls[callIndex].Function.Arguments, req.AnonymizationValues)
 		}

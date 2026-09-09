@@ -394,6 +394,11 @@ func NewWithError(cfg Config) (Provider, error) {
 func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
 	request := req.Request
 	candidates := r.routeCandidates(ctx, req, request, requiredChatCapabilities(request, false)...)
+	var err error
+	candidates, err = bindChatAudioHistory(request, candidates)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	if len(candidates) == 0 {
 		return openai.ChatCompletionResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -432,6 +437,10 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			errs = append(errs, wrapped)
 			progress.fail(err)
 			continue
+		}
+		if err := audioAnonymizationError(request, attemptCtx); err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.ChatCompletionResponse{}, err
 		}
 
 		started := time.Now()
@@ -545,6 +554,11 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 	request := req.Request
 	request.Stream = true
 	candidates := r.routeCandidates(ctx, req, request, requiredChatCapabilities(request, true)...)
+	var err error
+	candidates, err = bindChatAudioHistory(request, candidates)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, false, err
+	}
 	if len(candidates) == 0 {
 		// No native stream is available. The handler's normal Chat path still
 		// enforces all non-stream capabilities and can synthesize SSE on success.
@@ -591,6 +605,10 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			errs = append(errs, wrapped)
 			progress.fail(err)
 			continue
+		}
+		if err := audioAnonymizationError(request, attemptCtx); err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.ChatCompletionResponse{}, false, err
 		}
 		lastAttempt = &attemptCtx
 		if !mirrored {
@@ -1808,7 +1826,37 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	if request.WebSearchOptions != nil {
 		required = append(required, "web_search")
 	}
+	if openai.ChatRequestsAudio(request) || openai.ChatHasAudioHistory(request) {
+		required = append(required, "audio")
+	}
 	return required
+}
+
+func audioAnonymizationError(request openai.ChatCompletionRequest, attempt modules.RequestContext) error {
+	if !openai.ChatRequestsAudio(request) || len(attempt.AnonymizationValues) == 0 {
+		return nil
+	}
+	return &Error{Class: FailureContentPolicy, Provider: attempt.Metadata["provider.endpoint.name"], StatusCode: 400, UpstreamCode: "audio_anonymization_unsupported", Param: "audio", Err: errors.New("audio output cannot restore anonymized prompt values")}
+}
+
+func bindChatAudioHistory(request openai.ChatCompletionRequest, candidates []Endpoint) ([]Endpoint, error) {
+	if !openai.ChatHasAudioHistory(request) {
+		return candidates, nil
+	}
+	requested := strings.TrimSpace(request.Provider)
+	if requested == "" || requested == "auto" {
+		return nil, &Error{Class: FailureClientRequest, StatusCode: 400, UpstreamCode: "audio_history_requires_deployment", Param: "provider", Err: errors.New("messages.audio requires an exact deployment name in provider")}
+	}
+	bound := candidates[:0]
+	for _, candidate := range candidates {
+		if candidate.Name == requested && candidate.FallbackStage == 0 && candidate.RoutingModel == request.Model {
+			bound = append(bound, candidate)
+		}
+	}
+	if len(bound) != 1 {
+		return nil, &Error{Class: FailureClientRequest, StatusCode: 400, UpstreamCode: "audio_history_requires_deployment", Param: "provider", Err: errors.New("messages.audio provider must identify one available deployment")}
+	}
+	return bound, nil
 }
 
 func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) []string {
@@ -1918,11 +1966,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "web_search")
+	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "web_search") || hasCapability(required, "audio")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"mcp", "vision", "rerank", "web_search"} {
+	for _, capability := range []string{"mcp", "vision", "rerank", "web_search", "audio"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

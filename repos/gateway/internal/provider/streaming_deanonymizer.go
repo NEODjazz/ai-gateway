@@ -94,6 +94,11 @@ func deanonymizingChatStreamWriter(replacements map[string]string, write ChatCom
 			if refusal, ok := delta["refusal"].(string); ok {
 				delta["refusal"] = deanonymizer.consume(refusalKey, refusal)
 			}
+			audioKey := fmt.Sprintf("choice:%d:audio-transcript", index)
+			audio, _ := delta["audio"].(map[string]any)
+			if transcript, ok := audio["transcript"].(string); ok {
+				audio["transcript"] = deanonymizer.consume(audioKey, transcript)
+			}
 			deanonymizeToolCallDeltas(deanonymizer, index, delta)
 			if finish, ok := choice["finish_reason"].(string); ok && finish != "" {
 				if pending := deanonymizer.flush(key); pending != "" {
@@ -109,6 +114,17 @@ func deanonymizingChatStreamWriter(replacements map[string]string, write ChatCom
 						choice["delta"] = delta
 					}
 					delta["refusal"] = stringValue(delta["refusal"]) + pending
+				}
+				if pending := deanonymizer.flush(audioKey); pending != "" {
+					if delta == nil {
+						delta = map[string]any{}
+						choice["delta"] = delta
+					}
+					if audio == nil {
+						audio = map[string]any{}
+						delta["audio"] = audio
+					}
+					audio["transcript"] = stringValue(audio["transcript"]) + pending
 				}
 			}
 		}

@@ -11,6 +11,7 @@ type ChatGenerationOptions struct {
 	Metadata             map[string]string     `json:"metadata,omitempty"`
 	Store                *bool                 `json:"store,omitempty"`
 	Modalities           []string              `json:"modalities,omitempty"`
+	Audio                *ChatAudioOptions     `json:"audio,omitempty"`
 	ReasoningEffort      string                `json:"reasoning_effort,omitempty"`
 	N                    *int                  `json:"n,omitempty"`
 	SafetyIdentifier     string                `json:"safety_identifier,omitempty"`
@@ -63,8 +64,32 @@ func (o ChatGenerationOptions) Validate() string {
 	if o.N != nil && (*o.N < 1 || *o.N > 128) {
 		return "n must be between 1 and 128"
 	}
-	if o.Modalities != nil && (len(o.Modalities) != 1 || o.Modalities[0] != "text") {
-		return "modalities currently supports exactly [\"text\"]"
+	hasText, hasAudio := false, false
+	for _, modality := range o.Modalities {
+		switch modality {
+		case "text":
+			if hasText {
+				return "modalities must contain unique text or audio values"
+			}
+			hasText = true
+		case "audio":
+			if hasAudio {
+				return "modalities must contain unique text or audio values"
+			}
+			hasAudio = true
+		default:
+			return "modalities must contain unique text or audio values"
+		}
+	}
+	if o.Modalities != nil && len(o.Modalities) == 0 {
+		return "modalities must contain unique text or audio values"
+	}
+	if hasAudio {
+		if message := validateChatAudioOptions(o.Audio); message != "" {
+			return message
+		}
+	} else if o.Audio != nil {
+		return "audio requires the audio output modality"
 	}
 	if utf8.RuneCountInString(o.SafetyIdentifier) > 64 {
 		return "safety_identifier must contain at most 64 characters"

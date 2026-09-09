@@ -216,6 +216,40 @@ func TestChatStreamDeanonymizerJoinsSplitRefusalPlaceholder(t *testing.T) {
 	}
 }
 
+func TestChatStreamDeanonymizerJoinsSplitAudioTranscriptPlaceholder(t *testing.T) {
+	var transcript strings.Builder
+	write := deanonymizingChatStreamWriter(map[string]string{"{{EMAIL_1}}": "user@example.com"}, func(payload string) error {
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Audio struct {
+						Transcript string `json:"transcript"`
+					} `json:"audio"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			return err
+		}
+		for _, choice := range chunk.Choices {
+			transcript.WriteString(choice.Delta.Audio.Transcript)
+		}
+		return nil
+	})
+	for _, payload := range []string{
+		`{"choices":[{"index":0,"delta":{"audio":{"transcript":"{{EMA"}}}]}`,
+		`{"choices":[{"index":0,"delta":{"audio":{"transcript":"IL_1}}"}}}]}`,
+		`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+	} {
+		if err := write(payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if transcript.String() != "user@example.com" {
+		t.Fatalf("split audio transcript placeholder was not restored: %q", transcript.String())
+	}
+}
+
 func TestRouterCompletionsRequiresNativeAdapter(t *testing.T) {
 	client := &affinityResponseClient{id: "regular"}
 	router := Router{

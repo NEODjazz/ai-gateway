@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -31,6 +32,9 @@ func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) er
 		return err
 	}
 	if err := rejectChatMessageRefusals("anthropic", request.Messages); err != nil {
+		return err
+	}
+	if err := rejectChatMessageAudio("anthropic", request.Messages); err != nil {
 		return err
 	}
 	if err := rejectGenerationOptions("anthropic", request.ChatGenerationOptions); err != nil {
@@ -72,6 +76,9 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		return err
 	}
 	if err := rejectChatMessageRefusals("ollama", request.Messages); err != nil {
+		return err
+	}
+	if err := rejectChatMessageAudio("ollama", request.Messages); err != nil {
 		return err
 	}
 	if err := rejectGenerationOptions("ollama", request.ChatGenerationOptions); err != nil {
@@ -148,6 +155,7 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 		parameterCheck{"metadata", options.Metadata != nil},
 		parameterCheck{"store", options.Store != nil},
 		parameterCheck{"modalities", options.Modalities != nil},
+		parameterCheck{"audio", options.Audio != nil},
 		parameterCheck{"reasoning_effort", options.ReasoningEffort != ""},
 		parameterCheck{"n", options.N != nil},
 		parameterCheck{"safety_identifier", options.SafetyIdentifier != ""},
@@ -177,12 +185,25 @@ func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := rejectChatMessageRefusals("demo", request.Messages); err != nil {
 		return err
 	}
+	if err := rejectChatMessageAudio("demo", request.Messages); err != nil {
+		return err
+	}
 	return rejectGenerationOptions("demo", request.ChatGenerationOptions)
 }
 
 func (OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := validateChatPromptCacheBreakpoints("openai-compatible", request.Messages, true); err != nil {
 		return err
+	}
+	for _, message := range request.Messages {
+		if message.Audio != nil {
+			if message.Role != "assistant" {
+				return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.audio", Err: errors.New("messages.audio requires role=assistant")}
+			}
+			if err := openai.ValidateChatAudioReference(message.Audio); err != nil {
+				return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.audio", Err: err}
+			}
+		}
 	}
 	if message := request.ChatGenerationOptions.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
@@ -223,6 +244,15 @@ func rejectChatMessageRefusals(adapter string, messages []openai.Message) error 
 	for _, message := range messages {
 		if message.Refusal != nil {
 			return rejectParameters(adapter, parameterCheck{"messages.refusal", true})
+		}
+	}
+	return nil
+}
+
+func rejectChatMessageAudio(adapter string, messages []openai.Message) error {
+	for _, message := range messages {
+		if message.Audio != nil {
+			return rejectParameters(adapter, parameterCheck{"messages.audio", true})
 		}
 	}
 	return nil

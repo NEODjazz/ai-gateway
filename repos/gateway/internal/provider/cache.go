@@ -89,7 +89,7 @@ func (c distributedExactCache) set(ctx context.Context, key string, value []byte
 }
 
 func providerCacheKey(kind string, req modules.RequestContext) string {
-	if kind == "chat" && req.Request.WebSearchOptions != nil {
+	if kind == "chat" && (req.Request.WebSearchOptions != nil || openai.ChatRequestsAudio(req.Request)) {
 		return ""
 	}
 	tenant := cacheIsolationScope(req)

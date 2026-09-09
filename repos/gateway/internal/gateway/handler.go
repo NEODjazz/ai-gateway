@@ -162,6 +162,16 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 			writeError(w, http.StatusBadRequest, "invalid_request", "messages.annotations is response-only")
 			return
 		}
+		if message.Audio != nil {
+			if message.Role != "assistant" {
+				writeError(w, http.StatusBadRequest, "invalid_request", "messages.audio requires role=assistant")
+				return
+			}
+			if err := openai.ValidateChatAudioReference(message.Audio); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+				return
+			}
+		}
 	}
 	if request.MaxTokens != nil && request.MaxCompletionTokens != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "max_tokens and max_completion_tokens are mutually exclusive")
@@ -1148,6 +1158,7 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 					"role":       choice.Message.Role,
 					"content":    openai.ContentText(choice.Message.Content),
 					"refusal":    choice.Message.Refusal,
+					"audio":      choice.Message.Audio,
 					"tool_calls": calls,
 				},
 				"finish_reason": nil,

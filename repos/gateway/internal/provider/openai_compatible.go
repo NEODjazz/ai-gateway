@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -387,6 +388,9 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	if err := validateRequestedChatChoices(request, response); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	if err := validateRequestedChatAudio(request, response); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	return response, nil
 }
 
@@ -400,6 +404,9 @@ func validateChatCompletionEnvelope(response openai.ChatCompletionResponse) erro
 	for _, choice := range response.Choices {
 		if err := openai.ValidateChatAnnotations(choice.Message.Annotations); err != nil {
 			return fmt.Errorf("provider returned invalid chat completion annotations: %w", err)
+		}
+		if err := openai.ValidateChatAudioResponse(choice.Message.Audio); err != nil {
+			return fmt.Errorf("provider returned invalid chat completion audio: %w", err)
 		}
 	}
 	return nil
@@ -512,7 +519,13 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 
 	response, err := streamChatCompletionData(resp.Body, request.Model, write)
 	if err == nil {
+		err = validateChatCompletionEnvelope(response)
+	}
+	if err == nil {
 		err = validateRequestedChatChoices(request, response)
+	}
+	if err == nil {
+		err = validateRequestedChatAudio(request, response)
 	}
 	return response, err
 }
@@ -720,6 +733,7 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 					Role      string            `json:"role"`
 					Content   string            `json:"content"`
 					Refusal   *string           `json:"refusal"`
+					Audio     *openai.ChatAudio `json:"audio"`
 					ToolCalls []openai.ToolCall `json:"tool_calls,omitempty"`
 				} `json:"delta"`
 				FinishReason *string                `json:"finish_reason"`
@@ -813,6 +827,9 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 				}
 				current.Message.Refusal = &value
 			}
+			if err := mergeChatAudioDelta(&current.Message.Audio, choice.Delta.Audio); err != nil {
+				return err
+			}
 			if err := mergeToolCallDeltas(&current.Message.ToolCalls, choice.Delta.ToolCalls); err != nil {
 				return err
 			}
@@ -832,6 +849,73 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 		return openai.ChatCompletionResponse{}, err
 	}
 	return response, nil
+}
+
+func validateRequestedChatAudio(request openai.ChatCompletionRequest, response openai.ChatCompletionResponse) error {
+	if !openai.ChatRequestsAudio(request) {
+		for _, choice := range response.Choices {
+			if choice.Message.Audio != nil {
+				return errors.New("provider returned unrequested chat audio")
+			}
+		}
+		return nil
+	}
+	if len(response.Choices) == 0 {
+		return errors.New("provider omitted requested chat audio")
+	}
+	for _, choice := range response.Choices {
+		if choice.Message.Audio == nil {
+			return errors.New("provider omitted requested chat audio")
+		}
+	}
+	return nil
+}
+
+func mergeChatAudioDelta(target **openai.ChatAudio, delta *openai.ChatAudio) error {
+	if delta == nil {
+		return nil
+	}
+	if err := openai.ValidateChatAudioDelta(delta); err != nil {
+		return err
+	}
+	if *target == nil {
+		*target = &openai.ChatAudio{}
+	}
+	current := *target
+	if delta.ID != "" {
+		if current.ID != "" && current.ID != delta.ID {
+			return errors.New("provider changed chat audio ID during stream")
+		}
+		current.ID = delta.ID
+	}
+	if delta.Data != nil {
+		value := *delta.Data
+		if current.Data != nil {
+			value = *current.Data + value
+		}
+		if len(value) > openai.MaxChatAudioDataChars {
+			return errors.New("chat audio stream exceeds data limit")
+		}
+		current.Data = &value
+	}
+	if delta.Transcript != nil {
+		value := *delta.Transcript
+		if current.Transcript != nil {
+			value = *current.Transcript + value
+		}
+		if utf8.RuneCountInString(value) > openai.MaxChatAudioTranscriptChars {
+			return errors.New("chat audio stream exceeds transcript limit")
+		}
+		current.Transcript = &value
+	}
+	if delta.ExpiresAt != nil {
+		if current.ExpiresAt != nil && *current.ExpiresAt != *delta.ExpiresAt {
+			return errors.New("provider changed chat audio expiry during stream")
+		}
+		value := *delta.ExpiresAt
+		current.ExpiresAt = &value
+	}
+	return nil
 }
 
 func mergeToolCallDeltas(target *[]openai.ToolCall, deltas []openai.ToolCall) error {

@@ -224,9 +224,9 @@ func TestAnonymizerProtectsChatRefusalHistoryAndResponse(t *testing.T) {
 		t.Fatalf("refusal history was not anonymized: %+v", req.Request.Messages[0].Refusal)
 	}
 	masked := "Cannot send to {{EMAIL_1}}"
-	response := openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{Refusal: &masked}}}}
+	response := openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{Refusal: &masked, Audio: &openai.ChatAudio{Transcript: &masked}}}}}
 	DeanonymizeResponse(&req, &response)
-	if response.Choices[0].Message.Refusal == nil || *response.Choices[0].Message.Refusal != refusal {
+	if response.Choices[0].Message.Refusal == nil || *response.Choices[0].Message.Refusal != refusal || response.Choices[0].Message.Audio.Transcript == nil || *response.Choices[0].Message.Audio.Transcript != refusal {
 		t.Fatalf("refusal response was not restored: %+v", response.Choices[0].Message.Refusal)
 	}
 }

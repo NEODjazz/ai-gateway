@@ -40,6 +40,7 @@ type Message struct {
 	Content     any              `json:"content"`
 	Refusal     *string          `json:"refusal,omitempty"`
 	Annotations []ChatAnnotation `json:"annotations,omitempty"`
+	Audio       *ChatAudio       `json:"audio,omitempty"`
 	Name        string           `json:"name,omitempty"`
 	ToolCallID  string           `json:"tool_call_id,omitempty"`
 	ToolCalls   []ToolCall       `json:"tool_calls,omitempty"`
