@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.75
+  version: 0.1.76
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4367,8 +4367,16 @@ components:
       required: [id, type, enabled]
       properties:
         id: {type: string, minLength: 1, maxLength: 128}
-        type: {type: string, enum: [demo, ollama, openai, openai-compatible, anthropic, gemini, cohere, mistral]}
+        type: {type: string, enum: [demo, ollama, openai, openai-compatible, azure-openai, anthropic, gemini, cohere, mistral]}
         base_url: {type: string, format: uri, maxLength: 2048}
+        api_version:
+          type: string
+          maxLength: 32
+          description: Azure data-plane version. Empty selects the current /openai/v1 contract; dated and preview values are forwarded as api-version.
+        auth_type:
+          type: string
+          enum: [api_key, entra]
+          description: Azure credential transport. The credential remains write-only in the credential vault.
         enabled: {type: boolean}
     ProviderCredentialCreateInput:
       type: object

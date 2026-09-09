@@ -118,8 +118,9 @@ gateway:
       priority: 10
       enabled: false
     - name: azure-open-ai
-      type: openai
+      type: azure-openai
       base_url: $PROVIDER_BASE_URL_AZURE_OPEN_AI
+      auth_type: api_key
       stream: true
       dlp_enabled: false
       av_enabled: false

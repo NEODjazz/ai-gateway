@@ -7,13 +7,16 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 type ManagedProvider struct {
-	ID      string `json:"id"`
-	Type    string `json:"type"`
-	BaseURL string `json:"base_url,omitempty"`
-	Enabled bool   `json:"enabled"`
+	ID         string `json:"id"`
+	Type       string `json:"type"`
+	BaseURL    string `json:"base_url,omitempty"`
+	APIVersion string `json:"api_version,omitempty"`
+	AuthType   string `json:"auth_type,omitempty"`
+	Enabled    bool   `json:"enabled"`
 }
 
 type ProviderController interface {
@@ -133,6 +136,8 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 	input.ID = strings.TrimSpace(input.ID)
 	input.Type = strings.ToLower(strings.TrimSpace(input.Type))
 	input.BaseURL = strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
+	input.APIVersion = strings.TrimSpace(input.APIVersion)
+	input.AuthType = normalizeAzureAuthType(input.AuthType)
 	if input.ID == "" || len(input.ID) > 128 || !validProviderType(input.Type) || len(input.BaseURL) > 2048 {
 		return ManagedProvider{}, ErrInvalidProvider
 	}
@@ -142,16 +147,41 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
 	}
+	if input.Type == "azure-openai" {
+		parsed, _ := url.Parse(input.BaseURL)
+		if parsed.RawQuery != "" || parsed.Fragment != "" || !validAzureProviderVersion(input.APIVersion) || (input.AuthType != "api_key" && input.AuthType != "entra") {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
+	} else {
+		input.APIVersion = ""
+		input.AuthType = ""
+	}
 	return input, nil
 }
 
 func validProviderType(value string) bool {
 	switch value {
-	case "demo", "ollama", "openai", "openai-compatible", "anthropic", "gemini", "cohere", "mistral":
+	case "demo", "ollama", "openai", "openai-compatible", "azure-openai", "anthropic", "gemini", "cohere", "mistral":
 		return true
 	default:
 		return false
 	}
+}
+
+func validAzureProviderVersion(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "preview" {
+		return true
+	}
+	date := value
+	if strings.HasSuffix(date, "-preview") {
+		date = strings.TrimSuffix(date, "-preview")
+	}
+	if len(date) != 10 || date[4] != '-' || date[7] != '-' {
+		return false
+	}
+	_, err := time.Parse("2006-01-02", date)
+	return err == nil
 }
 
 func cloneProviders(current map[string]ManagedProvider) map[string]ManagedProvider {

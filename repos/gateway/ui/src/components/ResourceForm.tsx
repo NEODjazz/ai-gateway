@@ -115,7 +115,7 @@ export function ResourceForm({ title, fields, initial, loadOptions, onClose, onS
     setSaving(true);
     setError("");
     try {
-      const payload = Object.fromEntries(fields.map((field) => [field.key, outputValue(field, values[field.key])])) as Row;
+      const payload = Object.fromEntries(fields.filter((field) => !field.visibleWhen || String(values[field.visibleWhen.fieldKey]) === field.visibleWhen.equals).map((field) => [field.key, outputValue(field, values[field.key])])) as Row;
       await onSubmit(payload);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save the record");

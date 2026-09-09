@@ -50,6 +50,23 @@ func TestValidateProviderAdmissionRejectsUnsafeRerankPath(t *testing.T) {
 	}
 }
 
+func TestValidateAzureOpenAIConfiguration(t *testing.T) {
+	valid := ProviderEndpointConfig{Name: "azure", Type: "azure-openai", APIVersion: "2025-04-01-preview", AuthType: "entra"}
+	if err := validateProviderAdmission([]ProviderEndpointConfig{valid}); err != nil {
+		t.Fatalf("valid Azure configuration rejected: %v", err)
+	}
+	for _, endpoint := range []ProviderEndpointConfig{
+		{Name: "azure", Type: "azure-openai", APIVersion: "2025-13-01"},
+		{Name: "azure", Type: "azure-openai", AuthType: "basic"},
+		{Name: "azure", Type: "azure-openai", BaseURL: "https://example.test?secret=value"},
+		{Name: "other", Type: "openai-compatible", APIVersion: "2025-04-01-preview"},
+	} {
+		if err := validateProviderAdmission([]ProviderEndpointConfig{endpoint}); err == nil {
+			t.Fatalf("invalid Azure configuration accepted: %+v", endpoint)
+		}
+	}
+}
+
 func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("EXACT_CACHE_TTL_SECONDS", "120")
 	t.Setenv("EXACT_CACHE_MAX_BYTES", "2048")

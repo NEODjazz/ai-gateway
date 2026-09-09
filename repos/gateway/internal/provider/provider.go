@@ -306,7 +306,11 @@ func NewWithError(cfg Config) (Provider, error) {
 		if len(endpoint.Models) == 1 {
 			upstreamModel = endpoint.Models[0]
 		}
-		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(endpoint.BaseURL, "/"), Enabled: enabled}
+		authType := ""
+		if endpoint.Type == "azure-openai" {
+			authType = normalizeAzureAuthType(endpoint.AuthType)
+		}
+		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(endpoint.BaseURL, "/"), APIVersion: strings.TrimSpace(endpoint.APIVersion), AuthType: authType, Enabled: enabled}
 		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, UpstreamModel: upstreamModel, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, MaxRetries: endpoint.MaxRetries, CooldownAfterFailures: endpoint.CooldownAfterFailures, CooldownSeconds: endpoint.CooldownSeconds, MaxParallelRequests: endpoint.MaxParallelRequests, QueueCapacity: endpoint.QueueCapacity, QueueTimeoutMS: endpoint.QueueTimeoutMS, Enabled: enabled}
 	}
 
@@ -2202,6 +2206,8 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 		return NewOllama(endpoint.BaseURL, endpoint.Stream)
 	case "openai", "openai-compatible", "openrouter":
 		return NewOpenAICompatibleWithRerankPath(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.RerankPath)
+	case "azure-openai":
+		return NewAzureOpenAI(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.APIVersion, endpoint.AuthType)
 	case "gemini":
 		return NewGemini(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "anthropic":

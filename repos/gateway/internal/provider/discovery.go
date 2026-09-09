@@ -79,11 +79,16 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 		if managed.Type == "anthropic" {
 			request.Header.Set("x-api-key", secret)
 			request.Header.Set("anthropic-version", "2023-06-01")
+		} else if managed.Type == "azure-openai" && normalizeAzureAuthType(managed.AuthType) == "api_key" {
+			request.Header.Set("api-key", secret)
 		} else {
 			request.Header.Set("Authorization", "Bearer "+secret)
 		}
 	}
 	client := newProviderHTTPClient(10 * time.Second)
+	if managed.Type == "azure-openai" {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, ErrProviderProbeFailed
@@ -105,6 +110,9 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 }
 
 func discoveryURL(managed ManagedProvider) (string, error) {
+	if managed.Type == "azure-openai" {
+		return azureOpenAIDiscoveryURL(managed)
+	}
 	base, err := url.Parse(managed.BaseURL)
 	if err != nil {
 		return "", err
@@ -119,6 +127,31 @@ func discoveryURL(managed ManagedProvider) (string, error) {
 		base.Path = path + "/models"
 	}
 	base.RawQuery = ""
+	base.Fragment = ""
+	return base.String(), nil
+}
+
+func azureOpenAIDiscoveryURL(managed ManagedProvider) (string, error) {
+	base, err := url.Parse(managed.BaseURL)
+	if err != nil {
+		return "", err
+	}
+	path := strings.TrimRight(base.Path, "/")
+	if index := strings.Index(path, "/openai/deployments/"); index >= 0 {
+		path = path[:index] + "/openai"
+	} else {
+		normalized, parseErr := url.Parse(normalizeAzureOpenAIBaseURL(managed.BaseURL))
+		if parseErr != nil {
+			return "", parseErr
+		}
+		path = strings.TrimRight(normalized.Path, "/")
+	}
+	base.Path = path + "/models"
+	query := url.Values{}
+	if managed.APIVersion != "" {
+		query.Set("api-version", managed.APIVersion)
+	}
+	base.RawQuery = query.Encode()
 	base.Fragment = ""
 	return base.String(), nil
 }

@@ -62,7 +62,7 @@ func TestControlPlanePersistsEncryptedStateAndSynchronizesReplicas(t *testing.T)
 		t.Fatal(err)
 	}
 	first := firstProvider.(*Router)
-	if _, err := first.CreateProvider(ManagedProvider{ID: "managed", Type: "demo", Enabled: true}); err != nil {
+	if _, err := first.CreateProvider(ManagedProvider{ID: "managed", Type: "azure-openai", BaseURL: "https://resource.openai.azure.com", APIVersion: "2025-04-01-preview", AuthType: "entra", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := first.CreateCredential(CredentialInput{ID: "managed-key", ProviderID: "managed", Secret: "plaintext-secret"}); err != nil {
@@ -86,16 +86,20 @@ func TestControlPlanePersistsEncryptedStateAndSynchronizesReplicas(t *testing.T)
 		t.Fatal(err)
 	}
 	second := secondProvider.(*Router)
+	providers := second.ListProviders(context.Background())
+	if len(providers) != 1 || providers[0].APIVersion != "2025-04-01-preview" || providers[0].AuthType != "entra" {
+		t.Fatalf("Azure provider settings were not restored: %+v", providers)
+	}
 	if secret, err := second.credentialSecret("managed-key"); err != nil || secret != "plaintext-secret" {
 		t.Fatalf("credential was not restored: secret=%q err=%v", secret, err)
 	}
 	if models := second.Models(); len(models) != 2 || models[1].ID != "public" {
 		t.Fatalf("persisted models not restored: %+v", models)
 	}
-	if _, err := first.UpdateProvider("managed", ManagedProvider{Type: "demo", Enabled: false}); err != nil {
+	if _, err := first.UpdateProvider("managed", ManagedProvider{Type: "azure-openai", BaseURL: "https://resource.openai.azure.com", APIVersion: "2025-04-01-preview", AuthType: "entra", Enabled: false}); err != nil {
 		t.Fatal(err)
 	}
-	providers := second.ListProviders(context.Background())
+	providers = second.ListProviders(context.Background())
 	if len(providers) != 1 || providers[0].Enabled {
 		t.Fatalf("replica did not refresh provider state: %+v", providers)
 	}

@@ -26,6 +26,21 @@ describe("ResourceForm", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it("omits fields hidden by the current selector value", async () => {
+    const submit = vi.fn().mockResolvedValue(undefined);
+    render(<ResourceForm title="Add provider" fields={[
+      { key: "type", label: "Type", type: "select", options: ["azure-openai", "cohere"], defaultValue: "azure-openai" },
+      { key: "api_version", label: "Azure API version", visibleWhen: { fieldKey: "type", equals: "azure-openai" } }
+    ]} onClose={() => {}} onSubmit={submit} />);
+
+    await userEvent.type(screen.getByLabelText("Azure API version"), "2025-04-01-preview");
+    await userEvent.selectOptions(screen.getByLabelText("Type"), "cohere");
+    expect(screen.queryByLabelText("Azure API version")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(submit).toHaveBeenCalledWith({ type: "cohere" });
+  });
+
   it("selects multiple fixed values as removable chips", async () => {
     const submit = vi.fn().mockResolvedValue(undefined);
     render(<ResourceForm title="Edit model" fields={[{

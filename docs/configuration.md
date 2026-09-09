@@ -49,7 +49,7 @@ OpenAPI, а не в этом документе.
 абсолютным путём без query, fragment и `..`.
 
 Поддерживаемые static adapter types: `demo`, `ollama`, `openai`,
-`openai-compatible`, `openrouter`, `anthropic`, `gemini`, `cohere`, `mistral`. Capability задаётся явно для
+`openai-compatible`, `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`. Capability задаётся явно для
 ограниченных endpoints. Используемые значения: `chat`, `responses`,
 `embeddings`, `rerank`, `stream`, `tools`, `structured_output`, `mcp`, `vision`,
 `web_search`, `audio`.
@@ -76,8 +76,8 @@ Managed-режим намеренно разделяет конфигураци�
 Provider и Credential должны быть созданы до ссылающегося Deployment, а
 Deployment — до Model Group. UI использует выбор из уже созданных ресурсов, API
 принимает их IDs и возвращает `409` при удалении используемого ресурса. Managed
-Provider сейчас принимает `demo`, `ollama`, `openai`, `openai-compatible` и
-`anthropic`; отдельный тип `openrouter` доступен только static-конфигурации и в
+Provider сейчас принимает `demo`, `ollama`, `openai`, `openai-compatible`,
+`azure-openai`, `anthropic`, `gemini`, `cohere` и `mistral`; отдельный тип `openrouter` доступен только static-конфигурации и в
 managed mode задаётся как OpenAI-compatible endpoint.
 
 ## Gateway modules

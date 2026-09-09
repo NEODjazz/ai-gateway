@@ -47,6 +47,36 @@ func TestDeploymentHealthCheckUsesConfiguredCredentialAndUpstreamModel(t *testin
 	}
 }
 
+func TestDeploymentHealthCheckUsesAzureNativeSettings(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openai/deployments/gpt/chat/completions" || r.URL.Query().Get("api-version") != "2025-04-01-preview" {
+			t.Fatalf("unexpected URL: %s", r.URL.String())
+		}
+		if r.Header.Get("Authorization") != "Bearer entra-token" || r.Header.Get("api-key") != "" {
+			t.Fatalf("unexpected authorization headers: %v", r.Header)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"probe","object":"chat.completion","model":"gpt","choices":[]}`))
+	}))
+	defer upstream.Close()
+
+	router := New(Config{CredentialEncryptionKey: []byte("azure-health-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: upstream.URL + "/openai/deployments/gpt", APIVersion: "2025-04-01-preview", AuthType: "entra", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "azure-token", ProviderID: "azure", Secret: "entra-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateModelDeployment(ModelDeployment{ID: "azure-gpt", ProviderID: "azure", CredentialID: "azure-token", UpstreamModel: "gpt", Models: []string{"public-gpt"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	check, err := router.TestModelDeployment(context.Background(), "azure-gpt")
+	if err != nil || check.Status != "available" || check.ProviderID != "azure" {
+		t.Fatalf("unexpected check: %+v err=%v", check, err)
+	}
+}
+
 func TestDeploymentHealthCheckKeepsOnlySafeFailureMetadata(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

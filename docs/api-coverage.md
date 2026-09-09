@@ -63,7 +63,7 @@ availability is not inferred from these tests.
 | Capability | Current implementation | Remaining work |
 | --- | --- | --- |
 | Native provider catalog | Anthropic, Ollama, Gemini, Cohere Rerank and Mistral FIM; compatible HTTP adapter; native operations have protocol tests | Additional native providers with protocol tests |
-| Azure | Compatible HTTP scenarios only | Native endpoint/version behavior, Entra identity and refresh |
+| Azure | Native resource-root `/openai/v1` and explicit deployment paths, API version forwarding, API-key and static Entra bearer authentication, discovery and shared inference lifecycle | Managed Entra acquisition and refresh |
 | Workload identity | Not implemented | AWS signing, GCP credentials, Azure refresh and cancellation |
 | Model tokenization | Context estimate including tool schemas; native Anthropic/Gemini counter API | Exact model tokenizers/counters with versioned provenance |
 | Catalog synchronization | Versioned catalog and hot update | Validated upstream sync, rollback and price provenance |

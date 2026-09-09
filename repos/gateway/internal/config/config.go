@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -141,6 +142,8 @@ type ProviderEndpointConfig struct {
 	MirrorPercentage      float64           `json:"mirror_percentage,omitempty"`
 	MirrorTimeoutMS       int               `json:"mirror_timeout_ms,omitempty"`
 	RerankPath            string            `json:"rerank_path,omitempty"`
+	APIVersion            string            `json:"api_version,omitempty"`
+	AuthType              string            `json:"auth_type,omitempty"`
 }
 
 func Load() Config {
@@ -277,11 +280,41 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 		if endpoint.RerankPath != "" && (!strings.HasPrefix(endpoint.RerankPath, "/") || strings.ContainsAny(endpoint.RerankPath, "?#") || strings.Contains(endpoint.RerankPath, "..")) {
 			result = errors.Join(result, fmt.Errorf("provider %q rerank_path must be an absolute path without query, fragment, or traversal", name))
 		}
+		if endpoint.Type == "azure-openai" {
+			if parsed, err := url.Parse(endpoint.BaseURL); err != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+				result = errors.Join(result, fmt.Errorf("provider %q base_url must not contain query or fragment", name))
+			}
+			if !validAzureAPIVersion(endpoint.APIVersion) {
+				result = errors.Join(result, fmt.Errorf("provider %q has invalid api_version", name))
+			}
+			authType := strings.ToLower(strings.TrimSpace(endpoint.AuthType))
+			if authType != "" && authType != "api_key" && authType != "entra" {
+				result = errors.Join(result, fmt.Errorf("provider %q auth_type must be api_key or entra", name))
+			}
+		} else if endpoint.APIVersion != "" || endpoint.AuthType != "" {
+			result = errors.Join(result, fmt.Errorf("provider %q api_version and auth_type require type azure-openai", name))
+		}
 		if endpoint.QueueCapacity > 0 && endpoint.QueueTimeoutMS <= 0 {
 			result = errors.Join(result, fmt.Errorf("provider %q queue requires queue_timeout_ms", name))
 		}
 	}
 	return result
+}
+
+func validAzureAPIVersion(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "preview" {
+		return true
+	}
+	date := value
+	if strings.HasSuffix(date, "-preview") {
+		date = strings.TrimSuffix(date, "-preview")
+	}
+	if len(date) != 10 || date[4] != '-' || date[7] != '-' {
+		return false
+	}
+	_, err := time.Parse("2006-01-02", date)
+	return err == nil
 }
 
 func loadGuardrailPolicies() map[string]GuardrailPolicyConfig {
