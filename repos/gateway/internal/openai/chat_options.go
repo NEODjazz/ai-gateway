@@ -21,6 +21,7 @@ type ChatGenerationOptions struct {
 	PromptCacheKey       string                `json:"prompt_cache_key,omitempty"`
 	PromptCacheOptions   *PromptCacheOptions   `json:"prompt_cache_options,omitempty"`
 	PromptCacheRetention string                `json:"prompt_cache_retention,omitempty"`
+	PromptMode           string                `json:"prompt_mode,omitempty"`
 	Prediction           *ChatPrediction       `json:"prediction,omitempty"`
 	ServiceTier          string                `json:"service_tier,omitempty"`
 	User                 string                `json:"user,omitempty"`
@@ -109,6 +110,9 @@ func (o ChatGenerationOptions) Validate() string {
 	}
 	if o.PromptCacheRetention != "" && o.PromptCacheRetention != "in_memory" && o.PromptCacheRetention != "24h" {
 		return "prompt_cache_retention must be in_memory or 24h"
+	}
+	if o.PromptMode != "" && o.PromptMode != "reasoning" {
+		return "prompt_mode must be reasoning"
 	}
 	if message := validateChatPrediction(o.Prediction); message != "" {
 		return message

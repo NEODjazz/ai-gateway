@@ -24,6 +24,8 @@ func TestChatGenerationOptionValidation(t *testing.T) {
 		{`{"web_search_options":{"user_location":{"type":"approximate"}}}`, false},
 		{`{"prompt_cache_retention":"in_memory"}`, true},
 		{`{"prompt_cache_retention":"1h"}`, false},
+		{`{"prompt_mode":"reasoning"}`, true},
+		{`{"prompt_mode":"fast"}`, false},
 		{`{"prediction":{"type":"content","content":[{"type":"text","text":"one","prompt_cache_breakpoint":{"mode":"explicit"}},{"type":"text","text":"two"}]}}`, true},
 		{`{"prediction":{"type":"other","content":"expected"}}`, false},
 		{`{"prediction":{"type":"content"}}`, false},

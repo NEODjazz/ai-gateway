@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.85
+  version: 0.1.86
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3507,6 +3507,7 @@ components:
             mode: {type: string, enum: [implicit, explicit]}
             ttl: {type: string, enum: [30m]}
         prompt_cache_retention: {type: string, enum: [in_memory, 24h]}
+        prompt_mode: {type: string, enum: [reasoning], description: Enables the native Mistral reasoning system prompt; rejected by other adapters.}
         prediction:
           type: object
           additionalProperties: false

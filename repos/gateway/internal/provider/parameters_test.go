@@ -52,29 +52,34 @@ func TestNativeAdaptersRejectUnrepresentableChatParameters(t *testing.T) {
 	}
 }
 
-func TestOtherAdaptersRejectMistralSafePromptBeforeUpstream(t *testing.T) {
+func TestOtherAdaptersRejectMistralChatControlsBeforeUpstream(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	defer server.Close()
 	enabled := false
-	request := openai.ChatCompletionRequest{
-		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}},
-		ChatGenerationOptions: openai.ChatGenerationOptions{SafePrompt: &enabled},
-	}
-	for name, client := range map[string]Client{
-		"openai-compatible": NewOpenAICompatible(server.URL, "key", false),
-		"anthropic":         NewAnthropic(server.URL, "key", false),
-		"ollama":            NewOllama(server.URL, false),
-		"cohere":            NewCohere(server.URL, "key", false),
-		"gemini":            NewGemini(server.URL, "key", false),
+	for _, control := range []struct {
+		name    string
+		options openai.ChatGenerationOptions
+	}{
+		{name: "safe_prompt", options: openai.ChatGenerationOptions{SafePrompt: &enabled}},
+		{name: "prompt_mode", options: openai.ChatGenerationOptions{PromptMode: "reasoning"}},
 	} {
-		t.Run(name, func(t *testing.T) {
-			_, err := client.ChatCompletions(t.Context(), request)
-			assertUnsupportedParameter(t, err, "safe_prompt")
-		})
+		for name, client := range map[string]Client{
+			"openai-compatible": NewOpenAICompatible(server.URL, "key", false),
+			"anthropic":         NewAnthropic(server.URL, "key", false),
+			"ollama":            NewOllama(server.URL, false),
+			"cohere":            NewCohere(server.URL, "key", false),
+			"gemini":            NewGemini(server.URL, "key", false),
+		} {
+			t.Run(name+"/"+control.name, func(t *testing.T) {
+				request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: control.options}
+				_, err := client.ChatCompletions(t.Context(), request)
+				assertUnsupportedParameter(t, err, control.name)
+			})
+		}
 	}
 	if calls.Load() != 0 {
-		t.Fatalf("unsupported safe_prompt reached upstream: %d", calls.Load())
+		t.Fatalf("unsupported Mistral Chat control reached upstream: %d", calls.Load())
 	}
 }
 

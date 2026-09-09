@@ -147,6 +147,7 @@ func TestChatRejectsInvalidGenerationOptionsBeforePipeline(t *testing.T) {
 		{`{"model":"test","messages":[],"prompt_cache_options":{"mode":"invalid"}}`, "prompt_cache_options.mode must be implicit or explicit"},
 		{`{"model":"test","messages":[],"prompt_cache_options":{"ttl":"24h"}}`, "prompt_cache_options.ttl must be 30m"},
 		{`{"model":"test","messages":[],"prompt_cache_retention":"1h"}`, "prompt_cache_retention must be in_memory or 24h"},
+		{`{"model":"test","messages":[],"prompt_mode":"fast"}`, "prompt_mode must be reasoning"},
 		{`{"model":"test","messages":[],"prediction":{"type":"other","content":"expected"}}`, "prediction.type must be content"},
 		{`{"model":"test","messages":[],"prediction":{"type":"content","content":[{"type":"text","text":"x","extra":true}]}}`, "prediction.content must be text or an array of text parts"},
 		{`{"model":"test","messages":[],"stream_options":{"include_usage":true}}`, "stream_options requires stream=true"},

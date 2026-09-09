@@ -200,6 +200,7 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 		parameterCheck{"prompt_cache_key", options.PromptCacheKey != ""},
 		parameterCheck{"prompt_cache_options", options.PromptCacheOptions != nil},
 		parameterCheck{"prompt_cache_retention", options.PromptCacheRetention != ""},
+		parameterCheck{"prompt_mode", options.PromptMode != ""},
 		parameterCheck{"prediction", options.Prediction != nil},
 		parameterCheck{"service_tier", options.ServiceTier != ""},
 		parameterCheck{"user", options.User != ""},
@@ -256,6 +257,7 @@ func (p OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRe
 	return rejectParameters(providerName,
 		parameterCheck{"store", request.Store != nil && *request.Store},
 		parameterCheck{"safe_prompt", request.SafePrompt != nil && !p.supportsSafePrompt},
+		parameterCheck{"prompt_mode", request.PromptMode != "" && !p.supportsPromptMode},
 		parameterCheck{"service_tier", request.ServiceTier != ""},
 	)
 }

@@ -252,6 +252,7 @@ func (Cohere) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		parameterCheck{"reasoning_effort", request.ReasoningEffort != ""}, parameterCheck{"n", request.N != nil}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
 		parameterCheck{"safe_prompt", request.SafePrompt != nil},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},
+		parameterCheck{"prompt_mode", request.PromptMode != ""},
 		parameterCheck{"prediction", request.Prediction != nil}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"user", request.User != ""}, parameterCheck{"verbosity", request.Verbosity != ""},
 		parameterCheck{"web_search_options", request.WebSearchOptions != nil}, parameterCheck{"logprobs", request.Logprobs != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
 		parameterCheck{"logit_bias", request.LogitBias != nil},
