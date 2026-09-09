@@ -340,13 +340,13 @@ func TestMistralEmbeddingsAndErrorsUseNativeProviderIdentity(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Fatal(err)
 			}
-			if request["output_dimension"] != float64(2) || request["encoding_format"] != "float" || request["metadata"].(map[string]any)["trace"] != "embed" {
+			if request["output_dimension"] != float64(2) || request["output_dtype"] != "int8" || request["encoding_format"] != "float" || request["metadata"].(map[string]any)["trace"] != "embed" {
 				t.Fatalf("native embedding request=%#v", request)
 			}
 			if _, found := request["dimensions"]; found {
 				t.Fatalf("generic dimensions leaked into Mistral request: %#v", request)
 			}
-			_, _ = fmt.Fprint(w, `{"object":"list","model":"mistral-embed","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}],"usage":{"prompt_tokens":2,"total_tokens":2}}`)
+			_, _ = fmt.Fprint(w, `{"object":"list","model":"mistral-embed","data":[{"object":"embedding","index":0,"embedding":[-128,127]}],"usage":{"prompt_tokens":2,"total_tokens":2}}`)
 		case "/v1/chat/completions":
 			w.Header().Set("Retry-After", "1")
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -359,7 +359,7 @@ func TestMistralEmbeddingsAndErrorsUseNativeProviderIdentity(t *testing.T) {
 
 	client := NewMistral(server.URL, "provider-key", false)
 	dimensions := 2
-	embedding, err := client.Embeddings(t.Context(), openai.EmbeddingRequest{Model: "mistral-embed", Input: "hello", Metadata: map[string]string{"trace": "embed"}, EncodingFormat: "float", Dimensions: &dimensions})
+	embedding, err := client.Embeddings(t.Context(), openai.EmbeddingRequest{Model: "mistral-embed", Input: "hello", Metadata: map[string]string{"trace": "embed"}, EncodingFormat: "float", Dimensions: &dimensions, OutputDType: "int8"})
 	if err != nil || !embedding.UsageReported || embedding.Usage.TotalTokens != 2 || len(embedding.Data) != 1 || len(embedding.Data[0].Embedding) != 2 {
 		t.Fatalf("embedding=%+v err=%v", embedding, err)
 	}
@@ -403,6 +403,22 @@ func TestMistralEmbeddingsRejectUnsupportedInputBeforeUpstream(t *testing.T) {
 	var failure *Error
 	if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.Param != "metadata" || failure.UpstreamCode != "invalid_request" || calls.Load() != 0 {
 		t.Fatalf("invalid metadata error=%v failure=%+v calls=%d", err, failure, calls.Load())
+	}
+	zero, seven, tooLarge := 0, 7, 3073
+	for _, test := range []struct {
+		param   string
+		request openai.EmbeddingRequest
+	}{
+		{param: "output_dtype", request: openai.EmbeddingRequest{Model: "mistral-embed", Input: "text", OutputDType: "float16"}},
+		{param: "encoding_format", request: openai.EmbeddingRequest{Model: "mistral-embed", Input: "text", EncodingFormat: "hex"}},
+		{param: "dimensions", request: openai.EmbeddingRequest{Model: "mistral-embed", Input: "text", Dimensions: &zero}},
+		{param: "dimensions", request: openai.EmbeddingRequest{Model: "mistral-embed", Input: "text", Dimensions: &tooLarge}},
+		{param: "dimensions", request: openai.EmbeddingRequest{Model: "mistral-embed", Input: "text", Dimensions: &seven, OutputDType: "binary"}},
+	} {
+		_, err := client.Embeddings(t.Context(), test.request)
+		if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.UpstreamCode != "invalid_request" || failure.Param != test.param || calls.Load() != 0 {
+			t.Fatalf("invalid request=%+v error=%v failure=%+v calls=%d", test.request, err, failure, calls.Load())
+		}
 	}
 }
 

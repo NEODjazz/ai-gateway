@@ -131,16 +131,16 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 
 func (Ollama) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
 	input, err := openai.InspectEmbeddingInput(request.Input)
-	return rejectParameters("ollama", parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"input", err != nil || input.Tokenized()}, parameterCheck{"input_type", request.InputType != ""}, parameterCheck{"user", request.User != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"})
+	return rejectParameters("ollama", parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"output_dtype", request.OutputDType != ""}, parameterCheck{"input", err != nil || input.Tokenized()}, parameterCheck{"input_type", request.InputType != ""}, parameterCheck{"user", request.User != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"})
 }
 
 func (Demo) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
 	input, err := openai.InspectEmbeddingInput(request.Input)
-	return rejectParameters("demo", parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"input", err != nil || input.Tokenized()}, parameterCheck{"input_type", request.InputType != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"})
+	return rejectParameters("demo", parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"output_dtype", request.OutputDType != ""}, parameterCheck{"input", err != nil || input.Tokenized()}, parameterCheck{"input_type", request.InputType != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"})
 }
 
 func (p OpenAICompatible) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
-	return rejectParameters(p.providerName(), parameterCheck{"metadata", request.Metadata != nil && p.providerName() != "mistral"}, parameterCheck{"input_type", request.InputType != ""})
+	return rejectParameters(p.providerName(), parameterCheck{"metadata", request.Metadata != nil && p.providerName() != "mistral"}, parameterCheck{"output_dtype", request.OutputDType != "" && p.providerName() != "mistral"}, parameterCheck{"input_type", request.InputType != ""})
 }
 
 func validateChatAdapter(client Client, request openai.ChatCompletionRequest) error {

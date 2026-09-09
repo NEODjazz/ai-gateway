@@ -297,6 +297,7 @@ type EmbeddingRequest struct {
 	InputType      string            `json:"input_type,omitempty"`
 	EncodingFormat string            `json:"encoding_format,omitempty"`
 	Dimensions     *int              `json:"dimensions,omitempty"`
+	OutputDType    string            `json:"output_dtype,omitempty"`
 	User           string            `json:"user,omitempty"`
 }
 

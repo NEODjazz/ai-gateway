@@ -120,6 +120,17 @@ func (Mistral) ValidateEmbeddingParameters(request openai.EmbeddingRequest) erro
 	if message := openai.ValidateMetadata(request.Metadata); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "metadata", Err: errors.New(message)}
 	}
+	switch request.OutputDType {
+	case "", "float", "int8", "uint8", "binary", "ubinary":
+	default:
+		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "output_dtype", Err: errors.New("output_dtype must be float, int8, uint8, binary, or ubinary")}
+	}
+	if request.EncodingFormat != "" && request.EncodingFormat != "float" && request.EncodingFormat != "base64" {
+		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "encoding_format", Err: errors.New("encoding_format must be float or base64")}
+	}
+	if request.Dimensions != nil && (*request.Dimensions <= 0 || *request.Dimensions > 3072 || ((request.OutputDType == "binary" || request.OutputDType == "ubinary") && *request.Dimensions%8 != 0)) {
+		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "dimensions", Err: errors.New("Mistral dimensions must not exceed 3072 and must be divisible by 8 for binary output")}
+	}
 	input, err := openai.InspectEmbeddingInput(request.Input)
 	return rejectParameters("mistral",
 		parameterCheck{"input", err != nil || input.Tokenized()},

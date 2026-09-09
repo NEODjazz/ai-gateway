@@ -40,7 +40,7 @@ upstream. Распознаваемые параметры перечислены
 | `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
 | `/v1/responses/compact` | `provider`, `model`, `input`, `instructions` |
-| `/v1/embeddings` | `provider`, `model`, `input`, `metadata`, `input_type`, `encoding_format`, `dimensions`, `user` |
+| `/v1/embeddings` | `provider`, `model`, `input`, `metadata`, `input_type`, `encoding_format`, `dimensions`, `output_dtype`, `user` |
 | `/v1/rerank` | `provider`, `model`, `query`, `documents`, `top_n`, `rank_fields`, `return_documents`, `max_chunks_per_doc`, `max_tokens_per_doc` |
 
 Матрица описывает входной контракт gateway; возможности конкретной модели и
@@ -180,6 +180,10 @@ Mistral embeddings принимает только строку или масс�
 `input_type` и `user` отклоняются до provider modules, billing и upstream.
 Bounded `metadata` передается native Mistral Embeddings; остальные adapters
 отклоняют этот provider-specific параметр до выполнения.
+`output_dtype` поддерживает native `float`, `int8`, `uint8`, `binary` и
+`ubinary`. Gateway проверяет числовые диапазоны и целочисленность quantized
+ответов, а для packed binary сравнивает `dimensions` с числом битов. Та же
+проверка учитывает ширину dtype для `encoding_format=base64`.
 Mistral не объявляет унаследованный compatible rerank transport: даже ошибочно
 настроенная capability исключается router до modules, billing и network call.
 Chat `web_search_options` также отклоняется до выполнения: provider-managed web

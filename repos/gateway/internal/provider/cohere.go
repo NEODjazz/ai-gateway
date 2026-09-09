@@ -650,7 +650,7 @@ func (Cohere) Responses(context.Context, openai.ResponseRequest) (openai.Respons
 }
 
 func (Cohere) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
-	if err := rejectParameters("cohere", parameterCheck{"metadata", request.Metadata != nil}); err != nil {
+	if err := rejectParameters("cohere", parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"output_dtype", request.OutputDType != ""}); err != nil {
 		return err
 	}
 	input, err := openai.InspectEmbeddingInput(request.Input)

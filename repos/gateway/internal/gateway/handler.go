@@ -803,6 +803,10 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "encoding_format must be float or base64")
 		return
 	}
+	if request.OutputDType != "" && request.OutputDType != "float" && request.OutputDType != "int8" && request.OutputDType != "uint8" && request.OutputDType != "binary" && request.OutputDType != "ubinary" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "output_dtype must be float, int8, uint8, binary, or ubinary")
+		return
+	}
 	if request.InputType != "" && request.InputType != "search_document" && request.InputType != "search_query" && request.InputType != "classification" && request.InputType != "clustering" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "input_type is invalid")
 		return

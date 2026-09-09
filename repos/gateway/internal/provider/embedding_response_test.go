@@ -105,6 +105,51 @@ func TestBase64EmbeddingVectorValidation(t *testing.T) {
 		t.Fatal("base64 response accepted for float request")
 	}
 }
+
+func TestQuantizedEmbeddingVectorValidation(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		dtype      string
+		dimensions int
+		embedding  openai.Embedding
+	}{
+		{name: "int8", dtype: "int8", dimensions: 2, embedding: openai.Embedding{Embedding: []float64{-128, 127}}},
+		{name: "uint8", dtype: "uint8", dimensions: 2, embedding: openai.Embedding{Embedding: []float64{0, 255}}},
+		{name: "binary", dtype: "binary", dimensions: 16, embedding: openai.Embedding{Embedding: []float64{-128, 127}}},
+		{name: "ubinary", dtype: "ubinary", dimensions: 16, embedding: openai.Embedding{Embedding: []float64{0, 255}}},
+		{name: "base64 int8", dtype: "int8", dimensions: 2, embedding: openai.Embedding{EmbeddingBase64: base64.StdEncoding.EncodeToString([]byte{128, 127})}},
+		{name: "base64 binary", dtype: "binary", dimensions: 16, embedding: openai.Embedding{EmbeddingBase64: base64.StdEncoding.EncodeToString([]byte{128, 127})}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := openai.EmbeddingRequest{Input: "a", Dimensions: &test.dimensions, OutputDType: test.dtype}
+			if test.embedding.EmbeddingBase64 != "" {
+				request.EncodingFormat = "base64"
+			}
+			if err := validateEmbeddingVectors(request, []openai.Embedding{test.embedding}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+
+	invalid := []struct {
+		dtype      string
+		dimensions int
+		values     []float64
+	}{
+		{dtype: "int8", dimensions: 1, values: []float64{-129}},
+		{dtype: "int8", dimensions: 1, values: []float64{1.5}},
+		{dtype: "uint8", dimensions: 1, values: []float64{256}},
+		{dtype: "binary", dimensions: 8, values: []float64{0, 1}},
+		{dtype: "ubinary", dimensions: 8, values: []float64{-1}},
+	}
+	for _, test := range invalid {
+		request := openai.EmbeddingRequest{Input: "a", Dimensions: &test.dimensions, OutputDType: test.dtype}
+		if err := validateEmbeddingVectors(request, []openai.Embedding{{Embedding: test.values}}); err == nil {
+			t.Fatalf("invalid %s embedding accepted: %v", test.dtype, test.values)
+		}
+	}
+}
+
 func TestEmbeddingAdaptersEnforceResponseContract(t *testing.T) {
 	for _, adapter := range []string{"compatible", "ollama"} {
 		for _, mode := range []string{"empty", "dimension", "trailing", "oversized"} {

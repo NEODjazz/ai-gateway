@@ -319,7 +319,7 @@ func (*chatProvider) Models() []openai.Model {
 func TestEmbeddingsUsesAuthenticatedProviderPipeline(t *testing.T) {
 	llm := &chatProvider{}
 	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), llm)
-	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embed-model","input":["hello","world"],"metadata":{"trace":"embed"}}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embed-model","input":["hello","world"],"metadata":{"trace":"embed"},"output_dtype":"int8"}`))
 	request.Header.Set("Authorization", "Bearer test-key")
 	response := httptest.NewRecorder()
 
@@ -335,6 +335,9 @@ func TestEmbeddingsUsesAuthenticatedProviderPipeline(t *testing.T) {
 	}
 	if llm.request.EmbeddingRequest.Metadata["trace"] != "embed" {
 		t.Fatalf("embedding metadata was not preserved: %+v", llm.request.EmbeddingRequest.Metadata)
+	}
+	if llm.request.EmbeddingRequest.OutputDType != "int8" {
+		t.Fatalf("embedding output dtype was not preserved: %+v", llm.request.EmbeddingRequest)
 	}
 }
 
@@ -595,6 +598,16 @@ func TestEmbeddingsRejectsMalformedTokenArraysBeforePipeline(t *testing.T) {
 	}
 	if auth.calls != 0 {
 		t.Fatalf("pipeline ran for malformed token inputs: %d", auth.calls)
+	}
+}
+
+func TestEmbeddingsRejectsInvalidOutputDTypeBeforePipeline(t *testing.T) {
+	auth := &countingAccessModule{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{auth}), &chatProvider{})
+	response := httptest.NewRecorder()
+	handler.Embeddings(response, httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embed-model","input":"text","output_dtype":"float16"}`)))
+	if response.Code != http.StatusBadRequest || auth.calls != 0 || !strings.Contains(response.Body.String(), "output_dtype must be") {
+		t.Fatalf("status=%d pipeline calls=%d body=%s", response.Code, auth.calls, response.Body.String())
 	}
 }
 

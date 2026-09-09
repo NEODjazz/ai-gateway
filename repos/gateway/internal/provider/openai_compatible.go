@@ -100,6 +100,7 @@ type openAICompatibleEmbeddingRequest struct {
 	EncodingFormat  string            `json:"encoding_format,omitempty"`
 	Dimensions      *int              `json:"dimensions,omitempty"`
 	OutputDimension *int              `json:"output_dimension,omitempty"`
+	OutputDType     string            `json:"output_dtype,omitempty"`
 	User            string            `json:"user,omitempty"`
 }
 
@@ -562,7 +563,7 @@ func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.Embeddi
 	}
 	upstreamRequest := openAICompatibleEmbeddingRequest{
 		Model: request.Model, Input: request.Input, Metadata: request.Metadata, EncodingFormat: request.EncodingFormat,
-		Dimensions: request.Dimensions, User: request.User,
+		Dimensions: request.Dimensions, OutputDType: request.OutputDType, User: request.User,
 	}
 	p.mapEmbeddingDimensions(&upstreamRequest)
 	body, err := json.Marshal(upstreamRequest)

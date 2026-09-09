@@ -42,24 +42,25 @@ func validateEmbeddingVectors(request openai.EmbeddingRequest, data []openai.Emb
 				return errors.New("provider returned an embedding in the wrong encoding format")
 			}
 			decoded, err := base64.StdEncoding.Strict().DecodeString(item.EmbeddingBase64)
-			if err != nil || len(decoded) == 0 || len(decoded)%4 != 0 || len(decoded) > 65536*4 {
+			if err != nil || len(decoded) == 0 || len(decoded) > 65536*4 {
 				return errors.New("invalid base64 embedding")
 			}
-			itemDimensions = len(decoded) / 4
-			for offset := 0; offset < len(decoded); offset += 4 {
-				value := math.Float32frombits(binary.LittleEndian.Uint32(decoded[offset : offset+4]))
-				if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
-					return errors.New("invalid embedding value")
-				}
+			var dimensionError error
+			itemDimensions, dimensionError = base64EmbeddingDimensions(request.OutputDType, decoded)
+			if dimensionError != nil {
+				return dimensionError
 			}
 		} else {
 			if item.EmbeddingBase64 != "" {
 				return errors.New("provider returned an embedding in the wrong encoding format")
 			}
 			for _, value := range item.Embedding {
-				if math.IsNaN(value) || math.IsInf(value, 0) {
+				if !validEmbeddingValue(request.OutputDType, value) {
 					return errors.New("invalid embedding value")
 				}
+			}
+			if request.OutputDType == "binary" || request.OutputDType == "ubinary" {
+				itemDimensions *= 8
 			}
 		}
 		if dimensions == 0 {
@@ -70,4 +71,42 @@ func validateEmbeddingVectors(request openai.EmbeddingRequest, data []openai.Emb
 		}
 	}
 	return nil
+}
+
+func base64EmbeddingDimensions(dtype string, decoded []byte) (int, error) {
+	if dtype == "" || dtype == "float" {
+		if len(decoded)%4 != 0 {
+			return 0, errors.New("invalid base64 embedding")
+		}
+		for offset := 0; offset < len(decoded); offset += 4 {
+			value := math.Float32frombits(binary.LittleEndian.Uint32(decoded[offset : offset+4]))
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				return 0, errors.New("invalid embedding value")
+			}
+		}
+		return len(decoded) / 4, nil
+	}
+	if dtype == "binary" || dtype == "ubinary" {
+		return len(decoded) * 8, nil
+	}
+	if dtype == "int8" || dtype == "uint8" {
+		return len(decoded), nil
+	}
+	return 0, errors.New("invalid embedding output dtype")
+}
+
+func validEmbeddingValue(dtype string, value float64) bool {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return false
+	}
+	switch dtype {
+	case "int8", "binary":
+		return math.Trunc(value) == value && value >= -128 && value <= 127
+	case "uint8", "ubinary":
+		return math.Trunc(value) == value && value >= 0 && value <= 255
+	case "", "float":
+		return true
+	default:
+		return false
+	}
 }
