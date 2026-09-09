@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.76
+  version: 0.1.77
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -791,6 +791,32 @@ paths:
         '429': {$ref: '#/components/responses/RateLimited'}
         '451': {$ref: '#/components/responses/ContentRejected'}
         '502': {$ref: '#/components/responses/ProviderFailed'}
+  /guardrails/apply_guardrail:
+    post:
+      operationId: applyGuardrail
+      tags: [Guardrails]
+      summary: Execute an enabled guardrail policy without model inference
+      description: Authenticates the caller, enforces access groups, model policy when supplied, attached-policy authorization, RPM/TPM and durable audit. Admin credentials may execute any enabled policy. Request content is sent only to the configured scanners and is never returned or written to audit. This operation does not open a generation billing lifecycle.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GuardrailApplyRequest'}
+            example: {guardrail_name: strict, text: Text to inspect, model: gpt-5-mini}
+      responses:
+        '200':
+          description: Bounded scanner decision without request content
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GuardrailApplyResponse'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/GuardrailUnavailable'}
   /admin/v1/session:
     get:
       operationId: getAdminSession
@@ -1589,7 +1615,7 @@ paths:
         - {name: module, in: query, schema: {type: string, enum: [dlp, av]}}
         - {name: policy, in: query, schema: {type: string, maxLength: 128}}
         - {name: outcome, in: query, schema: {type: string, enum: [passed, rejected, unavailable]}}
-        - {name: source, in: query, schema: {type: string, enum: [inference, compliance]}}
+        - {name: source, in: query, schema: {type: string, enum: [inference, compliance, guardrail_api]}}
       responses:
         '200': {description: Guardrail monitoring snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/GuardrailMonitorSnapshot'}}}}
         '400': {$ref: '#/components/responses/InvalidRequest'}
@@ -2453,6 +2479,12 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
     DependencyUnavailable:
       description: Required storage is unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    GuardrailUnavailable:
+      description: Required policy registry, audit store, or scanner is unavailable
       content:
         application/json:
           schema:
@@ -4583,6 +4615,30 @@ components:
         dlp: {type: boolean}
         av: {type: boolean}
         enabled: {type: boolean}
+    GuardrailApplyRequest:
+      type: object
+      additionalProperties: false
+      required: [guardrail_name, text]
+      properties:
+        guardrail_name: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$'}
+        text: {type: string, minLength: 1, maxLength: 65536}
+        model: {type: string, minLength: 1, maxLength: 512}
+    GuardrailApplyResponse:
+      type: object
+      additionalProperties: false
+      required: [execution_id, guardrail_name, allowed, checks, content_stored]
+      properties:
+        execution_id: {type: string, minLength: 1, maxLength: 128, description: Server-generated execution identifier; independent of the caller correlation ID.}
+        guardrail_name: {type: string, minLength: 1, maxLength: 128}
+        allowed: {type: boolean}
+        checks:
+          type: object
+          additionalProperties: false
+          required: [dlp, av]
+          properties:
+            dlp: {type: string, enum: [disabled, passed, rejected]}
+            av: {type: string, enum: [disabled, passed, rejected]}
+        content_stored: {type: boolean, const: false}
     GuardrailPolicy:
       allOf:
         - {$ref: '#/components/schemas/GuardrailPolicyInput'}
@@ -4694,7 +4750,7 @@ components:
         request_id: {type: string, maxLength: 128}
         policy: {type: string, maxLength: 128}
         module: {type: string, maxLength: 32}
-        source: {type: string, enum: [inference, compliance]}
+        source: {type: string, enum: [inference, compliance, guardrail_api]}
         outcome: {type: string, enum: [passed, rejected, unavailable]}
         duration_ms: {type: integer, format: int64, minimum: 0}
     GuardrailMonitorFilter:
@@ -4706,7 +4762,7 @@ components:
         module: {type: string, enum: [dlp, av]}
         policy: {type: string, maxLength: 128}
         outcome: {type: string, enum: [passed, rejected, unavailable]}
-        source: {type: string, enum: [inference, compliance]}
+        source: {type: string, enum: [inference, compliance, guardrail_api]}
     GuardrailTimelineBucket:
       type: object
       additionalProperties: false

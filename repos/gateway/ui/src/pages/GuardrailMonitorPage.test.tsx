@@ -55,11 +55,11 @@ describe("GuardrailMonitorPage", () => {
     await screen.findByText("Shared Redis history across gateway replicas");
     await userEvent.selectOptions(screen.getByLabelText("Guardrail window"), "1h");
     await userEvent.selectOptions(screen.getByLabelText("Guardrail policy filter"), "strict");
-    await userEvent.selectOptions(screen.getByLabelText("Guardrail source filter"), "compliance");
+    await userEvent.selectOptions(screen.getByLabelText("Guardrail source filter"), "guardrail_api");
     await userEvent.selectOptions(screen.getByLabelText("Guardrail outcome filter"), "unavailable");
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => {
       const value = String(url);
-      return value.includes("/admin/v1/guardrails/monitor?") && value.includes("window=1h") && value.includes("policy=strict") && value.includes("source=compliance") && value.includes("outcome=unavailable");
+      return value.includes("/admin/v1/guardrails/monitor?") && value.includes("window=1h") && value.includes("policy=strict") && value.includes("source=guardrail_api") && value.includes("outcome=unavailable");
     })).toBe(true));
   });
 
@@ -69,13 +69,13 @@ describe("GuardrailMonitorPage", () => {
       if (url === "/admin/v1/guardrail-policies") return json(policies);
       return json(report);
     });
-    renderPage("/guardrails-monitor?policy=strict&window=1h&source=compliance");
+    renderPage("/guardrails-monitor?policy=strict&window=1h&source=guardrail_api");
     expect(await screen.findByDisplayValue("strict")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Last hour")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Compliance playground")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Guardrail API")).toBeInTheDocument();
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => {
       const value = String(url);
-      return value.includes("/admin/v1/guardrails/monitor?") && value.includes("window=1h") && value.includes("policy=strict") && value.includes("source=compliance");
+      return value.includes("/admin/v1/guardrails/monitor?") && value.includes("window=1h") && value.includes("policy=strict") && value.includes("source=guardrail_api");
     })).toBe(true));
   });
 

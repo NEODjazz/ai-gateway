@@ -270,6 +270,10 @@ func (h Handler) authorizeAccess(w http.ResponseWriter, ctx context.Context, req
 			return false
 		}
 	}
+	return h.authorizeRateLimit(w, ctx, req, tokens)
+}
+
+func (h Handler) authorizeRateLimit(w http.ResponseWriter, ctx context.Context, req modules.RequestContext, tokens int) bool {
 	key := req.CredentialID
 	if req.TeamID != "" {
 		key = "team:" + req.TeamID + ":credential:" + req.CredentialID
