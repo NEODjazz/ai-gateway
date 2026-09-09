@@ -23,8 +23,8 @@ availability is not inferred from these tests.
 | Chat completions | JSON, tools, structured output, vision input, SSE, generation controls, bounded multi-choice with aggregate reserve; native Cohere v2 text, structured JSON/SSE, generation controls and JSON/SSE function tools/history; native Anthropic web search with citations and actual search usage; domain-allowlisted Anthropic web fetch with citations, content limits and cache exclusion | Additional controls and model-specific policy |
 | Responses | Create, indexed SSE assembly, scoped deployment affinity, function tools, MCP passthrough, stateless reasoning history, native input-token count, owned retrieve/delete/cancel/input-items, generation options and metadata | Durable background lifecycle; remaining provider-specific parameters and counters |
 | Response compaction | Native compact contract, bounded opaque output, model authorization and usage settlement | Additional provider-native compact request options as demand is confirmed |
-| Embeddings | String/list and bounded token-ID input, exact token-ID accounting, float/base64 output, compatible adapters and native Gemini, Ollama and Cohere v2 adapters | Additional provider compatibility |
-| Rerank | Query/documents, compatible adapter, native Cohere v2 adapter and model discovery | Additional provider-specific request and usage matrices |
+| Embeddings | String/list and bounded token-ID input, exact token-ID accounting, float/base64 output, compatible adapters and native Gemini, Ollama, Cohere v2 and Voyage adapters | Additional provider compatibility |
+| Rerank | Query/documents, compatible adapter, native Cohere v2 and Voyage adapters; exact provider token usage | Additional provider-specific request and usage matrices |
 | Text completions | Compatible adapters accept string/list and token-ID prompts; Ollama text generation and Mistral FIM accept native string prompts; legacy response normalization, bounded JSON, incremental SSE and buffered fallback | Additional native provider adapters and provider-specific prompt forms |
 | Messages | Inbound `/v1/messages` JSON/SSE over the shared Chat pipeline; outbound Anthropic adapter; explicit prompt-cache controls; opaque user metadata; output effort and JSON Schema format; capacity-tier selection and assigned-tier reporting; signed and redacted thinking blocks with history round-trip; thinking-token usage details; native web-search server tool, citations and usage; capability-gated assistant prefill | Additional server tools |
 | Anthropic token counting | Native Anthropic/Gemini counters behind `/v1/messages/count_tokens` with authorization, policy, input quotas and bounded transport | Advanced native content blocks and additional provider counters |
@@ -63,7 +63,7 @@ availability is not inferred from these tests.
 
 | Capability | Current implementation | Remaining work |
 | --- | --- | --- |
-| Native provider catalog | Anthropic, Ollama, Gemini, Cohere Chat/Rerank/Embeddings and Mistral Chat/Embeddings/FIM; compatible HTTP adapter; native operations have protocol tests | Additional native providers with protocol tests |
+| Native provider catalog | Anthropic, Ollama, Gemini, Cohere Chat/Rerank/Embeddings, Mistral Chat/Embeddings/FIM and Voyage Embeddings/Rerank; compatible HTTP adapter; native operations have protocol tests | Additional native providers with protocol tests |
 | Azure | Native resource-root `/openai/v1` and explicit deployment paths, API version forwarding, API-key and static Entra bearer authentication, discovery and shared inference lifecycle | Managed Entra acquisition and refresh |
 | Workload identity | Not implemented | AWS signing, GCP credentials, Azure refresh and cancellation |
 | Model tokenization | Context estimate including tool schemas; native Anthropic/Gemini counter API | Exact model tokenizers/counters with versioned provenance |

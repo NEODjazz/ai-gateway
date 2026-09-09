@@ -7,7 +7,7 @@
 
 - Chat Completions, Responses, Embeddings и Rerank API;
 - native и synthetic SSE streaming;
-- OpenAI/Azure/OpenAI-compatible, Anthropic, Ollama и demo adapters;
+- OpenAI/Azure/OpenAI-compatible, Anthropic, Ollama, Gemini, Cohere, Mistral и Voyage adapters;
 - priority/weight/adaptive routing, retries, cooldown и cross-model fallback;
 - независимые Providers, Credentials, Deployments, Model Groups и pricing;
 - Virtual Keys, OIDC/JWT, organization/team/user scopes и Access Groups;

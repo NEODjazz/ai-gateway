@@ -63,6 +63,7 @@ describe("ProvidersPage", () => {
     render(<MemoryRouter><AuthProvider><ProvidersPage /></AuthProvider></MemoryRouter>);
     await userEvent.click(await screen.findByRole("button", { name: "Create Provider" }));
     const form = screen.getByRole("dialog", { name: "Create Provider" });
+    expect(within(form).getByRole("option", { name: "voyage" })).toBeInTheDocument();
     await userEvent.type(within(form).getByLabelText("ID"), "native-rerank");
     await userEvent.selectOptions(within(form).getByLabelText("Type"), "cohere");
     await userEvent.type(within(form).getByLabelText("Base URL"), "https://api.example.test");

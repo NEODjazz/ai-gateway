@@ -225,6 +225,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `ollama` | Native chat/stream/embeddings и provider completions JSON/SSE для строкового prompt |
 | `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output, text embeddings; API key |
 | `mistral` | Native Chat JSON/SSE and embeddings wire contract; FIM completions; Bearer API key |
+| `voyage` | Native text embeddings and rerank; Bearer API key |
 | `demo` | Локальный deterministic fallback для разработки |
 
 OpenAI-compatible adapter один раз повторяет запрос с
@@ -248,6 +249,15 @@ Bounded `metadata` передается native Mistral Embeddings; осталь�
 `ubinary`. Gateway проверяет числовые диапазоны и целочисленность quantized
 ответов, а для packed binary сравнивает `dimensions` с числом битов. Та же
 проверка учитывает ширину dtype для `encoding_format=base64`.
+
+Voyage adapter принимает до 1000 текстовых embedding inputs, `input_type`,
+`dimensions`, поддерживаемые output dtypes и `base64`. Token-ID input,
+provider metadata и `user` отклоняются до upstream call. Rerank принимает до
+1000 непустых строковых документов и преобразует публичный `top_n` в native
+`top_k`. Оба вызова отправляются с `truncation=false`, чтобы upstream не менял
+вход молча, а provider-reported `total_tokens` обязателен и используется для
+billing. Возвращаемые vectors, indices, scores и usage проходят bounded
+validation общей gateway-цепочки.
 Mistral не объявляет унаследованный compatible rerank transport: даже ошибочно
 настроенная capability исключается router до modules, billing и network call.
 Chat `web_search_options` также отклоняется до выполнения: provider-managed web
