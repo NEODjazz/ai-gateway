@@ -75,6 +75,9 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 		request.Keywords = append([]string(nil), req.AudioTranscriptionRequest.Keywords...)
 		request.SpeakerNames = append([]string(nil), req.AudioTranscriptionRequest.KnownSpeakerNames...)
 	}
+	if req.OCRRequest != nil && req.OCRRequest.DocumentAnnotationPrompt != "" {
+		request.Input = req.OCRRequest.DocumentAnnotationPrompt
+	}
 	response, err := callRemote[AnonymizeRequest, AnonymizeResponse](ctx, m.client, m.endpoint, request)
 	if err != nil {
 		return err
@@ -133,6 +136,13 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 			return errors.New("anonymizer returned an invalid known speaker name projection")
 		}
 		req.AudioTranscriptionRequest.KnownSpeakerNames = append([]string(nil), response.SpeakerNames...)
+	}
+	if req.OCRRequest != nil && req.OCRRequest.DocumentAnnotationPrompt != "" {
+		prompt, ok := response.Input.(string)
+		if !ok {
+			return errors.New("anonymizer returned an invalid OCR annotation prompt projection")
+		}
+		req.OCRRequest.DocumentAnnotationPrompt = prompt
 	}
 	req.AnonymizationValues = cloneStringMap(response.Replacements)
 	return nil

@@ -85,6 +85,19 @@ func TestAudioTranscriptionProjectsFilesToAVAndHintsToDLP(t *testing.T) {
 	}
 }
 
+func TestOCRProjectsInlineDocumentToAVAndPromptToDLP(t *testing.T) {
+	document := "data:application/pdf;base64,JVBERi0xLjcK"
+	request := openai.OCRRequest{Model: "ocr", Document: openai.OCRDocument{Type: "document_url", DocumentURL: document}, DocumentAnnotationPrompt: "private extraction rules"}
+	req := RequestContext{OCRRequest: &request}
+	attachments, err := requestImageAttachments(&req)
+	if err != nil || len(attachments) != 1 || attachments[0].MediaType != "application/pdf" || attachments[0].Data != "JVBERi0xLjcK" {
+		t.Fatalf("attachments=%+v err=%v", attachments, err)
+	}
+	if payload := scanPayload(&req); payload != "ocr_annotation_prompt: private extraction rules" {
+		t.Fatalf("payload=%q", payload)
+	}
+}
+
 func TestScanPayloadIncludesRerankTextOnly(t *testing.T) {
 	req := RequestContext{RerankRequest: &openai.RerankRequest{Model: "rerank", Query: "private query", Documents: []any{"private document", map[string]any{"text": "object document", "binary": []byte{1, 2}}}}}
 	payload := scanPayload(&req)

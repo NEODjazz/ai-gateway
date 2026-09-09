@@ -121,6 +121,14 @@ accepts a bounded string or list of queries plus result, domain, page-token and
 country filters. Queries pass through the shared content policy; compatible
 providers return at most 20 validated HTTP(S) results and billing settles one
 search unit for each submitted query.
+
+`POST /v1/ocr` routes only to explicitly `ocr` capable native Mistral
+deployments. It accepts bounded HTTPS document/image URLs and inline base64 PDF
+or image data, validates zero-based page selections and annotation formats, and
+settles the reserved page count from the provider's exact `pages_processed`
+usage. Inline binary data is sent to configured AV scanning; annotation prompts
+pass through the normal text policy. Provider file references are rejected
+until an owner-scoped Files API is available.
 Project details remain access-policy metadata rather than a synthetic billing
 identity. The console joins owner teams, project access groups and their
 virtual-key impact. Repeated `access_group_id` key-list query parameters use

@@ -110,6 +110,9 @@ func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 			req.AudioTranscriptionRequest.KnownSpeakerNames[index] = m.anonymize(req, req.AudioTranscriptionRequest.KnownSpeakerNames[index])
 		}
 	}
+	if req.OCRRequest != nil {
+		req.OCRRequest.DocumentAnnotationPrompt = m.anonymize(req, req.OCRRequest.DocumentAnnotationPrompt)
+	}
 	return nil
 }
 

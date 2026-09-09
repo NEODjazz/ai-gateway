@@ -172,6 +172,14 @@ type SearchClient interface {
 	Search(ctx context.Context, request openai.SearchRequest) (openai.SearchResponse, error)
 }
 
+type OCRProvider interface {
+	OCR(ctx context.Context, req modules.RequestContext) (openai.OCRResponse, error)
+}
+
+type OCRClient interface {
+	OCR(ctx context.Context, request openai.OCRRequest) (openai.OCRResponse, error)
+}
+
 type MCPClient interface {
 	SupportsMCP() bool
 }
@@ -1758,6 +1766,10 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		searchRequest.SearchDomainFilter = append([]string(nil), req.SearchRequest.SearchDomainFilter...)
 		attemptCtx.SearchRequest = &searchRequest
 	}
+	if req.OCRRequest != nil {
+		ocrRequest := *req.OCRRequest
+		attemptCtx.OCRRequest = &ocrRequest
+	}
 	attemptCtx.Response = nil
 	attemptCtx.CompletionResponse = nil
 	attemptCtx.ResponsesResponse = nil
@@ -1769,6 +1781,7 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 	attemptCtx.AudioTranscriptionResponse = nil
 	attemptCtx.AudioSpeechResponse = nil
 	attemptCtx.SearchResponse = nil
+	attemptCtx.OCRResponse = nil
 	attemptCtx.Usage = nil
 	attemptCtx.AnonymizationValues = nil
 	attemptCtx.Metadata = cloneMetadata(req.Metadata)
@@ -1822,6 +1835,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		if attemptCtx.SearchRequest != nil {
 			attemptCtx.SearchRequest.SetRoutingModel(routingModel)
 		}
+		if attemptCtx.OCRRequest != nil {
+			attemptCtx.OCRRequest.Model = routingModel
+		}
 		attemptCtx.Metadata["provider.original_model"] = originalModel
 		attemptCtx.Metadata["provider.routed_model"] = routingModel
 		attemptCtx.Metadata["provider.fallback_type"] = endpoint.FallbackType
@@ -1861,6 +1877,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		}
 		if attemptCtx.SearchRequest != nil {
 			attemptCtx.SearchRequest.SetRoutingModel(upstreamModel)
+		}
+		if attemptCtx.OCRRequest != nil {
+			attemptCtx.OCRRequest.Model = upstreamModel
 		}
 		attemptCtx.Metadata["provider.requested_model"] = requestedModel
 		attemptCtx.Metadata["provider.upstream_model"] = upstreamModel
@@ -2620,6 +2639,11 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 			return false
 		}
 	}
+	if hasCapability(required, "ocr") {
+		if client, ok := e.Provider.(interface{ SupportsOCR() bool }); ok && !client.SupportsOCR() {
+			return false
+		}
+	}
 	if len(e.Capabilities) == 0 {
 		return true
 	}
@@ -2674,11 +2698,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_speech") || hasCapability(required, "search") || hasCapability(required, "web_search") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill")
+	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "web_search") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_speech", "search", "web_search", "audio", "prompt_cache", "assistant_prefill"} {
+	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_speech", "ocr", "search", "web_search", "audio", "prompt_cache", "assistant_prefill"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

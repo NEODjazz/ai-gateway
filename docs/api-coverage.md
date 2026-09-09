@@ -37,7 +37,7 @@ availability is not inferred from these tests.
 | Text to speech | Authenticated `/v1/audio/speech`, strict bounded text/voice/options, shared text policy, explicit capability routing, compatible/Azure transport, bounded binary audio, retries, token quotas and exact Unicode character settlement | SSE event streaming, additional native provider adapters and duration-priced models |
 | Realtime | Not implemented | Session authorization, WebSocket lifecycle, quotas and usage settlement |
 | Videos | Not implemented | Durable owned jobs, polling/cancellation and artifact accounting |
-| OCR | Not implemented | Document validation, native execution and page accounting |
+| OCR | Authenticated `/v1/ocr` for bounded HTTPS or inline PDF/image input, zero-based page selection, annotation options, DLP/AV projection, explicit native Mistral capability routing, bounded response validation, retries and exact processed-page settlement | Owner-scoped file references and additional native provider adapters |
 | Moderation | Text batches and text/image input through the shared authentication, policy, routing, retry, observability and billing lifecycle; compatible and native Mistral provider adapters | Additional native provider protocols and credentialed image conformance tests |
 | Apply guardrail | Authenticated public execution with attached-policy authorization, access groups, RPM/TPM, fail-closed durable audit, bounded DLP/AV scans and metadata-only monitoring | Additional scanner protocols when justified by configured policy needs |
 | Batches | Not implemented | Durable jobs, files/results, quotas and idempotent batch settlement |

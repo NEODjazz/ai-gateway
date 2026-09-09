@@ -11,6 +11,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "image_variation", label: "Image variations", description: "Create variations of uploaded images" },
   { value: "audio_transcription", label: "Audio transcription", description: "Transcribe uploaded audio" },
   { value: "audio_speech", label: "Text to speech", description: "Generate speech audio from text" },
+  { value: "ocr", label: "OCR", description: "Extract structured text from documents and images" },
   { value: "search", label: "Search", description: "Execute standalone search requests" },
   { value: "stream", label: "Stream", description: "Streaming responses" },
   { value: "tools", label: "Tools", description: "Function and tool calling" },

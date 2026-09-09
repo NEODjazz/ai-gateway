@@ -57,3 +57,34 @@ func TestSearchRejectsInvalidJSONBeforeProvider(t *testing.T) {
 		}
 	}
 }
+
+func TestOCRUsesAuthenticatedPolicyAndPageAdmission(t *testing.T) {
+	llm := &chatProvider{}
+	rates := &embeddingTokenRateStore{}
+	handler := Routes(NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"ocr-*"}}}), llm, rates))
+	request := httptest.NewRequest(http.MethodPost, "/v1/ocr", strings.NewReader(`{"provider":"mistral-private","model":"ocr-document","document":{"type":"document_url","document_url":"https://example.test/invoice.pdf"},"pages":"0,2-4"}`))
+	request.Header.Set("Authorization", "Bearer client-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || llm.request.OCRRequest == nil || llm.request.APIKey != "" || llm.request.InputPages != 4 || !strings.Contains(response.Body.String(), `"pages_processed":1`) {
+		t.Fatalf("status=%d body=%s context=%+v", response.Code, response.Body.String(), llm.request)
+	}
+	if rates.tokens != llm.request.OCRRequest.InputTokens() {
+		t.Fatalf("TPM=%d want=%d", rates.tokens, llm.request.OCRRequest.InputTokens())
+	}
+}
+
+func TestOCRRejectsInvalidJSONBeforeProvider(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"ocr","document":{"type":"document_url","document_url":"http://example.test/a.pdf"}}`,
+		`{"model":"ocr","document":{"type":"file","document_url":"https://example.test/a.pdf"}}`,
+		`{"model":"ocr","document":{"type":"document_url","document_url":"https://example.test/a.pdf"},"unknown":true}`,
+	} {
+		llm := &chatProvider{}
+		response := httptest.NewRecorder()
+		Routes(NewHandler(modules.NewPipeline(nil), llm)).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/ocr", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest || llm.request.OCRRequest != nil {
+			t.Fatalf("status=%d body=%s provider_request=%+v", response.Code, response.Body.String(), llm.request.OCRRequest)
+		}
+	}
+}

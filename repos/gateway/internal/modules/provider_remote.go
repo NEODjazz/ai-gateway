@@ -111,6 +111,15 @@ func requestImageAttachments(req *RequestContext) ([]openai.ImageAttachment, err
 			attachments = append(attachments, openai.ImageAttachment{MediaType: reference.MediaType, Data: reference.Data})
 		}
 	}
+	if req.OCRRequest != nil {
+		attachment, err := req.OCRRequest.Document.Attachment()
+		if err != nil {
+			return nil, err
+		}
+		if attachment != nil {
+			attachments = append(attachments, *attachment)
+		}
+	}
 	if req.ResponseRequest == nil {
 		if req.ModerationRequest == nil {
 			return attachments, nil
@@ -191,6 +200,9 @@ func scanPayload(req *RequestContext) string {
 		for _, name := range req.AudioTranscriptionRequest.KnownSpeakerNames {
 			parts = append(parts, "known_speaker_name: "+name)
 		}
+	}
+	if req.OCRRequest != nil && req.OCRRequest.DocumentAnnotationPrompt != "" {
+		parts = append(parts, "ocr_annotation_prompt: "+req.OCRRequest.DocumentAnnotationPrompt)
 	}
 	return strings.Join(parts, "\n")
 }

@@ -1296,6 +1296,57 @@ func (h Handler) Search(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h Handler) OCR(w http.ResponseWriter, r *http.Request) {
+	var request openai.OCRRequest
+	if !decodeInferenceRequest(w, r, &request) {
+		return
+	}
+	if message := request.Validate(); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
+	reqCtx := modules.RequestContext{
+		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r),
+		OCRRequest: &request,
+		InputPages: request.ReservePages(),
+		Request:    openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model},
+		Metadata:   map[string]string{"gateway.api_type": "ocr"},
+	}
+	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
+		return
+	}
+	reqCtx.APIKey = ""
+	if reqCtx.OCRRequest == nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
+		return
+	}
+	request = *reqCtx.OCRRequest
+	reqCtx.InputPages = request.ReservePages()
+	if message := request.Validate(); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid OCR request")
+		return
+	}
+	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, request.InputTokens()) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+		return
+	}
+	ocrProvider, ok := h.provider.(provider.OCRProvider)
+	if !ok {
+		writeError(w, http.StatusBadGateway, "provider_failed", "OCR is not supported by the configured provider")
+		return
+	}
+	response, err := ocrProvider.OCR(r.Context(), reqCtx)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func validateRerankRequest(request openai.RerankRequest) string {
 	if strings.TrimSpace(request.Model) == "" {
 		return "model is required"

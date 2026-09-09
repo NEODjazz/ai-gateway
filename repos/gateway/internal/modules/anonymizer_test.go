@@ -118,6 +118,18 @@ func TestAnonymizerMasksAudioTranscriptionHints(t *testing.T) {
 	}
 }
 
+func TestAnonymizerMasksOCRPromptWithoutChangingDocument(t *testing.T) {
+	document := "data:application/pdf;base64,JVBERi0xLjcK"
+	request := openai.OCRRequest{Model: "ocr", Document: openai.OCRDocument{Type: "document_url", DocumentURL: document}, DocumentAnnotationPrompt: "extract user@example.com"}
+	req := RequestContext{OCRRequest: &request}
+	if err := NewAnonymizerModule(true, RuleEmail).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if request.DocumentAnnotationPrompt != "extract {{EMAIL_1}}" || request.Document.DocumentURL != document {
+		t.Fatalf("request=%+v", request)
+	}
+}
+
 func TestAnonymizerMasksImageEditPromptWithoutChangingAttachments(t *testing.T) {
 	attachment := openai.ImageAttachment{MediaType: "image/png", Data: "iVBORw0KGgpmaXh0dXJl"}
 	request := openai.ImageEditRequest{Model: "image", Prompt: "remove user@example.com", Images: []openai.ImageAttachment{attachment}}

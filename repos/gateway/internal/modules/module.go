@@ -59,6 +59,8 @@ type RequestContext struct {
 	AudioSpeechResponse        *openai.AudioSpeechResponse        `json:"-"`
 	SearchRequest              *openai.SearchRequest              `json:"search_request,omitempty"`
 	SearchResponse             *openai.SearchResponse             `json:"search_response,omitempty"`
+	OCRRequest                 *openai.OCRRequest                 `json:"ocr_request,omitempty"`
+	OCRResponse                *openai.OCRResponse                `json:"ocr_response,omitempty"`
 	Usage                      *openai.Usage                      `json:"usage,omitempty"`
 	Metadata                   map[string]string                  `json:"metadata,omitempty"`
 	AnonymizationValues        map[string]string                  `json:"anonymization_values,omitempty"`

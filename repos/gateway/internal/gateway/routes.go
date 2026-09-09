@@ -42,6 +42,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/v1/audio/transcriptions"}, func(h Handler) http.Handler { return http.HandlerFunc(h.TranscribeAudio) }},
 	{RouteContract{http.MethodPost, "/v1/audio/speech"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GenerateSpeech) }},
 	{RouteContract{http.MethodPost, "/v1/search"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Search) }},
+	{RouteContract{http.MethodPost, "/v1/ocr"}, func(h Handler) http.Handler { return http.HandlerFunc(h.OCR) }},
 	{RouteContract{http.MethodPost, "/guardrails/apply_guardrail"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ApplyGuardrail) }},
 	{RouteContract{http.MethodGet, "/admin/v1/session"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetAdminSession) }},
 	{RouteContract{http.MethodGet, "/admin/v1/keys"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListVirtualKeys) }},

@@ -177,6 +177,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.APIType = "audio_speech"
 	case "search":
 		request.APIType = "search"
+	case "ocr":
+		request.APIType = "ocr"
 	}
 	if request.OutputTokens == 0 && req.CompletionRequest == nil {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
@@ -265,6 +267,17 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.SearchRequests = req.SearchRequest.SearchUnits()
 		request.SearchRequestsEstimated = false
 		request.UsageEstimated = false
+	}
+	if req.OCRRequest != nil {
+		request.Provider = req.OCRRequest.Provider
+		request.Model = req.OCRRequest.Model
+		request.APIType = "ocr"
+		request.InputTokens = req.OCRRequest.InputTokens()
+		request.PromptTokensEstimated = request.InputTokens
+		request.OutputTokens = 0
+		request.TotalTokens = request.InputTokens
+		request.InputPages = req.InputPages
+		request.UsageEstimated = true
 	}
 	if req.Response != nil {
 		request.Phase = "commit"
@@ -383,6 +396,12 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.SearchRequests = req.SearchResponse.Usage.SearchRequests
 		request.SearchRequestsEstimated = false
 		request.UsageEstimated = false
+	}
+	if req.OCRResponse != nil {
+		request.Phase = "commit"
+		request.UpstreamModel = req.OCRResponse.Model
+		request.InputPages = req.OCRResponse.UsageInfo.PagesProcessed
+		request.UsageEstimated = true
 	}
 	if originalModel := metadataValue(req.Metadata, "provider.original_model"); originalModel != "" {
 		request.Model = originalModel

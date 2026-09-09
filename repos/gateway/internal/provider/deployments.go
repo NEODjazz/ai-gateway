@@ -327,7 +327,7 @@ func (r *Router) validateDeployment(deployment ModelDeployment) error {
 func validDeploymentCapabilities(capabilities []string) bool {
 	allowed := map[string]bool{
 		"chat": true, "responses": true, "embeddings": true, "rerank": true,
-		"stream": true, "tools": true, "structured_output": true, "mcp": true, "vision": true, "web_search": true, "search": true, "audio": true, "prompt_cache": true, "image_generation": true, "image_edit": true, "image_variation": true, "audio_transcription": true, "audio_speech": true,
+		"stream": true, "tools": true, "structured_output": true, "mcp": true, "vision": true, "web_search": true, "search": true, "audio": true, "prompt_cache": true, "image_generation": true, "image_edit": true, "image_variation": true, "audio_transcription": true, "audio_speech": true, "ocr": true,
 	}
 	seen := make(map[string]bool, len(capabilities))
 	for _, capability := range capabilities {

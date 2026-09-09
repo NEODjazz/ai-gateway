@@ -259,6 +259,23 @@ func TestRemoteBillingSettlesStandaloneSearchAsOneUnit(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingReservesAndSettlesOCRPages(t *testing.T) {
+	ocr := openai.OCRRequest{Provider: "mistral", Model: "ocr-document", Document: openai.OCRDocument{Type: "document_url", DocumentURL: "https://example.test/document.pdf"}, Pages: "0,2-4"}
+	req := RequestContext{
+		RequestID: "ocr-request", Request: openai.ChatCompletionRequest{Provider: ocr.Provider, Model: ocr.Model},
+		OCRRequest: &ocr, InputPages: ocr.ReservePages(), Metadata: map[string]string{"gateway.api_type": "ocr"},
+	}
+	reserve := billingRequest(&req)
+	if reserve.Phase != "reserve" || reserve.APIType != "ocr" || reserve.Model != "ocr-document" || reserve.InputPages != 4 || reserve.OutputTokens != 0 || reserve.TotalTokens != ocr.InputTokens() || !reserve.UsageEstimated {
+		t.Fatalf("reserve=%+v", reserve)
+	}
+	req.OCRResponse = &openai.OCRResponse{Model: "ocr-document-2026", Pages: []json.RawMessage{json.RawMessage(`{"index":0,"markdown":"text"}`)}, UsageInfo: openai.OCRUsageInfo{PagesProcessed: 1}}
+	commit := billingRequest(&req)
+	if commit.Phase != "commit" || commit.UpstreamModel != "ocr-document-2026" || commit.InputPages != 1 || commit.TotalTokens != ocr.InputTokens() || !commit.UsageEstimated {
+		t.Fatalf("commit=%+v", commit)
+	}
+}
+
 func TestRemoteBillingReservesAndCommitsProviderSearchUsage(t *testing.T) {
 	req := sensitiveContext()
 	req.Request.WebSearchOptions = &openai.ChatWebSearchOptions{SearchContextSize: "medium"}

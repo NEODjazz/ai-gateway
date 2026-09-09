@@ -298,6 +298,11 @@ func (p *chatProvider) Search(_ context.Context, req modules.RequestContext) (op
 	return openai.SearchResponse{Object: "search", Model: model, Results: []openai.SearchResult{{Title: "Result", URL: "https://example.test/result", Snippet: "found"}}, Usage: openai.Usage{SearchRequests: 1}}, nil
 }
 
+func (p *chatProvider) OCR(_ context.Context, req modules.RequestContext) (openai.OCRResponse, error) {
+	p.request = req
+	return openai.OCRResponse{Pages: []json.RawMessage{json.RawMessage(`{"index":0,"markdown":"text","images":[]}`)}, Model: req.OCRRequest.Model, UsageInfo: openai.OCRUsageInfo{PagesProcessed: 1}}, nil
+}
+
 func (p *chatProvider) CompactResponse(_ context.Context, req modules.RequestContext) (openai.CompactedResponse, error) {
 	p.request = req
 	return openai.CompactedResponse{
