@@ -183,6 +183,12 @@ func TestMistralChatUsesNativeRandomSeedInJSONAndStreaming(t *testing.T) {
 		if request["random_seed"] != float64(17) {
 			t.Fatalf("random_seed=%#v", request["random_seed"])
 		}
+		if request["max_tokens"] != float64(64) {
+			t.Fatalf("max_tokens=%#v", request["max_tokens"])
+		}
+		if _, found := request["max_completion_tokens"]; found {
+			t.Fatalf("max_completion_tokens leaked into Mistral request: %#v", request)
+		}
 		expectedSafePrompt := request["stream"] != true
 		if request["safe_prompt"] != expectedSafePrompt {
 			t.Fatalf("safe_prompt=%#v want %v", request["safe_prompt"], expectedSafePrompt)
@@ -209,10 +215,11 @@ func TestMistralChatUsesNativeRandomSeedInJSONAndStreaming(t *testing.T) {
 	defer server.Close()
 
 	seed := int64(17)
+	maxCompletionTokens := 64
 	safePrompt := true
 	prefix := true
 	client := NewMistral(server.URL, "provider-key", true)
-	request := openai.ChatCompletionRequest{Model: "mistral-small", Messages: []openai.Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "The answer is", Prefix: &prefix}}, Seed: &seed, ChatGenerationOptions: openai.ChatGenerationOptions{SafePrompt: &safePrompt, PromptMode: "reasoning"}}
+	request := openai.ChatCompletionRequest{Model: "mistral-small", Messages: []openai.Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "The answer is", Prefix: &prefix}}, Seed: &seed, MaxCompletionTokens: &maxCompletionTokens, ChatGenerationOptions: openai.ChatGenerationOptions{SafePrompt: &safePrompt, PromptMode: "reasoning"}}
 	response, err := client.ChatCompletions(t.Context(), request)
 	if err != nil || openai.ContentText(response.Choices[0].Message.Content) != "json" || response.Usage.TotalTokens != 3 {
 		t.Fatalf("response=%+v err=%v", response, err)

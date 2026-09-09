@@ -153,10 +153,14 @@ func (p OpenAICompatible) providerName() string {
 	return p.errorProvider
 }
 
-func (p OpenAICompatible) mapChatSeed(request *openAICompatibleChatRequest) {
+func (p OpenAICompatible) mapChatParameters(request *openAICompatibleChatRequest) {
 	if p.providerName() == "mistral" {
 		request.RandomSeed = request.Seed
 		request.Seed = nil
+		if request.MaxCompletionTokens != nil {
+			request.MaxTokens = request.MaxCompletionTokens
+			request.MaxCompletionTokens = nil
+		}
 	}
 }
 
@@ -448,7 +452,7 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 		Temperature: request.Temperature, TopP: request.TopP,
 		Stop: request.Stop, Seed: request.Seed,
 	}
-	p.mapChatSeed(&upstreamRequest)
+	p.mapChatParameters(&upstreamRequest)
 	if upstreamRequest.Stream {
 		upstreamRequest.StreamOptions = chatStreamOptions(request)
 	}
@@ -624,7 +628,7 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 		Temperature: request.Temperature, TopP: request.TopP,
 		Stop: request.Stop, Seed: request.Seed,
 	}
-	p.mapChatSeed(&upstreamRequest)
+	p.mapChatParameters(&upstreamRequest)
 	upstreamRequest.StreamOptions = chatStreamOptions(request)
 	resp, err := p.chatCompletionResponse(ctx, &upstreamRequest)
 	if err != nil {

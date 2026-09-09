@@ -167,8 +167,8 @@ OpenAI-compatible adapter один раз повторяет запрос с
 `max_completion_tokens`, только когда upstream явно отверг legacy
 `max_tokens`. Unsupported non-default `temperature` не переписывается
 молча: клиент должен отправить допустимое для модели значение.
-Mistral Chat преобразует публичный `seed` в native `random_seed`, а embeddings
-`dimensions` в `output_dimension`; JSON, SSE и embeddings responses проходят
+Mistral Chat преобразует публичные `seed` и `max_completion_tokens` в native
+`random_seed` и `max_tokens`, а embeddings `dimensions` в `output_dimension`; JSON, SSE и embeddings responses проходят
 общую bounded validation и reported usage accounting.
 Ошибки transport и parameter validation сохраняют provider identity `mistral`.
 Mistral embeddings принимает только строку или массив строк; token-ID input,
