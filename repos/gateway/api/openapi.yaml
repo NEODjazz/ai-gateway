@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.96
+  version: 0.1.97
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -280,6 +280,29 @@ paths:
       responses:
         '200':
           description: Edited images and provider-reported token usage
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ImageGenerationResponse'}
+        default:
+          description: Gateway or provider error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/images/variations:
+    post:
+      operationId: createImageVariation
+      tags: [Inference]
+      summary: Create variations of an uploaded image through an explicitly capable deployment
+      description: Applies bounded multipart decoding, image signature checks, gateway policy, AV scanning, RPM/TPM admission, retries and billing settlement.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: {$ref: '#/components/schemas/ImageVariationRequest'}
+      responses:
+        '200':
+          description: Image variations and provider-reported token usage
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ImageGenerationResponse'}
@@ -2946,7 +2969,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, stream, tools, structured_output, mcp, vision, web_search, audio]}
+          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, stream, tools, structured_output, mcp, vision, web_search, audio]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -4268,6 +4291,18 @@ components:
         background: {type: string, enum: [auto, transparent, opaque]}
         output_format: {type: string, enum: [png, webp, jpeg]}
         output_compression: {type: integer, minimum: 0, maximum: 100}
+    ImageVariationRequest:
+      type: object
+      additionalProperties: false
+      required: [image, model]
+      properties:
+        image: {type: string, format: binary, description: "PNG, JPEG, GIF or WebP image up to 8 MiB"}
+        provider: {type: string, description: Optional exact deployment selector}
+        model: {type: string, minLength: 1}
+        n: {type: integer, minimum: 1, maximum: 10, default: 1}
+        response_format: {type: string, enum: [url, b64_json]}
+        size: {type: string, enum: [256x256, 512x512, 1024x1024]}
+        user: {type: string, maxLength: 256}
     ImageGenerationResponse:
       type: object
       required: [created, data, usage]

@@ -91,6 +91,85 @@ func decodeImageEditRequest(w http.ResponseWriter, r *http.Request) (openai.Imag
 	return request, true
 }
 
+func decodeImageVariationRequest(w http.ResponseWriter, r *http.Request) (openai.ImageVariationRequest, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, openai.MaxInferenceBodyBytes)
+	reader, err := r.MultipartReader()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "multipart/form-data is required")
+		return openai.ImageVariationRequest{}, false
+	}
+	var request openai.ImageVariationRequest
+	seen := map[string]bool{}
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid or oversized multipart body")
+			return openai.ImageVariationRequest{}, false
+		}
+		name := part.FormName()
+		limit := int64(maxImageFormFieldBytes + 1)
+		if name == "image" {
+			limit = int64(openai.MaxImageBytes + 1)
+		}
+		value, readErr := io.ReadAll(io.LimitReader(part, limit))
+		_ = part.Close()
+		if readErr != nil || seen[name] {
+			writeError(w, http.StatusBadRequest, "invalid_request", "repeated or unreadable multipart field")
+			return openai.ImageVariationRequest{}, false
+		}
+		seen[name] = true
+		if name == "image" {
+			if len(value) == 0 || len(value) > openai.MaxImageBytes {
+				writeError(w, http.StatusBadRequest, "invalid_image", "image file is empty or exceeds the per-file limit")
+				return openai.ImageVariationRequest{}, false
+			}
+			attachment, attachmentErr := multipartImageAttachment(part.Header.Get("Content-Type"), value)
+			if attachmentErr != nil {
+				writeError(w, http.StatusBadRequest, "invalid_image", attachmentErr.Error())
+				return openai.ImageVariationRequest{}, false
+			}
+			request.Image = attachment
+			continue
+		}
+		if part.FileName() != "" || len(value) > maxImageFormFieldBytes || !setImageVariationField(&request, name, string(value)) {
+			writeError(w, http.StatusBadRequest, "invalid_request", "unknown or malformed multipart field")
+			return openai.ImageVariationRequest{}, false
+		}
+	}
+	if message := request.Validate(); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return openai.ImageVariationRequest{}, false
+	}
+	return request, true
+}
+
+func setImageVariationField(request *openai.ImageVariationRequest, name, value string) bool {
+	switch name {
+	case "provider":
+		request.Provider = value
+	case "model":
+		request.Model = value
+	case "response_format":
+		request.ResponseFormat = value
+	case "size":
+		request.Size = value
+	case "user":
+		request.User = value
+	case "n":
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return false
+		}
+		request.N = &parsed
+	default:
+		return false
+	}
+	return true
+}
+
 func multipartImageAttachment(contentType string, data []byte) (openai.ImageAttachment, error) {
 	mediaType, _, err := mime.ParseMediaType(contentType)
 	if err != nil || mediaType == "" || mediaType == "application/octet-stream" {

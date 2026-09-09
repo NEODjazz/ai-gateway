@@ -1065,6 +1065,51 @@ func (h Handler) EditImage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h Handler) CreateImageVariation(w http.ResponseWriter, r *http.Request) {
+	request, ok := decodeImageVariationRequest(w, r)
+	if !ok {
+		return
+	}
+	reqCtx := modules.RequestContext{
+		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r),
+		ImageVariationRequest: &request,
+		Request:               openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model},
+		Metadata:              map[string]string{"gateway.api_type": "image_variation"},
+	}
+	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
+		return
+	}
+	reqCtx.APIKey = ""
+	if reqCtx.ImageVariationRequest == nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
+		return
+	}
+	request = *reqCtx.ImageVariationRequest
+	if message := request.Validate(); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid image variation request")
+		return
+	}
+	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateImageVariationTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+		return
+	}
+	imageProvider, ok := h.provider.(provider.ImageVariationProvider)
+	if !ok {
+		writeError(w, http.StatusBadGateway, "provider_failed", "image variations are not supported by the configured provider")
+		return
+	}
+	response, err := imageProvider.CreateImageVariation(r.Context(), reqCtx)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func validateRerankRequest(request openai.RerankRequest) string {
 	if strings.TrimSpace(request.Model) == "" {
 		return "model is required"

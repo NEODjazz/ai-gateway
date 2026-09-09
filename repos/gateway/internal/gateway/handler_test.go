@@ -277,6 +277,11 @@ func (p *chatProvider) EditImage(_ context.Context, req modules.RequestContext) 
 	return openai.ImageGenerationResponse{Created: 7, Data: []openai.ImageData{{URL: "https://images.example/edited.png"}}, Usage: &openai.ImageUsage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8}}, nil
 }
 
+func (p *chatProvider) CreateImageVariation(_ context.Context, req modules.RequestContext) (openai.ImageGenerationResponse, error) {
+	p.request = req
+	return openai.ImageGenerationResponse{Created: 7, Data: []openai.ImageData{{URL: "https://images.example/variation.png"}}, Usage: &openai.ImageUsage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8}}, nil
+}
+
 func (p *chatProvider) CompactResponse(_ context.Context, req modules.RequestContext) (openai.CompactedResponse, error) {
 	p.request = req
 	return openai.CompactedResponse{

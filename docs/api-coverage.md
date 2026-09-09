@@ -31,7 +31,7 @@ availability is not inferred from these tests.
 | Interactions | Not implemented | Native lifecycle, resource ownership and accounting |
 | Image generation | Authenticated `/v1/images/generations`, explicit capability routing, compatible/Azure transport, bounded URL/base64 results, retries and token-usage settlement | Native provider adapters, streaming and image-specific non-token pricing |
 | Image edits | Authenticated `/v1/images/edits`, bounded multipart images/mask, signature validation, DLP/AV projection, explicit capability routing, compatible/Azure transport and token settlement | Provider-specific editing options and image-specific non-token pricing |
-| Image variations | Not implemented | Multipart contract and image accounting |
+| Image variations | Authenticated `/v1/images/variations`, bounded multipart image, signature validation, AV projection, explicit capability routing, compatible/Azure transport and token settlement | Provider-specific variation options and image-specific non-token pricing |
 | Audio transcription | Not implemented | Multipart audio validation, duration limits and accounting |
 | Text to speech | Not implemented | Binary/stream output and character/audio accounting |
 | Realtime | Not implemented | Session authorization, WebSocket lifecycle, quotas and usage settlement |

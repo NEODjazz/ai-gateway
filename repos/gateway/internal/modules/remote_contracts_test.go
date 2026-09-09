@@ -292,6 +292,25 @@ func TestImageEditBillingReserveAndSettlement(t *testing.T) {
 	}
 }
 
+func TestImageVariationBillingReserveAndSettlement(t *testing.T) {
+	n := 2
+	attachment := openai.ImageAttachment{MediaType: "image/png", Data: "iVBORw0KGgpmaXh0dXJl"}
+	req := &RequestContext{
+		Request:               openai.ChatCompletionRequest{Model: "image-model"},
+		ImageVariationRequest: &openai.ImageVariationRequest{Model: "image-model", Image: attachment, N: &n},
+		Metadata:              map[string]string{"gateway.api_type": "image_variation"},
+	}
+	reserved := billingRequest(req)
+	if reserved.APIType != "image_variation" || reserved.InputTokens != openai.ImageVariationInputTokens(*req.ImageVariationRequest) || reserved.OutputTokens != 2*openai.DefaultOutputTokenReserve || reserved.TotalTokens != reserved.InputTokens+reserved.OutputTokens {
+		t.Fatalf("reserve=%+v", reserved)
+	}
+	req.ImageGenerationResponse = &openai.ImageGenerationResponse{Usage: &openai.ImageUsage{InputTokens: 5, OutputTokens: 13, TotalTokens: 18}}
+	settled := billingRequest(req)
+	if settled.Phase != "commit" || settled.APIType != "image_variation" || settled.InputTokens != 5 || settled.OutputTokens != 13 || settled.TotalTokens != 18 || settled.UsageEstimated {
+		t.Fatalf("settlement=%+v", settled)
+	}
+}
+
 func TestRemoteBillingCommitsCompactionUsageSeparately(t *testing.T) {
 	req := sensitiveContext()
 	req.ResponseRequest = &openai.ResponseRequest{Provider: "provider", Model: "compact-model", Input: "private input", Instructions: "private instructions"}

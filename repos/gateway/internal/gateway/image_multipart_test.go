@@ -77,3 +77,39 @@ func TestImageEditRejectsMalformedMultipartBeforeProvider(t *testing.T) {
 		})
 	}
 }
+
+func TestImageVariationUsesAuthenticatedPipelineAndReservesTPM(t *testing.T) {
+	llm := &chatProvider{}
+	rates := &embeddingTokenRateStore{}
+	handler := Routes(NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"image-*"}}}), llm, rates))
+	body, contentType := imageEditHTTPBody(t, map[string]string{"provider": "images", "model": "image-model", "n": "2", "size": "512x512"}, map[string][]byte{"image": testPNG})
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/variations", body)
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("Authorization", "Bearer client-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || llm.request.ImageVariationRequest == nil || llm.request.APIKey != "" {
+		t.Fatalf("status=%d body=%s context=%+v", response.Code, response.Body.String(), llm.request)
+	}
+	if rates.tokens != openai.ImageVariationReserveTokens(*llm.request.ImageVariationRequest) {
+		t.Fatalf("TPM reserve=%d", rates.tokens)
+	}
+}
+
+func TestImageVariationRejectsUnknownAndRepeatedFields(t *testing.T) {
+	llm := &chatProvider{}
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("model", "image")
+	_ = writer.WriteField("model", "duplicate")
+	part, _ := writer.CreateFormFile("image", "image.png")
+	_, _ = part.Write(testPNG)
+	_ = writer.Close()
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/variations", body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	Routes(NewHandler(modules.NewPipeline(nil), llm)).ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || llm.request.ImageVariationRequest != nil {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}

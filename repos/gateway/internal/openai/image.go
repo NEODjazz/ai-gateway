@@ -39,6 +39,50 @@ type ImageEditRequest struct {
 	OutputCompression *int              `json:"output_compression,omitempty"`
 }
 
+type ImageVariationRequest struct {
+	Provider       string          `json:"provider,omitempty"`
+	Model          string          `json:"model"`
+	Image          ImageAttachment `json:"image"`
+	N              *int            `json:"n,omitempty"`
+	ResponseFormat string          `json:"response_format,omitempty"`
+	Size           string          `json:"size,omitempty"`
+	User           string          `json:"user,omitempty"`
+}
+
+func (r ImageVariationRequest) Validate() string {
+	if strings.TrimSpace(r.Model) == "" {
+		return "model is required"
+	}
+	if err := ValidateImageAttachments([]ImageAttachment{r.Image}); err != nil {
+		return err.Error()
+	}
+	if utf8.RuneCountInString(r.User) > 256 {
+		return "user must contain at most 256 characters"
+	}
+	if r.N != nil && (*r.N < 1 || *r.N > MaxGeneratedImages) {
+		return "n must be between 1 and 10"
+	}
+	if !oneOfOrEmpty(r.ResponseFormat, "url", "b64_json") {
+		return "response_format must be url or b64_json"
+	}
+	if !oneOfOrEmpty(r.Size, "256x256", "512x512", "1024x1024") {
+		return "unsupported size value"
+	}
+	return ""
+}
+
+func (r ImageVariationRequest) GenerationRequest() ImageGenerationRequest {
+	return ImageGenerationRequest{Provider: r.Provider, Model: r.Model, Prompt: "variation", N: r.N, ResponseFormat: r.ResponseFormat, Size: r.Size, User: r.User}
+}
+
+func ImageVariationInputTokens(r ImageVariationRequest) int {
+	return imageAttachmentTokens([]ImageAttachment{r.Image})
+}
+
+func ImageVariationReserveTokens(r ImageVariationRequest) int {
+	return ReserveTokens(ImageVariationInputTokens(r), ImageGenerationOutputReserve(r.GenerationRequest()))
+}
+
 func (r ImageEditRequest) Validate() string {
 	if len(r.Images) == 0 || len(r.Images) > MaxImageAttachments {
 		return "between 1 and 8 images are required"
@@ -74,6 +118,16 @@ func ImageEditInputTokens(r ImageEditRequest) int {
 	if r.Mask != nil {
 		attachments = append(attachments, *r.Mask)
 	}
+	attachmentTokens := imageAttachmentTokens(attachments)
+	limit := int(^uint(0) >> 1)
+	if tokens > limit-attachmentTokens {
+		return limit
+	}
+	return tokens + attachmentTokens
+}
+
+func imageAttachmentTokens(attachments []ImageAttachment) int {
+	tokens := 0
 	limit := int(^uint(0) >> 1)
 	for _, attachment := range attachments {
 		decoded, err := base64.StdEncoding.DecodeString(attachment.Data)

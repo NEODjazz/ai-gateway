@@ -11,6 +11,7 @@ describe("modelCapabilityOptions", () => {
       "moderation",
       "image_generation",
       "image_edit",
+      "image_variation",
       "stream",
       "tools",
       "structured_output",

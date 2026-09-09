@@ -93,6 +93,12 @@ func requestImageAttachments(req *RequestContext) ([]openai.ImageAttachment, err
 			return nil, err
 		}
 	}
+	if req.ImageVariationRequest != nil {
+		attachments = append(attachments, req.ImageVariationRequest.Image)
+		if err := openai.ValidateImageAttachments(attachments); err != nil {
+			return nil, err
+		}
+	}
 	if req.ResponseRequest == nil {
 		if req.ModerationRequest == nil {
 			return attachments, nil

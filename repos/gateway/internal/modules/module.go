@@ -49,6 +49,7 @@ type RequestContext struct {
 	ModerationResponse      *openai.ModerationResponse      `json:"moderation_response,omitempty"`
 	ImageGenerationRequest  *openai.ImageGenerationRequest  `json:"image_generation_request,omitempty"`
 	ImageEditRequest        *openai.ImageEditRequest        `json:"image_edit_request,omitempty"`
+	ImageVariationRequest   *openai.ImageVariationRequest   `json:"image_variation_request,omitempty"`
 	ImageGenerationResponse *openai.ImageGenerationResponse `json:"image_generation_response,omitempty"`
 	Usage                   *openai.Usage                   `json:"usage,omitempty"`
 	Metadata                map[string]string               `json:"metadata,omitempty"`

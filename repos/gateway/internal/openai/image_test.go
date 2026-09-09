@@ -54,3 +54,22 @@ func TestImageEditRequestValidationAndReserve(t *testing.T) {
 		t.Fatal("mismatched image media type was accepted")
 	}
 }
+
+func TestImageVariationRequestValidationAndReserve(t *testing.T) {
+	attachment, err := ParseDataImageURL("data:image/png;base64,iVBORw0KGgpmaXh0dXJl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 2
+	request := ImageVariationRequest{Model: "image", Image: attachment, N: &n, Size: "512x512"}
+	if message := request.Validate(); message != "" {
+		t.Fatal(message)
+	}
+	if got := ImageVariationReserveTokens(request); got != ImageVariationInputTokens(request)+2*DefaultOutputTokenReserve || ImageVariationInputTokens(request) == 0 {
+		t.Fatalf("input=%d reserve=%d", ImageVariationInputTokens(request), got)
+	}
+	request.Size = "1792x1024"
+	if message := request.Validate(); message == "" {
+		t.Fatal("unsupported variation size was accepted")
+	}
+}

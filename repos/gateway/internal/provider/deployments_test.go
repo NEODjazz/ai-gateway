@@ -42,7 +42,7 @@ func TestModelDeploymentUpdateChangesRuntimeCandidates(t *testing.T) {
 }
 
 func TestDeploymentCapabilitiesAcceptImageOperations(t *testing.T) {
-	if !validDeploymentCapabilities([]string{"image_generation", "image_edit"}) {
+	if !validDeploymentCapabilities([]string{"image_generation", "image_edit", "image_variation"}) {
 		t.Fatal("image capabilities were rejected")
 	}
 }

@@ -45,6 +45,7 @@ upstream. Распознаваемые параметры перечислены
 | `/v1/moderations` | `provider`, `model`, `input`, `metadata` |
 | `/v1/images/generations` | `provider`, `model`, `prompt`, `n`, `quality`, `response_format`, `size`, `style`, `user`, `background`, `output_format`, `output_compression` |
 | `/v1/images/edits` | Multipart: `image`/`image[]`, `mask`, `provider`, `model`, `prompt`, `n`, `quality`, `response_format`, `size`, `user`, `background`, `output_format`, `output_compression` |
+| `/v1/images/variations` | Multipart: `image`, `provider`, `model`, `n`, `response_format`, `size`, `user` |
 
 Матрица описывает входной контракт gateway; возможности конкретной модели и
 adapter дополнительно ограничивают допустимые запросы. `provider` управляет
@@ -162,7 +163,7 @@ adapter использует совместимый JSON transport, включа
 либо корректный base64 размером до 20 MiB после декодирования. Token usage
 обязателен и должен быть неотрицательным с точной суммой; ответ без usage
 отклоняется, поскольку gateway не может надежно начислить такой вызов. Streaming,
-multipart variations и модели с оплатой только за image остаются отдельными
+модели с оплатой только за image остаются отдельными
 контрактами.
 
 `POST /v1/images/edits` принимает `multipart/form-data` только для deployment и
@@ -173,6 +174,12 @@ model с capability `image_edit`. Допускается до 8 файлов с�
 в AV. Неизвестные и повторные scalar fields отклоняются. TPM reserve и billing
 settlement используют тот же bounded output contract, что и generation; успешный
 provider response обязан содержать точный token usage.
+
+`POST /v1/images/variations` принимает одно проверенное изображение размером до
+8 MiB для deployment и model с capability `image_variation`. Изображение
+передается в AV без текстовой проекции. TPM и billing reserve учитывают bounded
+image input и число запрошенных результатов; успешный ответ проходит общий
+validator количества, URL/base64 и точного token usage.
 
 `POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
 

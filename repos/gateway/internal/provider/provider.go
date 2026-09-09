@@ -140,6 +140,14 @@ type ImageEditClient interface {
 	EditImage(ctx context.Context, request openai.ImageEditRequest) (openai.ImageGenerationResponse, error)
 }
 
+type ImageVariationProvider interface {
+	CreateImageVariation(ctx context.Context, req modules.RequestContext) (openai.ImageGenerationResponse, error)
+}
+
+type ImageVariationClient interface {
+	CreateImageVariation(ctx context.Context, request openai.ImageVariationRequest) (openai.ImageGenerationResponse, error)
+}
+
 type MCPClient interface {
 	SupportsMCP() bool
 }
@@ -1309,6 +1317,90 @@ func (r Router) EditImage(ctx context.Context, req modules.RequestContext) (open
 	return openai.ImageGenerationResponse{}, joined
 }
 
+func (r Router) CreateImageVariation(ctx context.Context, req modules.RequestContext) (openai.ImageGenerationResponse, error) {
+	if req.ImageVariationRequest == nil {
+		return openai.ImageGenerationResponse{}, errors.New("missing image variation request")
+	}
+	request := *req.ImageVariationRequest
+	if message := request.Validate(); message != "" {
+		return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "image_variation")
+	if len(candidates) == 0 {
+		return openai.ImageGenerationResponse{}, fmt.Errorf("no image variation endpoint for provider=%q model=%q", request.Provider, request.Model)
+	}
+	var errs []error
+	var lastAttempt *modules.RequestContext
+	totalRetries, fallbackCount := 0, 0
+	progress := newRouteProgress(candidates)
+	if progress.initialFailure != nil {
+		errs = append(errs, progress.initialFailure)
+		fallbackCount = 1
+	}
+	for candidateIndex, endpoint := range candidates {
+		if !progress.allows(endpoint) {
+			continue
+		}
+		client, ok := endpoint.Provider.(ImageVariationClient)
+		if !ok {
+			continue
+		}
+		progress.enter(endpoint)
+		attemptCtx := providerAttemptContext(req, endpoint)
+		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
+		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
+			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
+			errs = append(errs, err)
+			progress.fail(err)
+			continue
+		}
+		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
+			if terminalModuleError(err) || ctx.Err() != nil {
+				return openai.ImageGenerationResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			}
+			errs = append(errs, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
+			continue
+		}
+		if attemptCtx.ImageVariationRequest == nil {
+			return openai.ImageGenerationResponse{}, fmt.Errorf("%s/%s modules removed image variation request", endpoint.Type, endpoint.Name)
+		}
+		started := time.Now()
+		lastAttempt = &attemptCtx
+		response, retries, err := r.callImageVariation(ctx, endpoint, client, *attemptCtx.ImageVariationRequest)
+		totalRetries += retries
+		setAttemptMetadata(&attemptCtx, started, err)
+		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
+		if err == nil {
+			if validationErr := validateImageGenerationResponse(response, attemptCtx.ImageVariationRequest.GenerationRequest()); validationErr != nil {
+				err = validationErr
+			} else {
+				attemptCtx.ImageGenerationResponse = &response
+				if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
+					return openai.ImageGenerationResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+				}
+				return response, nil
+			}
+		}
+		errs = append(errs, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err))
+		progress.fail(err)
+		if ctx.Err() != nil || !progress.hasNext(candidates[candidateIndex+1:]) {
+			joined := errors.Join(errs...)
+			r.modules.RunFailure(ctx, lastAttempt, joined)
+			return openai.ImageGenerationResponse{}, joined
+		}
+		fallbackCount++
+	}
+	if len(errs) == 0 {
+		errs = append(errs, errors.New("no selected endpoint implements image variations"))
+	}
+	joined := errors.Join(errs...)
+	if lastAttempt != nil {
+		r.modules.RunFailure(ctx, lastAttempt, joined)
+	}
+	return openai.ImageGenerationResponse{}, joined
+}
+
 func validateRerankResponse(response openai.RerankResponse, documentCount int) error {
 	if response.Meta != nil {
 		if units := response.Meta.BilledUnits; units != nil && (units.SearchUnits != units.SearchUnits || units.SearchUnits < 0 || units.SearchUnits > 1.7976931348623157e308 || units.TotalTokens < 0) {
@@ -1586,6 +1678,10 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		}
 		attemptCtx.ImageEditRequest = &imageEditRequest
 	}
+	if req.ImageVariationRequest != nil {
+		imageVariationRequest := *req.ImageVariationRequest
+		attemptCtx.ImageVariationRequest = &imageVariationRequest
+	}
 	attemptCtx.Response = nil
 	attemptCtx.CompletionResponse = nil
 	attemptCtx.ResponsesResponse = nil
@@ -1635,6 +1731,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		if attemptCtx.ImageEditRequest != nil {
 			attemptCtx.ImageEditRequest.Model = routingModel
 		}
+		if attemptCtx.ImageVariationRequest != nil {
+			attemptCtx.ImageVariationRequest.Model = routingModel
+		}
 		attemptCtx.Metadata["provider.original_model"] = originalModel
 		attemptCtx.Metadata["provider.routed_model"] = routingModel
 		attemptCtx.Metadata["provider.fallback_type"] = endpoint.FallbackType
@@ -1662,6 +1761,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		}
 		if attemptCtx.ImageEditRequest != nil {
 			attemptCtx.ImageEditRequest.Model = upstreamModel
+		}
+		if attemptCtx.ImageVariationRequest != nil {
+			attemptCtx.ImageVariationRequest.Model = upstreamModel
 		}
 		attemptCtx.Metadata["provider.requested_model"] = requestedModel
 		attemptCtx.Metadata["provider.upstream_model"] = upstreamModel
@@ -1888,6 +1990,35 @@ func (r Router) callImageEdit(ctx context.Context, endpoint Endpoint, client Ima
 		}
 	}
 	return openai.ImageGenerationResponse{}, endpointMaxRetries(endpoint), errors.New("image edit failed")
+}
+
+func (r Router) callImageVariation(ctx context.Context, endpoint Endpoint, client ImageVariationClient, request openai.ImageVariationRequest) (openai.ImageGenerationResponse, int, error) {
+	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	if err != nil {
+		return openai.ImageGenerationResponse{}, 0, err
+	}
+	defer release()
+	if err := r.health.permit(ctx, endpoint); err != nil {
+		return openai.ImageGenerationResponse{}, 0, err
+	}
+	for attempt := 0; attempt <= endpointMaxRetries(endpoint); attempt++ {
+		providerCtx, finish := r.startProviderCall(ctx, endpoint, "image_variation")
+		response, callErr := client.CreateImageVariation(providerCtx, request)
+		finish(callErr)
+		if callErr == nil {
+			r.health.success(ctx, endpoint)
+			return response, attempt, nil
+		}
+		if ctx.Err() != nil || attempt >= endpointRetryLimit(endpoint, callErr) || !retrySameEndpointWithPolicy(endpoint, callErr) {
+			r.health.failure(ctx, endpoint, callErr)
+			return openai.ImageGenerationResponse{}, attempt, callErr
+		}
+		if waitErr := r.retry.beforeRetry(ctx, callErr, attempt); waitErr != nil {
+			r.health.failure(ctx, endpoint, waitErr)
+			return openai.ImageGenerationResponse{}, attempt, waitErr
+		}
+	}
+	return openai.ImageGenerationResponse{}, endpointMaxRetries(endpoint), errors.New("image variation failed")
 }
 
 func (r Router) callRerank(ctx context.Context, endpoint Endpoint, client RerankClient, request openai.RerankRequest) (openai.RerankResponse, int, error) {
@@ -2367,6 +2498,11 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 			return false
 		}
 	}
+	if hasCapability(required, "image_variation") {
+		if client, ok := e.Provider.(interface{ SupportsImageVariation() bool }); ok && !client.SupportsImageVariation() {
+			return false
+		}
+	}
 	if len(e.Capabilities) == 0 {
 		return true
 	}
@@ -2421,11 +2557,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "web_search") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill")
+	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "web_search") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "web_search", "audio", "prompt_cache", "assistant_prefill"} {
+	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "web_search", "audio", "prompt_cache", "assistant_prefill"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

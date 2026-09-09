@@ -37,6 +37,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/v1/moderations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Moderations) }},
 	{RouteContract{http.MethodPost, "/v1/images/generations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GenerateImage) }},
 	{RouteContract{http.MethodPost, "/v1/images/edits"}, func(h Handler) http.Handler { return http.HandlerFunc(h.EditImage) }},
+	{RouteContract{http.MethodPost, "/v1/images/variations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateImageVariation) }},
 	{RouteContract{http.MethodPost, "/guardrails/apply_guardrail"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ApplyGuardrail) }},
 	{RouteContract{http.MethodGet, "/admin/v1/session"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetAdminSession) }},
 	{RouteContract{http.MethodGet, "/admin/v1/keys"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListVirtualKeys) }},
