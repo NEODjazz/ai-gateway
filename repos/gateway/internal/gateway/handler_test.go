@@ -784,6 +784,50 @@ func TestModelsReturnsOpenAICompatibleList(t *testing.T) {
 	}
 }
 
+func TestGetModelReturnsOnlyAuthorizedModel(t *testing.T) {
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{
+		modules.NewAuthModule(true),
+	}), modelsProvider{}))
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/models/test-model", nil)
+	request.Header.Set("Authorization", "Bearer demo-admin-key")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected ok, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var model openai.Model
+	if err := json.NewDecoder(recorder.Body).Decode(&model); err != nil || model.ID != "test-model" || model.Object != "model" || model.OwnedBy != "test-provider" {
+		t.Fatalf("model=%+v err=%v", model, err)
+	}
+}
+
+func TestGetModelDoesNotRevealMissingOrUnauthorizedModels(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		model    string
+		pipeline modules.Pipeline
+		wantCode int
+	}{
+		{name: "missing credentials", model: "test-model", pipeline: modules.NewPipeline([]modules.Module{modules.NewAuthModule(true)}), wantCode: http.StatusUnauthorized},
+		{name: "missing model", model: "absent", pipeline: modules.NewPipeline(nil), wantCode: http.StatusNotFound},
+		{name: "policy filtered", model: "test-model", pipeline: modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"other-*"}}}), wantCode: http.StatusNotFound},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := Routes(NewHandler(test.pipeline, modelsProvider{}))
+			request := httptest.NewRequest(http.MethodGet, "/v1/models/"+test.model, nil)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != test.wantCode {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if test.wantCode == http.StatusNotFound && (!strings.Contains(recorder.Body.String(), `"code":"model_not_found"`) || strings.Contains(recorder.Body.String(), "test-provider")) {
+				t.Fatalf("unsafe not-found response: %s", recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestRoutesExposePrometheusMetricsAndRequestID(t *testing.T) {
 	handler := Routes(NewHandler(modules.NewPipeline(nil), modelsProvider{}))
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)

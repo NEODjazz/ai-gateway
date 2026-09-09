@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.100
+  version: 0.1.101
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -390,6 +390,36 @@ paths:
                 $ref: '#/components/schemas/ModelsResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/ModuleFailed'
+  /v1/models/{model}:
+    get:
+      operationId: retrieveModel
+      tags: [Models]
+      summary: Retrieve a model allowed for the authenticated credential
+      parameters:
+        - name: model
+          in: path
+          required: true
+          schema: {type: string, minLength: 1}
+      responses:
+        '200':
+          description: Authorized model metadata
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Model is absent or hidden by effective credential, access-group, or tag policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '502':
           $ref: '#/components/responses/ModuleFailed'
   /v1/chat/completions:

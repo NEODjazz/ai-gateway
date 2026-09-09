@@ -7,6 +7,7 @@ Gateway реализует OpenAI-compatible endpoints:
 | Endpoint | Назначение |
 | --- | --- |
 | `GET /v1/models` | Модели, доступные текущему credential |
+| `GET /v1/models/{model}` | Метаданные одной доступной модели; скрытая и отсутствующая модель возвращают одинаковый `404` |
 | `POST /v1/chat/completions` | Chat, tools, structured output и vision |
 | `POST /v1/completions` | Native text completion для строковых и token-ID prompts; JSON и SSE |
 | `POST /v1/responses` | Responses, continuity, function tools и MCP passthrough |

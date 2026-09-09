@@ -102,6 +102,29 @@ func (h Handler) Ready(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) Models(w http.ResponseWriter, r *http.Request) {
+	models, ok := h.authorizedModels(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, openai.ModelsResponse{Object: "list", Data: models})
+}
+
+func (h Handler) GetModel(w http.ResponseWriter, r *http.Request) {
+	models, ok := h.authorizedModels(w, r)
+	if !ok {
+		return
+	}
+	modelID := r.PathValue("model")
+	for _, model := range models {
+		if model.ID == modelID {
+			writeJSON(w, http.StatusOK, model)
+			return
+		}
+	}
+	writeError(w, http.StatusNotFound, "model_not_found", "model not found")
+}
+
+func (h Handler) authorizedModels(w http.ResponseWriter, r *http.Request) ([]openai.Model, bool) {
 	reqCtx := modules.RequestContext{
 		APIKey:    bearerToken(r.Header.Get("Authorization")),
 		RequestID: requestID(r),
@@ -110,14 +133,14 @@ func (h Handler) Models(w http.ResponseWriter, r *http.Request) {
 	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
 		if errors.Is(err, modules.ErrUnauthorized) {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
-			return
+			return nil, false
 		}
 		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
-		return
+		return nil, false
 	}
 	reqCtx.APIKey = ""
 	if !h.prepareAccessGroups(w, &reqCtx) {
-		return
+		return nil, false
 	}
 
 	models := filterModels(h.provider.Models(), reqCtx.AllowedModels)
@@ -137,7 +160,7 @@ func (h Handler) Models(w http.ResponseWriter, r *http.Request) {
 		}
 		models = filtered
 	}
-	writeJSON(w, http.StatusOK, openai.ModelsResponse{Object: "list", Data: models})
+	return models, true
 }
 
 func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
