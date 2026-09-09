@@ -165,6 +165,8 @@ Mistral Chat преобразует публичный `seed` в native `random_
 `dimensions` в `output_dimension`; JSON, SSE и embeddings responses проходят
 общую bounded validation и reported usage accounting.
 Ошибки transport и parameter validation сохраняют provider identity `mistral`.
+Mistral embeddings принимает только строку или массив строк; token-ID input,
+`input_type` и `user` отклоняются до provider modules, billing и upstream.
 
 ## Routing и модели
 

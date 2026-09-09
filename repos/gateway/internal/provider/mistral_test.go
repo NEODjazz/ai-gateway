@@ -224,3 +224,29 @@ func TestMistralEmbeddingsAndErrorsUseNativeProviderIdentity(t *testing.T) {
 		t.Fatalf("validation error=%v", err)
 	}
 }
+
+func TestMistralEmbeddingsRejectUnsupportedInputBeforeUpstream(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	client := NewMistral(server.URL, "provider-key", false)
+	for _, test := range []struct {
+		name, param string
+		request     openai.EmbeddingRequest
+	}{
+		{name: "token IDs", param: "input", request: openai.EmbeddingRequest{Model: "mistral-embed", Input: []any{1.0, 2.0}}},
+		{name: "task type", param: "input_type", request: openai.EmbeddingRequest{Model: "mistral-embed", Input: "text", InputType: "search_query"}},
+		{name: "user", param: "user", request: openai.EmbeddingRequest{Model: "mistral-embed", Input: "text", User: "provider-hint"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := client.Embeddings(t.Context(), test.request)
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.Param != test.param || failure.UpstreamCode != "unsupported_parameter" {
+				t.Fatalf("error=%v failure=%+v", err, failure)
+			}
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unsupported embedding requests reached Mistral: %d", calls.Load())
+	}
+}
