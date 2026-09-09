@@ -70,7 +70,7 @@ availability is not inferred from these tests.
 | Catalog synchronization | Versioned catalog and hot update | Validated upstream sync, rollback and price provenance |
 | Arbitrary passthrough | Not implemented | Explicit route allowlists, identity isolation and accounting |
 | Parameter policy | Strict unknown-field decoding; native adapter rejection; generation control validation | Complete provider/model matrices and policy for new API families |
-| Deployment quotas | Atomic fixed-window RPM/TPM across inference, token-count, shadow and owned response lifecycle calls; bounded memory mode and shared Redis counters; quota-aware fallback | Provider-account quotas only when multiple deployments must share one upstream contract |
+| Provider and deployment quotas | Atomic fixed-window RPM/TPM across inference, token-count, shadow and owned response lifecycle calls; provider totals shared by all linked deployments; bounded memory mode and shared Redis counters; quota-aware fallback | Additional quota dimensions only when backed by an upstream contract |
 
 ## Completed increments
 

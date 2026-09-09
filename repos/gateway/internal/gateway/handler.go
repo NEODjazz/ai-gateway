@@ -1291,6 +1291,13 @@ func writeProviderFailure(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "billing_conflict", "billing lifecycle conflict")
 		return
 	}
+	var accountQuotaErr *provider.ProviderQuotaError
+	if errors.As(err, &accountQuotaErr) {
+		seconds := max(1, int((accountQuotaErr.RetryAfter+time.Second-1)/time.Second))
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		writeError(w, http.StatusTooManyRequests, "provider_rate_limit_exceeded", "provider rate limit exceeded")
+		return
+	}
 	var quotaErr *provider.DeploymentQuotaError
 	if errors.As(err, &quotaErr) {
 		seconds := max(1, int((quotaErr.RetryAfter+time.Second-1)/time.Second))

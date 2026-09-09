@@ -49,7 +49,8 @@ OpenAPI, а не в этом документе.
 абсолютным путём без query, fragment и `..`.
 `rate_limit_rpm` и `rate_limit_tpm` задают deployment-level fixed-window quotas;
 ноль означает отсутствие соответствующего ограничения. Допустимые максимумы —
-10,000,000 RPM и 1,000,000,000 TPM.
+10,000,000 RPM и 1,000,000,000 TPM. Те же поля у managed Provider задают
+общий предел для всех ссылающихся deployments; оба scope применяются атомарно.
 
 Поддерживаемые static adapter types: `demo`, `ollama`, `openai`,
 `openai-compatible`, `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`. Capability задаётся явно для
@@ -68,7 +69,7 @@ control-plane snapshot и никогда не возвращаются read API.
 
 Managed-режим намеренно разделяет конфигурацию на независимые ресурсы:
 
-- Provider: `id`, `type`, `base_url`, `enabled`;
+- Provider: `id`, `type`, `base_url`, shared RPM/TPM quotas и `enabled`;
 - Credential: `id`, optional `provider_id`, description и write-only secret;
 - Deployment: ссылки `provider_id`/`credential_id`, upstream/public models,
   capabilities, routing, admission, RPM/TPM quotas, retries, guardrail и enabled state;

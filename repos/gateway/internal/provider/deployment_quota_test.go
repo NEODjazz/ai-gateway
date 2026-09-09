@@ -90,3 +90,65 @@ func TestRedisDeploymentQuotaIsSharedAcrossRouters(t *testing.T) {
 		t.Fatalf("shared quota was not enforced: calls=%d err=%v", secondClient.calls, err)
 	}
 }
+
+func TestProviderAndDeploymentQuotasAreReservedAtomically(t *testing.T) {
+	store := NewMemoryDeploymentQuotaStore()
+	first := &countingProvider{content: "first"}
+	second := &countingProvider{content: "second"}
+	router := Router{health: newEndpointHealthTracker(), deploymentQuotas: store}
+	firstEndpoint := Endpoint{Name: "first", ProviderID: "account", Type: "demo", Provider: first, ProviderRateLimitRPM: 2, RateLimitRPM: 1}
+	secondEndpoint := Endpoint{Name: "second", ProviderID: "account", Type: "demo", Provider: second, ProviderRateLimitRPM: 2}
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	if _, _, err := router.callChat(context.Background(), firstEndpoint, request); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := router.callChat(context.Background(), firstEndpoint, request); err == nil {
+		t.Fatal("deployment quota did not reject the second call")
+	} else {
+		var quota *DeploymentQuotaError
+		if !errors.As(err, &quota) {
+			t.Fatalf("expected deployment quota error, got %v", err)
+		}
+	}
+	if _, _, err := router.callChat(context.Background(), secondEndpoint, request); err != nil {
+		t.Fatalf("rejected deployment call consumed provider quota: %v", err)
+	}
+	if first.calls != 1 || second.calls != 1 {
+		t.Fatalf("unexpected provider calls: first=%d second=%d", first.calls, second.calls)
+	}
+}
+
+func TestProviderQuotaIsSharedByDeployments(t *testing.T) {
+	store := NewMemoryDeploymentQuotaStore()
+	client := &countingProvider{content: "ok"}
+	router := Router{health: newEndpointHealthTracker(), deploymentQuotas: store}
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	for _, endpoint := range []Endpoint{
+		{Name: "first", ProviderID: "account", Type: "demo", Provider: client, ProviderRateLimitRPM: 1},
+		{Name: "second", ProviderID: "account", Type: "demo", Provider: client, ProviderRateLimitRPM: 1},
+	} {
+		_, _, err := router.callChat(context.Background(), endpoint, request)
+		if endpoint.Name == "first" && err != nil {
+			t.Fatal(err)
+		}
+		if endpoint.Name == "second" {
+			var quota *ProviderQuotaError
+			if !errors.As(err, &quota) || quota.Provider != "account" {
+				t.Fatalf("expected shared provider quota, got %v", err)
+			}
+		}
+	}
+}
+
+func TestManagedProviderValidatesQuotaBounds(t *testing.T) {
+	router := New(Config{}).(*Router)
+	for _, input := range []ManagedProvider{
+		{ID: "negative", Type: "demo", RateLimitRPM: -1, Enabled: true},
+		{ID: "rpm", Type: "demo", RateLimitRPM: 10000001, Enabled: true},
+		{ID: "tpm", Type: "demo", RateLimitTPM: 1000000001, Enabled: true},
+	} {
+		if _, err := router.CreateProvider(input); !errors.Is(err, ErrInvalidProvider) {
+			t.Fatalf("invalid provider quota was accepted: %+v err=%v", input, err)
+		}
+	}
+}

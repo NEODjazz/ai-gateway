@@ -11,12 +11,14 @@ import (
 )
 
 type ManagedProvider struct {
-	ID         string `json:"id"`
-	Type       string `json:"type"`
-	BaseURL    string `json:"base_url,omitempty"`
-	APIVersion string `json:"api_version,omitempty"`
-	AuthType   string `json:"auth_type,omitempty"`
-	Enabled    bool   `json:"enabled"`
+	ID           string `json:"id"`
+	Type         string `json:"type"`
+	BaseURL      string `json:"base_url,omitempty"`
+	APIVersion   string `json:"api_version,omitempty"`
+	AuthType     string `json:"auth_type,omitempty"`
+	RateLimitRPM int    `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM int    `json:"rate_limit_tpm,omitempty"`
+	Enabled      bool   `json:"enabled"`
 }
 
 type ProviderController interface {
@@ -138,7 +140,7 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 	input.BaseURL = strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
 	input.APIVersion = strings.TrimSpace(input.APIVersion)
 	input.AuthType = normalizeAzureAuthType(input.AuthType)
-	if input.ID == "" || len(input.ID) > 128 || !validProviderType(input.Type) || len(input.BaseURL) > 2048 {
+	if input.ID == "" || len(input.ID) > 128 || !validProviderType(input.Type) || len(input.BaseURL) > 2048 || input.RateLimitRPM < 0 || input.RateLimitRPM > 10000000 || input.RateLimitTPM < 0 || input.RateLimitTPM > 1000000000 {
 		return ManagedProvider{}, ErrInvalidProvider
 	}
 	if input.Type != "demo" {

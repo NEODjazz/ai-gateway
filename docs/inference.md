@@ -274,6 +274,9 @@ transient failure classes и учитывает bounded backoff/`Retry-After`.
 маршрутизированный запрос и полную оценку input/output токенов на фиксированную
 минуту до provider call; при исчерпании router пробует следующий разрешённый
 deployment. При Redis счетчики общие для всех gateway replicas.
+Managed provider может задать такие же общие пределы для суммы вызовов всех
+связанных deployments. Provider и deployment scopes резервируются атомарно;
+отклоненный одним scope запрос не расходует другой.
 
 Cross-model fallbacks настраиваются отдельно для `general`, `context_window` и
 `content_policy`. Gateway заранее пересекает все цели с model grants и

@@ -126,24 +126,31 @@ local function add(a, b)
   end
   return result
 end
-local current_requests = redis.call('GET', KEYS[1]) or '0'
-local current_tokens = redis.call('GET', KEYS[2]) or '0'
-local requests = add(current_requests, '1')
-local tokens = add(current_tokens, ARGV[3])
-local ttl = redis.call('PTTL', KEYS[1])
-if ttl < 0 then ttl = redis.call('PTTL', KEYS[2]) end
-if ttl < 0 then ttl = tonumber(ARGV[4]) end
-
-if (ARGV[1] ~= '0' and greater(requests, ARGV[1])) or
-   (ARGV[2] ~= '0' and greater(tokens, ARGV[2])) then
-  return {0, ttl}
+local count = #KEYS / 2
+local requests, tokens, ttls = {}, {}, {}
+for i = 1, count do
+  local request_key, token_key = KEYS[i * 2 - 1], KEYS[i * 2]
+  local current_requests = redis.call('GET', request_key) or '0'
+  local current_tokens = redis.call('GET', token_key) or '0'
+  requests[i] = add(current_requests, '1')
+  tokens[i] = add(current_tokens, ARGV[1])
+  local ttl = redis.call('PTTL', request_key)
+  if ttl < 0 then ttl = redis.call('PTTL', token_key) end
+  if ttl < 0 then ttl = tonumber(ARGV[2]) end
+  ttls[i] = ttl
+  local request_limit, token_limit = ARGV[4 + (i - 1) * 2], ARGV[5 + (i - 1) * 2]
+  if (request_limit ~= '0' and greater(requests[i], request_limit)) or
+     (token_limit ~= '0' and greater(tokens[i], token_limit)) then
+    return {0, i - 1, ttl}
+  end
 end
-if greater(requests, ARGV[5]) then requests = ARGV[5] end
-if greater(tokens, ARGV[5]) then tokens = ARGV[5] end
--- Both keys share the remaining fixed window; admission never extends it.
-redis.call('SET', KEYS[1], requests, 'PX', math.max(ttl, 1))
-redis.call('SET', KEYS[2], tokens, 'PX', math.max(ttl, 1))
-return {1, ttl}
+for i = 1, count do
+  if greater(requests[i], ARGV[3]) then requests[i] = ARGV[3] end
+  if greater(tokens[i], ARGV[3]) then tokens[i] = ARGV[3] end
+  redis.call('SET', KEYS[i * 2 - 1], requests[i], 'PX', math.max(ttls[i], 1))
+  redis.call('SET', KEYS[i * 2], tokens[i], 'PX', math.max(ttls[i], 1))
+end
+return {1, -1, ttls[1]}
 `)
 
 func (s *Store) Allow(ctx context.Context, identity string, requestLimit, tokenLimit, tokens int, window time.Duration) (bool, time.Duration, error) {
@@ -153,30 +160,57 @@ func (s *Store) Allow(ctx context.Context, identity string, requestLimit, tokenL
 	if requestLimit <= 0 && tokenLimit <= 0 {
 		return true, 0, nil
 	}
+	allowed, _, retryAfter, err := s.AllowMany(ctx, []string{identity}, []int{requestLimit}, []int{tokenLimit}, tokens, window)
+	return allowed, retryAfter, err
+}
+
+// AllowMany atomically reserves the same request against multiple fixed-window
+// scopes. A rejection leaves every scope unchanged and returns its input index.
+func (s *Store) AllowMany(ctx context.Context, identities []string, requestLimits, tokenLimits []int, tokens int, window time.Duration) (bool, int, time.Duration, error) {
+	if s == nil {
+		return false, -1, 0, errors.New("redis store is not configured")
+	}
+	if len(identities) == 0 || len(identities) != len(requestLimits) || len(identities) != len(tokenLimits) || len(identities) > 16 {
+		return false, -1, 0, errors.New("invalid rate-limit scopes")
+	}
 	if tokens < 0 {
 		tokens = 0
 	}
 	if window <= 0 {
 		window = time.Minute
 	}
-	identityHash := sha256.Sum256([]byte(identity))
-	base := s.prefix + ":rate:" + hex.EncodeToString(identityHash[:16])
-	result, err := fixedWindowScript.Run(ctx, s.client, []string{base + ":requests", base + ":tokens"}, max(requestLimit, 0), max(tokenLimit, 0), tokens, max(window.Milliseconds(), 1), math.MaxInt).Slice()
-	if err != nil {
-		return false, 0, err
+	keys := make([]string, 0, len(identities)*2)
+	arguments := make([]any, 0, 3+len(identities)*2)
+	arguments = append(arguments, tokens, max(window.Milliseconds(), 1), math.MaxInt)
+	for index, identity := range identities {
+		if identity == "" || requestLimits[index] <= 0 && tokenLimits[index] <= 0 {
+			return false, -1, 0, errors.New("invalid rate-limit scope")
+		}
+		identityHash := sha256.Sum256([]byte(identity))
+		base := s.prefix + ":rate:" + hex.EncodeToString(identityHash[:16])
+		keys = append(keys, base+":requests", base+":tokens")
+		arguments = append(arguments, max(requestLimits[index], 0), max(tokenLimits[index], 0))
 	}
-	if len(result) != 2 {
-		return false, 0, errors.New("unexpected redis rate-limit response")
+	result, err := fixedWindowScript.Run(ctx, s.client, keys, arguments...).Slice()
+	if err != nil {
+		return false, -1, 0, err
+	}
+	if len(result) != 3 {
+		return false, -1, 0, errors.New("unexpected redis rate-limit response")
 	}
 	allowed, ok := result[0].(int64)
 	if !ok {
-		return false, 0, errors.New("invalid redis rate-limit decision")
+		return false, -1, 0, errors.New("invalid redis rate-limit decision")
 	}
-	ttlMS, ok := result[1].(int64)
+	rejected, ok := result[1].(int64)
 	if !ok {
-		return false, 0, errors.New("invalid redis rate-limit ttl")
+		return false, -1, 0, errors.New("invalid redis rate-limit scope")
 	}
-	return allowed == 1, time.Duration(ttlMS) * time.Millisecond, nil
+	ttlMS, ok := result[2].(int64)
+	if !ok {
+		return false, -1, 0, errors.New("invalid redis rate-limit ttl")
+	}
+	return allowed == 1, int(rejected), time.Duration(ttlMS) * time.Millisecond, nil
 }
 
 var circuitPermitScript = redis.NewScript(`

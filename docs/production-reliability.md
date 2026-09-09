@@ -73,6 +73,10 @@ lifecycle operations consume the quota of the deployment they contact. The
 memory implementation fails closed after 10,000 active deployment identities;
 Redis shares counters across gateway replicas. Exhaustion returns HTTP 429 with
 `deployment_rate_limit_exceeded` and the fixed window's remaining `Retry-After`.
+Managed providers can also set shared `rate_limit_rpm` and `rate_limit_tpm`
+across all of their deployments. Provider and deployment reservations are one
+atomic operation: if either scope is exhausted, neither counter is incremented.
+Provider exhaustion returns `provider_rate_limit_exceeded` with `Retry-After`.
 
 ## Billing delivery and failure behavior
 

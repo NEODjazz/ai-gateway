@@ -243,6 +243,8 @@ type Endpoint struct {
 	FallbackStage         int
 	RateLimitRPM          int
 	RateLimitTPM          int
+	ProviderRateLimitRPM  int
+	ProviderRateLimitTPM  int
 }
 
 type Router struct {

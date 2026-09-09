@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.102
+  version: 0.1.103
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3284,6 +3284,10 @@ components:
         in_flight_requests: {type: integer, minimum: 0}
         queue_capacity: {type: integer, minimum: 0}
         queued_requests: {type: integer, minimum: 0}
+        rate_limit_rpm: {type: integer, minimum: 0}
+        rate_limit_tpm: {type: integer, minimum: 0}
+        provider_rate_limit_rpm: {type: integer, minimum: 0}
+        provider_rate_limit_tpm: {type: integer, minimum: 0}
         max_retries: {type: integer, minimum: 0}
         guardrail_policy: {type: string}
         guardrail_policy_valid: {type: boolean}
@@ -4777,6 +4781,8 @@ components:
           type: string
           enum: [api_key, entra]
           description: Azure credential transport. The credential remains write-only in the credential vault.
+        rate_limit_rpm: {type: integer, minimum: 0, maximum: 10000000, description: Shared request quota across every deployment backed by this provider; zero disables it.}
+        rate_limit_tpm: {type: integer, minimum: 0, maximum: 1000000000, description: Shared estimated token quota across every deployment backed by this provider; zero disables it.}
         enabled: {type: boolean}
     ProviderCredentialCreateInput:
       type: object

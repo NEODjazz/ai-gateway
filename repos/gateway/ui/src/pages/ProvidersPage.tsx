@@ -13,7 +13,7 @@ import { resourceConfigs } from "./resourceConfigs";
 import { GatewayButton } from "../components/GatewayButton";
 import { ModalCloseButton } from "../components/ModalCloseButton";
 
-type Provider = Row & { id: string; type: string; base_url?: string; enabled: boolean };
+type Provider = Row & { id: string; type: string; base_url?: string; rate_limit_rpm?: number; rate_limit_tpm?: number; enabled: boolean };
 type Credential = { id: string; provider_id?: string; description?: string };
 type Deployment = { id: string; provider_id: string; enabled: boolean };
 type ProviderProbe = { provider_id: string; status: string; latency_ms: number; model_count: number };
@@ -36,6 +36,8 @@ const columns = [
   { key: "id", label: "Provider" },
   { key: "type", label: "Type" },
   { key: "base_url", label: "Base URL" },
+  { key: "rate_limit_rpm", label: "RPM" },
+  { key: "rate_limit_tpm", label: "TPM" },
   { key: "credential_count", label: "Credentials" },
   { key: "deployment_count", label: "Deployments" },
   { key: "connection_status", label: "Connection", render: status },

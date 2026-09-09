@@ -982,6 +982,17 @@ func TestDeploymentQuotaFailureReturnsDistinct429WithRetryAfter(t *testing.T) {
 	}
 }
 
+func TestProviderQuotaFailureReturnsDistinct429WithRetryAfter(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeProviderFailure(recorder, &provider.ProviderQuotaError{Provider: "private-provider", RetryAfter: 2500 * time.Millisecond})
+	if recorder.Code != http.StatusTooManyRequests || recorder.Header().Get("Retry-After") != "3" {
+		t.Fatalf("unexpected provider quota response: code=%d retry-after=%q", recorder.Code, recorder.Header().Get("Retry-After"))
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, `"code":"provider_rate_limit_exceeded"`) || strings.Contains(body, "private-provider") {
+		t.Fatalf("provider details leaked in response: %s", body)
+	}
+}
+
 func TestProviderClientRequestPreservesSafeStatusAndParameter(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	writeProviderFailure(recorder, &provider.Error{

@@ -14,14 +14,14 @@ func TestAdminProviderLifecycle(t *testing.T) {
 	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
 
 	create := httptest.NewRecorder()
-	handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/admin/v1/providers", strings.NewReader(`{"id":"local","type":"ollama","base_url":"http://127.0.0.1:11434","enabled":true}`)))
-	if create.Code != http.StatusCreated || !strings.Contains(create.Body.String(), `"id":"local"`) {
+	handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/admin/v1/providers", strings.NewReader(`{"id":"local","type":"ollama","base_url":"http://127.0.0.1:11434","rate_limit_rpm":100,"rate_limit_tpm":50000,"enabled":true}`)))
+	if create.Code != http.StatusCreated || !strings.Contains(create.Body.String(), `"id":"local"`) || !strings.Contains(create.Body.String(), `"rate_limit_rpm":100`) || !strings.Contains(create.Body.String(), `"rate_limit_tpm":50000`) {
 		t.Fatalf("create failed: status=%d body=%s", create.Code, create.Body.String())
 	}
 
 	update := httptest.NewRecorder()
-	handler.ServeHTTP(update, httptest.NewRequest(http.MethodPut, "/admin/v1/providers/local", strings.NewReader(`{"type":"ollama","base_url":"http://ollama:11434","enabled":false}`)))
-	if update.Code != http.StatusOK || !strings.Contains(update.Body.String(), `"enabled":false`) {
+	handler.ServeHTTP(update, httptest.NewRequest(http.MethodPut, "/admin/v1/providers/local", strings.NewReader(`{"type":"ollama","base_url":"http://ollama:11434","rate_limit_rpm":200,"rate_limit_tpm":75000,"enabled":false}`)))
+	if update.Code != http.StatusOK || !strings.Contains(update.Body.String(), `"enabled":false`) || !strings.Contains(update.Body.String(), `"rate_limit_rpm":200`) {
 		t.Fatalf("update failed: status=%d body=%s", update.Code, update.Body.String())
 	}
 

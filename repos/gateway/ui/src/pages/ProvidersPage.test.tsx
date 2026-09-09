@@ -66,10 +66,12 @@ describe("ProvidersPage", () => {
     await userEvent.type(within(form).getByLabelText("ID"), "native-rerank");
     await userEvent.selectOptions(within(form).getByLabelText("Type"), "cohere");
     await userEvent.type(within(form).getByLabelText("Base URL"), "https://api.example.test");
+    await userEvent.type(within(form).getByLabelText("Shared requests per minute"), "120");
+    await userEvent.type(within(form).getByLabelText("Shared tokens per minute"), "64000");
     await userEvent.click(within(form).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls.some((call) => call.path === "/admin/v1/providers" && call.method === "POST")).toBe(true));
     const created = calls.find((call) => call.path === "/admin/v1/providers" && call.method === "POST")!;
-    expect(JSON.parse(created.body!)).toEqual({ id: "native-rerank", type: "cohere", base_url: "https://api.example.test", enabled: true });
+    expect(JSON.parse(created.body!)).toEqual({ id: "native-rerank", type: "cohere", base_url: "https://api.example.test", rate_limit_rpm: 120, rate_limit_tpm: 64000, enabled: true });
   });
 
   it("configures native Azure endpoint version and authentication", async () => {
@@ -91,6 +93,6 @@ describe("ProvidersPage", () => {
 	await userEvent.click(within(form).getByRole("button", { name: "Save" }));
 	await waitFor(() => expect(calls.some((call) => call.path === "/admin/v1/providers" && call.method === "POST")).toBe(true));
 	const created = calls.find((call) => call.path === "/admin/v1/providers" && call.method === "POST")!;
-	expect(JSON.parse(created.body!)).toEqual({ id: "azure-native", type: "azure-openai", base_url: "https://resource.openai.azure.com", api_version: "2025-04-01-preview", auth_type: "entra", enabled: true });
+	expect(JSON.parse(created.body!)).toEqual({ id: "azure-native", type: "azure-openai", base_url: "https://resource.openai.azure.com", api_version: "2025-04-01-preview", auth_type: "entra", rate_limit_rpm: 0, rate_limit_tpm: 0, enabled: true });
   });
 });

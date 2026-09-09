@@ -24,6 +24,8 @@ type EndpointDiagnostics struct {
 	QueuedRequests       int64      `json:"queued_requests"`
 	RateLimitRPM         int        `json:"rate_limit_rpm,omitempty"`
 	RateLimitTPM         int        `json:"rate_limit_tpm,omitempty"`
+	ProviderRateLimitRPM int        `json:"provider_rate_limit_rpm,omitempty"`
+	ProviderRateLimitTPM int        `json:"provider_rate_limit_tpm,omitempty"`
 	MaxRetries           int        `json:"max_retries"`
 	GuardrailPolicy      string     `json:"guardrail_policy,omitempty"`
 	GuardrailPolicyValid bool       `json:"guardrail_policy_valid"`
@@ -75,6 +77,7 @@ func (r Router) Diagnostics(ctx context.Context) RoutingDiagnostics {
 			MaxRetries: endpoint.MaxRetries, GuardrailPolicy: endpoint.GuardrailPolicy, GuardrailPolicyValid: endpoint.GuardrailPolicyValid,
 			DLPEnabled: endpoint.DLPEnabled, AVEnabled: endpoint.AVEnabled, Shadow: endpoint.Shadow, MirrorPercentage: endpoint.MirrorPercentage,
 			RateLimitRPM: endpoint.RateLimitRPM, RateLimitTPM: endpoint.RateLimitTPM,
+			ProviderRateLimitRPM: endpoint.ProviderRateLimitRPM, ProviderRateLimitTPM: endpoint.ProviderRateLimitTPM,
 		}
 		if endpoint.Admission != nil {
 			diagnostic.MaxParallelRequests = cap(endpoint.Admission.slots)

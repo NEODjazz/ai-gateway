@@ -99,6 +99,20 @@ func TestRedisRateLimitIsAtomic(t *testing.T) {
 	}
 }
 
+func TestRedisMultiScopeRateLimitRejectsAtomically(t *testing.T) {
+	store := integrationStore(t)
+	ctx := context.Background()
+	if allowed, _, _, err := store.AllowMany(ctx, []string{"provider", "deployment"}, []int{2, 1}, []int{0, 0}, 0, time.Minute); !allowed || err != nil {
+		t.Fatalf("first multi-scope admission: allowed=%v err=%v", allowed, err)
+	}
+	if allowed, rejected, _, err := store.AllowMany(ctx, []string{"provider", "deployment"}, []int{2, 1}, []int{0, 0}, 0, time.Minute); allowed || rejected != 1 || err != nil {
+		t.Fatalf("deployment rejection: allowed=%v rejected=%d err=%v", allowed, rejected, err)
+	}
+	if allowed, _, err := store.Allow(ctx, "provider", 2, 0, 0, time.Minute); !allowed || err != nil {
+		t.Fatalf("rejected multi-scope request consumed provider quota: allowed=%v err=%v", allowed, err)
+	}
+}
+
 func TestRedisCircuitIsSharedAndAllowsSingleHalfOpenProbe(t *testing.T) {
 	server := miniredis.RunT(t)
 	first := New(Config{Addr: server.Addr(), Prefix: "shared-circuit"})
