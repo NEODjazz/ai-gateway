@@ -34,7 +34,7 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 			}))
 			defer server.Close()
 			var request openai.ChatCompletionRequest
-			if err := json.Unmarshal([]byte(`{"model":"test","messages":[{"role":"user","content":[{"type":"text","text":"hello","prompt_cache_breakpoint":{"mode":"explicit"}}]}],"metadata":{"trace":"one"},"store":false,"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","prompt_cache_key":"tenant-thread","prompt_cache_options":{"mode":"explicit","ttl":"30m"},"prompt_cache_retention":"24h","prediction":{"type":"content","content":"expected"},"user":"legacy-user","verbosity":"low","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-1,"logit_bias":{"10":-100}}`), &request); err != nil {
+			if err := json.Unmarshal([]byte(`{"model":"test","messages":[{"role":"user","content":[{"type":"text","text":"hello","prompt_cache_breakpoint":{"mode":"explicit"}}]}],"stream_options":{"include_usage":false,"include_obfuscation":false},"metadata":{"trace":"one"},"store":false,"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","prompt_cache_key":"tenant-thread","prompt_cache_options":{"mode":"explicit","ttl":"30m"},"prompt_cache_retention":"24h","prediction":{"type":"content","content":"expected"},"user":"legacy-user","verbosity":"low","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-1,"logit_bias":{"10":-100}}`), &request); err != nil {
 				t.Fatal(err)
 			}
 			client := NewOpenAICompatible(server.URL, "", true)
@@ -58,7 +58,7 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 				t.Fatalf("prompt cache breakpoint was not forwarded: %s", received["messages"])
 			}
 			if streaming {
-				if string(received["stream_options"]) != `{"include_usage":true}` {
+				if string(received["stream_options"]) != `{"include_usage":true,"include_obfuscation":false}` {
 					t.Fatalf("stream usage was not requested: %s", received["stream_options"])
 				}
 			} else if _, present := received["stream_options"]; present {

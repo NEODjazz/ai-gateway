@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.63
+  version: 0.1.64
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -2695,6 +2695,7 @@ components:
           additionalProperties: false
           properties:
             include_usage: {type: boolean, description: Emit a final usage chunk to the client; upstream usage collection remains enabled for billing.}
+            include_obfuscation: {type: boolean, default: true, description: Add random padding to streaming delta events to reduce payload-size side channels.}
         temperature: {type: number, minimum: 0, maximum: 1}
         top_p: {type: number, minimum: 0, maximum: 1}
         system:

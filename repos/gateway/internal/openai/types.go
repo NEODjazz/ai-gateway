@@ -28,7 +28,8 @@ type ChatCompletionRequest struct {
 }
 
 type ChatStreamOptions struct {
-	IncludeUsage bool `json:"include_usage"`
+	IncludeUsage       bool  `json:"include_usage"`
+	IncludeObfuscation *bool `json:"include_obfuscation,omitempty"`
 }
 
 type Message struct {

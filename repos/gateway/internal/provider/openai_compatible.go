@@ -85,7 +85,8 @@ type openAICompatibleCompletionRequest struct {
 }
 
 type openAICompatibleStreamOptions struct {
-	IncludeUsage bool `json:"include_usage"`
+	IncludeUsage       bool  `json:"include_usage"`
+	IncludeObfuscation *bool `json:"include_obfuscation,omitempty"`
 }
 
 type openAICompatibleEmbeddingRequest struct {
@@ -357,7 +358,7 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 		Stop: request.Stop, Seed: request.Seed,
 	}
 	if upstreamRequest.Stream {
-		upstreamRequest.StreamOptions = &openAICompatibleStreamOptions{IncludeUsage: true}
+		upstreamRequest.StreamOptions = chatStreamOptions(request)
 	}
 	resp, err := p.chatCompletionResponse(ctx, &upstreamRequest)
 	if err != nil {
@@ -497,7 +498,7 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 		Temperature: request.Temperature, TopP: request.TopP,
 		Stop: request.Stop, Seed: request.Seed,
 	}
-	upstreamRequest.StreamOptions = &openAICompatibleStreamOptions{IncludeUsage: true}
+	upstreamRequest.StreamOptions = chatStreamOptions(request)
 	resp, err := p.chatCompletionResponse(ctx, &upstreamRequest)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -509,6 +510,14 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 		err = validateRequestedChatChoices(request, response)
 	}
 	return response, err
+}
+
+func chatStreamOptions(request openai.ChatCompletionRequest) *openAICompatibleStreamOptions {
+	options := &openAICompatibleStreamOptions{IncludeUsage: true}
+	if request.StreamOptions != nil {
+		options.IncludeObfuscation = request.StreamOptions.IncludeObfuscation
+	}
+	return options
 }
 
 func (p OpenAICompatible) chatCompletionResponse(ctx context.Context, request *openAICompatibleChatRequest) (*http.Response, error) {

@@ -89,7 +89,7 @@ func TestSyntheticChatStreamPreservesLogprobs(t *testing.T) {
 	writeChatCompletionStream(response, openai.ChatCompletionResponse{
 		ID: "chat-test", Created: 123, Model: "test", Metadata: map[string]string{"trace": "one"}, ServiceTier: "priority", SystemFingerprint: "fp-test",
 		Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "hello"}, Logprobs: &openai.ChoiceLogprobs{Content: []openai.TokenLogprob{{Token: "hello", Logprob: -0.5}}}}},
-	}, true)
+	}, &openai.ChatStreamOptions{IncludeUsage: true})
 	if !strings.Contains(response.Body.String(), `"logprobs":{"content":[{"token":"hello","logprob":-0.5`) {
 		t.Fatalf("synthetic SSE dropped logprobs: %s", response.Body.String())
 	}
@@ -108,7 +108,10 @@ func TestChatStreamUsageFilterRemovesNullAndFinalUsage(t *testing.T) {
 		`{"choices":[{"index":0}],"usage":null}`,
 		`{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`,
 	} {
-		filtered, _, deliver := filterChatStreamUsage(payload, false)
+		filtered, _, deliver, err := transformChatStreamPayload(payload, nil, false)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if deliver && strings.Contains(filtered, `"usage"`) {
 			t.Fatalf("usage leaked to an unrequested stream: %s", filtered)
 		}

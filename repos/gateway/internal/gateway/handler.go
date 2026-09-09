@@ -210,7 +210,10 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 		includeUsage := request.StreamOptions != nil && request.StreamOptions.IncludeUsage
 		usageDelivered := false
 		writeStreamPayload := func(payload string) error {
-			payload, hasUsage, deliver := filterChatStreamUsage(payload, includeUsage)
+			payload, hasUsage, deliver, err := transformChatStreamPayload(payload, request.StreamOptions, includeUsage)
+			if err != nil {
+				return err
+			}
 			usageDelivered = usageDelivered || hasUsage && deliver
 			if !deliver {
 				return nil
@@ -256,7 +259,7 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 	}
 
 	if stream {
-		writeChatCompletionStream(w, response, request.StreamOptions != nil && request.StreamOptions.IncludeUsage)
+		writeChatCompletionStream(w, response, request.StreamOptions)
 		return
 	}
 
@@ -1102,7 +1105,7 @@ func writeError(w http.ResponseWriter, status int, code string, message string) 
 	})
 }
 
-func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatCompletionResponse, includeUsage bool) {
+func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatCompletionResponse, options *openai.ChatStreamOptions) {
 	writeStreamHeaders(w)
 	w.WriteHeader(http.StatusOK)
 	created := response.Created
@@ -1143,7 +1146,7 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 				"finish_reason": nil,
 			},
 		}
-		writeSSE(w, content)
+		writeChatSSE(w, content, options)
 		finished := envelope()
 		finished["choices"] = []map[string]any{
 			{
@@ -1153,35 +1156,74 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 				"stop_sequence": choice.StopSequence,
 			},
 		}
-		writeSSE(w, finished)
+		writeChatSSE(w, finished, options)
 	}
 
-	if includeUsage {
+	if options != nil && options.IncludeUsage {
 		writeSSEPayload(w, chatCompletionUsagePayload(response))
 	}
 	writeSSEDone(w)
 }
 
-func filterChatStreamUsage(payload string, includeUsage bool) (string, bool, bool) {
+func transformChatStreamPayload(payload string, options *openai.ChatStreamOptions, includeUsage bool) (string, bool, bool, error) {
 	var chunk map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-		return payload, false, true
+		return payload, false, true, nil
 	}
 	usage, usagePresent := chunk["usage"]
 	hasUsage := usagePresent && string(usage) != "null"
 	if includeUsage || !usagePresent {
-		return payload, hasUsage, true
+		return transformChatObfuscation(chunk, options, hasUsage)
 	}
 	delete(chunk, "usage")
 	var choices []json.RawMessage
 	if raw, ok := chunk["choices"]; ok && json.Unmarshal(raw, &choices) == nil && len(choices) == 0 {
-		return "", true, false
+		return "", true, false, nil
 	}
-	filtered, err := json.Marshal(chunk)
+	return transformChatObfuscation(chunk, options, true)
+}
+
+func transformChatObfuscation(chunk map[string]json.RawMessage, options *openai.ChatStreamOptions, hasUsage bool) (string, bool, bool, error) {
+	include := true
+	if options != nil && options.IncludeObfuscation != nil {
+		include = *options.IncludeObfuscation
+	}
+	delete(chunk, "obfuscation")
+	var choices []json.RawMessage
+	deltaEvent := json.Unmarshal(chunk["choices"], &choices) == nil && len(choices) > 0
+	if include && deltaEvent {
+		encoded, err := json.Marshal(chunk)
+		if err != nil {
+			return "", hasUsage, true, err
+		}
+		padding := 256 - ((len(encoded) + len(`,"obfuscation":""`)) % 256)
+		if padding < 16 {
+			padding += 256
+		}
+		random := make([]byte, padding)
+		if _, err := rand.Read(random); err != nil {
+			return "", hasUsage, true, err
+		}
+		const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+		for index := range random {
+			random[index] = alphabet[int(random[index])%len(alphabet)]
+		}
+		value, _ := json.Marshal(string(random))
+		chunk["obfuscation"] = value
+	}
+	encoded, err := json.Marshal(chunk)
+	return string(encoded), hasUsage, true, err
+}
+
+func writeChatSSE(w http.ResponseWriter, payload map[string]any, options *openai.ChatStreamOptions) {
+	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return payload, true, true
+		return
 	}
-	return string(filtered), true, true
+	transformed, _, deliver, err := transformChatStreamPayload(string(encoded), options, true)
+	if err == nil && deliver {
+		_ = writeSSEPayload(w, transformed)
+	}
 }
 
 func chatCompletionUsagePayload(response openai.ChatCompletionResponse) string {

@@ -1077,6 +1077,21 @@ func TestChatCompletionsStreamsOpenAICompatibleEvents(t *testing.T) {
 	if strings.Contains(body, `"usage"`) {
 		t.Fatalf("usage was emitted without stream_options.include_usage: %s", body)
 	}
+	if !strings.Contains(body, `"obfuscation"`) {
+		t.Fatalf("default stream obfuscation was not emitted: %s", body)
+	}
+}
+
+func TestChatCompletionsDisablesRequestedStreamObfuscation(t *testing.T) {
+	provider := &streamingChatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), provider))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model","stream":true,"stream_options":{"include_obfuscation":false},"messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || strings.Contains(recorder.Body.String(), `"obfuscation"`) {
+		t.Fatalf("disabled stream obfuscation was emitted: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
 }
 
 func TestChatCompletionsEmitsRequestedStreamUsage(t *testing.T) {

@@ -186,6 +186,12 @@ prompt/completion отклоняются до cache, billing и доставки
 billing независимо от выбора клиента; если native stream не создаёт отдельный
 usage event, gateway формирует его из проверенного итогового результата.
 
+`stream_options.include_obfuscation` по умолчанию включён. Gateway сохраняет
+upstream obfuscation или добавляет случайное padding-поле к Chat delta events и
+выравнивает их размер по 256-byte buckets. Это одинаково работает для compatible,
+native и synthetic streams. Явное `false` передаётся compatible upstream и
+удаляет obfuscation из клиентского потока; поле не влияет на token usage и billing.
+
 
 ## Chat generation controls
 
