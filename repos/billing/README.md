@@ -145,6 +145,12 @@ Usage events and reports retain provider-reported `cache_read_input_tokens` and
 `008_usage_cache_tokens.sql` before deploying a billing binary that writes or
 queries these fields.
 
+Character-priced operations carry an exact Unicode `input_characters` count
+separately from estimated or provider-reported tokens. The model catalog field
+`character_cost_per_1m` participates in reserve and commit cost calculation;
+the reservation keeps the price snapshot so catalog changes cannot alter an
+in-flight request.
+
 `DELETE` is a soft disable. Summary includes committed usage and unexpired
 reservations, using the same period, scope, and currency calculation as
 enforcement. `expand=summaries` calculates every policy in one PostgreSQL query
@@ -183,6 +189,8 @@ migrations/clickhouse/005_usage_observability.sql
 migrations/clickhouse/006_usage_traces.sql
 migrations/clickhouse/007_usage_tags.sql
 migrations/clickhouse/008_usage_cache_tokens.sql
+migrations/clickhouse/009_usage_server_tools.sql
+migrations/clickhouse/010_usage_characters.sql
 ```
 
 Final usage events retain normalized provider/deployment identity, organization,
@@ -212,6 +220,8 @@ migrations/postgres/005_pricing_snapshots.sql
 migrations/postgres/006_management_audit.sql
 migrations/postgres/007_tag_budgets.sql
 migrations/postgres/008_organization_budgets.sql
+migrations/postgres/010_billing_server_tools.sql
+migrations/postgres/011_billing_characters.sql
 ```
 
 `management_audit_events` is an append-only management journal queried through

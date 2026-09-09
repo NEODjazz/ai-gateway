@@ -80,6 +80,7 @@ func run() error {
 			Roles:                   request.Roles,
 			Tags:                    request.Tags,
 			PromptTokensEstimated:   request.PromptTokensEstimated,
+			InputCharacters:         request.InputCharacters,
 			CacheReadInputTokens:    request.CacheReadInputTokens,
 			CacheWriteInputTokens:   request.CacheWriteInputTokens,
 			SearchRequests:          request.SearchRequests,
@@ -98,26 +99,27 @@ func run() error {
 				TotalTokens:      request.TotalTokens,
 			},
 			Metadata: map[string]string{
-				"provider.id":                      request.ProviderID,
-				"provider.endpoint.name":           request.ProviderEndpointName,
-				"provider.endpoint.type":           request.ProviderEndpointType,
-				"provider.status":                  request.Status,
-				"provider.error":                   request.Error,
-				"provider.failure_class":           request.FailureClass,
-				"provider.latency_ms":              request.LatencyMS,
-				"provider.first_token_latency_ms":  request.FirstTokenLatencyMS,
-				"provider.retry_count":             strconv.Itoa(request.RetryCount),
-				"provider.fallback_count":          strconv.Itoa(request.FallbackCount),
-				"provider.cache.status":            request.CacheStatus,
-				"provider.cache.kind":              request.CacheKind,
-				"usage.estimated":                  strconv.FormatBool(request.UsageEstimated),
-				"model_catalog.version":            request.CatalogVersion,
-				"model_catalog.pricing_key":        request.PricingKey,
-				"model_catalog.input_cost_per_1m":  request.InputCostPer1M,
-				"model_catalog.output_cost_per_1m": request.OutputCostPer1M,
-				"model_catalog.search_cost_per_1k": request.SearchCostPer1K,
-				"model_catalog.currency":           request.Currency,
-				"provider.upstream_model":          request.UpstreamModel,
+				"provider.id":                         request.ProviderID,
+				"provider.endpoint.name":              request.ProviderEndpointName,
+				"provider.endpoint.type":              request.ProviderEndpointType,
+				"provider.status":                     request.Status,
+				"provider.error":                      request.Error,
+				"provider.failure_class":              request.FailureClass,
+				"provider.latency_ms":                 request.LatencyMS,
+				"provider.first_token_latency_ms":     request.FirstTokenLatencyMS,
+				"provider.retry_count":                strconv.Itoa(request.RetryCount),
+				"provider.fallback_count":             strconv.Itoa(request.FallbackCount),
+				"provider.cache.status":               request.CacheStatus,
+				"provider.cache.kind":                 request.CacheKind,
+				"usage.estimated":                     strconv.FormatBool(request.UsageEstimated),
+				"model_catalog.version":               request.CatalogVersion,
+				"model_catalog.pricing_key":           request.PricingKey,
+				"model_catalog.input_cost_per_1m":     request.InputCostPer1M,
+				"model_catalog.output_cost_per_1m":    request.OutputCostPer1M,
+				"model_catalog.search_cost_per_1k":    request.SearchCostPer1K,
+				"model_catalog.character_cost_per_1m": request.CharacterCostPer1M,
+				"model_catalog.currency":              request.Currency,
+				"provider.upstream_model":             request.UpstreamModel,
 			},
 		}
 		if request.APIType == "responses" {
@@ -200,6 +202,7 @@ type usageRequest struct {
 	CacheKind               string   `json:"cache_kind,omitempty"`
 	UsageEstimated          bool     `json:"usage_estimated"`
 	PromptTokensEstimated   int      `json:"prompt_tokens_estimated"`
+	InputCharacters         int      `json:"input_characters"`
 	InputTokens             int      `json:"input_tokens"`
 	OutputTokens            int      `json:"output_tokens"`
 	TotalTokens             int      `json:"total_tokens"`
@@ -212,6 +215,7 @@ type usageRequest struct {
 	InputCostPer1M          string   `json:"input_cost_per_1m,omitempty"`
 	OutputCostPer1M         string   `json:"output_cost_per_1m,omitempty"`
 	SearchCostPer1K         string   `json:"search_cost_per_1k,omitempty"`
+	CharacterCostPer1M      string   `json:"character_cost_per_1m,omitempty"`
 	Currency                string   `json:"currency,omitempty"`
 }
 

@@ -13,7 +13,7 @@ describe("LogsPage", () => {
       const path = String(input);
       requested.push(path);
       if (path.includes("request-logs/settings")) return json({ content_stored: false });
-      if (path.includes("request-logs")) return json({ data: [{ request_id: "req-1", timestamp: "2026-08-28T10:00:00Z", status: "ok", model: "gpt", provider_id: "azure", cache_status: "hit", cache_kind: "semantic", total_tokens: 10, cache_read_input_tokens: 8, cache_write_input_tokens: 2, search_requests: 2, search_requests_estimated: false, usage_estimated: true, latency_ms: 120, first_token_latency_ms: 35, retry_count: 2, fallback_count: 1, cost: 0.1, currency: "USD" }] });
+      if (path.includes("request-logs")) return json({ data: [{ request_id: "req-1", timestamp: "2026-08-28T10:00:00Z", status: "ok", model: "gpt", provider_id: "azure", cache_status: "hit", cache_kind: "semantic", total_tokens: 10, input_characters: 4096, cache_read_input_tokens: 8, cache_write_input_tokens: 2, search_requests: 2, search_requests_estimated: false, usage_estimated: true, latency_ms: 120, first_token_latency_ms: 35, retry_count: 2, fallback_count: 1, cost: 0.1, currency: "USD" }] });
       if (path.includes("organizations")) return json({ data: [{ id: "org-1", name: "Platform" }] });
       if (path.includes("teams")) return json({ data: [{ id: "team-1", name: "Core" }] });
       if (path.includes("users")) return json({ data: [{ id: "user-1", email: "operator@example.com" }] });
@@ -28,6 +28,7 @@ describe("LogsPage", () => {
     expect(screen.getByText("Cache read tokens")).toBeInTheDocument();
     expect(screen.getByText("Cache write tokens")).toBeInTheDocument();
     expect(screen.getByText("Searches")).toBeInTheDocument();
+    expect(screen.getByText("Characters")).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Request log window"), "30");
     await userEvent.click(screen.getByRole("button", { name: "Apply window" }));
     await waitFor(() => expect(requested.some((path) => path.includes("request-logs?") && path.includes("days=30"))).toBe(true));

@@ -365,13 +365,14 @@ func TestBillingCacheHitDoesNotChargeProviderTokens(t *testing.T) {
 	module := BillingModule{required: true, pricing: PricingConfig{InputPricePer1K: 1}, writer: writer, policy: NoopPolicyChecker{}, lifecycle: NewLifecycleStore()}
 	req := RequestContext{
 		RequestID: "req-cache-hit", BillingPhase: "commit", PostResponse: true,
-		Request:  openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "cached prompt"}}},
-		Metadata: map[string]string{"provider.cache.status": "hit"},
+		Request:         openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "cached prompt"}}},
+		InputCharacters: 4096,
+		Metadata:        map[string]string{"provider.cache.status": "hit"},
 	}
 	if err := module.Handle(context.Background(), &req); err != nil {
 		t.Fatal(err)
 	}
-	if len(writer.events) != 1 || writer.events[0].CacheStatus != "hit" || writer.events[0].TotalTokens != 0 || writer.events[0].Cost != 0 {
+	if len(writer.events) != 1 || writer.events[0].CacheStatus != "hit" || writer.events[0].TotalTokens != 0 || writer.events[0].InputCharacters != 0 || writer.events[0].Cost != 0 {
 		t.Fatalf("cache hit must not charge provider usage: %+v", writer.events)
 	}
 }

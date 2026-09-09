@@ -9,17 +9,18 @@ import (
 )
 
 type AIHubModel struct {
-	Provider        string   `json:"provider"`
-	Model           string   `json:"model"`
-	Capabilities    []string `json:"capabilities,omitempty"`
-	MaxInputTokens  int      `json:"max_input_tokens,omitempty"`
-	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
-	InputCostPer1M  float64  `json:"input_cost_per_1m,omitempty"`
-	OutputCostPer1M float64  `json:"output_cost_per_1m,omitempty"`
-	SearchCostPer1K float64  `json:"search_cost_per_1k,omitempty"`
-	Currency        string   `json:"currency,omitempty"`
-	Deployments     []string `json:"deployments"`
-	Available       bool     `json:"available"`
+	Provider           string   `json:"provider"`
+	Model              string   `json:"model"`
+	Capabilities       []string `json:"capabilities,omitempty"`
+	MaxInputTokens     int      `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens    int      `json:"max_output_tokens,omitempty"`
+	InputCostPer1M     float64  `json:"input_cost_per_1m,omitempty"`
+	OutputCostPer1M    float64  `json:"output_cost_per_1m,omitempty"`
+	SearchCostPer1K    float64  `json:"search_cost_per_1k,omitempty"`
+	CharacterCostPer1M float64  `json:"character_cost_per_1m,omitempty"`
+	Currency           string   `json:"currency,omitempty"`
+	Deployments        []string `json:"deployments"`
+	Available          bool     `json:"available"`
 }
 
 type CostRecommendation struct {
@@ -91,7 +92,7 @@ func (h Handler) aiHubModels(r *http.Request) []AIHubModel {
 	}
 	result := make([]AIHubModel, 0, len(catalog.Models))
 	for _, entry := range catalog.Models {
-		item := AIHubModel{Provider: entry.Provider, Model: entry.Model, Capabilities: append([]string(nil), entry.Capabilities...), MaxInputTokens: entry.MaxInputTokens, MaxOutputTokens: entry.MaxOutputTokens, InputCostPer1M: entry.InputCostPer1M, OutputCostPer1M: entry.OutputCostPer1M, SearchCostPer1K: entry.SearchCostPer1K, Currency: entry.Currency, Deployments: []string{}}
+		item := AIHubModel{Provider: entry.Provider, Model: entry.Model, Capabilities: append([]string(nil), entry.Capabilities...), MaxInputTokens: entry.MaxInputTokens, MaxOutputTokens: entry.MaxOutputTokens, InputCostPer1M: entry.InputCostPer1M, OutputCostPer1M: entry.OutputCostPer1M, SearchCostPer1K: entry.SearchCostPer1K, CharacterCostPer1M: entry.CharacterCostPer1M, Currency: entry.Currency, Deployments: []string{}}
 		for _, deployment := range deployments {
 			if deployment.ProviderID != entry.Provider && deployment.ProviderType != entry.Provider && deployment.ID != entry.Provider {
 				continue

@@ -104,6 +104,9 @@ user, team, and organization. The report endpoint accepts bounded, typed
 filters for each dimension so the UI drill-down is calculated in ClickHouse.
 Provider prompt-cache read and write tokens are carried as separate counters in
 usage reports and request logs, independently from gateway cache-hit counts.
+Exact Unicode input-character counts are also carried independently for models
+whose catalog pricing uses `character_cost_per_1m`; tokens remain available for
+rate limits and token-based budgets.
 Project details remain access-policy metadata rather than a synthetic billing
 identity. The console joins owner teams, project access groups and their
 virtual-key impact. Repeated `access_group_id` key-list query parameters use

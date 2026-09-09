@@ -194,6 +194,8 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	req.Metadata["model_catalog.input_cost_per_1m"] = "1.5"
 	req.Metadata["model_catalog.output_cost_per_1m"] = "3"
 	req.Metadata["model_catalog.search_cost_per_1k"] = "10"
+	req.Metadata["model_catalog.character_cost_per_1m"] = "15"
+	req.InputCharacters = 4096
 	req.Metadata["model_catalog.currency"] = "USD"
 	req.Metadata["provider.id"] = "azure-open-ai"
 	req.Metadata["provider.first_token_latency_ms"] = "87"
@@ -204,7 +206,7 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	req.Request.Model = "fallback-group"
 	req.Response = &openai.ChatCompletionResponse{Model: "gpt-5.6-luna-2026-07-09", Usage: openai.Usage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11, PromptTokensDetails: &openai.PromptTokenDetails{CachedTokens: 6, CacheCreationTokens: 2}, CompletionTokensDetails: &openai.CompletionTokenDetails{AcceptedPredictionTokens: 2, RejectedPredictionTokens: 1}}}
 	request := billingRequest(&req)
-	if request.CatalogVersion != "runtime-v2" || request.PricingKey != "endpoint/model" || request.InputCostPer1M != "1.5" || request.SearchCostPer1K != "10" || request.Currency != "USD" {
+	if request.CatalogVersion != "runtime-v2" || request.PricingKey != "endpoint/model" || request.InputCostPer1M != "1.5" || request.SearchCostPer1K != "10" || request.CharacterCostPer1M != "15" || request.InputCharacters != 4096 || request.Currency != "USD" {
 		t.Fatalf("pricing snapshot=%+v", request)
 	}
 	if request.ProviderID != "azure-open-ai" || request.Model != "gpt-5.6-luna" || request.UpstreamModel != "gpt-5.6-luna-2026-07-09" {
