@@ -374,6 +374,9 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	if err := decodeChatCompletionResponse(resp.Body, &response); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	if err := validateCompletionUsage(response.Usage); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	if err := validateRequestedChatChoices(request, response); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
@@ -692,6 +695,9 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			response.Model = chunk.Model
 		}
 		if chunk.Usage != nil {
+			if err := validateCompletionUsage(*chunk.Usage); err != nil {
+				return err
+			}
 			response.Usage = *chunk.Usage
 		}
 		for _, choice := range chunk.Choices {

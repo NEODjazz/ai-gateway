@@ -170,7 +170,8 @@ post-response billing. Это событие не создаёт дополни�
 при проксировании клиенту. Для Chat SSE gateway всегда отправляет upstream
 `stream_options.include_usage=true`. Если upstream всё равно не присылает usage,
 остаётся существующий estimated fallback; точный учет не выводится из отсутствующих
-данных.
+данных. Отрицательные token counts, переполнение и `total_tokens` меньше суммы
+prompt/completion отклоняются до cache, billing и доставки SSE-события клиенту.
 
 
 ## Chat generation controls

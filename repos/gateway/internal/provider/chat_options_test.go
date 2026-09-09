@@ -129,6 +129,22 @@ func TestChatCompletionJSONResponseIsBoundedAndExact(t *testing.T) {
 	}
 }
 
+func TestCompatibleChatRejectsInvalidUsageBeforeDelivery(t *testing.T) {
+	invalid := `{"prompt_tokens":2,"completion_tokens":3,"total_tokens":4}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"one"}}],"usage":`+invalid+`}`)
+	}))
+	defer server.Close()
+	if _, err := NewOpenAICompatible(server.URL, "", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test"}); err == nil {
+		t.Fatal("invalid JSON usage accepted")
+	}
+	wrote := false
+	payload := `data: {"choices":[],"usage":` + invalid + `}` + "\n\n"
+	if _, err := streamChatCompletionData(strings.NewReader(payload), "test", func(string) error { wrote = true; return nil }); err == nil || wrote {
+		t.Fatalf("invalid SSE usage delivered: err=%v wrote=%v", err, wrote)
+	}
+}
+
 func TestGenerationControlsAreRejectedByNativeAdapters(t *testing.T) {
 	for _, body := range []string{`{"reasoning_effort":"high"}`, `{"n":2}`, `{"logprobs":false}`, `{"top_logprobs":0}`, `{"frequency_penalty":0}`, `{"presence_penalty":0}`, `{"logit_bias":{"1":0}}`} {
 		var request openai.ChatCompletionRequest
