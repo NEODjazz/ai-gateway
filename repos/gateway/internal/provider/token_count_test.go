@@ -17,6 +17,13 @@ import (
 func countTestRequest() TokenCountRequest {
 	return TokenCountRequest{Model: "claude-test", Messages: []openai.Message{{Role: "system", Content: "Be concise"}, {Role: "user", Content: []any{map[string]any{"type": "text", "text": "Describe"}, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}}}}}, Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object", "properties": map[string]any{"city": map[string]any{"type": "string"}}}}}}, ToolChoice: "required"}
 }
+
+func anthropicCachedCountTestRequest() TokenCountRequest {
+	request := countTestRequest()
+	request.Messages[1].Content.([]any)[0].(map[string]any)["prompt_cache_breakpoint"] = map[string]any{"mode": "explicit", "ttl": "1h"}
+	request.Tools[0].Function.PromptCacheBreakpoint = &openai.PromptCacheBreakpoint{Mode: "explicit", TTL: "5m"}
+	return request
+}
 func TestAnthropicCountTokensIncludesNativeContext(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages/count_tokens" || r.Method != "POST" || r.Header.Get("x-api-key") != "test-key" || r.Header.Get("anthropic-version") != "2023-06-01" || r.Header.Get("Authorization") != "" {
@@ -31,11 +38,11 @@ func TestAnthropicCountTokensIncludesNativeContext(t *testing.T) {
 			t.Errorf("wrong counter body: %v", body)
 		}
 		tools := body["tools"].([]any)
-		if len(tools) != 1 || tools[0].(map[string]any)["input_schema"] == nil {
+		if len(tools) != 1 || tools[0].(map[string]any)["input_schema"] == nil || tools[0].(map[string]any)["cache_control"].(map[string]any)["ttl"] != "5m" {
 			t.Error("tool schema lost")
 		}
 		content := body["messages"].([]any)[0].(map[string]any)["content"].([]any)
-		if len(content) != 2 || content[1].(map[string]any)["source"].(map[string]any)["data"] != "iVBORw0KGgo=" {
+		if len(content) != 2 || content[0].(map[string]any)["cache_control"].(map[string]any)["ttl"] != "1h" || content[1].(map[string]any)["source"].(map[string]any)["data"] != "iVBORw0KGgo=" {
 			t.Error("image context lost")
 		}
 		if body["tool_choice"].(map[string]any)["type"] != "any" {
@@ -45,7 +52,7 @@ func TestAnthropicCountTokensIncludesNativeContext(t *testing.T) {
 	}))
 	defer server.Close()
 	var counter TokenCountClient = NewAnthropic(server.URL, "test-key", false)
-	result, err := counter.CountTokens(context.Background(), countTestRequest())
+	result, err := counter.CountTokens(context.Background(), anthropicCachedCountTestRequest())
 	if err != nil || result.InputTokens != 321 || result.Source != "anthropic" || result.Model != "claude-test" {
 		t.Fatalf("count: %+v %v", result, err)
 	}

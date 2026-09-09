@@ -43,7 +43,7 @@ func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (
 	native := anthropicChatRequest(chat, false)
 	body, err := json.Marshal(struct {
 		Model      string             `json:"model"`
-		System     string             `json:"system,omitempty"`
+		System     any                `json:"system,omitempty"`
 		Messages   []anthropicMessage `json:"messages"`
 		Tools      []anthropicTool    `json:"tools,omitempty"`
 		ToolChoice map[string]any     `json:"tool_choice,omitempty"`
@@ -96,6 +96,9 @@ func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (
 
 func validateTokenCountRequest(request openai.ChatCompletionRequest) error {
 	invalid := func(field string) error { return rejectParameters("provider", parameterCheck{field, true}) }
+	if _, message := openai.ChatRequestPromptCacheBreakpoints(request); message != "" {
+		return invalid("prompt_cache_breakpoint")
+	}
 	if strings.TrimSpace(request.Model) == "" || len(request.Messages) == 0 || len(request.Messages) > 10000 || len(request.Tools) > 128 {
 		return invalid("messages")
 	}
@@ -134,7 +137,8 @@ func validateTokenCountRequest(request openai.ChatCompletionRequest) error {
 				}
 				switch part["type"] {
 				case "text":
-					if _, ok := part["text"].(string); !ok || len(part) != 2 {
+					_, hasBreakpoint := part["prompt_cache_breakpoint"]
+					if _, ok := part["text"].(string); !ok || len(part) != 2 && !(len(part) == 3 && hasBreakpoint) {
 						return invalid("messages.content")
 					}
 				case "image_url":

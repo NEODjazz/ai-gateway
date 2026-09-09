@@ -130,7 +130,7 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	if err := rejectLegacyFunctionCalling("gemini", request); err != nil {
 		return result, err
 	}
-	if err := validateChatPromptCacheBreakpoints("gemini", request.Messages, false); err != nil {
+	if err := validateChatPromptCacheBreakpoints("gemini", request, false); err != nil {
 		return result, err
 	}
 	if err := rejectGenerationOptions("gemini", request.ChatGenerationOptions); err != nil {

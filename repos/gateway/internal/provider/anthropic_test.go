@@ -20,6 +20,35 @@ func TestAnthropicMapsMaxCompletionTokensToMaxTokens(t *testing.T) {
 	}
 }
 
+func TestAnthropicMapsPromptCacheBreakpoints(t *testing.T) {
+	request := openai.ChatCompletionRequest{
+		Model: "claude",
+		Messages: []openai.Message{
+			{Role: "system", Content: []any{map[string]any{"type": "text", "text": "rules", "prompt_cache_breakpoint": map[string]any{"mode": "explicit", "ttl": "1h"}}}},
+			{Role: "user", Content: []any{map[string]any{"type": "text", "text": "question", "prompt_cache_breakpoint": map[string]any{"mode": "explicit"}}}},
+		},
+		Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}, PromptCacheBreakpoint: &openai.PromptCacheBreakpoint{Mode: "explicit", TTL: "5m"}}}},
+	}
+	converted := anthropicChatRequest(request, false)
+	system, ok := converted.System.([]anthropicContent)
+	message, messageOK := converted.Messages[0].Content.([]anthropicContent)
+	if !ok || !messageOK || len(system) != 1 || len(message) != 1 || len(converted.Tools) != 1 {
+		t.Fatalf("unexpected conversion: %+v", converted)
+	}
+	if system[0].CacheControl == nil || system[0].CacheControl.Type != "ephemeral" || system[0].CacheControl.TTL != "1h" || message[0].CacheControl == nil || message[0].CacheControl.TTL != "" || converted.Tools[0].CacheControl == nil || converted.Tools[0].CacheControl.TTL != "5m" {
+		t.Fatalf("cache controls changed: system=%+v message=%+v tool=%+v", system[0], message[0], converted.Tools[0])
+	}
+	encoded, err := json.Marshal(converted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"cache_control":{"type":"ephemeral","ttl":"1h"}`, `"cache_control":{"type":"ephemeral"}`, `"cache_control":{"type":"ephemeral","ttl":"5m"}`} {
+		if !strings.Contains(string(encoded), expected) {
+			t.Fatalf("missing %s in %s", expected, encoded)
+		}
+	}
+}
+
 func TestAnthropicChatCompletions(t *testing.T) {
 	var upstreamRequest anthropicRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

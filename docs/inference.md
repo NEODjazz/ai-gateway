@@ -1286,6 +1286,22 @@ upstream. Текущий model catalog хранит одну пару input/outp
 достоверно резервировать или начислять стоимость, зависящую от tier. Передача
 параметра должна включаться одновременно с tier-aware pricing configuration.
 
+### Native prompt caching
+
+Chat text parts and function tools may declare an explicit
+`prompt_cache_breakpoint` with `mode=explicit` and optional `ttl=5m|1h`.
+The Messages API maps `cache_control: {type: ephemeral}` on system text,
+message text and tools to the same internal contract. A request may contain at
+most four breakpoints across messages and tools. Breakpoints participate in
+the serialized token reserve and exact-cache key and disable semantic caching.
+
+The native Anthropic adapter emits the provider `cache_control` object without
+changing the requested TTL. Other native adapters reject the parameter.
+Routing requires an explicit `prompt_cache` deployment and model capability,
+so a request cannot reach an adapter that would discard the breakpoint.
+Provider-reported cache-read and cache-creation tokens continue through usage
+normalization and billing settlement.
+
 ### Stored Responses lifecycle
 
 The native-compatible adapter exposes bounded retrieval transport. It performs a

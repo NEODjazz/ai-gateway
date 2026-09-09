@@ -22,8 +22,8 @@ func ChatPromptCacheBreakpoints(messages []Message) (int, string) {
 				return 0, "prompt_cache_breakpoint is only supported on Chat text parts"
 			}
 			value, ok := breakpoint.(map[string]any)
-			if !ok || len(value) != 1 || value["mode"] != "explicit" {
-				return 0, "prompt_cache_breakpoint.mode must be explicit"
+			if !ok || !validPromptCacheBreakpointMap(value) {
+				return 0, "prompt_cache_breakpoint requires mode=explicit and optional ttl=5m or 1h"
 			}
 			count++
 			if count > 4 {
@@ -32,4 +32,41 @@ func ChatPromptCacheBreakpoints(messages []Message) (int, string) {
 		}
 	}
 	return count, ""
+}
+
+func ChatRequestPromptCacheBreakpoints(request ChatCompletionRequest) (int, string) {
+	count, message := ChatPromptCacheBreakpoints(request.Messages)
+	if message != "" {
+		return 0, message
+	}
+	for _, tool := range request.Tools {
+		if tool.Function.PromptCacheBreakpoint == nil {
+			continue
+		}
+		if !ValidPromptCacheBreakpoint(tool.Function.PromptCacheBreakpoint) {
+			return 0, "tool prompt_cache_breakpoint requires mode=explicit and optional ttl=5m or 1h"
+		}
+		count++
+		if count > 4 {
+			return 0, "at most 4 prompt_cache_breakpoint values are allowed"
+		}
+	}
+	return count, ""
+}
+
+func ValidPromptCacheBreakpoint(value *PromptCacheBreakpoint) bool {
+	return value != nil && value.Mode == "explicit" && (value.TTL == "" || value.TTL == "5m" || value.TTL == "1h")
+}
+
+func validPromptCacheBreakpointMap(value map[string]any) bool {
+	if len(value) < 1 || len(value) > 2 || value["mode"] != "explicit" {
+		return false
+	}
+	for key := range value {
+		if key != "mode" && key != "ttl" {
+			return false
+		}
+	}
+	ttl, supplied := value["ttl"]
+	return !supplied || ttl == "5m" || ttl == "1h"
 }

@@ -174,17 +174,33 @@ func TestChatRefusalHistoryScopesExactCache(t *testing.T) {
 	}
 }
 
-func TestPromptCacheBreakpointsAreRejectedByNativeAdapters(t *testing.T) {
+func TestPromptCacheBreakpointsAreRejectedByUnsupportedNativeAdapters(t *testing.T) {
 	var request openai.ChatCompletionRequest
 	if err := json.Unmarshal([]byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"hello","prompt_cache_breakpoint":{"mode":"explicit"}}]}]}`), &request); err != nil {
 		t.Fatal(err)
 	}
-	for _, client := range []Client{NewAnthropic("http://unused.invalid", "", false), NewOllama("http://unused.invalid", false), NewGemini("http://unused.invalid", "", false), Demo{}} {
+	if err := validateChatAdapter(NewAnthropic("http://unused.invalid", "", false), request); err != nil {
+		t.Fatalf("Anthropic rejected prompt cache breakpoint: %v", err)
+	}
+	for _, client := range []Client{NewOllama("http://unused.invalid", false), NewGemini("http://unused.invalid", "", false), Demo{}} {
 		var failure *Error
 		err := validateChatAdapter(client, request)
 		if !errors.As(err, &failure) || failure.Param != "messages.prompt_cache_breakpoint" || failure.UpstreamCode != "unsupported_parameter" {
 			t.Fatalf("%T silently accepted breakpoint: %v", client, err)
 		}
+	}
+}
+
+func TestAnthropicRejectsCachedToolWhenToolChoiceIsNone(t *testing.T) {
+	request := openai.ChatCompletionRequest{
+		Messages:   []openai.Message{{Role: "user", Content: "hello"}},
+		Tools:      []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}, PromptCacheBreakpoint: &openai.PromptCacheBreakpoint{Mode: "explicit"}}}},
+		ToolChoice: "none",
+	}
+	err := (Anthropic{}).ValidateChatParameters(request)
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Param != "tool_choice" || failure.UpstreamCode != "invalid_request" {
+		t.Fatalf("cached tool was silently removed: %v", err)
 	}
 }
 

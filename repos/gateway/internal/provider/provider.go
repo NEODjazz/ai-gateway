@@ -1829,6 +1829,9 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	if openai.ChatRequestsAudio(request) || openai.ChatHasAudioHistory(request) {
 		required = append(required, "audio")
 	}
+	if count, _ := openai.ChatRequestPromptCacheBreakpoints(request); count > 0 {
+		required = append(required, "prompt_cache")
+	}
 	return required
 }
 
@@ -1966,11 +1969,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "web_search") || hasCapability(required, "audio")
+	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "web_search") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"mcp", "vision", "rerank", "web_search", "audio"} {
+	for _, capability := range []string{"mcp", "vision", "rerank", "web_search", "audio", "prompt_cache"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

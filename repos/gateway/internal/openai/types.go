@@ -124,10 +124,16 @@ type Tool struct {
 }
 
 type FunctionDefinition struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Parameters  any    `json:"parameters,omitempty"`
-	Strict      *bool  `json:"strict,omitempty"`
+	Name                  string                 `json:"name"`
+	Description           string                 `json:"description,omitempty"`
+	Parameters            any                    `json:"parameters,omitempty"`
+	Strict                *bool                  `json:"strict,omitempty"`
+	PromptCacheBreakpoint *PromptCacheBreakpoint `json:"prompt_cache_breakpoint,omitempty"`
+}
+
+type PromptCacheBreakpoint struct {
+	Mode string `json:"mode"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 type ToolCallExtraContent struct {

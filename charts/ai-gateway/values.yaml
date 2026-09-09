@@ -143,6 +143,7 @@ gateway:
       stream: true
       dlp_enabled: false
       av_enabled: false
+      capabilities: [chat, responses, stream, tools, structured_output, vision, prompt_cache]
       models:
         - claude-sonnet-4-5
       priority: 20

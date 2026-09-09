@@ -27,7 +27,7 @@ type Anthropic struct {
 type anthropicRequest struct {
 	StopSequences []string           `json:"stop_sequences,omitempty"`
 	Model         string             `json:"model"`
-	System        string             `json:"system,omitempty"`
+	System        any                `json:"system,omitempty"`
 	Messages      []anthropicMessage `json:"messages"`
 	Tools         []anthropicTool    `json:"tools,omitempty"`
 	ToolChoice    map[string]any     `json:"tool_choice,omitempty"`
@@ -43,9 +43,15 @@ type anthropicMessage struct {
 }
 
 type anthropicTool struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	InputSchema any    `json:"input_schema"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description,omitempty"`
+	InputSchema  any                    `json:"input_schema"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
+type anthropicCacheControl struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 type anthropicResponse struct {
@@ -60,14 +66,15 @@ type anthropicResponse struct {
 }
 
 type anthropicContent struct {
-	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	Source    any    `json:"source,omitempty"`
-	ID        string `json:"id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Input     any    `json:"input,omitempty"`
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	Content   any    `json:"content,omitempty"`
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text,omitempty"`
+	Source       any                    `json:"source,omitempty"`
+	ID           string                 `json:"id,omitempty"`
+	Name         string                 `json:"name,omitempty"`
+	Input        any                    `json:"input,omitempty"`
+	ToolUseID    string                 `json:"tool_use_id,omitempty"`
+	Content      any                    `json:"content,omitempty"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicUsage struct {
@@ -332,21 +339,23 @@ func anthropicStructuredResponse(response openai.ResponseResponse) openai.Respon
 	return response
 }
 
-func anthropicMessages(messages []openai.Message) (string, []anthropicMessage) {
-	var system []string
+func anthropicMessages(messages []openai.Message) (any, []anthropicMessage) {
+	var systemText []string
+	var systemBlocks []anthropicContent
+	structuredSystem := false
 	converted := make([]anthropicMessage, 0, len(messages))
 	for _, message := range messages {
 		content := openai.ContentText(message.Content)
 		switch message.Role {
 		case "system", "developer":
 			if content != "" {
-				system = append(system, content)
+				systemText = append(systemText, content)
 			}
+			blocks := anthropicContentBlocks(message.Content)
+			systemBlocks = append(systemBlocks, blocks...)
+			structuredSystem = structuredSystem || anthropicBlocksUseCache(blocks)
 		case "assistant":
-			blocks := make([]anthropicContent, 0, len(message.ToolCalls)+1)
-			if content != "" {
-				blocks = append(blocks, anthropicContent{Type: "text", Text: content})
-			}
+			blocks := anthropicContentBlocks(message.Content)
 			for _, call := range message.ToolCalls {
 				var input any = map[string]any{}
 				if call.Function.Arguments != "" {
@@ -372,7 +381,30 @@ func anthropicMessages(messages []openai.Message) (string, []anthropicMessage) {
 	if len(converted) == 0 {
 		converted = append(converted, anthropicMessage{Role: "user", Content: ""})
 	}
-	return strings.Join(system, "\n\n"), converted
+	if structuredSystem {
+		return systemBlocks, converted
+	}
+	return strings.Join(systemText, "\n\n"), converted
+}
+
+func anthropicContentBlocks(value any) []anthropicContent {
+	converted := anthropicMessageContent(value)
+	if blocks, ok := converted.([]anthropicContent); ok {
+		return blocks
+	}
+	if text := openai.ContentText(converted); text != "" {
+		return []anthropicContent{{Type: "text", Text: text}}
+	}
+	return nil
+}
+
+func anthropicBlocksUseCache(blocks []anthropicContent) bool {
+	for _, block := range blocks {
+		if block.CacheControl != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func anthropicResponseMessages(input any) ([]anthropicMessage, error) {
@@ -424,7 +456,7 @@ func anthropicMessageContent(value any) any {
 		switch typeName {
 		case "text", "input_text":
 			if text, _ := object["text"].(string); text != "" {
-				blocks = append(blocks, anthropicContent{Type: "text", Text: text})
+				blocks = append(blocks, anthropicContent{Type: "text", Text: text, CacheControl: anthropicContentCacheControl(object)})
 			}
 		case "image_url", "input_image":
 			imageURL := ""
@@ -449,6 +481,22 @@ func anthropicMessageContent(value any) any {
 	return blocks
 }
 
+func anthropicContentCacheControl(object map[string]any) *anthropicCacheControl {
+	value, _ := object["prompt_cache_breakpoint"].(map[string]any)
+	if value == nil || value["mode"] != "explicit" {
+		return nil
+	}
+	ttl, _ := value["ttl"].(string)
+	return &anthropicCacheControl{Type: "ephemeral", TTL: ttl}
+}
+
+func anthropicToolCacheControl(value *openai.PromptCacheBreakpoint) *anthropicCacheControl {
+	if !openai.ValidPromptCacheBreakpoint(value) {
+		return nil
+	}
+	return &anthropicCacheControl{Type: "ephemeral", TTL: value.TTL}
+}
+
 func anthropicChatTools(tools []openai.Tool, choice any) ([]anthropicTool, map[string]any) {
 	converted := make([]anthropicTool, 0, len(tools))
 	for _, tool := range tools {
@@ -459,7 +507,7 @@ func anthropicChatTools(tools []openai.Tool, choice any) ([]anthropicTool, map[s
 		if schema == nil {
 			schema = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
-		converted = append(converted, anthropicTool{Name: tool.Function.Name, Description: tool.Function.Description, InputSchema: schema})
+		converted = append(converted, anthropicTool{Name: tool.Function.Name, Description: tool.Function.Description, InputSchema: schema, CacheControl: anthropicToolCacheControl(tool.Function.PromptCacheBreakpoint)})
 	}
 	return applyAnthropicToolChoice(converted, choice)
 }

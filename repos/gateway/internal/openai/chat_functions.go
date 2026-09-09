@@ -27,6 +27,9 @@ func ValidateLegacyFunctionRequest(request ChatCompletionRequest) error {
 	}
 	names := make(map[string]struct{}, len(request.Functions))
 	for _, function := range request.Functions {
+		if function.PromptCacheBreakpoint != nil {
+			return errors.New("legacy functions do not support prompt_cache_breakpoint")
+		}
 		if !chatFunctionName.MatchString(function.Name) {
 			return errors.New("function names must contain 1 to 64 letters, digits, underscores, or hyphens")
 		}

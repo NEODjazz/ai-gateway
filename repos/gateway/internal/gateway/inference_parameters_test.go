@@ -151,7 +151,7 @@ func TestChatRejectsInvalidGenerationOptionsBeforePipeline(t *testing.T) {
 		{`{"model":"test","messages":[],"prediction":{"type":"content","content":[{"type":"text","text":"x","extra":true}]}}`, "prediction.content must be text or an array of text parts"},
 		{`{"model":"test","messages":[],"stream_options":{"include_usage":true}}`, "stream_options requires stream=true"},
 		{`{"model":"test","messages":[],"web_search_options":{"search_context_size":"huge"}}`, "web_search_options.search_context_size"},
-		{`{"model":"test","messages":[{"role":"user","content":[{"type":"text","text":"x","prompt_cache_breakpoint":{"mode":"implicit"}}]}]}`, "prompt_cache_breakpoint.mode must be explicit"},
+		{`{"model":"test","messages":[{"role":"user","content":[{"type":"text","text":"x","prompt_cache_breakpoint":{"mode":"implicit"}}]}]}`, "prompt_cache_breakpoint requires mode=explicit"},
 		{`{"model":"test","messages":[{"role":"user","content":[{"type":"text","text":"1","prompt_cache_breakpoint":{"mode":"explicit"}},{"type":"text","text":"2","prompt_cache_breakpoint":{"mode":"explicit"}},{"type":"text","text":"3","prompt_cache_breakpoint":{"mode":"explicit"}},{"type":"text","text":"4","prompt_cache_breakpoint":{"mode":"explicit"}},{"type":"text","text":"5","prompt_cache_breakpoint":{"mode":"explicit"}}]}]}`, "at most 4 prompt_cache_breakpoint values are allowed"},
 		{`{"model":"test","messages":[{"role":"assistant","content":"Source","annotations":[]}]}`, "messages.annotations is response-only"},
 	} {

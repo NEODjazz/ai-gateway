@@ -28,14 +28,19 @@ type messagesInput struct {
 	Content json.RawMessage `json:"content"`
 }
 type messagesTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	InputSchema map[string]any `json:"input_schema"`
+	Name         string                `json:"name"`
+	Description  string                `json:"description,omitempty"`
+	InputSchema  map[string]any        `json:"input_schema"`
+	CacheControl *messagesCacheControl `json:"cache_control,omitempty"`
 }
 type messagesToolChoice struct {
 	Type            string `json:"type"`
 	Name            string `json:"name,omitempty"`
 	DisableParallel *bool  `json:"disable_parallel_tool_use,omitempty"`
+}
+type messagesCacheControl struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 func decodeMessagesValue(raw json.RawMessage, target any) error {
@@ -76,7 +81,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		return result, errors.New("top_p must be between 0 and 1")
 	}
 	if len(request.System) > 0 {
-		content, err := messagesText(request.System)
+		content, err := messagesSystem(request.System)
 		if err != nil {
 			return result, fmt.Errorf("system: %w", err)
 		}
@@ -119,13 +124,25 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 					return result, errors.New("text after tool_use is not supported")
 				}
 				var block struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
+					Type         string                `json:"type"`
+					Text         string                `json:"text"`
+					CacheControl *messagesCacheControl `json:"cache_control,omitempty"`
 				}
 				if err := decodeMessagesValue(raw, &block); err != nil {
 					return result, fmt.Errorf("text block: %w", err)
 				}
-				parts = append(parts, map[string]any{"type": "text", "text": block.Text})
+				part := map[string]any{"type": "text", "text": block.Text}
+				if block.CacheControl != nil {
+					breakpoint, err := messagesPromptCacheBreakpoint(block.CacheControl)
+					if err != nil {
+						return result, err
+					}
+					part["prompt_cache_breakpoint"] = map[string]any{"mode": breakpoint.Mode}
+					if breakpoint.TTL != "" {
+						part["prompt_cache_breakpoint"].(map[string]any)["ttl"] = breakpoint.TTL
+					}
+				}
+				parts = append(parts, part)
 			case "image":
 				var block struct {
 					Type   string `json:"type"`
@@ -195,7 +212,15 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		if tool.Name == "" || tool.InputSchema == nil {
 			return result, errors.New("tools require name and input_schema")
 		}
-		result.Tools = append(result.Tools, openai.Tool{Type: "function", Function: openai.FunctionDefinition{Name: tool.Name, Description: tool.Description, Parameters: tool.InputSchema}})
+		var breakpoint *openai.PromptCacheBreakpoint
+		if tool.CacheControl != nil {
+			var err error
+			breakpoint, err = messagesPromptCacheBreakpoint(tool.CacheControl)
+			if err != nil {
+				return result, err
+			}
+		}
+		result.Tools = append(result.Tools, openai.Tool{Type: "function", Function: openai.FunctionDefinition{Name: tool.Name, Description: tool.Description, Parameters: tool.InputSchema, PromptCacheBreakpoint: breakpoint}})
 	}
 	if choice := request.ToolChoice; choice != nil {
 		if choice.Name != "" && choice.Type != "tool" {
@@ -222,6 +247,50 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		}
 	}
 	return result, nil
+}
+
+func messagesSystem(raw json.RawMessage) (any, error) {
+	if text, err := messagesText(raw); err == nil {
+		return text, nil
+	}
+	var blocks []struct {
+		Type         string                `json:"type"`
+		Text         string                `json:"text"`
+		CacheControl *messagesCacheControl `json:"cache_control,omitempty"`
+	}
+	if err := decodeMessagesValue(raw, &blocks); err != nil || len(blocks) == 0 {
+		return nil, errors.New("system must be text or non-empty text blocks")
+	}
+	parts := make([]any, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Type != "text" {
+			return nil, errors.New("system supports only text blocks")
+		}
+		part := map[string]any{"type": "text", "text": block.Text}
+		if block.CacheControl != nil {
+			breakpoint, err := messagesPromptCacheBreakpoint(block.CacheControl)
+			if err != nil {
+				return nil, err
+			}
+			value := map[string]any{"mode": breakpoint.Mode}
+			if breakpoint.TTL != "" {
+				value["ttl"] = breakpoint.TTL
+			}
+			part["prompt_cache_breakpoint"] = value
+		}
+		parts = append(parts, part)
+	}
+	return parts, nil
+}
+
+func messagesPromptCacheBreakpoint(value *messagesCacheControl) (*openai.PromptCacheBreakpoint, error) {
+	if value == nil {
+		return nil, nil
+	}
+	if value.Type != "ephemeral" || (value.TTL != "" && value.TTL != "5m" && value.TTL != "1h") {
+		return nil, errors.New("cache_control requires type=ephemeral and optional ttl=5m or 1h")
+	}
+	return &openai.PromptCacheBreakpoint{Mode: "explicit", TTL: value.TTL}, nil
 }
 
 func messagesText(raw json.RawMessage) (string, error) {

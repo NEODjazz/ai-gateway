@@ -28,8 +28,15 @@ func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) er
 	if err := rejectLegacyFunctionCalling("anthropic", request); err != nil {
 		return err
 	}
-	if err := validateChatPromptCacheBreakpoints("anthropic", request.Messages, false); err != nil {
+	if err := validateChatPromptCacheBreakpoints("anthropic", request, true); err != nil {
 		return err
+	}
+	if request.ToolChoice == "none" {
+		for _, tool := range request.Tools {
+			if tool.Function.PromptCacheBreakpoint != nil {
+				return &Error{Class: FailureClientRequest, Provider: "anthropic", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "tool_choice", Err: errors.New("tool_choice=none cannot be combined with a tool prompt_cache_breakpoint")}
+			}
+		}
 	}
 	if err := rejectToolCallMetadata("anthropic", request.Messages); err != nil {
 		return err
@@ -75,7 +82,7 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	if err := rejectLegacyFunctionCalling("ollama", request); err != nil {
 		return err
 	}
-	if err := validateChatPromptCacheBreakpoints("ollama", request.Messages, false); err != nil {
+	if err := validateChatPromptCacheBreakpoints("ollama", request, false); err != nil {
 		return err
 	}
 	if err := rejectToolCallMetadata("ollama", request.Messages); err != nil {
@@ -185,7 +192,7 @@ func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := rejectLegacyFunctionCalling("demo", request); err != nil {
 		return err
 	}
-	if err := validateChatPromptCacheBreakpoints("demo", request.Messages, false); err != nil {
+	if err := validateChatPromptCacheBreakpoints("demo", request, false); err != nil {
 		return err
 	}
 	if err := rejectToolCallMetadata("demo", request.Messages); err != nil {
@@ -204,7 +211,7 @@ func (OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequ
 	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
 		return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "functions", Err: err}
 	}
-	if err := validateChatPromptCacheBreakpoints("openai-compatible", request.Messages, true); err != nil {
+	if err := validateChatPromptCacheBreakpoints("openai-compatible", request, true); err != nil {
 		return err
 	}
 	for _, message := range request.Messages {
@@ -241,8 +248,8 @@ func rejectLegacyFunctionCalling(adapter string, request openai.ChatCompletionRe
 	return nil
 }
 
-func validateChatPromptCacheBreakpoints(adapter string, messages []openai.Message, supported bool) error {
-	count, message := openai.ChatPromptCacheBreakpoints(messages)
+func validateChatPromptCacheBreakpoints(adapter string, request openai.ChatCompletionRequest, supported bool) error {
+	count, message := openai.ChatRequestPromptCacheBreakpoints(request)
 	if message != "" {
 		return &Error{Class: FailureClientRequest, Provider: adapter, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.prompt_cache_breakpoint", Err: fmt.Errorf("%s", message)}
 	}

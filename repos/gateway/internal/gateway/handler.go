@@ -157,7 +157,7 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
-	if _, message := openai.ChatPromptCacheBreakpoints(request.Messages); message != "" {
+	if _, message := openai.ChatRequestPromptCacheBreakpoints(request); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}

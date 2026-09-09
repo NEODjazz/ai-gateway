@@ -84,7 +84,7 @@ func TestMessagesPreservesAccessControls(t *testing.T) {
 func TestMessagesRejectsUnsupportedInputBeforeInference(t *testing.T) {
 	for _, body := range []string{
 		`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled"}}`,
-		`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}}]}]}`,
+		`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"30m"}}]}]}`,
 		`{"model":"m","max_tokens":10,"messages":[{"role":"assistant","content":"prefix"}]}`,
 		`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"unknown","content":"x"}]}]}`,
 		`{"model":"m","max_tokens":0,"messages":[{"role":"user","content":"hi"}]}`,
@@ -96,6 +96,28 @@ func TestMessagesRejectsUnsupportedInputBeforeInference(t *testing.T) {
 		if response.Code != 400 || upstream.calls != 0 {
 			t.Fatalf("invalid input accepted: %d %s", response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestMessagesConvertsPromptCacheControls(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{
+		ID: "message", Model: "model", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}},
+		Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11},
+	}}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":10,"system":[{"type":"text","text":"rules","cache_control":{"type":"ephemeral","ttl":"1h"}}],"tools":[{"name":"lookup","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"question","cache_control":{"type":"ephemeral","ttl":"5m"}}]}]}`, "")
+	if response.Code != http.StatusOK || upstream.calls != 1 {
+		t.Fatalf("response=%d body=%s calls=%d", response.Code, response.Body.String(), upstream.calls)
+	}
+	request := upstream.request.Request
+	if count, message := openai.ChatRequestPromptCacheBreakpoints(request); count != 3 || message != "" {
+		t.Fatalf("breakpoints count=%d message=%q request=%+v", count, message, request)
+	}
+	systemPart := request.Messages[0].Content.([]any)[0].(map[string]any)["prompt_cache_breakpoint"].(map[string]any)
+	userPart := request.Messages[1].Content.([]any)[0].(map[string]any)["prompt_cache_breakpoint"].(map[string]any)
+	toolBreakpoint := request.Tools[0].Function.PromptCacheBreakpoint
+	if systemPart["ttl"] != "1h" || userPart["ttl"] != "5m" || toolBreakpoint == nil || toolBreakpoint.Mode != "explicit" {
+		t.Fatalf("cache controls changed: system=%v user=%v tool=%+v", systemPart, userPart, toolBreakpoint)
 	}
 }
 

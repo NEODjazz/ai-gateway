@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.70
+  version: 0.1.71
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -2699,7 +2699,7 @@ components:
         temperature: {type: number, minimum: 0, maximum: 1}
         top_p: {type: number, minimum: 0, maximum: 1}
         system:
-          description: Text or text blocks without cache controls
+          description: Text or text blocks. Text blocks may carry an explicit ephemeral cache_control breakpoint.
           oneOf:
             - {type: string}
             - type: array
@@ -2730,6 +2730,13 @@ components:
               name: {type: string, minLength: 1}
               description: {type: string}
               input_schema: {type: object, additionalProperties: true}
+              cache_control:
+                type: object
+                additionalProperties: false
+                required: [type]
+                properties:
+                  type: {type: string, const: ephemeral}
+                  ttl: {type: string, enum: [5m, 1h]}
         tool_choice:
           type: object
           additionalProperties: false
@@ -3167,6 +3174,7 @@ components:
           required: [mode]
           properties:
             mode: {type: string, const: explicit}
+            ttl: {type: string, enum: [5m, 1h]}
     ImageContentPart:
       type: object
       additionalProperties: false
@@ -3298,6 +3306,13 @@ components:
           type: object
           additionalProperties: true
         strict: {type: boolean}
+        prompt_cache_breakpoint:
+          type: object
+          additionalProperties: false
+          required: [mode]
+          properties:
+            mode: {type: string, const: explicit}
+            ttl: {type: string, enum: [5m, 1h]}
     ChatTool:
       type: object
       additionalProperties: false

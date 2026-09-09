@@ -38,6 +38,7 @@ func TestValidateLegacyFunctionRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	tests := []ChatCompletionRequest{
+		{Functions: []FunctionDefinition{{Name: "lookup", PromptCacheBreakpoint: &PromptCacheBreakpoint{Mode: "explicit"}}}},
 		{Functions: []FunctionDefinition{function}, Tools: []Tool{{Type: "function", Function: function}}},
 		{Functions: []FunctionDefinition{function, function}},
 		{Functions: []FunctionDefinition{function}, FunctionCall: &LegacyFunctionChoice{Name: "other"}},

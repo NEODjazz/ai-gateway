@@ -25,7 +25,7 @@ availability is not inferred from these tests.
 | Embeddings | String/list and bounded token-ID input, exact token-ID accounting, float/base64 output, compatible and native adapters | Additional provider compatibility |
 | Rerank | Query/documents, compatible adapter | Provider-specific request and usage matrix |
 | Text completions | Compatible adapters accept string/list and token-ID prompts; Ollama provider execution accepts string prompts; legacy parameters/response/logprobs, bounded JSON, incremental SSE and buffered fallback | Additional native provider adapters and provider-specific prompt forms |
-| Messages | Inbound `/v1/messages` JSON/SSE over the shared Chat pipeline; outbound Anthropic adapter | Thinking, prompt-cache controls, server tools and prefill |
+| Messages | Inbound `/v1/messages` JSON/SSE over the shared Chat pipeline; outbound Anthropic adapter; explicit prompt-cache controls on system, message text and tools | Thinking, server tools and prefill |
 | Anthropic token counting | Native Anthropic/Gemini counters behind `/v1/messages/count_tokens` with authorization, policy, input quotas and bounded transport | Advanced native content blocks and additional provider counters |
 | GenerateContent | Native inbound JSON/SSE and context token counting through shared policy; outbound Gemini chat/tools/vision | Advanced native options and cloud credentials |
 | Interactions | Not implemented | Native lifecycle, resource ownership and accounting |
@@ -84,6 +84,8 @@ availability is not inferred from these tests.
   and Responses, including forced tools, structured output and SSE.
 - `006a16a`: bounded upstream choice/tool indices; negative, excessive and valid
   boundary cases tested before forwarding or allocating indexed arrays.
+- `22d622a`: legacy Chat function declarations, selection, history and SSE with
+  shared tool authorization, token reserve and cache policy.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control

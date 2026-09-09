@@ -200,7 +200,7 @@ func normalizeOnboardingCatalog(input modelcatalog.Catalog) (modelcatalog.Catalo
 	if err != nil || strings.TrimSpace(catalog.Version) == "" || len(catalog.Version) > 128 || catalog.Models == nil || len(catalog.Models) > 5000 {
 		return modelcatalog.Catalog{}, ErrInvalidModelOnboarding
 	}
-	allowedCapabilities := map[string]bool{"chat": true, "responses": true, "embeddings": true, "rerank": true, "stream": true, "tools": true, "structured_output": true, "mcp": true, "vision": true, "web_search": true, "audio": true}
+	allowedCapabilities := map[string]bool{"chat": true, "responses": true, "embeddings": true, "rerank": true, "stream": true, "tools": true, "structured_output": true, "mcp": true, "vision": true, "web_search": true, "audio": true, "prompt_cache": true}
 	for _, entry := range catalog.Models {
 		if len(entry.Provider) > 256 || len(entry.Model) > 256 {
 			return modelcatalog.Catalog{}, ErrInvalidModelOnboarding
