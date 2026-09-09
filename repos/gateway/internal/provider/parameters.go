@@ -61,6 +61,12 @@ func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) er
 	default:
 		return &Error{Class: FailureClientRequest, Provider: "anthropic", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "reasoning_effort", Err: errors.New("reasoning_effort must be low, medium, high, xhigh, or max")}
 	}
+	if options.WebSearchOptions != nil {
+		if options.WebSearchOptions.SearchContextSize != "" {
+			return &Error{Class: FailureClientRequest, Provider: "anthropic", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "web_search_options.search_context_size", Err: errors.New("search_context_size cannot be represented by this adapter")}
+		}
+		options.WebSearchOptions = nil
+	}
 	if err := rejectGenerationOptions("anthropic", options); err != nil {
 		return err
 	}

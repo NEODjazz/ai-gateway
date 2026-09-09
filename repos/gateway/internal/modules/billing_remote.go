@@ -53,8 +53,6 @@ type UsageRequest struct {
 	Currency                string   `json:"currency,omitempty"`
 }
 
-const defaultWebSearchRequestReserve = 5
-
 type UsageResponse struct {
 	Usage    *openai.Usage     `json:"usage,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
@@ -167,7 +165,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 	}
 	request.TotalTokens = openai.ReserveTokens(request.InputTokens, request.OutputTokens)
 	if req.Request.WebSearchOptions != nil {
-		request.SearchRequests = defaultWebSearchRequestReserve
+		request.SearchRequests = openai.WebSearchMaxUses
 		request.SearchRequestsEstimated = true
 	}
 	if req.CompletionRequest != nil {

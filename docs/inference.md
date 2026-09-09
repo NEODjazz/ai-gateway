@@ -255,10 +255,13 @@ native и synthetic streams. Явное `false` передаётся compatible 
 удаляет obfuscation из клиентского потока; поле не влияет на token usage и billing.
 
 Chat `web_search_options` принимает `search_context_size=low|medium|high` и
-optional approximate location. Поле передаётся только compatible adapter;
-native adapters возвращают `unsupported_parameter`. Маршрутизация требует явно
-заявленную deployment/model capability `web_search`. Exact и semantic response
-cache отключены, поскольку результат зависит от внешнего состояния веба.
+optional approximate location. Compatible adapter передаёт оба поля без
+преобразования. Native Anthropic adapter преобразует запрос в server-side web
+search tool с лимитом пять поисков и передаёт approximate location; непустой
+`search_context_size` отклоняется как непредставимый параметр. Остальные native
+adapters возвращают `unsupported_parameter`. Маршрутизация требует явно заявленную
+deployment/model capability `web_search`. Exact и semantic response cache
+отключены, поскольку результат зависит от внешнего состояния веба.
 
 Chat assistant messages preserve nullable `refusal` in compatible request
 history, JSON responses, live SSE accumulation and synthetic SSE. Refusal text
@@ -270,8 +273,10 @@ Non-streaming compatible Chat responses preserve typed `url_citation`
 annotations. Gateway validates at most 128 citations, nonnegative ordered
 offsets, bounded titles and HTTP(S) URLs before cache or client delivery.
 Annotations are response-only: request history containing them is rejected.
-Chat streaming deltas do not expose annotations in the current wire contract,
-so gateway does not add an incompatible SSE extension.
+Native Anthropic Chat responses convert web-search citations to the same contract
+and expose them in JSON and streaming deltas. Citation offsets are Unicode code
+point indexes in the assembled assistant text. Malformed citation types, URLs,
+titles, offsets and cited text fail before delivery and billing commit.
 
 
 ## Chat generation controls

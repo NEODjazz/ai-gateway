@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -59,10 +60,21 @@ type anthropicMessage struct {
 }
 
 type anthropicTool struct {
+	Type         string                 `json:"type,omitempty"`
 	Name         string                 `json:"name"`
 	Description  string                 `json:"description,omitempty"`
-	InputSchema  any                    `json:"input_schema"`
+	InputSchema  any                    `json:"input_schema,omitempty"`
+	MaxUses      int                    `json:"max_uses,omitempty"`
+	UserLocation *anthropicUserLocation `json:"user_location,omitempty"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
+type anthropicUserLocation struct {
+	Type     string `json:"type"`
+	City     string `json:"city,omitempty"`
+	Country  string `json:"country,omitempty"`
+	Region   string `json:"region,omitempty"`
+	Timezone string `json:"timezone,omitempty"`
 }
 
 type anthropicCacheControl struct {
@@ -90,7 +102,15 @@ type anthropicContent struct {
 	Input        any                    `json:"input,omitempty"`
 	ToolUseID    string                 `json:"tool_use_id,omitempty"`
 	Content      any                    `json:"content,omitempty"`
+	Citations    []anthropicCitation    `json:"citations,omitempty"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
+type anthropicCitation struct {
+	Type      string `json:"type"`
+	URL       string `json:"url"`
+	Title     string `json:"title"`
+	CitedText string `json:"cited_text"`
 }
 
 type anthropicUsage struct {
@@ -99,6 +119,11 @@ type anthropicUsage struct {
 	CacheReadInputTokens     int                          `json:"cache_read_input_tokens,omitempty"`
 	CacheCreationInputTokens int                          `json:"cache_creation_input_tokens,omitempty"`
 	OutputTokensDetails      *anthropicOutputTokenDetails `json:"output_tokens_details,omitempty"`
+	ServerToolUse            *anthropicServerToolUsage    `json:"server_tool_use,omitempty"`
+}
+
+type anthropicServerToolUsage struct {
+	WebSearchRequests int `json:"web_search_requests"`
 }
 
 type anthropicOutputTokenDetails struct {
@@ -129,6 +154,9 @@ func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompl
 		return openai.ChatCompletionResponse{}, err
 	}
 	if err := validateAnthropicUsage(response.Usage); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	if _, err := anthropicAnnotations(response); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 	converted := anthropicToChatCompletion(response, request.Model)
@@ -257,6 +285,9 @@ func (p Anthropic) setHeaders(request *http.Request) {
 func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) anthropicRequest {
 	system, messages := anthropicMessages(request.Messages)
 	tools, toolChoice := anthropicChatTools(request.Tools, request.ToolChoice)
+	if request.WebSearchOptions != nil {
+		tools = append(tools, anthropicWebSearchTool(request.WebSearchOptions))
+	}
 	var outputConfig *anthropicOutputConfig
 	if request.ResponseFormat != nil && request.ResponseFormat.Type == "json_schema" {
 		outputConfig = &anthropicOutputConfig{}
@@ -300,6 +331,19 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		Metadata:      metadata,
 		OutputConfig:  outputConfig,
 	}
+}
+
+func anthropicWebSearchTool(options *openai.ChatWebSearchOptions) anthropicTool {
+	tool := anthropicTool{Type: "web_search_20250305", Name: "web_search", MaxUses: openai.WebSearchMaxUses}
+	if options == nil || options.UserLocation == nil || options.UserLocation.Approximate == nil {
+		return tool
+	}
+	location := options.UserLocation.Approximate
+	tool.UserLocation = &anthropicUserLocation{
+		Type: "approximate", City: location.City, Country: location.Country,
+		Region: location.Region, Timezone: location.Timezone,
+	}
+	return tool
 }
 
 func anthropicUsesStructuredTool(format *openai.ResponseFormat) bool {
@@ -620,6 +664,7 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 		model = fallbackModel
 	}
 	content := anthropicText(response)
+	annotations, _ := anthropicAnnotations(response)
 	toolCalls := anthropicToolCalls(response)
 	inputTokens := anthropicInputTokens(response.Usage)
 	return openai.ChatCompletionResponse{
@@ -629,12 +674,13 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 		Choices: []openai.Choice{
 			{
 				Index:        0,
-				Message:      openai.Message{Role: "assistant", Content: content, ToolCalls: toolCalls},
+				Message:      openai.Message{Role: "assistant", Content: content, ToolCalls: toolCalls, Annotations: annotations},
 				FinishReason: anthropicFinishReason(response.StopReason),
 				StopSequence: anthropicMatchedStop(response.StopReason, response.StopSequence),
 			},
 		},
 		Usage: openai.Usage{
+			SearchRequests:   anthropicSearchRequests(response.Usage),
 			PromptTokens:     inputTokens,
 			CompletionTokens: response.Usage.OutputTokens,
 			TotalTokens:      inputTokens + response.Usage.OutputTokens,
@@ -661,7 +707,17 @@ func validateAnthropicUsage(usage anthropicUsage) error {
 	if details := usage.OutputTokensDetails; details != nil && (details.ThinkingTokens < 0 || details.ThinkingTokens > usage.OutputTokens) {
 		return errors.New("invalid Anthropic output token details")
 	}
+	if searches := anthropicSearchRequests(usage); searches < 0 || searches > openai.WebSearchMaxUses {
+		return errors.New("invalid Anthropic server tool usage")
+	}
 	return nil
+}
+
+func anthropicSearchRequests(usage anthropicUsage) int {
+	if usage.ServerToolUse == nil {
+		return 0
+	}
+	return usage.ServerToolUse.WebSearchRequests
 }
 
 func anthropicToResponse(response anthropicResponse, fallbackModel string) openai.ResponseResponse {
@@ -743,6 +799,46 @@ func anthropicText(response anthropicResponse) string {
 	return strings.Join(parts, "")
 }
 
+func anthropicAnnotations(response anthropicResponse) ([]openai.ChatAnnotation, error) {
+	annotations := make([]openai.ChatAnnotation, 0)
+	offset := 0
+	for _, content := range response.Content {
+		if content.Type != "text" {
+			continue
+		}
+		for _, citation := range content.Citations {
+			annotation, err := anthropicCitationAnnotation(citation, content.Text, offset)
+			if err != nil {
+				return nil, err
+			}
+			annotations = append(annotations, annotation)
+		}
+		offset += utf8.RuneCountInString(content.Text)
+	}
+	if err := openai.ValidateChatAnnotations(annotations); err != nil {
+		return nil, err
+	}
+	return annotations, nil
+}
+
+func anthropicCitationAnnotation(citation anthropicCitation, text string, offset int) (openai.ChatAnnotation, error) {
+	if citation.Type != "web_search_result_location" {
+		return openai.ChatAnnotation{}, errors.New("unsupported Anthropic citation")
+	}
+	start, end := 0, utf8.RuneCountInString(text)
+	if citation.CitedText != "" {
+		index := strings.Index(text, citation.CitedText)
+		if index < 0 {
+			return openai.ChatAnnotation{}, errors.New("Anthropic citation text is absent from its content block")
+		}
+		start = utf8.RuneCountInString(text[:index])
+		end = start + utf8.RuneCountInString(citation.CitedText)
+	}
+	return openai.ChatAnnotation{Type: "url_citation", URLCitation: openai.ChatURLCitation{
+		StartIndex: offset + start, EndIndex: offset + end, Title: citation.Title, URL: citation.URL,
+	}}, nil
+}
+
 func anthropicFinishReason(reason string) string {
 	switch reason {
 	case "end_turn", "stop_sequence":
@@ -765,6 +861,8 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 		},
 	}
 	toolIndexes := map[int]int{}
+	textBlockOffsets := map[int]int{}
+	textBlockContents := map[int]string{}
 	err := scanSSEEvents(body, func(event string, payload string) error {
 		if event == "message_stop" {
 			return io.EOF
@@ -783,8 +881,13 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 				response.Model = streamEvent.Message.Model
 			}
 			response.Usage.PromptTokens = anthropicInputTokens(streamEvent.Message.Usage)
+			response.Usage.SearchRequests = anthropicSearchRequests(streamEvent.Message.Usage)
 			response.Usage.PromptTokensDetails = &openai.PromptTokenDetails{CachedTokens: streamEvent.Message.Usage.CacheReadInputTokens, CacheWriteTokens: streamEvent.Message.Usage.CacheCreationInputTokens}
 		case "content_block_start":
+			if streamEvent.ContentBlock.Type == "text" {
+				textBlockOffsets[streamEvent.Index] = utf8.RuneCountInString(openai.ContentText(response.Choices[0].Message.Content))
+				textBlockContents[streamEvent.Index] = ""
+			}
 			if streamEvent.ContentBlock.Type == "tool_use" {
 				toolIndex := len(response.Choices[0].Message.ToolCalls)
 				toolIndexes[streamEvent.Index] = toolIndex
@@ -797,9 +900,21 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 		case "content_block_delta":
 			if streamEvent.Delta.Type == "text_delta" && streamEvent.Delta.Text != "" {
 				response.Choices[0].Message.Content = openai.ContentText(response.Choices[0].Message.Content) + streamEvent.Delta.Text
+				textBlockContents[streamEvent.Index] += streamEvent.Delta.Text
 				if err := write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, "assistant", streamEvent.Delta.Text, nil)); err != nil {
 					return err
 				}
+			}
+			if streamEvent.Delta.Type == "citations_delta" {
+				annotation, err := anthropicCitationAnnotation(streamEvent.Delta.Citation, textBlockContents[streamEvent.Index], textBlockOffsets[streamEvent.Index])
+				if err != nil {
+					return err
+				}
+				response.Choices[0].Message.Annotations = append(response.Choices[0].Message.Annotations, annotation)
+				if err := openai.ValidateChatAnnotations(response.Choices[0].Message.Annotations); err != nil {
+					return err
+				}
+				return write(openAIChatAnnotationChunkPayload(response.ID, response.Model, annotation))
 			}
 			if streamEvent.Delta.Type == "input_json_delta" && streamEvent.Delta.PartialJSON != "" {
 				toolIndex, found := toolIndexes[streamEvent.Index]
@@ -827,6 +942,9 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			if streamEvent.Usage.OutputTokensDetails != nil {
 				response.Usage.CompletionTokensDetails = anthropicCompletionTokenDetails(streamEvent.Usage)
 			}
+			if streamEvent.Usage.ServerToolUse != nil {
+				response.Usage.SearchRequests = anthropicSearchRequests(streamEvent.Usage)
+			}
 			if streamEvent.Delta.StopReason != "" {
 				if streamEvent.Delta.StopReason == "stop_sequence" && streamEvent.Delta.StopSequence == nil {
 					return errors.New("Anthropic omitted matched stop sequence")
@@ -846,6 +964,17 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 		response = anthropicStructuredChat(response)
 	}
 	return response, nil
+}
+
+func openAIChatAnnotationChunkPayload(id, model string, annotation openai.ChatAnnotation) string {
+	payload, err := json.Marshal(map[string]any{
+		"id": id, "object": "chat.completion.chunk", "created": time.Now().UTC().Unix(), "model": model,
+		"choices": []map[string]any{{"index": 0, "delta": map[string]any{"annotations": []openai.ChatAnnotation{annotation}}, "finish_reason": nil}},
+	})
+	if err != nil {
+		return "{}"
+	}
+	return string(payload)
 }
 
 func openAIChatToolCallChunkPayload(id, model string, toolIndex int, call openai.ToolCall) string {
@@ -966,11 +1095,12 @@ type anthropicStreamEvent struct {
 	Message      anthropicResponse `json:"message"`
 	ContentBlock anthropicContent  `json:"content_block"`
 	Delta        struct {
-		Type         string  `json:"type"`
-		Text         string  `json:"text"`
-		PartialJSON  string  `json:"partial_json"`
-		StopReason   string  `json:"stop_reason"`
-		StopSequence *string `json:"stop_sequence"`
+		Type         string            `json:"type"`
+		Text         string            `json:"text"`
+		PartialJSON  string            `json:"partial_json"`
+		StopReason   string            `json:"stop_reason"`
+		StopSequence *string           `json:"stop_sequence"`
+		Citation     anthropicCitation `json:"citation"`
 	} `json:"delta"`
 	Usage anthropicUsage `json:"usage"`
 }

@@ -225,7 +225,7 @@ func TestRemoteBillingReservesAndCommitsProviderSearchUsage(t *testing.T) {
 	req := sensitiveContext()
 	req.Request.WebSearchOptions = &openai.ChatWebSearchOptions{SearchContextSize: "medium"}
 	reserved := billingRequest(&req)
-	if reserved.SearchRequests != defaultWebSearchRequestReserve || !reserved.SearchRequestsEstimated {
+	if reserved.SearchRequests != openai.WebSearchMaxUses || !reserved.SearchRequestsEstimated {
 		t.Fatalf("search reserve=%+v", reserved)
 	}
 	req.Response = &openai.ChatCompletionResponse{Usage: openai.Usage{SearchRequests: 2}}

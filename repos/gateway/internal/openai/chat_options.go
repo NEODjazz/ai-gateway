@@ -5,6 +5,8 @@ import (
 	"unicode/utf8"
 )
 
+const WebSearchMaxUses = 5
+
 // ChatGenerationOptions contains optional controls shared with compatible wire
 // requests. Pointer fields preserve explicitly supplied false and zero values.
 type ChatGenerationOptions struct {

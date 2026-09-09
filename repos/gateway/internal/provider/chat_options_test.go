@@ -311,7 +311,7 @@ func TestGenerationControlsAreRejectedByNativeAdapters(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, client := range []Client{NewAnthropic("http://unused.invalid", "", false), NewOllama("http://unused.invalid", false), Demo{}} {
-			if _, anthropic := client.(Anthropic); anthropic && request.ReasoningEffort == "high" {
+			if _, anthropic := client.(Anthropic); anthropic && (request.ReasoningEffort == "high" || request.WebSearchOptions != nil) {
 				continue
 			}
 			if err := validateChatAdapter(client, request); err == nil {

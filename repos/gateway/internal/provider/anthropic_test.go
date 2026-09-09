@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -112,6 +113,52 @@ func TestAnthropicChatCompletions(t *testing.T) {
 	}
 }
 
+func TestAnthropicMapsWebSearchAndBillsActualUsage(t *testing.T) {
+	var upstream map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"id":"msg-search","type":"message","role":"assistant","model":"claude-test","stop_reason":"end_turn","content":[{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{"query":"weather"}},{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","url":"https://example.com/weather","title":"Weather","encrypted_content":"safe"}]},{"type":"text","text":"Today is sunny.","citations":[{"type":"web_search_result_location","url":"https://example.com/weather","title":"Weather","cited_text":"sunny"}]}],"usage":{"input_tokens":4,"output_tokens":3,"server_tool_use":{"web_search_requests":2}}}`))
+	}))
+	defer server.Close()
+
+	provider := NewAnthropic(server.URL, "", false)
+	response, err := provider.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "claude-test", Messages: []openai.Message{{Role: "user", Content: "weather"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{UserLocation: &openai.ChatWebSearchUserLocation{
+			Type: "approximate", Approximate: &openai.ChatWebSearchApproximateLocation{City: "Paris", Country: "FR", Timezone: "Europe/Paris"},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools, ok := upstream["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("upstream tools=%#v", upstream["tools"])
+	}
+	search, ok := tools[0].(map[string]any)
+	location, locationOK := search["user_location"].(map[string]any)
+	if !ok || !locationOK || search["type"] != "web_search_20250305" || search["name"] != "web_search" || search["max_uses"] != float64(openai.WebSearchMaxUses) || location["type"] != "approximate" || location["city"] != "Paris" || location["country"] != "FR" {
+		t.Fatalf("native search tool=%#v", search)
+	}
+	if _, found := search["input_schema"]; found {
+		t.Fatalf("server tool contains client input schema: %#v", search)
+	}
+	annotations := response.Choices[0].Message.Annotations
+	if response.Usage.SearchRequests != 2 || len(annotations) != 1 || annotations[0].URLCitation.StartIndex != 9 || annotations[0].URLCitation.EndIndex != 14 || annotations[0].URLCitation.URL != "https://example.com/weather" {
+		t.Fatalf("response=%+v", response)
+	}
+}
+
+func TestAnthropicRejectsUnrepresentableSearchContextSize(t *testing.T) {
+	err := (Anthropic{}).ValidateChatParameters(openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{SearchContextSize: "high"}}})
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Param != "web_search_options.search_context_size" || failure.UpstreamCode != "unsupported_parameter" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestAnthropicConvertsOpenAIVisionContent(t *testing.T) {
 	_, messages := anthropicMessages([]openai.Message{{Role: "user", Content: []any{
 		map[string]any{"type": "text", "text": "describe"},
@@ -189,6 +236,35 @@ func TestAnthropicStreamsChatCompletions(t *testing.T) {
 	}
 	if openai.ContentText(response.Choices[0].Message.Content) != "hello" || response.Usage.PromptTokens != 6 || response.Usage.TotalTokens != 8 || response.Usage.PromptTokensDetails == nil || response.Usage.PromptTokensDetails.CachedTokens != 2 || response.Usage.PromptTokensDetails.CacheWriteTokens != 1 {
 		t.Fatalf("unexpected streamed response: %+v", response)
+	}
+}
+
+func TestAnthropicStreamsWebSearchCitationsAndUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: message_start\n"+`data: {"type":"message_start","message":{"id":"msg-search","model":"claude-test","usage":{"input_tokens":4,"server_tool_use":{"web_search_requests":1}}}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_start\n"+`data: {"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\n"+`data: {"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"Today is sunny."}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\n"+`data: {"type":"content_block_delta","index":2,"delta":{"type":"citations_delta","citation":{"type":"web_search_result_location","url":"https://example.com/weather","title":"Weather","cited_text":"sunny"}}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: message_delta\n"+`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3,"server_tool_use":{"web_search_requests":2}}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: message_stop\n"+`data: {"type":"message_stop"}`+"\n\n")
+	}))
+	defer server.Close()
+
+	var payloads []string
+	response, err := NewAnthropic(server.URL, "", true).StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "claude-test", Messages: []openai.Message{{Role: "user", Content: "weather"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{}},
+	}, func(payload string) error { payloads = append(payloads, payload); return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payloads) != 3 || !strings.Contains(payloads[1], `"annotations":[{"type":"url_citation"`) {
+		t.Fatalf("payloads=%v", payloads)
+	}
+	annotations := response.Choices[0].Message.Annotations
+	if response.Usage.SearchRequests != 2 || response.Usage.TotalTokens != 7 || len(annotations) != 1 || annotations[0].URLCitation.StartIndex != 9 || annotations[0].URLCitation.EndIndex != 14 {
+		t.Fatalf("response=%+v", response)
 	}
 }
 
@@ -454,11 +530,26 @@ func TestAnthropicRejectsInvalidNativeMetadataAndUsageDetails(t *testing.T) {
 			t.Fatalf("invalid controls accepted: %+v", request)
 		}
 	}
+	for _, searches := range []int{-1, openai.WebSearchMaxUses + 1} {
+		if err := validateAnthropicUsage(anthropicUsage{ServerToolUse: &anthropicServerToolUsage{WebSearchRequests: searches}}); err == nil {
+			t.Fatalf("invalid web_search_requests=%d accepted", searches)
+		}
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(anthropicResponse{ID: "bad", StopReason: "end_turn", Usage: anthropicUsage{OutputTokens: 2, OutputTokensDetails: &anthropicOutputTokenDetails{ThinkingTokens: 3}}})
 	}))
 	defer server.Close()
 	if _, err := NewAnthropic(server.URL, "", false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "model"}); err == nil {
 		t.Fatal("invalid usage details accepted")
+	}
+}
+
+func TestAnthropicRejectsMalformedSearchCitation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"id":"bad-citation","stop_reason":"end_turn","content":[{"type":"text","text":"answer","citations":[{"type":"web_search_result_location","url":"javascript:alert(1)","title":"Unsafe","cited_text":"answer"}]}],"usage":{}}`)
+	}))
+	defer server.Close()
+	if _, err := NewAnthropic(server.URL, "", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model"}); err == nil {
+		t.Fatal("malformed search citation accepted")
 	}
 }
