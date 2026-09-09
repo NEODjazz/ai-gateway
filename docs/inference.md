@@ -186,16 +186,19 @@ validator количества, URL/base64 и точного token usage.
 `POST /v1/audio/transcriptions` принимает один файл FLAC, MP3, MP4, MPEG, MPGA,
 M4A, OGG, WAV или WebM размером до 20 MiB для deployment и model с capability
 `audio_transcription`. Gateway сверяет расширение, MIME type и сигнатуру файла,
-передает optional prompt в DLP, а аудиоданные — в AV. Неизвестные и повторные
-scalar fields, а также повторные значения bounded array fields отклоняются.
+передает optional prompt и `keywords[]` в DLP, а аудиоданные — в AV. Подсказки
+`languages[]` и `keywords[]` ограничены по количеству и размеру. Стратегия
+`chunking_strategy` принимает `auto` или строгий JSON-объект `server_vad` с
+bounded `prefix_padding_ms`, `silence_duration_ms` и `threshold`. Все эти поля
+учитываются в TPM и billing reserve. Неизвестные и повторные scalar fields, а
+также превышающие лимиты bounded array fields отклоняются.
 
 Поддерживаются JSON-форматы `json`, `verbose_json` и `diarized_json`. Успешный
 ответ ограничен 8 MiB, transcript — 1 MiB текста, words и segments — 100 000
 элементов суммарно. Provider обязан вернуть точный token usage с согласованной
 суммой; duration-only usage отклоняется, поскольку существующий TPM и billing
-контракт начисляет токены. Streaming, duration-priced models, chunking,
-multilingual/known-speaker hints и дополнительные native adapters остаются
-отдельными контрактами.
+контракт начисляет токены. Streaming, duration-priced models, known-speaker
+references и дополнительные native adapters остаются отдельными контрактами.
 
 `POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
 

@@ -72,14 +72,14 @@ func TestImageVariationProjectsAttachmentToAV(t *testing.T) {
 	}
 }
 
-func TestAudioTranscriptionProjectsFileToAVAndPromptToDLP(t *testing.T) {
-	request := openai.AudioTranscriptionRequest{Model: "audio", File: openai.AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: "UklGRi4uLi5XQVZFZGF0YQ=="}, Prompt: "private speaker"}
+func TestAudioTranscriptionProjectsFileToAVAndHintsToDLP(t *testing.T) {
+	request := openai.AudioTranscriptionRequest{Model: "audio", File: openai.AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: "UklGRi4uLi5XQVZFZGF0YQ=="}, Prompt: "private speaker", Keywords: []string{"private company", "private person"}}
 	req := RequestContext{AudioTranscriptionRequest: &request}
 	attachments, err := requestImageAttachments(&req)
 	if err != nil || len(attachments) != 1 || attachments[0].MediaType != "audio/wav" || attachments[0].Data != request.File.Data {
 		t.Fatalf("attachments=%+v err=%v", attachments, err)
 	}
-	if payload := scanPayload(&req); payload != "transcription_prompt: private speaker" {
+	if payload := scanPayload(&req); payload != "transcription_prompt: private speaker\ntranscription_keyword: private company\ntranscription_keyword: private person" {
 		t.Fatalf("payload=%q", payload)
 	}
 }

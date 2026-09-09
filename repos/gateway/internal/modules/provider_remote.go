@@ -175,8 +175,13 @@ func scanPayload(req *RequestContext) string {
 	if req.ImageEditRequest != nil && req.ImageEditRequest.Prompt != "" {
 		parts = append(parts, "image_edit_prompt: "+req.ImageEditRequest.Prompt)
 	}
-	if req.AudioTranscriptionRequest != nil && req.AudioTranscriptionRequest.Prompt != "" {
-		parts = append(parts, "transcription_prompt: "+req.AudioTranscriptionRequest.Prompt)
+	if req.AudioTranscriptionRequest != nil {
+		if req.AudioTranscriptionRequest.Prompt != "" {
+			parts = append(parts, "transcription_prompt: "+req.AudioTranscriptionRequest.Prompt)
+		}
+		for _, keyword := range req.AudioTranscriptionRequest.Keywords {
+			parts = append(parts, "transcription_keyword: "+keyword)
+		}
 	}
 	return strings.Join(parts, "\n")
 }

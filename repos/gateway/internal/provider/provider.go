@@ -1694,6 +1694,24 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		audioRequest := *req.AudioTranscriptionRequest
 		audioRequest.TimestampGranularities = append([]string(nil), req.AudioTranscriptionRequest.TimestampGranularities...)
 		audioRequest.Include = append([]string(nil), req.AudioTranscriptionRequest.Include...)
+		audioRequest.Languages = append([]string(nil), req.AudioTranscriptionRequest.Languages...)
+		audioRequest.Keywords = append([]string(nil), req.AudioTranscriptionRequest.Keywords...)
+		if req.AudioTranscriptionRequest.ChunkingStrategy != nil {
+			strategy := *req.AudioTranscriptionRequest.ChunkingStrategy
+			if strategy.PrefixPaddingMS != nil {
+				value := *strategy.PrefixPaddingMS
+				strategy.PrefixPaddingMS = &value
+			}
+			if strategy.SilenceDurationMS != nil {
+				value := *strategy.SilenceDurationMS
+				strategy.SilenceDurationMS = &value
+			}
+			if strategy.Threshold != nil {
+				value := *strategy.Threshold
+				strategy.Threshold = &value
+			}
+			audioRequest.ChunkingStrategy = &strategy
+		}
 		attemptCtx.AudioTranscriptionRequest = &audioRequest
 	}
 	attemptCtx.Response = nil

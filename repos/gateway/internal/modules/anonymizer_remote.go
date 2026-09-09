@@ -15,6 +15,7 @@ type AnonymizeRequest struct {
 	Instructions string           `json:"instructions,omitempty"`
 	Query        string           `json:"query,omitempty"`
 	Documents    []any            `json:"documents,omitempty"`
+	Keywords     []string         `json:"keywords,omitempty"`
 }
 
 type AnonymizeResponse struct {
@@ -23,6 +24,7 @@ type AnonymizeResponse struct {
 	Instructions string            `json:"instructions,omitempty"`
 	Query        string            `json:"query,omitempty"`
 	Documents    []any             `json:"documents,omitempty"`
+	Keywords     []string          `json:"keywords,omitempty"`
 	Replacements map[string]string `json:"replacements,omitempty"`
 }
 
@@ -65,7 +67,10 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 		request.Input = req.ImageEditRequest.Prompt
 	}
 	if req.AudioTranscriptionRequest != nil {
-		request.Input = req.AudioTranscriptionRequest.Prompt
+		if req.AudioTranscriptionRequest.Prompt != "" {
+			request.Input = req.AudioTranscriptionRequest.Prompt
+		}
+		request.Keywords = append([]string(nil), req.AudioTranscriptionRequest.Keywords...)
 	}
 	response, err := callRemote[AnonymizeRequest, AnonymizeResponse](ctx, m.client, m.endpoint, request)
 	if err != nil {
@@ -110,11 +115,17 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 		req.ImageEditRequest.Prompt = prompt
 	}
 	if req.AudioTranscriptionRequest != nil {
-		prompt, ok := response.Input.(string)
-		if !ok {
-			return errors.New("anonymizer returned an invalid transcription prompt projection")
+		if req.AudioTranscriptionRequest.Prompt != "" {
+			prompt, ok := response.Input.(string)
+			if !ok {
+				return errors.New("anonymizer returned an invalid transcription prompt projection")
+			}
+			req.AudioTranscriptionRequest.Prompt = prompt
 		}
-		req.AudioTranscriptionRequest.Prompt = prompt
+		if len(response.Keywords) != len(req.AudioTranscriptionRequest.Keywords) {
+			return errors.New("anonymizer returned an invalid transcription keyword projection")
+		}
+		req.AudioTranscriptionRequest.Keywords = append([]string(nil), response.Keywords...)
 	}
 	req.AnonymizationValues = cloneStringMap(response.Replacements)
 	return nil

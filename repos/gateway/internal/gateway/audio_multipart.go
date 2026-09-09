@@ -32,7 +32,7 @@ func decodeAudioTranscriptionRequest(w http.ResponseWriter, r *http.Request) (op
 			return openai.AudioTranscriptionRequest{}, false
 		}
 		name := part.FormName()
-		if name == "timestamp_granularities[]" || name == "include[]" {
+		if name == "timestamp_granularities[]" || name == "include[]" || name == "languages[]" || name == "keywords[]" {
 			value, ok := readAudioScalar(part)
 			if !ok || !appendAudioArrayField(&request, name, value) {
 				writeError(w, http.StatusBadRequest, "invalid_request", "invalid multipart field "+strconv.Quote(name))
@@ -108,6 +108,12 @@ func setAudioScalarField(request *openai.AudioTranscriptionRequest, name, value 
 			return false
 		}
 		request.Temperature = &parsed
+	case "chunking_strategy":
+		parsed, err := openai.ParseAudioChunkingStrategy(value)
+		if err != nil {
+			return false
+		}
+		request.ChunkingStrategy = parsed
 	default:
 		return false
 	}
@@ -122,6 +128,12 @@ func appendAudioArrayField(request *openai.AudioTranscriptionRequest, name, valu
 	case "include[]":
 		request.Include = append(request.Include, value)
 		return len(request.Include) <= 1
+	case "languages[]":
+		request.Languages = append(request.Languages, value)
+		return len(request.Languages) <= openai.MaxAudioLanguages
+	case "keywords[]":
+		request.Keywords = append(request.Keywords, value)
+		return len(request.Keywords) <= openai.MaxAudioKeywords
 	default:
 		return false
 	}

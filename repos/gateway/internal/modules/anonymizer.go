@@ -103,6 +103,9 @@ func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 	}
 	if req.AudioTranscriptionRequest != nil {
 		req.AudioTranscriptionRequest.Prompt = m.anonymize(req, req.AudioTranscriptionRequest.Prompt)
+		for index := range req.AudioTranscriptionRequest.Keywords {
+			req.AudioTranscriptionRequest.Keywords[index] = m.anonymize(req, req.AudioTranscriptionRequest.Keywords[index])
+		}
 	}
 	return nil
 }

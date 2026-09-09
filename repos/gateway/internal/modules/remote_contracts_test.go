@@ -554,22 +554,50 @@ func TestRemoteAnonymizerUsesImageGenerationPrompt(t *testing.T) {
 	}
 }
 
-func TestRemoteAnonymizerUsesAudioTranscriptionPromptOnly(t *testing.T) {
+func TestRemoteAnonymizerUsesAudioTranscriptionHintsOnly(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body AnonymizeRequest
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Input != "private speaker" || len(body.Messages) != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Input != "private speaker" || strings.Join(body.Keywords, ",") != "private@example.com,Acme" || len(body.Messages) != 0 {
 			t.Fatalf("body=%+v err=%v", body, err)
 		}
-		_ = json.NewEncoder(w).Encode(AnonymizeResponse{Input: "masked speaker"})
+		_ = json.NewEncoder(w).Encode(AnonymizeResponse{Input: "masked speaker", Keywords: []string{"{{EMAIL_1}}", "Acme"}})
 	}))
 	defer server.Close()
-	request := openai.AudioTranscriptionRequest{Model: "audio", Prompt: "private speaker", File: openai.AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: "UklGRi4uLi5XQVZFZGF0YQ=="}}
+	request := openai.AudioTranscriptionRequest{Model: "audio", Prompt: "private speaker", Keywords: []string{"private@example.com", "Acme"}, File: openai.AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: "UklGRi4uLi5XQVZFZGF0YQ=="}}
 	req := RequestContext{AudioTranscriptionRequest: &request}
 	if err := NewRemoteAnonymizerModule(true, server.URL).Handle(t.Context(), &req); err != nil {
 		t.Fatal(err)
 	}
-	if request.Prompt != "masked speaker" || request.File.Data == "" {
+	if request.Prompt != "masked speaker" || strings.Join(request.Keywords, ",") != "{{EMAIL_1}},Acme" || request.File.Data == "" {
 		t.Fatalf("request=%+v", request)
+	}
+}
+
+func TestRemoteAnonymizerRejectsMissingTranscriptionKeywords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(AnonymizeResponse{Input: "masked", Keywords: nil})
+	}))
+	defer server.Close()
+	request := openai.AudioTranscriptionRequest{Model: "audio", Prompt: "private", Keywords: []string{"private"}}
+	req := RequestContext{AudioTranscriptionRequest: &request}
+	if err := NewRemoteAnonymizerModule(true, server.URL).Handle(t.Context(), &req); err == nil {
+		t.Fatal("missing keyword projection was accepted")
+	}
+}
+
+func TestRemoteAnonymizerAcceptsTranscriptionKeywordsWithoutPrompt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body AnonymizeRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Input != nil || len(body.Keywords) != 1 {
+			t.Fatalf("body=%+v err=%v", body, err)
+		}
+		_ = json.NewEncoder(w).Encode(AnonymizeResponse{Keywords: []string{"masked"}})
+	}))
+	defer server.Close()
+	request := openai.AudioTranscriptionRequest{Model: "audio", Keywords: []string{"private"}}
+	req := RequestContext{AudioTranscriptionRequest: &request}
+	if err := NewRemoteAnonymizerModule(true, server.URL).Handle(t.Context(), &req); err != nil || request.Keywords[0] != "masked" {
+		t.Fatalf("request=%+v err=%v", request, err)
 	}
 }
 

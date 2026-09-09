@@ -47,6 +47,25 @@ func (p OpenAICompatible) TranscribeAudio(ctx context.Context, request openai.Au
 			return openai.AudioTranscriptionResponse{}, err
 		}
 	}
+	for _, value := range request.Languages {
+		if err := writer.WriteField("languages[]", value); err != nil {
+			return openai.AudioTranscriptionResponse{}, err
+		}
+	}
+	for _, value := range request.Keywords {
+		if err := writer.WriteField("keywords[]", value); err != nil {
+			return openai.AudioTranscriptionResponse{}, err
+		}
+	}
+	if request.ChunkingStrategy != nil {
+		value, err := request.ChunkingStrategy.MultipartValue()
+		if err != nil {
+			return openai.AudioTranscriptionResponse{}, err
+		}
+		if err := writer.WriteField("chunking_strategy", value); err != nil {
+			return openai.AudioTranscriptionResponse{}, err
+		}
+	}
 	if err := writeAudioPart(writer, request.File); err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}

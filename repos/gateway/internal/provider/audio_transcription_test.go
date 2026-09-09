@@ -47,7 +47,7 @@ func TestOpenAICompatibleAudioTranscriptionContract(t *testing.T) {
 		if err := r.ParseMultipartForm(openai.MaxInferenceBodyBytes); err != nil {
 			t.Fatal(err)
 		}
-		if r.FormValue("provider") != "" || r.FormValue("model") != "upstream-audio" || r.FormValue("prompt") != "names" || r.FormValue("temperature") != "0.25" || len(r.MultipartForm.Value["timestamp_granularities[]"]) != 2 {
+		if r.FormValue("provider") != "" || r.FormValue("model") != "upstream-audio" || r.FormValue("prompt") != "names" || r.FormValue("temperature") != "0.25" || len(r.MultipartForm.Value["timestamp_granularities[]"]) != 2 || strings.Join(r.MultipartForm.Value["languages[]"], ",") != "en,fr" || strings.Join(r.MultipartForm.Value["keywords[]"], ",") != "Acme,Jane" || r.FormValue("chunking_strategy") != `{"type":"server_vad","threshold":0.4}` {
 			t.Fatalf("form=%v", r.MultipartForm.Value)
 		}
 		files := r.MultipartForm.File["file"]
@@ -64,7 +64,8 @@ func TestOpenAICompatibleAudioTranscriptionContract(t *testing.T) {
 	}))
 	defer server.Close()
 	temperature := 0.25
-	request := openai.AudioTranscriptionRequest{Provider: "deployment", Model: "upstream-audio", File: transcriptionAttachment(), Prompt: "names", ResponseFormat: "verbose_json", Temperature: &temperature, TimestampGranularities: []string{"word", "segment"}}
+	threshold := 0.4
+	request := openai.AudioTranscriptionRequest{Provider: "deployment", Model: "upstream-audio", File: transcriptionAttachment(), Prompt: "names", ResponseFormat: "verbose_json", Temperature: &temperature, TimestampGranularities: []string{"word", "segment"}, Languages: []string{"en", "fr"}, Keywords: []string{"Acme", "Jane"}, ChunkingStrategy: &openai.AudioChunkingStrategy{Type: "server_vad", Threshold: &threshold}}
 	response, err := NewOpenAICompatible(server.URL+"/v1", "secret", false).TranscribeAudio(t.Context(), request)
 	if err != nil || response.Text != "hello" || response.Usage == nil || response.Usage.TotalTokens != 4 {
 		t.Fatalf("response=%+v err=%v", response, err)
