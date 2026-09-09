@@ -204,6 +204,13 @@ is included in context token estimates and follows the same anonymization and
 deanonymization boundary as message content. Native adapters reject historical
 refusal fields explicitly instead of silently converting them to ordinary text.
 
+Non-streaming compatible Chat responses preserve typed `url_citation`
+annotations. Gateway validates at most 128 citations, nonnegative ordered
+offsets, bounded titles and HTTP(S) URLs before cache or client delivery.
+Annotations are response-only: request history containing them is rejected.
+Chat streaming deltas do not expose annotations in the current wire contract,
+so gateway does not add an incompatible SSE extension.
+
 
 ## Chat generation controls
 

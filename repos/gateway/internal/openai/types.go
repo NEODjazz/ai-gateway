@@ -3,7 +3,10 @@ package openai
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"net/url"
 	"strings"
+	"unicode/utf8"
 )
 
 type ChatCompletionRequest struct {
@@ -33,12 +36,47 @@ type ChatStreamOptions struct {
 }
 
 type Message struct {
-	Role       string     `json:"role"`
-	Content    any        `json:"content"`
-	Refusal    *string    `json:"refusal,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Role        string           `json:"role"`
+	Content     any              `json:"content"`
+	Refusal     *string          `json:"refusal,omitempty"`
+	Annotations []ChatAnnotation `json:"annotations,omitempty"`
+	Name        string           `json:"name,omitempty"`
+	ToolCallID  string           `json:"tool_call_id,omitempty"`
+	ToolCalls   []ToolCall       `json:"tool_calls,omitempty"`
+}
+
+type ChatAnnotation struct {
+	Type        string          `json:"type"`
+	URLCitation ChatURLCitation `json:"url_citation"`
+}
+
+type ChatURLCitation struct {
+	EndIndex   int    `json:"end_index"`
+	StartIndex int    `json:"start_index"`
+	Title      string `json:"title"`
+	URL        string `json:"url"`
+}
+
+func ValidateChatAnnotations(annotations []ChatAnnotation) error {
+	if len(annotations) > 128 {
+		return errors.New("chat completion contains more than 128 annotations")
+	}
+	for _, annotation := range annotations {
+		citation := annotation.URLCitation
+		parsed, err := url.Parse(citation.URL)
+		if annotation.Type != "url_citation" ||
+			citation.StartIndex < 0 ||
+			citation.EndIndex < citation.StartIndex ||
+			citation.Title == "" ||
+			utf8.RuneCountInString(citation.Title) > 2048 ||
+			err != nil ||
+			(parsed.Scheme != "http" && parsed.Scheme != "https") ||
+			parsed.Host == "" ||
+			utf8.RuneCountInString(citation.URL) > 8192 {
+			return errors.New("invalid chat URL citation")
+		}
+	}
+	return nil
 }
 
 type Tool struct {

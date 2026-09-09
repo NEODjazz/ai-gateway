@@ -397,6 +397,11 @@ func validateChatCompletionEnvelope(response openai.ChatCompletionResponse) erro
 	if message := openai.ValidateMetadata(response.Metadata); message != "" {
 		return fmt.Errorf("provider returned invalid chat completion metadata: %s", message)
 	}
+	for _, choice := range response.Choices {
+		if err := openai.ValidateChatAnnotations(choice.Message.Annotations); err != nil {
+			return fmt.Errorf("provider returned invalid chat completion annotations: %w", err)
+		}
+	}
 	return nil
 }
 

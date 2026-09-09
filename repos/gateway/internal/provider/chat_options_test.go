@@ -115,6 +115,43 @@ func TestCompatibleChatRefusalRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCompatibleChatPreservesURLCitations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"id":"chat-citation","object":"chat.completion","created":1,"model":"test","choices":[{"index":0,"message":{"role":"assistant","content":"Source","annotations":[{"type":"url_citation","url_citation":{"start_index":0,"end_index":6,"title":"Example","url":"https://example.com/source"}}]},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer server.Close()
+
+	response, err := NewOpenAICompatible(server.URL, "", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotations := response.Choices[0].Message.Annotations
+	if len(annotations) != 1 || annotations[0].Type != "url_citation" || annotations[0].URLCitation.URL != "https://example.com/source" || annotations[0].URLCitation.EndIndex != 6 {
+		t.Fatalf("URL citation was not preserved: %+v", annotations)
+	}
+	payload, err := json.Marshal(response)
+	if err != nil || !strings.Contains(string(payload), `"annotations":[{"type":"url_citation"`) {
+		t.Fatalf("URL citation was not serialized: payload=%s err=%v", payload, err)
+	}
+}
+
+func TestCompatibleChatRejectsInvalidURLCitations(t *testing.T) {
+	for name, citation := range map[string]string{
+		"unsafe URL":      `{"start_index":0,"end_index":6,"title":"Example","url":"javascript:alert(1)"}`,
+		"reversed offset": `{"start_index":7,"end_index":6,"title":"Example","url":"https://example.com/source"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintf(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"Source","annotations":[{"type":"url_citation","url_citation":%s}]}}]}`, citation)
+			}))
+			defer server.Close()
+			if _, err := NewOpenAICompatible(server.URL, "", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test"}); err == nil || !strings.Contains(err.Error(), "annotations") {
+				t.Fatalf("invalid URL citation accepted: %v", err)
+			}
+		})
+	}
+}
+
 func TestChatRefusalHistoryIsRejectedByNativeAdapters(t *testing.T) {
 	refusal := "cannot help"
 	request := openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "assistant", Refusal: &refusal}}}

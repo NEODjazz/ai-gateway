@@ -157,6 +157,12 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
+	for _, message := range request.Messages {
+		if message.Annotations != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "messages.annotations is response-only")
+			return
+		}
+	}
 	if request.MaxTokens != nil && request.MaxCompletionTokens != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "max_tokens and max_completion_tokens are mutually exclusive")
 		return

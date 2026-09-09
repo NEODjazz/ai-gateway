@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.66
+  version: 0.1.67
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3226,11 +3226,31 @@ components:
           enum: [system, developer, user, assistant, tool]
         content: {$ref: '#/components/schemas/MessageContent'}
         refusal: {type: [string, 'null'], description: Model refusal content for assistant history and responses.}
+        annotations:
+          type: array
+          readOnly: true
+          maxItems: 128
+          items: {$ref: '#/components/schemas/ChatAnnotation'}
         name: {type: string}
         tool_call_id: {type: string}
         tool_calls:
           type: array
           items: {$ref: '#/components/schemas/ToolCall'}
+    ChatAnnotation:
+      type: object
+      additionalProperties: false
+      required: [type, url_citation]
+      properties:
+        type: {type: string, const: url_citation}
+        url_citation:
+          type: object
+          additionalProperties: false
+          required: [end_index, start_index, title, url]
+          properties:
+            end_index: {type: integer, minimum: 0}
+            start_index: {type: integer, minimum: 0}
+            title: {type: string, minLength: 1, maxLength: 2048}
+            url: {type: string, format: uri, minLength: 1, maxLength: 8192}
     FunctionDefinition:
       type: object
       additionalProperties: false
