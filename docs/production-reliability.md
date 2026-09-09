@@ -4,6 +4,10 @@
 
 TPM and remote billing reserve use the same context estimator. For chat, it includes messages, tool calls, tool schemas, tool choice and response format. For Responses, it includes input, instructions, tools, tool choice and text format. The estimate uses serialized context bytes (approximately four bytes per token); image input uses a fixed 4096-token estimate instead of charging for base64 length. This is a reservation estimate, not a provider tokenizer or a guarantee of exact multimodal usage. Provider-reported usage settles the final charge when available; fallback usage remains marked estimated.
 
+Native Messages and GenerateContent requests retain their API family in billing
+reserve, commit and failure events. The gateway sets this classification before
+the policy pipeline runs; arbitrary client request metadata cannot override it.
+
 Explicit prompt-cache breakpoints are limited to four across Chat messages and
 tools. They are part of token reservation and exact cache identity. Semantic
 response caching is disabled for these requests. Native prompt caching also

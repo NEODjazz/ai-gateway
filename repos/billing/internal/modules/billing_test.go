@@ -226,6 +226,25 @@ func TestBillingPreservesExplicitEmbeddingsAPIType(t *testing.T) {
 	}
 }
 
+func TestBillingPreservesNativeChatSurfaceAPIType(t *testing.T) {
+	for _, apiType := range []string{"messages", "generate_content"} {
+		t.Run(apiType, func(t *testing.T) {
+			module := NewBillingModuleWithPricing(true, PricingConfig{})
+			req := RequestContext{
+				APIType: apiType, BillingPhase: "commit", PromptTokensEstimated: 3,
+				Request: openai.ChatCompletionRequest{Provider: "native", Model: "model"},
+				Usage:   &openai.Usage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5},
+			}
+			if err := module.Handle(context.Background(), &req); err != nil {
+				t.Fatal(err)
+			}
+			if req.BillingEvent == nil || req.BillingEvent.APIType != apiType {
+				t.Fatalf("unexpected billing event: %+v", req.BillingEvent)
+			}
+		})
+	}
+}
+
 func TestBillingEstimatesMultipartMessageContent(t *testing.T) {
 	module := NewBillingModuleWithPricing(true, PricingConfig{})
 	req := RequestContext{

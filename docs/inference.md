@@ -356,8 +356,8 @@ separate 32 MiB total limit and must form JSON objects before completion. A
 stream without a finish reason fails.
 
 Compatibility is partial. Unsupported top-level fields and block fields fail
-with a native invalid_request_error. In particular, thinking, cache controls,
-server tools, documents, URL images, metadata, top_k, assistant
+with a native invalid_request_error. In particular, thinking, server tools,
+documents, URL images, metadata, top_k, assistant
 prefill, text after tool_use and is_error=true tool results are not supported.
 All tool-use history requires matching results. Opaque provider tool metadata
 that cannot be represented in Messages produces an explicit conversion error.

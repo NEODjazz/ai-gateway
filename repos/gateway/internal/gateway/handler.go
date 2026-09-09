@@ -149,6 +149,10 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest) {
+	h.serveChatAs(w, r, request, "")
+}
+
+func (h Handler) serveChatAs(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, apiType string) {
 	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -196,6 +200,9 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 		RequestID: executionID(w),
 		SessionID: sessionID(r),
 		Request:   request,
+	}
+	if apiType != "" {
+		reqCtx.Metadata = map[string]string{"gateway.api_type": apiType}
 	}
 
 	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {

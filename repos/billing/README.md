@@ -40,7 +40,8 @@ The internally generated and persisted `billing_event` includes:
 - provider
 - provider endpoint name/type
 - model
-- API type: `chat_completions`, `responses`, `embeddings`, or `rerank`
+- API type: `chat_completions`, `messages`, `generate_content`, `responses`,
+  `responses_compact`, `completions`, `embeddings`, or `rerank`
 - status/error
 - latency in ms
 - estimated prompt tokens

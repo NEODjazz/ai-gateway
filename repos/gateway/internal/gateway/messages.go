@@ -39,7 +39,7 @@ func (h Handler) Messages(w http.ResponseWriter, r *http.Request) {
 		copyRequest.Header.Set("Authorization", "Bearer "+key)
 	}
 	output.model = chat.Model
-	h.serveChat(output, copyRequest, chat)
+	h.serveChatAs(output, copyRequest, chat, "messages")
 }
 
 type messagesWriter struct {

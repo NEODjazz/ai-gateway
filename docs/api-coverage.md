@@ -86,6 +86,8 @@ availability is not inferred from these tests.
   boundary cases tested before forwarding or allocating indexed arrays.
 - `22d622a`: legacy Chat function declarations, selection, history and SSE with
   shared tool authorization, token reserve and cache policy.
+- `23b3e2c`: native prompt-cache controls, TTL preservation, capability routing,
+  token-count context and cache isolation.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control

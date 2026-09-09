@@ -150,6 +150,12 @@ func billingRequest(req *RequestContext) UsageRequest {
 	}
 	request.InputTokens = request.PromptTokensEstimated
 	request.OutputTokens = requestedOutputTokens(req)
+	switch metadataValue(req.Metadata, "gateway.api_type") {
+	case "messages":
+		request.APIType = "messages"
+	case "generate_content":
+		request.APIType = "generate_content"
+	}
 	if request.OutputTokens == 0 && req.CompletionRequest == nil {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
 	}

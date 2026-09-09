@@ -250,6 +250,21 @@ func TestRemoteBillingCommitsCompactionUsageSeparately(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingPreservesNativeChatSurfaceAPIType(t *testing.T) {
+	for _, apiType := range []string{"messages", "generate_content"} {
+		req := sensitiveContext()
+		req.Metadata = map[string]string{"gateway.api_type": apiType}
+		if request := billingRequest(&req); request.APIType != apiType {
+			t.Fatalf("%s classified as %s", apiType, request.APIType)
+		}
+	}
+	req := sensitiveContext()
+	req.Metadata = map[string]string{"gateway.api_type": "client-controlled"}
+	if request := billingRequest(&req); request.APIType != "chat_completions" {
+		t.Fatalf("untrusted api type accepted: %s", request.APIType)
+	}
+}
+
 func TestRemoteBillingReservesAllCompletionCandidatesAndCommitsUsage(t *testing.T) {
 	maxTokens, bestOf := 100, 3
 	req := sensitiveContext()

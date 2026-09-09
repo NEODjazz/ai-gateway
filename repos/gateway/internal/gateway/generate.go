@@ -56,7 +56,7 @@ func (h Handler) GenerateContent(w http.ResponseWriter, r *http.Request) {
 	copyRequest := r.Clone(r.Context())
 	copyRequest.Header.Set("Authorization", "Bearer "+key)
 	output.model = model
-	h.serveChat(output, copyRequest, chat)
+	h.serveChatAs(output, copyRequest, chat, "generate_content")
 }
 func validateGenerateQuery(r *http.Request, stream bool) error {
 	query, err := url.ParseQuery(r.URL.RawQuery)
