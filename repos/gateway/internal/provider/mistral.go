@@ -67,6 +67,8 @@ func (Mistral) SupportsImageVariation() bool { return false }
 
 func (Mistral) SupportsAudioTranscription() bool { return false }
 
+func (Mistral) SupportsAudioSpeech() bool { return false }
+
 func (Mistral) GenerateImage(context.Context, openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
 	return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_operation", Err: errors.New("image generation is not supported by this adapter")}
 }
@@ -81,6 +83,10 @@ func (Mistral) CreateImageVariation(context.Context, openai.ImageVariationReques
 
 func (Mistral) TranscribeAudio(context.Context, openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
 	return openai.AudioTranscriptionResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_operation", Err: errors.New("audio transcription is not supported by this adapter")}
+}
+
+func (Mistral) GenerateSpeech(context.Context, openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
+	return openai.AudioSpeechResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_operation", Err: errors.New("text to speech is not supported by this adapter")}
 }
 
 func (p Mistral) ValidateChatParameters(request openai.ChatCompletionRequest) error {

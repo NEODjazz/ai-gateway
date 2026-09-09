@@ -169,6 +169,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.APIType = "image_edit"
 	case "image_variation":
 		request.APIType = "image_variation"
+	case "audio_speech":
+		request.APIType = "audio_speech"
 	}
 	if request.OutputTokens == 0 && req.CompletionRequest == nil {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
@@ -235,6 +237,16 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.Provider = req.AudioTranscriptionRequest.Provider
 		request.Model = req.AudioTranscriptionRequest.Model
 		request.APIType = "audio_transcription"
+	}
+	if req.AudioSpeechRequest != nil {
+		request.Provider = req.AudioSpeechRequest.Provider
+		request.Model = req.AudioSpeechRequest.Model
+		request.APIType = "audio_speech"
+		request.InputCharacters = req.AudioSpeechRequest.InputCharacters()
+		request.InputTokens = openai.AudioSpeechReserveTokens(*req.AudioSpeechRequest)
+		request.PromptTokensEstimated = request.InputTokens
+		request.OutputTokens = 0
+		request.TotalTokens = request.InputTokens
 	}
 	if req.Response != nil {
 		request.Phase = "commit"
@@ -338,6 +350,11 @@ func billingRequest(req *RequestContext) UsageRequest {
 			request.TotalTokens = usage.TotalTokens
 			request.UsageEstimated = false
 		}
+	}
+	if req.AudioSpeechResponse != nil {
+		request.Phase = "commit"
+		request.UpstreamModel = req.AudioSpeechResponse.Model
+		request.UsageEstimated = true
 	}
 	if originalModel := metadataValue(req.Metadata, "provider.original_model"); originalModel != "" {
 		request.Model = originalModel

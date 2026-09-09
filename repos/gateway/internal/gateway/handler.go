@@ -1178,6 +1178,62 @@ func (h Handler) TranscribeAudio(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h Handler) GenerateSpeech(w http.ResponseWriter, r *http.Request) {
+	var request openai.AudioSpeechRequest
+	if !decodeInferenceRequest(w, r, &request) {
+		return
+	}
+	if message := request.Validate(); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
+	reqCtx := modules.RequestContext{
+		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r),
+		AudioSpeechRequest: &request,
+		InputCharacters:    request.InputCharacters(),
+		Request:            openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model, Messages: []openai.Message{{Role: "user", Content: request.Input}}},
+		Metadata:           map[string]string{"gateway.api_type": "audio_speech"},
+	}
+	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
+		return
+	}
+	reqCtx.APIKey = ""
+	if reqCtx.AudioSpeechRequest == nil || len(reqCtx.Request.Messages) != 1 {
+		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
+		return
+	}
+	request = *reqCtx.AudioSpeechRequest
+	request.Input = openai.ContentText(reqCtx.Request.Messages[0].Content)
+	reqCtx.AudioSpeechRequest = &request
+	reqCtx.InputCharacters = request.InputCharacters()
+	if message := request.Validate(); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid audio speech request")
+		return
+	}
+	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateAudioSpeechTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+		return
+	}
+	audioProvider, ok := h.provider.(provider.AudioSpeechProvider)
+	if !ok {
+		writeError(w, http.StatusBadGateway, "provider_failed", "audio speech is not supported by the configured provider")
+		return
+	}
+	response, err := audioProvider.GenerateSpeech(r.Context(), reqCtx)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", response.ContentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(response.Data)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(response.Data)
+}
+
 func validateRerankRequest(request openai.RerankRequest) string {
 	if strings.TrimSpace(request.Model) == "" {
 		return "model is required"

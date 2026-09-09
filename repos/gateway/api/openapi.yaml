@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.106
+  version: 0.1.107
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -329,6 +329,33 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AudioTranscriptionResponse'}
+        default:
+          description: Gateway or provider error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/audio/speech:
+    post:
+      operationId: createSpeech
+      tags: [Inference]
+      summary: Generate speech audio from text through an explicitly capable deployment
+      description: Applies strict JSON validation, text policies, RPM/TPM admission, bounded provider response buffering, retries, exact Unicode character billing and durable settlement. The audio stream format returns a buffered binary response; SSE is rejected explicitly.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AudioSpeechRequest'}
+      responses:
+        '200':
+          description: Generated speech in the requested audio format
+          content:
+            audio/mpeg: {schema: {type: string, format: binary}}
+            audio/ogg: {schema: {type: string, format: binary}}
+            audio/aac: {schema: {type: string, format: binary}}
+            audio/flac: {schema: {type: string, format: binary}}
+            audio/wav: {schema: {type: string, format: binary}}
+            application/octet-stream: {schema: {type: string, format: binary}}
         default:
           description: Gateway or provider error
           content:
@@ -3026,7 +3053,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, stream, tools, structured_output, mcp, vision, web_search, audio]}
+          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_speech, stream, tools, structured_output, mcp, vision, web_search, audio]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -4472,6 +4499,19 @@ components:
           maxItems: 4
           description: Must contain the same number of entries as known_speaker_names[]. Each entry is a supported base64 data audio URL up to 512 KiB decoded; the combined decoded limit is 2 MiB. Providers validate the required sample duration.
           items: {type: string, format: uri, pattern: '^data:(?:audio|video)/[^;,]+;base64,'}
+    AudioSpeechRequest:
+      type: object
+      additionalProperties: false
+      required: [model, input, voice]
+      properties:
+        provider: {type: string, description: Optional exact deployment selector}
+        model: {type: string, minLength: 1}
+        input: {type: string, minLength: 1, maxLength: 4096, description: At most 4096 Unicode characters}
+        voice: {type: string, minLength: 1, maxLength: 128}
+        instructions: {type: string, maxLength: 16384}
+        response_format: {type: string, enum: [mp3, opus, aac, flac, wav, pcm], default: mp3}
+        speed: {type: number, minimum: 0.25, maximum: 4, default: 1}
+        stream_format: {type: string, enum: [audio], default: audio}
     AudioTranscriptionResponse:
       type: object
       additionalProperties: false

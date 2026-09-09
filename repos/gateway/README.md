@@ -107,6 +107,12 @@ usage reports and request logs, independently from gateway cache-hit counts.
 Exact Unicode input-character counts are also carried independently for models
 whose catalog pricing uses `character_cost_per_1m`; tokens remain available for
 rate limits and token-based budgets.
+
+`POST /v1/audio/speech` routes only to `audio_speech` capable deployments. It
+accepts bounded text, voice, instructions, speed and audio format options,
+applies the shared text policy, and returns a buffered binary response capped at
+32 MiB. Character pricing uses the exact Unicode input count. The `audio`
+stream format is supported; unsupported stream formats fail explicitly.
 Project details remain access-policy metadata rather than a synthetic billing
 identity. The console joins owner teams, project access groups and their
 virtual-key impact. Repeated `access_group_id` key-list query parameters use

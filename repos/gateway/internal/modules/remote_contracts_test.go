@@ -223,6 +223,23 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingSettlesAudioSpeechWithExactCharacters(t *testing.T) {
+	request := openai.AudioSpeechRequest{Provider: "speech", Model: "tts", Input: "Привет 👋", Voice: "alloy"}
+	req := RequestContext{
+		RequestID: "speech-request", Request: openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model},
+		AudioSpeechRequest: &request, InputCharacters: request.InputCharacters(), Metadata: map[string]string{"gateway.api_type": "audio_speech"},
+	}
+	reserve := billingRequest(&req)
+	if reserve.Phase != "reserve" || reserve.APIType != "audio_speech" || reserve.InputCharacters != 8 || reserve.OutputTokens != 0 || reserve.TotalTokens != openai.AudioSpeechReserveTokens(request) {
+		t.Fatalf("reserve=%+v", reserve)
+	}
+	req.AudioSpeechResponse = &openai.AudioSpeechResponse{Data: []byte("audio"), ContentType: "audio/mpeg", Model: "tts-versioned"}
+	commit := billingRequest(&req)
+	if commit.Phase != "commit" || commit.InputCharacters != 8 || commit.UpstreamModel != "tts-versioned" || !commit.UsageEstimated {
+		t.Fatalf("commit=%+v", commit)
+	}
+}
+
 func TestRemoteBillingReservesAndCommitsProviderSearchUsage(t *testing.T) {
 	req := sensitiveContext()
 	req.Request.WebSearchOptions = &openai.ChatWebSearchOptions{SearchContextSize: "medium"}

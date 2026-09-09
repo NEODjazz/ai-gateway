@@ -34,7 +34,7 @@ availability is not inferred from these tests.
 | Image edits | Authenticated `/v1/images/edits`, bounded multipart images/mask, signature validation, DLP/AV projection, explicit capability routing, compatible/Azure transport and token settlement | Provider-specific editing options and image-specific non-token pricing |
 | Image variations | Authenticated `/v1/images/variations`, bounded multipart image, signature validation, AV projection, explicit capability routing, compatible/Azure transport and token settlement | Provider-specific variation options and image-specific non-token pricing |
 | Audio transcription | Authenticated `/v1/audio/transcriptions`, bounded multipart audio, extension/MIME/signature validation, prompt/keyword/speaker-name DLP, AV projection for the source and bounded known-speaker samples, multilingual hints and chunking strategy, explicit capability routing, compatible/Azure transport and exact token settlement | Streaming, duration-priced models and additional native provider adapters |
-| Text to speech | Not implemented | Binary/stream output and character/audio accounting |
+| Text to speech | Authenticated `/v1/audio/speech`, strict bounded text/voice/options, shared text policy, explicit capability routing, compatible/Azure transport, bounded binary audio, retries, token quotas and exact Unicode character settlement | SSE event streaming, additional native provider adapters and duration-priced models |
 | Realtime | Not implemented | Session authorization, WebSocket lifecycle, quotas and usage settlement |
 | Videos | Not implemented | Durable owned jobs, polling/cancellation and artifact accounting |
 | OCR | Not implemented | Document validation, native execution and page accounting |

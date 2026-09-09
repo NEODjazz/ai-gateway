@@ -54,6 +54,8 @@ type RequestContext struct {
 	ImageGenerationResponse    *openai.ImageGenerationResponse    `json:"image_generation_response,omitempty"`
 	AudioTranscriptionRequest  *openai.AudioTranscriptionRequest  `json:"audio_transcription_request,omitempty"`
 	AudioTranscriptionResponse *openai.AudioTranscriptionResponse `json:"audio_transcription_response,omitempty"`
+	AudioSpeechRequest         *openai.AudioSpeechRequest         `json:"audio_speech_request,omitempty"`
+	AudioSpeechResponse        *openai.AudioSpeechResponse        `json:"-"`
 	Usage                      *openai.Usage                      `json:"usage,omitempty"`
 	Metadata                   map[string]string                  `json:"metadata,omitempty"`
 	AnonymizationValues        map[string]string                  `json:"anonymization_values,omitempty"`

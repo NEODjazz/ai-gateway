@@ -271,6 +271,10 @@ func estimateAudioTranscriptionTokens(request openai.AudioTranscriptionRequest) 
 	return openai.AudioTranscriptionReserveTokens(request)
 }
 
+func estimateAudioSpeechTokens(request openai.AudioSpeechRequest) int {
+	return openai.AudioSpeechReserveTokens(request)
+}
+
 func (h Handler) authorizeAccess(w http.ResponseWriter, ctx context.Context, req modules.RequestContext, model string, tokens int) bool {
 	if !modelAllowed(model, req.AllowedModels) {
 		writeError(w, 403, "model_not_allowed", "credential is not allowed to use model "+strconv.Quote(model))
