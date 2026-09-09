@@ -10,6 +10,7 @@ describe("modelCapabilityOptions", () => {
       "rerank",
       "moderation",
       "image_generation",
+      "image_edit",
       "stream",
       "tools",
       "structured_output",

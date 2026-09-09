@@ -273,6 +273,25 @@ func TestImageGenerationBillingReserveAndSettlement(t *testing.T) {
 	}
 }
 
+func TestImageEditBillingReserveAndSettlement(t *testing.T) {
+	n := 2
+	attachment := openai.ImageAttachment{MediaType: "image/png", Data: "iVBORw0KGgpmaXh0dXJl"}
+	req := &RequestContext{
+		Request:          openai.ChatCompletionRequest{Model: "image-model"},
+		ImageEditRequest: &openai.ImageEditRequest{Model: "image-model", Prompt: "edit", Images: []openai.ImageAttachment{attachment}, N: &n},
+		Metadata:         map[string]string{"gateway.api_type": "image_edit"},
+	}
+	reserved := billingRequest(req)
+	if reserved.APIType != "image_edit" || reserved.InputTokens != openai.ImageEditInputTokens(*req.ImageEditRequest) || reserved.OutputTokens != 2*openai.DefaultOutputTokenReserve || reserved.TotalTokens != reserved.InputTokens+reserved.OutputTokens {
+		t.Fatalf("reserve=%+v", reserved)
+	}
+	req.ImageGenerationResponse = &openai.ImageGenerationResponse{Usage: &openai.ImageUsage{InputTokens: 5, OutputTokens: 13, TotalTokens: 18}}
+	settled := billingRequest(req)
+	if settled.Phase != "commit" || settled.APIType != "image_edit" || settled.InputTokens != 5 || settled.OutputTokens != 13 || settled.TotalTokens != 18 || settled.UsageEstimated {
+		t.Fatalf("settlement=%+v", settled)
+	}
+}
+
 func TestRemoteBillingCommitsCompactionUsageSeparately(t *testing.T) {
 	req := sensitiveContext()
 	req.ResponseRequest = &openai.ResponseRequest{Provider: "provider", Model: "compact-model", Input: "private input", Instructions: "private instructions"}
@@ -495,6 +514,26 @@ func TestRemoteAnonymizerUsesImageGenerationPrompt(t *testing.T) {
 	}
 	if request.Prompt != "masked prompt" {
 		t.Fatalf("prompt=%q", request.Prompt)
+	}
+}
+
+func TestRemoteAnonymizerUsesImageEditPromptWithoutProjectingFiles(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body AnonymizeRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Input != "private edit" || len(body.Messages) != 0 {
+			t.Fatalf("body=%+v err=%v", body, err)
+		}
+		_ = json.NewEncoder(w).Encode(AnonymizeResponse{Input: "masked edit"})
+	}))
+	defer server.Close()
+	attachment := openai.ImageAttachment{MediaType: "image/png", Data: "iVBORw0KGgpmaXh0dXJl"}
+	request := openai.ImageEditRequest{Model: "image", Prompt: "private edit", Images: []openai.ImageAttachment{attachment}}
+	req := RequestContext{ImageEditRequest: &request}
+	if err := NewRemoteAnonymizerModule(true, server.URL).Handle(t.Context(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if request.Prompt != "masked edit" || request.Images[0] != attachment {
+		t.Fatalf("request=%+v", request)
 	}
 }
 

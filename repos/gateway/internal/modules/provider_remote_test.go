@@ -51,6 +51,18 @@ func TestScanPayloadIncludesImageGenerationPrompt(t *testing.T) {
 	}
 }
 
+func TestImageEditProjectsPromptAndAttachmentsToScanners(t *testing.T) {
+	attachment := openai.ImageAttachment{MediaType: "image/png", Data: "iVBORw0KGgpmaXh0dXJl"}
+	req := RequestContext{ImageEditRequest: &openai.ImageEditRequest{Model: "image", Prompt: "private edit prompt", Images: []openai.ImageAttachment{attachment}, Mask: &attachment}}
+	if payload := scanPayload(&req); payload != "image_edit_prompt: private edit prompt" {
+		t.Fatalf("payload=%q", payload)
+	}
+	attachments, err := requestImageAttachments(&req)
+	if err != nil || len(attachments) != 2 || attachments[0] != attachment || attachments[1] != attachment {
+		t.Fatalf("attachments=%+v err=%v", attachments, err)
+	}
+}
+
 func TestScanPayloadIncludesRerankTextOnly(t *testing.T) {
 	req := RequestContext{RerankRequest: &openai.RerankRequest{Model: "rerank", Query: "private query", Documents: []any{"private document", map[string]any{"text": "object document", "binary": []byte{1, 2}}}}}
 	payload := scanPayload(&req)

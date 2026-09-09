@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/base64"
 	"strings"
 	"unicode/utf8"
 )
@@ -20,6 +21,75 @@ type ImageGenerationRequest struct {
 	Background        string `json:"background,omitempty"`
 	OutputFormat      string `json:"output_format,omitempty"`
 	OutputCompression *int   `json:"output_compression,omitempty"`
+}
+
+type ImageEditRequest struct {
+	Provider          string            `json:"provider,omitempty"`
+	Model             string            `json:"model"`
+	Prompt            string            `json:"prompt"`
+	Images            []ImageAttachment `json:"images"`
+	Mask              *ImageAttachment  `json:"mask,omitempty"`
+	N                 *int              `json:"n,omitempty"`
+	Quality           string            `json:"quality,omitempty"`
+	ResponseFormat    string            `json:"response_format,omitempty"`
+	Size              string            `json:"size,omitempty"`
+	User              string            `json:"user,omitempty"`
+	Background        string            `json:"background,omitempty"`
+	OutputFormat      string            `json:"output_format,omitempty"`
+	OutputCompression *int              `json:"output_compression,omitempty"`
+}
+
+func (r ImageEditRequest) Validate() string {
+	if len(r.Images) == 0 || len(r.Images) > MaxImageAttachments {
+		return "between 1 and 8 images are required"
+	}
+	attachments := append([]ImageAttachment(nil), r.Images...)
+	if r.Mask != nil {
+		if r.Mask.MediaType != "image/png" {
+			return "mask must be a PNG image"
+		}
+		attachments = append(attachments, *r.Mask)
+	}
+	if err := ValidateImageAttachments(attachments); err != nil {
+		return err.Error()
+	}
+	return r.GenerationRequest().Validate()
+}
+
+func (r ImageEditRequest) GenerationRequest() ImageGenerationRequest {
+	return ImageGenerationRequest{
+		Provider: r.Provider, Model: r.Model, Prompt: r.Prompt, N: r.N, Quality: r.Quality,
+		ResponseFormat: r.ResponseFormat, Size: r.Size, User: r.User, Background: r.Background,
+		OutputFormat: r.OutputFormat, OutputCompression: r.OutputCompression,
+	}
+}
+
+func ImageEditReserveTokens(r ImageEditRequest) int {
+	return ReserveTokens(ImageEditInputTokens(r), ImageGenerationOutputReserve(r.GenerationRequest()))
+}
+
+func ImageEditInputTokens(r ImageEditRequest) int {
+	tokens := EstimateContextTokens(r.Prompt)
+	attachments := append([]ImageAttachment(nil), r.Images...)
+	if r.Mask != nil {
+		attachments = append(attachments, *r.Mask)
+	}
+	limit := int(^uint(0) >> 1)
+	for _, attachment := range attachments {
+		decoded, err := base64.StdEncoding.DecodeString(attachment.Data)
+		if err != nil {
+			return limit
+		}
+		imageTokens := len(decoded) / 4
+		if len(decoded)%4 != 0 {
+			imageTokens++
+		}
+		if tokens > limit-imageTokens {
+			return limit
+		}
+		tokens += imageTokens
+	}
+	return tokens
 }
 
 func (r ImageGenerationRequest) Validate() string {

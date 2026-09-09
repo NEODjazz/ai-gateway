@@ -32,3 +32,25 @@ func TestImageGenerationRequestValidation(t *testing.T) {
 		t.Fatalf("total reserve=%d", got)
 	}
 }
+
+func TestImageEditRequestValidationAndReserve(t *testing.T) {
+	attachment, err := ParseDataImageURL("data:image/png;base64,iVBORw0KGgpmaXh0dXJl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 2
+	request := ImageEditRequest{Model: "image", Prompt: "edit", Images: []ImageAttachment{attachment}, Mask: &attachment, N: &n}
+	if message := request.Validate(); message != "" {
+		t.Fatal(message)
+	}
+	if got := ImageEditReserveTokens(request); got != ImageEditInputTokens(request)+2*DefaultOutputTokenReserve {
+		t.Fatalf("reserve=%d", got)
+	}
+	if ImageEditInputTokens(request) <= EstimateContextTokens(request.Prompt) {
+		t.Fatal("image bytes were not included in input estimate")
+	}
+	request.Images[0].MediaType = "image/jpeg"
+	if message := request.Validate(); message == "" {
+		t.Fatal("mismatched image media type was accepted")
+	}
+}

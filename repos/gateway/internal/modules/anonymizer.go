@@ -98,6 +98,9 @@ func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 	if req.ImageGenerationRequest != nil {
 		req.ImageGenerationRequest.Prompt = m.anonymize(req, req.ImageGenerationRequest.Prompt)
 	}
+	if req.ImageEditRequest != nil {
+		req.ImageEditRequest.Prompt = m.anonymize(req, req.ImageEditRequest.Prompt)
+	}
 	return nil
 }
 

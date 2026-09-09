@@ -84,6 +84,15 @@ func requestImageAttachments(req *RequestContext) ([]openai.ImageAttachment, err
 	if err != nil {
 		return nil, err
 	}
+	if req.ImageEditRequest != nil {
+		attachments = append(attachments, req.ImageEditRequest.Images...)
+		if req.ImageEditRequest.Mask != nil {
+			attachments = append(attachments, *req.ImageEditRequest.Mask)
+		}
+		if err := openai.ValidateImageAttachments(attachments); err != nil {
+			return nil, err
+		}
+	}
 	if req.ResponseRequest == nil {
 		if req.ModerationRequest == nil {
 			return attachments, nil
@@ -150,6 +159,9 @@ func scanPayload(req *RequestContext) string {
 	}
 	if req.ImageGenerationRequest != nil && req.ImageGenerationRequest.Prompt != "" {
 		parts = append(parts, "image_prompt: "+req.ImageGenerationRequest.Prompt)
+	}
+	if req.ImageEditRequest != nil && req.ImageEditRequest.Prompt != "" {
+		parts = append(parts, "image_edit_prompt: "+req.ImageEditRequest.Prompt)
 	}
 	return strings.Join(parts, "\n")
 }

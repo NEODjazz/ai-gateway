@@ -123,6 +123,19 @@ func ParseDataImageURL(value string) (ImageAttachment, error) {
 	return ImageAttachment{MediaType: mediaType, Data: data}, nil
 }
 
+func ValidateImageAttachments(attachments []ImageAttachment) error {
+	validated := make([]ImageAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		parsed, err := ParseDataImageURL("data:" + attachment.MediaType + ";base64," + attachment.Data)
+		if err != nil {
+			return err
+		}
+		validated = append(validated, parsed)
+	}
+	_, err := validateAttachmentLimits(validated)
+	return err
+}
+
 func validImageSignature(mediaType string, data []byte) bool {
 	switch mediaType {
 	case "image/jpeg":

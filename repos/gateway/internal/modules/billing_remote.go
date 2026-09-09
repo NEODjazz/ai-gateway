@@ -161,6 +161,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.APIType = "generate_content"
 	case "image_generation":
 		request.APIType = "image_generation"
+	case "image_edit":
+		request.APIType = "image_edit"
 	}
 	if request.OutputTokens == 0 && req.CompletionRequest == nil {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
@@ -212,6 +214,11 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.Provider = req.ImageGenerationRequest.Provider
 		request.Model = req.ImageGenerationRequest.Model
 		request.APIType = "image_generation"
+	}
+	if req.ImageEditRequest != nil {
+		request.Provider = req.ImageEditRequest.Provider
+		request.Model = req.ImageEditRequest.Model
+		request.APIType = "image_edit"
 	}
 	if req.Response != nil {
 		request.Phase = "commit"
@@ -353,6 +360,9 @@ func requestedOutputTokens(req *RequestContext) int {
 	if req.ImageGenerationRequest != nil {
 		return openai.ImageGenerationOutputReserve(*req.ImageGenerationRequest)
 	}
+	if req.ImageEditRequest != nil {
+		return openai.ImageGenerationOutputReserve(req.ImageEditRequest.GenerationRequest())
+	}
 	return openai.ChatOutputReserve(req.Request)
 }
 
@@ -377,6 +387,9 @@ func estimateRequestTokens(req *RequestContext) int {
 	}
 	if req.ImageGenerationRequest != nil {
 		return openai.EstimateContextTokens(req.ImageGenerationRequest.Prompt)
+	}
+	if req.ImageEditRequest != nil {
+		return openai.ImageEditInputTokens(*req.ImageEditRequest)
 	}
 	return openai.ChatInputTokens(req.Request)
 }

@@ -61,6 +61,9 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 	if req.ImageGenerationRequest != nil {
 		request.Input = req.ImageGenerationRequest.Prompt
 	}
+	if req.ImageEditRequest != nil {
+		request.Input = req.ImageEditRequest.Prompt
+	}
 	response, err := callRemote[AnonymizeRequest, AnonymizeResponse](ctx, m.client, m.endpoint, request)
 	if err != nil {
 		return err
@@ -95,6 +98,13 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 			return errors.New("anonymizer returned an invalid image prompt projection")
 		}
 		req.ImageGenerationRequest.Prompt = prompt
+	}
+	if req.ImageEditRequest != nil {
+		prompt, ok := response.Input.(string)
+		if !ok {
+			return errors.New("anonymizer returned an invalid image edit prompt projection")
+		}
+		req.ImageEditRequest.Prompt = prompt
 	}
 	req.AnonymizationValues = cloneStringMap(response.Replacements)
 	return nil

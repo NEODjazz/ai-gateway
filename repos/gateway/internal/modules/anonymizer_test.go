@@ -106,6 +106,18 @@ func TestAnonymizerMasksImageGenerationPrompt(t *testing.T) {
 	}
 }
 
+func TestAnonymizerMasksImageEditPromptWithoutChangingAttachments(t *testing.T) {
+	attachment := openai.ImageAttachment{MediaType: "image/png", Data: "iVBORw0KGgpmaXh0dXJl"}
+	request := openai.ImageEditRequest{Model: "image", Prompt: "remove user@example.com", Images: []openai.ImageAttachment{attachment}}
+	req := RequestContext{ImageEditRequest: &request}
+	if err := NewAnonymizerModule(true, RuleEmail).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if request.Prompt != "remove {{EMAIL_1}}" || request.Images[0] != attachment {
+		t.Fatalf("request=%+v", request)
+	}
+}
+
 func TestAnonymizerModerationInputPreservesImages(t *testing.T) {
 	request := openai.ModerationRequest{Input: []any{map[string]any{"type": "text", "text": "send to user@example.com"}, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.test/image.png"}}}}
 	req := RequestContext{ModerationRequest: &request}

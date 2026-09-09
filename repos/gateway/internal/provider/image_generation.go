@@ -55,7 +55,11 @@ func (p OpenAICompatible) GenerateImage(ctx context.Context, request openai.Imag
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return openai.ImageGenerationResponse{}, responseStatusError(p.providerName(), response)
 	}
-	payload, err := io.ReadAll(io.LimitReader(response.Body, maxImageGenerationResponseBytes+1))
+	return decodeImageGenerationResponse(response.Body, request)
+}
+
+func decodeImageGenerationResponse(body io.Reader, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
+	payload, err := io.ReadAll(io.LimitReader(body, maxImageGenerationResponseBytes+1))
 	if err != nil || len(payload) > maxImageGenerationResponseBytes {
 		return openai.ImageGenerationResponse{}, errors.New("image generation response exceeds limit")
 	}
