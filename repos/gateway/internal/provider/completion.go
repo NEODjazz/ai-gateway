@@ -197,11 +197,11 @@ func (r Router) Completions(ctx context.Context, req modules.RequestContext) (op
 		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
 			attemptCtx.CompletionResponse = &response
-			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
-				return openai.CompletionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
-			}
 			for index := range response.Choices {
 				response.Choices[index].Text = modules.DeanonymizeText(response.Choices[index].Text, attemptCtx.AnonymizationValues)
+			}
+			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
+				return openai.CompletionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 			}
 			return response, nil
 		}
@@ -231,6 +231,9 @@ func (r Router) StreamCompletions(ctx context.Context, req modules.RequestContex
 	}
 	candidates := r.routeCandidates(ctx, req, req.Request, "chat")
 	if len(candidates) == 0 {
+		return openai.CompletionResponse{}, false, nil
+	}
+	if outputDLPRequired(req, candidates) {
 		return openai.CompletionResponse{}, false, nil
 	}
 

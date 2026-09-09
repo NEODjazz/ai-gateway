@@ -244,6 +244,7 @@ type Endpoint struct {
 	Models                []string
 	Priority              int
 	DLPEnabled            bool
+	OutputDLPEnabled      bool
 	AVEnabled             bool
 	MaxRetries            int
 	RetryPolicy           map[string]int
@@ -319,6 +320,7 @@ func NewWithError(cfg Config) (Provider, error) {
 		}
 
 		dlpEnabled := endpoint.DLPEnabled
+		outputDLPEnabled := false
 		avEnabled := endpoint.AVEnabled
 		policyValid := true
 		if endpoint.GuardrailPolicy != "" {
@@ -326,6 +328,7 @@ func NewWithError(cfg Config) (Provider, error) {
 			policyValid = found
 			if found {
 				dlpEnabled = policy.DLP
+				outputDLPEnabled = policy.OutputDLP && policy.DLP
 				avEnabled = policy.AV
 			}
 		}
@@ -344,6 +347,7 @@ func NewWithError(cfg Config) (Provider, error) {
 			Models:                endpoint.Models,
 			Priority:              endpoint.Priority,
 			DLPEnabled:            dlpEnabled,
+			OutputDLPEnabled:      outputDLPEnabled,
 			AVEnabled:             avEnabled,
 			MaxRetries:            endpoint.MaxRetries,
 			CooldownAfterFailures: endpoint.CooldownAfterFailures,
@@ -434,7 +438,7 @@ func NewWithError(cfg Config) (Provider, error) {
 	router.modelGroups.current.Store(&emptyModelGroups)
 	initialGuardrails := make(map[string]GuardrailPolicy, len(cfg.GuardrailPolicies))
 	for name, policy := range cfg.GuardrailPolicies {
-		initialGuardrails[name] = GuardrailPolicy{Name: name, DLP: policy.DLP, AV: policy.AV, Enabled: true}
+		initialGuardrails[name] = GuardrailPolicy{Name: name, DLP: policy.DLP, OutputDLP: policy.OutputDLP && policy.DLP, AV: policy.AV, Enabled: true}
 	}
 	router.guardrails = &guardrailRegistry{}
 	router.guardrails.current.Store(&initialGuardrails)
@@ -537,10 +541,10 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 				setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 				response.Usage = openai.Usage{}
 				attemptCtx.Response = &response
+				modules.DeanonymizeResponse(&attemptCtx, &response)
 				if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 					return openai.ChatCompletionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 				}
-				modules.DeanonymizeResponse(&attemptCtx, &response)
 				return response, nil
 			}
 		} else if cacheErr != nil {
@@ -569,10 +573,10 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 						setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 						cached.Usage = openai.Usage{}
 						attemptCtx.Response = &cached
+						modules.DeanonymizeResponse(&attemptCtx, &cached)
 						if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 							return openai.ChatCompletionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 						}
-						modules.DeanonymizeResponse(&attemptCtx, &cached)
 						return cached, nil
 					}
 				}
@@ -591,13 +595,20 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
 			attemptCtx.Metadata["provider.cache.status"] = "miss"
-			if payload, marshalErr := json.Marshal(response); marshalErr == nil {
-				if cacheErr := r.cacheSet(ctx, cacheKey, payload); cacheErr != nil {
+			cachePayload, _ := json.Marshal(response)
+			mergeChatUsage(&response, attemptCtx.Usage)
+			attemptCtx.Response = &response
+			modules.DeanonymizeResponse(&attemptCtx, &response)
+			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
+				return openai.ChatCompletionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+			}
+			if len(cachePayload) > 0 {
+				if cacheErr := r.cacheSet(ctx, cacheKey, cachePayload); cacheErr != nil {
 					attemptCtx.Metadata["provider.cache.status"] = "error"
 					log.Printf("provider cache set failed: %v", cacheErr)
 				}
 				if semanticScope != "" && len(semanticVector) > 0 {
-					stored := r.semantic.set(semanticScope, semanticVector, payload)
+					stored := r.semantic.set(semanticScope, semanticVector, cachePayload)
 					if r.observer != nil {
 						result := "skipped"
 						if stored {
@@ -607,12 +618,6 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 					}
 				}
 			}
-			mergeChatUsage(&response, attemptCtx.Usage)
-			attemptCtx.Response = &response
-			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
-				return openai.ChatCompletionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
-			}
-			modules.DeanonymizeResponse(&attemptCtx, &response)
 			return response, nil
 		}
 		errs = append(errs, fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err))
@@ -644,6 +649,11 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 	if len(candidates) == 0 {
 		// No native stream is available. The handler's normal Chat path still
 		// enforces all non-stream capabilities and can synthesize SSE on success.
+		return openai.ChatCompletionResponse{}, false, nil
+	}
+	if outputDLPRequired(req, candidates) {
+		// Output policies need the complete response before any bytes are sent.
+		// The handler will use the regular path and synthesize SSE after scanning.
 		return openai.ChatCompletionResponse{}, false, nil
 	}
 
@@ -857,10 +867,10 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 				response.Usage = openai.ResponseUsage{}
 				attemptCtx.ResponsesResponse = &response
 				r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
+				modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
 				if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 					return openai.ResponseResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 				}
-				modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
 				return response, nil
 			}
 		} else if cacheErr != nil {
@@ -881,17 +891,18 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 				return openai.ResponseResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 			}
 			attemptCtx.Metadata["provider.cache.status"] = "miss"
-			if payload, marshalErr := json.Marshal(response); marshalErr == nil && cacheableResponsesResult(response) {
-				if cacheErr := r.cacheSet(ctx, cacheKey, payload); cacheErr != nil {
-					attemptCtx.Metadata["provider.cache.status"] = "error"
-					log.Printf("provider cache set failed: %v", cacheErr)
-				}
-			}
+			cachePayload, _ := json.Marshal(response)
 			attemptCtx.ResponsesResponse = &response
 			modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
 			r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
 			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 				return openai.ResponseResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+			}
+			if len(cachePayload) > 0 && cacheableResponsesResult(response) {
+				if cacheErr := r.cacheSet(ctx, cacheKey, cachePayload); cacheErr != nil {
+					attemptCtx.Metadata["provider.cache.status"] = "error"
+					log.Printf("provider cache set failed: %v", cacheErr)
+				}
 			}
 			if err := r.persistResponseOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, request.Model, response.ID, endpoint); err != nil {
 				return openai.ResponseResponse{}, err
@@ -1493,6 +1504,9 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 	if len(candidates) == 0 {
 		return openai.ResponseResponse{}, false, nil
 	}
+	if outputDLPRequired(req, candidates) {
+		return openai.ResponseResponse{}, false, nil
+	}
 
 	var errs []error
 	var lastAttempt *modules.RequestContext
@@ -1791,6 +1805,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 	if attemptCtx.Metadata["policy.modules.dlp.enabled"] == "true" {
 		attemptCtx.Metadata["provider.modules.dlp.enabled"] = "true"
 	}
+	if attemptCtx.Metadata["policy.modules.dlp.output_enabled"] == "true" {
+		attemptCtx.Metadata["provider.modules.dlp.output_enabled"] = "true"
+	}
 	if attemptCtx.Metadata["policy.modules.av.enabled"] == "true" {
 		attemptCtx.Metadata["provider.modules.av.enabled"] = "true"
 	}
@@ -1941,13 +1958,14 @@ func combinePolicyNames(values ...string) string {
 
 func providerMetadata(endpoint Endpoint) map[string]string {
 	return map[string]string{
-		"provider.id":                  endpoint.ProviderID,
-		"provider.endpoint.name":       endpoint.Name,
-		"provider.endpoint.type":       endpoint.Type,
-		"provider.modules.dlp.enabled": boolString(endpoint.DLPEnabled),
-		"provider.modules.av.enabled":  boolString(endpoint.AVEnabled),
-		"provider.guardrail.policy":    endpoint.GuardrailPolicy,
-		"provider.guardrail.valid":     boolString(endpoint.GuardrailPolicy == "" || endpoint.GuardrailPolicyValid),
+		"provider.id":                         endpoint.ProviderID,
+		"provider.endpoint.name":              endpoint.Name,
+		"provider.endpoint.type":              endpoint.Type,
+		"provider.modules.dlp.enabled":        boolString(endpoint.DLPEnabled),
+		"provider.modules.dlp.output_enabled": boolString(endpoint.OutputDLPEnabled),
+		"provider.modules.av.enabled":         boolString(endpoint.AVEnabled),
+		"provider.guardrail.policy":           endpoint.GuardrailPolicy,
+		"provider.guardrail.valid":            boolString(endpoint.GuardrailPolicy == "" || endpoint.GuardrailPolicyValid),
 	}
 }
 
@@ -1956,6 +1974,18 @@ func boolString(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func outputDLPRequired(req modules.RequestContext, endpoints []Endpoint) bool {
+	if req.Metadata["policy.modules.dlp.output_enabled"] == "true" {
+		return true
+	}
+	for _, endpoint := range endpoints {
+		if endpoint.OutputDLPEnabled {
+			return true
+		}
+	}
+	return false
 }
 
 func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, int, error) {

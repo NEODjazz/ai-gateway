@@ -18,6 +18,13 @@ type monitoredGuardrailModule struct {
 	err  error
 }
 
+type monitoredPostGuardrailModule struct{ monitoredGuardrailModule }
+
+func (monitoredPostGuardrailModule) PostResponseEnabled() bool { return true }
+func (m monitoredPostGuardrailModule) HandlePostResponse(context.Context, *modules.RequestContext) error {
+	return m.err
+}
+
 type sharedGuardrailEventStore struct {
 	mu       sync.Mutex
 	events   []GuardrailEvent
@@ -89,6 +96,23 @@ func TestGuardrailMonitorSkipsDisabledModule(t *testing.T) {
 	}
 	if monitor.Snapshot(10).Summary.Total != 0 {
 		t.Fatal("disabled guardrail was recorded as a scan")
+	}
+}
+
+func TestGuardrailMonitorRecordsProviderOutputPhase(t *testing.T) {
+	monitor := NewGuardrailMonitor(10)
+	module := NewGuardrailMonitoringModule(monitoredPostGuardrailModule{monitoredGuardrailModule{name: "dlp", err: modules.ErrContentRejected}}, monitor)
+	post, ok := module.(modules.PostResponseModule)
+	if !ok || !post.PostResponseEnabled() {
+		t.Fatal("monitor wrapper did not preserve post-response module")
+	}
+	req := &modules.RequestContext{RequestID: "request-output", Metadata: map[string]string{"provider.modules.dlp.output_enabled": "true", "provider.guardrail.policy": "strict"}}
+	if err := post.HandlePostResponse(context.Background(), req); !errors.Is(err, modules.ErrContentRejected) {
+		t.Fatalf("unexpected output guardrail error: %v", err)
+	}
+	snapshot := monitor.Snapshot(10)
+	if snapshot.Summary.Rejected != 1 || len(snapshot.Events) != 1 || snapshot.Events[0].Source != "inference_output" {
+		t.Fatalf("unexpected output monitor snapshot: %+v", snapshot)
 	}
 }
 

@@ -24,6 +24,7 @@ type ResolvedPolicyAttachment struct {
 	MatchedVia   []string `json:"matched_via"`
 	PolicyStatus string   `json:"policy_status"`
 	DLP          bool     `json:"dlp"`
+	OutputDLP    bool     `json:"output_dlp"`
 	AV           bool     `json:"av"`
 }
 
@@ -37,6 +38,7 @@ type PolicyResolutionResponse struct {
 	MatchedAttachments []ResolvedPolicyAttachment `json:"matched_attachments"`
 	EffectivePolicies  []string                   `json:"effective_policies"`
 	DLP                bool                       `json:"dlp"`
+	OutputDLP          bool                       `json:"output_dlp"`
 	AV                 bool                       `json:"av"`
 	Enforceable        bool                       `json:"enforceable"`
 	Issues             []PolicyResolutionIssue    `json:"issues"`
@@ -92,13 +94,14 @@ func (h Handler) resolvePolicyAttachmentSet(attachments []PolicyAttachment, cont
 			result.Issues = append(result.Issues, PolicyResolutionIssue{AttachmentID: attachment.ID, PolicyName: attachment.PolicyName, Code: "policy_missing"})
 		} else if !policy.Enabled {
 			resolved.PolicyStatus = "disabled"
-			resolved.DLP, resolved.AV = policy.DLP, policy.AV
+			resolved.DLP, resolved.OutputDLP, resolved.AV = policy.DLP, policy.OutputDLP, policy.AV
 			result.Enforceable = false
 			result.Issues = append(result.Issues, PolicyResolutionIssue{AttachmentID: attachment.ID, PolicyName: attachment.PolicyName, Code: "policy_disabled"})
 		} else {
 			resolved.PolicyStatus = "enabled"
-			resolved.DLP, resolved.AV = policy.DLP, policy.AV
+			resolved.DLP, resolved.OutputDLP, resolved.AV = policy.DLP, policy.OutputDLP, policy.AV
 			result.DLP = result.DLP || policy.DLP
+			result.OutputDLP = result.OutputDLP || policy.OutputDLP
 			result.AV = result.AV || policy.AV
 			if _, duplicate := seen[policy.Name]; !duplicate {
 				seen[policy.Name] = struct{}{}
@@ -156,6 +159,7 @@ func (h Handler) applyPolicyAttachmentsForModels(w http.ResponseWriter, req *mod
 	req.Metadata["policy.guardrail.required"] = "true"
 	req.Metadata["policy.guardrail.names"] = strings.Join(resolution.EffectivePolicies, ",")
 	req.Metadata["policy.modules.dlp.enabled"] = strconv.FormatBool(resolution.DLP)
+	req.Metadata["policy.modules.dlp.output_enabled"] = strconv.FormatBool(resolution.OutputDLP)
 	req.Metadata["policy.modules.av.enabled"] = strconv.FormatBool(resolution.AV)
 	return true
 }

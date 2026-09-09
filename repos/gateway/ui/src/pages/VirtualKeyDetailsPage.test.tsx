@@ -21,7 +21,7 @@ describe("VirtualKeyDetailsPage", () => {
       if (path === "/admin/v1/users?limit=500") return json({ data: [{ id: "user-1", name: "Alice" }] });
       if (path === "/admin/v1/teams?limit=500" || path === "/admin/v1/organizations?limit=500") return json({ data: [] });
       if (path === "/admin/v1/access-groups") return json({ data: [{ id: "platform", name: "Platform access" }] });
-      if (path === "/admin/v1/policy-attachments/resolve" && init?.method === "POST") return json({ matched_attachments: [{ id: "prod-dlp", policy_name: "strict", scope: "specific", matched_via: ["key", "model", "tag"], policy_status: "enabled", dlp: true, av: false }], effective_policies: ["strict"], dlp: true, av: false, enforceable: true, issues: [] });
+      if (path === "/admin/v1/policy-attachments/resolve" && init?.method === "POST") return json({ matched_attachments: [{ id: "prod-dlp", policy_name: "strict", scope: "specific", matched_via: ["key", "model", "tag"], policy_status: "enabled", dlp: true, output_dlp: false, av: false }], effective_policies: ["strict"], dlp: true, output_dlp: false, av: false, enforceable: true, issues: [] });
       if (path.endsWith("/rotate") && init?.method === "POST") return json({ id: "vk_alpha", token: "sk-rotated-once" });
       if (path.endsWith("/disable") && init?.method === "POST") { disabledAt = "2026-09-02T01:00:00Z"; return json({}); }
       return json({ error: { message: `unexpected ${init?.method || "GET"} ${path}` } }, 500);

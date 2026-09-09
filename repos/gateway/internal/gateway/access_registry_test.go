@@ -202,7 +202,7 @@ func TestTagRestrictionsFilterModelDiscovery(t *testing.T) {
 }
 
 func TestPolicyAttachmentsAdminAPIAndRequestEvaluation(t *testing.T) {
-	runtime := provider.New(provider.Config{GuardrailPolicies: map[string]config.GuardrailPolicyConfig{"strict": {DLP: true}}})
+	runtime := provider.New(provider.Config{GuardrailPolicies: map[string]config.GuardrailPolicyConfig{"strict": {DLP: true, OutputDLP: true}}})
 	registry := NewAccessRegistry()
 	audit := &recordingAuditClient{}
 	handler := NewHandler(modulesPipeline("admin"), runtime).WithAccessRegistry(registry).WithAudit(audit)
@@ -218,7 +218,7 @@ func TestPolicyAttachmentsAdminAPIAndRequestEvaluation(t *testing.T) {
 	if !handler.applyPolicyAttachments(httptest.NewRecorder(), &req, "gpt-5.6") {
 		t.Fatal("matching policy attachment was rejected")
 	}
-	if req.Metadata["policy.guardrail.required"] != "true" || req.Metadata["policy.modules.dlp.enabled"] != "true" || req.Metadata["policy.guardrail.names"] != "strict" {
+	if req.Metadata["policy.guardrail.required"] != "true" || req.Metadata["policy.modules.dlp.enabled"] != "true" || req.Metadata["policy.modules.dlp.output_enabled"] != "true" || req.Metadata["policy.guardrail.names"] != "strict" {
 		t.Fatalf("policy was not materialized into request metadata: %+v", req.Metadata)
 	}
 

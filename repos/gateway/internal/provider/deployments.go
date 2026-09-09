@@ -270,6 +270,7 @@ func (r Router) runtimeEndpoints() []Endpoint {
 			endpoint.GuardrailPolicyValid = exists && policy.Enabled
 			if endpoint.GuardrailPolicyValid {
 				endpoint.DLPEnabled = policy.DLP
+				endpoint.OutputDLPEnabled = policy.OutputDLP && policy.DLP
 				endpoint.AVEnabled = policy.AV
 			}
 		}

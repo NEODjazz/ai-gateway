@@ -12,6 +12,7 @@ type GuardrailPolicy struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	DLP         bool   `json:"dlp"`
+	OutputDLP   bool   `json:"output_dlp"`
 	AV          bool   `json:"av"`
 	Enabled     bool   `json:"enabled"`
 }
@@ -96,7 +97,7 @@ func (r *Router) UpdateGuardrailPolicyDurable(ctx context.Context, name string, 
 func normalizeGuardrailPolicy(name string, policy GuardrailPolicy) (GuardrailPolicy, error) {
 	name = strings.TrimSpace(name)
 	policy.Description = strings.TrimSpace(policy.Description)
-	if name == "" || len(name) > 128 || len(policy.Description) > 1024 || (!policy.DLP && !policy.AV) {
+	if name == "" || len(name) > 128 || len(policy.Description) > 1024 || (!policy.DLP && !policy.AV) || (policy.OutputDLP && !policy.DLP) {
 		return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
 	}
 	for _, value := range name {

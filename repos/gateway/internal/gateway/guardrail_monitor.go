@@ -211,7 +211,7 @@ func normalizeGuardrailEvent(event GuardrailEvent) (GuardrailEvent, bool) {
 	if (event.Module != "dlp" && event.Module != "av") || (event.Outcome != "passed" && event.Outcome != "rejected" && event.Outcome != "unavailable") {
 		return GuardrailEvent{}, false
 	}
-	if event.Source != "compliance" && event.Source != "guardrail_api" {
+	if event.Source != "compliance" && event.Source != "guardrail_api" && event.Source != "inference_output" {
 		event.Source = "inference"
 	}
 	if event.OccurredAt.IsZero() {
@@ -322,6 +322,32 @@ func (m guardrailMonitoringModule) Handle(ctx context.Context, req *modules.Requ
 	return err
 }
 
+func (m guardrailMonitoringModule) PostResponseEnabled() bool {
+	post, ok := m.inner.(modules.PostResponseModule)
+	return ok && post.PostResponseEnabled()
+}
+
+func (m guardrailMonitoringModule) HandlePostResponse(ctx context.Context, req *modules.RequestContext) error {
+	post, ok := m.inner.(modules.PostResponseModule)
+	if !ok || !post.PostResponseEnabled() {
+		return nil
+	}
+	outputEnabled, _ := strconv.ParseBool(strings.TrimSpace(req.Metadata["provider.modules."+m.Name()+".output_enabled"]))
+	if !outputEnabled {
+		return post.HandlePostResponse(ctx, req)
+	}
+	started := time.Now()
+	err := post.HandlePostResponse(ctx, req)
+	outcome := "passed"
+	if errors.Is(err, modules.ErrContentRejected) {
+		outcome = "rejected"
+	} else if err != nil {
+		outcome = "unavailable"
+	}
+	m.monitor.RecordContext(ctx, GuardrailEvent{RequestID: req.RequestID, Policy: req.Metadata["provider.guardrail.policy"], Module: m.Name(), Source: "inference_output", Outcome: outcome, DurationMS: time.Since(started).Milliseconds()})
+	return err
+}
+
 func guardrailModuleEnabled(metadata map[string]string, module string) bool {
 	enabled, _ := strconv.ParseBool(strings.TrimSpace(metadata["provider.modules."+module+".enabled"]))
 	return enabled
@@ -359,7 +385,7 @@ func (h Handler) GetGuardrailMonitor(w http.ResponseWriter, r *http.Request) {
 	if filter.Window == "" {
 		filter.Window = "retained"
 	}
-	if !allowedValue(filter.Window, "retained", "15m", "1h", "24h") || !allowedValue(filter.Module, "", "dlp", "av") || len(filter.Policy) > 128 || !allowedValue(filter.Outcome, "", "passed", "rejected", "unavailable") || !allowedValue(filter.Source, "", "inference", "compliance", "guardrail_api") {
+	if !allowedValue(filter.Window, "retained", "15m", "1h", "24h") || !allowedValue(filter.Module, "", "dlp", "av") || len(filter.Policy) > 128 || !allowedValue(filter.Outcome, "", "passed", "rejected", "unavailable") || !allowedValue(filter.Source, "", "inference", "inference_output", "compliance", "guardrail_api") {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid guardrail monitor filter")
 		return
 	}

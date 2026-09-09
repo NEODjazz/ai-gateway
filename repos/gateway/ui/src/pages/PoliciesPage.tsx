@@ -13,7 +13,7 @@ import { PolicyResolutionResult, type PolicyResolution } from "../components/Pol
 import { StatCard } from "../components/StatCard";
 import type { Row } from "../components/DataTable";
 
-type GuardrailPolicy = { name: string; description?: string; dlp: boolean; av: boolean; enabled: boolean };
+type GuardrailPolicy = { name: string; description?: string; dlp: boolean; output_dlp: boolean; av: boolean; enabled: boolean };
 type PolicyAttachment = { id: string; policy_name: string; scope: "*" | "specific" | ""; teams?: string[]; keys?: string[]; models?: string[]; tags?: string[] };
 type DirectoryTeam = { id: string; name?: string };
 type VirtualKey = { id: string; alias?: string };
@@ -34,7 +34,7 @@ function records<T>(payload: unknown, key = "data"): T[] {
 }
 
 function values(value?: string[]) { return value || []; }
-function policyModules(policy?: GuardrailPolicy) { return [policy?.dlp && "DLP", policy?.av && "Antivirus"].filter(Boolean) as string[]; }
+function policyModules(policy?: GuardrailPolicy) { return [policy?.dlp && "Input DLP", policy?.output_dlp && "Output DLP", policy?.av && "Antivirus"].filter(Boolean) as string[]; }
 function scopeDimensions(attachment: PolicyAttachment | AttachmentDraft) {
   if (attachment.scope === "*") return ["Global"];
   return [[attachment.teams, "Teams"], [attachment.keys, "Keys"], [attachment.models, "Models"], [attachment.tags, "Tags"]]

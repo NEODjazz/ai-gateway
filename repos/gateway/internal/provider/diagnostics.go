@@ -30,6 +30,7 @@ type EndpointDiagnostics struct {
 	GuardrailPolicy      string     `json:"guardrail_policy,omitempty"`
 	GuardrailPolicyValid bool       `json:"guardrail_policy_valid"`
 	DLPEnabled           bool       `json:"dlp_enabled"`
+	OutputDLPEnabled     bool       `json:"output_dlp_enabled"`
 	AVEnabled            bool       `json:"av_enabled"`
 	Shadow               bool       `json:"shadow"`
 	MirrorPercentage     float64    `json:"mirror_percentage,omitempty"`
@@ -75,7 +76,7 @@ func (r Router) Diagnostics(ctx context.Context) RoutingDiagnostics {
 			Priority: endpoint.Priority, Weight: endpoint.Weight, State: state, CooldownUntil: cooldownUntil, ConsecutiveFailures: health.failures,
 			Samples: adaptive.samples, LatencyEWMAms: adaptive.latencyEWMA, FailureEWMA: adaptive.failureEWMA,
 			MaxRetries: endpoint.MaxRetries, GuardrailPolicy: endpoint.GuardrailPolicy, GuardrailPolicyValid: endpoint.GuardrailPolicyValid,
-			DLPEnabled: endpoint.DLPEnabled, AVEnabled: endpoint.AVEnabled, Shadow: endpoint.Shadow, MirrorPercentage: endpoint.MirrorPercentage,
+			DLPEnabled: endpoint.DLPEnabled, OutputDLPEnabled: endpoint.OutputDLPEnabled, AVEnabled: endpoint.AVEnabled, Shadow: endpoint.Shadow, MirrorPercentage: endpoint.MirrorPercentage,
 			RateLimitRPM: endpoint.RateLimitRPM, RateLimitTPM: endpoint.RateLimitTPM,
 			ProviderRateLimitRPM: endpoint.ProviderRateLimitRPM, ProviderRateLimitTPM: endpoint.ProviderRateLimitTPM,
 		}

@@ -150,6 +150,7 @@ func (p Pipeline) runPre(ctx context.Context, req *RequestContext, tokenCount bo
 }
 
 func (p Pipeline) RunPostResponse(ctx context.Context, req *RequestContext) error {
+	var terminal []error
 	for _, module := range p.modules {
 		postModule, ok := module.(PostResponseModule)
 		if !ok || !postModule.PostResponseEnabled() {
@@ -157,13 +158,14 @@ func (p Pipeline) RunPostResponse(ctx context.Context, req *RequestContext) erro
 		}
 		err := p.run(ctx, req, module, "post", postModule.HandlePostResponse)
 		if err != nil {
-			if module.Required() || errors.Is(err, ErrContentRejected) {
-				return fmt.Errorf("%s post-response module failed: %w", module.Name(), err)
+			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
+				terminal = append(terminal, fmt.Errorf("%s post-response module failed: %w", module.Name(), err))
+				continue
 			}
 			log.Printf("optional post-response module %s skipped after error: %v", module.Name(), err)
 		}
 	}
-	return nil
+	return errors.Join(terminal...)
 }
 
 func (p Pipeline) RunFailure(ctx context.Context, req *RequestContext, cause error) {

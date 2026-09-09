@@ -47,8 +47,8 @@ func TestGuardrailPolicyAndCompliancePlayground(t *testing.T) {
 	monitor := NewGuardrailMonitor(10)
 	handler := NewHandler(modulesPipeline("admin"), runtime).WithComplianceModules(NewGuardrailMonitoringModule(dlp, monitor), NewGuardrailMonitoringModule(av, monitor)).WithGuardrailMonitor(monitor)
 	put := httptest.NewRecorder()
-	Routes(handler).ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/admin/v1/guardrail-policies/strict", strings.NewReader(`{"description":"test","dlp":true,"av":true,"enabled":true}`)))
-	if put.Code != http.StatusOK {
+	Routes(handler).ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/admin/v1/guardrail-policies/strict", strings.NewReader(`{"description":"test","dlp":true,"output_dlp":true,"av":true,"enabled":true}`)))
+	if put.Code != http.StatusOK || !strings.Contains(put.Body.String(), `"output_dlp":true`) {
 		t.Fatalf("put status=%d body=%s", put.Code, put.Body.String())
 	}
 	check := httptest.NewRecorder()

@@ -137,6 +137,20 @@ func TestRouterCompletionStreamStopsFallbackAfterClientWrite(t *testing.T) {
 	}
 }
 
+func TestRouterCompletionOutputDLPUsesBufferedFallback(t *testing.T) {
+	client := &scriptedCompletionStreamClient{completionTestClient: completionTestClient{result: validCompletionResponse()}, payloads: []string{`{"choices":[{"index":0,"text":"must not leak"}]}`}}
+	router := Router{
+		endpoints: []Endpoint{{Name: "guarded", Type: "openai-compatible", Models: []string{"model"}, Capabilities: []string{"chat", "stream"}, OutputDLPEnabled: true, Provider: client}},
+		modules:   modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	request := openai.CompletionRequest{Model: "model", Prompt: "input", Stream: true}
+	writes := 0
+	_, streamed, err := router.StreamCompletions(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "input"}}}, CompletionRequest: &request}, func(string) error { writes++; return nil })
+	if err != nil || streamed || writes != 0 || client.streamCalls != 0 {
+		t.Fatalf("completion output leaked before scanning: streamed=%v writes=%d calls=%d err=%v", streamed, writes, client.streamCalls, err)
+	}
+}
+
 func TestRouterCompletionStreamRunsPostResponseBilling(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -469,6 +471,19 @@ func (p *countingProvider) Responses(context.Context, openai.ResponseRequest) (o
 
 type failingPostModule struct{}
 
+type responseCaptureModule struct{ text string }
+
+func (*responseCaptureModule) Name() string                                          { return "output-capture" }
+func (*responseCaptureModule) Required() bool                                        { return true }
+func (*responseCaptureModule) Handle(context.Context, *modules.RequestContext) error { return nil }
+func (*responseCaptureModule) PostResponseEnabled() bool                             { return true }
+func (m *responseCaptureModule) HandlePostResponse(_ context.Context, req *modules.RequestContext) error {
+	if req.Response != nil && len(req.Response.Choices) > 0 {
+		m.text = openai.ContentText(req.Response.Choices[0].Message.Content)
+	}
+	return nil
+}
+
 func (failingPostModule) Name() string                                          { return "post" }
 func (failingPostModule) Required() bool                                        { return true }
 func (failingPostModule) Handle(context.Context, *modules.RequestContext) error { return nil }
@@ -712,6 +727,52 @@ func TestStreamingAdmissionRejectsBeforeStreamStarts(t *testing.T) {
 	var admissionErr *AdmissionError
 	if streamed || !errors.As(err, &admissionErr) {
 		t.Fatalf("admission must fail before SSE starts: streamed=%v err=%v", streamed, err)
+	}
+}
+
+func TestOutputDLPUsesBufferedStreamingFallback(t *testing.T) {
+	client := &scriptedStreamingProvider{}
+	router := Router{
+		endpoints: []Endpoint{{Name: "guarded", Type: "openai", Models: []string{"model"}, Capabilities: []string{"chat", "responses", "stream"}, OutputDLPEnabled: true, Provider: client}},
+		modules:   modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	writes := 0
+	_, streamed, err := router.StreamChatCompletions(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model", Stream: true}}, func(string) error { writes++; return nil })
+	if err != nil || streamed || writes != 0 || client.chatCalls != 0 {
+		t.Fatalf("chat output leaked before scanning: streamed=%v writes=%d calls=%d err=%v", streamed, writes, client.chatCalls, err)
+	}
+	responseRequest := openai.ResponseRequest{Model: "model", Stream: true, Input: "hello"}
+	_, streamed, err = router.StreamResponses(context.Background(), modules.RequestContext{ResponseRequest: &responseRequest}, func(string, string) error { writes++; return nil })
+	if err != nil || streamed || writes != 0 || client.responseCalls != 0 {
+		t.Fatalf("responses output leaked before scanning: streamed=%v writes=%d calls=%d err=%v", streamed, writes, client.responseCalls, err)
+	}
+}
+
+func TestRouterRejectsProviderOutputAfterInputDLPAllows(t *testing.T) {
+	scans := 0
+	scanner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		scans++
+		var request modules.ScanRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		allowed := scans == 1
+		_ = json.NewEncoder(w).Encode(modules.ScanResponse{Allowed: allowed})
+	}))
+	defer scanner.Close()
+	upstream := &countingProvider{content: "provider secret"}
+	router := Router{
+		endpoints: []Endpoint{{Name: "guarded", Type: "demo", Models: []string{"model"}, DLPEnabled: true, OutputDLPEnabled: true, Provider: upstream}},
+		modules:   modules.NewPipeline([]modules.Module{modules.NewProviderRemoteModule("dlp", false, scanner.URL)}),
+		health:    newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	_, err := router.ChatCompletions(context.Background(), modules.RequestContext{RequestID: "execution-output", Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "safe input"}}}})
+	var providerErr *Error
+	if !errors.As(err, &providerErr) || providerErr.Class != FailurePostProcessing || !errors.Is(err, modules.ErrContentRejected) {
+		t.Fatalf("expected post-processing rejection, got %v", err)
+	}
+	if scans != 2 || upstream.calls != 1 {
+		t.Fatalf("unexpected lifecycle scans=%d upstream=%d", scans, upstream.calls)
 	}
 }
 
@@ -1016,6 +1077,24 @@ func TestRouterExactCacheIsTenantScopedAndRunsPostModulesOnHit(t *testing.T) {
 	}
 }
 
+func TestRouterDoesNotCacheResponseWhenPostProcessingFails(t *testing.T) {
+	upstream := &countingProvider{content: "blocked"}
+	router := Router{
+		cache: newExactCache(time.Minute), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+		modules:   modules.NewPipeline([]modules.Module{failingPostModule{}}),
+		endpoints: []Endpoint{{Name: "primary", Type: "openai", Models: []string{"model"}, Provider: upstream}},
+	}
+	req := modules.RequestContext{CredentialID: "tenant", Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "same prompt"}}}}
+	for range 2 {
+		if _, err := router.ChatCompletions(context.Background(), req); err == nil {
+			t.Fatal("expected post-processing failure")
+		}
+	}
+	if upstream.calls != 2 {
+		t.Fatalf("failed response was cached: upstream calls=%d", upstream.calls)
+	}
+}
+
 func TestRouterFallsBackToNextResponsesEndpoint(t *testing.T) {
 	router := Router{
 		defaultProvider: "ollama",
@@ -1101,6 +1180,25 @@ func TestRouterAppliesProviderLevelModulesForResponses(t *testing.T) {
 	}
 	if !strings.Contains(response.OutputText, "user@example.com") {
 		t.Fatalf("expected client response to be deanonymized, got %q", response.OutputText)
+	}
+}
+
+func TestPostResponseModulesSeeClientVisibleDeanonymizedText(t *testing.T) {
+	echo := &echoProvider{}
+	capture := &responseCaptureModule{}
+	router := Router{
+		defaultProvider: "demo",
+		modules: modules.NewPipeline([]modules.Module{
+			modules.NewAnonymizerModule(true, modules.RuleEmail), capture,
+		}),
+		endpoints: []Endpoint{{Name: "echo", Type: "demo", Provider: echo}},
+	}
+	_, err := router.ChatCompletions(context.Background(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "test-model", Messages: []openai.Message{{Role: "user", Content: "user@example.com"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capture.text != "user@example.com" {
+		t.Fatalf("post-response module saw %q", capture.text)
 	}
 }
 

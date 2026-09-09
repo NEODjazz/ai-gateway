@@ -224,6 +224,72 @@ func TestProviderRemoteModuleDoesNotSendBearerToken(t *testing.T) {
 	}
 }
 
+func TestDLPScansProviderOutputAndRejectsBeforeDelivery(t *testing.T) {
+	var received ScanRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(ScanResponse{Allowed: false})
+	}))
+	defer server.Close()
+	module := NewProviderRemoteModule("dlp", false, server.URL)
+	refusal := "private refusal"
+	req := RequestContext{
+		RequestID: "execution-1",
+		Metadata:  map[string]string{"provider.modules.dlp.output_enabled": "true"},
+		Request:   openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "request secret"}}},
+		Response: &openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{
+			Role: "assistant", Content: "response secret", Refusal: &refusal,
+			ToolCalls: []openai.ToolCall{{Function: openai.FunctionCall{Arguments: `{"email":"user@example.com"}`}}},
+		}}}},
+	}
+	err := NewPipeline([]Module{module}).RunPostResponse(context.Background(), &req)
+	if !errors.Is(err, ErrContentRejected) {
+		t.Fatalf("expected output rejection, got %v", err)
+	}
+	if received.RequestID != "execution-1" || !strings.Contains(received.Content, "response secret") || !strings.Contains(received.Content, "user@example.com") || strings.Contains(received.Content, "request secret") {
+		t.Fatalf("unexpected output projection: %+v", received)
+	}
+}
+
+func TestOutputDLPFailsClosedWhenProjectionOrScannerIsUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		endpoint string
+		content  string
+	}{
+		{name: "missing scanner", content: "response"},
+		{name: "oversized projection", endpoint: "http://unused.invalid", content: strings.Repeat("x", maxResponseScanBytes+1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			module := NewProviderRemoteModule("dlp", false, tc.endpoint)
+			req := RequestContext{Metadata: map[string]string{"provider.modules.dlp.output_enabled": "true"}, Response: &openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{Content: tc.content}}}}}
+			err := NewPipeline([]Module{module}).RunPostResponse(context.Background(), &req)
+			if !errors.Is(err, ErrGuardrailUnavailable) {
+				t.Fatalf("output DLP failed open: %v", err)
+			}
+		})
+	}
+}
+
+func TestOutputDLPSkipsResponsesWithoutExplicitPolicy(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		_ = json.NewEncoder(w).Encode(ScanResponse{Allowed: true})
+	}))
+	defer server.Close()
+	module := NewProviderRemoteModule("dlp", true, server.URL)
+	req := RequestContext{Response: &openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{Content: "response"}}}}}
+	if err := NewPipeline([]Module{module}).RunPostResponse(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("output scanner called without output policy")
+	}
+}
+
 func TestAVReceivesBinaryAttachmentsWhileDLPReceivesTextOnly(t *testing.T) {
 	for _, moduleName := range []string{"dlp", "av"} {
 		t.Run(moduleName, func(t *testing.T) {
@@ -271,6 +337,33 @@ func TestPipelineStopsOnContentRejectedEvenWhenOptional(t *testing.T) {
 }
 
 type rejectingModule struct{}
+
+type postLifecycleModule struct {
+	name   string
+	err    error
+	called *bool
+}
+
+func (m postLifecycleModule) Name() string                                { return m.name }
+func (postLifecycleModule) Required() bool                                { return false }
+func (postLifecycleModule) Handle(context.Context, *RequestContext) error { return nil }
+func (postLifecycleModule) PostResponseEnabled() bool                     { return true }
+func (m postLifecycleModule) HandlePostResponse(context.Context, *RequestContext) error {
+	*m.called = true
+	return m.err
+}
+
+func TestPostResponseLifecycleContinuesAfterOutputRejection(t *testing.T) {
+	rejected, billed := false, false
+	pipeline := NewPipeline([]Module{
+		postLifecycleModule{name: "dlp", err: ErrContentRejected, called: &rejected},
+		postLifecycleModule{name: "billing", called: &billed},
+	})
+	err := pipeline.RunPostResponse(context.Background(), &RequestContext{})
+	if !errors.Is(err, ErrContentRejected) || !rejected || !billed {
+		t.Fatalf("post-response lifecycle was truncated: rejected=%v billed=%v err=%v", rejected, billed, err)
+	}
+}
 
 type recordingModuleObserver struct {
 	module string

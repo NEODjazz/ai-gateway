@@ -7,10 +7,10 @@ import { GuardrailsPage } from "./GuardrailsPage";
 const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } }));
 
 const policies = [
-  { name: "strict", description: "DLP and antivirus", dlp: true, av: true, enabled: true },
-  { name: "av-only", description: "Malware scan", dlp: false, av: true, enabled: true },
-  { name: "scanner-down", description: "Unavailable scanner fixture", dlp: true, av: false, enabled: true },
-  { name: "disabled", description: "Not active", dlp: true, av: false, enabled: false },
+  { name: "strict", description: "DLP and antivirus", dlp: true, output_dlp: true, av: true, enabled: true },
+  { name: "av-only", description: "Malware scan", dlp: false, output_dlp: false, av: true, enabled: true },
+  { name: "scanner-down", description: "Unavailable scanner fixture", dlp: true, output_dlp: false, av: false, enabled: true },
+  { name: "disabled", description: "Not active", dlp: true, output_dlp: false, av: false, enabled: false },
 ];
 
 function renderPage() {
@@ -33,7 +33,8 @@ describe("GuardrailsPage", () => {
     renderPage();
     const strict = (await screen.findByText("strict")).closest("tr")!;
     expect(within(strict).getAllByText("1", { selector: "td" })).toHaveLength(2);
-    expect(within(strict).getByText("DLP")).toBeInTheDocument();
+    expect(within(strict).getByText("Input DLP")).toBeInTheDocument();
+    expect(within(strict).getByText("Output DLP")).toBeInTheDocument();
     expect(within(strict).getByText("Antivirus")).toBeInTheDocument();
     await userEvent.click(within(strict).getByRole("button", { name: "Actions for guardrail policy strict" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Inspect" }));
@@ -44,13 +45,14 @@ describe("GuardrailsPage", () => {
     await userEvent.type(screen.getByLabelText("Policy name"), "pii-baseline");
     await userEvent.type(screen.getByLabelText("Description"), "PII baseline");
     await userEvent.click(screen.getByLabelText("Run DLP scanner"));
+    await userEvent.click(screen.getByLabelText("Scan provider output before delivery"));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Select at least one scanner");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Output DLP requires the DLP scanner");
     await userEvent.click(screen.getByLabelText("Run DLP scanner"));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/admin/v1/guardrail-policies/pii-baseline" && init?.method === "PUT")).toBe(true));
     const call = fetchMock.mock.calls.find(([url, init]) => String(url) === "/admin/v1/guardrail-policies/pii-baseline" && init?.method === "PUT")!;
-    expect(JSON.parse(String(call[1]?.body))).toEqual({ description: "PII baseline", dlp: true, av: false, enabled: true });
+    expect(JSON.parse(String(call[1]?.body))).toEqual({ description: "PII baseline", dlp: true, output_dlp: true, av: false, enabled: true });
   });
 
   it("compares multiple enabled policies and renders only metadata-safe outcomes", async () => {

@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -33,6 +34,37 @@ func (m ProviderRemoteModule) Name() string {
 
 func (m ProviderRemoteModule) Required() bool {
 	return m.required
+}
+
+func (m ProviderRemoteModule) PostResponseEnabled() bool {
+	return m.name == "dlp"
+}
+
+func (m ProviderRemoteModule) HandlePostResponse(ctx context.Context, req *RequestContext) error {
+	if !metadataBool(req.Metadata, "provider.modules.dlp.output_enabled") {
+		return nil
+	}
+	payload, err := scanResponsePayload(req)
+	if err != nil {
+		return errors.Join(ErrGuardrailUnavailable, err)
+	}
+	if payload == "" {
+		return nil
+	}
+	if strings.TrimSpace(m.endpoint) == "" {
+		return errors.Join(ErrGuardrailUnavailable, errors.New("remote module url is empty"))
+	}
+	response, err := callRemote[ScanRequest, ScanResponse](ctx, m.client, m.endpoint, ScanRequest{RequestID: req.RequestID, Content: payload})
+	if err != nil {
+		if errors.Is(err, ErrContentRejected) {
+			return err
+		}
+		return errors.Join(ErrGuardrailUnavailable, err)
+	}
+	if !response.Allowed {
+		return ErrContentRejected
+	}
+	return nil
 }
 
 func (m ProviderRemoteModule) Handle(ctx context.Context, req *RequestContext) error {
@@ -205,6 +237,135 @@ func scanPayload(req *RequestContext) string {
 		parts = append(parts, "ocr_annotation_prompt: "+req.OCRRequest.DocumentAnnotationPrompt)
 	}
 	return strings.Join(parts, "\n")
+}
+
+const maxResponseScanBytes = 64 << 10
+
+func scanResponsePayload(req *RequestContext) (string, error) {
+	var result strings.Builder
+	appendText := func(label, value string) error {
+		if value == "" {
+			return nil
+		}
+		additional := len(label) + len(value)
+		if result.Len() > 0 {
+			additional++
+		}
+		if additional > maxResponseScanBytes-result.Len() {
+			return errors.New("response text projection exceeds the 64 KiB DLP scan limit")
+		}
+		if result.Len() > 0 {
+			result.WriteByte('\n')
+		}
+		result.WriteString(label)
+		result.WriteString(value)
+		return nil
+	}
+	if req.Response != nil {
+		for _, choice := range req.Response.Choices {
+			if err := appendText("assistant: ", openai.ContentText(choice.Message.Content)); err != nil {
+				return "", err
+			}
+			if choice.Message.Refusal != nil {
+				if err := appendText("refusal: ", *choice.Message.Refusal); err != nil {
+					return "", err
+				}
+			}
+			if choice.Message.Audio != nil && choice.Message.Audio.Transcript != nil {
+				if err := appendText("audio_transcript: ", *choice.Message.Audio.Transcript); err != nil {
+					return "", err
+				}
+			}
+			if choice.Message.FunctionCall != nil {
+				if err := appendText("function_arguments: ", choice.Message.FunctionCall.Arguments); err != nil {
+					return "", err
+				}
+			}
+			for _, call := range choice.Message.ToolCalls {
+				if err := appendText("tool_arguments: ", call.Function.Arguments); err != nil {
+					return "", err
+				}
+			}
+			for _, block := range choice.Message.Reasoning {
+				if err := appendText("reasoning: ", block.Thinking); err != nil {
+					return "", err
+				}
+			}
+		}
+	}
+	if req.CompletionResponse != nil {
+		for _, choice := range req.CompletionResponse.Choices {
+			if err := appendText("completion: ", choice.Text); err != nil {
+				return "", err
+			}
+		}
+	}
+	if req.ResponsesResponse != nil {
+		if err := appendText("output_text: ", req.ResponsesResponse.OutputText); err != nil {
+			return "", err
+		}
+		for _, item := range req.ResponsesResponse.Output {
+			if err := appendText("arguments: ", item.Arguments); err != nil {
+				return "", err
+			}
+			for _, content := range append(append([]openai.ResponseOutputContent(nil), item.Content...), item.Summary...) {
+				if err := appendText("output: ", content.Text); err != nil {
+					return "", err
+				}
+				if err := appendText("refusal: ", content.Refusal); err != nil {
+					return "", err
+				}
+			}
+		}
+	}
+	if req.CompactedResponse != nil {
+		for _, item := range req.CompactedResponse.Output {
+			var value any
+			if json.Unmarshal(item, &value) == nil {
+				if err := appendText("compacted_output: ", openai.ContentText(value)); err != nil {
+					return "", err
+				}
+			}
+		}
+	}
+	if req.ImageGenerationResponse != nil {
+		for _, image := range req.ImageGenerationResponse.Data {
+			if err := appendText("revised_prompt: ", image.RevisedPrompt); err != nil {
+				return "", err
+			}
+		}
+	}
+	if req.AudioTranscriptionResponse != nil {
+		if err := appendText("transcript: ", req.AudioTranscriptionResponse.Text); err != nil {
+			return "", err
+		}
+	}
+	if req.SearchResponse != nil {
+		for _, item := range req.SearchResponse.Results {
+			if err := appendText("search_title: ", item.Title); err != nil {
+				return "", err
+			}
+			if err := appendText("search_snippet: ", item.Snippet); err != nil {
+				return "", err
+			}
+		}
+	}
+	if req.OCRResponse != nil {
+		if req.OCRResponse.DocumentAnnotation != nil {
+			if err := appendText("document_annotation: ", *req.OCRResponse.DocumentAnnotation); err != nil {
+				return "", err
+			}
+		}
+		for _, page := range req.OCRResponse.Pages {
+			var value any
+			if json.Unmarshal(page, &value) == nil {
+				if err := appendText("ocr_page: ", openai.ContentText(value)); err != nil {
+					return "", err
+				}
+			}
+		}
+	}
+	return result.String(), nil
 }
 
 func metadataBool(metadata map[string]string, key string) bool {

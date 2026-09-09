@@ -12,7 +12,7 @@ import { ResourceForm, type Field } from "../components/ResourceForm";
 import { StatCard } from "../components/StatCard";
 import type { Row } from "../components/DataTable";
 
-type Policy = { name: string; description?: string; dlp: boolean; av: boolean; enabled: boolean };
+type Policy = { name: string; description?: string; dlp: boolean; output_dlp: boolean; av: boolean; enabled: boolean };
 type PolicyAttachment = { id: string; policy_name: string; scope: string; teams?: string[]; keys?: string[]; models?: string[]; tags?: string[] };
 type Deployment = { id: string; guardrail_policy?: string; enabled: boolean; runtime_state?: string };
 type ComplianceResult = { request_id: string; policy: string; allowed: boolean; checks: Record<string, "passed" | "rejected" | "unavailable" | "disabled">; content_stored: false };
@@ -22,6 +22,7 @@ const policyFields: Field[] = [
   { key: "name", label: "Policy name", required: true, readOnlyOnEdit: true, placeholder: "production-strict" },
   { key: "description", label: "Description", type: "textarea", placeholder: "What this policy protects" },
   { key: "dlp", label: "Run DLP scanner", type: "boolean", defaultValue: true },
+  { key: "output_dlp", label: "Scan provider output before delivery", type: "boolean" },
   { key: "av", label: "Run antivirus scanner", type: "boolean" },
   { key: "enabled", label: "Enabled", type: "boolean", defaultValue: true },
 ];
@@ -33,16 +34,18 @@ function records<T>(payload: unknown): T[] {
 }
 
 function checksLabel(policy: Policy) {
-  return [policy.dlp && "DLP", policy.av && "Antivirus"].filter(Boolean) as string[];
+  return [policy.dlp && "Input DLP", policy.output_dlp && "Output DLP", policy.av && "Antivirus"].filter(Boolean) as string[];
 }
 
 function GuardrailPolicyForm({ initial, client, onClose, onSaved }: { initial?: Policy; client: APIClient; onClose: () => void; onSaved: () => Promise<void> }) {
   async function save(value: Row) {
     const name = String(value.name || "").trim();
     const dlp = Boolean(value.dlp);
+    const outputDLP = Boolean(value.output_dlp);
     const av = Boolean(value.av);
+    if (outputDLP && !dlp) throw new Error("Output DLP requires the DLP scanner");
     if (!dlp && !av) throw new Error("Select at least one scanner: DLP or antivirus");
-    await client.request(`/admin/v1/guardrail-policies/${encodeURIComponent(name)}`, { method: "PUT", body: { description: String(value.description || ""), dlp, av, enabled: Boolean(value.enabled) } });
+    await client.request(`/admin/v1/guardrail-policies/${encodeURIComponent(name)}`, { method: "PUT", body: { description: String(value.description || ""), dlp, output_dlp: outputDLP, av, enabled: Boolean(value.enabled) } });
     onClose();
     await onSaved();
   }

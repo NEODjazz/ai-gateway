@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.112
+  version: 0.1.113
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1812,7 +1812,7 @@ paths:
         - {name: module, in: query, schema: {type: string, enum: [dlp, av]}}
         - {name: policy, in: query, schema: {type: string, maxLength: 128}}
         - {name: outcome, in: query, schema: {type: string, enum: [passed, rejected, unavailable]}}
-        - {name: source, in: query, schema: {type: string, enum: [inference, compliance, guardrail_api]}}
+        - {name: source, in: query, schema: {type: string, enum: [inference, inference_output, compliance, guardrail_api]}}
       responses:
         '200': {description: Guardrail monitoring snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/GuardrailMonitorSnapshot'}}}}
         '400': {$ref: '#/components/responses/InvalidRequest'}
@@ -3351,7 +3351,7 @@ components:
     EndpointDiagnostics:
       type: object
       additionalProperties: false
-      required: [name, type, models, priority, weight, state, consecutive_failures, samples, latency_ewma_ms, failure_ewma, in_flight_requests, queued_requests, max_retries, guardrail_policy_valid, dlp_enabled, av_enabled, shadow]
+      required: [name, type, models, priority, weight, state, consecutive_failures, samples, latency_ewma_ms, failure_ewma, in_flight_requests, queued_requests, max_retries, guardrail_policy_valid, dlp_enabled, output_dlp_enabled, av_enabled, shadow]
       properties:
         name: {type: string}
         type: {type: string}
@@ -3377,6 +3377,7 @@ components:
         guardrail_policy: {type: string}
         guardrail_policy_valid: {type: boolean}
         dlp_enabled: {type: boolean}
+        output_dlp_enabled: {type: boolean}
         av_enabled: {type: boolean}
         shadow: {type: boolean}
         mirror_percentage: {type: number, minimum: 0, maximum: 100}
@@ -5232,6 +5233,7 @@ components:
       properties:
         description: {type: string, maxLength: 1024}
         dlp: {type: boolean}
+        output_dlp: {type: boolean, description: Scan textual provider output before returning it. Native streams are buffered through the non-streaming path when enabled.}
         av: {type: boolean}
         enabled: {type: boolean}
     GuardrailApplyRequest:
@@ -5292,7 +5294,7 @@ components:
         tags: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
     ResolvedPolicyAttachment:
       type: object
-      required: [id, policy_name, scope, matched_via, policy_status, dlp, av]
+      required: [id, policy_name, scope, matched_via, policy_status, dlp, output_dlp, av]
       properties:
         id: {type: string}
         policy_name: {type: string}
@@ -5300,6 +5302,7 @@ components:
         matched_via: {type: array, items: {type: string, enum: [global, team, key, key_id, key_alias, model, tag]}}
         policy_status: {type: string, enum: [enabled, disabled, missing, unavailable]}
         dlp: {type: boolean}
+        output_dlp: {type: boolean}
         av: {type: boolean}
     PolicyResolutionIssue:
       type: object
@@ -5310,11 +5313,12 @@ components:
         code: {type: string, enum: [policy_controller_unavailable, policy_missing, policy_disabled]}
     PolicyResolution:
       type: object
-      required: [matched_attachments, effective_policies, dlp, av, enforceable, issues]
+      required: [matched_attachments, effective_policies, dlp, output_dlp, av, enforceable, issues]
       properties:
         matched_attachments: {type: array, items: {$ref: '#/components/schemas/ResolvedPolicyAttachment'}}
         effective_policies: {type: array, uniqueItems: true, items: {type: string}}
         dlp: {type: boolean}
+        output_dlp: {type: boolean}
         av: {type: boolean}
         enforceable: {type: boolean}
         issues: {type: array, items: {$ref: '#/components/schemas/PolicyResolutionIssue'}}
@@ -5369,7 +5373,7 @@ components:
         request_id: {type: string, maxLength: 128}
         policy: {type: string, maxLength: 128}
         module: {type: string, maxLength: 32}
-        source: {type: string, enum: [inference, compliance, guardrail_api]}
+        source: {type: string, enum: [inference, inference_output, compliance, guardrail_api]}
         outcome: {type: string, enum: [passed, rejected, unavailable]}
         duration_ms: {type: integer, format: int64, minimum: 0}
     GuardrailMonitorFilter:
@@ -5381,7 +5385,7 @@ components:
         module: {type: string, enum: [dlp, av]}
         policy: {type: string, maxLength: 128}
         outcome: {type: string, enum: [passed, rejected, unavailable]}
-        source: {type: string, enum: [inference, compliance, guardrail_api]}
+        source: {type: string, enum: [inference, inference_output, compliance, guardrail_api]}
     GuardrailTimelineBucket:
       type: object
       additionalProperties: false

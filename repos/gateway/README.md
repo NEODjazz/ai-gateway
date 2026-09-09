@@ -67,9 +67,13 @@ Policy attachments can apply an enabled DLP/AV policy globally or to the
 intersection of configured team, virtual-key ID/alias, public model, and key-tag
 patterns. Matching policies are combined with deployment guardrails and fail
 closed if a required scanner is unavailable.
+Policies can explicitly require provider-output DLP. The gateway scans the
+bounded textual response projection before delivery and routes streaming
+requests through its buffered fallback so rejected or unscanned content is not
+sent in partial events.
 `POST /admin/v1/policy-attachments/resolve` performs a metadata-only dry
 resolution with the exact runtime matcher. The Policies workspace uses it to
-show matched attachments, cumulative DLP/AV requirements, and fail-closed
+show matched attachments, cumulative input/output DLP and AV requirements, and fail-closed
 missing/disabled-policy issues without invoking a provider or scanner. Its
 attachment editor supports configured values plus exact or trailing-asterisk
 patterns and displays the AND-across-dimensions scope semantics before save.

@@ -6,8 +6,8 @@ import { PoliciesPage } from "./PoliciesPage";
 
 const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } }));
 const policies = [
-  { name: "strict", description: "DLP and antivirus", dlp: true, av: true, enabled: true },
-  { name: "disabled", description: "Disabled fixture", dlp: true, av: false, enabled: false },
+  { name: "strict", description: "DLP and antivirus", dlp: true, output_dlp: true, av: true, enabled: true },
+  { name: "disabled", description: "Disabled fixture", dlp: true, output_dlp: false, av: false, enabled: false },
 ];
 
 function renderPage(entry = "/policies") {
@@ -75,10 +75,10 @@ describe("PoliciesPage", () => {
       if (url === "/admin/v1/policy-attachments") return json({ data: [] });
       if (url === "/admin/v1/policy-attachments/resolve" && init?.method === "POST") return json({
         matched_attachments: [
-          { id: "global-strict", policy_name: "strict", scope: "*", matched_via: ["global"], policy_status: "enabled", dlp: true, av: true },
-          { id: "stale", policy_name: "missing-policy", scope: "specific", matched_via: ["team", "model"], policy_status: "missing", dlp: false, av: false },
+          { id: "global-strict", policy_name: "strict", scope: "*", matched_via: ["global"], policy_status: "enabled", dlp: true, output_dlp: true, av: true },
+          { id: "stale", policy_name: "missing-policy", scope: "specific", matched_via: ["team", "model"], policy_status: "missing", dlp: false, output_dlp: false, av: false },
         ],
-        effective_policies: ["strict"], dlp: true, av: true, enforceable: false,
+        effective_policies: ["strict"], dlp: true, output_dlp: true, av: true, enforceable: false,
         issues: [{ attachment_id: "stale", policy_name: "missing-policy", code: "policy_missing" }],
       });
       return json({ error: { message: `unexpected ${init?.method || "GET"} ${url}` } }, 500);
