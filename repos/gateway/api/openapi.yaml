@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.107
+  version: 0.1.108
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -356,6 +356,29 @@ paths:
             audio/flac: {schema: {type: string, format: binary}}
             audio/wav: {schema: {type: string, format: binary}}
             application/octet-stream: {schema: {type: string, format: binary}}
+        default:
+          description: Gateway or provider error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/search:
+    post:
+      operationId: search
+      tags: [Inference]
+      summary: Execute a standalone search through an explicitly capable deployment
+      description: Applies strict JSON validation, query content policy, model authorization, RPM/TPM admission, bounded response validation, retries and exact search-unit settlement.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SearchRequest'}
+      responses:
+        '200':
+          description: Bounded search results
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SearchResponse'}
         default:
           description: Gateway or provider error
           content:
@@ -3053,7 +3076,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_speech, stream, tools, structured_output, mcp, vision, web_search, audio]}
+          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_speech, search, stream, tools, structured_output, mcp, vision, web_search, audio]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -4512,6 +4535,51 @@ components:
         response_format: {type: string, enum: [mp3, opus, aac, flac, wav, pcm], default: mp3}
         speed: {type: number, minimum: 0.25, maximum: 4, default: 1}
         stream_format: {type: string, enum: [audio], default: audio}
+    SearchRequest:
+      type: object
+      additionalProperties: false
+      required: [query]
+      anyOf:
+        - required: [model]
+        - required: [search_tool_name]
+      properties:
+        provider: {type: string, description: Optional exact deployment selector}
+        model: {type: string, minLength: 1, description: Public search deployment model}
+        search_tool_name: {type: string, minLength: 1, description: Alias for the public search deployment model}
+        query:
+          oneOf:
+            - {type: string, minLength: 1, maxLength: 16384}
+            - type: array
+              minItems: 1
+              maxItems: 20
+              items: {type: string, minLength: 1, maxLength: 16384}
+        max_results: {type: integer, minimum: 1, maximum: 20, default: 10}
+        search_domain_filter:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: {type: string, minLength: 1, maxLength: 253}
+        max_tokens_per_page: {type: integer, minimum: 1, maximum: 4096, default: 1024}
+        country: {type: string, pattern: '^[A-Z]{2}$'}
+    SearchResponse:
+      type: object
+      additionalProperties: false
+      required: [object, results]
+      properties:
+        object: {type: string, const: search}
+        results:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [url]
+            properties:
+              title: {type: string, maxLength: 8192}
+              url: {type: string, format: uri, maxLength: 4096}
+              snippet: {type: string, maxLength: 1048576}
+              date: {type: string, maxLength: 128}
+              last_updated: {type: string, maxLength: 128}
     AudioTranscriptionResponse:
       type: object
       additionalProperties: false

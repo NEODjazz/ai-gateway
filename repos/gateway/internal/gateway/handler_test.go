@@ -292,6 +292,12 @@ func (p *chatProvider) GenerateSpeech(_ context.Context, req modules.RequestCont
 	return openai.AudioSpeechResponse{Data: []byte("ID3audio"), ContentType: "audio/mpeg", Model: req.AudioSpeechRequest.Model}, nil
 }
 
+func (p *chatProvider) Search(_ context.Context, req modules.RequestContext) (openai.SearchResponse, error) {
+	p.request = req
+	model, _ := req.SearchRequest.RoutingModel()
+	return openai.SearchResponse{Object: "search", Model: model, Results: []openai.SearchResult{{Title: "Result", URL: "https://example.test/result", Snippet: "found"}}, Usage: openai.Usage{SearchRequests: 1}}, nil
+}
+
 func (p *chatProvider) CompactResponse(_ context.Context, req modules.RequestContext) (openai.CompactedResponse, error) {
 	p.request = req
 	return openai.CompactedResponse{

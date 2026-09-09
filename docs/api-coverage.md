@@ -44,7 +44,7 @@ availability is not inferred from these tests.
 | Fine tuning | Not implemented | Owned training jobs, model ownership and training accounting |
 | Files | Not implemented | Owner-scoped upload/content/delete, retention and storage quotas |
 | Assistants | Not implemented | Assistant/thread/run ownership and lifecycle |
-| Search | Not implemented | Execution adapters, authorization and search-unit accounting |
+| Search | Authenticated `/v1/search` for one or bounded batched queries, domain/country filters, explicit capability routing, compatible transport, bounded result validation, retries and per-query search-unit settlement | Additional native provider adapters, tiered result pricing and managed search-tool registry |
 | Skills | Not implemented | Versioned registry, owner isolation and provider execution contract |
 | MCP | Registry, ACL and Responses passthrough | Runtime transport, bounded sessions and tool execution accounting |
 | A2A | Not implemented | Agent discovery, task ownership and authenticated execution |

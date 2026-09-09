@@ -171,6 +171,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.APIType = "image_variation"
 	case "audio_speech":
 		request.APIType = "audio_speech"
+	case "search":
+		request.APIType = "search"
 	}
 	if request.OutputTokens == 0 && req.CompletionRequest == nil {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
@@ -247,6 +249,18 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.PromptTokensEstimated = request.InputTokens
 		request.OutputTokens = 0
 		request.TotalTokens = request.InputTokens
+	}
+	if req.SearchRequest != nil {
+		request.Provider = req.SearchRequest.Provider
+		request.Model, _ = req.SearchRequest.RoutingModel()
+		request.APIType = "search"
+		request.InputTokens = 0
+		request.PromptTokensEstimated = 0
+		request.OutputTokens = 0
+		request.TotalTokens = 0
+		request.SearchRequests = req.SearchRequest.SearchUnits()
+		request.SearchRequestsEstimated = false
+		request.UsageEstimated = false
 	}
 	if req.Response != nil {
 		request.Phase = "commit"
@@ -355,6 +369,16 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.Phase = "commit"
 		request.UpstreamModel = req.AudioSpeechResponse.Model
 		request.UsageEstimated = true
+	}
+	if req.SearchResponse != nil {
+		request.Phase = "commit"
+		request.UpstreamModel = req.SearchResponse.Model
+		request.InputTokens = 0
+		request.OutputTokens = 0
+		request.TotalTokens = 0
+		request.SearchRequests = req.SearchResponse.Usage.SearchRequests
+		request.SearchRequestsEstimated = false
+		request.UsageEstimated = false
 	}
 	if originalModel := metadataValue(req.Metadata, "provider.original_model"); originalModel != "" {
 		request.Model = originalModel

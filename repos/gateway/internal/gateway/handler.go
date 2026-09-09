@@ -1234,6 +1234,68 @@ func (h Handler) GenerateSpeech(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(response.Data)
 }
 
+func (h Handler) Search(w http.ResponseWriter, r *http.Request) {
+	var request openai.SearchRequest
+	if !decodeInferenceRequest(w, r, &request) {
+		return
+	}
+	if message := request.Validate(); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
+	model, _ := request.RoutingModel()
+	queries, _ := request.Queries()
+	messages := make([]openai.Message, len(queries))
+	for index, query := range queries {
+		messages[index] = openai.Message{Role: "user", Content: query}
+	}
+	reqCtx := modules.RequestContext{
+		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r),
+		SearchRequest: &request,
+		Request:       openai.ChatCompletionRequest{Provider: request.Provider, Model: model, Messages: messages},
+		Metadata:      map[string]string{"gateway.api_type": "search"},
+	}
+	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
+		return
+	}
+	reqCtx.APIKey = ""
+	if reqCtx.SearchRequest == nil || len(reqCtx.Request.Messages) != len(queries) {
+		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
+		return
+	}
+	request = *reqCtx.SearchRequest
+	queries = make([]string, len(reqCtx.Request.Messages))
+	for index := range reqCtx.Request.Messages {
+		queries[index] = openai.ContentText(reqCtx.Request.Messages[index].Content)
+	}
+	request.SetQueries(queries)
+	reqCtx.SearchRequest = &request
+	if message := request.Validate(); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid search request")
+		return
+	}
+	model, _ = request.RoutingModel()
+	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, model, openai.SearchReserveTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, model) {
+		return
+	}
+	searchProvider, ok := h.provider.(provider.SearchProvider)
+	if !ok {
+		writeError(w, http.StatusBadGateway, "provider_failed", "search is not supported by the configured provider")
+		return
+	}
+	response, err := searchProvider.Search(r.Context(), reqCtx)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func validateRerankRequest(request openai.RerankRequest) string {
 	if strings.TrimSpace(request.Model) == "" {
 		return "model is required"

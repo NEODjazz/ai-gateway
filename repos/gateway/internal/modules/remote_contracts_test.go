@@ -240,6 +240,23 @@ func TestRemoteBillingSettlesAudioSpeechWithExactCharacters(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingSettlesStandaloneSearchAsOneUnit(t *testing.T) {
+	search := openai.SearchRequest{Provider: "search", SearchToolName: "web-search", Query: "gateway"}
+	req := RequestContext{
+		RequestID: "search-request", Request: openai.ChatCompletionRequest{Provider: search.Provider, Model: "web-search"},
+		SearchRequest: &search, Metadata: map[string]string{"gateway.api_type": "search"},
+	}
+	reserve := billingRequest(&req)
+	if reserve.Phase != "reserve" || reserve.APIType != "search" || reserve.Model != "web-search" || reserve.SearchRequests != 1 || reserve.SearchRequestsEstimated || reserve.InputTokens != 0 || reserve.OutputTokens != 0 || reserve.TotalTokens != 0 || reserve.UsageEstimated {
+		t.Fatalf("reserve=%+v", reserve)
+	}
+	req.SearchResponse = &openai.SearchResponse{Object: "search", Model: "web-search-v2", Usage: openai.Usage{SearchRequests: 1}}
+	commit := billingRequest(&req)
+	if commit.Phase != "commit" || commit.UpstreamModel != "web-search-v2" || commit.SearchRequests != 1 || commit.SearchRequestsEstimated || commit.TotalTokens != 0 || commit.UsageEstimated {
+		t.Fatalf("commit=%+v", commit)
+	}
+}
+
 func TestRemoteBillingReservesAndCommitsProviderSearchUsage(t *testing.T) {
 	req := sensitiveContext()
 	req.Request.WebSearchOptions = &openai.ChatWebSearchOptions{SearchContextSize: "medium"}
