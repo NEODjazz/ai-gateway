@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -33,7 +34,7 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 			}))
 			defer server.Close()
 			var request openai.ChatCompletionRequest
-			if err := json.Unmarshal([]byte(`{"model":"test","reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","prompt_cache_key":"tenant-thread","verbosity":"low","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-1,"logit_bias":{"10":-100}}`), &request); err != nil {
+			if err := json.Unmarshal([]byte(`{"model":"test","metadata":{"trace":"one"},"store":false,"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","prompt_cache_key":"tenant-thread","verbosity":"low","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-1,"logit_bias":{"10":-100}}`), &request); err != nil {
 				t.Fatal(err)
 			}
 			client := NewOpenAICompatible(server.URL, "", true)
@@ -48,7 +49,7 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for name, want := range map[string]string{"reasoning_effort": `"high"`, "n": "2", "safety_identifier": `"hashed-user"`, "prompt_cache_key": `"tenant-thread"`, "verbosity": `"low"`, "logprobs": "true", "top_logprobs": "0", "frequency_penalty": "0", "presence_penalty": "-1", "logit_bias": `{"10":-100}`} {
+			for name, want := range map[string]string{"metadata": `{"trace":"one"}`, "store": "false", "reasoning_effort": `"high"`, "n": "2", "safety_identifier": `"hashed-user"`, "prompt_cache_key": `"tenant-thread"`, "verbosity": `"low"`, "logprobs": "true", "top_logprobs": "0", "frequency_penalty": "0", "presence_penalty": "-1", "logit_bias": `{"10":-100}`} {
 				if string(received[name]) != want {
 					t.Fatalf("%s=%s, want %s", name, received[name], want)
 				}
@@ -166,7 +167,7 @@ func TestCompatibleChatRejectsInvalidUsageBeforeDelivery(t *testing.T) {
 }
 
 func TestGenerationControlsAreRejectedByNativeAdapters(t *testing.T) {
-	for _, body := range []string{`{"reasoning_effort":"high"}`, `{"n":2}`, `{"safety_identifier":"hashed-user"}`, `{"prompt_cache_key":"tenant-thread"}`, `{"service_tier":"priority"}`, `{"verbosity":"low"}`, `{"logprobs":false}`, `{"top_logprobs":0}`, `{"frequency_penalty":0}`, `{"presence_penalty":0}`, `{"logit_bias":{"1":0}}`} {
+	for _, body := range []string{`{"metadata":{"trace":"one"}}`, `{"store":false}`, `{"reasoning_effort":"high"}`, `{"n":2}`, `{"safety_identifier":"hashed-user"}`, `{"prompt_cache_key":"tenant-thread"}`, `{"service_tier":"priority"}`, `{"verbosity":"low"}`, `{"logprobs":false}`, `{"top_logprobs":0}`, `{"frequency_penalty":0}`, `{"presence_penalty":0}`, `{"logit_bias":{"1":0}}`} {
 		var request openai.ChatCompletionRequest
 		if err := json.Unmarshal([]byte(body), &request); err != nil {
 			t.Fatal(err)
@@ -176,6 +177,15 @@ func TestGenerationControlsAreRejectedByNativeAdapters(t *testing.T) {
 				t.Fatalf("%T silently accepted %s", client, body)
 			}
 		}
+	}
+}
+
+func TestCompatibleChatRejectsStoredRequests(t *testing.T) {
+	store := true
+	err := NewOpenAICompatible("http://unused.invalid", "", false).ValidateChatParameters(openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{Store: &store}})
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Param != "store" || failure.UpstreamCode != "unsupported_parameter" {
+		t.Fatalf("stored Chat request was not rejected explicitly: %v", err)
 	}
 }
 
@@ -231,5 +241,27 @@ func TestVerbosityScopesCaches(t *testing.T) {
 	changedScope, _, changedOK := semanticRequest(changed, Endpoint{Name: "test"})
 	if !baseOK || !changedOK || baseScope == changedScope {
 		t.Fatal("semantic cache ignored verbosity")
+	}
+}
+
+func TestChatMetadataAndStoreScopeCaches(t *testing.T) {
+	base := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "hello"}}}}
+	store := false
+	for name, change := range map[string]func(*openai.ChatCompletionRequest){
+		"metadata": func(request *openai.ChatCompletionRequest) { request.Metadata = map[string]string{"trace": "one"} },
+		"store":    func(request *openai.ChatCompletionRequest) { request.Store = &store },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := base
+			change(&changed.Request)
+			if providerCacheKey("chat", base) == providerCacheKey("chat", changed) {
+				t.Fatalf("exact cache ignored %s", name)
+			}
+			baseScope, _, baseOK := semanticRequest(base, Endpoint{Name: "test"})
+			changedScope, _, changedOK := semanticRequest(changed, Endpoint{Name: "test"})
+			if !baseOK || !changedOK || baseScope == changedScope {
+				t.Fatalf("semantic cache ignored %s", name)
+			}
+		})
 	}
 }

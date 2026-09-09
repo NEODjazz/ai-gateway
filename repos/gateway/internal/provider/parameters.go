@@ -133,6 +133,8 @@ func (Ollama) ValidateCompletionParameters(request openai.CompletionRequest) err
 
 func rejectGenerationOptions(adapter string, options openai.ChatGenerationOptions) error {
 	return rejectParameters(adapter,
+		parameterCheck{"metadata", options.Metadata != nil},
+		parameterCheck{"store", options.Store != nil},
 		parameterCheck{"reasoning_effort", options.ReasoningEffort != ""},
 		parameterCheck{"n", options.N != nil},
 		parameterCheck{"safety_identifier", options.SafetyIdentifier != ""},
@@ -158,7 +160,10 @@ func (OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequ
 	if message := request.ChatGenerationOptions.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
 	}
-	return rejectParameters("openai-compatible", parameterCheck{"service_tier", request.ServiceTier != ""})
+	return rejectParameters("openai-compatible",
+		parameterCheck{"store", request.Store != nil && *request.Store},
+		parameterCheck{"service_tier", request.ServiceTier != ""},
+	)
 }
 
 func (OpenAICompatible) ValidateResponseParameters(request openai.ResponseRequest) error {

@@ -35,7 +35,7 @@ upstream. Распознаваемые параметры перечислены
 
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
-| `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `verbosity`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
+| `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `verbosity`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
 | `/v1/completions` | `provider`, `model`, `prompt`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `n`, `presence_penalty`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
 | `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
@@ -1181,6 +1181,15 @@ assembled from SSE. The stream collector rejects a provider stream that changes
 one of these identities between events. Synthetic SSE reuses the collected
 upstream timestamp and envelope for every generated event; when `created` is
 absent, it selects one timestamp for the whole synthetic stream.
+
+Chat accepts string-valued `metadata` with the same 16-entry, 64-character key
+and 512-character value limits as Responses. Compatible JSON and SSE requests
+forward it unchanged. `store=false` is also forwarded explicitly. `store=true`
+is rejected before execution until the gateway exposes the corresponding stored
+Chat lifecycle; accepting it would create resources that gateway clients cannot
+retrieve or delete. Native adapters reject both controls when their contracts
+cannot preserve them. Both fields participate in cache scope, while authenticated
+billing identity remains independent of client metadata.
 
 Chat и Responses распознают `service_tier` и проверяют значения `auto`,
 `default`, `flex`, `scale`, `priority`, `fast` и `ultrafast`. Все adapters пока

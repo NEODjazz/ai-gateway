@@ -110,6 +110,7 @@ func TestChatRejectsInvalidGenerationOptionsBeforePipeline(t *testing.T) {
 		{`{"model":"test","messages":[],"safety_identifier":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, "at most 64 characters"},
 		{`{"model":"test","messages":[],"service_tier":"unknown"}`, "unsupported service_tier value"},
 		{`{"model":"test","messages":[],"verbosity":"unknown"}`, "verbosity must be low, medium, or high"},
+		{`{"model":"test","messages":[],"metadata":{"trace":"` + strings.Repeat("я", 513) + `"}}`, "metadata keys must be at most 64 characters and values at most 512 characters"},
 	} {
 		access := &countingAccessModule{}
 		handler := NewHandler(modules.NewPipeline([]modules.Module{access}), &chatProvider{})
