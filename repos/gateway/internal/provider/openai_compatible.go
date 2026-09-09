@@ -17,19 +17,20 @@ import (
 
 type openAICompatibleChatRequest struct {
 	openai.ChatGenerationOptions
-	Model               string                 `json:"model"`
-	Messages            []openai.Message       `json:"messages"`
-	Tools               []openai.Tool          `json:"tools,omitempty"`
-	ToolChoice          any                    `json:"tool_choice,omitempty"`
-	ParallelToolCalls   *bool                  `json:"parallel_tool_calls,omitempty"`
-	ResponseFormat      *openai.ResponseFormat `json:"response_format,omitempty"`
-	Stream              bool                   `json:"stream,omitempty"`
-	MaxTokens           *int                   `json:"max_tokens,omitempty"`
-	MaxCompletionTokens *int                   `json:"max_completion_tokens,omitempty"`
-	Temperature         *float64               `json:"temperature,omitempty"`
-	TopP                *float64               `json:"top_p,omitempty"`
-	Stop                any                    `json:"stop,omitempty"`
-	Seed                *int64                 `json:"seed,omitempty"`
+	Model               string                         `json:"model"`
+	Messages            []openai.Message               `json:"messages"`
+	Tools               []openai.Tool                  `json:"tools,omitempty"`
+	ToolChoice          any                            `json:"tool_choice,omitempty"`
+	ParallelToolCalls   *bool                          `json:"parallel_tool_calls,omitempty"`
+	ResponseFormat      *openai.ResponseFormat         `json:"response_format,omitempty"`
+	Stream              bool                           `json:"stream,omitempty"`
+	StreamOptions       *openAICompatibleStreamOptions `json:"stream_options,omitempty"`
+	MaxTokens           *int                           `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int                           `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64                       `json:"temperature,omitempty"`
+	TopP                *float64                       `json:"top_p,omitempty"`
+	Stop                any                            `json:"stop,omitempty"`
+	Seed                *int64                         `json:"seed,omitempty"`
 }
 
 type openAICompatibleResponseRequest struct {
@@ -352,6 +353,9 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 		Temperature: request.Temperature, TopP: request.TopP,
 		Stop: request.Stop, Seed: request.Seed,
 	}
+	if upstreamRequest.Stream {
+		upstreamRequest.StreamOptions = &openAICompatibleStreamOptions{IncludeUsage: true}
+	}
 	resp, err := p.chatCompletionResponse(ctx, &upstreamRequest)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -474,6 +478,7 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 		Temperature: request.Temperature, TopP: request.TopP,
 		Stop: request.Stop, Seed: request.Seed,
 	}
+	upstreamRequest.StreamOptions = &openAICompatibleStreamOptions{IncludeUsage: true}
 	resp, err := p.chatCompletionResponse(ctx, &upstreamRequest)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err

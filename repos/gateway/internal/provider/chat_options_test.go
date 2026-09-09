@@ -53,6 +53,13 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 					t.Fatalf("%s=%s, want %s", name, received[name], want)
 				}
 			}
+			if streaming {
+				if string(received["stream_options"]) != `{"include_usage":true}` {
+					t.Fatalf("stream usage was not requested: %s", received["stream_options"])
+				}
+			} else if _, present := received["stream_options"]; present {
+				t.Fatal("stream_options sent for a non-streaming request")
+			}
 			wantCount := 1
 			if streaming {
 				wantCount = 2

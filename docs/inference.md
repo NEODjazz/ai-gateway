@@ -167,8 +167,10 @@ Ollama, Gemini и demo отклоняют `base64` до обращения к up
 OpenAI-compatible SSE учитывает `usage` из финального события с пустым `choices`:
 reported prompt/completion/total tokens и prompt-cache details доходят до
 post-response billing. Это событие не создаёт дополнительный choice и сохраняется
-при проксировании клиенту. Если upstream не присылает usage, остаётся существующий
-estimated fallback; точный учет не выводится из отсутствующих данных.
+при проксировании клиенту. Для Chat SSE gateway всегда отправляет upstream
+`stream_options.include_usage=true`. Если upstream всё равно не присылает usage,
+остаётся существующий estimated fallback; точный учет не выводится из отсутствующих
+данных.
 
 
 ## Chat generation controls
