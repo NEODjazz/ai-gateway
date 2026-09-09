@@ -1994,6 +1994,12 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	if count, _ := openai.ChatRequestPromptCacheBreakpoints(request); count > 0 {
 		required = append(required, "prompt_cache")
 	}
+	for _, message := range request.Messages {
+		if message.Prefix != nil && *message.Prefix {
+			required = append(required, "assistant_prefill")
+			break
+		}
+	}
 	return required
 }
 
@@ -2136,11 +2142,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "web_search") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache")
+	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "web_search") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "web_search", "audio", "prompt_cache"} {
+	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "web_search", "audio", "prompt_cache", "assistant_prefill"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

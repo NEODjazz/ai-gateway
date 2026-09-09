@@ -83,7 +83,7 @@ func TestOtherAdaptersRejectMistralChatControlsBeforeUpstream(t *testing.T) {
 	}
 }
 
-func TestOtherAdaptersRejectMistralMessagePrefixBeforeUpstream(t *testing.T) {
+func TestAdaptersWithoutAssistantPrefillRejectMessagePrefixBeforeUpstream(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	defer server.Close()
@@ -91,7 +91,6 @@ func TestOtherAdaptersRejectMistralMessagePrefixBeforeUpstream(t *testing.T) {
 	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "assistant", Content: "history", Prefix: &prefix}}}
 	for name, client := range map[string]Client{
 		"openai-compatible": NewOpenAICompatible(server.URL, "key", false),
-		"anthropic":         NewAnthropic(server.URL, "key", false),
 		"ollama":            NewOllama(server.URL, false),
 		"cohere":            NewCohere(server.URL, "key", false),
 		"gemini":            NewGemini(server.URL, "key", false),

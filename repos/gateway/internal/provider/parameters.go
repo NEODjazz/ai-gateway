@@ -26,7 +26,7 @@ func rejectParameters(adapter string, checks ...parameterCheck) error {
 }
 
 func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) error {
-	if err := validateChatMessagePrefix("anthropic", request.Messages, false); err != nil {
+	if err := validateChatMessagePrefix("anthropic", request.Messages, true); err != nil {
 		return err
 	}
 	if err := rejectLegacyFunctionCalling("anthropic", request); err != nil {

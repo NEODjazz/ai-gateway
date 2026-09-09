@@ -21,6 +21,32 @@ func TestAnthropicMapsMaxCompletionTokensToMaxTokens(t *testing.T) {
 	}
 }
 
+func TestAnthropicMapsAssistantPrefillWithoutWireExtension(t *testing.T) {
+	prefix := true
+	request := openai.ChatCompletionRequest{Model: "claude", Messages: []openai.Message{
+		{Role: "user", Content: "Choose A or B"},
+		{Role: "assistant", Content: "The answer is (", Prefix: &prefix},
+	}}
+	if err := (Anthropic{}).ValidateChatParameters(request); err != nil {
+		t.Fatal(err)
+	}
+	converted := anthropicChatRequest(request, false)
+	if len(converted.Messages) != 2 {
+		t.Fatalf("prefill changed during conversion: %+v", converted.Messages)
+	}
+	blocks, ok := converted.Messages[1].Content.([]anthropicContent)
+	if converted.Messages[1].Role != "assistant" || !ok || len(blocks) != 1 || blocks[0].Text != "The answer is (" {
+		t.Fatalf("prefill changed during conversion: %+v", converted.Messages)
+	}
+	encoded, err := json.Marshal(converted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"prefix"`) {
+		t.Fatalf("internal prefix marker leaked upstream: %s", encoded)
+	}
+}
+
 func TestAnthropicMapsPromptCacheBreakpoints(t *testing.T) {
 	request := openai.ChatCompletionRequest{
 		Model: "claude",

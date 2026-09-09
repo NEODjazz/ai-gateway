@@ -10,5 +10,6 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "tools", label: "Tools", description: "Function and tool calling" },
   { value: "structured_output", label: "Structured output", description: "Structured JSON output" },
   { value: "mcp", label: "MCP", description: "MCP tool calls" },
-  { value: "vision", label: "Vision", description: "Image inputs" }
+  { value: "vision", label: "Vision", description: "Image inputs" },
+  { value: "assistant_prefill", label: "Assistant prefill", description: "Continue a final assistant prefix" }
 ];

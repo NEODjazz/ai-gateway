@@ -195,8 +195,9 @@ Mistral Chat принимает `safe_prompt` и передает явно за�
 в native request. Другие adapters отклоняют этот provider-specific параметр.
 `prompt_mode=reasoning` передается только в native Mistral Chat; прочие значения
 и другие adapters получают явную ошибку до выполнения.
-Для Mistral доступен assistant prefix: `prefix=true` разрешен только у последнего
-assistant message с непустым текстом. Другие adapters отклоняют `messages.prefix`.
+Для Mistral и Anthropic доступен assistant prefix: `prefix=true` разрешен только
+у последнего assistant message с непустым текстом. Маршрутизация требует
+capability `assistant_prefill`; остальные adapters отклоняют `messages.prefix`.
 Mistral FIM дополнительно передает `metadata`, `min_tokens` и `prompt_cache_key`;
 compatible и Ollama adapters отклоняют эти поля до выполнения.
 

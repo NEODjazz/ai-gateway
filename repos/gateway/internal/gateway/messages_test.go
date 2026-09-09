@@ -111,7 +111,8 @@ func TestMessagesRejectsUnsupportedInputBeforeInference(t *testing.T) {
 	for _, body := range []string{
 		`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled"}}`,
 		`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"30m"}}]}]}`,
-		`{"model":"m","max_tokens":10,"messages":[{"role":"assistant","content":"prefix"}]}`,
+		`{"model":"m","max_tokens":10,"messages":[{"role":"assistant","content":"   "}]}`,
+		`{"model":"m","max_tokens":10,"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call","name":"lookup","input":{}}]}]}`,
 		`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"unknown","content":"x"}]}]}`,
 		`{"model":"m","max_tokens":0,"messages":[{"role":"user","content":"hi"}]}`,
 		`{"model":"m","max_tokens":10,"messages":[]} {}`,
@@ -126,6 +127,22 @@ func TestMessagesRejectsUnsupportedInputBeforeInference(t *testing.T) {
 		if response.Code != 400 || upstream.calls != 0 {
 			t.Fatalf("invalid input accepted: %d %s", response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestMessagesConvertsAssistantPrefill(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{
+		ID: "message", Model: "model", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "B)"}, FinishReason: "stop"}},
+		Usage: openai.Usage{PromptTokens: 8, CompletionTokens: 1, TotalTokens: 9},
+	}}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":1,"messages":[{"role":"user","content":"Choose A or B"},{"role":"assistant","content":"The answer is ("}]}`, "")
+	if response.Code != http.StatusOK || upstream.calls != 1 || len(upstream.request.Request.Messages) != 2 {
+		t.Fatalf("response=%d body=%s calls=%d request=%+v", response.Code, response.Body.String(), upstream.calls, upstream.request.Request)
+	}
+	prefix := upstream.request.Request.Messages[1].Prefix
+	if prefix == nil || !*prefix || !strings.Contains(response.Body.String(), `"text":"B)"`) {
+		t.Fatalf("prefix=%v response=%s", prefix, response.Body.String())
 	}
 }
 

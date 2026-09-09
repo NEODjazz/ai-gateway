@@ -237,7 +237,12 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		flush()
 	}
 	if !allowPartial && request.Messages[len(request.Messages)-1].Role == "assistant" {
-		return result, errors.New("assistant prefill is not supported")
+		last := &result.Messages[len(result.Messages)-1]
+		if last.Role != "assistant" || strings.TrimSpace(openai.ContentText(last.Content)) == "" || len(last.ToolCalls) > 0 {
+			return result, errors.New("assistant prefill requires non-empty text content")
+		}
+		prefix := true
+		last.Prefix = &prefix
 	}
 	if !allowPartial && len(knownCalls) > 0 {
 		return result, errors.New("all tool_use blocks require a tool_result")
