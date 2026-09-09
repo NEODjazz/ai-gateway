@@ -20,6 +20,33 @@ func generateCall(handler http.Handler, path, body, key string) *httptest.Respon
 	handler.ServeHTTP(response, request)
 	return response
 }
+
+func TestGenerateContentParsesVersionedModelIDs(t *testing.T) {
+	for _, test := range []struct {
+		value, model, action string
+		valid                bool
+	}{
+		{"phi3:latest:generateContent", "phi3:latest", "generateContent", true},
+		{"publishers/acme/models/family:2026:streamGenerateContent", "publishers/acme/models/family:2026", "streamGenerateContent", true},
+		{"model:countTokens", "model", "countTokens", true},
+		{"model:unknown", "", "", false},
+		{":generateContent", "", "", false},
+	} {
+		model, action, valid := generateModelAction(test.value)
+		if model != test.model || action != test.action || valid != test.valid {
+			t.Fatalf("%q parsed as model=%q action=%q valid=%t", test.value, model, action, valid)
+		}
+	}
+}
+
+func TestGenerateContentRoutesModelIDContainingColon(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "id", Model: "phi3:latest", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}}, Usage: openai.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}}}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	response := generateCall(handler, "/v1beta/models/phi3:latest:generateContent", `{"contents":[{"parts":[{"text":"hi"}]}]}`, "")
+	if response.Code != http.StatusOK || upstream.calls != 1 || upstream.request.Request.Model != "phi3:latest" {
+		t.Fatalf("status=%d calls=%d request=%+v body=%s", response.Code, upstream.calls, upstream.request.Request, response.Body.String())
+	}
+}
 func TestGenerateContentNativeJSON(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "id", Model: "m", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call", Type: "function", Function: openai.FunctionCall{Name: "weather", Arguments: `{"city":"Paris"}`}, ExtraContent: &openai.ToolCallExtraContent{Google: &openai.GoogleToolCallContent{ThoughtSignature: "opaque"}}}}}, FinishReason: "tool_calls"}}, Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 7, TotalTokens: 17, CompletionTokensDetails: &openai.CompletionTokenDetails{ReasoningTokens: 4}}}}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))

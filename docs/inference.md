@@ -441,6 +441,8 @@ Protocol: [Gemini token counting](https://ai.google.dev/api/tokens).
 
 POST `/v1beta/models/{model}:generateContent` returns native JSON; POST
 `/v1beta/models/{model}:streamGenerateContent?alt=sse` returns native SSE.
+The action is parsed from the final colon, so versioned model IDs such as
+`phi3:latest` remain addressable on generation, streaming and token-count routes.
 Send a gateway key in `x-goog-api-key` or Bearer authorization. Query credentials
 and conflicting authentication headers are rejected. Both endpoints use the shared
 Chat pipeline for authorization, model/tool ACL, quotas, content policy and billing.

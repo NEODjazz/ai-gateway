@@ -21,8 +21,8 @@ var generateRoutes = []RouteContract{
 func (h Handler) GenerateContent(w http.ResponseWriter, r *http.Request) {
 	output := &generateWriter{destination: w, headers: make(http.Header), status: http.StatusOK}
 	defer output.finish()
-	model, action, ok := strings.Cut(r.PathValue("modelAction"), ":")
-	if !ok || model == "" || len(model) > 256 || (action != "generateContent" && action != "streamGenerateContent" && action != "countTokens") {
+	model, action, ok := generateModelAction(r.PathValue("modelAction"))
+	if !ok {
 		writeError(output, 404, "not_found", "unknown model operation")
 		return
 	}
@@ -58,6 +58,19 @@ func (h Handler) GenerateContent(w http.ResponseWriter, r *http.Request) {
 	output.model = model
 	h.serveChatAs(output, copyRequest, chat, "generate_content")
 }
+
+func generateModelAction(value string) (string, string, bool) {
+	separator := strings.LastIndexByte(value, ':')
+	if separator <= 0 || separator == len(value)-1 {
+		return "", "", false
+	}
+	model, action := value[:separator], value[separator+1:]
+	if len(model) > 256 || (action != "generateContent" && action != "streamGenerateContent" && action != "countTokens") {
+		return "", "", false
+	}
+	return model, action, true
+}
+
 func validateGenerateQuery(r *http.Request, stream bool) error {
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
