@@ -35,7 +35,7 @@ upstream. Распознаваемые параметры перечислены
 
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
-| `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `prediction`, `service_tier`, `verbosity`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
+| `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `prompt_cache_retention`, `prediction`, `service_tier`, `verbosity`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
 | `/v1/completions` | `provider`, `model`, `prompt`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `n`, `presence_penalty`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
 | `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
@@ -1175,6 +1175,12 @@ OpenAI-compatible JSON and streaming requests preserve the object. Exact and
 semantic gateway cache keys include it, so requests with different upstream
 prompt-cache policies do not share a cached response. Native adapters reject the
 object explicitly when they cannot represent its semantics.
+
+Chat `prompt_cache_retention` accepts `in_memory` or `24h` and is forwarded by
+the OpenAI-compatible adapter in JSON and streaming requests. It is included in
+both gateway cache scopes, while native adapters reject it explicitly. This field
+controls the selected provider's prompt-prefix cache retention; gateway response
+cache retention remains governed by the effective gateway cache policy.
 
 Chat text content parts may mark up to four exact prefix boundaries with
 `prompt_cache_breakpoint: {"mode":"explicit"}`. The gateway validates the

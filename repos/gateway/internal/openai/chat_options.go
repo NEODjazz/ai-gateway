@@ -8,21 +8,22 @@ import (
 // ChatGenerationOptions contains optional controls shared with compatible wire
 // requests. Pointer fields preserve explicitly supplied false and zero values.
 type ChatGenerationOptions struct {
-	Metadata           map[string]string   `json:"metadata,omitempty"`
-	Store              *bool               `json:"store,omitempty"`
-	ReasoningEffort    string              `json:"reasoning_effort,omitempty"`
-	N                  *int                `json:"n,omitempty"`
-	SafetyIdentifier   string              `json:"safety_identifier,omitempty"`
-	PromptCacheKey     string              `json:"prompt_cache_key,omitempty"`
-	PromptCacheOptions *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
-	Prediction         *ChatPrediction     `json:"prediction,omitempty"`
-	ServiceTier        string              `json:"service_tier,omitempty"`
-	Verbosity          string              `json:"verbosity,omitempty"`
-	Logprobs           *bool               `json:"logprobs,omitempty"`
-	TopLogprobs        *int                `json:"top_logprobs,omitempty"`
-	FrequencyPenalty   *float64            `json:"frequency_penalty,omitempty"`
-	PresencePenalty    *float64            `json:"presence_penalty,omitempty"`
-	LogitBias          map[string]int      `json:"logit_bias,omitempty"`
+	Metadata             map[string]string   `json:"metadata,omitempty"`
+	Store                *bool               `json:"store,omitempty"`
+	ReasoningEffort      string              `json:"reasoning_effort,omitempty"`
+	N                    *int                `json:"n,omitempty"`
+	SafetyIdentifier     string              `json:"safety_identifier,omitempty"`
+	PromptCacheKey       string              `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions   *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
+	PromptCacheRetention string              `json:"prompt_cache_retention,omitempty"`
+	Prediction           *ChatPrediction     `json:"prediction,omitempty"`
+	ServiceTier          string              `json:"service_tier,omitempty"`
+	Verbosity            string              `json:"verbosity,omitempty"`
+	Logprobs             *bool               `json:"logprobs,omitempty"`
+	TopLogprobs          *int                `json:"top_logprobs,omitempty"`
+	FrequencyPenalty     *float64            `json:"frequency_penalty,omitempty"`
+	PresencePenalty      *float64            `json:"presence_penalty,omitempty"`
+	LogitBias            map[string]int      `json:"logit_bias,omitempty"`
 }
 
 type PromptCacheOptions struct {
@@ -54,6 +55,9 @@ func (o ChatGenerationOptions) Validate() string {
 		if o.PromptCacheOptions.TTL != "" && o.PromptCacheOptions.TTL != "30m" {
 			return "prompt_cache_options.ttl must be 30m"
 		}
+	}
+	if o.PromptCacheRetention != "" && o.PromptCacheRetention != "in_memory" && o.PromptCacheRetention != "24h" {
+		return "prompt_cache_retention must be in_memory or 24h"
 	}
 	if message := validateChatPrediction(o.Prediction); message != "" {
 		return message
