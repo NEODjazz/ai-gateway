@@ -185,12 +185,25 @@ func validateCompletionAdapter(client CompletionClient, request openai.Completio
 	return nil
 }
 
+func (p OpenAICompatible) ValidateCompletionParameters(request openai.CompletionRequest) error {
+	return rejectParameters(p.providerName(),
+		parameterCheck{"metadata", request.Metadata != nil},
+		parameterCheck{"min_tokens", request.MinTokens != nil},
+		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
+	)
+}
+
 func (Ollama) ValidateCompletionParameters(request openai.CompletionRequest) error {
 	prompt, err := openai.InspectCompletionPrompt(request.Prompt)
 	if err != nil {
 		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "prompt", Err: err}
 	}
-	return rejectParameters("ollama", parameterCheck{"prompt", prompt.Kind != openai.CompletionPromptText})
+	return rejectParameters("ollama",
+		parameterCheck{"prompt", prompt.Kind != openai.CompletionPromptText},
+		parameterCheck{"metadata", request.Metadata != nil},
+		parameterCheck{"min_tokens", request.MinTokens != nil},
+		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
+	)
 }
 
 func rejectGenerationOptions(adapter string, options openai.ChatGenerationOptions) error {

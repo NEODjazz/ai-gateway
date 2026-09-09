@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.87
+  version: 0.1.88
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3609,6 +3609,12 @@ components:
               items:
                 type: array
                 items: {type: integer, minimum: 0, maximum: 2147483647}
+        metadata:
+          type: object
+          description: Native Mistral FIM metadata; rejected by other adapters.
+          maxProperties: 16
+          propertyNames: {maxLength: 64}
+          additionalProperties: {type: string, maxLength: 512}
         best_of: {type: integer, minimum: 1, maximum: 20, description: Must be at least n and cannot exceed 1 with stream=true.}
         echo: {type: boolean}
         frequency_penalty: {type: number, minimum: -2, maximum: 2}
@@ -3618,8 +3624,10 @@ components:
           additionalProperties: {type: integer, minimum: -100, maximum: 100}
         logprobs: {type: integer, minimum: 0, maximum: 5}
         max_tokens: {type: integer, minimum: 0}
+        min_tokens: {type: integer, minimum: 0, description: Native Mistral FIM minimum output tokens; cannot exceed max_tokens and is rejected by other adapters.}
         n: {type: integer, minimum: 1, maximum: 128}
         presence_penalty: {type: number, minimum: -2, maximum: 2}
+        prompt_cache_key: {type: string, description: Native Mistral FIM prompt cache key; rejected by other adapters.}
         seed: {type: integer, format: int64}
         stop:
           oneOf:

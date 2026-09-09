@@ -399,6 +399,12 @@ func validateCompletionRequest(request openai.CompletionRequest) string {
 	if request.MaxTokens != nil && *request.MaxTokens < 0 {
 		return "max_tokens must be nonnegative"
 	}
+	if request.MinTokens != nil && (*request.MinTokens < 0 || request.MaxTokens != nil && *request.MinTokens > *request.MaxTokens) {
+		return "min_tokens must be nonnegative and not exceed max_tokens"
+	}
+	if message := openai.ValidateMetadata(request.Metadata); message != "" {
+		return message
+	}
 	n := 1
 	if request.N != nil {
 		n = *request.N

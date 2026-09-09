@@ -206,24 +206,27 @@ type ChatCompletionResponse struct {
 }
 
 type CompletionRequest struct {
-	Provider         string         `json:"provider,omitempty"`
-	Model            string         `json:"model"`
-	Prompt           any            `json:"prompt,omitempty"`
-	BestOf           *int           `json:"best_of,omitempty"`
-	Echo             *bool          `json:"echo,omitempty"`
-	FrequencyPenalty *float64       `json:"frequency_penalty,omitempty"`
-	LogitBias        map[string]int `json:"logit_bias,omitempty"`
-	Logprobs         *int           `json:"logprobs,omitempty"`
-	MaxTokens        *int           `json:"max_tokens,omitempty"`
-	N                *int           `json:"n,omitempty"`
-	PresencePenalty  *float64       `json:"presence_penalty,omitempty"`
-	Seed             *int64         `json:"seed,omitempty"`
-	Stop             any            `json:"stop,omitempty"`
-	Stream           bool           `json:"stream,omitempty"`
-	Suffix           string         `json:"suffix,omitempty"`
-	Temperature      *float64       `json:"temperature,omitempty"`
-	TopP             *float64       `json:"top_p,omitempty"`
-	User             string         `json:"user,omitempty"`
+	Provider         string            `json:"provider,omitempty"`
+	Model            string            `json:"model"`
+	Prompt           any               `json:"prompt,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
+	BestOf           *int              `json:"best_of,omitempty"`
+	Echo             *bool             `json:"echo,omitempty"`
+	FrequencyPenalty *float64          `json:"frequency_penalty,omitempty"`
+	LogitBias        map[string]int    `json:"logit_bias,omitempty"`
+	Logprobs         *int              `json:"logprobs,omitempty"`
+	MaxTokens        *int              `json:"max_tokens,omitempty"`
+	MinTokens        *int              `json:"min_tokens,omitempty"`
+	N                *int              `json:"n,omitempty"`
+	PresencePenalty  *float64          `json:"presence_penalty,omitempty"`
+	PromptCacheKey   string            `json:"prompt_cache_key,omitempty"`
+	Seed             *int64            `json:"seed,omitempty"`
+	Stop             any               `json:"stop,omitempty"`
+	Stream           bool              `json:"stream,omitempty"`
+	Suffix           string            `json:"suffix,omitempty"`
+	Temperature      *float64          `json:"temperature,omitempty"`
+	TopP             *float64          `json:"top_p,omitempty"`
+	User             string            `json:"user,omitempty"`
 }
 
 type CompletionResponse struct {

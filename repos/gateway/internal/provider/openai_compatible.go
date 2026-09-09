@@ -276,6 +276,9 @@ func (p OpenAICompatible) StreamCompletions(ctx context.Context, request openai.
 }
 
 func (p OpenAICompatible) completion(ctx context.Context, request openai.CompletionRequest, stream bool, write CompletionStreamWriter) (openai.CompletionResponse, error) {
+	if err := p.ValidateCompletionParameters(request); err != nil {
+		return openai.CompletionResponse{}, err
+	}
 	upstream := openAICompatibleCompletionRequest{
 		Model: request.Model, Prompt: request.Prompt, BestOf: request.BestOf, Echo: request.Echo,
 		FrequencyPenalty: request.FrequencyPenalty, LogitBias: request.LogitBias, Logprobs: request.Logprobs,

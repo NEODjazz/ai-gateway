@@ -17,15 +17,18 @@ type Mistral struct {
 }
 
 type mistralFIMRequest struct {
-	Model       string   `json:"model"`
-	Prompt      string   `json:"prompt"`
-	Suffix      string   `json:"suffix,omitempty"`
-	MaxTokens   *int     `json:"max_tokens,omitempty"`
-	RandomSeed  *int64   `json:"random_seed,omitempty"`
-	Stop        any      `json:"stop,omitempty"`
-	Stream      bool     `json:"stream"`
-	Temperature *float64 `json:"temperature,omitempty"`
-	TopP        *float64 `json:"top_p,omitempty"`
+	Model          string            `json:"model"`
+	Prompt         string            `json:"prompt"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+	Suffix         string            `json:"suffix,omitempty"`
+	MaxTokens      *int              `json:"max_tokens,omitempty"`
+	MinTokens      *int              `json:"min_tokens,omitempty"`
+	PromptCacheKey string            `json:"prompt_cache_key,omitempty"`
+	RandomSeed     *int64            `json:"random_seed,omitempty"`
+	Stop           any               `json:"stop,omitempty"`
+	Stream         bool              `json:"stream"`
+	Temperature    *float64          `json:"temperature,omitempty"`
+	TopP           *float64          `json:"top_p,omitempty"`
 }
 
 type mistralFIMResponse struct {
@@ -132,6 +135,12 @@ func mistralModerationTextInput(input any) bool {
 }
 
 func (Mistral) ValidateCompletionParameters(request openai.CompletionRequest) error {
+	if message := openai.ValidateMetadata(request.Metadata); message != "" {
+		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "metadata", Err: errors.New(message)}
+	}
+	if request.MinTokens != nil && (*request.MinTokens < 0 || request.MaxTokens != nil && *request.MinTokens > *request.MaxTokens) {
+		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "min_tokens", Err: errors.New("min_tokens must be nonnegative and not exceed max_tokens")}
+	}
 	prompt, err := openai.InspectCompletionPrompt(request.Prompt)
 	if err != nil || prompt.Kind != openai.CompletionPromptText {
 		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "prompt", Err: errors.New("Mistral FIM requires one string prompt")}
@@ -165,7 +174,8 @@ func (p Mistral) fimCompletion(ctx context.Context, request openai.CompletionReq
 	}
 	prompt, _ := request.Prompt.(string)
 	body, err := json.Marshal(mistralFIMRequest{
-		Model: request.Model, Prompt: prompt, Suffix: request.Suffix, MaxTokens: request.MaxTokens,
+		Model: request.Model, Prompt: prompt, Metadata: request.Metadata, Suffix: request.Suffix,
+		MaxTokens: request.MaxTokens, MinTokens: request.MinTokens, PromptCacheKey: request.PromptCacheKey,
 		RandomSeed: request.Seed, Stop: request.Stop, Stream: stream, Temperature: request.Temperature, TopP: request.TopP,
 	})
 	if err != nil {

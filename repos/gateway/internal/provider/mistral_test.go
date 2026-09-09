@@ -30,8 +30,11 @@ func TestMistralFIMThroughRouter(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		if request["model"] != "codestral-upstream" || request["prompt"] != "masked" || request["suffix"] != "return sum" || request["max_tokens"] != float64(40) || request["random_seed"] != float64(7) || request["stream"] != false {
+		if request["model"] != "codestral-upstream" || request["prompt"] != "masked" || request["suffix"] != "return sum" || request["max_tokens"] != float64(40) || request["min_tokens"] != float64(5) || request["prompt_cache_key"] != "repository-prefix" || request["random_seed"] != float64(7) || request["stream"] != false {
 			t.Fatalf("FIM request fields changed: %+v", request)
+		}
+		if metadata, ok := request["metadata"].(map[string]any); !ok || metadata["ticket"] != "42" {
+			t.Fatalf("FIM metadata=%#v", request["metadata"])
 		}
 		if _, found := request["seed"]; found {
 			t.Fatal("compatible seed field leaked into native FIM request")
@@ -40,9 +43,9 @@ func TestMistralFIMThroughRouter(t *testing.T) {
 	}))
 	defer server.Close()
 
-	maxTokens := 40
+	maxTokens, minTokens := 40, 5
 	seed := int64(7)
-	request := openai.CompletionRequest{Model: "codestral-public", Prompt: "func add", Suffix: "return sum", MaxTokens: &maxTokens, Seed: &seed}
+	request := openai.CompletionRequest{Model: "codestral-public", Prompt: "func add", Metadata: map[string]string{"ticket": "42"}, Suffix: "return sum", MaxTokens: &maxTokens, MinTokens: &minTokens, PromptCacheKey: "repository-prefix", Seed: &seed}
 	lifecycle := &completionLifecycleModule{}
 	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
 		Name: "mistral-native", Type: "mistral", BaseURL: server.URL + "/proxy", APIKey: "provider-key",
@@ -64,6 +67,10 @@ func TestMistralFIMStreamingThroughRouter(t *testing.T) {
 		if r.URL.Path != "/v1/fim/completions" || r.Header.Get("Accept") != "text/event-stream" {
 			t.Errorf("unexpected stream request: %s", r.URL.Path)
 		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["min_tokens"] != float64(2) || request["prompt_cache_key"] != "stream-prefix" || request["metadata"].(map[string]any)["mode"] != "stream" {
+			t.Fatalf("stream request=%#v err=%v", request, err)
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprint(w, "data: {\"id\":\"fim-stream\",\"object\":\"chat.completion.chunk\",\"created\":20,\"model\":\"codestral\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"first\"},\"finish_reason\":null}]}\n\n")
 		_, _ = fmt.Fprint(w, "data: {\"id\":\"fim-stream\",\"object\":\"chat.completion.chunk\",\"created\":20,\"model\":\"codestral\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" second\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n")
@@ -71,7 +78,8 @@ func TestMistralFIMStreamingThroughRouter(t *testing.T) {
 	}))
 	defer server.Close()
 
-	request := openai.CompletionRequest{Model: "codestral", Prompt: "start", Stream: true}
+	minTokens := 2
+	request := openai.CompletionRequest{Model: "codestral", Prompt: "start", Metadata: map[string]string{"mode": "stream"}, MinTokens: &minTokens, PromptCacheKey: "stream-prefix", Stream: true}
 	lifecycle := &completionLifecycleModule{}
 	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "mistral", Type: "mistral", BaseURL: server.URL, Stream: true, Models: []string{"codestral"}, Capabilities: []string{"chat", "stream"}}}, Modules: modules.NewPipeline([]modules.Module{lifecycle})}).(*Router)
 	payloads := []string{}
@@ -84,6 +92,29 @@ func TestMistralFIMStreamingThroughRouter(t *testing.T) {
 	}
 	if lifecycle.pre != 1 || lifecycle.post != 1 || lifecycle.response == nil || lifecycle.response.Usage.TotalTokens != 5 || len(payloads) != 2 || !strings.Contains(payloads[0], `"object":"text_completion"`) || !strings.Contains(payloads[1], `"finish_reason":"stop"`) || response.Choices[0].Text != "first second" || response.Usage.TotalTokens != 5 {
 		t.Fatalf("payloads=%v response=%+v", payloads, response)
+	}
+}
+
+func TestMistralFIMRejectsInvalidControlsBeforeUpstream(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	negative, maximum, tooLarge := -1, 4, 5
+	for name, request := range map[string]openai.CompletionRequest{
+		"negative minimum": {Model: "codestral", Prompt: "x", MinTokens: &negative},
+		"minimum over max": {Model: "codestral", Prompt: "x", MinTokens: &tooLarge, MaxTokens: &maximum},
+		"invalid metadata": {Model: "codestral", Prompt: "x", Metadata: map[string]string{strings.Repeat("k", 65): "value"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewMistral(server.URL, "key", false).Completions(t.Context(), request)
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.UpstreamCode != "invalid_request" {
+				t.Fatalf("error=%v failure=%+v", err, failure)
+			}
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("invalid FIM controls reached Mistral: %d", calls.Load())
 	}
 }
 

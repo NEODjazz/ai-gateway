@@ -173,6 +173,34 @@ func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
 	}
 }
 
+func TestOtherCompletionAdaptersRejectMistralFIMControlsBeforeUpstream(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	minimum := 1
+	for _, control := range []struct {
+		name    string
+		request openai.CompletionRequest
+	}{
+		{name: "metadata", request: openai.CompletionRequest{Model: "model", Prompt: "x", Metadata: map[string]string{"ticket": "42"}}},
+		{name: "min_tokens", request: openai.CompletionRequest{Model: "model", Prompt: "x", MinTokens: &minimum}},
+		{name: "prompt_cache_key", request: openai.CompletionRequest{Model: "model", Prompt: "x", PromptCacheKey: "prefix"}},
+	} {
+		for name, client := range map[string]CompletionClient{
+			"openai-compatible": NewOpenAICompatible(server.URL, "key", true),
+			"ollama":            NewOllama(server.URL, true),
+		} {
+			t.Run(name+"/"+control.name, func(t *testing.T) {
+				_, err := client.Completions(t.Context(), control.request)
+				assertUnsupportedParameter(t, err, control.name)
+			})
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unsupported FIM controls reached upstream: %d", calls.Load())
+	}
+}
+
 func assertUnsupportedParameter(t *testing.T, err error, param string) {
 	t.Helper()
 	var failure *Error

@@ -419,6 +419,9 @@ func TestCompletionsRejectsInvalidAndUnsupportedRequestShapes(t *testing.T) {
 		`{"model":"m","prompt":"x","n":2,"best_of":1}`,
 		`{"model":"m","prompt":"x","logprobs":6}`,
 		`{"model":"m","prompt":"x","stream":true,"best_of":2}`,
+		`{"model":"m","prompt":"x","min_tokens":-1}`,
+		`{"model":"m","prompt":"x","min_tokens":3,"max_tokens":2}`,
+		`{"model":"m","prompt":"x","metadata":{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa":"value"}}`,
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/completions", strings.NewReader(body)))
@@ -454,6 +457,20 @@ func TestCompletionsAcceptsTextAndTokenPromptArrays(t *testing.T) {
 				t.Fatalf("unexpected prompt: got=%#v want=%#v", llm.request.CompletionRequest.Prompt, test.prompt)
 			}
 		})
+	}
+}
+
+func TestCompletionsPreservesMistralFIMControlsThroughPipeline(t *testing.T) {
+	llm := &chatProvider{}
+	pipeline := modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}})
+	handler := Routes(NewHandler(pipeline, llm))
+	request := httptest.NewRequest(http.MethodPost, "/v1/completions", strings.NewReader(`{"model":"codestral","prompt":"func add","metadata":{"ticket":"42"},"min_tokens":3,"max_tokens":20,"prompt_cache_key":"repository-prefix"}`))
+	request.Header.Set("Authorization", "Bearer client-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	completion := llm.request.CompletionRequest
+	if response.Code != http.StatusOK || completion == nil || completion.Metadata["ticket"] != "42" || completion.MinTokens == nil || *completion.MinTokens != 3 || completion.PromptCacheKey != "repository-prefix" {
+		t.Fatalf("status=%d body=%s completion=%+v", response.Code, response.Body.String(), completion)
 	}
 }
 
