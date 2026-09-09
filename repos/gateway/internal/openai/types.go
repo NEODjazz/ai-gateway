@@ -176,13 +176,20 @@ type Usage struct {
 }
 
 type CompletionTokenDetails struct {
-	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
+	AcceptedPredictionTokens int `json:"accepted_prediction_tokens,omitempty"`
+	AudioTokens              int `json:"audio_tokens,omitempty"`
+	ReasoningTokens          int `json:"reasoning_tokens,omitempty"`
+	RejectedPredictionTokens int `json:"rejected_prediction_tokens,omitempty"`
+	TextTokens               int `json:"text_tokens,omitempty"`
 }
 
 type PromptTokenDetails struct {
 	CachedTokens        int `json:"cached_tokens,omitempty"`
 	CacheWriteTokens    int `json:"cache_write_tokens,omitempty"`
 	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
+	AudioTokens         int `json:"audio_tokens,omitempty"`
+	ImageTokens         int `json:"image_tokens,omitempty"`
+	TextTokens          int `json:"text_tokens,omitempty"`
 }
 
 type EmbeddingRequest struct {
@@ -469,6 +476,9 @@ type InputTokenDetails struct {
 	CachedTokens        int `json:"cached_tokens,omitempty"`
 	CacheWriteTokens    int `json:"cache_write_tokens,omitempty"`
 	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
+	AudioTokens         int `json:"audio_tokens,omitempty"`
+	ImageTokens         int `json:"image_tokens,omitempty"`
+	TextTokens          int `json:"text_tokens,omitempty"`
 }
 
 type ModelsResponse struct {

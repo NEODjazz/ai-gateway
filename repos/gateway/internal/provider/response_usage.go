@@ -8,8 +8,8 @@ import (
 )
 
 func validateResponseUsage(usage openai.ResponseUsage) error {
-	if details := usage.OutputTokensDetails; details != nil && details.ReasoningTokens < 0 {
-		return errors.New("invalid negative Responses reasoning token usage")
+	if hasNegativeCompletionTokenDetails(usage.OutputTokensDetails) {
+		return errors.New("invalid negative Responses output token details")
 	}
 	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.TotalTokens < 0 {
 		return errors.New("invalid negative Responses token usage")
@@ -18,8 +18,8 @@ func validateResponseUsage(usage openai.ResponseUsage) error {
 		return errors.New("Responses token usage exceeds integer range")
 	}
 	if details := usage.InputTokensDetails; details != nil {
-		if details.CachedTokens < 0 || details.CacheWriteTokens < 0 || details.CacheCreationTokens < 0 {
-			return errors.New("invalid negative Responses cache token usage")
+		if details.CachedTokens < 0 || details.CacheWriteTokens < 0 || details.CacheCreationTokens < 0 || details.AudioTokens < 0 || details.ImageTokens < 0 || details.TextTokens < 0 {
+			return errors.New("invalid negative Responses input token details")
 		}
 	}
 	return nil

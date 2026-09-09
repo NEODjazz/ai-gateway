@@ -91,14 +91,18 @@ func validateCompletionUsage(usage openai.Usage) error {
 		return errors.New("provider returned inconsistent completion usage")
 	}
 	if details := usage.PromptTokensDetails; details != nil {
-		if details.CachedTokens < 0 || details.CacheWriteTokens < 0 || details.CacheCreationTokens < 0 {
-			return errors.New("provider returned negative completion cache usage")
+		if details.CachedTokens < 0 || details.CacheWriteTokens < 0 || details.CacheCreationTokens < 0 || details.AudioTokens < 0 || details.ImageTokens < 0 || details.TextTokens < 0 {
+			return errors.New("provider returned negative completion prompt token details")
 		}
 	}
-	if details := usage.CompletionTokensDetails; details != nil && details.ReasoningTokens < 0 {
-		return errors.New("provider returned negative completion reasoning usage")
+	if hasNegativeCompletionTokenDetails(usage.CompletionTokensDetails) {
+		return errors.New("provider returned negative completion token details")
 	}
 	return nil
+}
+
+func hasNegativeCompletionTokenDetails(details *openai.CompletionTokenDetails) bool {
+	return details != nil && (details.AcceptedPredictionTokens < 0 || details.AudioTokens < 0 || details.ReasoningTokens < 0 || details.RejectedPredictionTokens < 0 || details.TextTokens < 0)
 }
 
 func validateCompletionResult(response openai.CompletionResponse, request openai.CompletionRequest) error {

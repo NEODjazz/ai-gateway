@@ -1176,6 +1176,14 @@ semantic gateway cache keys include it, so requests with different upstream
 prompt-cache policies do not share a cached response. Native adapters reject the
 object explicitly when they cannot represent its semantics.
 
+Chat and Responses usage preserve provider-reported modality and predicted-output
+breakdowns: input/prompt `audio_tokens`, `image_tokens`, `text_tokens`, and output
+`accepted_prediction_tokens`, `rejected_prediction_tokens`, `audio_tokens`,
+`reasoning_tokens`, `text_tokens`. Negative detail counts are rejected before a
+JSON response or SSE event is delivered. Billing continues to settle from the
+provider's aggregate input/output counts, which already include rejected predicted
+tokens, so detail fields are observability data and are not added a second time.
+
 Chat `verbosity` and Responses `text.verbosity` accept `low`, `medium` or `high`.
 OpenAI-compatible JSON and streaming requests preserve the supplied value.
 Exact and semantic cache keys include it because verbosity changes output

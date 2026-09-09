@@ -16,6 +16,13 @@ func TestResponsesRejectsInvalidUsageBeforeDelivery(t *testing.T) {
 		`{"input_tokens":1,"input_tokens_details":{"cached_tokens":-1}}`,
 		`{"input_tokens":1,"input_tokens_details":{"cache_write_tokens":-1}}`,
 		`{"input_tokens":1,"input_tokens_details":{"cache_creation_tokens":-1}}`,
+		`{"input_tokens":1,"input_tokens_details":{"audio_tokens":-1}}`,
+		`{"input_tokens":1,"input_tokens_details":{"image_tokens":-1}}`,
+		`{"input_tokens":1,"input_tokens_details":{"text_tokens":-1}}`,
+		`{"output_tokens":1,"output_tokens_details":{"accepted_prediction_tokens":-1}}`,
+		`{"output_tokens":1,"output_tokens_details":{"audio_tokens":-1}}`,
+		`{"output_tokens":1,"output_tokens_details":{"rejected_prediction_tokens":-1}}`,
+		`{"output_tokens":1,"output_tokens_details":{"text_tokens":-1}}`,
 	} {
 		t.Run(usage, func(t *testing.T) {
 			document := fmt.Sprintf(`{"id":"r","object":"response","model":"m","status":"completed","usage":%s}`, usage)

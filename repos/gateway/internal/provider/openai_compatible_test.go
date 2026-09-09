@@ -61,7 +61,8 @@ func TestOpenAICompatiblePreservesChatCacheTokenDetails(t *testing.T) {
 				"prompt_tokens":21,
 				"completion_tokens":3,
 				"total_tokens":24,
-				"prompt_tokens_details":{"cached_tokens":13,"cache_write_tokens":5}
+				"prompt_tokens_details":{"cached_tokens":13,"cache_write_tokens":5,"audio_tokens":2,"image_tokens":3,"text_tokens":16},
+				"completion_tokens_details":{"accepted_prediction_tokens":1,"audio_tokens":2,"reasoning_tokens":3,"rejected_prediction_tokens":4,"text_tokens":5}
 			}
 		}`))
 	}))
@@ -77,6 +78,9 @@ func TestOpenAICompatiblePreservesChatCacheTokenDetails(t *testing.T) {
 	if response.Usage.PromptTokensDetails.CachedTokens != 13 || response.Usage.PromptTokensDetails.CacheWriteTokens != 5 {
 		t.Fatalf("unexpected cache token details: %+v", response.Usage.PromptTokensDetails)
 	}
+	if response.Usage.PromptTokensDetails.AudioTokens != 2 || response.Usage.PromptTokensDetails.ImageTokens != 3 || response.Usage.PromptTokensDetails.TextTokens != 16 || response.Usage.CompletionTokensDetails == nil || response.Usage.CompletionTokensDetails.AcceptedPredictionTokens != 1 || response.Usage.CompletionTokensDetails.RejectedPredictionTokens != 4 || response.Usage.CompletionTokensDetails.TextTokens != 5 {
+		t.Fatalf("completion modality details lost: %+v", response.Usage)
+	}
 }
 
 func TestOpenAICompatiblePreservesResponseCacheTokenDetails(t *testing.T) {
@@ -91,7 +95,8 @@ func TestOpenAICompatiblePreservesResponseCacheTokenDetails(t *testing.T) {
 				"input_tokens":21,
 				"output_tokens":3,
 				"total_tokens":24,
-				"input_tokens_details":{"cached_tokens":13,"cache_creation_tokens":5}
+				"input_tokens_details":{"cached_tokens":13,"cache_creation_tokens":5,"audio_tokens":2,"image_tokens":3,"text_tokens":16},
+				"output_tokens_details":{"accepted_prediction_tokens":1,"audio_tokens":2,"reasoning_tokens":3,"rejected_prediction_tokens":4,"text_tokens":5}
 			}
 		}`))
 	}))
@@ -106,6 +111,9 @@ func TestOpenAICompatiblePreservesResponseCacheTokenDetails(t *testing.T) {
 	}
 	if response.Usage.InputTokensDetails.CachedTokens != 13 || response.Usage.InputTokensDetails.CacheCreationTokens != 5 {
 		t.Fatalf("unexpected cache token details: %+v", response.Usage.InputTokensDetails)
+	}
+	if response.Usage.InputTokensDetails.AudioTokens != 2 || response.Usage.InputTokensDetails.ImageTokens != 3 || response.Usage.InputTokensDetails.TextTokens != 16 || response.Usage.OutputTokensDetails == nil || response.Usage.OutputTokensDetails.AcceptedPredictionTokens != 1 || response.Usage.OutputTokensDetails.RejectedPredictionTokens != 4 || response.Usage.OutputTokensDetails.TextTokens != 5 {
+		t.Fatalf("response modality details lost: %+v", response.Usage)
 	}
 }
 
@@ -669,7 +677,7 @@ func TestOpenAICompatibleCollectsStreamingToolCallArguments(t *testing.T) {
 
 func TestChatStreamPreservesReportedUsage(t *testing.T) {
 	payload := "data: {\"id\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n" +
-		"data: {\"id\":\"chat-test\",\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120,\"prompt_tokens_details\":{\"cached_tokens\":80}}}\n\n" +
+		"data: {\"id\":\"chat-test\",\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120,\"prompt_tokens_details\":{\"cached_tokens\":80,\"audio_tokens\":2,\"image_tokens\":3,\"text_tokens\":95},\"completion_tokens_details\":{\"accepted_prediction_tokens\":7,\"audio_tokens\":2,\"reasoning_tokens\":3,\"rejected_prediction_tokens\":4,\"text_tokens\":11}}}\n\n" +
 		"data: [DONE]\n\n"
 	for _, streaming := range []bool{false, true} {
 		var writer ChatCompletionStreamWriter
@@ -683,6 +691,9 @@ func TestChatStreamPreservesReportedUsage(t *testing.T) {
 		}
 		if response.Usage.PromptTokens != 100 || response.Usage.CompletionTokens != 20 || response.Usage.TotalTokens != 120 || response.Usage.PromptTokensDetails == nil || response.Usage.PromptTokensDetails.CachedTokens != 80 {
 			t.Fatalf("reported stream usage lost: %+v", response.Usage)
+		}
+		if response.Usage.PromptTokensDetails.ImageTokens != 3 || response.Usage.CompletionTokensDetails == nil || response.Usage.CompletionTokensDetails.AcceptedPredictionTokens != 7 || response.Usage.CompletionTokensDetails.RejectedPredictionTokens != 4 || response.Usage.CompletionTokensDetails.TextTokens != 11 {
+			t.Fatalf("stream token details lost: %+v", response.Usage)
 		}
 		if len(response.Choices) != 1 || response.Choices[0].Message.Content != "hello" {
 			t.Fatalf("usage-only event changed content: %+v", response)

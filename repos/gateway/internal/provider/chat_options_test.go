@@ -151,18 +151,30 @@ func TestCompatibleChatRejectsInvalidResponseEnvelope(t *testing.T) {
 }
 
 func TestCompatibleChatRejectsInvalidUsageBeforeDelivery(t *testing.T) {
-	invalid := `{"prompt_tokens":2,"completion_tokens":3,"total_tokens":4}`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprint(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"one"}}],"usage":`+invalid+`}`)
-	}))
-	defer server.Close()
-	if _, err := NewOpenAICompatible(server.URL, "", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test"}); err == nil {
-		t.Fatal("invalid JSON usage accepted")
-	}
-	wrote := false
-	payload := `data: {"choices":[],"usage":` + invalid + `}` + "\n\n"
-	if _, err := streamChatCompletionData(strings.NewReader(payload), "test", func(string) error { wrote = true; return nil }); err == nil || wrote {
-		t.Fatalf("invalid SSE usage delivered: err=%v wrote=%v", err, wrote)
+	for _, invalid := range []string{
+		`{"prompt_tokens":2,"completion_tokens":3,"total_tokens":4}`,
+		`{"prompt_tokens_details":{"audio_tokens":-1}}`,
+		`{"prompt_tokens_details":{"image_tokens":-1}}`,
+		`{"prompt_tokens_details":{"text_tokens":-1}}`,
+		`{"completion_tokens_details":{"accepted_prediction_tokens":-1}}`,
+		`{"completion_tokens_details":{"audio_tokens":-1}}`,
+		`{"completion_tokens_details":{"rejected_prediction_tokens":-1}}`,
+		`{"completion_tokens_details":{"text_tokens":-1}}`,
+	} {
+		t.Run(invalid, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprint(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"one"}}],"usage":`+invalid+`}`)
+			}))
+			defer server.Close()
+			if _, err := NewOpenAICompatible(server.URL, "", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test"}); err == nil {
+				t.Fatal("invalid JSON usage accepted")
+			}
+			wrote := false
+			payload := `data: {"choices":[],"usage":` + invalid + `}` + "\n\n"
+			if _, err := streamChatCompletionData(strings.NewReader(payload), "test", func(string) error { wrote = true; return nil }); err == nil || wrote {
+				t.Fatalf("invalid SSE usage delivered: err=%v wrote=%v", err, wrote)
+			}
+		})
 	}
 }
 

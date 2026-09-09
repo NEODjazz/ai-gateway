@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.57
+  version: 0.1.58
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3317,13 +3317,20 @@ components:
         completion_tokens_details:
           type: object
           properties:
+            accepted_prediction_tokens: {type: integer, minimum: 0}
+            audio_tokens: {type: integer, minimum: 0}
             reasoning_tokens: {type: integer, minimum: 0}
+            rejected_prediction_tokens: {type: integer, minimum: 0}
+            text_tokens: {type: integer, minimum: 0}
         prompt_tokens_details:
           type: object
           properties:
             cached_tokens: {type: integer, minimum: 0}
             cache_write_tokens: {type: integer, minimum: 0}
             cache_creation_tokens: {type: integer, minimum: 0}
+            audio_tokens: {type: integer, minimum: 0}
+            image_tokens: {type: integer, minimum: 0}
+            text_tokens: {type: integer, minimum: 0}
     CompletionRequest:
       type: object
       additionalProperties: false
@@ -3714,7 +3721,11 @@ components:
         output_tokens_details:
           type: object
           properties:
+            accepted_prediction_tokens: {type: integer, minimum: 0}
+            audio_tokens: {type: integer, minimum: 0}
             reasoning_tokens: {type: integer, minimum: 0}
+            rejected_prediction_tokens: {type: integer, minimum: 0}
+            text_tokens: {type: integer, minimum: 0}
         input_tokens: {type: integer, minimum: 0}
         output_tokens: {type: integer, minimum: 0}
         total_tokens: {type: integer, minimum: 0}
@@ -3724,6 +3735,9 @@ components:
             cached_tokens: {type: integer, minimum: 0}
             cache_write_tokens: {type: integer, minimum: 0}
             cache_creation_tokens: {type: integer, minimum: 0}
+            audio_tokens: {type: integer, minimum: 0}
+            image_tokens: {type: integer, minimum: 0}
+            text_tokens: {type: integer, minimum: 0}
     ResponseResponse:
       type: object
       required: [id, object, model]
