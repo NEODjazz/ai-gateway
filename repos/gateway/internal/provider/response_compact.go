@@ -154,7 +154,7 @@ func (r Router) CompactResponse(ctx context.Context, req modules.RequestContext)
 }
 
 func (r Router) callResponseCompact(ctx context.Context, endpoint Endpoint, client ResponseCompactClient, request openai.ResponseCompactRequest) (openai.CompactedResponse, int, error) {
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, openai.ReserveTokens(openai.ResponseCompactInputTokens(request), 0))
 	if err != nil {
 		return openai.CompactedResponse{}, 0, err
 	}

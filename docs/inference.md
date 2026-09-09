@@ -269,6 +269,12 @@ fallback tiers, `weight` распределяет трафик внутри tier
 учитывает EWMA latency/failures. Same-deployment retry разрешён только для
 transient failure classes и учитывает bounded backoff/`Retry-After`.
 
+Каждый deployment может задать `rate_limit_rpm` и `rate_limit_tpm`. Нулевое
+значение отключает соответствующий предел. Допуск атомарно резервирует один
+маршрутизированный запрос и полную оценку input/output токенов на фиксированную
+минуту до provider call; при исчерпании router пробует следующий разрешённый
+deployment. При Redis счетчики общие для всех gateway replicas.
+
 Cross-model fallbacks настраиваются отдельно для `general`, `context_window` и
 `content_policy`. Gateway заранее пересекает все цели с model grants и
 guardrails. Authentication, invalid request, gateway content rejection и budget

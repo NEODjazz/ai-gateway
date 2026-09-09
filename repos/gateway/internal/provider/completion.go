@@ -286,7 +286,7 @@ func (r Router) StreamCompletions(ctx context.Context, req modules.RequestContex
 		attemptCtx.CompletionRequest.Stream = true
 		lastAttempt = &attemptCtx
 		started := time.Now()
-		release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+		release, err := r.acquireEndpoint(ctx, endpoint, openai.CompletionReserveTokens(*attemptCtx.CompletionRequest))
 		if err != nil {
 			setAttemptMetadata(&attemptCtx, started, err)
 			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
@@ -373,7 +373,7 @@ func (r Router) StreamCompletions(ctx context.Context, req modules.RequestContex
 }
 
 func (r Router) callCompletion(ctx context.Context, endpoint Endpoint, client CompletionClient, request openai.CompletionRequest) (openai.CompletionResponse, int, error) {
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, openai.CompletionReserveTokens(request))
 	if err != nil {
 		return openai.CompletionResponse{}, 0, err
 	}

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.101
+  version: 0.1.102
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4912,6 +4912,8 @@ components:
         max_parallel_requests: {type: integer, minimum: 0, maximum: 100000}
         queue_capacity: {type: integer, minimum: 0, maximum: 100000}
         queue_timeout_ms: {type: integer, minimum: 0, maximum: 600000}
+        rate_limit_rpm: {type: integer, minimum: 0, maximum: 10000000, description: Maximum routed requests per fixed minute for this deployment; zero disables the request quota.}
+        rate_limit_tpm: {type: integer, minimum: 0, maximum: 1000000000, description: Maximum estimated input and reserved output tokens per fixed minute for this deployment; zero disables the token quota.}
         enabled: {type: boolean}
     ModelDeployment:
       allOf:

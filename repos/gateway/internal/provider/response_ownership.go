@@ -279,7 +279,7 @@ func (r Router) DeleteResponse(ctx context.Context, req modules.RequestContext, 
 
 func callResponseLifecycle[T any](r Router, ctx context.Context, endpoint Endpoint, operation string, call func(context.Context) (T, error)) (T, error) {
 	var zero T
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, 0)
 	if err != nil {
 		return zero, err
 	}

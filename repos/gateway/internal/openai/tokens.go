@@ -46,6 +46,10 @@ func ResponseOutputLimit(r ResponseRequest) int {
 	return 0
 }
 
+func ResponseReserveTokens(r ResponseRequest) int {
+	return ReserveTokens(ResponseInputTokens(r), ResponseOutputLimit(r))
+}
+
 // EstimateContextTokens estimates the serialized input, including roles, tool
 // schemas and tool arguments. It is not a provider tokenizer. Encoded image
 // bytes are replaced with a bounded image allowance rather than counted as text.

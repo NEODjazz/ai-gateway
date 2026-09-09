@@ -26,7 +26,7 @@ func (r Router) mirrorChat(ctx context.Context, requestID string, request openai
 		if upstream, found := endpoint.ModelAliases[mirrored.Model]; found {
 			mirrored.Model = upstream
 		}
-		go r.runMirror(ctx, endpoint, "chat.mirror", func(callCtx context.Context) error {
+		go r.runMirror(ctx, endpoint, "chat.mirror", openai.ChatReserveTokens(mirrored), func(callCtx context.Context) error {
 			_, err := endpoint.Provider.ChatCompletions(callCtx, mirrored)
 			return err
 		})
@@ -54,7 +54,7 @@ func (r Router) mirrorResponses(ctx context.Context, requestID string, request o
 		if upstream, found := endpoint.ModelAliases[mirrored.Model]; found {
 			mirrored.Model = upstream
 		}
-		go r.runMirror(ctx, endpoint, "responses.mirror", func(callCtx context.Context) error {
+		go r.runMirror(ctx, endpoint, "responses.mirror", openai.ResponseReserveTokens(mirrored), func(callCtx context.Context) error {
 			_, err := endpoint.Provider.Responses(callCtx, mirrored)
 			return err
 		})
@@ -77,7 +77,7 @@ func (r Router) mirrorEmbeddings(ctx context.Context, requestID string, request 
 		if upstream, found := endpoint.ModelAliases[mirrored.Model]; found {
 			mirrored.Model = upstream
 		}
-		go r.runMirror(ctx, endpoint, "embeddings.mirror", func(callCtx context.Context) error { _, err := client.Embeddings(callCtx, mirrored); return err })
+		go r.runMirror(ctx, endpoint, "embeddings.mirror", openai.EmbeddingInputTokenCount(mirrored.Input), func(callCtx context.Context) error { _, err := client.Embeddings(callCtx, mirrored); return err })
 	}
 }
 
@@ -97,7 +97,11 @@ func (r Router) mirrorRerank(ctx context.Context, requestID string, request open
 		if upstream, found := endpoint.ModelAliases[mirrored.Model]; found {
 			mirrored.Model = upstream
 		}
-		go r.runMirror(ctx, endpoint, "rerank.mirror", func(callCtx context.Context) error { _, err := client.Rerank(callCtx, mirrored); return err })
+		tokens := openai.EstimateContextTokens(struct {
+			Query     string
+			Documents []any
+		}{mirrored.Query, mirrored.Documents})
+		go r.runMirror(ctx, endpoint, "rerank.mirror", tokens, func(callCtx context.Context) error { _, err := client.Rerank(callCtx, mirrored); return err })
 	}
 }
 
@@ -117,7 +121,7 @@ func (r Router) mirrorModerations(ctx context.Context, requestID string, request
 		if upstream, found := endpoint.ModelAliases[mirrored.Model]; found {
 			mirrored.Model = upstream
 		}
-		go r.runMirror(ctx, endpoint, "moderations.mirror", func(callCtx context.Context) error { _, err := client.Moderations(callCtx, mirrored); return err })
+		go r.runMirror(ctx, endpoint, "moderations.mirror", openai.ModerationInputTokenCount(mirrored.Input), func(callCtx context.Context) error { _, err := client.Moderations(callCtx, mirrored); return err })
 	}
 }
 
@@ -132,14 +136,14 @@ func (r Router) shadowEndpoints(catalog modelcatalog.Catalog, model string, capa
 	return result
 }
 
-func (r Router) runMirror(parent context.Context, endpoint Endpoint, operation string, call func(context.Context) error) {
+func (r Router) runMirror(parent context.Context, endpoint Endpoint, operation string, tokens int, call func(context.Context) error) {
 	timeout := endpoint.MirrorTimeout
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
 	defer cancel()
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, tokens)
 	if err != nil {
 		return
 	}

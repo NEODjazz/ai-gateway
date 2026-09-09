@@ -10,7 +10,7 @@ function response(value: unknown) {
 
 describe("DeploymentsPage", () => {
   it("shows health details, runs checks and pauses a deployment", async () => {
-    const deployment = { id: "azure-gpt", provider_id: "azure", credential_id: "azure-key", provider_type: "openai-compatible", upstream_model: "gpt-versioned", models: ["gpt"], capabilities: ["chat"], priority: 0, weight: 1, enabled: true, runtime_state: "available", latency_ewma_ms: 100, failure_ewma: 0.01 };
+    const deployment = { id: "azure-gpt", provider_id: "azure", credential_id: "azure-key", provider_type: "openai-compatible", upstream_model: "gpt-versioned", models: ["gpt"], capabilities: ["chat"], priority: 0, weight: 1, rate_limit_rpm: 120, rate_limit_tpm: 64000, enabled: true, runtime_state: "available", latency_ewma_ms: 100, failure_ewma: 0.01 };
     const check = { deployment_id: "azure-gpt", provider_id: "azure", model: "gpt-versioned", status: "available", latency_ms: 42, checked_at: "2026-08-27T18:00:00Z" };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const path = String(input);
@@ -44,13 +44,20 @@ describe("DeploymentsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Actions for azure-gpt" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const edit = await screen.findByRole("dialog", { name: "Edit azure-gpt" });
+    expect(within(edit).getByLabelText("Requests per minute")).toHaveValue(120);
+    expect(within(edit).getByLabelText("Tokens per minute")).toHaveValue(64000);
     await userEvent.click(within(edit).getByLabelText("Capabilities"));
     await userEvent.click(within(edit).getByRole("option", { name: /Tools/ }));
     await userEvent.click(within(edit).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-deployments/azure-gpt" && options?.method === "PUT" && JSON.parse(String(options.body)).capabilities?.includes("tools"))).toBe(true));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => {
+      if (String(path) !== "/admin/v1/model-deployments/azure-gpt" || options?.method !== "PUT") return false;
+      const body = JSON.parse(String(options.body));
+      return body.capabilities?.includes("tools") && body.rate_limit_rpm === 120 && body.rate_limit_tpm === 64000;
+    })).toBe(true));
     await userEvent.click(screen.getByRole("button", { name: "Actions for azure-gpt" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Details" }));
     expect(await screen.findByRole("dialog", { name: "Deployment details" })).toBeInTheDocument();
+    expect(screen.getByText("120 / 64000")).toBeInTheDocument();
     expect(screen.getByText("2026-08-27 18:00:00 UTC")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Run health check" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-deployments/health-checks" && options?.method === "POST")).toBe(true));

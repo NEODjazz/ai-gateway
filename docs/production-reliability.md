@@ -64,6 +64,15 @@ Normal quota exhaustion remains HTTP 429 with `Retry-After`. The capacity is an
 internal fixed bound, not a new configuration option. These limits remain
 per-process in memory mode; use the Redis store for shared multi-instance quotas.
 
+Deployment `rate_limit_rpm` and `rate_limit_tpm` use the same atomic fixed-window
+contract. TPM reserves the full effective input plus bounded output before an
+upstream call, including tool schemas and either supported output-token field.
+Quota exhaustion skips the limited deployment and remains eligible for routing
+fallback. Cache hits do not consume deployment quota. Shadow calls and response
+lifecycle operations consume the quota of the deployment they contact. The
+memory implementation fails closed after 10,000 active deployment identities;
+Redis shares counters across gateway replicas.
+
 ## Billing delivery and failure behavior
 
 Required billing with usage-event reporting enabled requires `BILLING_DURABLE_OUTBOX_ENABLED=true` and a working PostgreSQL database. Memory-only usage delivery makes readiness fail in this configuration. Deployments that previously enabled required usage reporting without a durable outbox must configure PostgreSQL and enable the durable path before rollout. Existing migrations remain sufficient.

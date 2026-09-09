@@ -117,6 +117,8 @@ func (h Handler) mutateModelDeployment(w http.ResponseWriter, r *http.Request, i
 		MaxParallelRequests   int      `json:"max_parallel_requests,omitempty"`
 		QueueCapacity         int      `json:"queue_capacity,omitempty"`
 		QueueTimeoutMS        int      `json:"queue_timeout_ms,omitempty"`
+		RateLimitRPM          int      `json:"rate_limit_rpm,omitempty"`
+		RateLimitTPM          int      `json:"rate_limit_tpm,omitempty"`
 		Enabled               bool     `json:"enabled"`
 	}
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 64<<10))
@@ -133,7 +135,7 @@ func (h Handler) mutateModelDeployment(w http.ResponseWriter, r *http.Request, i
 	if input.CredentialID != nil {
 		credentialID = *input.CredentialID
 	}
-	deployment := provider.ModelDeployment{ID: input.ID, ProviderID: input.ProviderID, CredentialID: credentialID, CredentialSet: input.CredentialID != nil, UpstreamModel: input.UpstreamModel, Models: input.Models, Capabilities: input.Capabilities, Priority: input.Priority, Weight: input.Weight, GuardrailPolicy: input.GuardrailPolicy, RequestTimeoutMS: input.RequestTimeoutMS, MaxRetries: input.MaxRetries, CooldownAfterFailures: input.CooldownAfterFailures, CooldownSeconds: input.CooldownSeconds, MaxParallelRequests: input.MaxParallelRequests, QueueCapacity: input.QueueCapacity, QueueTimeoutMS: input.QueueTimeoutMS, Enabled: input.Enabled}
+	deployment := provider.ModelDeployment{ID: input.ID, ProviderID: input.ProviderID, CredentialID: credentialID, CredentialSet: input.CredentialID != nil, UpstreamModel: input.UpstreamModel, Models: input.Models, Capabilities: input.Capabilities, Priority: input.Priority, Weight: input.Weight, GuardrailPolicy: input.GuardrailPolicy, RequestTimeoutMS: input.RequestTimeoutMS, MaxRetries: input.MaxRetries, CooldownAfterFailures: input.CooldownAfterFailures, CooldownSeconds: input.CooldownSeconds, MaxParallelRequests: input.MaxParallelRequests, QueueCapacity: input.QueueCapacity, QueueTimeoutMS: input.QueueTimeoutMS, RateLimitRPM: input.RateLimitRPM, RateLimitTPM: input.RateLimitTPM, Enabled: input.Enabled}
 	targetID := input.ID
 	if id != "" {
 		targetID = id

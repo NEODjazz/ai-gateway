@@ -47,6 +47,9 @@ OpenAPI, а не в этом документе.
 `queue_timeout_ms`. Shadow endpoint требует `max_parallel_requests > 0`.
 `mirror_percentage` должен быть от 0 до 100. `rerank_path` должен быть
 абсолютным путём без query, fragment и `..`.
+`rate_limit_rpm` и `rate_limit_tpm` задают deployment-level fixed-window quotas;
+ноль означает отсутствие соответствующего ограничения. Допустимые максимумы —
+10,000,000 RPM и 1,000,000,000 TPM.
 
 Поддерживаемые static adapter types: `demo`, `ollama`, `openai`,
 `openai-compatible`, `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`. Capability задаётся явно для
@@ -68,7 +71,7 @@ Managed-режим намеренно разделяет конфигураци�
 - Provider: `id`, `type`, `base_url`, `enabled`;
 - Credential: `id`, optional `provider_id`, description и write-only secret;
 - Deployment: ссылки `provider_id`/`credential_id`, upstream/public models,
-  capabilities, routing, admission, retries, guardrail и enabled state;
+  capabilities, routing, admission, RPM/TPM quotas, retries, guardrail и enabled state;
 - Model Group: public model ID, упорядоченные deployment IDs, strategy, retry
   policy и cross-model fallbacks;
 - Model Catalog: pricing и model-level capabilities.

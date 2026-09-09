@@ -30,6 +30,8 @@ type ModelDeployment struct {
 	MaxParallelRequests   int      `json:"max_parallel_requests,omitempty"`
 	QueueCapacity         int      `json:"queue_capacity,omitempty"`
 	QueueTimeoutMS        int      `json:"queue_timeout_ms,omitempty"`
+	RateLimitRPM          int      `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM          int      `json:"rate_limit_tpm,omitempty"`
 	Enabled               bool     `json:"enabled"`
 	RuntimeState          string   `json:"runtime_state"`
 	LatencyEWMAms         float64  `json:"latency_ewma_ms,omitempty"`
@@ -344,7 +346,9 @@ func validDeploymentOperations(deployment ModelDeployment) bool {
 		deployment.CooldownSeconds >= 0 && deployment.CooldownSeconds <= 86400 &&
 		deployment.MaxParallelRequests >= 0 && deployment.MaxParallelRequests <= 100000 &&
 		deployment.QueueCapacity >= 0 && deployment.QueueCapacity <= 100000 &&
-		deployment.QueueTimeoutMS >= 0 && deployment.QueueTimeoutMS <= 600000) {
+		deployment.QueueTimeoutMS >= 0 && deployment.QueueTimeoutMS <= 600000 &&
+		deployment.RateLimitRPM >= 0 && deployment.RateLimitRPM <= 10000000 &&
+		deployment.RateLimitTPM >= 0 && deployment.RateLimitTPM <= 1000000000) {
 		return false
 	}
 	if deployment.MaxParallelRequests == 0 {
@@ -383,7 +387,7 @@ func (r *Router) endpointForDeployment(deployment ModelDeployment) (Endpoint, er
 			aliases[model] = deployment.UpstreamModel
 		}
 	}
-	return Endpoint{Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second}, nil
+	return Endpoint{Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second, RateLimitRPM: deployment.RateLimitRPM, RateLimitTPM: deployment.RateLimitTPM}, nil
 }
 
 func (r *Router) configuredEndpoints() []Endpoint {

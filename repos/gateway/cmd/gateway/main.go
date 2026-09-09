@@ -94,6 +94,7 @@ func main() {
 		providerConfig.CacheStore = redisStore
 		providerConfig.SessionStore = redisStore
 		providerConfig.CircuitStore = redisStore
+		providerConfig.DeploymentQuotaStore = redisStore
 	}
 	llmProvider, err := provider.NewWithError(providerConfig)
 	if err != nil {

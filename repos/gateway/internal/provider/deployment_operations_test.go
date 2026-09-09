@@ -26,7 +26,7 @@ func TestManagedDeploymentAppliesOperationalSettings(t *testing.T) {
 	if _, err := router.CreateProvider(ManagedProvider{ID: "demo-managed", Type: "demo", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	input := ModelDeployment{ID: "managed", ProviderID: "demo-managed", Models: []string{"model"}, Weight: 1, RequestTimeoutMS: 2500, MaxRetries: 3, CooldownAfterFailures: 4, CooldownSeconds: 30, MaxParallelRequests: 5, QueueCapacity: 7, QueueTimeoutMS: 900, Enabled: true}
+	input := ModelDeployment{ID: "managed", ProviderID: "demo-managed", Models: []string{"model"}, Weight: 1, RequestTimeoutMS: 2500, MaxRetries: 3, CooldownAfterFailures: 4, CooldownSeconds: 30, MaxParallelRequests: 5, QueueCapacity: 7, QueueTimeoutMS: 900, RateLimitRPM: 120, RateLimitTPM: 64000, Enabled: true}
 	if _, err := router.CreateModelDeployment(input); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestManagedDeploymentAppliesOperationalSettings(t *testing.T) {
 			endpoint = candidate
 		}
 	}
-	if endpoint.RequestTimeout != 2500*time.Millisecond || endpoint.MaxRetries != 3 || endpoint.CooldownAfterFailures != 4 || endpoint.Cooldown != 30*time.Second || endpoint.Admission == nil || cap(endpoint.Admission.slots) != 5 || endpoint.Admission.queueCapacity != 7 || endpoint.Admission.queueTimeout != 900*time.Millisecond {
+	if endpoint.RequestTimeout != 2500*time.Millisecond || endpoint.MaxRetries != 3 || endpoint.CooldownAfterFailures != 4 || endpoint.Cooldown != 30*time.Second || endpoint.Admission == nil || cap(endpoint.Admission.slots) != 5 || endpoint.Admission.queueCapacity != 7 || endpoint.Admission.queueTimeout != 900*time.Millisecond || endpoint.RateLimitRPM != 120 || endpoint.RateLimitTPM != 64000 {
 		t.Fatalf("operational settings were not applied: %+v admission=%+v", endpoint, endpoint.Admission)
 	}
 	invalid := input
@@ -44,6 +44,12 @@ func TestManagedDeploymentAppliesOperationalSettings(t *testing.T) {
 	invalid.MaxParallelRequests = 0
 	if _, err := router.CreateModelDeployment(invalid); !errors.Is(err, ErrInvalidDeployment) {
 		t.Fatalf("expected invalid admission settings, got %v", err)
+	}
+	invalid = input
+	invalid.ID = "invalid-quota"
+	invalid.RateLimitTPM = 1000000001
+	if _, err := router.CreateModelDeployment(invalid); !errors.Is(err, ErrInvalidDeployment) {
+		t.Fatalf("expected invalid quota settings, got %v", err)
 	}
 }
 

@@ -132,7 +132,7 @@ func (r Router) CountResponseInputTokens(ctx context.Context, req modules.Reques
 		ParallelToolCalls: effective.ParallelToolCalls, Text: effective.Text,
 		PreviousResponse: effective.PreviousResponse, Reasoning: effective.Reasoning, Truncation: effective.Truncation,
 	}
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, openai.ResponseInputTokens(*effective))
 	if err != nil {
 		return openai.ResponseInputTokenCount{}, err
 	}

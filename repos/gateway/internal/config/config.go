@@ -134,6 +134,8 @@ type ProviderEndpointConfig struct {
 	MaxParallelRequests   int               `json:"max_parallel_requests,omitempty"`
 	QueueCapacity         int               `json:"queue_capacity,omitempty"`
 	QueueTimeoutMS        int               `json:"queue_timeout_ms,omitempty"`
+	RateLimitRPM          int               `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM          int               `json:"rate_limit_tpm,omitempty"`
 	GuardrailPolicy       string            `json:"guardrail_policy,omitempty"`
 	ModelAliases          map[string]string `json:"model_aliases,omitempty"`
 	Weight                int               `json:"weight,omitempty"`
@@ -265,8 +267,11 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 		if name == "" {
 			name = endpoint.Type
 		}
-		if endpoint.MaxParallelRequests < 0 || endpoint.QueueCapacity < 0 || endpoint.QueueTimeoutMS < 0 {
+		if endpoint.MaxParallelRequests < 0 || endpoint.QueueCapacity < 0 || endpoint.QueueTimeoutMS < 0 || endpoint.RateLimitRPM < 0 || endpoint.RateLimitTPM < 0 {
 			result = errors.Join(result, fmt.Errorf("provider %q admission values must not be negative", name))
+		}
+		if endpoint.RateLimitRPM > 10000000 || endpoint.RateLimitTPM > 1000000000 {
+			result = errors.Join(result, fmt.Errorf("provider %q rate limits exceed supported bounds", name))
 		}
 		if endpoint.QueueCapacity > 0 && endpoint.MaxParallelRequests <= 0 {
 			result = errors.Join(result, fmt.Errorf("provider %q queue requires max_parallel_requests", name))

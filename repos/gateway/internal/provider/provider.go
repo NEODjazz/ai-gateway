@@ -205,6 +205,7 @@ type Config struct {
 	CredentialEncryptionKey []byte
 	ControlPlaneStore       ControlPlaneStore
 	ControlPlaneRefresh     time.Duration
+	DeploymentQuotaStore    DeploymentQuotaStore
 }
 
 type ProviderObserver interface {
@@ -240,6 +241,8 @@ type Endpoint struct {
 	RoutingModel          string
 	FallbackType          string
 	FallbackStage         int
+	RateLimitRPM          int
+	RateLimitTPM          int
 }
 
 type Router struct {
@@ -266,6 +269,7 @@ type Router struct {
 	adminState       *adminStateRegistry
 	deploymentHealth *deploymentHealthRegistry
 	retry            retryScheduler
+	deploymentQuotas DeploymentQuotaStore
 }
 
 func New(cfg Config) Provider {
@@ -329,6 +333,8 @@ func NewWithError(cfg Config) (Provider, error) {
 			MirrorTimeout:         mirrorTimeout,
 			Provider:              provider,
 			BaseURL:               strings.TrimRight(endpoint.BaseURL, "/"),
+			RateLimitRPM:          endpoint.RateLimitRPM,
+			RateLimitTPM:          endpoint.RateLimitTPM,
 		})
 		enabled := endpoint.Enabled == nil || *endpoint.Enabled
 		deploymentWeight := endpoint.Weight
@@ -344,7 +350,7 @@ func NewWithError(cfg Config) (Provider, error) {
 			authType = normalizeAzureAuthType(endpoint.AuthType)
 		}
 		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(endpoint.BaseURL, "/"), APIVersion: strings.TrimSpace(endpoint.APIVersion), AuthType: authType, Enabled: enabled}
-		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, UpstreamModel: upstreamModel, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, MaxRetries: endpoint.MaxRetries, CooldownAfterFailures: endpoint.CooldownAfterFailures, CooldownSeconds: endpoint.CooldownSeconds, MaxParallelRequests: endpoint.MaxParallelRequests, QueueCapacity: endpoint.QueueCapacity, QueueTimeoutMS: endpoint.QueueTimeoutMS, Enabled: enabled}
+		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, UpstreamModel: upstreamModel, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, MaxRetries: endpoint.MaxRetries, CooldownAfterFailures: endpoint.CooldownAfterFailures, CooldownSeconds: endpoint.CooldownSeconds, MaxParallelRequests: endpoint.MaxParallelRequests, QueueCapacity: endpoint.QueueCapacity, QueueTimeoutMS: endpoint.QueueTimeoutMS, RateLimitRPM: endpoint.RateLimitRPM, RateLimitTPM: endpoint.RateLimitTPM, Enabled: enabled}
 	}
 
 	hasPrimary := false
@@ -366,19 +372,24 @@ func NewWithError(cfg Config) (Provider, error) {
 	if registry == nil {
 		registry = modelcatalog.NewRegistry(cfg.Catalog, nil, time.Second)
 	}
+	deploymentQuotas := cfg.DeploymentQuotaStore
+	if deploymentQuotas == nil {
+		deploymentQuotas = NewMemoryDeploymentQuotaStore()
+	}
 	router := &Router{
-		defaultProvider: cfg.Default,
-		endpoints:       endpoints,
-		modules:         cfg.Modules,
-		health:          newEndpointHealthTracker(cfg.CircuitStore),
-		routeCounter:    &atomic.Uint64{},
-		cache:           newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
-		catalog:         registry,
-		observer:        cfg.Observer,
-		routingStrategy: strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
-		adaptive:        newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
-		affinity:        newAffinityStore(cfg.AffinityTTL, cfg.SessionStore),
-		ownership:       newResponseOwnershipStore(cfg.ResponseOwnershipTTL, cfg.SessionStore),
+		defaultProvider:  cfg.Default,
+		endpoints:        endpoints,
+		modules:          cfg.Modules,
+		health:           newEndpointHealthTracker(cfg.CircuitStore),
+		routeCounter:     &atomic.Uint64{},
+		cache:            newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
+		catalog:          registry,
+		observer:         cfg.Observer,
+		routingStrategy:  strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
+		adaptive:         newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
+		deploymentQuotas: deploymentQuotas,
+		affinity:         newAffinityStore(cfg.AffinityTTL, cfg.SessionStore),
+		ownership:        newResponseOwnershipStore(cfg.ResponseOwnershipTTL, cfg.SessionStore),
 		semantic: newSemanticResponseCache(semanticCacheConfig{
 			ttl: cfg.SemanticCacheTTL, threshold: cfg.SemanticCacheThreshold,
 			maxEntries: cfg.SemanticCacheMaxEntries, maxBytes: cfg.SemanticCacheMaxBytes,
@@ -662,7 +673,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		}
 
 		started := time.Now()
-		release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+		release, err := r.acquireEndpoint(ctx, endpoint, openai.ChatReserveTokens(attemptCtx.Request))
 		if err != nil {
 			setAttemptMetadata(&attemptCtx, started, err)
 			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
@@ -1508,7 +1519,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		}
 
 		started := time.Now()
-		release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+		release, err := r.acquireEndpoint(ctx, endpoint, openai.ResponseReserveTokens(*attemptCtx.ResponseRequest))
 		if err != nil {
 			setAttemptMetadata(&attemptCtx, started, err)
 			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
@@ -1882,7 +1893,7 @@ func boolString(value bool) string {
 }
 
 func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, int, error) {
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, openai.ChatReserveTokens(request))
 	if err != nil {
 		return openai.ChatCompletionResponse{}, 0, err
 	}
@@ -1914,7 +1925,7 @@ func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.
 }
 
 func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request openai.ResponseRequest) (openai.ResponseResponse, int, error) {
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, openai.ResponseReserveTokens(request))
 	if err != nil {
 		return openai.ResponseResponse{}, 0, err
 	}
@@ -1945,7 +1956,7 @@ func (r Router) callResponses(ctx context.Context, endpoint Endpoint, request op
 }
 
 func (r Router) callEmbeddings(ctx context.Context, endpoint Endpoint, client EmbeddingClient, request openai.EmbeddingRequest) (openai.EmbeddingResponse, int, error) {
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, openai.EmbeddingInputTokenCount(request.Input))
 	if err != nil {
 		return openai.EmbeddingResponse{}, 0, err
 	}
@@ -1976,7 +1987,7 @@ func (r Router) callEmbeddings(ctx context.Context, endpoint Endpoint, client Em
 }
 
 func (r Router) callImageGeneration(ctx context.Context, endpoint Endpoint, client ImageGenerationClient, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, int, error) {
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, openai.ImageGenerationReserveTokens(request))
 	if err != nil {
 		return openai.ImageGenerationResponse{}, 0, err
 	}
@@ -2005,7 +2016,7 @@ func (r Router) callImageGeneration(ctx context.Context, endpoint Endpoint, clie
 }
 
 func (r Router) callImageEdit(ctx context.Context, endpoint Endpoint, client ImageEditClient, request openai.ImageEditRequest) (openai.ImageGenerationResponse, int, error) {
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, openai.ImageEditReserveTokens(request))
 	if err != nil {
 		return openai.ImageGenerationResponse{}, 0, err
 	}
@@ -2034,7 +2045,7 @@ func (r Router) callImageEdit(ctx context.Context, endpoint Endpoint, client Ima
 }
 
 func (r Router) callImageVariation(ctx context.Context, endpoint Endpoint, client ImageVariationClient, request openai.ImageVariationRequest) (openai.ImageGenerationResponse, int, error) {
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, openai.ImageVariationReserveTokens(request))
 	if err != nil {
 		return openai.ImageGenerationResponse{}, 0, err
 	}
@@ -2063,7 +2074,10 @@ func (r Router) callImageVariation(ctx context.Context, endpoint Endpoint, clien
 }
 
 func (r Router) callRerank(ctx context.Context, endpoint Endpoint, client RerankClient, request openai.RerankRequest) (openai.RerankResponse, int, error) {
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, openai.EstimateContextTokens(struct {
+		Query     string
+		Documents []any
+	}{request.Query, request.Documents}))
 	if err != nil {
 		return openai.RerankResponse{}, 0, err
 	}
@@ -2093,7 +2107,7 @@ func (r Router) callRerank(ctx context.Context, endpoint Endpoint, client Rerank
 }
 
 func (r Router) callModerations(ctx context.Context, endpoint Endpoint, client ModerationClient, request openai.ModerationRequest) (openai.ModerationResponse, int, error) {
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, openai.ModerationInputTokenCount(request.Input))
 	if err != nil {
 		return openai.ModerationResponse{}, 0, err
 	}

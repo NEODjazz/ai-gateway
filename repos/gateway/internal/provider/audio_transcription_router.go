@@ -96,7 +96,7 @@ func (r Router) TranscribeAudio(ctx context.Context, req modules.RequestContext)
 }
 
 func (r Router) callAudioTranscription(ctx context.Context, endpoint Endpoint, client AudioTranscriptionClient, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, int, error) {
-	release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+	release, err := r.acquireEndpoint(ctx, endpoint, openai.AudioTranscriptionReserveTokens(request))
 	if err != nil {
 		return openai.AudioTranscriptionResponse{}, 0, err
 	}

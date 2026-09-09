@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
 )
 
 type TokenCountProvider interface {
@@ -41,7 +42,7 @@ func (r Router) CountTokens(ctx context.Context, req modules.RequestContext) (To
 		if err := r.modules.RunTokenCount(ctx, &attempt); err != nil {
 			return TokenCountResult{}, err
 		}
-		release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
+		release, err := r.acquireEndpoint(ctx, endpoint, openai.ChatInputTokens(attempt.Request))
 		if err != nil {
 			return TokenCountResult{}, err
 		}

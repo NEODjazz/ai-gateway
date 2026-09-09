@@ -237,7 +237,7 @@ func estimateCompletionTokens(request openai.CompletionRequest) int {
 }
 
 func estimateResponseTokens(request openai.ResponseRequest) int {
-	return openai.ReserveTokens(openai.ResponseInputTokens(request), openai.ResponseOutputLimit(request))
+	return openai.ResponseReserveTokens(request)
 }
 
 func estimateResponseCompactTokens(request openai.ResponseCompactRequest) int {
