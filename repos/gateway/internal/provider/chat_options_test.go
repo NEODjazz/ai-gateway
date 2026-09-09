@@ -81,6 +81,62 @@ func TestCompatibleChatGenerationOptionsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCompatibleChatRefusalRoundTrip(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprint(streaming), func(t *testing.T) {
+			var received openai.ChatCompletionRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+					t.Error(err)
+					return
+				}
+				if streaming {
+					_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-refusal\",\"created\":1,\"model\":\"test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"refusal\":\"cannot \"}}]}\n\n")
+					_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-refusal\",\"created\":1,\"model\":\"test\",\"choices\":[{\"index\":0,\"delta\":{\"refusal\":\"help\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+					return
+				}
+				_, _ = fmt.Fprint(w, `{"id":"chat-refusal","object":"chat.completion","created":1,"model":"test","choices":[{"index":0,"message":{"role":"assistant","content":null,"refusal":"cannot help"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+			}))
+			defer server.Close()
+			historical := "previous refusal"
+			request := openai.ChatCompletionRequest{Model: "test", Stream: streaming, Messages: []openai.Message{{Role: "assistant", Refusal: &historical}}}
+			client := NewOpenAICompatible(server.URL, "", true)
+			var response openai.ChatCompletionResponse
+			var err error
+			if streaming {
+				response, err = client.StreamChatCompletions(t.Context(), request, func(string) error { return nil })
+			} else {
+				response, err = client.ChatCompletions(t.Context(), request)
+			}
+			if err != nil || len(received.Messages) != 1 || received.Messages[0].Refusal == nil || *received.Messages[0].Refusal != historical || response.Choices[0].Message.Refusal == nil || *response.Choices[0].Message.Refusal != "cannot help" {
+				t.Fatalf("refusal was not preserved: received=%+v response=%+v err=%v", received.Messages, response, err)
+			}
+		})
+	}
+}
+
+func TestChatRefusalHistoryIsRejectedByNativeAdapters(t *testing.T) {
+	refusal := "cannot help"
+	request := openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "assistant", Refusal: &refusal}}}
+	for _, client := range []Client{NewAnthropic("http://unused.invalid", "", false), NewOllama("http://unused.invalid", false), NewGemini("http://unused.invalid", "", false), Demo{}} {
+		var failure *Error
+		err := validateChatAdapter(client, request)
+		if !errors.As(err, &failure) || failure.Param != "messages.refusal" || failure.UpstreamCode != "unsupported_parameter" {
+			t.Fatalf("%T silently accepted refusal history: %v", client, err)
+		}
+	}
+}
+
+func TestChatRefusalHistoryScopesExactCache(t *testing.T) {
+	base := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "assistant", Content: nil}}}}
+	changed := base
+	refusal := "cannot help"
+	changed.Request.Messages = []openai.Message{{Role: "assistant", Content: nil, Refusal: &refusal}}
+	if providerCacheKey("chat", base) == providerCacheKey("chat", changed) {
+		t.Fatal("exact cache ignored refusal history")
+	}
+}
+
 func TestPromptCacheBreakpointsAreRejectedByNativeAdapters(t *testing.T) {
 	var request openai.ChatCompletionRequest
 	if err := json.Unmarshal([]byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"hello","prompt_cache_breakpoint":{"mode":"explicit"}}]}]}`), &request); err != nil {

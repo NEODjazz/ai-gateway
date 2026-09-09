@@ -1141,6 +1141,7 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 				"delta": map[string]any{
 					"role":       choice.Message.Role,
 					"content":    openai.ContentText(choice.Message.Content),
+					"refusal":    choice.Message.Refusal,
 					"tool_calls": calls,
 				},
 				"finish_reason": nil,

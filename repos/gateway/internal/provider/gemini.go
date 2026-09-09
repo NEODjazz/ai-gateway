@@ -133,6 +133,9 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	if err := rejectGenerationOptions("gemini", request.ChatGenerationOptions); err != nil {
 		return result, err
 	}
+	if err := rejectChatMessageRefusals("gemini", request.Messages); err != nil {
+		return result, err
+	}
 	if request.ParallelToolCalls != nil {
 		return result, geminiInvalid("parallel_tool_calls")
 	}

@@ -714,6 +714,7 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 				Delta struct {
 					Role      string            `json:"role"`
 					Content   string            `json:"content"`
+					Refusal   *string           `json:"refusal"`
 					ToolCalls []openai.ToolCall `json:"tool_calls,omitempty"`
 				} `json:"delta"`
 				FinishReason *string                `json:"finish_reason"`
@@ -799,6 +800,13 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			}
 			if choice.Delta.Content != "" {
 				current.Message.Content = openai.ContentText(current.Message.Content) + choice.Delta.Content
+			}
+			if choice.Delta.Refusal != nil {
+				value := *choice.Delta.Refusal
+				if current.Message.Refusal != nil {
+					value = *current.Message.Refusal + value
+				}
+				current.Message.Refusal = &value
 			}
 			if err := mergeToolCallDeltas(&current.Message.ToolCalls, choice.Delta.ToolCalls); err != nil {
 				return err

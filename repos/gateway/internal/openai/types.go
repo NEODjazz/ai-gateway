@@ -35,6 +35,7 @@ type ChatStreamOptions struct {
 type Message struct {
 	Role       string     `json:"role"`
 	Content    any        `json:"content"`
+	Refusal    *string    `json:"refusal,omitempty"`
 	Name       string     `json:"name,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`

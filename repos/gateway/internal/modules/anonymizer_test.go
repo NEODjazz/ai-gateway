@@ -213,6 +213,24 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 
 }
 
+func TestAnonymizerProtectsChatRefusalHistoryAndResponse(t *testing.T) {
+	refusal := "Cannot send to user@example.com"
+	module := NewAnonymizerModule(true, RuleEmail)
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "assistant", Refusal: &refusal}}}}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Request.Messages[0].Refusal == nil || !strings.Contains(*req.Request.Messages[0].Refusal, "{{EMAIL_1}}") {
+		t.Fatalf("refusal history was not anonymized: %+v", req.Request.Messages[0].Refusal)
+	}
+	masked := "Cannot send to {{EMAIL_1}}"
+	response := openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{Refusal: &masked}}}}
+	DeanonymizeResponse(&req, &response)
+	if response.Choices[0].Message.Refusal == nil || *response.Choices[0].Message.Refusal != refusal {
+		t.Fatalf("refusal response was not restored: %+v", response.Choices[0].Message.Refusal)
+	}
+}
+
 func TestAnonymizerProtectsToolArgumentsAndRestoresToolResponse(t *testing.T) {
 	module := NewAnonymizerModule(true, RuleEmail)
 	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{

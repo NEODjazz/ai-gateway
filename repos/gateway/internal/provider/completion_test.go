@@ -184,6 +184,38 @@ func TestCompletionStreamDeanonymizerJoinsSplitPlaceholder(t *testing.T) {
 	}
 }
 
+func TestChatStreamDeanonymizerJoinsSplitRefusalPlaceholder(t *testing.T) {
+	var refusal strings.Builder
+	write := deanonymizingChatStreamWriter(map[string]string{"{{EMAIL_1}}": "user@example.com"}, func(payload string) error {
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Refusal string `json:"refusal"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			return err
+		}
+		for _, choice := range chunk.Choices {
+			refusal.WriteString(choice.Delta.Refusal)
+		}
+		return nil
+	})
+	for _, payload := range []string{
+		`{"choices":[{"index":0,"delta":{"refusal":"{{EMA"}}]}`,
+		`{"choices":[{"index":0,"delta":{"refusal":"IL_1}}"}}]}`,
+		`{"choices":[{"index":0,"delta":{},"finish_reason":"content_filter"}]}`,
+	} {
+		if err := write(payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if refusal.String() != "user@example.com" {
+		t.Fatalf("split refusal placeholder was not restored: %q", refusal.String())
+	}
+}
+
 func TestRouterCompletionsRequiresNativeAdapter(t *testing.T) {
 	client := &affinityResponseClient{id: "regular"}
 	router := Router{

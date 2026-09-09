@@ -198,6 +198,12 @@ native adapters возвращают `unsupported_parameter`. Маршрутиз
 заявленную deployment/model capability `web_search`. Exact и semantic response
 cache отключены, поскольку результат зависит от внешнего состояния веба.
 
+Chat assistant messages preserve nullable `refusal` in compatible request
+history, JSON responses, live SSE accumulation and synthetic SSE. Refusal text
+is included in context token estimates and follows the same anonymization and
+deanonymization boundary as message content. Native adapters reject historical
+refusal fields explicitly instead of silently converting them to ordinary text.
+
 
 ## Chat generation controls
 

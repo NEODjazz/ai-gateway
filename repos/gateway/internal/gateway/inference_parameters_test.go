@@ -86,12 +86,16 @@ func TestInferenceDecoderRejectsUnknownMessageField(t *testing.T) {
 
 func TestSyntheticChatStreamPreservesLogprobs(t *testing.T) {
 	response := httptest.NewRecorder()
+	refusal := "cannot help"
 	writeChatCompletionStream(response, openai.ChatCompletionResponse{
 		ID: "chat-test", Created: 123, Model: "test", Metadata: map[string]string{"trace": "one"}, ServiceTier: "priority", SystemFingerprint: "fp-test",
-		Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "hello"}, Logprobs: &openai.ChoiceLogprobs{Content: []openai.TokenLogprob{{Token: "hello", Logprob: -0.5}}}}},
+		Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "hello", Refusal: &refusal}, Logprobs: &openai.ChoiceLogprobs{Content: []openai.TokenLogprob{{Token: "hello", Logprob: -0.5}}}}},
 	}, &openai.ChatStreamOptions{IncludeUsage: true})
 	if !strings.Contains(response.Body.String(), `"logprobs":{"content":[{"token":"hello","logprob":-0.5`) {
 		t.Fatalf("synthetic SSE dropped logprobs: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"refusal":"cannot help"`) {
+		t.Fatalf("synthetic SSE dropped refusal: %s", response.Body.String())
 	}
 	for _, field := range []string{`"metadata":{"trace":"one"}`, `"service_tier":"priority"`, `"system_fingerprint":"fp-test"`} {
 		if !strings.Contains(response.Body.String(), field) {

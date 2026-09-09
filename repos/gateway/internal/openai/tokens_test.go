@@ -38,6 +38,12 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	if ChatInputTokens(withArguments) <= ChatInputTokens(base)+500 {
 		t.Fatal("tool arguments omitted")
 	}
+	refusal := strings.Repeat("refusal", 1000)
+	withRefusal := base
+	withRefusal.Messages = []Message{{Role: "assistant", Refusal: &refusal}}
+	if ChatInputTokens(withRefusal) <= ChatInputTokens(base)+1000 {
+		t.Fatal("assistant refusal omitted")
+	}
 	response := ResponseRequest{Input: "test", Instructions: strings.Repeat("system", 1000)}
 	if ResponseInputTokens(response) < 1000 {
 		t.Fatal("instructions omitted")

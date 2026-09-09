@@ -71,6 +71,10 @@ func (m AnonymizerModule) Required() bool {
 func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 	for index := range req.Request.Messages {
 		req.Request.Messages[index].Content = m.anonymizeAny(req, req.Request.Messages[index].Content)
+		if req.Request.Messages[index].Refusal != nil {
+			value := m.anonymize(req, *req.Request.Messages[index].Refusal)
+			req.Request.Messages[index].Refusal = &value
+		}
 		for callIndex := range req.Request.Messages[index].ToolCalls {
 			req.Request.Messages[index].ToolCalls[callIndex].Function.Arguments = m.anonymize(req, req.Request.Messages[index].ToolCalls[callIndex].Function.Arguments)
 		}
@@ -143,6 +147,10 @@ func DeanonymizeResponse(req *RequestContext, response *openai.ChatCompletionRes
 
 	for index := range response.Choices {
 		response.Choices[index].Message.Content = DeanonymizeAny(response.Choices[index].Message.Content, req.AnonymizationValues)
+		if response.Choices[index].Message.Refusal != nil {
+			value := DeanonymizeText(*response.Choices[index].Message.Refusal, req.AnonymizationValues)
+			response.Choices[index].Message.Refusal = &value
+		}
 		for callIndex := range response.Choices[index].Message.ToolCalls {
 			response.Choices[index].Message.ToolCalls[callIndex].Function.Arguments = DeanonymizeText(response.Choices[index].Message.ToolCalls[callIndex].Function.Arguments, req.AnonymizationValues)
 		}

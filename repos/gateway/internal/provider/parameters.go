@@ -30,6 +30,9 @@ func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) er
 	if err := rejectToolCallMetadata("anthropic", request.Messages); err != nil {
 		return err
 	}
+	if err := rejectChatMessageRefusals("anthropic", request.Messages); err != nil {
+		return err
+	}
 	if err := rejectGenerationOptions("anthropic", request.ChatGenerationOptions); err != nil {
 		return err
 	}
@@ -66,6 +69,9 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		return err
 	}
 	if err := rejectToolCallMetadata("ollama", request.Messages); err != nil {
+		return err
+	}
+	if err := rejectChatMessageRefusals("ollama", request.Messages); err != nil {
 		return err
 	}
 	if err := rejectGenerationOptions("ollama", request.ChatGenerationOptions); err != nil {
@@ -167,6 +173,9 @@ func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := rejectToolCallMetadata("demo", request.Messages); err != nil {
 		return err
 	}
+	if err := rejectChatMessageRefusals("demo", request.Messages); err != nil {
+		return err
+	}
 	return rejectGenerationOptions("demo", request.ChatGenerationOptions)
 }
 
@@ -204,6 +213,15 @@ func rejectToolCallMetadata(adapter string, messages []openai.Message) error {
 			if call.ExtraContent != nil {
 				return rejectParameters(adapter, parameterCheck{"messages.tool_calls.extra_content", true})
 			}
+		}
+	}
+	return nil
+}
+
+func rejectChatMessageRefusals(adapter string, messages []openai.Message) error {
+	for _, message := range messages {
+		if message.Refusal != nil {
+			return rejectParameters(adapter, parameterCheck{"messages.refusal", true})
 		}
 	}
 	return nil
