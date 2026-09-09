@@ -11,5 +11,8 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "structured_output", label: "Structured output", description: "Structured JSON output" },
   { value: "mcp", label: "MCP", description: "MCP tool calls" },
   { value: "vision", label: "Vision", description: "Image inputs" },
+  { value: "web_search", label: "Web search", description: "Provider web search tools" },
+  { value: "audio", label: "Audio", description: "Audio input and output" },
+  { value: "prompt_cache", label: "Prompt cache", description: "Explicit provider prompt caching" },
   { value: "assistant_prefill", label: "Assistant prefill", description: "Continue a final assistant prefix" }
 ];
