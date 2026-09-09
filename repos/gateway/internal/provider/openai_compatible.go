@@ -21,6 +21,8 @@ type openAICompatibleChatRequest struct {
 	openai.ChatGenerationOptions
 	Model               string                         `json:"model"`
 	Messages            []openai.Message               `json:"messages"`
+	Functions           []openai.FunctionDefinition    `json:"functions,omitempty"`
+	FunctionCall        *openai.LegacyFunctionChoice   `json:"function_call,omitempty"`
 	Tools               []openai.Tool                  `json:"tools,omitempty"`
 	ToolChoice          any                            `json:"tool_choice,omitempty"`
 	ParallelToolCalls   *bool                          `json:"parallel_tool_calls,omitempty"`
@@ -351,7 +353,7 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	}
 	upstreamRequest := openAICompatibleChatRequest{
 		ChatGenerationOptions: request.ChatGenerationOptions,
-		Model:                 request.Model, Messages: request.Messages, Tools: request.Tools,
+		Model:                 request.Model, Messages: request.Messages, Functions: request.Functions, FunctionCall: request.FunctionCall, Tools: request.Tools,
 		ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		ResponseFormat: request.ResponseFormat, Stream: request.Stream && p.upstreamStream,
 		MaxTokens: request.MaxTokens, MaxCompletionTokens: request.MaxCompletionTokens,
@@ -370,7 +372,19 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	if request.Stream && p.upstreamStream {
 		response, err := decodeChatCompletionStream(resp.Body, request.Model)
 		if err == nil {
+			err = validateChatCompletionEnvelope(response)
+		}
+		if err == nil {
+			err = validateCompletionUsage(response.Usage)
+		}
+		if err == nil {
 			err = validateRequestedChatChoices(request, response)
+		}
+		if err == nil {
+			err = validateRequestedChatAudio(request, response)
+		}
+		if err == nil {
+			err = validateRequestedLegacyFunctionCalls(request, response)
 		}
 		return response, err
 	}
@@ -391,6 +405,9 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	if err := validateRequestedChatAudio(request, response); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	if err := validateRequestedLegacyFunctionCalls(request, response); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	return response, nil
 }
 
@@ -402,6 +419,9 @@ func validateChatCompletionEnvelope(response openai.ChatCompletionResponse) erro
 		return fmt.Errorf("provider returned invalid chat completion metadata: %s", message)
 	}
 	for _, choice := range response.Choices {
+		if err := openai.ValidateLegacyFunctionResponse(choice.Message.FunctionCall); err != nil {
+			return fmt.Errorf("provider returned invalid legacy function call: %w", err)
+		}
 		if err := openai.ValidateChatAnnotations(choice.Message.Annotations); err != nil {
 			return fmt.Errorf("provider returned invalid chat completion annotations: %w", err)
 		}
@@ -503,7 +523,7 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 
 	upstreamRequest := openAICompatibleChatRequest{
 		ChatGenerationOptions: request.ChatGenerationOptions,
-		Model:                 request.Model, Messages: request.Messages, Tools: request.Tools,
+		Model:                 request.Model, Messages: request.Messages, Functions: request.Functions, FunctionCall: request.FunctionCall, Tools: request.Tools,
 		ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		ResponseFormat: request.ResponseFormat, Stream: true,
 		MaxTokens: request.MaxTokens, MaxCompletionTokens: request.MaxCompletionTokens,
@@ -526,6 +546,9 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 	}
 	if err == nil {
 		err = validateRequestedChatAudio(request, response)
+	}
+	if err == nil {
+		err = validateRequestedLegacyFunctionCalls(request, response)
 	}
 	return response, err
 }
@@ -730,11 +753,12 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			Choices           []struct {
 				Index int `json:"index"`
 				Delta struct {
-					Role      string            `json:"role"`
-					Content   string            `json:"content"`
-					Refusal   *string           `json:"refusal"`
-					Audio     *openai.ChatAudio `json:"audio"`
-					ToolCalls []openai.ToolCall `json:"tool_calls,omitempty"`
+					Role         string               `json:"role"`
+					Content      string               `json:"content"`
+					Refusal      *string              `json:"refusal"`
+					Audio        *openai.ChatAudio    `json:"audio"`
+					FunctionCall *openai.FunctionCall `json:"function_call"`
+					ToolCalls    []openai.ToolCall    `json:"tool_calls,omitempty"`
 				} `json:"delta"`
 				FinishReason *string                `json:"finish_reason"`
 				StopSequence *string                `json:"stop_sequence"`
@@ -830,6 +854,9 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			if err := mergeChatAudioDelta(&current.Message.Audio, choice.Delta.Audio); err != nil {
 				return err
 			}
+			if err := mergeLegacyFunctionCallDelta(&current.Message.FunctionCall, choice.Delta.FunctionCall); err != nil {
+				return err
+			}
 			if err := mergeToolCallDeltas(&current.Message.ToolCalls, choice.Delta.ToolCalls); err != nil {
 				return err
 			}
@@ -851,6 +878,22 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 	return response, nil
 }
 
+func mergeLegacyFunctionCallDelta(target **openai.FunctionCall, delta *openai.FunctionCall) error {
+	if delta == nil {
+		return nil
+	}
+	if *target == nil {
+		*target = &openai.FunctionCall{}
+	}
+	current := *target
+	current.Name += delta.Name
+	current.Arguments += delta.Arguments
+	if len(current.Name) > 64 || len(current.Arguments) > openai.MaxChatFunctionArgumentsChars {
+		return errors.New("legacy function call stream exceeds limit")
+	}
+	return nil
+}
+
 func validateRequestedChatAudio(request openai.ChatCompletionRequest, response openai.ChatCompletionResponse) error {
 	if !openai.ChatRequestsAudio(request) {
 		for _, choice := range response.Choices {
@@ -866,6 +909,29 @@ func validateRequestedChatAudio(request openai.ChatCompletionRequest, response o
 	for _, choice := range response.Choices {
 		if choice.Message.Audio == nil {
 			return errors.New("provider omitted requested chat audio")
+		}
+	}
+	return nil
+}
+
+func validateRequestedLegacyFunctionCalls(request openai.ChatCompletionRequest, response openai.ChatCompletionResponse) error {
+	allowed := make(map[string]struct{}, len(request.Functions))
+	for _, function := range request.Functions {
+		allowed[function.Name] = struct{}{}
+	}
+	for _, choice := range response.Choices {
+		call := choice.Message.FunctionCall
+		if call == nil {
+			continue
+		}
+		if len(allowed) == 0 || (request.FunctionCall != nil && request.FunctionCall.Mode == "none") {
+			return errors.New("provider returned an unrequested legacy function call")
+		}
+		if _, ok := allowed[call.Name]; !ok {
+			return errors.New("provider returned an undeclared legacy function call")
+		}
+		if request.FunctionCall != nil && request.FunctionCall.Name != "" && call.Name != request.FunctionCall.Name {
+			return errors.New("provider returned a different legacy function call")
 		}
 	}
 	return nil

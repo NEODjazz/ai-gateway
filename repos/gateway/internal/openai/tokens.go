@@ -83,11 +83,13 @@ func EstimateContextTokens(value any) int {
 
 func ChatInputTokens(r ChatCompletionRequest) int {
 	return EstimateContextTokens(struct {
-		Messages   []Message       `json:"messages"`
-		Tools      []Tool          `json:"tools,omitempty"`
-		ToolChoice any             `json:"tool_choice,omitempty"`
-		Format     *ResponseFormat `json:"response_format,omitempty"`
-	}{r.Messages, r.Tools, r.ToolChoice, r.ResponseFormat})
+		Messages     []Message             `json:"messages"`
+		Functions    []FunctionDefinition  `json:"functions,omitempty"`
+		FunctionCall *LegacyFunctionChoice `json:"function_call,omitempty"`
+		Tools        []Tool                `json:"tools,omitempty"`
+		ToolChoice   any                   `json:"tool_choice,omitempty"`
+		Format       *ResponseFormat       `json:"response_format,omitempty"`
+	}{r.Messages, r.Functions, r.FunctionCall, r.Tools, r.ToolChoice, r.ResponseFormat})
 }
 
 func ResponseInputTokens(r ResponseRequest) int {

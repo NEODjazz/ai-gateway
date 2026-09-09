@@ -25,6 +25,9 @@ func rejectParameters(adapter string, checks ...parameterCheck) error {
 }
 
 func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectLegacyFunctionCalling("anthropic", request); err != nil {
+		return err
+	}
 	if err := validateChatPromptCacheBreakpoints("anthropic", request.Messages, false); err != nil {
 		return err
 	}
@@ -69,6 +72,9 @@ func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectLegacyFunctionCalling("ollama", request); err != nil {
+		return err
+	}
 	if err := validateChatPromptCacheBreakpoints("ollama", request.Messages, false); err != nil {
 		return err
 	}
@@ -176,6 +182,9 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 }
 
 func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectLegacyFunctionCalling("demo", request); err != nil {
+		return err
+	}
 	if err := validateChatPromptCacheBreakpoints("demo", request.Messages, false); err != nil {
 		return err
 	}
@@ -192,6 +201,9 @@ func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 }
 
 func (OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
+		return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "functions", Err: err}
+	}
 	if err := validateChatPromptCacheBreakpoints("openai-compatible", request.Messages, true); err != nil {
 		return err
 	}
@@ -212,6 +224,21 @@ func (OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequ
 		parameterCheck{"store", request.Store != nil && *request.Store},
 		parameterCheck{"service_tier", request.ServiceTier != ""},
 	)
+}
+
+func rejectLegacyFunctionCalling(adapter string, request openai.ChatCompletionRequest) error {
+	if err := rejectParameters(adapter,
+		parameterCheck{"functions", len(request.Functions) > 0},
+		parameterCheck{"function_call", request.FunctionCall != nil},
+	); err != nil {
+		return err
+	}
+	for _, message := range request.Messages {
+		if message.FunctionCall != nil || message.Role == "function" {
+			return rejectParameters(adapter, parameterCheck{"messages.function_call", true})
+		}
+	}
+	return nil
 }
 
 func validateChatPromptCacheBreakpoints(adapter string, messages []openai.Message, supported bool) error {

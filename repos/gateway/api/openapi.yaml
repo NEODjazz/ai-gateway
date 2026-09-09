@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.69
+  version: 0.1.70
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3199,6 +3199,13 @@ components:
       properties:
         name: {type: string, minLength: 1}
         arguments: {type: string}
+    LegacyFunctionCall:
+      type: object
+      additionalProperties: false
+      required: [name, arguments]
+      properties:
+        name: {type: string, pattern: '^[A-Za-z0-9_-]{1,64}$'}
+        arguments: {type: string, minLength: 1, maxLength: 1048576}
     ToolCallExtraContent:
       type: object
       additionalProperties: false
@@ -3223,7 +3230,7 @@ components:
       properties:
         role:
           type: string
-          enum: [system, developer, user, assistant, tool]
+          enum: [system, developer, user, assistant, tool, function]
         content: {$ref: '#/components/schemas/MessageContent'}
         refusal: {type: [string, 'null'], description: Model refusal content for assistant history and responses.}
         annotations:
@@ -3239,6 +3246,9 @@ components:
         tool_calls:
           type: array
           items: {$ref: '#/components/schemas/ToolCall'}
+        function_call:
+          $ref: '#/components/schemas/LegacyFunctionCall'
+          description: Legacy assistant function call. Supported by compatible deployments; native adapters reject it explicitly.
     ChatAnnotation:
       type: object
       additionalProperties: false
@@ -3295,6 +3305,17 @@ components:
       properties:
         type: {type: string, const: function}
         function: {$ref: '#/components/schemas/FunctionDefinition'}
+    LegacyFunctionDefinition:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, pattern: '^[A-Za-z0-9_-]{1,64}$'}
+        description: {type: string, maxLength: 4096}
+        parameters:
+          type: object
+          additionalProperties: true
+        strict: {type: boolean}
     JSONSchemaFormat:
       type: object
       additionalProperties: false
@@ -3331,6 +3352,20 @@ components:
           items: {$ref: '#/components/schemas/ChatTool'}
         tool_choice: {}
         parallel_tool_calls: {type: boolean}
+        functions:
+          type: array
+          maxItems: 128
+          items: {$ref: '#/components/schemas/LegacyFunctionDefinition'}
+          description: Legacy function declarations for compatible deployments. Mutually exclusive with tools.
+        function_call:
+          description: Legacy function selection. Mutually exclusive with tool_choice.
+          oneOf:
+            - {type: string, enum: [none, auto]}
+            - type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: {type: string, pattern: '^[A-Za-z0-9_-]{1,64}$'}
         response_format: {$ref: '#/components/schemas/ResponseFormat'}
         stream: {type: boolean, default: false}
         max_tokens: {type: integer, minimum: 1}

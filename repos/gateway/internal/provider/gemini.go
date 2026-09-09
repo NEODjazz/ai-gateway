@@ -127,6 +127,9 @@ func (g Gemini) Responses(context.Context, openai.ResponseRequest) (openai.Respo
 
 func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, error) {
 	result := geminiRequest{}
+	if err := rejectLegacyFunctionCalling("gemini", request); err != nil {
+		return result, err
+	}
 	if err := validateChatPromptCacheBreakpoints("gemini", request.Messages, false); err != nil {
 		return result, err
 	}

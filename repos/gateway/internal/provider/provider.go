@@ -1814,7 +1814,7 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	if stream {
 		required = append(required, "stream")
 	}
-	if len(request.Tools) > 0 {
+	if len(request.Tools) > 0 || openai.ChatRequiresFunctionCapability(request) {
 		required = append(required, "tools")
 	}
 	if request.ResponseFormat != nil {

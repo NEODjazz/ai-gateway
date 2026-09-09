@@ -128,13 +128,19 @@ func toolAllowed(tool string, grants []string) bool {
 	return modelAllowed(tool, grants)
 }
 
-func chatToolIdentifiers(tools []openai.Tool) ([]string, bool) {
-	identifiers := make([]string, 0, len(tools))
+func chatToolIdentifiers(tools []openai.Tool, functions []openai.FunctionDefinition) ([]string, bool) {
+	identifiers := make([]string, 0, len(tools)+len(functions))
 	for _, tool := range tools {
 		if tool.Type != "function" || strings.TrimSpace(tool.Function.Name) == "" {
 			return nil, false
 		}
 		identifiers = append(identifiers, tool.Function.Name)
+	}
+	for _, function := range functions {
+		if strings.TrimSpace(function.Name) == "" {
+			return nil, false
+		}
+		identifiers = append(identifiers, function.Name)
 	}
 	return identifiers, true
 }

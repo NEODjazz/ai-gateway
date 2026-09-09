@@ -149,6 +149,10 @@ func (h Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest) {
+	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
 	if message := request.ChatGenerationOptions.Validate(); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
@@ -211,7 +215,11 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 		return
 	}
 	request = reqCtx.Request
-	toolIdentifiers, validTools := chatToolIdentifiers(request.Tools)
+	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	toolIdentifiers, validTools := chatToolIdentifiers(request.Tools, request.Functions)
 	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) {
 		return
 	}
@@ -1155,11 +1163,12 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 				"index":    choice.Index,
 				"logprobs": choice.Logprobs,
 				"delta": map[string]any{
-					"role":       choice.Message.Role,
-					"content":    openai.ContentText(choice.Message.Content),
-					"refusal":    choice.Message.Refusal,
-					"audio":      choice.Message.Audio,
-					"tool_calls": calls,
+					"role":          choice.Message.Role,
+					"content":       openai.ContentText(choice.Message.Content),
+					"refusal":       choice.Message.Refusal,
+					"audio":         choice.Message.Audio,
+					"function_call": choice.Message.FunctionCall,
+					"tool_calls":    calls,
 				},
 				"finish_reason": nil,
 			},

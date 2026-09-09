@@ -87,10 +87,11 @@ func TestInferenceDecoderRejectsUnknownMessageField(t *testing.T) {
 func TestSyntheticChatStreamPreservesLogprobs(t *testing.T) {
 	response := httptest.NewRecorder()
 	refusal := "cannot help"
+	functionCall := &openai.FunctionCall{Name: "weather", Arguments: `{"city":"Moscow"}`}
 	audioData, audioTranscript, audioExpiry := "aGVsbG8=", "hello", int64(123)
 	writeChatCompletionStream(response, openai.ChatCompletionResponse{
 		ID: "chat-test", Created: 123, Model: "test", Metadata: map[string]string{"trace": "one"}, ServiceTier: "priority", SystemFingerprint: "fp-test",
-		Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "hello", Refusal: &refusal, Audio: &openai.ChatAudio{ID: "audio-1", Data: &audioData, Transcript: &audioTranscript, ExpiresAt: &audioExpiry}}, Logprobs: &openai.ChoiceLogprobs{Content: []openai.TokenLogprob{{Token: "hello", Logprob: -0.5}}}}},
+		Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "hello", Refusal: &refusal, Audio: &openai.ChatAudio{ID: "audio-1", Data: &audioData, Transcript: &audioTranscript, ExpiresAt: &audioExpiry}, FunctionCall: functionCall}, Logprobs: &openai.ChoiceLogprobs{Content: []openai.TokenLogprob{{Token: "hello", Logprob: -0.5}}}}},
 	}, &openai.ChatStreamOptions{IncludeUsage: true})
 	if !strings.Contains(response.Body.String(), `"logprobs":{"content":[{"token":"hello","logprob":-0.5`) {
 		t.Fatalf("synthetic SSE dropped logprobs: %s", response.Body.String())
@@ -100,6 +101,9 @@ func TestSyntheticChatStreamPreservesLogprobs(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), `"audio":{"id":"audio-1","data":"aGVsbG8=","expires_at":123,"transcript":"hello"}`) {
 		t.Fatalf("synthetic SSE dropped audio: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"function_call":{"name":"weather","arguments":"{\"city\":\"Moscow\"}"}`) {
+		t.Fatalf("synthetic SSE dropped legacy function call: %s", response.Body.String())
 	}
 	for _, field := range []string{`"metadata":{"trace":"one"}`, `"service_tier":"priority"`, `"system_fingerprint":"fp-test"`} {
 		if !strings.Contains(response.Body.String(), field) {

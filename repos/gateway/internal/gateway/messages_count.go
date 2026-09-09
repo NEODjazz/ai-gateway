@@ -78,7 +78,7 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 		return 0, false
 	}
 	request = req.Request
-	tools, valid := chatToolIdentifiers(request.Tools)
+	tools, valid := chatToolIdentifiers(request.Tools, nil)
 	if !h.authorizeTools(w, req, tools, valid) || !h.authorizeAccess(w, r.Context(), req, request.Model, openai.ChatInputTokens(request)) {
 		return 0, false
 	}

@@ -146,6 +146,22 @@ func TestChatToolACLAllowsWildcardAndRejectsUnscopedTool(t *testing.T) {
 	}
 }
 
+func TestLegacyChatFunctionACLUsesDeclaredNames(t *testing.T) {
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"weather"}}}), &chatProvider{})
+	allowed := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[{"role":"user","content":"weather"}],"functions":[{"name":"weather"}],"function_call":{"name":"weather"}}`))
+	allowedResponse := httptest.NewRecorder()
+	handler.ChatCompletions(allowedResponse, allowed)
+	if allowedResponse.Code != http.StatusOK {
+		t.Fatalf("allowed legacy function rejected: status=%d body=%s", allowedResponse.Code, allowedResponse.Body.String())
+	}
+	denied := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[{"role":"user","content":"mail"}],"functions":[{"name":"send_mail"}],"function_call":"auto"}`))
+	deniedResponse := httptest.NewRecorder()
+	handler.ChatCompletions(deniedResponse, denied)
+	if deniedResponse.Code != http.StatusForbidden || !strings.Contains(deniedResponse.Body.String(), "tool_not_allowed") {
+		t.Fatalf("unscoped legacy function accepted: status=%d body=%s", deniedResponse.Code, deniedResponse.Body.String())
+	}
+}
+
 func TestResponsesMCPACLUsesServerIdentity(t *testing.T) {
 	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"mcp:weather-prod@https://mcp.example.test"}}}), &chatProvider{})
 	allowed := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test","input":"weather","tools":[{"type":"mcp","server_label":"weather-prod","server_url":"https://mcp.example.test"}]}`))

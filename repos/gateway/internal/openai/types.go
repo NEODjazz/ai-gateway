@@ -13,21 +13,23 @@ type ChatCompletionRequest struct {
 	// RequireMatchedStop is an internal protocol requirement, never client JSON.
 	RequireMatchedStop bool `json:"-"`
 	ChatGenerationOptions
-	Provider            string             `json:"provider,omitempty"`
-	Model               string             `json:"model"`
-	Messages            []Message          `json:"messages"`
-	Tools               []Tool             `json:"tools,omitempty"`
-	ToolChoice          any                `json:"tool_choice,omitempty"`
-	ParallelToolCalls   *bool              `json:"parallel_tool_calls,omitempty"`
-	ResponseFormat      *ResponseFormat    `json:"response_format,omitempty"`
-	Stream              bool               `json:"stream,omitempty"`
-	StreamOptions       *ChatStreamOptions `json:"stream_options,omitempty"`
-	MaxTokens           *int               `json:"max_tokens,omitempty"`
-	MaxCompletionTokens *int               `json:"max_completion_tokens,omitempty"`
-	Temperature         *float64           `json:"temperature,omitempty"`
-	TopP                *float64           `json:"top_p,omitempty"`
-	Stop                any                `json:"stop,omitempty"`
-	Seed                *int64             `json:"seed,omitempty"`
+	Provider            string                `json:"provider,omitempty"`
+	Model               string                `json:"model"`
+	Messages            []Message             `json:"messages"`
+	Functions           []FunctionDefinition  `json:"functions,omitempty"`
+	FunctionCall        *LegacyFunctionChoice `json:"function_call,omitempty"`
+	Tools               []Tool                `json:"tools,omitempty"`
+	ToolChoice          any                   `json:"tool_choice,omitempty"`
+	ParallelToolCalls   *bool                 `json:"parallel_tool_calls,omitempty"`
+	ResponseFormat      *ResponseFormat       `json:"response_format,omitempty"`
+	Stream              bool                  `json:"stream,omitempty"`
+	StreamOptions       *ChatStreamOptions    `json:"stream_options,omitempty"`
+	MaxTokens           *int                  `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int                  `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64              `json:"temperature,omitempty"`
+	TopP                *float64              `json:"top_p,omitempty"`
+	Stop                any                   `json:"stop,omitempty"`
+	Seed                *int64                `json:"seed,omitempty"`
 }
 
 type ChatStreamOptions struct {
@@ -36,14 +38,50 @@ type ChatStreamOptions struct {
 }
 
 type Message struct {
-	Role        string           `json:"role"`
-	Content     any              `json:"content"`
-	Refusal     *string          `json:"refusal,omitempty"`
-	Annotations []ChatAnnotation `json:"annotations,omitempty"`
-	Audio       *ChatAudio       `json:"audio,omitempty"`
-	Name        string           `json:"name,omitempty"`
-	ToolCallID  string           `json:"tool_call_id,omitempty"`
-	ToolCalls   []ToolCall       `json:"tool_calls,omitempty"`
+	Role         string           `json:"role"`
+	Content      any              `json:"content"`
+	Refusal      *string          `json:"refusal,omitempty"`
+	Annotations  []ChatAnnotation `json:"annotations,omitempty"`
+	Audio        *ChatAudio       `json:"audio,omitempty"`
+	Name         string           `json:"name,omitempty"`
+	ToolCallID   string           `json:"tool_call_id,omitempty"`
+	ToolCalls    []ToolCall       `json:"tool_calls,omitempty"`
+	FunctionCall *FunctionCall    `json:"function_call,omitempty"`
+}
+
+type LegacyFunctionChoice struct {
+	Mode string
+	Name string
+}
+
+func (c *LegacyFunctionChoice) UnmarshalJSON(data []byte) error {
+	var mode string
+	if json.Unmarshal(data, &mode) == nil {
+		if mode != "none" && mode != "auto" {
+			return errors.New("function_call must be none, auto, or a named function")
+		}
+		c.Mode, c.Name = mode, ""
+		return nil
+	}
+	var named struct {
+		Name string `json:"name"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&named); err != nil || strings.TrimSpace(named.Name) == "" {
+		return errors.New("function_call must be none, auto, or a named function")
+	}
+	c.Mode, c.Name = "", named.Name
+	return nil
+}
+
+func (c LegacyFunctionChoice) MarshalJSON() ([]byte, error) {
+	if c.Name != "" {
+		return json.Marshal(struct {
+			Name string `json:"name"`
+		}{c.Name})
+	}
+	return json.Marshal(c.Mode)
 }
 
 type ChatAnnotation struct {
