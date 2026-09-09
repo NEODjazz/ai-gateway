@@ -40,7 +40,7 @@ upstream. Распознаваемые параметры перечислены
 | `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
 | `/v1/responses/compact` | `provider`, `model`, `input`, `instructions` |
-| `/v1/embeddings` | `provider`, `model`, `input`, `encoding_format`, `dimensions`, `user` |
+| `/v1/embeddings` | `provider`, `model`, `input`, `input_type`, `encoding_format`, `dimensions`, `user` |
 | `/v1/rerank` | `provider`, `model`, `query`, `documents`, `top_n`, `rank_fields`, `return_documents`, `max_chunks_per_doc`, `max_tokens_per_doc` |
 
 Матрица описывает входной контракт gateway; возможности конкретной модели и
@@ -59,6 +59,18 @@ gateway response projection and is not forwarded. Responses are limited to
 8 MiB, reject trailing JSON, invalid indices, non-finite scores, and negative
 token or billed-unit counters. Search units remain observable provider usage;
 token-based catalog pricing continues to use the existing bounded input estimate.
+
+The same provider type implements native text embeddings through `/v2/embed`.
+Requests require one of `search_document`, `search_query`, `classification` or
+`clustering` in `input_type` and accept at most 96 non-empty texts. Token-ID
+input and `user` are rejected before the upstream call. `dimensions` maps to
+the native output dimension and is restricted to 256, 512, 1024 or 1536.
+Float vectors are validated for count, consistent dimensions and finite values;
+`encoding_format: base64` is encoded locally from the validated float response.
+Provider-reported billed input tokens take precedence over the bounded local
+estimate, including an explicitly reported zero, and flow into post-response
+billing. Model discovery includes non-deprecated models advertising either the
+native Embed or Rerank endpoint.
 
 Provider type `mistral` uses the compatible Chat and Embeddings transports and
 implements text completion as native FIM at

@@ -16,7 +16,7 @@ func TestManagedCohereDiscoveryUsesScopedCredentialAndFiltersModels(t *testing.T
 		if r.Method != http.MethodGet || r.URL.Path != "/proxy/v1/models" || r.Header.Get("Authorization") != "Bearer test-secret" {
 			t.Errorf("unexpected discovery request: %s %s", r.Method, r.URL.Path)
 		}
-		_, _ = fmt.Fprint(w, `{"models":[{"name":"rerank-z","endpoints":["rerank"]},{"name":"chat","endpoints":["chat"]},{"name":"rerank-old","is_deprecated":true,"endpoints":["rerank"]},{"name":"rerank-a","endpoints":["rerank"]}]}`)
+		_, _ = fmt.Fprint(w, `{"models":[{"name":"rerank-z","endpoints":["rerank"]},{"name":"embed-a","endpoints":["embed"]},{"name":"chat","endpoints":["chat"]},{"name":"rerank-old","is_deprecated":true,"endpoints":["rerank"]},{"name":"rerank-a","endpoints":["rerank"]}]}`)
 	}))
 	defer server.Close()
 	router := New(Config{CredentialEncryptionKey: []byte("cohere-discovery-key")}).(*Router)
@@ -29,7 +29,7 @@ func TestManagedCohereDiscoveryUsesScopedCredentialAndFiltersModels(t *testing.T
 		}
 	}
 	models, err := router.DiscoverProviderModels(context.Background(), "native", "native-key")
-	if err != nil || len(models) != 2 || models[0].ID != "rerank-a" || models[1].ID != "rerank-z" || calls.Load() != 1 {
+	if err != nil || len(models) != 3 || models[0].ID != "embed-a" || models[1].ID != "rerank-a" || models[2].ID != "rerank-z" || calls.Load() != 1 {
 		t.Fatalf("models=%v calls=%d err=%v", models, calls.Load(), err)
 	}
 	if _, err := router.DiscoverProviderModels(context.Background(), "native", "other-key"); err == nil {

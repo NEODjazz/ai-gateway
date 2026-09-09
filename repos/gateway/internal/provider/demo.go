@@ -13,6 +13,9 @@ import (
 type Demo struct{}
 
 func (Demo) Embeddings(_ context.Context, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
+	if err := (Demo{}).ValidateEmbeddingParameters(request); err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
 	inputs, ok := openai.EmbeddingInputStrings(request.Input)
 	if !ok {
 		return openai.EmbeddingResponse{}, fmt.Errorf("invalid embedding input")

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.77
+  version: 0.1.78
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4061,6 +4061,7 @@ components:
                 minItems: 1
                 maxItems: 8192
                 items: {type: integer, minimum: 0, maximum: 2147483647}
+        input_type: {type: string, enum: [search_document, search_query, classification, clustering], description: Required by the native Cohere embedding adapter and rejected by adapters that do not support it.}
         encoding_format: {type: string, enum: [float, base64]}
         dimensions: {type: integer, minimum: 1}
         user: {type: string}

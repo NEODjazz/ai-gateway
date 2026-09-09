@@ -18,7 +18,7 @@ import (
 const maxGeminiEmbeddingInputs = 100
 
 func (Gemini) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
-	if err := rejectParameters("gemini", parameterCheck{"user", request.User != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"}); err != nil {
+	if err := rejectParameters("gemini", parameterCheck{"input_type", request.InputType != ""}, parameterCheck{"user", request.User != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"}); err != nil {
 		return err
 	}
 	input, err := openai.InspectEmbeddingInput(request.Input)

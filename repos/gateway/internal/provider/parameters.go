@@ -119,12 +119,16 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 
 func (Ollama) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
 	input, err := openai.InspectEmbeddingInput(request.Input)
-	return rejectParameters("ollama", parameterCheck{"input", err != nil || input.Tokenized()}, parameterCheck{"user", request.User != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"})
+	return rejectParameters("ollama", parameterCheck{"input", err != nil || input.Tokenized()}, parameterCheck{"input_type", request.InputType != ""}, parameterCheck{"user", request.User != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"})
 }
 
 func (Demo) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
 	input, err := openai.InspectEmbeddingInput(request.Input)
-	return rejectParameters("demo", parameterCheck{"input", err != nil || input.Tokenized()}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"})
+	return rejectParameters("demo", parameterCheck{"input", err != nil || input.Tokenized()}, parameterCheck{"input_type", request.InputType != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"})
+}
+
+func (OpenAICompatible) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
+	return rejectParameters("openai-compatible", parameterCheck{"input_type", request.InputType != ""})
 }
 
 func validateChatAdapter(client Client, request openai.ChatCompletionRequest) error {

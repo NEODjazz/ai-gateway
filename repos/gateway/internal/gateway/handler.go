@@ -793,6 +793,10 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "encoding_format must be float or base64")
 		return
 	}
+	if request.InputType != "" && request.InputType != "search_document" && request.InputType != "search_query" && request.InputType != "classification" && request.InputType != "clustering" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "input_type is invalid")
+		return
+	}
 	if request.Dimensions != nil && *request.Dimensions <= 0 {
 		writeError(w, http.StatusBadRequest, "invalid_request", "dimensions must be positive")
 		return

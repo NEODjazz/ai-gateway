@@ -196,7 +196,7 @@ func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredMod
 			return nil, err
 		}
 		for _, item := range body.Models {
-			if item.Deprecated || !containsString(item.Endpoints, "rerank") {
+			if item.Deprecated || (!containsString(item.Endpoints, "rerank") && !containsString(item.Endpoints, "embed")) {
 				continue
 			}
 			ids = append(ids, item.Name)

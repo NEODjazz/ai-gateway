@@ -503,6 +503,9 @@ func validateRequestedChatChoices(request openai.ChatCompletionRequest, response
 }
 
 func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
+	if err := p.ValidateEmbeddingParameters(request); err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
 	body, err := json.Marshal(openAICompatibleEmbeddingRequest{
 		Model: request.Model, Input: request.Input, EncodingFormat: request.EncodingFormat,
 		Dimensions: request.Dimensions, User: request.User,
