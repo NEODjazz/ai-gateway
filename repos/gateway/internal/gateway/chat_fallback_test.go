@@ -38,7 +38,7 @@ func TestChatFallbackStreamPreservesToolsAndUsage(t *testing.T) {
 		Usage: openai.Usage{PromptTokens: 20, CompletionTokens: 7, TotalTokens: 27, PromptTokensDetails: &openai.PromptTokenDetails{CachedTokens: 5}},
 	}}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
-	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"Weather?"}]}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"Weather?"}]}`))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "text/event-stream" {

@@ -64,6 +64,9 @@ type generatePart struct {
 
 func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionRequest, error) {
 	result := openai.ChatCompletionRequest{Model: model, Stream: stream, MaxCompletionTokens: r.Generation.MaxOutputTokens, Temperature: r.Generation.Temperature, TopP: r.Generation.TopP, Seed: r.Generation.Seed}
+	if stream {
+		result.StreamOptions = &openai.ChatStreamOptions{IncludeUsage: true}
+	}
 	fail := func(field string) (openai.ChatCompletionRequest, error) {
 		return result, fmt.Errorf("invalid or unsupported %s", field)
 	}

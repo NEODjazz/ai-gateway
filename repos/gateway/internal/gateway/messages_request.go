@@ -56,6 +56,9 @@ func (request messagesRequest) chat() (openai.ChatCompletionRequest, error) {
 
 func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatCompletionRequest, error) {
 	result := openai.ChatCompletionRequest{Model: request.Model, MaxTokens: &request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP, Stream: request.Stream}
+	if request.Stream {
+		result.StreamOptions = &openai.ChatStreamOptions{IncludeUsage: true}
+	}
 	if len(request.StopSequences) > 0 {
 		if _, valid := openai.StopSequences(request.StopSequences); !valid {
 			return result, errors.New("stop_sequences must contain 1–4 non-empty strings")

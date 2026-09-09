@@ -10,20 +10,25 @@ type ChatCompletionRequest struct {
 	// RequireMatchedStop is an internal protocol requirement, never client JSON.
 	RequireMatchedStop bool `json:"-"`
 	ChatGenerationOptions
-	Provider            string          `json:"provider,omitempty"`
-	Model               string          `json:"model"`
-	Messages            []Message       `json:"messages"`
-	Tools               []Tool          `json:"tools,omitempty"`
-	ToolChoice          any             `json:"tool_choice,omitempty"`
-	ParallelToolCalls   *bool           `json:"parallel_tool_calls,omitempty"`
-	ResponseFormat      *ResponseFormat `json:"response_format,omitempty"`
-	Stream              bool            `json:"stream,omitempty"`
-	MaxTokens           *int            `json:"max_tokens,omitempty"`
-	MaxCompletionTokens *int            `json:"max_completion_tokens,omitempty"`
-	Temperature         *float64        `json:"temperature,omitempty"`
-	TopP                *float64        `json:"top_p,omitempty"`
-	Stop                any             `json:"stop,omitempty"`
-	Seed                *int64          `json:"seed,omitempty"`
+	Provider            string             `json:"provider,omitempty"`
+	Model               string             `json:"model"`
+	Messages            []Message          `json:"messages"`
+	Tools               []Tool             `json:"tools,omitempty"`
+	ToolChoice          any                `json:"tool_choice,omitempty"`
+	ParallelToolCalls   *bool              `json:"parallel_tool_calls,omitempty"`
+	ResponseFormat      *ResponseFormat    `json:"response_format,omitempty"`
+	Stream              bool               `json:"stream,omitempty"`
+	StreamOptions       *ChatStreamOptions `json:"stream_options,omitempty"`
+	MaxTokens           *int               `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int               `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64           `json:"temperature,omitempty"`
+	TopP                *float64           `json:"top_p,omitempty"`
+	Stop                any                `json:"stop,omitempty"`
+	Seed                *int64             `json:"seed,omitempty"`
+}
+
+type ChatStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type Message struct {

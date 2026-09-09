@@ -89,7 +89,7 @@ func TestSyntheticChatStreamPreservesLogprobs(t *testing.T) {
 	writeChatCompletionStream(response, openai.ChatCompletionResponse{
 		ID: "chat-test", Created: 123, Model: "test", Metadata: map[string]string{"trace": "one"}, ServiceTier: "priority", SystemFingerprint: "fp-test",
 		Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "hello"}, Logprobs: &openai.ChoiceLogprobs{Content: []openai.TokenLogprob{{Token: "hello", Logprob: -0.5}}}}},
-	})
+	}, true)
 	if !strings.Contains(response.Body.String(), `"logprobs":{"content":[{"token":"hello","logprob":-0.5`) {
 		t.Fatalf("synthetic SSE dropped logprobs: %s", response.Body.String())
 	}
@@ -100,6 +100,18 @@ func TestSyntheticChatStreamPreservesLogprobs(t *testing.T) {
 	}
 	if count := strings.Count(response.Body.String(), `"created":123`); count != 3 {
 		t.Fatalf("synthetic SSE did not reuse the upstream timestamp in every event: count=%d body=%s", count, response.Body.String())
+	}
+}
+
+func TestChatStreamUsageFilterRemovesNullAndFinalUsage(t *testing.T) {
+	for _, payload := range []string{
+		`{"choices":[{"index":0}],"usage":null}`,
+		`{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`,
+	} {
+		filtered, _, deliver := filterChatStreamUsage(payload, false)
+		if deliver && strings.Contains(filtered, `"usage"`) {
+			t.Fatalf("usage leaked to an unrequested stream: %s", filtered)
+		}
 	}
 }
 
@@ -116,6 +128,7 @@ func TestChatRejectsInvalidGenerationOptionsBeforePipeline(t *testing.T) {
 		{`{"model":"test","messages":[],"prompt_cache_retention":"1h"}`, "prompt_cache_retention must be in_memory or 24h"},
 		{`{"model":"test","messages":[],"prediction":{"type":"other","content":"expected"}}`, "prediction.type must be content"},
 		{`{"model":"test","messages":[],"prediction":{"type":"content","content":[{"type":"text","text":"x","extra":true}]}}`, "prediction.content must be text or an array of text parts"},
+		{`{"model":"test","messages":[],"stream_options":{"include_usage":true}}`, "stream_options requires stream=true"},
 		{`{"model":"test","messages":[{"role":"user","content":[{"type":"text","text":"x","prompt_cache_breakpoint":{"mode":"implicit"}}]}]}`, "prompt_cache_breakpoint.mode must be explicit"},
 		{`{"model":"test","messages":[{"role":"user","content":[{"type":"text","text":"1","prompt_cache_breakpoint":{"mode":"explicit"}},{"type":"text","text":"2","prompt_cache_breakpoint":{"mode":"explicit"}},{"type":"text","text":"3","prompt_cache_breakpoint":{"mode":"explicit"}},{"type":"text","text":"4","prompt_cache_breakpoint":{"mode":"explicit"}},{"type":"text","text":"5","prompt_cache_breakpoint":{"mode":"explicit"}}]}]}`, "at most 4 prompt_cache_breakpoint values are allowed"},
 	} {

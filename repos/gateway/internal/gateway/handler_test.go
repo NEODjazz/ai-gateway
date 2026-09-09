@@ -547,6 +547,9 @@ func (p *streamingChatProvider) StreamChatCompletions(_ context.Context, req mod
 	if err := write(`{"id":"chatcmpl-test","object":"chat.completion.chunk","model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":"hello live"},"finish_reason":null}]}`); err != nil {
 		return openai.ChatCompletionResponse{}, true, err
 	}
+	if err := write(`{"id":"chatcmpl-test","object":"chat.completion.chunk","model":"test-model","choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`); err != nil {
+		return openai.ChatCompletionResponse{}, true, err
+	}
 	return openai.ChatCompletionResponse{
 		ID:     "chatcmpl-test",
 		Object: "chat.completion",
@@ -554,6 +557,7 @@ func (p *streamingChatProvider) StreamChatCompletions(_ context.Context, req mod
 		Choices: []openai.Choice{
 			{Index: 0, Message: openai.Message{Role: "assistant", Content: "hello live"}, FinishReason: "stop"},
 		},
+		Usage: openai.Usage{PromptTokens: 2, CompletionTokens: 1, TotalTokens: 3},
 	}, true, nil
 }
 
@@ -1069,6 +1073,21 @@ func TestChatCompletionsStreamsOpenAICompatibleEvents(t *testing.T) {
 	}
 	if provider.request.Request.Stream {
 		t.Fatal("expected upstream provider request to be non-streaming")
+	}
+	if strings.Contains(body, `"usage"`) {
+		t.Fatalf("usage was emitted without stream_options.include_usage: %s", body)
+	}
+}
+
+func TestChatCompletionsEmitsRequestedStreamUsage(t *testing.T) {
+	provider := &streamingChatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), provider))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || strings.Count(recorder.Body.String(), `"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3`) != 1 {
+		t.Fatalf("requested usage chunk was not emitted exactly once: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 

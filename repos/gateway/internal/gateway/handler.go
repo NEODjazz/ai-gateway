@@ -161,6 +161,10 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 		writeError(w, http.StatusBadRequest, "invalid_request", "max_tokens and max_completion_tokens are mutually exclusive")
 		return
 	}
+	if request.StreamOptions != nil && !request.Stream {
+		writeError(w, http.StatusBadRequest, "invalid_request", "stream_options requires stream=true")
+		return
+	}
 
 	if (request.MaxTokens != nil && *request.MaxTokens <= 0) || (request.MaxCompletionTokens != nil && *request.MaxCompletionTokens <= 0) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "output token limit must be positive")
@@ -203,7 +207,14 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 	}
 	if stream {
 		streamStarted := false
+		includeUsage := request.StreamOptions != nil && request.StreamOptions.IncludeUsage
+		usageDelivered := false
 		writeStreamPayload := func(payload string) error {
+			payload, hasUsage, deliver := filterChatStreamUsage(payload, includeUsage)
+			usageDelivered = usageDelivered || hasUsage && deliver
+			if !deliver {
+				return nil
+			}
 			if !streamStarted {
 				writeStreamHeaders(w)
 				w.WriteHeader(http.StatusOK)
@@ -226,6 +237,9 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 			}); ok {
 				sink.chatStreamResult(response)
 			}
+			if includeUsage && !usageDelivered {
+				_ = writeStreamPayload(chatCompletionUsagePayload(response))
+			}
 			writeSSEDone(w)
 			return
 		} else if err != nil {
@@ -242,7 +256,7 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 	}
 
 	if stream {
-		writeChatCompletionStream(w, response)
+		writeChatCompletionStream(w, response, request.StreamOptions != nil && request.StreamOptions.IncludeUsage)
 		return
 	}
 
@@ -1088,7 +1102,7 @@ func writeError(w http.ResponseWriter, status int, code string, message string) 
 	})
 }
 
-func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatCompletionResponse) {
+func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatCompletionResponse, includeUsage bool) {
 	writeStreamHeaders(w)
 	w.WriteHeader(http.StatusOK)
 	created := response.Created
@@ -1142,11 +1156,54 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 		writeSSE(w, finished)
 	}
 
-	usage := envelope()
-	usage["choices"] = []any{}
-	usage["usage"] = response.Usage
-	writeSSE(w, usage)
+	if includeUsage {
+		writeSSEPayload(w, chatCompletionUsagePayload(response))
+	}
 	writeSSEDone(w)
+}
+
+func filterChatStreamUsage(payload string, includeUsage bool) (string, bool, bool) {
+	var chunk map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+		return payload, false, true
+	}
+	usage, usagePresent := chunk["usage"]
+	hasUsage := usagePresent && string(usage) != "null"
+	if includeUsage || !usagePresent {
+		return payload, hasUsage, true
+	}
+	delete(chunk, "usage")
+	var choices []json.RawMessage
+	if raw, ok := chunk["choices"]; ok && json.Unmarshal(raw, &choices) == nil && len(choices) == 0 {
+		return "", true, false
+	}
+	filtered, err := json.Marshal(chunk)
+	if err != nil {
+		return payload, true, true
+	}
+	return string(filtered), true, true
+}
+
+func chatCompletionUsagePayload(response openai.ChatCompletionResponse) string {
+	created := response.Created
+	if created == 0 {
+		created = time.Now().UTC().Unix()
+	}
+	payload := map[string]any{"id": response.ID, "object": "chat.completion.chunk", "model": response.Model, "created": created, "choices": []any{}, "usage": response.Usage}
+	if len(response.Metadata) > 0 {
+		payload["metadata"] = response.Metadata
+	}
+	if response.ServiceTier != "" {
+		payload["service_tier"] = response.ServiceTier
+	}
+	if response.SystemFingerprint != "" {
+		payload["system_fingerprint"] = response.SystemFingerprint
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "{}"
+	}
+	return string(encoded)
 }
 
 func writeCompletionStream(w http.ResponseWriter, response openai.CompletionResponse) {
