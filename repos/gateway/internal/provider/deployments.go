@@ -311,7 +311,7 @@ func containsDeployment(values []string, expected string) bool {
 }
 
 func (r *Router) validateDeployment(deployment ModelDeployment) error {
-	if strings.TrimSpace(deployment.ID) == "" || len(deployment.ID) > 128 || strings.TrimSpace(deployment.ProviderID) == "" || len(deployment.ProviderID) > 128 || len(deployment.CredentialID) > 128 || len(deployment.UpstreamModel) > 256 || deployment.Priority < 0 || deployment.Weight < 0 || len(deployment.Models) == 0 || len(deployment.Models) > 128 || !validDeploymentStrings(deployment.Models) || !validDeploymentStrings(deployment.Capabilities) || len(deployment.GuardrailPolicy) > 128 || !validDeploymentOperations(deployment) {
+	if strings.TrimSpace(deployment.ID) == "" || len(deployment.ID) > 128 || strings.TrimSpace(deployment.ProviderID) == "" || len(deployment.ProviderID) > 128 || len(deployment.CredentialID) > 128 || len(deployment.UpstreamModel) > 256 || deployment.Priority < 0 || deployment.Weight < 0 || len(deployment.Models) == 0 || len(deployment.Models) > 128 || !validDeploymentStrings(deployment.Models) || !validDeploymentCapabilities(deployment.Capabilities) || len(deployment.GuardrailPolicy) > 128 || !validDeploymentOperations(deployment) {
 		return ErrInvalidDeployment
 	}
 	if deployment.CredentialID != "" {
@@ -320,6 +320,21 @@ func (r *Router) validateDeployment(deployment ModelDeployment) error {
 		}
 	}
 	return nil
+}
+
+func validDeploymentCapabilities(capabilities []string) bool {
+	allowed := map[string]bool{
+		"chat": true, "responses": true, "embeddings": true, "rerank": true,
+		"stream": true, "tools": true, "structured_output": true, "mcp": true, "vision": true,
+	}
+	seen := make(map[string]bool, len(capabilities))
+	for _, capability := range capabilities {
+		if !allowed[capability] || seen[capability] {
+			return false
+		}
+		seen[capability] = true
+	}
+	return true
 }
 
 func validDeploymentOperations(deployment ModelDeployment) bool {

@@ -69,6 +69,14 @@ func TestAdminModelDeploymentLifecycle(t *testing.T) {
 	if list.Code != http.StatusOK || strings.Contains(list.Body.String(), "base_url") || strings.Contains(list.Body.String(), "api_key") {
 		t.Fatalf("unsafe deployment list: status=%d body=%s", list.Code, list.Body.String())
 	}
+	for _, capabilities := range []string{`["embedding"]`, `["chat","chat"]`} {
+		invalid := httptest.NewRecorder()
+		body := `{"models":["m2"],"capabilities":` + capabilities + `,"enabled":true}`
+		Routes(handler).ServeHTTP(invalid, httptest.NewRequest(http.MethodPut, "/admin/v1/model-deployments/safe-endpoint", strings.NewReader(body)))
+		if invalid.Code != http.StatusBadRequest {
+			t.Fatalf("invalid deployment capabilities accepted: capabilities=%s status=%d body=%s", capabilities, invalid.Code, invalid.Body.String())
+		}
+	}
 	update := httptest.NewRecorder()
 	Routes(handler).ServeHTTP(update, httptest.NewRequest(http.MethodPut, "/admin/v1/model-deployments/safe-endpoint", strings.NewReader(`{"models":["m2"],"capabilities":["chat"],"priority":2,"weight":3,"enabled":true}`)))
 	if update.Code != http.StatusOK || !strings.Contains(update.Body.String(), `"models":["m2"]`) {
