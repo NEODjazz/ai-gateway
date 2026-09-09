@@ -60,6 +60,16 @@ gateway response projection and is not forwarded. Responses are limited to
 token or billed-unit counters. Search units remain observable provider usage;
 token-based catalog pricing continues to use the existing bounded input estimate.
 
+Provider type `mistral` uses the compatible Chat and Embeddings transports and
+implements text completion as native FIM at
+`/v1/fim/completions`. The FIM adapter accepts one string prompt, `suffix`,
+`max_tokens`, `seed` (sent as `random_seed`), `stop`, `temperature`, `top_p`,
+and JSON or SSE execution. It normalizes the provider's chat-shaped FIM result
+to the public text-completion response, requires stable stream identity and a
+terminal `[DONE]`, validates final usage, and rejects unsupported legacy fields
+before an upstream call. Managed model discovery uses `/v1/models` with a
+provider-scoped Bearer credential.
+
 `/v1/completions` следует legacy [text completion contract](https://developers.openai.com/api/reference/java/resources/completions/methods/create).
 Gateway принимает строку, массив строк, массив token IDs или массив массивов
 token IDs и передает параметры только адаптеру с native completion operation.

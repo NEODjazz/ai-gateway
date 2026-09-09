@@ -66,6 +66,7 @@ describe("ModelOnboardingPage", () => {
     await screen.findByRole("option", { name: "+ Create provider" });
     await userEvent.selectOptions(screen.getByLabelText("Provider"), "__new");
     expect(screen.getByRole("option", { name: "cohere" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "mistral" })).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Provider type"), "gemini");
     expect(screen.getByLabelText("Provider type")).toHaveValue("gemini");
   });

@@ -2062,6 +2062,8 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 		return NewAnthropic(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "cohere":
 		return NewCohere(endpoint.BaseURL, endpoint.APIKey)
+	case "mistral":
+		return NewMistral(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "demo":
 		return Demo{}
 	default:
