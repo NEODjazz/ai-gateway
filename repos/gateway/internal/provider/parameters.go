@@ -125,6 +125,7 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 	return rejectParameters(adapter,
 		parameterCheck{"reasoning_effort", options.ReasoningEffort != ""},
 		parameterCheck{"n", options.N != nil},
+		parameterCheck{"safety_identifier", options.SafetyIdentifier != ""},
 		parameterCheck{"logprobs", options.Logprobs != nil},
 		parameterCheck{"top_logprobs", options.TopLogprobs != nil},
 		parameterCheck{"frequency_penalty", options.FrequencyPenalty != nil},

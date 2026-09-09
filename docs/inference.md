@@ -34,7 +34,7 @@ upstream. Новые поддерживаемые параметры переч�
 
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
-| `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
+| `/v1/chat/completions` | `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `reasoning_effort`, `n`, `safety_identifier`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `logit_bias` |
 | `/v1/completions` | `provider`, `model`, `prompt`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `n`, `presence_penalty`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
 | `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
@@ -179,6 +179,11 @@ prompt/completion отклоняются до cache, billing и доставки
 `n` принимает от 1 до 128 choices для OpenAI-compatible adapter. TPM и budget
 reserve умножают per-choice output limit (включая default reserve) на `n` с
 насыщением при переполнении. Native adapters отклоняют `n` до provider modules.
+
+`safety_identifier` передается OpenAI-compatible adapter и ограничен 64 Unicode
+characters. Он входит в exact и semantic cache keys, но не заменяет
+аутентифицированные `user_id`/credential identity в billing. Native adapters
+возвращают явный `unsupported_parameter`.
 
 OpenAI-compatible chat передаёт `reasoning_effort`, `logprobs`, `top_logprobs`,
 `frequency_penalty`, `presence_penalty` и `logit_bias` в обычном и streaming flow.

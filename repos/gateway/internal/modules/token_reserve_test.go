@@ -29,3 +29,10 @@ func TestBillingReserveIncludesEveryChatChoice(t *testing.T) {
 		t.Fatalf("multi-choice output was not fully reserved: %+v", reserved)
 	}
 }
+
+func TestChatSafetyIdentifierDoesNotReplaceBillingIdentity(t *testing.T) {
+	req := RequestContext{UserID: "authenticated-user", Request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{SafetyIdentifier: "provider-user"}}}
+	if reserved := billingRequest(&req); reserved.UserID != "authenticated-user" {
+		t.Fatalf("request identifier replaced billing identity: %+v", reserved)
+	}
+}

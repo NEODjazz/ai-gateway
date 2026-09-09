@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -11,9 +12,12 @@ func TestChatGenerationOptionValidation(t *testing.T) {
 		valid bool
 	}{
 		{`{}`, true},
-		{`{"reasoning_effort":"high","n":2,"logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-2,"logit_bias":{"10":-100}}`, true},
+		{`{"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-2,"logit_bias":{"10":-100}}`, true},
 		{`{"n":0}`, false},
 		{`{"n":129}`, false},
+		{`{"safety_identifier":"` + strings.Repeat("я", 64) + `"}`, true},
+		{`{"safety_identifier":"` + strings.Repeat("я", 65) + `"}`, false},
+		{`{"safety_identifier":"` + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" + `"}`, false},
 		{`{"reasoning_effort":"unexpected"}`, false},
 		{`{"logprobs":true,"top_logprobs":21}`, false},
 		{`{"logprobs":true,"top_logprobs":-1}`, false},

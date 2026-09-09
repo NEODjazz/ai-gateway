@@ -82,6 +82,7 @@ func TestChatRejectsInvalidGenerationOptionsBeforePipeline(t *testing.T) {
 	for _, test := range []struct{ body, message string }{
 		{`{"model":"test","messages":[],"top_logprobs":2}`, "requires logprobs=true"},
 		{`{"model":"test","messages":[],"n":0}`, "n must be between 1 and 128"},
+		{`{"model":"test","messages":[],"safety_identifier":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, "at most 64 characters"},
 	} {
 		access := &countingAccessModule{}
 		handler := NewHandler(modules.NewPipeline([]modules.Module{access}), &chatProvider{})

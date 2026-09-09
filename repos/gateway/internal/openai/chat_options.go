@@ -1,12 +1,16 @@
 package openai
 
-import "strconv"
+import (
+	"strconv"
+	"unicode/utf8"
+)
 
 // ChatGenerationOptions contains optional controls shared with compatible wire
 // requests. Pointer fields preserve explicitly supplied false and zero values.
 type ChatGenerationOptions struct {
 	ReasoningEffort  string         `json:"reasoning_effort,omitempty"`
 	N                *int           `json:"n,omitempty"`
+	SafetyIdentifier string         `json:"safety_identifier,omitempty"`
 	Logprobs         *bool          `json:"logprobs,omitempty"`
 	TopLogprobs      *int           `json:"top_logprobs,omitempty"`
 	FrequencyPenalty *float64       `json:"frequency_penalty,omitempty"`
@@ -17,6 +21,9 @@ type ChatGenerationOptions struct {
 func (o ChatGenerationOptions) Validate() string {
 	if o.N != nil && (*o.N < 1 || *o.N > 128) {
 		return "n must be between 1 and 128"
+	}
+	if utf8.RuneCountInString(o.SafetyIdentifier) > 64 {
+		return "safety_identifier must contain at most 64 characters"
 	}
 	switch o.ReasoningEffort {
 	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
