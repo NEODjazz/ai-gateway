@@ -85,6 +85,15 @@ buffered SSE projection. Cohere tools, media and other unsupported Chat paramete
 are rejected or excluded by deployment capabilities. Discovery includes
 non-deprecated models advertising the Chat, Embed or Rerank endpoint.
 
+Native Cohere JSON Chat also maps function schemas, `auto`, `required` and
+`none` tool selection, consistent strict-tool mode, parallel tool calls,
+assistant tool-call history and document-wrapped tool results. Tool names remain
+subject to the gateway ACL and tool schemas participate in TPM and billing
+reservation. Malformed arguments, unknown history IDs, mixed strict settings,
+named tool selection and requests that disable parallel calls fail before the
+upstream request. Native tool-call SSE remains disabled until its indexed
+argument lifecycle is normalized with the same guarantees.
+
 Provider type `mistral` uses the compatible Chat and Embeddings transports and
 implements text completion as native FIM at
 `/v1/fim/completions`. The FIM adapter accepts one string prompt, `suffix`,

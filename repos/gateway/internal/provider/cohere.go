@@ -54,12 +54,26 @@ type cohereChatRequest struct {
 	Seed             *int64                `json:"seed,omitempty"`
 	FrequencyPenalty *float64              `json:"frequency_penalty,omitempty"`
 	PresencePenalty  *float64              `json:"presence_penalty,omitempty"`
+	Tools            []openai.Tool         `json:"tools,omitempty"`
+	ToolChoice       string                `json:"tool_choice,omitempty"`
+	StrictTools      bool                  `json:"strict_tools,omitempty"`
 	Stream           bool                  `json:"stream,omitempty"`
 }
 
 type cohereChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string            `json:"role"`
+	Content    any               `json:"content,omitempty"`
+	ToolCalls  []openai.ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
+}
+
+type cohereToolResultContent struct {
+	Type     string                   `json:"type"`
+	Document cohereToolResultDocument `json:"document"`
+}
+
+type cohereToolResultDocument struct {
+	Data string `json:"data"`
 }
 
 type cohereResponseFormat struct {
@@ -86,6 +100,7 @@ type cohereChatResponse struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
+		ToolCalls []openai.ToolCall `json:"tool_calls"`
 	} `json:"message"`
 	Usage *cohereChatUsageResponse `json:"usage"`
 }
@@ -166,22 +181,72 @@ func (Cohere) ValidateChatParameters(request openai.ChatCompletionRequest) error
 			return cohereChatError("response_format", "json_schema response_format requires a schema")
 		}
 	}
+	toolCalls := map[string]bool{}
 	for _, message := range request.Messages {
-		if message.Role != "system" && message.Role != "developer" && message.Role != "user" && message.Role != "assistant" {
+		if message.Role != "system" && message.Role != "developer" && message.Role != "user" && message.Role != "assistant" && message.Role != "tool" {
 			return rejectParameters("cohere", parameterCheck{"messages", true})
 		}
-		if message.Role == "function" || message.Role == "tool" || len(message.ToolCalls) > 0 || message.FunctionCall != nil || message.Refusal != nil || len(message.Annotations) > 0 {
+		if message.Role == "function" || message.FunctionCall != nil || message.Refusal != nil || len(message.Annotations) > 0 || message.Name != "" {
 			return rejectParameters("cohere", parameterCheck{"messages", true})
 		}
 		if attachments, err := openai.ChatImageAttachments([]openai.Message{message}); err != nil || len(attachments) > 0 {
+			return rejectParameters("cohere", parameterCheck{"messages", true})
+		}
+		if message.Role == "assistant" && len(message.ToolCalls) > 0 {
+			for _, call := range message.ToolCalls {
+				if err := validateCohereToolCall(call); err != nil || toolCalls[call.ID] {
+					return rejectParameters("cohere", parameterCheck{"messages", true})
+				}
+				toolCalls[call.ID] = true
+			}
+			if message.Content != nil && openai.ContentText(message.Content) != "" {
+				return rejectParameters("cohere", parameterCheck{"messages", true})
+			}
+			continue
+		}
+		if message.Role == "tool" {
+			if message.ToolCallID == "" || !toolCalls[message.ToolCallID] || len(message.ToolCalls) > 0 {
+				return rejectParameters("cohere", parameterCheck{"messages", true})
+			}
+		} else if message.ToolCallID != "" || len(message.ToolCalls) > 0 {
 			return rejectParameters("cohere", parameterCheck{"messages", true})
 		}
 		if _, err := cohereChatText(message.Content); err != nil {
 			return rejectParameters("cohere", parameterCheck{"messages", true})
 		}
 	}
+	strictTools := false
+	if len(request.Tools) > 128 {
+		return cohereChatError("tools", "tools must contain at most 128 definitions")
+	}
+	toolNames := make(map[string]bool, len(request.Tools))
+	for index, tool := range request.Tools {
+		name := strings.TrimSpace(tool.Function.Name)
+		if tool.Type != "function" || name == "" || toolNames[name] || tool.Function.PromptCacheBreakpoint != nil {
+			return rejectParameters("cohere", parameterCheck{"tools", true})
+		}
+		toolNames[name] = true
+		if tool.Function.Parameters != nil {
+			if _, ok := tool.Function.Parameters.(map[string]any); !ok {
+				return rejectParameters("cohere", parameterCheck{"tools", true})
+			}
+		}
+		strict := tool.Function.Strict != nil && *tool.Function.Strict
+		if index > 0 && strict != strictTools {
+			return cohereChatError("tools", "Cohere strict_tools requires the same strict setting for every tool")
+		}
+		strictTools = strict
+	}
+	if request.ResponseFormat != nil && len(request.Tools) > 0 {
+		return cohereChatError("response_format", "response_format cannot be combined with tools")
+	}
+	if _, err := cohereToolChoice(request.ToolChoice, len(request.Tools)); err != nil {
+		return err
+	}
+	if request.ParallelToolCalls != nil && !*request.ParallelToolCalls {
+		return cohereChatError("parallel_tool_calls", "Cohere cannot disable parallel tool calls")
+	}
 	return rejectParameters("cohere",
-		parameterCheck{"tools", len(request.Tools) > 0}, parameterCheck{"tool_choice", request.ToolChoice != nil}, parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 		parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"store", request.Store != nil}, parameterCheck{"modalities", request.Modalities != nil}, parameterCheck{"audio", request.Audio != nil},
 		parameterCheck{"reasoning_effort", request.ReasoningEffort != ""}, parameterCheck{"n", request.N != nil}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},
@@ -208,7 +273,7 @@ func (p Cohere) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if err := decodeCohereChatResponse(response.Body, &upstream); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	if upstream.ID == "" || upstream.Message.Role != "assistant" || len(upstream.Message.Content) == 0 {
+	if upstream.ID == "" || upstream.Message.Role != "assistant" || (len(upstream.Message.Content) == 0 && len(upstream.Message.ToolCalls) == 0) {
 		return openai.ChatCompletionResponse{}, errors.New("invalid Cohere chat response")
 	}
 	var content strings.Builder
@@ -219,6 +284,20 @@ func (p Cohere) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 		content.WriteString(block.Text)
 	}
 	finishReason, err := cohereFinishReason(upstream.FinishReason)
+	if strings.EqualFold(upstream.FinishReason, "TOOL_CALL") {
+		finishReason, err = "tool_calls", nil
+		if len(upstream.Message.ToolCalls) == 0 {
+			err = errors.New("Cohere tool-call response omitted tool calls")
+		}
+		for _, call := range upstream.Message.ToolCalls {
+			if callErr := validateCohereToolCall(call); callErr != nil {
+				err = callErr
+				break
+			}
+		}
+	} else if len(upstream.Message.ToolCalls) > 0 {
+		err = errors.New("Cohere returned tool calls without TOOL_CALL finish reason")
+	}
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
@@ -226,7 +305,7 @@ func (p Cohere) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	return openai.ChatCompletionResponse{ID: upstream.ID, Object: "chat.completion", Created: time.Now().Unix(), Model: request.Model, Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: content.String()}, FinishReason: finishReason}}, Usage: usage}, nil
+	return openai.ChatCompletionResponse{ID: upstream.ID, Object: "chat.completion", Created: time.Now().Unix(), Model: request.Model, Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: content.String(), ToolCalls: upstream.Message.ToolCalls}, FinishReason: finishReason}}, Usage: usage}, nil
 }
 
 func cohereNativeChatRequest(request openai.ChatCompletionRequest, stream bool) (cohereChatRequest, error) {
@@ -238,9 +317,17 @@ func cohereNativeChatRequest(request openai.ChatCompletionRequest, stream bool) 
 		}
 		content, err := cohereChatText(message.Content)
 		if err != nil {
+			if message.Role == "assistant" && len(message.ToolCalls) > 0 {
+				messages[index] = cohereChatMessage{Role: role, ToolCalls: message.ToolCalls}
+				continue
+			}
 			return cohereChatRequest{}, err
 		}
-		messages[index] = cohereChatMessage{Role: role, Content: content}
+		if message.Role == "tool" {
+			messages[index] = cohereChatMessage{Role: role, ToolCallID: message.ToolCallID, Content: []cohereToolResultContent{{Type: "document", Document: cohereToolResultDocument{Data: content}}}}
+		} else {
+			messages[index] = cohereChatMessage{Role: role, Content: content}
+		}
 	}
 	maxTokens := request.MaxCompletionTokens
 	if maxTokens == nil {
@@ -252,6 +339,14 @@ func cohereNativeChatRequest(request openai.ChatCompletionRequest, stream bool) 
 		Temperature: request.Temperature, P: request.TopP, Seed: request.Seed,
 		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty, Stream: stream,
 	}
+	native.Tools = append([]openai.Tool(nil), request.Tools...)
+	for index := range native.Tools {
+		native.Tools[index].Function.Strict = nil
+	}
+	native.ToolChoice, _ = cohereToolChoice(request.ToolChoice, len(request.Tools))
+	if len(request.Tools) > 0 && request.Tools[0].Function.Strict != nil {
+		native.StrictTools = *request.Tools[0].Function.Strict
+	}
 	if format := request.ResponseFormat; format != nil && format.Type != "text" {
 		native.ResponseFormat = &cohereResponseFormat{Type: "json_object"}
 		if format.Type == "json_schema" && format.JSONSchema != nil {
@@ -259,6 +354,31 @@ func cohereNativeChatRequest(request openai.ChatCompletionRequest, stream bool) 
 		}
 	}
 	return native, nil
+}
+
+func cohereToolChoice(value any, tools int) (string, error) {
+	if value == nil {
+		return "", nil
+	}
+	choice, ok := value.(string)
+	if ok && choice == "auto" {
+		return "", nil
+	}
+	if !ok || tools == 0 || (choice != "required" && choice != "none") {
+		return "", cohereChatError("tool_choice", "tool_choice must be auto, required, or none with declared tools")
+	}
+	return strings.ToUpper(choice), nil
+}
+
+func validateCohereToolCall(call openai.ToolCall) error {
+	if call.ID == "" || call.Type != "function" || strings.TrimSpace(call.Function.Name) == "" || call.Index != nil || call.ExtraContent != nil || len(call.Function.Arguments) > openai.MaxChatFunctionArgumentsChars {
+		return errors.New("invalid Cohere tool call")
+	}
+	var arguments map[string]any
+	if json.Unmarshal([]byte(call.Function.Arguments), &arguments) != nil || arguments == nil {
+		return errors.New("invalid Cohere tool call arguments")
+	}
+	return nil
 }
 
 func (p Cohere) doChat(ctx context.Context, native cohereChatRequest, accept string) (*http.Response, error) {

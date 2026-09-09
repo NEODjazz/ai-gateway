@@ -62,7 +62,6 @@ func TestCohereChatRejectsUnsupportedParametersBeforeUpstream(t *testing.T) {
 		param string
 		value openai.ChatCompletionRequest
 	}{
-		{param: "tools", value: openai.ChatCompletionRequest{Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "tool"}}}}},
 		{param: "messages", value: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "tool", Content: "result", ToolCallID: "call"}}}},
 		{param: "messages", value: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}}}}}}},
 		{param: "logprobs", value: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &enabled}}},
