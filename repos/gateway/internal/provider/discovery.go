@@ -76,7 +76,7 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 	}
 	request.Header.Set("Accept", "application/json")
 	if managed.Type == "bedrock" && managed.AuthType == "aws_sigv4" {
-		credential, credentialErr := r.awsCredentialSource(managed.ID, credentialID, secret).Credential(ctx)
+		credential, credentialErr := r.awsCredentialSource(managed.ID, credentialID, secret, managed.Region).Credential(ctx)
 		if credentialErr != nil || signAWSRequest(request, nil, credential, managed.Region, "bedrock", time.Now()) != nil {
 			return nil, ErrProviderProbeFailed
 		}

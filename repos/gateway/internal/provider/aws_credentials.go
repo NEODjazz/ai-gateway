@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -19,15 +20,18 @@ const (
 	awsECSCredentialBaseURL = "http://169.254.170.2"
 	awsIMDSBaseURL          = "http://169.254.169.254"
 	awsCredentialMaxBytes   = 32 << 10
+	awsWebIdentityMaxBytes  = 64 << 10
 )
 
 type awsCredentialSource struct {
 	explicit         string
+	region           string
 	client           *http.Client
 	getenv           func(string) string
 	now              func() time.Time
 	ecsBaseURL       string
 	imdsBaseURL      string
+	stsBaseURL       string
 	mu               sync.Mutex
 	cached           awsCredential
 	cacheValid       bool
@@ -41,6 +45,7 @@ type awsCredentialSource struct {
 
 type managedAWSCredentialSource struct {
 	explicit string
+	region   string
 	source   *awsCredentialSource
 }
 
@@ -56,28 +61,41 @@ type awsRoleCredential struct {
 	Expiration      time.Time `json:"Expiration"`
 }
 
-func newAWSCredentialSource(explicit string) *awsCredentialSource {
+type awsWebIdentityResponse struct {
+	Result struct {
+		Credentials struct {
+			AccessKeyID     string    `xml:"AccessKeyId"`
+			SecretAccessKey string    `xml:"SecretAccessKey"`
+			SessionToken    string    `xml:"SessionToken"`
+			Expiration      time.Time `xml:"Expiration"`
+		} `xml:"Credentials"`
+	} `xml:"AssumeRoleWithWebIdentityResult"`
+}
+
+func newAWSCredentialSource(explicit, region string) *awsCredentialSource {
 	client := newProviderHTTPClient(2 * time.Second)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &awsCredentialSource{
 		explicit:    explicit,
+		region:      region,
 		client:      client,
 		getenv:      os.Getenv,
 		now:         time.Now,
 		ecsBaseURL:  awsECSCredentialBaseURL,
 		imdsBaseURL: awsIMDSBaseURL,
+		stsBaseURL:  awsSTSEndpoint(region),
 	}
 }
 
-func (r *Router) awsCredentialSource(providerID, credentialID, explicit string) *awsCredentialSource {
+func (r *Router) awsCredentialSource(providerID, credentialID, explicit, region string) *awsCredentialSource {
 	key := providerID + "\x00" + credentialID
 	r.awsCredentials.mu.Lock()
 	defer r.awsCredentials.mu.Unlock()
-	if current, found := r.awsCredentials.current[key]; found && current.explicit == explicit {
+	if current, found := r.awsCredentials.current[key]; found && current.explicit == explicit && current.region == region {
 		return current.source
 	}
-	source := newAWSCredentialSource(explicit)
-	r.awsCredentials.current[key] = managedAWSCredentialSource{explicit: explicit, source: source}
+	source := newAWSCredentialSource(explicit, region)
+	r.awsCredentials.current[key] = managedAWSCredentialSource{explicit: explicit, region: region, source: source}
 	return source
 }
 
@@ -180,6 +198,14 @@ func (s *awsCredentialSource) load(ctx context.Context) (awsCredential, time.Tim
 		}
 		return credential, time.Time{}, nil
 	}
+	roleARN := strings.TrimSpace(s.getenv("AWS_ROLE_ARN"))
+	tokenFile := strings.TrimSpace(s.getenv("AWS_WEB_IDENTITY_TOKEN_FILE"))
+	if roleARN != "" || tokenFile != "" {
+		if roleARN == "" || tokenFile == "" {
+			return awsCredential{}, time.Time{}, errors.New("incomplete AWS web identity configuration")
+		}
+		return s.loadWebIdentity(ctx, roleARN, tokenFile, strings.TrimSpace(s.getenv("AWS_ROLE_SESSION_NAME")))
+	}
 	if relativeURI := strings.TrimSpace(s.getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")); relativeURI != "" {
 		endpoint, err := awsContainerRelativeURL(s.ecsBaseURL, relativeURI)
 		if err != nil {
@@ -198,6 +224,96 @@ func (s *awsCredentialSource) load(ctx context.Context) (awsCredential, time.Tim
 		return awsCredential{}, time.Time{}, errors.New("AWS credential source is unavailable")
 	}
 	return s.loadIMDS(ctx)
+}
+
+func awsSTSEndpoint(region string) string {
+	suffix := "amazonaws.com"
+	if strings.HasPrefix(region, "cn-") {
+		suffix = "amazonaws.com.cn"
+	}
+	return "https://sts." + region + "." + suffix
+}
+
+func (s *awsCredentialSource) loadWebIdentity(ctx context.Context, roleARN, tokenFile, sessionName string) (awsCredential, time.Time, error) {
+	if !validAWSRoleARN(roleARN) || !filepath.IsAbs(tokenFile) {
+		return awsCredential{}, time.Time{}, errors.New("invalid AWS web identity configuration")
+	}
+	if sessionName == "" {
+		sessionName = "ai-gateway"
+	}
+	if !validAWSRoleSessionName(sessionName) {
+		return awsCredential{}, time.Time{}, errors.New("invalid AWS web identity configuration")
+	}
+	token, err := readAWSBoundedFile(tokenFile, awsWebIdentityMaxBytes)
+	if err != nil {
+		return awsCredential{}, time.Time{}, errors.New("invalid AWS web identity token file")
+	}
+	token = []byte(strings.TrimSpace(string(token)))
+	if len(token) == 0 || strings.ContainsAny(string(token), "\r\n") {
+		return awsCredential{}, time.Time{}, errors.New("invalid AWS web identity token file")
+	}
+	form := url.Values{
+		"Action":           {"AssumeRoleWithWebIdentity"},
+		"Version":          {"2011-06-15"},
+		"RoleArn":          {roleARN},
+		"RoleSessionName":  {sessionName},
+		"WebIdentityToken": {string(token)},
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.stsBaseURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return awsCredential{}, time.Time{}, errors.New("invalid AWS web identity request")
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err := s.client.Do(request)
+	if err != nil {
+		return awsCredential{}, time.Time{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return awsCredential{}, time.Time{}, fmt.Errorf("AWS web identity endpoint returned status %d", response.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, awsCredentialMaxBytes+1))
+	if err != nil || len(data) > awsCredentialMaxBytes {
+		return awsCredential{}, time.Time{}, errors.New("AWS web identity response is invalid")
+	}
+	var value awsWebIdentityResponse
+	decoder := xml.NewDecoder(strings.NewReader(string(data)))
+	if err := decoder.Decode(&value); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		return awsCredential{}, time.Time{}, errors.New("AWS web identity response is invalid")
+	}
+	credential := awsCredential{AccessKeyID: value.Result.Credentials.AccessKeyID, SecretAccessKey: value.Result.Credentials.SecretAccessKey, SessionToken: value.Result.Credentials.SessionToken}
+	if err := validateAWSCredential(credential); err != nil || value.Result.Credentials.Expiration.IsZero() || !value.Result.Credentials.Expiration.After(s.now()) {
+		return awsCredential{}, time.Time{}, errors.New("AWS web identity response is invalid")
+	}
+	return credential, value.Result.Credentials.Expiration, nil
+}
+
+func validAWSRoleARN(value string) bool {
+	if len(value) < 20 || len(value) > 2048 || strings.ContainsAny(value, "\x00\r\n\t ") {
+		return false
+	}
+	parts := strings.SplitN(value, ":", 6)
+	if len(parts) != 6 || parts[0] != "arn" || parts[1] == "" || parts[2] != "iam" || parts[3] != "" || len(parts[4]) != 12 || !strings.HasPrefix(parts[5], "role/") || len(parts[5]) == len("role/") {
+		return false
+	}
+	for _, char := range parts[4] {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func validAWSRoleSessionName(value string) bool {
+	if len(value) < 2 || len(value) > 64 {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && !strings.ContainsRune("+=,.@_-", char) {
+			return false
+		}
+	}
+	return true
 }
 
 func validateAWSCredential(credential awsCredential) error {
@@ -248,14 +364,22 @@ func (s *awsCredentialSource) containerAuthorization() (string, error) {
 }
 
 func readAWSAuthorizationTokenFile(path string) ([]byte, error) {
+	return readAWSBoundedFile(path, 8<<10)
+}
+
+func readAWSBoundedFile(path string, limit int64) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, (8<<10)+1))
-	if err != nil || len(data) > 8<<10 {
-		return nil, errors.New("AWS container authorization token file is too large")
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, errors.New("AWS credential token path is not a regular file")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil || int64(len(data)) > limit {
+		return nil, errors.New("AWS credential token file is too large")
 	}
 	return data, nil
 }

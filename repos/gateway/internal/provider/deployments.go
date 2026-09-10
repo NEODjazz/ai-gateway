@@ -421,7 +421,7 @@ func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployme
 	client := providerFor(providerConfig)
 	if managed.Type == "bedrock" && managed.AuthType == "aws_sigv4" {
 		bedrock := NewBedrockWithAuth(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.AuthType, providerConfig.Region)
-		bedrock.aws = r.awsCredentialSource(managed.ID, deployment.CredentialID, secret)
+		bedrock.aws = r.awsCredentialSource(managed.ID, deployment.CredentialID, secret, managed.Region)
 		client = bedrock
 	}
 	if client == nil {

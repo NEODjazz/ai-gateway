@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.173
+  version: 0.1.174
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -5473,7 +5473,7 @@ components:
         auth_type:
           type: string
           enum: [api_key, entra, bearer, aws_sigv4]
-          description: Azure accepts api_key or entra. Bedrock accepts bearer for compatible private endpoints or aws_sigv4 for AWS IAM authentication. A Bedrock aws_sigv4 deployment without a bound credential uses environment, ECS/EKS container or EC2 IMDSv2 role credentials. Explicit credentials remain write-only in the credential vault.
+          description: Azure accepts api_key or entra. Bedrock accepts bearer for compatible private endpoints or aws_sigv4 for AWS IAM authentication. A Bedrock aws_sigv4 deployment without a bound credential uses environment, projected web identity, ECS/EKS container or EC2 IMDSv2 role credentials. Explicit credentials remain write-only in the credential vault.
         region:
           type: string
           maxLength: 64

@@ -100,7 +100,8 @@ func NewBedrockWithAuth(baseURL, credential, authType, region string) Bedrock {
 	if authType == "" || authType == "api_key" {
 		authType = "bearer"
 	}
-	return Bedrock{baseURL: strings.TrimRight(baseURL, "/"), apiKey: credential, authType: authType, region: strings.ToLower(strings.TrimSpace(region)), client: client, now: time.Now, aws: newAWSCredentialSource(credential)}
+	region = strings.ToLower(strings.TrimSpace(region))
+	return Bedrock{baseURL: strings.TrimRight(baseURL, "/"), apiKey: credential, authType: authType, region: region, client: client, now: time.Now, aws: newAWSCredentialSource(credential, region)}
 }
 
 func (Bedrock) SupportsResponses() bool { return false }
