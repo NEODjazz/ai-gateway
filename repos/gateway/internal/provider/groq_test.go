@@ -167,6 +167,7 @@ func TestGroqResponsesRejectUnsupportedParametersBeforeHTTP(t *testing.T) {
 		{name: "continuity", param: "previous_response_id", code: "unsupported_parameter", request: openai.ResponseRequest{PreviousResponse: "response"}},
 		{name: "safety identifier", param: "safety_identifier", code: "unsupported_parameter", request: openai.ResponseRequest{SafetyIdentifier: "user"}},
 		{name: "prompt cache key", param: "prompt_cache_key", code: "unsupported_parameter", request: openai.ResponseRequest{PromptCacheKey: "cache"}},
+		{name: "text verbosity", param: "text.verbosity", code: "unsupported_parameter", request: openai.ResponseRequest{Text: map[string]any{"verbosity": "low"}}},
 		{name: "top logprobs", param: "top_logprobs", code: "unsupported_parameter", request: openai.ResponseRequest{TopLogprobs: &topLogprobs}},
 		{name: "frequency penalty", param: "frequency_penalty", code: "unsupported_parameter", request: openai.ResponseRequest{FrequencyPenalty: &penalty}},
 		{name: "presence penalty", param: "presence_penalty", code: "unsupported_parameter", request: openai.ResponseRequest{PresencePenalty: &penalty}},

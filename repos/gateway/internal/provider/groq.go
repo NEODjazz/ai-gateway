@@ -85,6 +85,7 @@ func (g Groq) ValidateResponseParameters(request openai.ResponseRequest) error {
 			}
 		}
 	}
+	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
 	return rejectParameters("groq",
 		parameterCheck{"include", len(request.Include) > 0},
 		parameterCheck{"store", request.Store != nil && *request.Store},
@@ -92,6 +93,7 @@ func (g Groq) ValidateResponseParameters(request openai.ResponseRequest) error {
 		parameterCheck{"previous_response_id", request.PreviousResponse != ""},
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
+		parameterCheck{"text.verbosity", verbositySupplied},
 		parameterCheck{"top_logprobs", request.TopLogprobs != nil},
 		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil},
 		parameterCheck{"presence_penalty", request.PresencePenalty != nil},
