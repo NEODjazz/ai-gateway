@@ -38,6 +38,9 @@ HTTP 403, даже если модель не собиралась его выз
 - Для Responses MCP проверяется `mcp:<server_label>@<canonical-https-url>`.
   HTTPS URL не может содержать userinfo, query или fragment; host приводится
   к нижнему регистру, завершающий slash удаляется при построении identity.
+- Для gateway runtime отдельный tool имеет identity
+  `mcp:<server_id>@<canonical-https-url>#tool:<tool_name>`. Connector identity
+  разрешает все tools сервера; tool identity разрешает только совпавшее имя.
 - Grants поддерживают точное совпадение, `*` и префикс с завершающей `*`.
   Только точный connector grant ограничивает конкретную пару label/URL.
 - Пустой `allowed_tools` не ограничивает инструменты со стороны ключа.
@@ -140,7 +143,10 @@ Discovery проходит authentication, connector ACL, отдельное п�
 Access Groups и RPM admission. Оно фиксируется durable billing lifecycle с
 `api_type=mcp_tools_list`, нулевыми токенами и стоимостью. В Request Logs и
 usage reports доступен отдельный `tool_requests`; discovery оставляет его
-нулевым, потому что инструмент не выполнялся.
+нулевым, потому что инструмент не выполнялся. Список discovery фильтруется по
+трем слоям: grants MCP Server, Virtual Key и Access Groups. Tool-specific grant
+дает право выполнить discovery соединения, но в ответе остаются только
+разрешенные tool definitions.
 
 Прямой tool call проходит те же authentication, connector ACL, Access Groups и
 RPM checks. Клиент обязан передать один `Idempotency-Key` длиной до 128 visible

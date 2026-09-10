@@ -202,13 +202,37 @@ func (r *MCPRegistry) ToolsetAllows(id, identifier string) bool {
 	return false
 }
 
+func (r *MCPRegistry) ToolsetAllowsConnector(id, connector string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	toolset, ok := r.toolsets[id]
+	if !ok || !toolset.Enabled {
+		return false
+	}
+	for _, grant := range toolset.Tools {
+		if mcpGrantAllowsConnector(grant, connector) {
+			return true
+		}
+	}
+	return false
+}
+
+func mcpGrantAllowsConnector(grant, connector string) bool {
+	grant = strings.TrimSpace(grant)
+	return toolAllowed(connector, []string{grant}) || strings.HasPrefix(grant, connector+"#tool:")
+}
+
 func (r *MCPRegistry) enabledServerAllows(identifier string) bool {
+	connector := identifier
+	if separator := strings.Index(identifier, "#tool:"); separator > 0 {
+		connector = identifier[:separator]
+	}
 	for _, server := range r.servers {
 		if !server.Enabled {
 			continue
 		}
 		for _, grant := range server.Tools {
-			if toolAllowed(identifier, []string{grant}) {
+			if toolAllowed(identifier, []string{grant}) || toolAllowed(connector, []string{grant}) {
 				return true
 			}
 		}

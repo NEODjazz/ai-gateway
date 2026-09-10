@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.170
+  version: 0.1.171
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -450,7 +450,7 @@ paths:
       operationId: listMCPServerTools
       tags: [MCP]
       summary: Discover tools from an enabled registered MCP server
-      description: Authenticates the virtual key, enforces exact connector and access-group grants, consumes RPM admission, and records a durable zero-cost discovery lifecycle. Each request creates a bounded Streamable HTTP session and performs initialize followed by tools/list. The gateway sends no client bearer token or stored credential to the MCP server. Legacy SSE registry entries are rejected.
+      description: Authenticates the virtual key, enforces connector or tool-specific credential and access-group grants, consumes RPM admission, and records a durable zero-cost discovery lifecycle. Each request creates a bounded Streamable HTTP session and performs initialize followed by tools/list. Returned definitions are filtered through the server registry, credential and access-group policies. The gateway sends no client bearer token or stored credential to the MCP server. Legacy SSE registry entries are rejected.
       security: [{bearerAuth: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128}}
@@ -6014,7 +6014,11 @@ components:
         description: {type: string, maxLength: 1024}
         server_url: {type: string, format: uri, pattern: '^https://[^?#]+$'}
         transport: {type: string, enum: [streamable-http, sse], description: Streamable HTTP supports authenticated gateway discovery; legacy SSE remains metadata-only}
-        tools: {type: array, maxItems: 256, description: Permission strings matched for connector authorization through toolsets. Empty or omitted grants match any connector. Exact connector identities are recommended; strings are not verified against server URL or discovered tools., items: {type: string, minLength: 1, maxLength: 512}}
+        tools:
+          type: array
+          maxItems: 256
+          description: "Permission strings for the connector identity or a tool-specific identity formed by appending #tool: and the discovered tool name. Empty or omitted grants match any tool on this server."
+          items: {type: string, minLength: 1, maxLength: 512}
         enabled: {type: boolean}
     MCPServer:
       allOf:
@@ -6067,7 +6071,11 @@ components:
       properties:
         name: {type: string, minLength: 1, maxLength: 256}
         description: {type: string, maxLength: 1024}
-        tools: {type: array, maxItems: 256, description: Function names or connector identities with exact or trailing-wildcard matching. Empty grants match any identifier subject to the enabled-server check for connectors. Registry membership is not validated on save., items: {type: string, minLength: 1, maxLength: 512}}
+        tools:
+          type: array
+          maxItems: 256
+          description: Function names, connector identities or tool-specific connector identities with exact or trailing-wildcard matching. Empty grants match any identifier subject to the enabled-server check for connectors.
+          items: {type: string, minLength: 1, maxLength: 512}
         enabled: {type: boolean}
     MCPToolset:
       allOf:

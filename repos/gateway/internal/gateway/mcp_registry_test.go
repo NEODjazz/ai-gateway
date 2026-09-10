@@ -54,6 +54,17 @@ func TestMCPToolsetGrantExpandsAtAuthorization(t *testing.T) {
 	}
 }
 
+func TestMCPToolsetSpecificGrantAllowsConnectorDiscovery(t *testing.T) {
+	registry := runtimeRegistry(t, "streamable-http")
+	connector := "mcp:weather@https://mcp.example.test/v1"
+	if _, err := registry.PutToolset("forecast-only", MCPToolset{Name: "Forecast only", Tools: []string{connector + "#tool:forecast"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !registry.ToolsetAllowsConnector("forecast-only", connector) || !registry.ToolsetAllows("forecast-only", connector+"#tool:forecast") || registry.ToolsetAllows("forecast-only", connector+"#tool:delete_city") {
+		t.Fatal("tool-specific toolset grant was not isolated")
+	}
+}
+
 func TestMCPRegistryAdminAPIExcludesCredentials(t *testing.T) {
 	handler := NewHandler(modulesPipeline("admin"), nil).WithMCPRegistry(NewMCPRegistry())
 	router := Routes(handler)

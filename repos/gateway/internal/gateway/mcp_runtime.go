@@ -64,7 +64,7 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identifier := "mcp:" + server.ID + "@" + server.ServerURL
-	if !h.authorizeTools(w, req, []string{identifier}, true) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
+	if !h.authorizeMCPConnector(w, req, identifier) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
 		return
 	}
 	if err := h.pipeline.RunBillingLifecycle(r.Context(), &req, "reserve", nil); err != nil {
@@ -87,6 +87,13 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "mcp_server_failed", "MCP server request failed")
 		return
 	}
+	filtered := page.Tools[:0]
+	for _, tool := range page.Tools {
+		if h.mcpToolAllowed(req, server, identifier, tool.Name) {
+			filtered = append(filtered, tool)
+		}
+	}
+	page.Tools = filtered
 	req.Metadata["provider.status"] = "ok"
 	if err := h.pipeline.RunBillingLifecycle(r.Context(), &req, "commit", nil); err != nil {
 		writeMCPBillingFailure(w, err)
@@ -165,7 +172,7 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identifier := "mcp:" + server.ID + "@" + server.ServerURL
-	if !h.authorizeTools(w, req, []string{identifier}, true) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
+	if !h.authorizeMCPTool(w, req, server, identifier, toolName) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
 		return
 	}
 	encodedArguments, err := json.Marshal(input.Arguments)
@@ -243,6 +250,76 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 	}
 	h.auditOutcome(r.Context(), audit, event, "succeeded")
 	writeMCPStoredResponse(w, http.StatusOK, payload)
+}
+
+func (h Handler) authorizeMCPConnector(w http.ResponseWriter, req modules.RequestContext, connector string) bool {
+	if !h.mcpConnectorAllowed(connector, req.AllowedTools) {
+		writeError(w, http.StatusForbidden, "tool_not_allowed", "credential is not allowed to use this MCP connector")
+		return false
+	}
+	if req.AccessGroupsEvaluated && !h.mcpConnectorAllowed(connector, req.AccessGroupTools) {
+		writeError(w, http.StatusForbidden, "access_group_tool_not_allowed", "assigned access groups do not allow the requested MCP connector")
+		return false
+	}
+	return true
+}
+
+func (h Handler) authorizeMCPTool(w http.ResponseWriter, req modules.RequestContext, server MCPServer, connector, tool string) bool {
+	identifier := connector + "#tool:" + tool
+	if !mcpToolAllowedByGrants(connector, identifier, server.Tools) {
+		writeError(w, http.StatusForbidden, "mcp_tool_not_registered", "MCP tool is not allowed by the server registry")
+		return false
+	}
+	if !h.mcpToolGrantAllowed(connector, identifier, req.AllowedTools) {
+		writeError(w, http.StatusForbidden, "tool_not_allowed", "credential is not allowed to use the requested MCP tool")
+		return false
+	}
+	if req.AccessGroupsEvaluated && !h.mcpToolGrantAllowed(connector, identifier, req.AccessGroupTools) {
+		writeError(w, http.StatusForbidden, "access_group_tool_not_allowed", "assigned access groups do not allow the requested MCP tool")
+		return false
+	}
+	return true
+}
+
+func (h Handler) mcpToolAllowed(req modules.RequestContext, server MCPServer, connector, tool string) bool {
+	identifier := connector + "#tool:" + tool
+	return mcpToolAllowedByGrants(connector, identifier, server.Tools) &&
+		h.mcpToolGrantAllowed(connector, identifier, req.AllowedTools) &&
+		(!req.AccessGroupsEvaluated || h.mcpToolGrantAllowed(connector, identifier, req.AccessGroupTools))
+}
+
+func mcpToolAllowedByGrants(connector, identifier string, grants []string) bool {
+	return toolAllowed(connector, grants) || toolAllowed(identifier, grants)
+}
+
+func (h Handler) mcpToolGrantAllowed(connector, identifier string, grants []string) bool {
+	if mcpToolAllowedByGrants(connector, identifier, grants) {
+		return true
+	}
+	if h.mcp == nil {
+		return false
+	}
+	for _, grant := range grants {
+		if strings.HasPrefix(grant, "toolset:") && (h.mcp.ToolsetAllows(strings.TrimPrefix(grant, "toolset:"), connector) || h.mcp.ToolsetAllows(strings.TrimPrefix(grant, "toolset:"), identifier)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (h Handler) mcpConnectorAllowed(connector string, grants []string) bool {
+	if len(grants) == 0 {
+		return true
+	}
+	for _, grant := range grants {
+		if mcpGrantAllowsConnector(grant, connector) {
+			return true
+		}
+		if strings.HasPrefix(grant, "toolset:") && h.mcp != nil && h.mcp.ToolsetAllowsConnector(strings.TrimPrefix(grant, "toolset:"), connector) {
+			return true
+		}
+	}
+	return false
 }
 
 func validIdempotencyKey(value string) bool {
