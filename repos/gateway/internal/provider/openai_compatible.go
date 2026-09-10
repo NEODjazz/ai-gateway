@@ -596,9 +596,11 @@ func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.Embeddi
 	var upstream struct {
 		openai.EmbeddingResponse
 		Usage *struct {
-			openai.Usage
-			PromptTokens *int `json:"prompt_tokens"`
-			TotalTokens  *int `json:"total_tokens"`
+			PromptTokens            *int                           `json:"prompt_tokens"`
+			CompletionTokens        int                            `json:"completion_tokens"`
+			TotalTokens             *int                           `json:"total_tokens"`
+			PromptTokensDetails     *openai.PromptTokenDetails     `json:"prompt_tokens_details"`
+			CompletionTokensDetails *openai.CompletionTokenDetails `json:"completion_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := decodeEmbeddingResponse(resp.Body, &upstream); err != nil {
@@ -609,9 +611,10 @@ func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.Embeddi
 		if usage.PromptTokens == nil || usage.TotalTokens == nil || *usage.PromptTokens < 0 || *usage.TotalTokens < *usage.PromptTokens || usage.CompletionTokens != 0 {
 			return openai.EmbeddingResponse{}, errors.New("invalid embedding usage")
 		}
-		response.Usage = usage.Usage
-		response.Usage.PromptTokens = *usage.PromptTokens
-		response.Usage.TotalTokens = *usage.TotalTokens
+		response.Usage = openai.Usage{
+			PromptTokens: *usage.PromptTokens, CompletionTokens: usage.CompletionTokens, TotalTokens: *usage.TotalTokens,
+			PromptTokensDetails: usage.PromptTokensDetails, CompletionTokensDetails: usage.CompletionTokensDetails,
+		}
 		response.UsageReported = true
 	}
 	if err := validateEmbeddingVectors(request, response.Data); err != nil {

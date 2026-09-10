@@ -323,6 +323,32 @@ type Usage struct {
 	CompletionTokensDetails *CompletionTokenDetails `json:"completion_tokens_details,omitempty"`
 }
 
+func (u *Usage) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		PromptTokens            int                     `json:"prompt_tokens"`
+		CompletionTokens        int                     `json:"completion_tokens"`
+		TotalTokens             int                     `json:"total_tokens"`
+		PromptTokensDetails     *PromptTokenDetails     `json:"prompt_tokens_details"`
+		CompletionTokensDetails *CompletionTokenDetails `json:"completion_tokens_details"`
+		PromptCacheHitTokens    *int                    `json:"prompt_cache_hit_tokens"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	u.PromptTokens = wire.PromptTokens
+	u.CompletionTokens = wire.CompletionTokens
+	u.TotalTokens = wire.TotalTokens
+	u.PromptTokensDetails = wire.PromptTokensDetails
+	u.CompletionTokensDetails = wire.CompletionTokensDetails
+	if wire.PromptCacheHitTokens != nil {
+		if u.PromptTokensDetails == nil {
+			u.PromptTokensDetails = &PromptTokenDetails{}
+		}
+		u.PromptTokensDetails.CachedTokens = *wire.PromptCacheHitTokens
+	}
+	return nil
+}
+
 type CompletionTokenDetails struct {
 	AcceptedPredictionTokens int `json:"accepted_prediction_tokens,omitempty"`
 	AudioTokens              int `json:"audio_tokens,omitempty"`
