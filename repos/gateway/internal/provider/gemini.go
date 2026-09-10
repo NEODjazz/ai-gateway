@@ -115,6 +115,7 @@ type geminiRequest struct {
 	ToolConfig  map[string]any   `json:"toolConfig,omitempty"`
 	Generation  geminiGeneration `json:"generationConfig"`
 	ServiceTier string           `json:"serviceTier,omitempty"`
+	Store       *bool            `json:"store,omitempty"`
 }
 type geminiResponse struct {
 	ID             string                    `json:"responseId"`
@@ -205,6 +206,9 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	default:
 		return result, geminiInvalid("service_tier")
 	}
+	if options.Store != nil && *options.Store {
+		return result, geminiInvalid("store")
+	}
 	options.TopK = nil
 	options.FrequencyPenalty = nil
 	options.PresencePenalty = nil
@@ -213,6 +217,7 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	options.N = nil
 	options.ReasoningEffort = ""
 	options.ServiceTier = ""
+	options.Store = nil
 	if err := rejectGenerationOptions("gemini", options); err != nil {
 		return result, err
 	}
@@ -249,6 +254,7 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		ThinkingConfig: thinkingConfig, Seed: request.Seed, Stop: stop,
 	}
 	result.ServiceTier = serviceTier
+	result.Store = request.Store
 	if request.ResponseFormat != nil {
 		switch request.ResponseFormat.Type {
 		case "text":
