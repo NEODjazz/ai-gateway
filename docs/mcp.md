@@ -1,10 +1,10 @@
 # MCP: интеграция и границы контроля
 
-Gateway реализует реестр MCP, разрешения на инструменты и passthrough remote
-MCP connectors через Responses API. Собственного MCP endpoint, клиента для
-`initialize`, `tools/list`, `tools/call`, запуска stdio-процессов и исполнения
-инструментов в gateway нет. Добавление MCP Server в UI сохраняет metadata,
-но не подключает сервер к OpenCode или провайдеру.
+Gateway реализует реестр MCP, разрешения на инструменты, безопасное discovery
+через `GET /v1/mcp/servers/{id}/tools` и passthrough remote MCP connectors через
+Responses API. Discovery выполняет `initialize` и `tools/list` через bounded
+Streamable HTTP client. Публичного `tools/call`, запуска stdio-процессов и
+исполнения инструментов в gateway пока нет.
 
 ## Два сценария
 
@@ -12,6 +12,7 @@ MCP connectors через Responses API. Собственного MCP endpoint, 
 | --- | --- | --- | --- |
 | OpenCode через `/v1/chat/completions` | Описания `type: function`, затем сообщения с результатами | OpenCode, со своими MCP credentials | `tools`, плюс `stream` для streaming |
 | Remote MCP через `/v1/responses` | `type: mcp` с label, URL и настройками коннектора | Upstream provider модели | Явная `mcp`, плюс `stream` для streaming |
+| Gateway discovery | ID включенного MCP Server и optional cursor | Gateway выполняет `initialize` и `tools/list` без credentials | Не зависит от model route |
 
 В первом сценарии клиент получает список инструментов у своего MCP-сервера,
 передаёт их описания модели через gateway, получает `tool_calls`, выполняет
@@ -134,18 +135,19 @@ durable admin-state snapshot, если он настроен. `expand=references
 проверяет Access Groups и полную выборку non-revoked Virtual Keys и блокируется
 при назначении или невозможности подтвердить полноту выборки.
 
-Request Logs и budgets относятся к запросам модели. Это не отдельный аудит
-каждого `tools/call` и не бюджет на прямые клиентские обращения к MCP.
-Централизованные MCP discovery, credentials/OAuth, egress policy и аудит
-исполнения потребуют отдельного MCP proxy runtime.
+Discovery проходит authentication, connector ACL, отдельное пересечение grants
+Access Groups и RPM admission. Оно фиксируется durable billing lifecycle с
+`api_type=mcp_tools_list`, нулевыми токенами и стоимостью. В Request Logs и
+usage reports доступен отдельный `tool_requests`; discovery оставляет его
+нулевым, потому что инструмент не выполнялся.
 
-В gateway есть bounded Streamable HTTP client foundation для будущего runtime.
-Он выполняет initialize negotiation, поддерживает JSON и SSE ответы на POST,
+Bounded Streamable HTTP client выполняет initialize negotiation, поддерживает
+JSON и SSE ответы на POST,
 передает protocol/session headers, ограничивает request/response/tool pages и
-отклоняет private, loopback и link-local адреса при каждом DNS resolve. Client
-пока не подключен к публичному endpoint: registry credentials, per-tool ACL,
-usage accounting и durable audit должны быть добавлены вместе, прежде чем
-разрешать прямое выполнение инструментов.
+отклоняет private, loopback и link-local адреса при каждом DNS resolve. Реестр
+не хранит credentials, поэтому discovery работает только с серверами, которым
+они не нужны. Прямое выполнение требует отдельной idempotency и durable audit
+семантики до публикации endpoint.
 
 ## Проверка реализации
 

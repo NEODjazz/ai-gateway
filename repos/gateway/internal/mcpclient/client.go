@@ -150,14 +150,23 @@ func (c *Client) ListTools(ctx context.Context, cursor string) (ToolPage, error)
 		return ToolPage{}, errors.New("MCP cursor exceeds limit")
 	}
 	for _, tool := range page.Tools {
-		var schema struct {
-			Type string `json:"type"`
-		}
-		if tool.Name == "" || len(tool.Name) > 256 || len(tool.InputSchema) == 0 || json.Unmarshal(tool.InputSchema, &schema) != nil || schema.Type != "object" {
+		if tool.Name == "" || len(tool.Name) > 256 || !validJSONObject(tool.InputSchema, true) || (len(tool.OutputSchema) > 0 && !validJSONObject(tool.OutputSchema, true)) || (len(tool.Annotations) > 0 && !validJSONObject(tool.Annotations, false)) {
 			return ToolPage{}, errors.New("invalid MCP tool definition")
 		}
 	}
 	return page, nil
+}
+
+func validJSONObject(raw json.RawMessage, requireObjectType bool) bool {
+	var value map[string]any
+	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil || value == nil {
+		return false
+	}
+	if !requireObjectType {
+		return true
+	}
+	typeName, ok := value["type"].(string)
+	return ok && typeName == "object"
 }
 
 func (c *Client) CallTool(ctx context.Context, name string, arguments map[string]any) (CallResult, error) {

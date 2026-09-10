@@ -106,3 +106,21 @@ func TestClientRejectsMismatchedAndOversizedResponses(t *testing.T) {
 		t.Fatalf("oversized request err=%v", err)
 	}
 }
+
+func TestToolSchemasAndAnnotationsMustBeObjects(t *testing.T) {
+	for _, test := range []struct {
+		raw         string
+		requireType bool
+		valid       bool
+	}{
+		{raw: `{"type":"object","properties":{}}`, requireType: true, valid: true},
+		{raw: `{"type":"array"}`, requireType: true},
+		{raw: `null`, requireType: false},
+		{raw: `[]`, requireType: false},
+		{raw: `{"readOnlyHint":true}`, requireType: false, valid: true},
+	} {
+		if got := validJSONObject(json.RawMessage(test.raw), test.requireType); got != test.valid {
+			t.Fatalf("raw=%s requireType=%t got=%t", test.raw, test.requireType, got)
+		}
+	}
+}

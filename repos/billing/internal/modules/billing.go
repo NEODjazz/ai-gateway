@@ -299,6 +299,11 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		}
 	}
 	pricing, supplied, suppliedErr := suppliedPricingSnapshot(req)
+	if apiType == "mcp_tools_list" || apiType == "mcp_tools_call" {
+		pricing = PricingSnapshot{Currency: m.pricing.Currency}
+		supplied = true
+		suppliedErr = nil
+	}
 	var err error
 	if !supplied && suppliedErr == nil {
 		pricing, err = m.catalog.Resolve(metadata(req, "provider.endpoint.name"), metadata(req, "provider.endpoint.type"), providerName, model, m.pricing)

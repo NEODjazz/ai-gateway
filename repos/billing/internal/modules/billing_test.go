@@ -462,3 +462,19 @@ func TestBillingPersistsBoundedToolRequestsWithoutInventingCost(t *testing.T) {
 		}
 	}
 }
+
+func TestBillingDoesNotRequireModelPricingForMCPRuntime(t *testing.T) {
+	catalog, err := ParseModelCatalog(`{"version":"v1","unknown_model_policy":"deny","models":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := &recordingUsageWriter{}
+	module := BillingModule{required: true, pricing: PricingConfig{Currency: "USD"}, writer: writer, policy: NoopPolicyChecker{}, lifecycle: NewLifecycleStore(), catalog: catalog}
+	req := RequestContext{RequestID: "mcp-list", BillingPhase: "commit", PostResponse: true, APIType: "mcp_tools_list", Request: openai.ChatCompletionRequest{Provider: "mcp", Model: "weather"}}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if len(writer.events) != 1 || writer.events[0].APIType != "mcp_tools_list" || writer.events[0].Provider != "mcp" || writer.events[0].Model != "weather" || writer.events[0].Cost != 0 || writer.events[0].Currency != "USD" {
+		t.Fatalf("unexpected MCP discovery event: %+v", writer.events)
+	}
+}

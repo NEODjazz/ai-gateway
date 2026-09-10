@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"ai-gateway-gateway/internal/mcpclient"
 	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
@@ -34,6 +35,7 @@ type Handler struct {
 	logging       *LoggingRegistry
 	agents        *AgentRegistry
 	mcp           *MCPRegistry
+	mcpRuntime    MCPRuntimeFactory
 	access        *AccessRegistry
 	budgets       BudgetManagementClient
 	usage         UsageManagementClient
@@ -84,7 +86,7 @@ func NewHandlerWithMetrics(pipeline modules.Pipeline, llmProvider provider.Provi
 	if metrics == nil {
 		metrics = NewMetrics()
 	}
-	return Handler{pipeline: pipeline, provider: llmProvider, rateLimits: rateLimits, metrics: metrics, ready: ready}
+	return Handler{pipeline: pipeline, provider: llmProvider, rateLimits: rateLimits, metrics: metrics, ready: ready, mcpRuntime: func(endpoint string) (MCPRuntimeClient, error) { return mcpclient.New(endpoint) }}
 }
 
 func (h Handler) Health(w http.ResponseWriter, _ *http.Request) {

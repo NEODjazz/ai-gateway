@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -43,4 +44,42 @@ func TestRunAuthenticationRequiresEstablishedCredential(t *testing.T) {
 	if err := NewPipeline([]Module{auth}).RunAuthentication(t.Context(), &req); err != ErrUnauthorized {
 		t.Fatalf("missing credential err=%v", err)
 	}
+}
+
+func TestRunBillingLifecycleOnlyRunsBillingPhase(t *testing.T) {
+	auth := &authenticationPipelineModule{name: "auth", establish: true}
+	billing := &billingLifecyclePipelineModule{}
+	content := &authenticationPipelineModule{name: "dlp"}
+	pipeline := NewPipeline([]Module{auth, billing, content})
+	req := RequestContext{}
+	if err := pipeline.RunBillingLifecycle(t.Context(), &req, "reserve", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeline.RunBillingLifecycle(t.Context(), &req, "commit", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeline.RunBillingLifecycle(t.Context(), &req, "cancel", context.Canceled); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(billing.phases, ",") != "reserve,commit,cancel" || auth.calls != 0 || content.calls != 0 {
+		t.Fatalf("phases=%v auth=%d content=%d", billing.phases, auth.calls, content.calls)
+	}
+}
+
+type billingLifecyclePipelineModule struct{ phases []string }
+
+func (*billingLifecyclePipelineModule) Name() string              { return "billing" }
+func (*billingLifecyclePipelineModule) Required() bool            { return true }
+func (*billingLifecyclePipelineModule) PostResponseEnabled() bool { return true }
+func (m *billingLifecyclePipelineModule) Handle(context.Context, *RequestContext) error {
+	m.phases = append(m.phases, "reserve")
+	return nil
+}
+func (m *billingLifecyclePipelineModule) HandlePostResponse(context.Context, *RequestContext) error {
+	m.phases = append(m.phases, "commit")
+	return nil
+}
+func (m *billingLifecyclePipelineModule) HandleFailure(context.Context, *RequestContext, error) error {
+	m.phases = append(m.phases, "cancel")
+	return nil
 }

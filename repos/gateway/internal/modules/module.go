@@ -135,6 +135,42 @@ func (p Pipeline) RunAuthentication(ctx context.Context, req *RequestContext) er
 	return nil
 }
 
+// RunBillingLifecycle executes only the billing module for non-inference
+// operations that authenticate separately and must not pass through content
+// transforms. The phase uses the same reserve/commit/cancel contract as model
+// requests.
+func (p Pipeline) RunBillingLifecycle(ctx context.Context, req *RequestContext, phase string, cause error) error {
+	for _, module := range p.modules {
+		if module.Name() != "billing" {
+			continue
+		}
+		var handle func(context.Context, *RequestContext) error
+		switch phase {
+		case "reserve":
+			handle = module.Handle
+		case "commit":
+			post, ok := module.(PostResponseModule)
+			if !ok || !post.PostResponseEnabled() {
+				return errors.New("billing module does not support commit")
+			}
+			handle = post.HandlePostResponse
+		case "cancel":
+			failure, ok := module.(FailureModule)
+			if !ok {
+				return errors.New("billing module does not support cancel")
+			}
+			handle = func(ctx context.Context, req *RequestContext) error { return failure.HandleFailure(ctx, req, cause) }
+		default:
+			return errors.New("invalid billing lifecycle phase")
+		}
+		if err := p.run(ctx, req, module, phase, handle); err != nil {
+			return fmt.Errorf("billing %s failed: %w", phase, err)
+		}
+		return nil
+	}
+	return nil
+}
+
 func (p Pipeline) runPre(ctx context.Context, req *RequestContext, tokenCount bool) error {
 	for _, module := range p.modules {
 		if tokenCount && module.Name() == "billing" {

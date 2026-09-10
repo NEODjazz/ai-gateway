@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.168
+  version: 0.1.169
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -442,6 +442,30 @@ paths:
               schema: {$ref: '#/components/schemas/SearchResponse'}
         default:
           description: Gateway or provider error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/mcp/servers/{id}/tools:
+    get:
+      operationId: listMCPServerTools
+      tags: [MCP]
+      summary: Discover tools from an enabled registered MCP server
+      description: Authenticates the virtual key, enforces exact connector and access-group grants, consumes RPM admission, and records a durable zero-cost discovery lifecycle. Each request creates a bounded Streamable HTTP session and performs initialize followed by tools/list. The gateway sends no client bearer token or stored credential to the MCP server. Legacy SSE registry entries are rejected.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 2048}}
+      responses:
+        '200':
+          description: Bounded page of validated MCP tool definitions
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MCPRuntimeToolPage'}
+        default:
+          description: Authentication, policy, rate-limit, billing, transport, or upstream failure
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -2061,7 +2085,7 @@ paths:
       operationId: updateMCPServer
       tags: [MCP]
       summary: Create or atomically update safe MCP server metadata
-      description: Stores metadata only; does not connect, discover tools, execute calls, or configure clients. No credential or header fields are accepted. Enabled server tool grants are consulted for connector authorization through toolsets; direct grants are independent. Tool strings are not verified against the server URL or a remote tool list.
+      description: Stores endpoint and policy metadata without credentials or headers. Enabled Streamable HTTP entries can be queried through the authenticated discovery endpoint; saves do not connect to the server. Tool execution is not exposed. Enabled server grants are consulted for connector authorization through toolsets; direct grants are independent. Tool strings are not verified against a remote tool list.
       parameters: [{$ref: '#/components/parameters/MCPEntryID'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/MCPServerInput'}}}}
       responses:
@@ -5952,7 +5976,7 @@ components:
         label: {type: string, minLength: 1, maxLength: 128}
         description: {type: string, maxLength: 1024}
         server_url: {type: string, format: uri, pattern: '^https://[^?#]+$'}
-        transport: {type: string, enum: [streamable-http, sse], description: Metadata only; does not configure an MCP connection}
+        transport: {type: string, enum: [streamable-http, sse], description: Streamable HTTP supports authenticated gateway discovery; legacy SSE remains metadata-only}
         tools: {type: array, maxItems: 256, description: Permission strings matched for connector authorization through toolsets. Empty or omitted grants match any connector. Exact connector identities are recommended; strings are not verified against server URL or discovered tools., items: {type: string, minLength: 1, maxLength: 512}}
         enabled: {type: boolean}
     MCPServer:
@@ -5967,6 +5991,24 @@ components:
       required: [toolset_ids]
       properties:
         toolset_ids: {type: array, items: {type: string}}
+    MCPRuntimeTool:
+      type: object
+      additionalProperties: false
+      required: [name, inputSchema]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 256}
+        title: {type: string}
+        description: {type: string}
+        inputSchema: {type: object, additionalProperties: true}
+        outputSchema: {type: object, additionalProperties: true}
+        annotations: {type: object, additionalProperties: true}
+    MCPRuntimeToolPage:
+      type: object
+      additionalProperties: false
+      required: [tools]
+      properties:
+        tools: {type: array, maxItems: 1000, items: {$ref: '#/components/schemas/MCPRuntimeTool'}}
+        nextCursor: {type: string, maxLength: 2048}
     MCPToolsetInput:
       type: object
       additionalProperties: false

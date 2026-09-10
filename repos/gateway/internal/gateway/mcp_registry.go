@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"ai-gateway-gateway/internal/mcpclient"
 )
 
 type MCPServer struct {
@@ -63,6 +65,24 @@ func (r *MCPRegistry) Servers() []MCPServer {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
+}
+func (r *MCPRegistry) Server(id string) (MCPServer, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	server, ok := r.servers[id]
+	server.Tools = append([]string(nil), server.Tools...)
+	return server, ok
+}
+
+type MCPRuntimeClient interface {
+	ListTools(context.Context, string) (mcpclient.ToolPage, error)
+}
+
+type MCPRuntimeFactory func(string) (MCPRuntimeClient, error)
+
+func (h Handler) WithMCPRuntimeFactory(factory MCPRuntimeFactory) Handler {
+	h.mcpRuntime = factory
+	return h
 }
 func (r *MCPRegistry) Toolsets() []MCPToolset {
 	r.mu.RLock()
