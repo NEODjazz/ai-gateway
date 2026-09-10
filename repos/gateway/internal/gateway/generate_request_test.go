@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"ai-gateway-gateway/internal/provider"
@@ -13,7 +12,7 @@ import (
 
 func TestGenerateRequestConvertsNativeContextAndConfig(t *testing.T) {
 	var native generateRequest
-	raw := `{"systemInstruction":{"parts":[{"text":"Be concise"}]},"contents":[{"role":"user","parts":[{"text":"Describe"},{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}]}],"tools":[{"functionDeclarations":[{"name":"weather","parameters":{"type":"OBJECT","properties":{"city":{"type":"STRING"}},"required":["city"]}}]}],"toolConfig":{"functionCallingConfig":{"mode":"ANY","allowedFunctionNames":["weather"]}},"generationConfig":{"maxOutputTokens":50,"temperature":0.2,"topP":0.9,"seed":7,"stopSequences":[" END "],"candidateCount":1,"responseMimeType":"application/json","responseSchema":{"type":"OBJECT","properties":{"answer":{"type":"STRING"}}}}}`
+	raw := `{"systemInstruction":{"parts":[{"text":"Be concise"}]},"contents":[{"role":"user","parts":[{"text":"Describe"},{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}]}],"tools":[{"functionDeclarations":[{"name":"weather","parameters":{"type":"OBJECT","properties":{"city":{"type":"STRING"}},"required":["city"]}}]}],"toolConfig":{"functionCallingConfig":{"mode":"ANY","allowedFunctionNames":["weather"]}},"generationConfig":{"maxOutputTokens":50,"temperature":0.2,"topP":0.9,"topK":12,"seed":7,"presencePenalty":0.3,"frequencyPenalty":-0.2,"responseLogprobs":true,"logprobs":5,"responseModalities":["TEXT"],"stopSequences":[" END "],"candidateCount":1,"responseMimeType":"application/json","responseSchema":{"type":"OBJECT","properties":{"answer":{"type":"STRING"}}}}}`
 	if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +20,7 @@ func TestGenerateRequestConvertsNativeContextAndConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chat.Model != "public-model" || !chat.Stream || *chat.MaxCompletionTokens != 50 || *chat.Seed != 7 || len(chat.Messages) != 2 || chat.Messages[0].Role != "system" {
+	if chat.Model != "public-model" || !chat.Stream || *chat.MaxCompletionTokens != 50 || *chat.Seed != 7 || chat.TopK == nil || *chat.TopK != 12 || chat.PresencePenalty == nil || *chat.PresencePenalty != 0.3 || chat.FrequencyPenalty == nil || *chat.FrequencyPenalty != -0.2 || chat.Logprobs == nil || !*chat.Logprobs || chat.TopLogprobs == nil || *chat.TopLogprobs != 5 || chat.N == nil || *chat.N != 1 || len(chat.Modalities) != 1 || chat.Modalities[0] != "text" || len(chat.Messages) != 2 || chat.Messages[0].Role != "system" {
 		t.Fatalf("context/config: %+v", chat)
 	}
 	schema := chat.Tools[0].Function.Parameters.(map[string]any)
@@ -116,6 +115,12 @@ func TestGenerateRequestRejectsUnsupportedFieldsAndUnions(t *testing.T) {
 		`{"contents":[{"role":"model","parts":[{"text":"private","thought":true,"thoughtSignature":"%%%"}]}]}`,
 		`{"contents":[{"parts":[{"functionResponse":{"name":"missing","response":{}}}]}]}`,
 		`{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"candidateCount":2}}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"topK":0}}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"presencePenalty":3}}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"frequencyPenalty":-3}}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"logprobs":1}}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"responseLogprobs":true,"logprobs":21}}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"responseModalities":["AUDIO"]}}`,
 		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"functionDeclarations":[{"name":"f","parameters":{"type":"OBJECT","propertyOrdering":["a"]}}]}]}`,
 		`{"contents":[{"role":"model","parts":[{"functionCall":{"name":"f","args":{}}},{"functionCall":{"name":"f","args":{}}}]},{"parts":[{"functionResponse":{"name":"f","response":{}}}]}]}`,
 	} {
@@ -127,10 +132,6 @@ func TestGenerateRequestRejectsUnsupportedFieldsAndUnions(t *testing.T) {
 		if err == nil {
 			t.Fatalf("unsupported input accepted: %s", raw)
 		}
-	}
-	var request generateRequest
-	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"topK":12}}`), &request); err == nil || !strings.Contains(err.Error(), "topK") {
-		t.Fatal("unknown generation parameter ignored")
 	}
 }
 

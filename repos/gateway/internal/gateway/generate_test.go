@@ -50,8 +50,9 @@ func TestGenerateContentRoutesModelIDContainingColon(t *testing.T) {
 func TestGenerateContentNativeJSON(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "id", Model: "m", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call", Type: "function", Function: openai.FunctionCall{Name: "weather", Arguments: `{"city":"Paris"}`}, ExtraContent: &openai.ToolCallExtraContent{Google: &openai.GoogleToolCallContent{ThoughtSignature: "opaque"}}}}}, FinishReason: "tool_calls"}}, Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 7, TotalTokens: 17, CompletionTokensDetails: &openai.CompletionTokenDetails{ReasoningTokens: 4}}}}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
-	response := generateCall(handler, "/v1beta/models/m:generateContent", `{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":20}}`, "")
-	if response.Code != 200 || upstream.calls != 1 || upstream.request.Request.MaxCompletionTokens == nil || *upstream.request.Request.MaxCompletionTokens != 20 {
+	response := generateCall(handler, "/v1beta/models/m:generateContent", `{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":20,"topK":10,"presencePenalty":0.2,"frequencyPenalty":-0.1,"responseLogprobs":true,"logprobs":3,"responseModalities":["TEXT"],"candidateCount":1}}`, "")
+	request := upstream.request.Request
+	if response.Code != 200 || upstream.calls != 1 || request.MaxCompletionTokens == nil || *request.MaxCompletionTokens != 20 || request.TopK == nil || *request.TopK != 10 || request.PresencePenalty == nil || *request.PresencePenalty != 0.2 || request.FrequencyPenalty == nil || *request.FrequencyPenalty != -0.1 || request.Logprobs == nil || !*request.Logprobs || request.TopLogprobs == nil || *request.TopLogprobs != 3 || request.N == nil || *request.N != 1 || len(request.Modalities) != 1 || request.Modalities[0] != "text" {
 		t.Fatalf("request: %d %s", response.Code, response.Body.String())
 	}
 	for _, want := range []string{`"functionCall"`, `"thoughtSignature":"opaque"`, `"finishReason":"STOP"`, `"thoughtsTokenCount":4`, `"candidatesTokenCount":3`, `"totalTokenCount":17`} {

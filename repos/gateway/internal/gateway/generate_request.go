@@ -23,15 +23,21 @@ type generateRequest struct {
 		} `json:"functionCallingConfig"`
 	} `json:"toolConfig,omitempty"`
 	Generation struct {
-		MaxOutputTokens *int           `json:"maxOutputTokens,omitempty"`
-		Temperature     *float64       `json:"temperature,omitempty"`
-		TopP            *float64       `json:"topP,omitempty"`
-		Seed            *int64         `json:"seed,omitempty"`
-		Stop            []string       `json:"stopSequences,omitempty"`
-		CandidateCount  *int           `json:"candidateCount,omitempty"`
-		MIMEType        string         `json:"responseMimeType,omitempty"`
-		JSONSchema      map[string]any `json:"responseJsonSchema,omitempty"`
-		Schema          map[string]any `json:"responseSchema,omitempty"`
+		MaxOutputTokens  *int           `json:"maxOutputTokens,omitempty"`
+		Temperature      *float64       `json:"temperature,omitempty"`
+		TopP             *float64       `json:"topP,omitempty"`
+		TopK             *int           `json:"topK,omitempty"`
+		Seed             *int64         `json:"seed,omitempty"`
+		Stop             []string       `json:"stopSequences,omitempty"`
+		CandidateCount   *int           `json:"candidateCount,omitempty"`
+		PresencePenalty  *float64       `json:"presencePenalty,omitempty"`
+		FrequencyPenalty *float64       `json:"frequencyPenalty,omitempty"`
+		ResponseLogprobs *bool          `json:"responseLogprobs,omitempty"`
+		Logprobs         *int           `json:"logprobs,omitempty"`
+		Modalities       []string       `json:"responseModalities,omitempty"`
+		MIMEType         string         `json:"responseMimeType,omitempty"`
+		JSONSchema       map[string]any `json:"responseJsonSchema,omitempty"`
+		Schema           map[string]any `json:"responseSchema,omitempty"`
 	} `json:"generationConfig,omitempty"`
 }
 type generateContent struct {
@@ -90,6 +96,35 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 	if n := r.Generation.TopP; n != nil && (*n < 0 || *n > 1) {
 		return fail("topP")
 	}
+	if n := r.Generation.TopK; n != nil && (*n < 1 || *n > 1000000) {
+		return fail("topK")
+	}
+	for _, penalty := range []struct {
+		name  string
+		value *float64
+	}{
+		{name: "presencePenalty", value: r.Generation.PresencePenalty},
+		{name: "frequencyPenalty", value: r.Generation.FrequencyPenalty},
+	} {
+		if penalty.value != nil && (math.IsNaN(*penalty.value) || math.IsInf(*penalty.value, 0) || *penalty.value < -2 || *penalty.value > 2) {
+			return fail(penalty.name)
+		}
+	}
+	if n := r.Generation.Logprobs; n != nil && (*n < 0 || *n > 20 || r.Generation.ResponseLogprobs == nil || !*r.Generation.ResponseLogprobs) {
+		return fail("logprobs")
+	}
+	if r.Generation.Modalities != nil {
+		if len(r.Generation.Modalities) > 1 || len(r.Generation.Modalities) == 1 && r.Generation.Modalities[0] != "TEXT" {
+			return fail("responseModalities")
+		}
+		result.Modalities = []string{"text"}
+	}
+	result.TopK = r.Generation.TopK
+	result.PresencePenalty = r.Generation.PresencePenalty
+	result.FrequencyPenalty = r.Generation.FrequencyPenalty
+	result.Logprobs = r.Generation.ResponseLogprobs
+	result.TopLogprobs = r.Generation.Logprobs
+	result.N = r.Generation.CandidateCount
 	if _, valid := openai.StopSequences(r.Generation.Stop); !valid {
 		return fail("stopSequences")
 	}
