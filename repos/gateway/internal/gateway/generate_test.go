@@ -68,6 +68,38 @@ func TestGenerateContentReturnsThoughtParts(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestGenerateContentReturnsTextPartSignature(t *testing.T) {
+	native, err := openai.AddGeminiPartSignature(nil, 0, "c2lnbmVk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "id", Model: "m", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "answer", NativeContent: native}, FinishReason: "stop"}}, Usage: openai.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}}}
+	response := generateCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), "/v1beta/models/m:generateContent", `{"contents":[{"parts":[{"text":"question"}]}]}`, "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"text":"answer","thoughtSignature":"c2lnbmVk"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestGenerateStreamEmitsFinalTextPartSignature(t *testing.T) {
+	native, err := openai.AddGeminiPartSignature(nil, 0, "c2lnbmVk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := httptest.NewRecorder()
+	w := &generateWriter{destination: destination, headers: make(http.Header)}
+	w.Header().Set("Content-Type", "text/event-stream")
+	if err := w.chunk(`{"id":"id","model":"m","choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`); err != nil {
+		t.Fatal(err)
+	}
+	w.chatStreamResult(openai.ChatCompletionResponse{ID: "id", Model: "m", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "answer", NativeContent: native}, FinishReason: "stop"}}, Usage: openai.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}})
+	if err := w.chunk("[DONE]"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(destination.Body.String(), `"text":"","thoughtSignature":"c2lnbmVk"`) {
+		t.Fatalf("body=%s", destination.Body.String())
+	}
+}
 func TestGenerateContentAuthQuotasAndUnsupportedParameters(t *testing.T) {
 	for _, tc := range []struct {
 		path, body, key string

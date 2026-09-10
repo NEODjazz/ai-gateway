@@ -88,6 +88,62 @@ func TestGeminiPreservesThoughtPartsAndHistory(t *testing.T) {
 	}
 }
 
+func TestGeminiPreservesTextPartSignatures(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body geminiRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Contents[1].Parts[0].ThoughtSignature != "cHJpb3I=" || body.Contents[1].Parts[0].Thought {
+			t.Fatalf("history=%+v", body.Contents[1].Parts)
+		}
+		_, _ = w.Write([]byte(`{"candidates":[{"index":0,"content":{"parts":[{"text":"answer","thoughtSignature":"bmV3"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}`))
+	}))
+	defer server.Close()
+	native, err := openai.AddGeminiPartSignature(nil, 0, "cHJpb3I=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "question"}, {Role: "assistant", Content: "prior", NativeContent: native}}}
+	response, err := NewGemini(server.URL, "", false).ChatCompletions(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signatures, err := openai.GeminiPartSignatures(response.Choices[0].Message.NativeContent)
+	if err != nil || len(signatures) != 1 || signatures[0].Signature != "bmV3" {
+		t.Fatalf("signatures=%+v err=%v", signatures, err)
+	}
+}
+
+func TestGeminiRejectsUnknownNativeContent(t *testing.T) {
+	request := geminiTestChat()
+	request.Messages = append(request.Messages, openai.Message{
+		Role:          "assistant",
+		Content:       "answer",
+		NativeContent: []json.RawMessage{json.RawMessage(`{"type":"unknown"}`)},
+	})
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("unknown native content accepted")
+	}
+}
+
+func TestGeminiStreamPreservesTextPartSignatureInFinalResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"answer\",\"thoughtSignature\":\"c2lnbmVk\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1,\"totalTokenCount\":2}}\n\n"))
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Stream: true, Messages: []openai.Message{{Role: "user", Content: "question"}}}
+	response, err := NewGemini(server.URL, "", true).StreamChatCompletions(t.Context(), request, func(string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	signatures, err := openai.GeminiPartSignatures(response.Choices[0].Message.NativeContent)
+	if err != nil || len(signatures) != 1 || signatures[0].Signature != "c2lnbmVk" {
+		t.Fatalf("signatures=%+v err=%v", signatures, err)
+	}
+}
+
 func TestGeminiRejectsThoughtsOutsideAssistantHistory(t *testing.T) {
 	request := geminiTestChat()
 	request.Messages[0].Reasoning = []openai.ReasoningBlock{{Type: "thinking", Thinking: "private"}}

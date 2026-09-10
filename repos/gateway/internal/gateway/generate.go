@@ -107,6 +107,8 @@ type generateWriter struct {
 	toolNames         [128]strings.Builder
 	toolArguments     [128]strings.Builder
 	toolBytes         int
+	partSignatures    []openai.GeminiPartSignature
+	directResponse    *openai.ChatCompletionResponse
 	err               error
 }
 
@@ -220,6 +222,25 @@ func generateParts(message openai.Message) ([]any, error) {
 		copy(parts[position+1:], parts[position:])
 		parts[position] = part
 	}
+	signatures, err := openai.GeminiPartSignatures(message.NativeContent)
+	if err != nil {
+		return nil, err
+	}
+	for _, signature := range signatures {
+		position := min(signature.Index, len(parts))
+		if position < len(parts) {
+			if part, ok := parts[position].(map[string]any); ok {
+				if _, textPart := part["text"]; textPart && part["thought"] != true {
+					part["thoughtSignature"] = signature.Signature
+					continue
+				}
+			}
+		}
+		part := map[string]any{"text": "", "thoughtSignature": signature.Signature}
+		parts = append(parts, nil)
+		copy(parts[position+1:], parts[position:])
+		parts[position] = part
+	}
 	return parts, nil
 }
 func generateEnvelope(id, model string, parts []any, reason string, usage map[string]int) map[string]any {
@@ -255,6 +276,9 @@ func (w *generateWriter) chunk(payload string) error {
 		parts, err := generateParts(message)
 		if err != nil {
 			return err
+		}
+		for _, signature := range w.partSignatures {
+			parts = append(parts, map[string]any{"text": "", "thoughtSignature": signature.Signature})
 		}
 		usage, err := generateUsage(w.usage)
 		if err != nil {
@@ -377,6 +401,46 @@ func (w *generateWriter) chatStreamResult(response openai.ChatCompletionResponse
 	if response.Model != "" {
 		w.model = response.Model
 	}
+	if len(response.Choices) == 1 {
+		signatures, err := openai.GeminiPartSignatures(response.Choices[0].Message.NativeContent)
+		if err != nil {
+			w.err = err
+			return
+		}
+		w.partSignatures = signatures
+	}
+}
+
+func (w *generateWriter) chatResult(response openai.ChatCompletionResponse, stream bool) {
+	if stream {
+		if len(response.Choices) != 1 || response.Choices[0].Index != 0 {
+			w.err = errors.New("invalid provider response")
+			return
+		}
+		parts, err := generateParts(response.Choices[0].Message)
+		if err != nil {
+			w.err = err
+			return
+		}
+		reason, err := generateReason(response.Choices[0].FinishReason)
+		if err != nil {
+			w.err = err
+			return
+		}
+		usage, err := generateUsage(response.Usage)
+		if err != nil {
+			w.err = err
+			return
+		}
+		if err := w.event(generateEnvelope(response.ID, response.Model, parts, reason, usage)); err != nil {
+			w.err = err
+			return
+		}
+		w.terminal = true
+		return
+	}
+	copy := response
+	w.directResponse = &copy
 }
 func generateError(code int, message string) map[string]any {
 	status := "INTERNAL"
@@ -423,7 +487,12 @@ func (w *generateWriter) finish() {
 		return
 	}
 	var response openai.ChatCompletionResponse
-	err := json.Unmarshal(w.buffer.Bytes(), &response)
+	var err error
+	if w.directResponse != nil {
+		response = *w.directResponse
+	} else {
+		err = json.Unmarshal(w.buffer.Bytes(), &response)
+	}
 	var parts []any
 	var reason string
 	var usage map[string]int

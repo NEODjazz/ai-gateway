@@ -170,7 +170,7 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 					members++
 				}
 			}
-			if members != 1 || (part.Thought && part.Text == nil) || (part.Signature != "" && part.Call == nil && !part.Thought) || part.Thought && part.Signature != "" && !validGenerateBase64(part.Signature) {
+			if members != 1 || (part.Thought && part.Text == nil) || part.Text != nil && part.Signature != "" && !validGenerateBase64(part.Signature) {
 				return fail("contents.parts")
 			}
 			switch {
@@ -187,6 +187,17 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 					return fail("text after functionCall")
 				}
 				parts = append(parts, map[string]any{"type": "text", "text": *part.Text})
+				if part.Signature != "" {
+					if role != "assistant" {
+						return fail("thoughtSignature role")
+					}
+					var err error
+					message.NativeContent, err = openai.AddGeminiPartSignature(message.NativeContent, partIndex, part.Signature)
+					if err != nil {
+						return result, err
+					}
+					result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(part.Signature))
+				}
 			case part.InlineData != nil:
 				if role != "user" {
 					return fail("inlineData role")

@@ -91,6 +91,22 @@ func TestGenerateThoughtHistoryRoundTrip(t *testing.T) {
 		t.Fatalf("parts=%+v err=%v", parts, err)
 	}
 }
+
+func TestGenerateTextPartSignatureRoundTrip(t *testing.T) {
+	var native generateRequest
+	raw := `{"contents":[{"role":"model","parts":[{"text":"answer","thoughtSignature":"c2lnbmVk"}]}]}`
+	if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || len(chat.Messages) != 1 || len(chat.Messages[0].NativeContent) != 1 || chat.NativeInputTokens == 0 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	parts, err := generateParts(chat.Messages[0])
+	if err != nil || len(parts) != 1 || parts[0].(map[string]any)["thoughtSignature"] != "c2lnbmVk" {
+		t.Fatalf("parts=%+v err=%v", parts, err)
+	}
+}
 func TestGenerateRequestRejectsUnsupportedFieldsAndUnions(t *testing.T) {
 	for _, raw := range []string{
 		`{"contents":[{"parts":[{"text":"hi"}]}],"safetySettings":[]}`,

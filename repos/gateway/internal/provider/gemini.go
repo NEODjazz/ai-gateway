@@ -323,6 +323,9 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		if len(message.Reasoning) > 0 && message.Role != "assistant" {
 			return result, geminiInvalid("messages.reasoning")
 		}
+		if len(message.NativeContent) > 0 && message.Role != "assistant" {
+			return result, geminiInvalid("messages.native_content")
+		}
 		if (message.Role != "assistant" && len(message.ToolCalls) > 0) || (message.Role != "tool" && message.ToolCallID != "") {
 			return result, geminiInvalid("messages.tool_calls")
 		}
@@ -378,6 +381,16 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 					copy(content.Parts[position+1:], content.Parts[position:])
 					content.Parts[position] = part
 				}
+			}
+			signatures, err := openai.GeminiPartSignatures(message.NativeContent)
+			if err != nil || len(signatures) != len(message.NativeContent) {
+				return result, geminiInvalid("messages.native_content")
+			}
+			for _, signature := range signatures {
+				if signature.Index >= len(content.Parts) || content.Parts[signature.Index].Thought || content.Parts[signature.Index].FunctionCall != nil || content.Parts[signature.Index].FunctionResponse != nil || content.Parts[signature.Index].InlineData != nil {
+					return result, geminiInvalid("messages.native_content")
+				}
+				content.Parts[signature.Index].ThoughtSignature = signature.Signature
 			}
 		case "tool":
 			name, ok := toolNames[message.ToolCallID]
@@ -664,6 +677,13 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 				return result, errors.New("unsupported Gemini output modality")
 			}
 			text.WriteString(part.Text)
+			if part.ThoughtSignature != "" && part.FunctionCall == nil {
+				var err error
+				choice.Message.NativeContent, err = openai.AddGeminiPartSignature(choice.Message.NativeContent, partIndex, part.ThoughtSignature)
+				if err != nil {
+					return result, err
+				}
+			}
 			if part.FunctionCall != nil {
 				if part.FunctionCall.Name == "" {
 					return result, errors.New("invalid Gemini function call")
@@ -815,6 +835,32 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 				current.Logprobs.Content = append(current.Logprobs.Content, choice.Logprobs.Content...)
 			}
 			current.Message.Content = openai.ContentText(current.Message.Content) + openai.ContentText(choice.Message.Content)
+			incomingSignatures, err := openai.GeminiPartSignatures(choice.Message.NativeContent)
+			if err != nil {
+				return err
+			}
+			storedSignatures, err := openai.GeminiPartSignatures(current.Message.NativeContent)
+			if err != nil {
+				return err
+			}
+			for _, incoming := range incomingSignatures {
+				found := false
+				for _, stored := range storedSignatures {
+					if stored.Index == incoming.Index {
+						if stored.Signature != incoming.Signature {
+							return errors.New("Gemini part signature changed during stream")
+						}
+						found = true
+					}
+				}
+				if !found {
+					current.Message.NativeContent, err = openai.AddGeminiPartSignature(current.Message.NativeContent, incoming.Index, incoming.Signature)
+					if err != nil {
+						return err
+					}
+					storedSignatures = append(storedSignatures, incoming)
+				}
+			}
 			for _, block := range choice.Message.Reasoning {
 				stored := -1
 				if block.Index != nil {
