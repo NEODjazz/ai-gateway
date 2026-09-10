@@ -13,16 +13,30 @@ import (
 )
 
 func (r Router) TranscribeAudio(ctx context.Context, req modules.RequestContext) (openai.AudioTranscriptionResponse, error) {
+	return r.routeAudio(ctx, req, false)
+}
+
+func (r Router) TranslateAudio(ctx context.Context, req modules.RequestContext) (openai.AudioTranscriptionResponse, error) {
+	return r.routeAudio(ctx, req, true)
+}
+
+type audioOperationCall func(context.Context, openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error)
+
+func (r Router) routeAudio(ctx context.Context, req modules.RequestContext, translation bool) (openai.AudioTranscriptionResponse, error) {
 	if req.AudioTranscriptionRequest == nil {
-		return openai.AudioTranscriptionResponse{}, errors.New("missing audio transcription request")
+		return openai.AudioTranscriptionResponse{}, errors.New("missing audio request")
 	}
 	request := *req.AudioTranscriptionRequest
 	if message := request.Validate(); message != "" {
 		return openai.AudioTranscriptionResponse{}, &Error{Class: FailureClientRequest, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
-	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "audio_transcription")
+	operation := "audio_transcription"
+	if translation {
+		operation = "audio_translation"
+	}
+	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, operation)
 	if len(candidates) == 0 {
-		return openai.AudioTranscriptionResponse{}, fmt.Errorf("no audio transcription endpoint for provider=%q model=%q", request.Provider, request.Model)
+		return openai.AudioTranscriptionResponse{}, fmt.Errorf("no %s endpoint for provider=%q model=%q", operation, request.Provider, request.Model)
 	}
 	var errs []error
 	var lastAttempt *modules.RequestContext
@@ -36,9 +50,19 @@ func (r Router) TranscribeAudio(ctx context.Context, req modules.RequestContext)
 		if !progress.allows(endpoint) {
 			continue
 		}
-		client, ok := endpoint.Provider.(AudioTranscriptionClient)
-		if !ok {
-			continue
+		var call audioOperationCall
+		if translation {
+			client, ok := endpoint.Provider.(AudioTranslationClient)
+			if !ok {
+				continue
+			}
+			call = client.TranslateAudio
+		} else {
+			client, ok := endpoint.Provider.(AudioTranscriptionClient)
+			if !ok {
+				continue
+			}
+			call = client.TranscribeAudio
 		}
 		progress.enter(endpoint)
 		attemptCtx := providerAttemptContext(req, endpoint)
@@ -69,7 +93,7 @@ func (r Router) TranscribeAudio(ctx context.Context, req modules.RequestContext)
 		}
 		started := time.Now()
 		lastAttempt = &attemptCtx
-		response, retries, err := r.callAudioTranscription(ctx, endpoint, client, *attemptCtx.AudioTranscriptionRequest)
+		response, retries, err := r.callAudioOperation(ctx, endpoint, call, *attemptCtx.AudioTranscriptionRequest, operation)
 		totalRetries += retries
 		setAttemptMetadata(&attemptCtx, started, err)
 		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
@@ -108,7 +132,7 @@ func (r Router) TranscribeAudio(ctx context.Context, req modules.RequestContext)
 	return openai.AudioTranscriptionResponse{}, joined
 }
 
-func (r Router) callAudioTranscription(ctx context.Context, endpoint Endpoint, client AudioTranscriptionClient, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, int, error) {
+func (r Router) callAudioOperation(ctx context.Context, endpoint Endpoint, call audioOperationCall, request openai.AudioTranscriptionRequest, operation string) (openai.AudioTranscriptionResponse, int, error) {
 	release, err := r.acquireEndpoint(ctx, endpoint, openai.AudioTranscriptionReserveTokens(request))
 	if err != nil {
 		return openai.AudioTranscriptionResponse{}, 0, err
@@ -118,8 +142,8 @@ func (r Router) callAudioTranscription(ctx context.Context, endpoint Endpoint, c
 		return openai.AudioTranscriptionResponse{}, 0, err
 	}
 	for attempt := 0; attempt <= endpointMaxRetries(endpoint); attempt++ {
-		providerCtx, finish := r.startProviderCall(ctx, endpoint, "audio_transcription")
-		response, callErr := client.TranscribeAudio(providerCtx, request)
+		providerCtx, finish := r.startProviderCall(ctx, endpoint, operation)
+		response, callErr := call(providerCtx, request)
 		finish(callErr)
 		if callErr == nil {
 			r.health.success(ctx, endpoint)
@@ -134,5 +158,5 @@ func (r Router) callAudioTranscription(ctx context.Context, endpoint Endpoint, c
 			return openai.AudioTranscriptionResponse{}, attempt, waitErr
 		}
 	}
-	return openai.AudioTranscriptionResponse{}, endpointMaxRetries(endpoint), errors.New("audio transcription failed")
+	return openai.AudioTranscriptionResponse{}, endpointMaxRetries(endpoint), errors.New("audio operation failed")
 }

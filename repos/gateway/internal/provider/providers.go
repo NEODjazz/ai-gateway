@@ -34,7 +34,7 @@ var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatib
 var managedOperationCapabilities = []string{
 	"chat", "responses", "embeddings", "rerank", "moderation",
 	"image_generation", "image_edit", "image_variation",
-	"audio_transcription", "audio_speech", "ocr", "search", "stream",
+	"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "stream",
 }
 
 var managedFeatureCapabilities = []string{

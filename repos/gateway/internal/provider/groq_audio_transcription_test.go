@@ -41,6 +41,46 @@ func TestGroqAudioTranscriptionContract(t *testing.T) {
 	}
 }
 
+func TestGroqAudioTranslationContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/openai/v1/audio/translations" || r.Header.Get("Authorization") != "Bearer groq-key" {
+			t.Fatalf("unexpected request: %s %s headers=%v", r.Method, r.URL.Path, r.Header)
+		}
+		if err := r.ParseMultipartForm(openai.MaxInferenceBodyBytes); err != nil {
+			t.Fatal(err)
+		}
+		if r.FormValue("model") != "whisper-large-v3" || r.FormValue("language") != "en" || r.FormValue("prompt") != "product names" || r.FormValue("temperature") != "0.25" || r.FormValue("response_format") != "verbose_json" || len(r.MultipartForm.Value["timestamp_granularities[]"]) != 0 {
+			t.Fatalf("form=%v", r.MultipartForm.Value)
+		}
+		_, _ = io.WriteString(w, `{"task":"translate","language":"english","duration":1.25,"text":"hello"}`)
+	}))
+	defer server.Close()
+	temperature := 0.25
+	request := openai.AudioTranscriptionRequest{Model: "whisper-large-v3", File: mistralWAVAttachment(1250), Language: "en", Prompt: "product names", ResponseFormat: "json", Temperature: &temperature}
+	response, err := NewGroq(server.URL+"/openai/v1", "groq-key", false).TranslateAudio(t.Context(), request)
+	if err != nil || response.Text != "hello" || response.Duration != 1.25 || response.Usage == nil || response.Usage.Type != "duration" || response.Usage.InputAudioMilliseconds != groqMinimumBilledAudioMilliseconds {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGroqAudioTranslationRejectsUnsupportedParametersBeforeNetwork(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	client := NewGroq(server.URL+"/openai/v1", "secret", false)
+	for _, request := range []openai.AudioTranscriptionRequest{
+		{Model: "whisper", File: mistralWAVAttachment(1000), Language: "fr"},
+		{Model: "whisper", File: mistralWAVAttachment(1000), ResponseFormat: "verbose_json", TimestampGranularities: []string{"segment"}},
+	} {
+		if _, err := client.TranslateAudio(t.Context(), request); err == nil {
+			t.Fatalf("unsupported translation request accepted: %+v", request)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("upstream calls=%d", calls)
+	}
+}
+
 func TestGroqAudioTranscriptionRejectsUnsupportedParametersAndFormats(t *testing.T) {
 	client := NewGroq("https://example.test/openai/v1", "secret", false)
 	requests := []openai.AudioTranscriptionRequest{
@@ -73,6 +113,33 @@ func TestRouterGroqTranscriptionUsesMinimumBillableDuration(t *testing.T) {
 	response, err := router.TranscribeAudio(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, AudioTranscriptionRequest: &request})
 	if err != nil || response.Text != "hello" || recorder.reserved != 10000 || recorder.settled != 10000 || response.Duration != 1.25 {
 		t.Fatalf("response=%+v recorder=%+v err=%v", response, recorder, err)
+	}
+}
+
+func TestRouterGroqTranslationRequiresCapabilityAndAppliesAlias(t *testing.T) {
+	var model string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openai/v1/audio/translations" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(openai.MaxInferenceBodyBytes); err != nil {
+			t.Fatal(err)
+		}
+		model = r.FormValue("model")
+		_, _ = io.WriteString(w, `{"text":"hello"}`)
+	}))
+	defer server.Close()
+	recorder := &transcriptionLifecycleRecorder{}
+	router := New(Config{Modules: modules.NewPipeline([]modules.Module{recorder}), Endpoints: []config.ProviderEndpointConfig{{Name: "translation", Type: "groq", BaseURL: server.URL + "/openai/v1", Models: []string{"public-audio"}, ModelAliases: map[string]string{"public-audio": "whisper-large-v3"}, Capabilities: []string{"audio_translation"}}}}).(*Router)
+	request := openai.AudioTranscriptionRequest{Model: "public-audio", File: mistralWAVAttachment(1250)}
+	response, err := router.TranslateAudio(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, AudioTranscriptionRequest: &request, Metadata: map[string]string{"gateway.api_type": "audio_translation"}})
+	if err != nil || response.Text != "hello" || model != "whisper-large-v3" || recorder.reserved != 10000 || recorder.settled != 10000 {
+		t.Fatalf("response=%+v model=%q recorder=%+v err=%v", response, model, recorder, err)
+	}
+
+	missing := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "transcription", Type: "groq", BaseURL: server.URL + "/openai/v1", Models: []string{"public-audio"}, Capabilities: []string{"audio_transcription"}}}}).(*Router)
+	if _, err := missing.TranslateAudio(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, AudioTranscriptionRequest: &request}); err == nil {
+		t.Fatal("transcription-only endpoint was selected for translation")
 	}
 }
 

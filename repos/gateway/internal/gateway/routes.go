@@ -42,6 +42,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/v1/images/edits"}, func(h Handler) http.Handler { return http.HandlerFunc(h.EditImage) }},
 	{RouteContract{http.MethodPost, "/v1/images/variations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateImageVariation) }},
 	{RouteContract{http.MethodPost, "/v1/audio/transcriptions"}, func(h Handler) http.Handler { return http.HandlerFunc(h.TranscribeAudio) }},
+	{RouteContract{http.MethodPost, "/v1/audio/translations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.TranslateAudio) }},
 	{RouteContract{http.MethodPost, "/v1/audio/speech"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GenerateSpeech) }},
 	{RouteContract{http.MethodPost, "/v1/search"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Search) }},
 	{RouteContract{http.MethodPost, "/v1/ocr"}, func(h Handler) http.Handler { return http.HandlerFunc(h.OCR) }},

@@ -19,6 +19,8 @@ Gateway реализует OpenAI-compatible endpoints:
 | `GET /v1/responses/{id}/input_items` | Страница исходных input items сохраненного Response |
 | `POST /v1/embeddings` | Строки или bounded token-ID inputs |
 | `POST /v1/rerank` | Query/documents ranking |
+| `POST /v1/audio/transcriptions` | Транскрипция проверенного multipart audio с token или duration billing |
+| `POST /v1/audio/translations` | Перевод речи на английский через deployment с явной capability |
 
 Полные payloads, ограничения и ошибки описывает
 [OpenAPI](../repos/gateway/api/openapi.yaml). Все endpoints требуют Bearer
@@ -227,6 +229,15 @@ duration и завершенный audio-only WebM: RIFF, STREAMINFO, Ogg granul
 определить длительность до provider call. Multiplexed WebM, unknown-size nested
 elements и fragmented MP4 без полной track duration отклоняются до добавления
 полного track timeline parser, чтобы контейнер не мог обойти duration budget.
+
+`POST /v1/audio/translations` использует тот же multipart request, проверки
+файла, DLP/AV policy, model authorization, TPM reserve, retry и billing lifecycle.
+Маршрутизация требует отдельную capability `audio_translation`, поэтому
+transcription-only deployment не выбирается для перевода. Native Groq adapter
+вызывает `/audio/translations`, принимает `prompt`, `temperature`,
+`response_format` и только `language=en`; timestamp granularities отклоняются до
+upstream call. Для учета применяется проверенная длительность контейнера и
+минимум десять оплачиваемых секунд.
 
 `POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
 

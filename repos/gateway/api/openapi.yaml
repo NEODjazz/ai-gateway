@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.163
+  version: 0.1.164
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -354,7 +354,7 @@ paths:
       operationId: transcribeAudio
       tags: [Inference]
       summary: Transcribe an uploaded audio file through an explicitly capable deployment
-      description: Applies bounded multipart decoding, file signature checks, AV and prompt DLP policies, RPM/TPM admission, retries and exact token-usage billing. Native Mistral deployments also settle provider-reported audio duration; WAV reserves its parsed duration while compressed formats conservatively reserve the provider's 60-minute limit.
+      description: Applies bounded multipart decoding, file signature checks, AV and prompt DLP policies, RPM/TPM admission, retries and exact provider usage settlement. Duration-priced native deployments reserve validated container duration before execution.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -363,7 +363,30 @@ paths:
             schema: {$ref: '#/components/schemas/AudioTranscriptionRequest'}
       responses:
         '200':
-          description: Transcript with exact provider-reported token usage
+          description: Transcript with exact token or duration usage
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AudioTranscriptionResponse'}
+        default:
+          description: Gateway or provider error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/audio/translations:
+    post:
+      operationId: translateAudio
+      tags: [Inference]
+      summary: Translate uploaded speech to English through an explicitly capable deployment
+      description: Uses the same bounded multipart, authorization, access policy, DLP/AV, RPM/TPM, retry and duration-billing lifecycle as transcription. The native Groq adapter accepts its documented prompt, temperature and structured response controls.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: {$ref: '#/components/schemas/AudioTranscriptionRequest'}
+      responses:
+        '200':
+          description: English translation with exact duration usage
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AudioTranscriptionResponse'}
@@ -3343,7 +3366,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_speech, ocr, search, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
+          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -5399,12 +5422,12 @@ components:
         operations:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_speech, ocr, search, stream]}
+          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, stream]}
         capabilities:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_speech, ocr, search, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
+          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
     ProviderCredentialCreateInput:
       type: object
       additionalProperties: false

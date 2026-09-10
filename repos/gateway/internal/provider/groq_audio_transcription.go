@@ -68,8 +68,28 @@ func (Groq) ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest) (
 }
 
 func (g Groq) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
+	if err := g.validateAudioRequest(request); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	return g.sendAudioRequest(ctx, request, "audio/transcriptions", true)
+}
+
+func (g Groq) TranslateAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
+	if err := g.validateAudioRequest(request); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	if request.Language != "" && request.Language != "en" {
+		return openai.AudioTranscriptionResponse{}, groqAudioClientError("unsupported_parameter", "language", "Groq audio translation only accepts language=en")
+	}
+	if len(request.TimestampGranularities) > 0 {
+		return openai.AudioTranscriptionResponse{}, groqAudioClientError("unsupported_parameter", "timestamp_granularities", "Groq audio translation does not support timestamp granularities")
+	}
+	return g.sendAudioRequest(ctx, request, "audio/translations", false)
+}
+
+func (g Groq) validateAudioRequest(request openai.AudioTranscriptionRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.AudioTranscriptionResponse{}, groqAudioClientError("invalid_request", "", message)
+		return groqAudioClientError("invalid_request", "", message)
 	}
 	if err := rejectParameters("groq",
 		parameterCheck{"include", len(request.Include) > 0},
@@ -80,11 +100,15 @@ func (g Groq) TranscribeAudio(ctx context.Context, request openai.AudioTranscrip
 		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},
 		parameterCheck{"response_format", request.ResponseFormat == "diarized_json"},
 	); err != nil {
-		return openai.AudioTranscriptionResponse{}, err
+		return err
 	}
 	if request.Prompt != "" && openai.EstimateContextTokens(request.Prompt) > 224 {
-		return openai.AudioTranscriptionResponse{}, groqAudioClientError("invalid_request", "prompt", "prompt exceeds the 224 token limit")
+		return groqAudioClientError("invalid_request", "prompt", "prompt exceeds the 224 token limit")
 	}
+	return nil
+}
+
+func (g Groq) sendAudioRequest(ctx context.Context, request openai.AudioTranscriptionRequest, path string, includeTimestamps bool) (openai.AudioTranscriptionResponse, error) {
 	billableDuration, err := g.ReserveAudioMilliseconds(request)
 	if err != nil {
 		return openai.AudioTranscriptionResponse{}, groqAudioClientError("unsupported_audio", "file", err.Error())
@@ -124,9 +148,11 @@ func (g Groq) TranscribeAudio(ctx context.Context, request openai.AudioTranscrip
 			}
 		}
 	}
-	for _, value := range request.TimestampGranularities {
-		if err := writer.WriteField("timestamp_granularities[]", value); err != nil {
-			return openai.AudioTranscriptionResponse{}, err
+	if includeTimestamps {
+		for _, value := range request.TimestampGranularities {
+			if err := writer.WriteField("timestamp_granularities[]", value); err != nil {
+				return openai.AudioTranscriptionResponse{}, err
+			}
 		}
 	}
 	if err := writeAudioPart(writer, request.File); err != nil {
@@ -135,7 +161,7 @@ func (g Groq) TranscribeAudio(ctx context.Context, request openai.AudioTranscrip
 	if err := writer.Close(); err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(g.compatible.baseURL, "audio/transcriptions"), &body)
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(g.compatible.baseURL, path), &body)
 	if err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}

@@ -287,6 +287,11 @@ func (p *chatProvider) TranscribeAudio(_ context.Context, req modules.RequestCon
 	return openai.AudioTranscriptionResponse{Text: "hello", Usage: &openai.AudioTranscriptionUsage{Type: "tokens", InputTokens: 3, OutputTokens: 1, TotalTokens: 4}}, nil
 }
 
+func (p *chatProvider) TranslateAudio(_ context.Context, req modules.RequestContext) (openai.AudioTranscriptionResponse, error) {
+	p.request = req
+	return openai.AudioTranscriptionResponse{Text: "hello", Duration: 1, Usage: &openai.AudioTranscriptionUsage{Type: "duration", InputAudioMilliseconds: 10000}}, nil
+}
+
 func (p *chatProvider) GenerateSpeech(_ context.Context, req modules.RequestContext) (openai.AudioSpeechResponse, error) {
 	p.request = req
 	return openai.AudioSpeechResponse{Data: []byte("ID3audio"), ContentType: "audio/mpeg", Model: req.AudioSpeechRequest.Model}, nil

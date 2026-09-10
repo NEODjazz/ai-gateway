@@ -1167,15 +1167,27 @@ func (h Handler) CreateImageVariation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) TranscribeAudio(w http.ResponseWriter, r *http.Request) {
+	h.handleAudio(w, r, false)
+}
+
+func (h Handler) TranslateAudio(w http.ResponseWriter, r *http.Request) {
+	h.handleAudio(w, r, true)
+}
+
+func (h Handler) handleAudio(w http.ResponseWriter, r *http.Request, translation bool) {
 	request, ok := decodeAudioTranscriptionRequest(w, r)
 	if !ok {
 		return
+	}
+	apiType := "audio_transcription"
+	if translation {
+		apiType = "audio_translation"
 	}
 	reqCtx := modules.RequestContext{
 		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r),
 		AudioTranscriptionRequest: &request,
 		Request:                   openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model},
-		Metadata:                  map[string]string{"gateway.api_type": "audio_transcription"},
+		Metadata:                  map[string]string{"gateway.api_type": apiType},
 	}
 	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
 		if errors.Is(err, modules.ErrUnauthorized) {
@@ -1198,12 +1210,23 @@ func (h Handler) TranscribeAudio(w http.ResponseWriter, r *http.Request) {
 	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateAudioTranscriptionTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
-	audioProvider, ok := h.provider.(provider.AudioTranscriptionProvider)
-	if !ok {
-		writeError(w, http.StatusBadGateway, "provider_failed", "audio transcription is not supported by the configured provider")
-		return
+	var response openai.AudioTranscriptionResponse
+	var err error
+	if translation {
+		audioProvider, ok := h.provider.(provider.AudioTranslationProvider)
+		if !ok {
+			writeError(w, http.StatusBadGateway, "provider_failed", "audio translation is not supported by the configured provider")
+			return
+		}
+		response, err = audioProvider.TranslateAudio(r.Context(), reqCtx)
+	} else {
+		audioProvider, ok := h.provider.(provider.AudioTranscriptionProvider)
+		if !ok {
+			writeError(w, http.StatusBadGateway, "provider_failed", "audio transcription is not supported by the configured provider")
+			return
+		}
+		response, err = audioProvider.TranscribeAudio(r.Context(), reqCtx)
 	}
-	response, err := audioProvider.TranscribeAudio(r.Context(), reqCtx)
 	if err != nil {
 		writeProviderFailure(w, err)
 		return

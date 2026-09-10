@@ -21,6 +21,7 @@ func NewGroq(baseURL, apiKey string, stream bool) Groq {
 func (Groq) SupportsResponses() bool          { return true }
 func (Groq) SupportsMCP() bool                { return true }
 func (Groq) SupportsAudioTranscription() bool { return true }
+func (Groq) SupportsAudioTranslation() bool   { return true }
 func (Groq) SupportsAudioSpeech() bool        { return true }
 func (Groq) SupportsTools() bool              { return true }
 func (Groq) SupportsStructuredOutput() bool   { return true }

@@ -58,6 +58,24 @@ func TestAudioTranscriptionUsesAuthenticatedPipelineAndReservesTPM(t *testing.T)
 	}
 }
 
+func TestAudioTranslationUsesAuthenticatedPipeline(t *testing.T) {
+	llm := &chatProvider{}
+	rates := &embeddingTokenRateStore{}
+	handler := Routes(NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"audio-*"}}}), llm, rates))
+	body, contentType := audioHTTPBody(t, [][2]string{{"provider", "speech"}, {"model", "audio-model"}, {"language", "en"}, {"prompt", "product names"}, {"response_format", "json"}}, "sample.wav", []byte("RIFF....WAVEdata"))
+	request := httptest.NewRequest(http.MethodPost, "/v1/audio/translations", body)
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("Authorization", "Bearer client-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || llm.request.AudioTranscriptionRequest == nil || llm.request.APIKey != "" || llm.request.Metadata["gateway.api_type"] != "audio_translation" {
+		t.Fatalf("status=%d body=%s context=%+v", response.Code, response.Body.String(), llm.request)
+	}
+	if rates.tokens != openai.AudioTranscriptionReserveTokens(*llm.request.AudioTranscriptionRequest) {
+		t.Fatalf("TPM reserve=%d", rates.tokens)
+	}
+}
+
 func TestAudioTranscriptionRejectsMalformedMultipartBeforeProvider(t *testing.T) {
 	for _, test := range []struct {
 		name     string

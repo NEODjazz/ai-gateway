@@ -248,7 +248,11 @@ func billingRequest(req *RequestContext) UsageRequest {
 	if req.AudioTranscriptionRequest != nil {
 		request.Provider = req.AudioTranscriptionRequest.Provider
 		request.Model = req.AudioTranscriptionRequest.Model
-		request.APIType = "audio_transcription"
+		if metadataValue(req.Metadata, "gateway.api_type") == "audio_translation" {
+			request.APIType = "audio_translation"
+		} else {
+			request.APIType = "audio_transcription"
+		}
 	}
 	if req.AudioSpeechRequest != nil {
 		request.Provider = req.AudioSpeechRequest.Provider

@@ -386,6 +386,25 @@ func TestAudioTranscriptionBillingReserveAndSettlement(t *testing.T) {
 	}
 }
 
+func TestAudioTranslationBillingPreservesDurationUsage(t *testing.T) {
+	attachment := openai.AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: "UklGRi4uLi5XQVZFZGF0YQ=="}
+	req := &RequestContext{
+		Request:                   openai.ChatCompletionRequest{Model: "audio-model"},
+		AudioTranscriptionRequest: &openai.AudioTranscriptionRequest{Model: "audio-model", File: attachment, Prompt: "names"},
+		InputAudioMilliseconds:    10000,
+		Metadata:                  map[string]string{"gateway.api_type": "audio_translation"},
+	}
+	reserved := billingRequest(req)
+	if reserved.APIType != "audio_translation" || reserved.InputAudioMilliseconds != 10000 {
+		t.Fatalf("reserve=%+v", reserved)
+	}
+	req.AudioTranscriptionResponse = &openai.AudioTranscriptionResponse{Text: "hello", Duration: 1, Usage: &openai.AudioTranscriptionUsage{Type: "duration", InputAudioMilliseconds: 10000}}
+	settled := billingRequest(req)
+	if settled.Phase != "commit" || settled.APIType != "audio_translation" || settled.InputAudioMilliseconds != 10000 || settled.InputTokens != 0 || settled.OutputTokens != 0 || settled.TotalTokens != 0 || settled.UsageEstimated {
+		t.Fatalf("settlement=%+v", settled)
+	}
+}
+
 func TestRemoteBillingCommitsCompactionUsageSeparately(t *testing.T) {
 	req := sensitiveContext()
 	req.ResponseRequest = &openai.ResponseRequest{Provider: "provider", Model: "compact-model", Input: "private input", Instructions: "private instructions"}
