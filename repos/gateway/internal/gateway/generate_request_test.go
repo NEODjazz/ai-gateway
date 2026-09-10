@@ -75,11 +75,29 @@ func TestGenerateFunctionHistoryRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGenerateThoughtHistoryRoundTrip(t *testing.T) {
+	var native generateRequest
+	raw := `{"contents":[{"role":"model","parts":[{"text":"private plan","thought":true,"thoughtSignature":"c2lnbmVk"},{"text":"answer"}]}]}`
+	if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || len(chat.Messages) != 1 || len(chat.Messages[0].Reasoning) != 1 || chat.Messages[0].Reasoning[0].Thinking != "private plan" || chat.Messages[0].Reasoning[0].Signature != "c2lnbmVk" {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	parts, err := generateParts(chat.Messages[0])
+	if err != nil || len(parts) != 2 || parts[0].(map[string]any)["thought"] != true || parts[1].(map[string]any)["text"] != "answer" {
+		t.Fatalf("parts=%+v err=%v", parts, err)
+	}
+}
 func TestGenerateRequestRejectsUnsupportedFieldsAndUnions(t *testing.T) {
 	for _, raw := range []string{
 		`{"contents":[{"parts":[{"text":"hi"}]}],"safetySettings":[]}`,
 		`{"contents":[{"parts":[{"text":"hi","inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}]}]}`,
 		`{"contents":[{"parts":[{"text":"hi","thoughtSignature":"signature"}]}]}`,
+		`{"contents":[{"parts":[{"text":"private","thought":true}]}]}`,
+		`{"contents":[{"role":"model","parts":[{"text":"private","thought":true,"thoughtSignature":"%%%"}]}]}`,
 		`{"contents":[{"parts":[{"functionResponse":{"name":"missing","response":{}}}]}]}`,
 		`{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"candidateCount":2}}`,
 		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"functionDeclarations":[{"name":"f","parameters":{"type":"OBJECT","propertyOrdering":["a"]}}]}]}`,

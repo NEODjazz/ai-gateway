@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -60,6 +61,7 @@ type generatePart struct {
 		Response map[string]any `json:"response"`
 	} `json:"functionResponse,omitempty"`
 	Signature string `json:"thoughtSignature,omitempty"`
+	Thought   bool   `json:"thought,omitempty"`
 }
 
 func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionRequest, error) {
@@ -154,25 +156,33 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		message := openai.Message{Role: role}
 		parts := []any{}
 		flush := func() {
-			if len(parts) > 0 || len(message.ToolCalls) > 0 {
+			if len(parts) > 0 || len(message.ToolCalls) > 0 || len(message.Reasoning) > 0 {
 				message.Content = parts
 				result.Messages = append(result.Messages, message)
 				message = openai.Message{Role: role}
 				parts = []any{}
 			}
 		}
-		for _, part := range content.Parts {
+		for partIndex, part := range content.Parts {
 			members := 0
 			for _, present := range []bool{part.Text != nil, part.InlineData != nil, part.Call != nil, part.Result != nil} {
 				if present {
 					members++
 				}
 			}
-			if members != 1 || (part.Signature != "" && part.Call == nil) {
+			if members != 1 || (part.Thought && part.Text == nil) || (part.Signature != "" && part.Call == nil && !part.Thought) || part.Thought && part.Signature != "" && !validGenerateBase64(part.Signature) {
 				return fail("contents.parts")
 			}
 			switch {
 			case part.Text != nil:
+				if part.Thought {
+					if role != "assistant" || *part.Text == "" {
+						return fail("thought")
+					}
+					index := partIndex
+					message.Reasoning = append(message.Reasoning, openai.ReasoningBlock{Index: &index, Type: "thinking", Thinking: *part.Text, Signature: part.Signature})
+					continue
+				}
 				if len(message.ToolCalls) > 0 {
 					return fail("text after functionCall")
 				}
@@ -297,4 +307,9 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		return result, err
 	}
 	return result, nil
+}
+
+func validGenerateBase64(value string) bool {
+	_, err := base64.StdEncoding.DecodeString(value)
+	return err == nil
 }

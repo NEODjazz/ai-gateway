@@ -64,6 +64,54 @@ func TestGeminiNativeChatAndToolSignatures(t *testing.T) {
 	}
 }
 
+func TestGeminiPreservesThoughtPartsAndHistory(t *testing.T) {
+	index := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body geminiRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		thought := body.Contents[1].Parts[0]
+		if !thought.Thought || thought.Text != "prior plan" || thought.ThoughtSignature != "c2lnbmVk" {
+			t.Fatalf("thought history=%+v", thought)
+		}
+		_, _ = w.Write([]byte(`{"candidates":[{"index":0,"content":{"parts":[{"text":"new plan","thought":true,"thoughtSignature":"bmV3LXNpZw=="},{"text":"answer"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"thoughtsTokenCount":1,"totalTokenCount":4}}`))
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{
+		{Role: "user", Content: "question"},
+		{Role: "assistant", Content: "prior answer", Reasoning: []openai.ReasoningBlock{{Index: &index, Type: "thinking", Thinking: "prior plan", Signature: "c2lnbmVk"}}},
+	}}
+	response, err := NewGemini(server.URL, "", false).ChatCompletions(t.Context(), request)
+	if err != nil || len(response.Choices[0].Message.Reasoning) != 1 || response.Choices[0].Message.Reasoning[0].Thinking != "new plan" || response.Choices[0].Message.Reasoning[0].Signature != "bmV3LXNpZw==" || openai.ContentText(response.Choices[0].Message.Content) != "answer" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGeminiRejectsThoughtsOutsideAssistantHistory(t *testing.T) {
+	request := geminiTestChat()
+	request.Messages[0].Reasoning = []openai.ReasoningBlock{{Type: "thinking", Thinking: "private"}}
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("user reasoning was silently discarded")
+	}
+}
+
+func TestGeminiStreamReassemblesThoughtSignature(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"plan \",\"thought\":true}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"more\",\"thought\":true}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"\",\"thought\":true,\"thoughtSignature\":\"c2lnbmVk\"}],\"role\":\"model\"},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1,\"thoughtsTokenCount\":2,\"totalTokenCount\":4}}\n\n"))
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Stream: true, Messages: []openai.Message{{Role: "user", Content: "question"}}}
+	var chunks []string
+	response, err := NewGemini(server.URL, "", true).StreamChatCompletions(t.Context(), request, func(value string) error { chunks = append(chunks, value); return nil })
+	if err != nil || len(response.Choices[0].Message.Reasoning) != 1 || response.Choices[0].Message.Reasoning[0].Thinking != "plan more" || response.Choices[0].Message.Reasoning[0].Signature != "c2lnbmVk" || !strings.Contains(strings.Join(chunks, "\n"), `"reasoning"`) {
+		t.Fatalf("response=%+v chunks=%v err=%v", response, chunks, err)
+	}
+}
+
 func TestGeminiNativeChatUsesGCPWorkloadToken(t *testing.T) {
 	var tokenCalls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -354,10 +402,10 @@ func TestGeminiNativeStreamUsageAndBilling(t *testing.T) {
 	if err != nil || !streamed {
 		t.Fatalf("stream failed: %v", err)
 	}
-	if response.Choices[0].Message.Content != "hello world" || recorder.calls != 1 || recorder.usage.CompletionTokens != 5 || recorder.usage.TotalTokens != 15 {
+	if response.Choices[0].Message.Content != "hello world" || len(response.Choices[0].Message.Reasoning) != 1 || response.Choices[0].Message.Reasoning[0].Thinking != "private" || recorder.calls != 1 || recorder.usage.CompletionTokens != 5 || recorder.usage.TotalTokens != 15 {
 		t.Fatalf("stream/billing result: %+v %+v", response, recorder)
 	}
-	if len(payloads) != 2 || strings.Contains(strings.Join(payloads, ""), "private") || !strings.Contains(payloads[1], `"total_tokens":15`) {
+	if len(payloads) != 2 || !strings.Contains(payloads[0], `"thinking":"private"`) || strings.Contains(payloads[0], `"content":"private"`) || !strings.Contains(payloads[1], `"total_tokens":15`) {
 		t.Fatalf("invalid SSE conversion: %v", payloads)
 	}
 }

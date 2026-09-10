@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,6 +64,9 @@ func (g Gemini) authorize(request *http.Request) error {
 func (Gemini) SupportsVision() bool { return true }
 
 func (Gemini) SupportsResponses() bool { return false }
+
+func (Gemini) SupportsReasoningBlocks() bool   { return true }
+func (Gemini) SupportsUnsignedReasoning() bool { return true }
 
 type geminiPart struct {
 	Text             string                  `json:"text,omitempty"`
@@ -316,6 +320,9 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	}
 	toolNames := make(map[string]string)
 	for _, message := range request.Messages {
+		if len(message.Reasoning) > 0 && message.Role != "assistant" {
+			return result, geminiInvalid("messages.reasoning")
+		}
 		if (message.Role != "assistant" && len(message.ToolCalls) > 0) || (message.Role != "tool" && message.ToolCallID != "") {
 			return result, geminiInvalid("messages.tool_calls")
 		}
@@ -356,6 +363,21 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 				}
 				content.Parts = append(content.Parts, part)
 				toolNames[call.ID] = call.Function.Name
+			}
+			if len(message.Reasoning) > 0 {
+				if err := validateGeminiReasoning(message.Reasoning); err != nil {
+					return result, err
+				}
+				for _, reasoning := range message.Reasoning {
+					part := geminiPart{Text: reasoning.Thinking, Thought: true, ThoughtSignature: reasoning.Signature}
+					position := len(content.Parts)
+					if reasoning.Index != nil {
+						position = min(*reasoning.Index, len(content.Parts))
+					}
+					content.Parts = append(content.Parts, geminiPart{})
+					copy(content.Parts[position+1:], content.Parts[position:])
+					content.Parts[position] = part
+				}
 			}
 		case "tool":
 			name, ok := toolNames[message.ToolCallID]
@@ -552,6 +574,14 @@ func (g Gemini) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 		err = errors.New("Gemini response produced no candidates")
 	}
 	if err == nil {
+		for _, choice := range result.Choices {
+			if reasoningErr := validateGeminiReasoning(choice.Message.Reasoning); reasoningErr != nil {
+				err = reasoningErr
+				break
+			}
+		}
+	}
+	if err == nil {
 		err = validateRequestedChatChoices(request, result)
 	}
 	return result, err
@@ -621,8 +651,13 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 			choice.Logprobs = &logprobs
 		}
 		var text strings.Builder
-		for _, part := range candidate.Content.Parts {
+		for partIndex, part := range candidate.Content.Parts {
 			if part.Thought {
+				if part.Text == "" && part.ThoughtSignature == "" || part.InlineData != nil || part.FunctionCall != nil || part.FunctionResponse != nil {
+					return result, errors.New("invalid Gemini thought part")
+				}
+				index := partIndex
+				choice.Message.Reasoning = append(choice.Message.Reasoning, openai.ReasoningBlock{Index: &index, Type: "thinking", Thinking: part.Text, Signature: part.ThoughtSignature})
 				continue
 			}
 			if part.InlineData != nil || part.FunctionResponse != nil {
@@ -673,6 +708,23 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 		result.Choices = append(result.Choices, choice)
 	}
 	return result, nil
+}
+
+func validateGeminiReasoning(blocks []openai.ReasoningBlock) error {
+	if err := openai.ValidateBedrockReasoningBlocks(blocks); err != nil {
+		return fmt.Errorf("invalid Gemini reasoning: %w", err)
+	}
+	for _, block := range blocks {
+		if block.Type != "thinking" || block.Signature != "" && !validGeminiBase64(block.Signature) {
+			return errors.New("invalid Gemini reasoning block")
+		}
+	}
+	return nil
+}
+
+func validGeminiBase64(value string) bool {
+	_, err := base64.StdEncoding.DecodeString(value)
+	return err == nil
 }
 
 func geminiChoiceLogprobs(result geminiLogprobsResult) (openai.ChoiceLogprobs, error) {
@@ -763,6 +815,28 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 				current.Logprobs.Content = append(current.Logprobs.Content, choice.Logprobs.Content...)
 			}
 			current.Message.Content = openai.ContentText(current.Message.Content) + openai.ContentText(choice.Message.Content)
+			for _, block := range choice.Message.Reasoning {
+				stored := -1
+				if block.Index != nil {
+					for index := range current.Message.Reasoning {
+						if current.Message.Reasoning[index].Index != nil && *current.Message.Reasoning[index].Index == *block.Index {
+							stored = index
+							break
+						}
+					}
+				}
+				if stored < 0 {
+					current.Message.Reasoning = append(current.Message.Reasoning, block)
+					continue
+				}
+				current.Message.Reasoning[stored].Thinking += block.Thinking
+				if block.Signature != "" {
+					if current.Message.Reasoning[stored].Signature != "" && current.Message.Reasoning[stored].Signature != block.Signature {
+						return errors.New("Gemini thought signature changed during stream")
+					}
+					current.Message.Reasoning[stored].Signature = block.Signature
+				}
+			}
 			for i := range choice.Message.ToolCalls {
 				index := len(current.Message.ToolCalls)
 				if index >= maxChatStreamToolCalls {
@@ -805,6 +879,9 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	for _, choice := range result.Choices {
 		if choice.FinishReason == "" {
 			return openai.ChatCompletionResponse{}, errors.New("Gemini stream ended before completion")
+		}
+		if err := validateGeminiReasoning(choice.Message.Reasoning); err != nil {
+			return openai.ChatCompletionResponse{}, err
 		}
 	}
 	if err := validateRequestedChatChoices(request, result); err != nil {

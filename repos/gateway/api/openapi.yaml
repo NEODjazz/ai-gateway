@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.206
+  version: 0.1.207
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4069,7 +4069,11 @@ components:
         text: {type: string}
         thoughtSignature:
           type: string
-          description: Only supported on functionCall parts.
+          format: byte
+          description: Opaque signature supported on functionCall and model thought-text parts and preserved for later turns.
+        thought:
+          type: boolean
+          description: When true, text is model reasoning and is preserved separately from visible response text.
         inlineData:
           type: object
           additionalProperties: false

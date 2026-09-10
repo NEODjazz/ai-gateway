@@ -60,6 +60,14 @@ func TestGenerateContentNativeJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateContentReturnsThoughtParts(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "id", Model: "m", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "answer", Reasoning: []openai.ReasoningBlock{{Type: "thinking", Thinking: "private plan", Signature: "c2lnbmVk"}}}, FinishReason: "stop"}}, Usage: openai.Usage{PromptTokens: 1, CompletionTokens: 2, TotalTokens: 3}}}
+	response := generateCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), "/v1beta/models/m:generateContent", `{"contents":[{"parts":[{"text":"question"}]}]}`, "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"text":"private plan","thought":true,"thoughtSignature":"c2lnbmVk"`) || !strings.Contains(response.Body.String(), `"text":"answer"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
 func TestGenerateContentAuthQuotasAndUnsupportedParameters(t *testing.T) {
 	for _, tc := range []struct {
 		path, body, key string

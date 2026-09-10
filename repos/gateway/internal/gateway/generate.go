@@ -201,6 +201,25 @@ func generateParts(message openai.Message) ([]any, error) {
 		}
 		parts = append(parts, part)
 	}
+	if err := openai.ValidateBedrockReasoningBlocks(message.Reasoning); err != nil {
+		return nil, err
+	}
+	for _, reasoning := range message.Reasoning {
+		if reasoning.Type != "thinking" || reasoning.Signature != "" && !validGenerateBase64(reasoning.Signature) {
+			return nil, errors.New("invalid Gemini thought block")
+		}
+		part := map[string]any{"text": reasoning.Thinking, "thought": true}
+		if reasoning.Signature != "" {
+			part["thoughtSignature"] = reasoning.Signature
+		}
+		position := len(parts)
+		if reasoning.Index != nil {
+			position = min(*reasoning.Index, len(parts))
+		}
+		parts = append(parts, nil)
+		copy(parts[position+1:], parts[position:])
+		parts[position] = part
+	}
 	return parts, nil
 }
 func generateEnvelope(id, model string, parts []any, reason string, usage map[string]int) map[string]any {
@@ -293,6 +312,18 @@ func (w *generateWriter) chunk(payload string) error {
 		}
 		if text := openai.ContentText(choice.Delta.Content); text != "" {
 			if err := w.event(generateEnvelope(w.id, w.model, []any{map[string]any{"text": text}}, "", nil)); err != nil {
+				return err
+			}
+		}
+		for _, reasoning := range choice.Delta.Reasoning {
+			if reasoning.Type != "thinking" || reasoning.Thinking == "" && reasoning.Signature == "" || reasoning.Signature != "" && !validGenerateBase64(reasoning.Signature) {
+				return errors.New("invalid Gemini thought stream delta")
+			}
+			part := map[string]any{"text": reasoning.Thinking, "thought": true}
+			if reasoning.Signature != "" {
+				part["thoughtSignature"] = reasoning.Signature
+			}
+			if err := w.event(generateEnvelope(w.id, w.model, []any{part}, "", nil)); err != nil {
 				return err
 			}
 		}
