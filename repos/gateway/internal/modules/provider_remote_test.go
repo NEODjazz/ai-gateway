@@ -256,13 +256,18 @@ func TestDLPScansProviderOutputAndRejectsBeforeDelivery(t *testing.T) {
 	defer server.Close()
 	module := NewProviderRemoteModule("dlp", false, server.URL)
 	refusal := "private refusal"
+	documentIndex := 0
 	req := RequestContext{
 		RequestID: "execution-1",
 		Metadata:  map[string]string{"provider.modules.dlp.output_enabled": "true"},
 		Request:   openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "request secret"}}},
 		Response: &openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{
 			Role: "assistant", Content: "response secret", Refusal: &refusal,
-			ToolCalls:     []openai.ToolCall{{Function: openai.FunctionCall{Arguments: `{"email":"user@example.com"}`}}},
+			ToolCalls: []openai.ToolCall{{Function: openai.FunctionCall{Arguments: `{"email":"user@example.com"}`}}},
+			Annotations: []openai.ChatAnnotation{{Type: "source_citation", SourceCitation: &openai.ChatSourceCitation{
+				Title: "report", Source: "citation source secret", SourceContent: []string{"citation excerpt secret"},
+				LocationType: "document_page", DocumentIndex: &documentIndex,
+			}}},
 			NativeContent: []json.RawMessage{json.RawMessage(`{"type":"web_fetch_tool_result","content":{"type":"document","source":{"type":"text","data":"native document secret"}}}`)},
 		}}}},
 	}
@@ -270,7 +275,7 @@ func TestDLPScansProviderOutputAndRejectsBeforeDelivery(t *testing.T) {
 	if !errors.Is(err, ErrContentRejected) {
 		t.Fatalf("expected output rejection, got %v", err)
 	}
-	if received.RequestID != "execution-1" || !strings.Contains(received.Content, "response secret") || !strings.Contains(received.Content, "user@example.com") || !strings.Contains(received.Content, "native document secret") || strings.Contains(received.Content, "request secret") {
+	if received.RequestID != "execution-1" || !strings.Contains(received.Content, "response secret") || !strings.Contains(received.Content, "user@example.com") || !strings.Contains(received.Content, "citation source secret") || !strings.Contains(received.Content, "citation excerpt secret") || !strings.Contains(received.Content, "native document secret") || strings.Contains(received.Content, "request secret") {
 		t.Fatalf("unexpected output projection: %+v", received)
 	}
 }

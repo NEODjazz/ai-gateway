@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -28,11 +29,57 @@ type Bedrock struct {
 }
 
 type bedrockContentBlock struct {
-	Text       string             `json:"text,omitempty"`
-	Image      *bedrockImage      `json:"image,omitempty"`
-	Document   *bedrockDocument   `json:"document,omitempty"`
-	ToolUse    *bedrockToolUse    `json:"toolUse,omitempty"`
-	ToolResult *bedrockToolResult `json:"toolResult,omitempty"`
+	Text             string                   `json:"text,omitempty"`
+	Image            *bedrockImage            `json:"image,omitempty"`
+	Document         *bedrockDocument         `json:"document,omitempty"`
+	ToolUse          *bedrockToolUse          `json:"toolUse,omitempty"`
+	ToolResult       *bedrockToolResult       `json:"toolResult,omitempty"`
+	CitationsContent *bedrockCitationsContent `json:"citationsContent,omitempty"`
+}
+
+type bedrockCitationsContent struct {
+	Content   []bedrockCitationText `json:"content"`
+	Citations []bedrockCitation     `json:"citations"`
+}
+
+type bedrockCitationText struct {
+	Text *string `json:"text,omitempty"`
+}
+
+type bedrockCitation struct {
+	Title         string                         `json:"title,omitempty"`
+	Source        string                         `json:"source,omitempty"`
+	SourceContent []bedrockCitationSourceContent `json:"sourceContent,omitempty"`
+	Location      bedrockCitationLocation        `json:"location"`
+}
+
+type bedrockCitationSourceContent struct {
+	Text *string `json:"text,omitempty"`
+}
+
+type bedrockCitationLocation struct {
+	DocumentChar         *bedrockDocumentLocation     `json:"documentChar,omitempty"`
+	DocumentChunk        *bedrockDocumentLocation     `json:"documentChunk,omitempty"`
+	DocumentPage         *bedrockDocumentLocation     `json:"documentPage,omitempty"`
+	SearchResultLocation *bedrockSearchResultLocation `json:"searchResultLocation,omitempty"`
+	Web                  *bedrockWebLocation          `json:"web,omitempty"`
+}
+
+type bedrockDocumentLocation struct {
+	DocumentIndex *int `json:"documentIndex,omitempty"`
+	Start         *int `json:"start,omitempty"`
+	End           *int `json:"end,omitempty"`
+}
+
+type bedrockSearchResultLocation struct {
+	SearchResultIndex *int `json:"searchResultIndex,omitempty"`
+	Start             *int `json:"start,omitempty"`
+	End               *int `json:"end,omitempty"`
+}
+
+type bedrockWebLocation struct {
+	Domain string `json:"domain,omitempty"`
+	URL    string `json:"url,omitempty"`
 }
 
 type bedrockDocument struct {
@@ -454,11 +501,13 @@ func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletio
 	result.Usage = openai.Usage{PromptTokens: usage.InputTokens, CompletionTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens}
 	message := openai.Message{Role: "assistant"}
 	var texts []string
+	offset := 0
 	for _, block := range response.Output.Message.Content {
 		fields := 0
 		if block.Text != "" {
 			fields++
 			texts = append(texts, block.Text)
+			offset += utf8.RuneCountInString(block.Text)
 		}
 		if block.ToolUse != nil {
 			fields++
@@ -468,9 +517,22 @@ func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletio
 			}
 			message.ToolCalls = append(message.ToolCalls, openai.ToolCall{ID: block.ToolUse.ID, Type: "function", Function: openai.FunctionCall{Name: block.ToolUse.Name, Arguments: string(arguments)}})
 		}
-		if block.Image != nil || block.ToolResult != nil || fields != 1 {
+		if block.CitationsContent != nil {
+			fields++
+			text, annotations, err := bedrockCitationAnnotations(*block.CitationsContent, offset)
+			if err != nil {
+				return result, err
+			}
+			texts = append(texts, text)
+			message.Annotations = append(message.Annotations, annotations...)
+			offset += utf8.RuneCountInString(text)
+		}
+		if block.Image != nil || block.Document != nil || block.ToolResult != nil || fields != 1 {
 			return result, errors.New("invalid Bedrock output content block")
 		}
+	}
+	if err := openai.ValidateChatAnnotations(message.Annotations); err != nil {
+		return result, fmt.Errorf("invalid Bedrock citations: %w", err)
 	}
 	if len(texts) > 0 {
 		message.Content = strings.Join(texts, "")
@@ -485,6 +547,96 @@ func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletio
 	}
 	result.Choices = []openai.Choice{{Index: 0, Message: message, FinishReason: finishReason}}
 	return result, nil
+}
+
+func bedrockCitationAnnotations(block bedrockCitationsContent, offset int) (string, []openai.ChatAnnotation, error) {
+	if len(block.Content) == 0 || len(block.Content) > 128 || len(block.Citations) > 128 {
+		return "", nil, errors.New("invalid Bedrock citations content")
+	}
+	var text strings.Builder
+	for _, content := range block.Content {
+		if content.Text == nil {
+			return "", nil, errors.New("invalid Bedrock generated citation content")
+		}
+		text.WriteString(*content.Text)
+	}
+	if text.Len() == 0 {
+		return "", nil, errors.New("empty Bedrock generated citation content")
+	}
+	start := offset
+	end := offset + utf8.RuneCountInString(text.String())
+	annotations := make([]openai.ChatAnnotation, 0, len(block.Citations))
+	for _, citation := range block.Citations {
+		annotation, err := bedrockCitationAnnotation(citation, start, end)
+		if err != nil {
+			return "", nil, err
+		}
+		annotations = append(annotations, annotation)
+	}
+	return text.String(), annotations, nil
+}
+
+func bedrockCitationAnnotation(citation bedrockCitation, start, end int) (openai.ChatAnnotation, error) {
+	locations := 0
+	for _, present := range []bool{citation.Location.DocumentChar != nil, citation.Location.DocumentChunk != nil, citation.Location.DocumentPage != nil, citation.Location.SearchResultLocation != nil, citation.Location.Web != nil} {
+		if present {
+			locations++
+		}
+	}
+	if locations != 1 {
+		return openai.ChatAnnotation{}, errors.New("invalid Bedrock citation location")
+	}
+	if citation.Location.Web != nil {
+		title := citation.Title
+		if title == "" {
+			title = citation.Location.Web.Domain
+		}
+		if title == "" {
+			if parsed, err := url.Parse(citation.Location.Web.URL); err == nil {
+				title = parsed.Host
+			}
+		}
+		return openai.ChatAnnotation{Type: "url_citation", URLCitation: &openai.ChatURLCitation{StartIndex: start, EndIndex: end, Title: title, URL: citation.Location.Web.URL}}, nil
+	}
+	source := &openai.ChatSourceCitation{StartIndex: start, EndIndex: end, Title: citation.Title, Source: citation.Source}
+	for _, content := range citation.SourceContent {
+		if content.Text == nil {
+			return openai.ChatAnnotation{}, errors.New("invalid Bedrock citation source content")
+		}
+		source.SourceContent = append(source.SourceContent, *content.Text)
+	}
+	setLocation := func(locationType string, documentIndex, locationStart, locationEnd *int) error {
+		if documentIndex == nil || locationStart == nil || locationEnd == nil {
+			return errors.New("incomplete Bedrock document citation location")
+		}
+		source.LocationType, source.DocumentIndex = locationType, documentIndex
+		source.LocationStart, source.LocationEnd = *locationStart, *locationEnd
+		return nil
+	}
+	var err error
+	switch {
+	case citation.Location.DocumentChar != nil:
+		location := citation.Location.DocumentChar
+		err = setLocation("document_char", location.DocumentIndex, location.Start, location.End)
+	case citation.Location.DocumentChunk != nil:
+		location := citation.Location.DocumentChunk
+		err = setLocation("document_chunk", location.DocumentIndex, location.Start, location.End)
+	case citation.Location.DocumentPage != nil:
+		location := citation.Location.DocumentPage
+		err = setLocation("document_page", location.DocumentIndex, location.Start, location.End)
+	case citation.Location.SearchResultLocation != nil:
+		location := citation.Location.SearchResultLocation
+		if location.SearchResultIndex == nil || location.Start == nil || location.End == nil {
+			err = errors.New("incomplete Bedrock search citation location")
+		} else {
+			source.LocationType, source.SearchResultIndex = "search_result", location.SearchResultIndex
+			source.LocationStart, source.LocationEnd = *location.Start, *location.End
+		}
+	}
+	if err != nil {
+		return openai.ChatAnnotation{}, err
+	}
+	return openai.ChatAnnotation{Type: "source_citation", SourceCitation: source}, nil
 }
 
 func (Bedrock) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {

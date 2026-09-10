@@ -1002,7 +1002,7 @@ func anthropicCitationAnnotation(citation anthropicCitation, text string, offset
 		start = utf8.RuneCountInString(text[:index])
 		end = start + utf8.RuneCountInString(citation.CitedText)
 	}
-	return openai.ChatAnnotation{Type: "url_citation", URLCitation: openai.ChatURLCitation{
+	return openai.ChatAnnotation{Type: "url_citation", URLCitation: &openai.ChatURLCitation{
 		StartIndex: offset + start, EndIndex: offset + end, Title: citation.Title, URL: citation.URL,
 	}}, nil
 }

@@ -230,3 +230,84 @@ func TestBedrockRejectsUnsupportedOutputImage(t *testing.T) {
 		t.Fatal("unsupported output image was silently discarded")
 	}
 }
+
+func TestBedrockConversePreservesCitations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"До: "},{"citationsContent":{"content":[{"text":"ответ"}],"citations":[{"title":"Report","source":"upload","sourceContent":[{"text":"источник"}],"location":{"documentPage":{"documentIndex":1,"start":3,"end":4}}},{"title":"Web","location":{"web":{"domain":"example.com","url":"https://example.com/source"}}}]}}]}},"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":3,"totalTokens":5}}`)
+	}))
+	defer server.Close()
+
+	response, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "question"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := response.Choices[0].Message
+	if openai.ContentText(message.Content) != "До: ответ" || len(message.Annotations) != 2 {
+		t.Fatalf("message=%+v", message)
+	}
+	source := message.Annotations[0].SourceCitation
+	web := message.Annotations[1].URLCitation
+	if source == nil || source.StartIndex != 4 || source.EndIndex != 9 || source.LocationType != "document_page" || source.DocumentIndex == nil || *source.DocumentIndex != 1 || len(source.SourceContent) != 1 || source.SourceContent[0] != "источник" {
+		t.Fatalf("source citation=%+v", source)
+	}
+	if web == nil || web.StartIndex != 4 || web.EndIndex != 9 || web.URL != "https://example.com/source" {
+		t.Fatalf("web citation=%+v", web)
+	}
+
+	native, err := openai.BedrockFromChat(response)
+	if err != nil || len(native.Output.Message.Content) != 1 || native.Output.Message.Content[0].CitationsContent == nil || len(native.Output.Message.Content[0].CitationsContent.Citations) != 2 {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+}
+
+func TestBedrockRejectsMalformedCitationLocations(t *testing.T) {
+	zero, one := 0, 1
+	validUsage := &struct {
+		InputTokens  int `json:"inputTokens"`
+		OutputTokens int `json:"outputTokens"`
+		TotalTokens  int `json:"totalTokens"`
+	}{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}
+	for name, location := range map[string]bedrockCitationLocation{
+		"missing": {},
+		"union": {
+			DocumentPage: &bedrockDocumentLocation{DocumentIndex: &zero, Start: &zero, End: &one},
+			Web:          &bedrockWebLocation{URL: "https://example.com"},
+		},
+		"incomplete": {DocumentChar: &bedrockDocumentLocation{DocumentIndex: &zero, Start: &zero}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			text := "answer"
+			response := bedrockResponse{StopReason: "end_turn", Usage: validUsage}
+			response.Output.Message.Content = []bedrockContentBlock{{CitationsContent: &bedrockCitationsContent{
+				Content: []bedrockCitationText{{Text: &text}}, Citations: []bedrockCitation{{Title: "Source", Location: location}},
+			}}}
+			if _, err := bedrockToChat(response, "model"); err == nil {
+				t.Fatal("malformed citation location accepted")
+			}
+		})
+	}
+}
+
+func TestBedrockMapsEverySourceCitationLocation(t *testing.T) {
+	zero, one, two := 0, 1, 2
+	tests := map[string]struct {
+		location bedrockCitationLocation
+		kind     string
+	}{
+		"character": {location: bedrockCitationLocation{DocumentChar: &bedrockDocumentLocation{DocumentIndex: &zero, Start: &one, End: &two}}, kind: "document_char"},
+		"chunk":     {location: bedrockCitationLocation{DocumentChunk: &bedrockDocumentLocation{DocumentIndex: &zero, Start: &one, End: &two}}, kind: "document_chunk"},
+		"page":      {location: bedrockCitationLocation{DocumentPage: &bedrockDocumentLocation{DocumentIndex: &zero, Start: &one, End: &two}}, kind: "document_page"},
+		"search":    {location: bedrockCitationLocation{SearchResultLocation: &bedrockSearchResultLocation{SearchResultIndex: &zero, Start: &one, End: &two}}, kind: "search_result"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			annotation, err := bedrockCitationAnnotation(bedrockCitation{Title: "Source", Location: test.location}, 3, 8)
+			if err != nil || annotation.SourceCitation == nil || annotation.SourceCitation.LocationType != test.kind || annotation.SourceCitation.LocationStart != 1 || annotation.SourceCitation.LocationEnd != 2 {
+				t.Fatalf("annotation=%+v err=%v", annotation, err)
+			}
+			if err := openai.ValidateChatAnnotations([]openai.ChatAnnotation{annotation}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

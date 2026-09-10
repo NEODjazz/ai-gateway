@@ -30,11 +30,57 @@ type BedrockMessage struct {
 }
 
 type BedrockContentBlock struct {
-	Text       *string            `json:"text,omitempty"`
-	Image      *BedrockImage      `json:"image,omitempty"`
-	Document   *BedrockDocument   `json:"document,omitempty"`
-	ToolUse    *BedrockToolUse    `json:"toolUse,omitempty"`
-	ToolResult *BedrockToolResult `json:"toolResult,omitempty"`
+	Text             *string                  `json:"text,omitempty"`
+	Image            *BedrockImage            `json:"image,omitempty"`
+	Document         *BedrockDocument         `json:"document,omitempty"`
+	ToolUse          *BedrockToolUse          `json:"toolUse,omitempty"`
+	ToolResult       *BedrockToolResult       `json:"toolResult,omitempty"`
+	CitationsContent *BedrockCitationsContent `json:"citationsContent,omitempty"`
+}
+
+type BedrockCitationsContent struct {
+	Content   []BedrockCitationText `json:"content"`
+	Citations []BedrockCitation     `json:"citations"`
+}
+
+type BedrockCitationText struct {
+	Text *string `json:"text,omitempty"`
+}
+
+type BedrockCitation struct {
+	Title         string                         `json:"title,omitempty"`
+	Source        string                         `json:"source,omitempty"`
+	SourceContent []BedrockCitationSourceContent `json:"sourceContent,omitempty"`
+	Location      BedrockCitationLocation        `json:"location"`
+}
+
+type BedrockCitationSourceContent struct {
+	Text *string `json:"text,omitempty"`
+}
+
+type BedrockCitationLocation struct {
+	DocumentChar         *BedrockDocumentLocation     `json:"documentChar,omitempty"`
+	DocumentChunk        *BedrockDocumentLocation     `json:"documentChunk,omitempty"`
+	DocumentPage         *BedrockDocumentLocation     `json:"documentPage,omitempty"`
+	SearchResultLocation *BedrockSearchResultLocation `json:"searchResultLocation,omitempty"`
+	Web                  *BedrockWebLocation          `json:"web,omitempty"`
+}
+
+type BedrockDocumentLocation struct {
+	DocumentIndex int `json:"documentIndex"`
+	Start         int `json:"start"`
+	End           int `json:"end"`
+}
+
+type BedrockSearchResultLocation struct {
+	SearchResultIndex int `json:"searchResultIndex"`
+	Start             int `json:"start"`
+	End               int `json:"end"`
+}
+
+type BedrockWebLocation struct {
+	Domain string `json:"domain,omitempty"`
+	URL    string `json:"url"`
 }
 
 type BedrockDocument struct {
@@ -368,7 +414,17 @@ func BedrockFromChat(response ChatCompletionResponse) (BedrockConverseResponse, 
 		return result, errors.New("chat response cannot be represented as Converse")
 	}
 	choice := response.Choices[0]
-	if text := ContentText(choice.Message.Content); text != "" {
+	text := ContentText(choice.Message.Content)
+	if err := ValidateChatAnnotations(choice.Message.Annotations); err != nil {
+		return result, err
+	}
+	if text != "" && len(choice.Message.Annotations) > 0 {
+		citations, err := bedrockCitationsFromAnnotations(text, choice.Message.Annotations)
+		if err != nil {
+			return result, err
+		}
+		result.Output.Message.Content = append(result.Output.Message.Content, BedrockContentBlock{CitationsContent: citations})
+	} else if text != "" {
 		value := text
 		result.Output.Message.Content = append(result.Output.Message.Content, BedrockContentBlock{Text: &value})
 	}
@@ -385,5 +441,51 @@ func BedrockFromChat(response ChatCompletionResponse) (BedrockConverseResponse, 
 		return result, errors.New("chat response cannot be represented as Converse")
 	}
 	result.StopReason = stopReason
+	return result, nil
+}
+
+func bedrockCitationsFromAnnotations(text string, annotations []ChatAnnotation) (*BedrockCitationsContent, error) {
+	value := text
+	result := &BedrockCitationsContent{Content: []BedrockCitationText{{Text: &value}}}
+	for _, annotation := range annotations {
+		citation := BedrockCitation{}
+		switch annotation.Type {
+		case "url_citation":
+			if annotation.URLCitation == nil {
+				return nil, errors.New("invalid URL citation")
+			}
+			citation.Title = annotation.URLCitation.Title
+			citation.Location.Web = &BedrockWebLocation{URL: annotation.URLCitation.URL}
+		case "source_citation":
+			if annotation.SourceCitation == nil {
+				return nil, errors.New("invalid source citation")
+			}
+			source := annotation.SourceCitation
+			citation.Title, citation.Source = source.Title, source.Source
+			for _, content := range source.SourceContent {
+				content := content
+				citation.SourceContent = append(citation.SourceContent, BedrockCitationSourceContent{Text: &content})
+			}
+			switch source.LocationType {
+			case "document_char", "document_chunk", "document_page":
+				location := &BedrockDocumentLocation{DocumentIndex: *source.DocumentIndex, Start: source.LocationStart, End: source.LocationEnd}
+				switch source.LocationType {
+				case "document_char":
+					citation.Location.DocumentChar = location
+				case "document_chunk":
+					citation.Location.DocumentChunk = location
+				case "document_page":
+					citation.Location.DocumentPage = location
+				}
+			case "search_result":
+				citation.Location.SearchResultLocation = &BedrockSearchResultLocation{SearchResultIndex: *source.SearchResultIndex, Start: source.LocationStart, End: source.LocationEnd}
+			default:
+				return nil, errors.New("unsupported source citation location")
+			}
+		default:
+			return nil, errors.New("unsupported chat annotation")
+		}
+		result.Citations = append(result.Citations, citation)
+	}
 	return result, nil
 }

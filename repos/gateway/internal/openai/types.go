@@ -158,8 +158,9 @@ func (c LegacyFunctionChoice) MarshalJSON() ([]byte, error) {
 }
 
 type ChatAnnotation struct {
-	Type        string          `json:"type"`
-	URLCitation ChatURLCitation `json:"url_citation"`
+	Type           string              `json:"type"`
+	URLCitation    *ChatURLCitation    `json:"url_citation,omitempty"`
+	SourceCitation *ChatSourceCitation `json:"source_citation,omitempty"`
 }
 
 type ChatURLCitation struct {
@@ -169,26 +170,65 @@ type ChatURLCitation struct {
 	URL        string `json:"url"`
 }
 
+type ChatSourceCitation struct {
+	EndIndex          int      `json:"end_index"`
+	StartIndex        int      `json:"start_index"`
+	Title             string   `json:"title,omitempty"`
+	Source            string   `json:"source,omitempty"`
+	SourceContent     []string `json:"source_content,omitempty"`
+	LocationType      string   `json:"location_type"`
+	DocumentIndex     *int     `json:"document_index,omitempty"`
+	SearchResultIndex *int     `json:"search_result_index,omitempty"`
+	LocationStart     int      `json:"location_start"`
+	LocationEnd       int      `json:"location_end"`
+}
+
 func ValidateChatAnnotations(annotations []ChatAnnotation) error {
 	if len(annotations) > 128 {
 		return errors.New("chat completion contains more than 128 annotations")
 	}
 	for _, annotation := range annotations {
-		citation := annotation.URLCitation
-		parsed, err := url.Parse(citation.URL)
-		if annotation.Type != "url_citation" ||
-			citation.StartIndex < 0 ||
-			citation.EndIndex < citation.StartIndex ||
-			citation.Title == "" ||
-			utf8.RuneCountInString(citation.Title) > 2048 ||
-			err != nil ||
-			(parsed.Scheme != "http" && parsed.Scheme != "https") ||
-			parsed.Host == "" ||
-			utf8.RuneCountInString(citation.URL) > 8192 {
-			return errors.New("invalid chat URL citation")
+		switch annotation.Type {
+		case "url_citation":
+			citation := annotation.URLCitation
+			if citation == nil || annotation.SourceCitation != nil {
+				return errors.New("invalid chat URL citation")
+			}
+			parsed, err := url.Parse(citation.URL)
+			if citation.StartIndex < 0 || citation.EndIndex < citation.StartIndex || citation.Title == "" || utf8.RuneCountInString(citation.Title) > 2048 || err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || utf8.RuneCountInString(citation.URL) > 8192 {
+				return errors.New("invalid chat URL citation")
+			}
+		case "source_citation":
+			citation := annotation.SourceCitation
+			if citation == nil || annotation.URLCitation != nil || !validChatSourceCitation(*citation) {
+				return errors.New("invalid chat source citation")
+			}
+		default:
+			return errors.New("unsupported chat annotation type")
 		}
 	}
 	return nil
+}
+
+func validChatSourceCitation(citation ChatSourceCitation) bool {
+	if citation.StartIndex < 0 || citation.EndIndex < citation.StartIndex || citation.LocationStart < 0 || citation.LocationEnd < citation.LocationStart || utf8.RuneCountInString(citation.Title) > 2048 || utf8.RuneCountInString(citation.Source) > 8192 || len(citation.SourceContent) > 16 {
+		return false
+	}
+	totalSourceRunes := 0
+	for _, content := range citation.SourceContent {
+		totalSourceRunes += utf8.RuneCountInString(content)
+		if totalSourceRunes > 65536 {
+			return false
+		}
+	}
+	switch citation.LocationType {
+	case "document_char", "document_chunk", "document_page":
+		return citation.DocumentIndex != nil && *citation.DocumentIndex >= 0 && citation.SearchResultIndex == nil
+	case "search_result":
+		return citation.SearchResultIndex != nil && *citation.SearchResultIndex >= 0 && citation.DocumentIndex == nil
+	default:
+		return false
+	}
 }
 
 type Tool struct {

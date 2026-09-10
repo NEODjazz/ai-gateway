@@ -276,6 +276,19 @@ func scanResponsePayload(req *RequestContext) (string, error) {
 			if err := appendText("assistant: ", openai.ContentText(choice.Message.Content)); err != nil {
 				return "", err
 			}
+			for _, annotation := range choice.Message.Annotations {
+				if annotation.SourceCitation == nil {
+					continue
+				}
+				if err := appendText("citation_source: ", annotation.SourceCitation.Source); err != nil {
+					return "", err
+				}
+				for _, content := range annotation.SourceCitation.SourceContent {
+					if err := appendText("citation_content: ", content); err != nil {
+						return "", err
+					}
+				}
+			}
 			if choice.Message.Refusal != nil {
 				if err := appendText("refusal: ", *choice.Message.Refusal); err != nil {
 					return "", err
