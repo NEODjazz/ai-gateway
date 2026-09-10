@@ -135,9 +135,22 @@ type bedrockRequest struct {
 	PerformanceConfig                 *bedrockPerformanceConfig `json:"performanceConfig,omitempty"`
 	OutputConfig                      *bedrockOutputConfig      `json:"outputConfig,omitempty"`
 	AdditionalModelResponseFieldPaths []string                  `json:"additionalModelResponseFieldPaths,omitempty"`
-	ToolConfig                        *struct {
-		Tools []bedrockTool `json:"tools"`
-	} `json:"toolConfig,omitempty"`
+	ToolConfig                        *bedrockToolConfig        `json:"toolConfig,omitempty"`
+}
+
+type bedrockToolConfig struct {
+	Tools      []bedrockTool      `json:"tools"`
+	ToolChoice *bedrockToolChoice `json:"toolChoice,omitempty"`
+}
+
+type bedrockToolChoice struct {
+	Auto *struct{}                  `json:"auto,omitempty"`
+	Any  *struct{}                  `json:"any,omitempty"`
+	Tool *bedrockSpecificToolChoice `json:"tool,omitempty"`
+}
+
+type bedrockSpecificToolChoice struct {
+	Name string `json:"name"`
 }
 
 type bedrockServiceTier struct {
@@ -273,7 +286,7 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 	}
 	if err := rejectParameters("bedrock",
 		parameterCheck{"stream", request.Stream}, parameterCheck{"stream_options", request.StreamOptions != nil},
-		parameterCheck{"tool_choice", request.ToolChoice != nil}, parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
+		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 		parameterCheck{"seed", request.Seed != nil},
 		parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"store", request.Store != nil},
 		parameterCheck{"modalities", request.Modalities != nil}, parameterCheck{"reasoning_effort", request.ReasoningEffort != ""},
@@ -376,13 +389,11 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 		return result, bedrockInvalid("messages")
 	}
 	if len(request.Tools) > 0 {
-		result.ToolConfig = &struct {
-			Tools []bedrockTool `json:"tools"`
-		}{}
+		result.ToolConfig = &bedrockToolConfig{}
 		seen := make(map[string]bool)
 		for _, tool := range request.Tools {
 			function := tool.Function
-			if tool.Type != "function" || function.Name == "" || seen[function.Name] || function.Strict != nil || function.PromptCacheBreakpoint != nil {
+			if tool.Type != "function" || !openai.ValidBedrockToolName(function.Name) || seen[function.Name] || function.Strict != nil || function.PromptCacheBreakpoint != nil {
 				return result, bedrockInvalid("tools")
 			}
 			seen[function.Name] = true
@@ -393,8 +404,41 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 			}
 			result.ToolConfig.Tools = append(result.ToolConfig.Tools, bedrockTool{Spec: spec})
 		}
+		choice, err := bedrockChatToolChoice(request.ToolChoice, seen)
+		if err != nil {
+			return result, err
+		}
+		result.ToolConfig.ToolChoice = choice
+	} else if request.ToolChoice != nil {
+		return result, bedrockInvalid("tool_choice")
 	}
 	return result, nil
+}
+
+func bedrockChatToolChoice(value any, tools map[string]bool) (*bedrockToolChoice, error) {
+	if value == nil {
+		return nil, nil
+	}
+	switch choice := value.(type) {
+	case string:
+		switch choice {
+		case "auto":
+			return &bedrockToolChoice{Auto: &struct{}{}}, nil
+		case "required":
+			return &bedrockToolChoice{Any: &struct{}{}}, nil
+		default:
+			return nil, bedrockInvalid("tool_choice")
+		}
+	case map[string]any:
+		function, ok := choice["function"].(map[string]any)
+		name, _ := function["name"].(string)
+		if !ok || len(choice) != 2 || choice["type"] != "function" || len(function) != 1 || !tools[name] {
+			return nil, bedrockInvalid("tool_choice")
+		}
+		return &bedrockToolChoice{Tool: &bedrockSpecificToolChoice{Name: name}}, nil
+	default:
+		return nil, bedrockInvalid("tool_choice")
+	}
 }
 
 func bedrockInputContent(value any, native []json.RawMessage) ([]bedrockContentBlock, error) {

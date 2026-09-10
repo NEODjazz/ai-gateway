@@ -148,7 +148,18 @@ type BedrockInferenceConfig struct {
 }
 
 type BedrockToolConfig struct {
-	Tools []BedrockTool `json:"tools"`
+	Tools      []BedrockTool      `json:"tools"`
+	ToolChoice *BedrockToolChoice `json:"toolChoice,omitempty"`
+}
+
+type BedrockToolChoice struct {
+	Auto *struct{}                  `json:"auto,omitempty"`
+	Any  *struct{}                  `json:"any,omitempty"`
+	Tool *BedrockSpecificToolChoice `json:"tool,omitempty"`
+}
+
+type BedrockSpecificToolChoice struct {
+	Name string `json:"name"`
 }
 
 type BedrockTool struct {
@@ -329,14 +340,48 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		seen := make(map[string]bool)
 		for _, tool := range r.ToolConfig.Tools {
 			spec := tool.Spec
-			if spec.Name == "" || spec.InputSchema.JSON == nil || seen[spec.Name] {
+			if !ValidBedrockToolName(spec.Name) || spec.InputSchema.JSON == nil || seen[spec.Name] {
 				return request, errors.New("invalid tool specification")
 			}
 			seen[spec.Name] = true
 			request.Tools = append(request.Tools, Tool{Type: "function", Function: FunctionDefinition{Name: spec.Name, Description: spec.Description, Parameters: spec.InputSchema.JSON}})
 		}
+		if choice := r.ToolConfig.ToolChoice; choice != nil {
+			members := 0
+			if choice.Auto != nil {
+				members++
+				request.ToolChoice = "auto"
+			}
+			if choice.Any != nil {
+				members++
+				request.ToolChoice = "required"
+			}
+			if choice.Tool != nil {
+				members++
+				if !seen[choice.Tool.Name] {
+					return request, errors.New("toolChoice.tool must reference a configured tool")
+				}
+				request.ToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": choice.Tool.Name}}
+			}
+			if members != 1 {
+				return request, errors.New("toolChoice must contain exactly one union member")
+			}
+		}
 	}
 	return request, nil
+}
+
+func ValidBedrockToolName(name string) bool {
+	if len(name) == 0 || len(name) > 64 {
+		return false
+	}
+	for _, char := range name {
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '_' || char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func ValidateBedrockResponseFieldPaths(paths []string) error {

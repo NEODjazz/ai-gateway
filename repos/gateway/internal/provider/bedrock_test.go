@@ -28,7 +28,7 @@ func TestBedrockConverseMapsMessagesToolsAndUsage(t *testing.T) {
 			t.Fatalf("request=%#v", body)
 		}
 		toolConfig := body["toolConfig"].(map[string]any)
-		if len(toolConfig["tools"].([]any)) != 1 {
+		if len(toolConfig["tools"].([]any)) != 1 || toolConfig["toolChoice"].(map[string]any)["any"] == nil {
 			t.Fatalf("tool config=%#v", toolConfig)
 		}
 		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"checking "},{"toolUse":{"toolUseId":"call_2","name":"weather","input":{"city":"Paris"}}}]}},"stopReason":"tool_use","usage":{"inputTokens":9,"outputTokens":4,"totalTokens":13}}`)
@@ -44,10 +44,31 @@ func TestBedrockConverseMapsMessagesToolsAndUsage(t *testing.T) {
 			{Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call_1", Type: "function", Function: openai.FunctionCall{Name: "weather", Arguments: `{"city":"Rome"}`}}}},
 			{Role: "tool", ToolCallID: "call_1", Content: "sunny"},
 		},
-		Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object"}}}},
+		Tools:      []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object"}}}},
+		ToolChoice: "required",
 	})
 	if err != nil || response.Usage.TotalTokens != 13 || response.Choices[0].FinishReason != "tool_calls" || openai.ContentText(response.Choices[0].Message.Content) != "checking " || response.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"city":"Paris"}` {
 		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestBedrockConverseMapsNamedToolChoice(t *testing.T) {
+	request := openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "weather"}},
+		Tools:      []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather"}}},
+		ToolChoice: map[string]any{"type": "function", "function": map[string]any{"name": "weather"}},
+	}
+	converted, err := bedrockChatRequest(request)
+	if err != nil || converted.ToolConfig == nil || converted.ToolConfig.ToolChoice == nil || converted.ToolConfig.ToolChoice.Tool == nil || converted.ToolConfig.ToolChoice.Tool.Name != "weather" {
+		t.Fatalf("request=%+v err=%v", converted, err)
+	}
+	request.ToolChoice = "none"
+	if _, err := bedrockChatRequest(request); err == nil {
+		t.Fatal("unsupported none tool choice accepted")
+	}
+	request.ToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "missing"}}
+	if _, err := bedrockChatRequest(request); err == nil {
+		t.Fatal("unknown named tool accepted")
 	}
 }
 

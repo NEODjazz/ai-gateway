@@ -27,6 +27,34 @@ func TestBedrockConverseMapsToolHistoryAndConfiguration(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseMapsToolChoice(t *testing.T) {
+	tool := BedrockTool{Spec: BedrockToolSpec{Name: "weather", InputSchema: BedrockToolInputSchema{JSON: map[string]any{"type": "object"}}}}
+	for name, choice := range map[string]*BedrockToolChoice{
+		"auto":  {Auto: &struct{}{}},
+		"any":   {Any: &struct{}{}},
+		"named": {Tool: &BedrockSpecificToolChoice{Name: "weather"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("weather")}}}}, ToolConfig: &BedrockToolConfig{Tools: []BedrockTool{tool}, ToolChoice: choice}}
+			chat, err := request.ChatRequest("model", "")
+			if err != nil || chat.ToolChoice == nil {
+				t.Fatalf("chat=%+v err=%v", chat, err)
+			}
+		})
+	}
+	invalid := []*BedrockToolChoice{{}, {Auto: &struct{}{}, Any: &struct{}{}}, {Tool: &BedrockSpecificToolChoice{Name: "missing"}}}
+	for _, choice := range invalid {
+		request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("weather")}}}}, ToolConfig: &BedrockToolConfig{Tools: []BedrockTool{tool}, ToolChoice: choice}}
+		if _, err := request.ChatRequest("model", ""); err == nil {
+			t.Fatalf("invalid tool choice accepted: %+v", choice)
+		}
+	}
+	request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("weather")}}}}, ToolConfig: &BedrockToolConfig{Tools: []BedrockTool{{Spec: BedrockToolSpec{Name: "bad name", InputSchema: BedrockToolInputSchema{JSON: map[string]any{}}}}}}}
+	if _, err := request.ChatRequest("model", ""); err == nil {
+		t.Fatal("invalid Bedrock tool name accepted")
+	}
+}
+
 func TestBedrockConverseMapsReservedTierAndPerformance(t *testing.T) {
 	request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("hello")}}}}, ServiceTier: &BedrockServiceTier{Type: "reserved"}, PerformanceConfig: &BedrockPerformanceConfig{Latency: "optimized"}}
 	chat, err := request.ChatRequest("model", "")
