@@ -16,7 +16,7 @@ func TestPostgresSkillOwnershipIsolationIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(store.Close)
 	owner := "skill-owner/" + time.Now().UTC().Format("20060102150405.000000000")
 	other := owner + "/other"
 	for _, id := range []string{"skill_integration_a", "skill_integration_b"} {
@@ -61,7 +61,7 @@ func TestPostgresSkillOwnershipRejectsInvalidInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(store.Close)
 	if _, err := store.ClaimSkill(context.Background(), skillstate.Ownership{}); !errors.Is(err, skillstate.ErrInvalid) {
 		t.Fatalf("claim error=%v", err)
 	}
