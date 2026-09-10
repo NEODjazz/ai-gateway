@@ -74,6 +74,9 @@ type geminiGeneration struct {
 	MaxOutputTokens    *int     `json:"maxOutputTokens,omitempty"`
 	Temperature        *float64 `json:"temperature,omitempty"`
 	TopP               *float64 `json:"topP,omitempty"`
+	TopK               *int     `json:"topK,omitempty"`
+	FrequencyPenalty   *float64 `json:"frequencyPenalty,omitempty"`
+	PresencePenalty    *float64 `json:"presencePenalty,omitempty"`
 	Seed               *int64   `json:"seed,omitempty"`
 	Stop               []string `json:"stopSequences,omitempty"`
 	ResponseMIMEType   string   `json:"responseMimeType,omitempty"`
@@ -136,7 +139,25 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	if err := validateChatPromptCacheBreakpoints("gemini", request, false); err != nil {
 		return result, err
 	}
-	if err := rejectGenerationOptions("gemini", request.ChatGenerationOptions); err != nil {
+	options := request.ChatGenerationOptions
+	if options.TopK != nil && (*options.TopK < 1 || *options.TopK > 1000000) {
+		return result, geminiInvalid("top_k")
+	}
+	for _, penalty := range []struct {
+		name  string
+		value *float64
+	}{
+		{name: "frequency_penalty", value: options.FrequencyPenalty},
+		{name: "presence_penalty", value: options.PresencePenalty},
+	} {
+		if penalty.value != nil && (math.IsNaN(*penalty.value) || math.IsInf(*penalty.value, 0) || *penalty.value < -2 || *penalty.value > 2) {
+			return result, geminiInvalid(penalty.name)
+		}
+	}
+	options.TopK = nil
+	options.FrequencyPenalty = nil
+	options.PresencePenalty = nil
+	if err := rejectGenerationOptions("gemini", options); err != nil {
 		return result, err
 	}
 	if err := rejectChatMessageRefusals("gemini", request.Messages); err != nil {
@@ -165,7 +186,10 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	if !valid {
 		return result, geminiInvalid("stop")
 	}
-	result.Generation = geminiGeneration{MaxOutputTokens: maxTokens, Temperature: request.Temperature, TopP: request.TopP, Seed: request.Seed, Stop: stop}
+	result.Generation = geminiGeneration{
+		MaxOutputTokens: maxTokens, Temperature: request.Temperature, TopP: request.TopP, TopK: request.TopK,
+		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty, Seed: request.Seed, Stop: stop,
+	}
 	if request.ResponseFormat != nil {
 		switch request.ResponseFormat.Type {
 		case "text":

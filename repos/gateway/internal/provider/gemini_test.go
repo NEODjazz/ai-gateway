@@ -18,7 +18,8 @@ import (
 
 func geminiTestChat() openai.ChatCompletionRequest {
 	limit := 123
-	return openai.ChatCompletionRequest{Model: "gemini-test", MaxCompletionTokens: &limit, Messages: []openai.Message{{Role: "system", Content: "Be concise"}, {Role: "user", Content: "Weather?"}}, Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object"}}}}, ToolChoice: "required", ResponseFormat: &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "answer", Schema: map[string]any{"type": "object"}}}}
+	topK, frequencyPenalty, presencePenalty := 40, 0.2, -0.1
+	return openai.ChatCompletionRequest{Model: "gemini-test", MaxCompletionTokens: &limit, Messages: []openai.Message{{Role: "system", Content: "Be concise"}, {Role: "user", Content: "Weather?"}}, Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object"}}}}, ToolChoice: "required", ResponseFormat: &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "answer", Schema: map[string]any{"type": "object"}}}, ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK, FrequencyPenalty: &frequencyPenalty, PresencePenalty: &presencePenalty}}
 }
 
 func TestGeminiNativeChatAndToolSignatures(t *testing.T) {
@@ -39,7 +40,7 @@ func TestGeminiNativeChatAndToolSignatures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.System == nil || request.System.Parts[0].Text != "Be concise" || request.Generation.MaxOutputTokens == nil || *request.Generation.MaxOutputTokens != 123 || request.Generation.ResponseMIMEType != "application/json" || len(request.Tools) != 1 {
+	if request.System == nil || request.System.Parts[0].Text != "Be concise" || request.Generation.MaxOutputTokens == nil || *request.Generation.MaxOutputTokens != 123 || request.Generation.TopK == nil || *request.Generation.TopK != 40 || request.Generation.FrequencyPenalty == nil || *request.Generation.FrequencyPenalty != 0.2 || request.Generation.PresencePenalty == nil || *request.Generation.PresencePenalty != -0.1 || request.Generation.ResponseMIMEType != "application/json" || len(request.Tools) != 1 {
 		t.Fatalf("native mapping incomplete: %+v", request)
 	}
 	if response.Usage.TotalTokens != 15 || response.Usage.CompletionTokens != 5 || response.Usage.PromptTokensDetails.CachedTokens != 4 {
@@ -60,6 +61,23 @@ func TestGeminiNativeChatAndToolSignatures(t *testing.T) {
 	}
 	if encoded.Contents[1].Parts[0].ThoughtSignature != "opaque-signature" || encoded.Contents[2].Parts[0].FunctionResponse.Name != "weather" {
 		t.Fatalf("tool continuation was not preserved: %+v", encoded.Contents)
+	}
+}
+
+func TestGeminiRejectsInvalidNativeSamplingControls(t *testing.T) {
+	zero, tooLarge := 0, 1000001
+	below, above := -2.1, 2.1
+	for name, request := range map[string]openai.ChatCompletionRequest{
+		"top_k_zero":        {ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &zero}},
+		"top_k_too_large":   {ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &tooLarge}},
+		"frequency_penalty": {ChatGenerationOptions: openai.ChatGenerationOptions{FrequencyPenalty: &below}},
+		"presence_penalty":  {ChatGenerationOptions: openai.ChatGenerationOptions{PresencePenalty: &above}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := geminiChatRequest(request); err == nil {
+				t.Fatal("invalid native sampling control accepted")
+			}
+		})
 	}
 }
 
