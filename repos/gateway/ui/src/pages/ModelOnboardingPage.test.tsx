@@ -87,6 +87,7 @@ describe("ModelOnboardingPage", () => {
       if (!options?.method && path === "/admin/v1/credentials") return json({ data: [] });
       if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
       if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "voyage", operations: ["embeddings", "rerank"] }] });
       if (path.endsWith("/test")) return json({ provider_id: "voyage", status: "available", latency_ms: 1, model_count: 1 });
       if (path.endsWith("/discover-models")) return json({ data: [{ id: "voyage-4" }] });
       if (path === "/admin/v1/model-onboarding/plan") return json({ revision: 1, catalog_version: "v1", deployments: body?.deployments, model_groups: body?.model_groups, changes: [] });
@@ -99,6 +100,9 @@ describe("ModelOnboardingPage", () => {
     await userEvent.click((await screen.findAllByRole("checkbox"))[0]);
     await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
     await screen.findByText("Review onboarding plan");
+    await userEvent.click(screen.getByLabelText("Capabilities voyage-4"));
+    expect(screen.getByRole("option", { name: /Rerank/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Image generation/ })).not.toBeInTheDocument();
     const plan = calls.find((call) => call.path === "/admin/v1/model-onboarding/plan")?.body as { deployments?: Array<{ capabilities?: string[] }> };
     expect(plan.deployments?.[0].capabilities).toEqual(["embeddings"]);
   });

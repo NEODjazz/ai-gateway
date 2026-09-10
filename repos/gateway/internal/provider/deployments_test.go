@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync/atomic"
 	"testing"
 
@@ -110,6 +111,25 @@ func TestManagedDeploymentAcceptsSupportedNativeCapabilities(t *testing.T) {
 	}
 	if _, err := router.CreateModelDeployment(ModelDeployment{ID: "voyage-embed", ProviderID: "voyage", Models: []string{"model"}, Capabilities: []string{"embeddings", "rerank"}, Enabled: true}); err != nil {
 		t.Fatalf("supported capabilities rejected: %v", err)
+	}
+}
+
+func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
+	profiles := ManagedProviderCapabilityProfiles()
+	byType := make(map[string][]string, len(profiles))
+	for _, profile := range profiles {
+		byType[profile.Type] = profile.Operations
+	}
+	if got := byType["voyage"]; !slices.Equal(got, []string{"embeddings", "rerank"}) {
+		t.Fatalf("voyage operations=%v", got)
+	}
+	for _, operation := range []string{"chat", "responses", "embeddings", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_speech", "search", "stream"} {
+		if !slices.Contains(byType["openai-compatible"], operation) {
+			t.Fatalf("openai-compatible missing %s: %v", operation, byType["openai-compatible"])
+		}
+	}
+	if slices.Contains(byType["anthropic"], "embeddings") || !slices.Contains(byType["anthropic"], "responses") {
+		t.Fatalf("anthropic operations=%v", byType["anthropic"])
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"ai-gateway-gateway/internal/config"
 )
 
 type ManagedProvider struct {
@@ -19,6 +21,19 @@ type ManagedProvider struct {
 	RateLimitRPM int    `json:"rate_limit_rpm,omitempty"`
 	RateLimitTPM int    `json:"rate_limit_tpm,omitempty"`
 	Enabled      bool   `json:"enabled"`
+}
+
+type ProviderCapabilityProfile struct {
+	Type       string   `json:"type"`
+	Operations []string `json:"operations"`
+}
+
+var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage"}
+
+var managedOperationCapabilities = []string{
+	"chat", "responses", "embeddings", "rerank", "moderation",
+	"image_generation", "image_edit", "image_variation",
+	"audio_transcription", "audio_speech", "ocr", "search", "stream",
 }
 
 type ProviderController interface {
@@ -162,12 +177,28 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 }
 
 func validProviderType(value string) bool {
-	switch value {
-	case "demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage":
-		return true
-	default:
-		return false
+	for _, providerType := range managedProviderTypes {
+		if value == providerType {
+			return true
+		}
 	}
+	return false
+}
+
+func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
+	profiles := make([]ProviderCapabilityProfile, 0, len(managedProviderTypes))
+	for _, providerType := range managedProviderTypes {
+		client := providerFor(config.ProviderEndpointConfig{Type: providerType, Stream: true})
+		endpoint := Endpoint{Type: providerType, Provider: client, Capabilities: managedOperationCapabilities}
+		operations := make([]string, 0, len(managedOperationCapabilities))
+		for _, capability := range managedOperationCapabilities {
+			if supportsManagedAdapterCapability(endpoint, capability) {
+				operations = append(operations, capability)
+			}
+		}
+		profiles = append(profiles, ProviderCapabilityProfile{Type: providerType, Operations: operations})
+	}
+	return profiles
 }
 
 func validAzureProviderVersion(value string) bool {

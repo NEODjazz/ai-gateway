@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultModelCapabilities, modelCapabilityOptions } from "./modelCapabilities";
+import { defaultModelCapabilities, modelCapabilityOptions, providerModelCapabilityOptions } from "./modelCapabilities";
 
 describe("modelCapabilityOptions", () => {
   it("exposes every configurable inference capability", () => {
@@ -35,5 +35,15 @@ describe("modelCapabilityOptions", () => {
     expect(defaultModelCapabilities("ollama")).toEqual(["chat", "responses", "embeddings", "stream"]);
     expect(defaultModelCapabilities("anthropic")).toEqual(["chat", "responses", "stream"]);
     expect(defaultModelCapabilities("openrouter")).toEqual(["chat", "stream"]);
+  });
+
+  it("filters adapter operations while preserving feature capabilities", () => {
+    const values = providerModelCapabilityOptions(["embeddings", "rerank"]).map(({ value }) => value);
+    expect(values).toContain("embeddings");
+    expect(values).toContain("rerank");
+    expect(values).toContain("tools");
+    expect(values).not.toContain("chat");
+    expect(values).not.toContain("responses");
+    expect(values).not.toContain("image_generation");
   });
 });

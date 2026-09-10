@@ -27,6 +27,13 @@ func (h Handler) ListProviders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": controller.ListProviders(r.Context())})
 }
 
+func (h Handler) ListProviderCapabilities(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeAdmin(w, r); !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": provider.ManagedProviderCapabilityProfiles()})
+}
+
 func (h Handler) CreateProvider(w http.ResponseWriter, r *http.Request) {
 	h.mutateProvider(w, r, "", "provider.create")
 }

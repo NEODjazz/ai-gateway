@@ -81,6 +81,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/admin/v1/model-onboarding/plan"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PlanModelOnboarding) }},
 	{RouteContract{http.MethodPost, "/admin/v1/model-onboarding/apply"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ApplyModelOnboarding) }},
 	{RouteContract{http.MethodGet, "/admin/v1/providers"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListProviders) }},
+	{RouteContract{http.MethodGet, "/admin/v1/provider-capabilities"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListProviderCapabilities) }},
 	{RouteContract{http.MethodPost, "/admin/v1/providers"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateProvider) }},
 	{RouteContract{http.MethodPut, "/admin/v1/providers/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateProvider) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/providers/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteProvider) }},

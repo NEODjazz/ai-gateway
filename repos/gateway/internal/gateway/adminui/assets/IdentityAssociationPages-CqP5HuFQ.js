@@ -1,0 +1,1 @@
+import{j as a,s,o,u as n}from"./app.js";function i(){const{hasCapability:e}=n();return a.jsx(s,{config:o.teams,allowCreate:e("admin")})}function r(){return a.jsx(s,{config:o.organizations})}export{r as OrganizationsPage,i as TeamsPage};

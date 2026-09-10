@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.118
+  version: 0.1.119
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1487,6 +1487,15 @@ paths:
         '403': {$ref: '#/components/responses/AdminRequired'}
         '404': {$ref: '#/components/responses/NotFound'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/provider-capabilities:
+    get:
+      operationId: listProviderCapabilities
+      tags: [Providers]
+      summary: List operations implemented by each managed provider adapter
+      responses:
+        '200': {description: Provider adapter capability profiles, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/ProviderCapabilityProfile'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
   /admin/v1/providers:
     get:
       operationId: listManagedProviders
@@ -5072,6 +5081,16 @@ components:
         rate_limit_rpm: {type: integer, minimum: 0, maximum: 10000000, description: Shared request quota across every deployment backed by this provider; zero disables it.}
         rate_limit_tpm: {type: integer, minimum: 0, maximum: 1000000000, description: Shared estimated token quota across every deployment backed by this provider; zero disables it.}
         enabled: {type: boolean}
+    ProviderCapabilityProfile:
+      type: object
+      additionalProperties: false
+      required: [type, operations]
+      properties:
+        type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, cohere, mistral, voyage]}
+        operations:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_speech, ocr, search, stream]}
     ProviderCredentialCreateInput:
       type: object
       additionalProperties: false

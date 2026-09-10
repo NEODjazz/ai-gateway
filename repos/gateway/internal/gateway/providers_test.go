@@ -46,3 +46,12 @@ func TestAdminProviderRejectsCredentialInPayload(t *testing.T) {
 		t.Fatalf("unsafe payload accepted or reflected: status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestAdminListsProviderCapabilityProfiles(t *testing.T) {
+	runtime := provider.New(provider.Config{})
+	response := httptest.NewRecorder()
+	Routes(NewHandler(modulesPipeline("admin"), runtime)).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/v1/provider-capabilities", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"type":"voyage","operations":["embeddings","rerank"]`) {
+		t.Fatalf("unexpected capability profiles: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
