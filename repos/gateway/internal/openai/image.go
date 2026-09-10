@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/base64"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -21,6 +22,9 @@ type ImageGenerationRequest struct {
 	Background        string `json:"background,omitempty"`
 	OutputFormat      string `json:"output_format,omitempty"`
 	OutputCompression *int   `json:"output_compression,omitempty"`
+	Resolution        string `json:"resolution,omitempty"`
+	AspectRatio       string `json:"aspect_ratio,omitempty"`
+	Seed              *int64 `json:"seed,omitempty"`
 }
 
 type ImageEditRequest struct {
@@ -177,10 +181,29 @@ func (r ImageGenerationRequest) Validate() string {
 	if !oneOfOrEmpty(r.Background, "auto", "transparent", "opaque") {
 		return "unsupported background value"
 	}
-	if !oneOfOrEmpty(r.OutputFormat, "png", "webp", "jpeg") {
+	if !oneOfOrEmpty(r.OutputFormat, "png", "webp", "jpeg", "svg") {
 		return "unsupported output_format value"
 	}
+	if !oneOfOrEmpty(r.Resolution, "512", "1K", "2K", "4K") {
+		return "resolution must be 512, 1K, 2K, or 4K"
+	}
+	if !validImageAspectRatio(r.AspectRatio) {
+		return "aspect_ratio must be auto or a ratio between 1:1 and 99:99"
+	}
 	return ""
+}
+
+func validImageAspectRatio(value string) bool {
+	if value == "" || value == "auto" {
+		return true
+	}
+	width, height, found := strings.Cut(value, ":")
+	if !found || strings.Contains(height, ":") {
+		return false
+	}
+	w, wErr := strconv.Atoi(width)
+	h, hErr := strconv.Atoi(height)
+	return wErr == nil && hErr == nil && w >= 1 && w <= 99 && h >= 1 && h <= 99
 }
 
 func ImageGenerationOutputReserve(r ImageGenerationRequest) int {
@@ -228,6 +251,7 @@ type ImageData struct {
 	B64JSON       string `json:"b64_json,omitempty"`
 	URL           string `json:"url,omitempty"`
 	RevisedPrompt string `json:"revised_prompt,omitempty"`
+	MediaType     string `json:"media_type,omitempty"`
 }
 
 type ImageUsage struct {

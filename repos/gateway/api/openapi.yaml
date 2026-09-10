@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.129
+  version: 0.1.130
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4786,8 +4786,11 @@ components:
         style: {type: string, enum: [vivid, natural]}
         user: {type: string}
         background: {type: string, enum: [auto, transparent, opaque]}
-        output_format: {type: string, enum: [png, webp, jpeg]}
+        output_format: {type: string, enum: [png, webp, jpeg, svg]}
         output_compression: {type: integer, minimum: 0, maximum: 100}
+        resolution: {type: string, enum: ['512', 1K, 2K, 4K]}
+        aspect_ratio: {type: string, pattern: '^(auto|[1-9][0-9]?:[1-9][0-9]?)$'}
+        seed: {type: integer, format: int64}
     ImageEditRequest:
       type: object
       additionalProperties: false
@@ -4808,7 +4811,7 @@ components:
         size: {type: string, enum: [auto, 256x256, 512x512, 1024x1024, 1536x1024, 1024x1536, 1792x1024, 1024x1792]}
         user: {type: string, maxLength: 256}
         background: {type: string, enum: [auto, transparent, opaque]}
-        output_format: {type: string, enum: [png, webp, jpeg]}
+        output_format: {type: string, enum: [png, webp, jpeg, svg]}
         output_compression: {type: integer, minimum: 0, maximum: 100}
     ImageVariationRequest:
       type: object
@@ -4828,7 +4831,7 @@ components:
       properties:
         created: {type: integer, format: int64, minimum: 0}
         background: {type: string, enum: [auto, transparent, opaque]}
-        output_format: {type: string, enum: [png, webp, jpeg]}
+        output_format: {type: string, enum: [png, webp, jpeg, svg]}
         quality: {type: string, enum: [auto, low, medium, high, xhigh, max]}
         size: {type: string, enum: [auto, 256x256, 512x512, 1024x1024, 1536x1024, 1024x1536, 1792x1024, 1024x1792]}
         data:
@@ -4842,6 +4845,7 @@ components:
               b64_json: {type: string, format: byte}
               url: {type: string, format: uri}
               revised_prompt: {type: string, maxLength: 32000}
+              media_type: {type: string, enum: [image/png, image/jpeg, image/webp, image/svg+xml]}
             oneOf:
               - required: [b64_json]
               - required: [url]

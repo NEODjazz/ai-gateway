@@ -19,14 +19,15 @@ func TestOpenAICompatibleImageGenerationContract(t *testing.T) {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		var request map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["provider"] != nil || request["prompt"] != "draw" || request["n"] != float64(1) {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["provider"] != nil || request["prompt"] != "draw" || request["n"] != float64(1) || request["resolution"] != "2K" || request["aspect_ratio"] != "16:9" || request["seed"] != float64(42) {
 			t.Fatalf("request=%#v err=%v", request, err)
 		}
 		_, _ = w.Write([]byte(`{"created":7,"data":[{"url":"https://images.example/result.png","revised_prompt":"draw clearly"}],"usage":{"input_tokens":3,"output_tokens":5,"total_tokens":8}}`))
 	}))
 	defer server.Close()
 	n := 1
-	response, err := NewOpenAICompatible(server.URL+"/v1", "secret", false).GenerateImage(context.Background(), openai.ImageGenerationRequest{Provider: "deployment", Model: "image", Prompt: "draw", N: &n})
+	seed := int64(42)
+	response, err := NewOpenAICompatible(server.URL+"/v1", "secret", false).GenerateImage(context.Background(), openai.ImageGenerationRequest{Provider: "deployment", Model: "image", Prompt: "draw", N: &n, Resolution: "2K", AspectRatio: "16:9", Seed: &seed})
 	if err != nil || response.Created != 7 || response.Usage == nil || response.Usage.TotalTokens != 8 {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
@@ -104,6 +105,7 @@ func TestImageGenerationResponseValidation(t *testing.T) {
 		{Data: []openai.ImageData{{URL: "file:///secret"}}},
 		{Data: []openai.ImageData{{URL: "https://user:pass@example.com/image"}}},
 		{Data: []openai.ImageData{{B64JSON: "invalid"}}},
+		{Data: []openai.ImageData{{B64JSON: "aW1hZ2U=", MediaType: "text/html"}}, Usage: &openai.ImageUsage{}},
 		{Data: []openai.ImageData{{B64JSON: "aW1hZ2U=", URL: "https://example.com/image"}}},
 		{Data: []openai.ImageData{{URL: "https://example.com/image"}}, Usage: &openai.ImageUsage{InputTokens: 2, OutputTokens: 2, TotalTokens: 3}},
 	} {

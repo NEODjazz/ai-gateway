@@ -35,7 +35,10 @@ func (p OpenAICompatible) GenerateImage(ctx context.Context, request openai.Imag
 		Background        string `json:"background,omitempty"`
 		OutputFormat      string `json:"output_format,omitempty"`
 		OutputCompression *int   `json:"output_compression,omitempty"`
-	}{request.Model, request.Prompt, request.N, request.Quality, request.ResponseFormat, request.Size, request.Style, request.User, request.Background, request.OutputFormat, request.OutputCompression})
+		Resolution        string `json:"resolution,omitempty"`
+		AspectRatio       string `json:"aspect_ratio,omitempty"`
+		Seed              *int64 `json:"seed,omitempty"`
+	}{request.Model, request.Prompt, request.N, request.Quality, request.ResponseFormat, request.Size, request.Style, request.User, request.Background, request.OutputFormat, request.OutputCompression, request.Resolution, request.AspectRatio, request.Seed})
 	if err != nil {
 		return openai.ImageGenerationResponse{}, err
 	}
@@ -82,7 +85,7 @@ func validateImageGenerationResponse(response openai.ImageGenerationResponse, re
 }
 
 func validateImageGenerationResponseCount(response openai.ImageGenerationResponse, request openai.ImageGenerationRequest, exactCount bool) error {
-	if response.Created < 0 || !oneOfOrEmptyImageValue(response.Background, "auto", "transparent", "opaque") || !oneOfOrEmptyImageValue(response.OutputFormat, "png", "webp", "jpeg") || !oneOfOrEmptyImageValue(response.Quality, "auto", "low", "medium", "high", "xhigh", "max") || !oneOfOrEmptyImageValue(response.Size, "auto", "256x256", "512x512", "1024x1024", "1536x1024", "1024x1536", "1792x1024", "1024x1792") {
+	if response.Created < 0 || !oneOfOrEmptyImageValue(response.Background, "auto", "transparent", "opaque") || !oneOfOrEmptyImageValue(response.OutputFormat, "png", "webp", "jpeg", "svg") || !oneOfOrEmptyImageValue(response.Quality, "auto", "low", "medium", "high", "xhigh", "max") || !oneOfOrEmptyImageValue(response.Size, "auto", "256x256", "512x512", "1024x1024", "1536x1024", "1024x1536", "1792x1024", "1024x1792") {
 		return errors.New("provider returned invalid image metadata")
 	}
 	want := 1
@@ -93,7 +96,7 @@ func validateImageGenerationResponseCount(response openai.ImageGenerationRespons
 		return errors.New("provider returned an invalid image count")
 	}
 	for _, image := range response.Data {
-		if (image.B64JSON == "") == (image.URL == "") || utf8.RuneCountInString(image.RevisedPrompt) > 32000 {
+		if (image.B64JSON == "") == (image.URL == "") || utf8.RuneCountInString(image.RevisedPrompt) > 32000 || !oneOfOrEmptyImageValue(image.MediaType, "image/png", "image/jpeg", "image/webp", "image/svg+xml") {
 			return errors.New("provider returned invalid image data")
 		}
 		if image.B64JSON != "" {

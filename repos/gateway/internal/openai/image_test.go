@@ -13,12 +13,23 @@ func TestImageGenerationRequestValidation(t *testing.T) {
 		{Model: "image", Prompt: "draw", N: &n0},
 		{Model: "image", Prompt: "draw", N: &n11},
 		{Model: "image", Prompt: "draw", OutputCompression: &compression},
+		{Model: "image", Prompt: "draw", Resolution: "8K"},
+		{Model: "image", Prompt: "draw", AspectRatio: "16x9"},
+		{Model: "image", Prompt: "draw", AspectRatio: "0:1"},
 		{Model: "image", Prompt: "draw", OutputFormat: "gif"},
 		{Model: "image", Prompt: "draw", User: strings.Repeat("u", 257)},
 	} {
 		if request.Validate() == "" {
 			t.Fatalf("invalid request accepted: %+v", request)
 		}
+	}
+	for _, ratio := range []string{"auto", "1:1", "16:9", "9:21", "99:99"} {
+		if message := (ImageGenerationRequest{Model: "image", Prompt: "draw", AspectRatio: ratio}).Validate(); message != "" {
+			t.Fatalf("valid aspect ratio %q rejected: %s", ratio, message)
+		}
+	}
+	if message := (ImageGenerationRequest{Model: "image", Prompt: "draw", Resolution: "2K", OutputFormat: "svg"}).Validate(); message != "" {
+		t.Fatalf("normalized image controls rejected: %s", message)
 	}
 	n := 10
 	valid := ImageGenerationRequest{Model: "image", Prompt: "draw", N: &n}

@@ -50,15 +50,16 @@ func TestOpenRouterImageGenerationUsesDedicatedContract(t *testing.T) {
 			t.Fatalf("unexpected request: %s %s authorization=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
 		}
 		var request map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["provider"] != nil || request["prompt"] != "draw" || request["user"] != "tenant-user" || request["n"] != float64(2) {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["provider"] != nil || request["prompt"] != "draw" || request["user"] != "tenant-user" || request["n"] != float64(2) || request["resolution"] != "2K" || request["aspect_ratio"] != "16:9" || request["seed"] != float64(42) {
 			t.Fatalf("request=%#v err=%v", request, err)
 		}
 		_, _ = fmt.Fprint(w, `{"created":7,"data":[{"b64_json":"aW1hZ2U=","media_type":"image/png"}],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8,"cost":0.04}}`)
 	}))
 	defer server.Close()
 	n := 2
-	response, err := NewOpenRouter(server.URL+"/api/v1", "secret", false, "").GenerateImage(context.Background(), openai.ImageGenerationRequest{Model: "image", Prompt: "draw", N: &n, User: "tenant-user"})
-	if err != nil || response.Created != 7 || len(response.Data) != 1 || response.Usage == nil || *response.Usage != (openai.ImageUsage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8}) {
+	seed := int64(42)
+	response, err := NewOpenRouter(server.URL+"/api/v1", "secret", false, "").GenerateImage(context.Background(), openai.ImageGenerationRequest{Model: "image", Prompt: "draw", N: &n, User: "tenant-user", Resolution: "2K", AspectRatio: "16:9", Seed: &seed})
+	if err != nil || response.Created != 7 || len(response.Data) != 1 || response.Data[0].MediaType != "image/png" || response.Usage == nil || *response.Usage != (openai.ImageUsage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8}) {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }

@@ -126,7 +126,10 @@ func (p OpenRouter) GenerateImage(ctx context.Context, request openai.ImageGener
 		OutputFormat      string `json:"output_format,omitempty"`
 		OutputCompression *int   `json:"output_compression,omitempty"`
 		User              string `json:"user,omitempty"`
-	}{request.Model, request.Prompt, request.N, request.Quality, request.Size, request.Background, request.OutputFormat, request.OutputCompression, request.User})
+		Resolution        string `json:"resolution,omitempty"`
+		AspectRatio       string `json:"aspect_ratio,omitempty"`
+		Seed              *int64 `json:"seed,omitempty"`
+	}{request.Model, request.Prompt, request.N, request.Quality, request.Size, request.Background, request.OutputFormat, request.OutputCompression, request.User, request.Resolution, request.AspectRatio, request.Seed})
 	if err != nil {
 		return openai.ImageGenerationResponse{}, err
 	}
