@@ -520,7 +520,7 @@ func streamCohereChat(body io.Reader, model string, wantLogprobs bool, write Cha
 			if logprobs == nil {
 				return write(openAIChatCompletionChunkPayload(result.ID, result.Model, 0, "", text, nil))
 			}
-			payload, err := cohereLogprobChunkPayload(result.ID, result.Model, result.Created, text, logprobs)
+			payload, err := chatCompletionLogprobChunkPayload(result.ID, result.Model, result.Created, "", text, logprobs)
 			if err != nil {
 				return err
 			}
@@ -634,10 +634,14 @@ func cohereChoiceLogprobs(items []cohereLogprobItem) (openai.ChoiceLogprobs, str
 	return converted, text.String(), nil
 }
 
-func cohereLogprobChunkPayload(id, model string, created int64, content string, logprobs *openai.ChoiceLogprobs) (string, error) {
+func chatCompletionLogprobChunkPayload(id, model string, created int64, role, content string, logprobs *openai.ChoiceLogprobs) (string, error) {
+	delta := map[string]any{"content": content}
+	if role != "" {
+		delta["role"] = role
+	}
 	payload, err := json.Marshal(map[string]any{
 		"id": id, "object": "chat.completion.chunk", "created": created, "model": model,
-		"choices": []map[string]any{{"index": 0, "delta": map[string]any{"content": content}, "finish_reason": nil, "logprobs": logprobs}},
+		"choices": []map[string]any{{"index": 0, "delta": delta, "finish_reason": nil, "logprobs": logprobs}},
 	})
 	return string(payload), err
 }

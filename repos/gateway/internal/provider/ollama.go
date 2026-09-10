@@ -20,12 +20,14 @@ type Ollama struct {
 }
 
 type ollamaChatRequest struct {
-	Model    string                 `json:"model"`
-	Messages []ollamaRequestMessage `json:"messages"`
-	Tools    []openai.Tool          `json:"tools,omitempty"`
-	Format   any                    `json:"format,omitempty"`
-	Options  ollamaOptions          `json:"options,omitempty"`
-	Stream   bool                   `json:"stream"`
+	Model       string                 `json:"model"`
+	Messages    []ollamaRequestMessage `json:"messages"`
+	Tools       []openai.Tool          `json:"tools,omitempty"`
+	Format      any                    `json:"format,omitempty"`
+	Options     ollamaOptions          `json:"options,omitempty"`
+	Stream      bool                   `json:"stream"`
+	Logprobs    *bool                  `json:"logprobs,omitempty"`
+	TopLogprobs *int                   `json:"top_logprobs,omitempty"`
 }
 
 type ollamaOptions struct {
@@ -58,16 +60,28 @@ type ollamaRequestFunctionCall struct {
 }
 
 type ollamaChatResponse struct {
-	Model              string         `json:"model"`
-	Message            openai.Message `json:"message"`
-	Done               bool           `json:"done"`
-	PromptEvalCount    int            `json:"prompt_eval_count"`
-	EvalCount          int            `json:"eval_count"`
-	DoneReason         string         `json:"done_reason"`
-	TotalDuration      int64          `json:"total_duration"`
-	LoadDuration       int64          `json:"load_duration"`
-	PromptEvalDuration int64          `json:"prompt_eval_duration"`
-	EvalDuration       int64          `json:"eval_duration"`
+	Model              string          `json:"model"`
+	Message            openai.Message  `json:"message"`
+	Done               bool            `json:"done"`
+	PromptEvalCount    int             `json:"prompt_eval_count"`
+	EvalCount          int             `json:"eval_count"`
+	DoneReason         string          `json:"done_reason"`
+	TotalDuration      int64           `json:"total_duration"`
+	LoadDuration       int64           `json:"load_duration"`
+	PromptEvalDuration int64           `json:"prompt_eval_duration"`
+	EvalDuration       int64           `json:"eval_duration"`
+	Logprobs           []ollamaLogprob `json:"logprobs"`
+}
+
+type ollamaTokenLogprob struct {
+	Token   string  `json:"token"`
+	Logprob float64 `json:"logprob"`
+	Bytes   []int   `json:"bytes"`
+}
+
+type ollamaLogprob struct {
+	ollamaTokenLogprob
+	TopLogprobs []ollamaTokenLogprob `json:"top_logprobs"`
 }
 
 type ollamaEmbeddingRequest struct {
@@ -121,6 +135,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 		Format:   ollamaResponseFormat(request.ResponseFormat),
 		Options:  ollamaRequestOptions(request),
 		Stream:   request.Stream && p.upstreamStream,
+		Logprobs: request.Logprobs, TopLogprobs: request.TopLogprobs,
 	})
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -152,6 +167,17 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if finishReason == "" {
 		finishReason = "stop"
 	}
+	logprobs, logprobText, err := ollamaChoiceLogprobs(ollamaResp.Logprobs)
+	if err != nil || len(ollamaResp.Logprobs) > 0 && logprobText != openai.ContentText(ollamaResp.Message.Content) {
+		return openai.ChatCompletionResponse{}, errors.New("invalid Ollama chat logprobs")
+	}
+	if request.Logprobs != nil && *request.Logprobs && len(ollamaResp.Logprobs) == 0 && openai.ContentText(ollamaResp.Message.Content) != "" {
+		return openai.ChatCompletionResponse{}, errors.New("Ollama chat response omitted requested logprobs")
+	}
+	var choiceLogprobs *openai.ChoiceLogprobs
+	if len(ollamaResp.Logprobs) > 0 {
+		choiceLogprobs = &logprobs
+	}
 
 	return openai.ChatCompletionResponse{
 		ID:     "chatcmpl-ollama",
@@ -162,6 +188,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 				Index:        0,
 				Message:      ollamaResp.Message,
 				FinishReason: finishReason,
+				Logprobs:     choiceLogprobs,
 			},
 		},
 		Usage: openai.Usage{
@@ -233,6 +260,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		Format:   ollamaResponseFormat(request.ResponseFormat),
 		Options:  ollamaRequestOptions(request),
 		Stream:   true,
+		Logprobs: request.Logprobs, TopLogprobs: request.TopLogprobs,
 	})
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -285,6 +313,13 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		normalizeOllamaToolCalls(&chunk.Message)
 		content := openai.ContentText(chunk.Message.Content)
 		if content != "" {
+			logprobs, logprobText, err := ollamaChoiceLogprobs(chunk.Logprobs)
+			if err != nil || len(chunk.Logprobs) > 0 && logprobText != content {
+				return openai.ChatCompletionResponse{}, errors.New("invalid Ollama chat stream logprobs")
+			}
+			if request.Logprobs != nil && *request.Logprobs && len(chunk.Logprobs) == 0 {
+				return openai.ChatCompletionResponse{}, errors.New("Ollama chat stream omitted requested logprobs")
+			}
 			response.Choices[0].Message.Content = openai.ContentText(response.Choices[0].Message.Content) + content
 			role := ""
 			if !sentRole {
@@ -294,7 +329,19 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 				}
 				sentRole = true
 			}
-			if err := write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, role, content, nil)); err != nil {
+			if len(chunk.Logprobs) > 0 {
+				if response.Choices[0].Logprobs == nil {
+					response.Choices[0].Logprobs = &openai.ChoiceLogprobs{}
+				}
+				response.Choices[0].Logprobs.Content = append(response.Choices[0].Logprobs.Content, logprobs.Content...)
+				payload, err := chatCompletionLogprobChunkPayload(response.ID, response.Model, time.Now().Unix(), role, content, &logprobs)
+				if err != nil {
+					return openai.ChatCompletionResponse{}, err
+				}
+				if err := write(payload); err != nil {
+					return openai.ChatCompletionResponse{}, err
+				}
+			} else if err := write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, role, content, nil)); err != nil {
 				return openai.ChatCompletionResponse{}, err
 			}
 		}
@@ -325,6 +372,49 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		response.Choices[0].FinishReason = "stop"
 	}
 	return response, nil
+}
+
+func ollamaChoiceLogprobs(items []ollamaLogprob) (openai.ChoiceLogprobs, string, error) {
+	if len(items) > 100_000 {
+		return openai.ChoiceLogprobs{}, "", errors.New("too many Ollama logprobs")
+	}
+	converted := openai.ChoiceLogprobs{Content: make([]openai.TokenLogprob, 0, len(items))}
+	var content strings.Builder
+	for _, item := range items {
+		token, err := ollamaOpenAITokenLogprob(item.ollamaTokenLogprob)
+		if err != nil || len(item.TopLogprobs) > 20 {
+			return openai.ChoiceLogprobs{}, "", errors.New("invalid Ollama logprobs")
+		}
+		for _, candidate := range item.TopLogprobs {
+			top, err := ollamaOpenAITokenLogprob(candidate)
+			if err != nil {
+				return openai.ChoiceLogprobs{}, "", errors.New("invalid Ollama top logprobs")
+			}
+			token.TopLogprobs = append(token.TopLogprobs, openai.TopLogprob{Token: top.Token, Logprob: top.Logprob, Bytes: top.Bytes})
+		}
+		content.WriteString(token.Token)
+		converted.Content = append(converted.Content, token)
+	}
+	return converted, content.String(), nil
+}
+
+func ollamaOpenAITokenLogprob(item ollamaTokenLogprob) (openai.TokenLogprob, error) {
+	if !finiteProbability(item.Logprob) {
+		return openai.TokenLogprob{}, errors.New("invalid log probability")
+	}
+	bytes := tokenBytes(item.Token)
+	if len(item.Bytes) > 0 {
+		if len(item.Bytes) != len(bytes) {
+			return openai.TokenLogprob{}, errors.New("invalid token bytes")
+		}
+		for index := range bytes {
+			if item.Bytes[index] != bytes[index] {
+				return openai.TokenLogprob{}, errors.New("invalid token bytes")
+			}
+		}
+		bytes = append([]int(nil), item.Bytes...)
+	}
+	return openai.TokenLogprob{Token: item.Token, Logprob: item.Logprob, Bytes: bytes, TopLogprobs: []openai.TopLogprob{}}, nil
 }
 
 func ollamaMessages(messages []openai.Message) []ollamaRequestMessage {

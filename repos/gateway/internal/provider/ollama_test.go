@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -213,9 +214,74 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 	}
 }
 
+func TestOllamaNativeLogprobsRoundTrip(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%t", streaming), func(t *testing.T) {
+			var upstream ollamaChatRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+					t.Fatal(err)
+				}
+				chunk := `{"model":"llama-test","message":{"role":"assistant","content":"é"},"logprobs":[{"token":"é","logprob":-0.1,"bytes":[195,169],"top_logprobs":[{"token":"e","logprob":-0.2,"bytes":[101]}]}]}`
+				if streaming {
+					_, _ = fmt.Fprintln(w, chunk)
+					_, _ = fmt.Fprintln(w, `{"model":"llama-test","done":true,"done_reason":"stop","prompt_eval_count":2,"eval_count":1}`)
+					return
+				}
+				_, _ = fmt.Fprint(w, strings.TrimSuffix(chunk, "}")+`,"done":true,"done_reason":"stop","prompt_eval_count":2,"eval_count":1}`)
+			}))
+			defer server.Close()
+
+			enabled := true
+			top := 1
+			request := openai.ChatCompletionRequest{Model: "llama-test", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: streaming, ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &enabled, TopLogprobs: &top}}
+			var chunks []string
+			var response openai.ChatCompletionResponse
+			var err error
+			client := NewOllama(server.URL, streaming)
+			if streaming {
+				response, err = client.StreamChatCompletions(context.Background(), request, func(payload string) error {
+					chunks = append(chunks, payload)
+					return nil
+				})
+			} else {
+				response, err = client.ChatCompletions(context.Background(), request)
+			}
+			if err != nil || upstream.Logprobs == nil || !*upstream.Logprobs || upstream.TopLogprobs == nil || *upstream.TopLogprobs != 1 {
+				t.Fatalf("request=%+v response=%+v err=%v", upstream, response, err)
+			}
+			logprobs := response.Choices[0].Logprobs
+			if logprobs == nil || len(logprobs.Content) != 1 || logprobs.Content[0].Token != "é" || logprobs.Content[0].Logprob != -0.1 || fmt.Sprint(logprobs.Content[0].Bytes) != "[195 169]" || len(logprobs.Content[0].TopLogprobs) != 1 {
+				t.Fatalf("logprobs were not normalized: %+v", response)
+			}
+			if streaming && (len(chunks) != 2 || !strings.Contains(chunks[0], `"role":"assistant"`) || !strings.Contains(chunks[0], `"logprobs":{"content"`)) {
+				t.Fatalf("stream logprobs were not preserved: %v", chunks)
+			}
+		})
+	}
+}
+
+func TestOllamaRejectsInvalidLogprobs(t *testing.T) {
+	token := "x"
+	for name, items := range map[string][]ollamaLogprob{
+		"positive probability":  {{ollamaTokenLogprob: ollamaTokenLogprob{Token: token, Logprob: 0.1}}},
+		"mismatched bytes":      {{ollamaTokenLogprob: ollamaTokenLogprob{Token: token, Logprob: -0.1, Bytes: []int{121}}}},
+		"too many alternatives": {{ollamaTokenLogprob: ollamaTokenLogprob{Token: token, Logprob: -0.1}, TopLogprobs: make([]ollamaTokenLogprob, 21)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := ollamaChoiceLogprobs(items); err == nil {
+				t.Fatal("invalid Ollama logprobs accepted")
+			}
+		})
+	}
+}
+
 func TestOllamaRejectsInvalidNativeSamplingOptions(t *testing.T) {
 	invalidTopK := -1
 	invalidMinP := 1.1
+	invalidTopLogprobs := 21
+	validTopLogprobs := 1
+	logprobs := true
 	for _, test := range []struct {
 		name    string
 		request openai.ChatCompletionRequest
@@ -223,6 +289,8 @@ func TestOllamaRejectsInvalidNativeSamplingOptions(t *testing.T) {
 	}{
 		{name: "top_k", request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &invalidTopK}}, param: "top_k"},
 		{name: "min_p", request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{MinP: &invalidMinP}}, param: "min_p"},
+		{name: "top_logprobs range", request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &logprobs, TopLogprobs: &invalidTopLogprobs}}, param: "top_logprobs"},
+		{name: "top_logprobs dependency", request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{TopLogprobs: &validTopLogprobs}}, param: "top_logprobs"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var failure *Error

@@ -314,7 +314,7 @@ func TestGenerationControlsAreRejectedByNativeAdapters(t *testing.T) {
 			if _, anthropic := client.(Anthropic); anthropic && (request.ReasoningEffort == "high" || request.WebSearchOptions != nil) {
 				continue
 			}
-			if _, ollama := client.(Ollama); ollama && (request.MinP != nil || request.TopK != nil) {
+			if _, ollama := client.(Ollama); ollama && (request.MinP != nil || request.TopK != nil || request.Logprobs != nil || request.TopLogprobs != nil) {
 				continue
 			}
 			if err := validateChatAdapter(client, request); err == nil {

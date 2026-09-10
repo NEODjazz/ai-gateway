@@ -141,8 +141,13 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	if options.MinP != nil && (math.IsNaN(*options.MinP) || math.IsInf(*options.MinP, 0) || *options.MinP < 0 || *options.MinP > 1) {
 		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_parameter", Param: "min_p", Err: fmt.Errorf("parameter min_p must be a finite number between 0 and 1")}
 	}
+	if options.TopLogprobs != nil && (*options.TopLogprobs < 0 || *options.TopLogprobs > 20 || options.Logprobs == nil || !*options.Logprobs) {
+		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_parameter", Param: "top_logprobs", Err: fmt.Errorf("parameter top_logprobs must be between 0 and 20 and requires logprobs=true")}
+	}
 	options.TopK = nil
 	options.MinP = nil
+	options.Logprobs = nil
+	options.TopLogprobs = nil
 	if err := rejectGenerationOptions("ollama", options); err != nil {
 		return err
 	}

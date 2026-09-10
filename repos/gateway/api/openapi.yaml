@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.144
+  version: 0.1.145
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4049,8 +4049,8 @@ components:
               items: {type: string, minLength: 1, maxLength: 253, pattern: '^[A-Za-z0-9.-]+$'}
             max_uses: {type: integer, minimum: 1, maximum: 5, default: 5}
             max_content_tokens: {type: integer, minimum: 1, maximum: 100000}
-        logprobs: {type: boolean, description: Native Gemini and Cohere adapters preserve token log probabilities; support by compatible deployments is provider-specific.}
-        top_logprobs: {type: integer, minimum: 0, maximum: 20, description: Requires logprobs=true. Native Gemini maps this to the per-step candidate count.}
+        logprobs: {type: boolean, description: "Native Gemini, Cohere, and Ollama adapters preserve token log probabilities; support by compatible deployments is provider-specific."}
+        top_logprobs: {type: integer, minimum: 0, maximum: 20, description: Requires logprobs=true. Native Gemini maps this to the per-step candidate count; native Ollama returns up to this many alternatives.}
         frequency_penalty: {type: number, minimum: -2, maximum: 2}
         presence_penalty: {type: number, minimum: -2, maximum: 2}
         min_p: {type: number, minimum: 0, maximum: 1, description: "Relative minimum token probability forwarded by compatible and native Ollama adapters."}
