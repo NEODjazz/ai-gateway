@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.199
+  version: 0.1.200
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3571,6 +3571,12 @@ components:
           uniqueItems: true
           description: Non-empty RFC 6901 JSON Pointers for bounded model-specific response fields.
           items: {type: string, minLength: 1, maxLength: 256, pattern: '^/([^~]|~[01])*$'}
+        requestMetadata:
+          type: object
+          maxProperties: 16
+          description: Bounded key-value metadata attached to the provider invocation log. Requests using it bypass response caches.
+          propertyNames: {minLength: 1, maxLength: 256, pattern: '^[a-zA-Z0-9\s:_@$#=/+,.-]+$'}
+          additionalProperties: {type: string, maxLength: 256, pattern: '^[a-zA-Z0-9\s:_@$#=/+,.-]*$'}
     BedrockInferenceConfig:
       type: object
       additionalProperties: false

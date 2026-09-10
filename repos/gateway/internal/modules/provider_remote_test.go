@@ -65,6 +65,15 @@ func TestBedrockDocumentsReachDLPAndAVProjections(t *testing.T) {
 	}
 }
 
+func TestBedrockRequestMetadataReachesDLPProjection(t *testing.T) {
+	req := RequestContext{Request: openai.ChatCompletionRequest{BedrockRequestMetadata: map[string]string{
+		"z-key": "private-z", "a-key": "user@example.com",
+	}}}
+	if payload := scanPayload(&req); payload != "request_metadata: a-key=user@example.com\nrequest_metadata: z-key=private-z" {
+		t.Fatalf("request metadata missing or unstable: %q", payload)
+	}
+}
+
 func TestScanPayloadIncludesImageGenerationPrompt(t *testing.T) {
 	req := RequestContext{ImageGenerationRequest: &openai.ImageGenerationRequest{Model: "image", Prompt: "private image prompt"}}
 	if payload := scanPayload(&req); payload != "image_prompt: private image prompt" {

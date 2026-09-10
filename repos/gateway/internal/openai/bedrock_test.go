@@ -90,6 +90,39 @@ func TestBedrockConverseValidatesAdditionalResponseFieldPaths(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseValidatesAndCopiesRequestMetadata(t *testing.T) {
+	request := BedrockConverseRequest{
+		Messages:        []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("hello")}}}},
+		RequestMetadata: map[string]string{"tenant:id": "customer-42", "empty": ""},
+	}
+	chat, err := request.ChatRequest("model", "")
+	if err != nil || chat.BedrockRequestMetadata["tenant:id"] != "customer-42" {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	request.RequestMetadata["tenant:id"] = "changed"
+	if chat.BedrockRequestMetadata["tenant:id"] != "customer-42" {
+		t.Fatal("request metadata was not copied")
+	}
+
+	tooMany := make(map[string]string, 17)
+	for i := 0; i < 17; i++ {
+		tooMany[string(rune('a'+i))] = "value"
+	}
+	for _, metadata := range []map[string]string{
+		tooMany,
+		{"": "value"},
+		{strings.Repeat("a", 257): "value"},
+		{"key": strings.Repeat("a", 257)},
+		{"bad!key": "value"},
+		{"key": "snowman ☃"},
+	} {
+		request.RequestMetadata = metadata
+		if _, err := request.ChatRequest("model", ""); err == nil {
+			t.Fatalf("invalid request metadata accepted: %#v", metadata)
+		}
+	}
+}
+
 func TestBedrockConverseMapsStructuredOutput(t *testing.T) {
 	request := BedrockConverseRequest{
 		Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("extract")}}}},

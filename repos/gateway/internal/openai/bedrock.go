@@ -17,6 +17,7 @@ type BedrockConverseRequest struct {
 	PerformanceConfig                 *BedrockPerformanceConfig `json:"performanceConfig,omitempty"`
 	OutputConfig                      *BedrockOutputConfig      `json:"outputConfig,omitempty"`
 	AdditionalModelResponseFieldPaths []string                  `json:"additionalModelResponseFieldPaths,omitempty"`
+	RequestMetadata                   map[string]string         `json:"requestMetadata,omitempty"`
 }
 
 type BedrockOutputConfig struct {
@@ -190,7 +191,16 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 	if err := ValidateBedrockResponseFieldPaths(r.AdditionalModelResponseFieldPaths); err != nil {
 		return request, err
 	}
+	if err := ValidateBedrockRequestMetadata(r.RequestMetadata); err != nil {
+		return request, err
+	}
 	request.BedrockAdditionalModelResponseFieldPaths = append([]string(nil), r.AdditionalModelResponseFieldPaths...)
+	if len(r.RequestMetadata) > 0 {
+		request.BedrockRequestMetadata = make(map[string]string, len(r.RequestMetadata))
+		for key, value := range r.RequestMetadata {
+			request.BedrockRequestMetadata[key] = value
+		}
+	}
 	if r.OutputConfig != nil {
 		format := r.OutputConfig.TextFormat
 		definition := format.Structure.JSONSchema
@@ -369,6 +379,34 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		}
 	}
 	return request, nil
+}
+
+func ValidateBedrockRequestMetadata(metadata map[string]string) error {
+	if len(metadata) > 16 {
+		return errors.New("requestMetadata must contain at most 16 entries")
+	}
+	for key, value := range metadata {
+		if !validBedrockRequestMetadataText(key, false) {
+			return errors.New("requestMetadata contains an invalid key")
+		}
+		if !validBedrockRequestMetadataText(value, true) {
+			return errors.New("requestMetadata contains an invalid value")
+		}
+	}
+	return nil
+}
+
+func validBedrockRequestMetadataText(value string, emptyAllowed bool) bool {
+	if (!emptyAllowed && value == "") || len(value) > 256 {
+		return false
+	}
+	for _, char := range value {
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || strings.ContainsRune(" \t\n\r\f:_@$#=/+,-.", char) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func ValidBedrockToolName(name string) bool {

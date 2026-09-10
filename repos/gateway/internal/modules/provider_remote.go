@@ -203,6 +203,16 @@ func scanPayload(req *RequestContext) string {
 	if text := openai.BedrockDocumentText(req.Request.Messages); text != "" {
 		parts = append(parts, "document: "+text)
 	}
+	if len(req.Request.BedrockRequestMetadata) > 0 {
+		keys := make([]string, 0, len(req.Request.BedrockRequestMetadata))
+		for key := range req.Request.BedrockRequestMetadata {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			parts = append(parts, "request_metadata: "+key+"="+req.Request.BedrockRequestMetadata[key])
+		}
+	}
 	if req.ResponseRequest != nil {
 		if req.ResponseRequest.Instructions != "" {
 			parts = append(parts, "instructions: "+req.ResponseRequest.Instructions)

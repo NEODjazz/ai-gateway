@@ -33,6 +33,11 @@ The external `X-Request-ID` remains a correlation identifier. Every inference ex
 
 Exact and semantic response cache scopes include credential ID, user, team, organization, sorted roles/tags/model/tool grants, evaluated access-group grants and effective policy metadata (`policy.*`, `provider.modules.*`, `provider.guardrail.*`). Scope data is hashed. Requests without a credential do not use the response cache. There is no implicit sharing between members of a team. Changes to effective policy cause cache misses; old entries expire normally. Exact cache uses a new key namespace. Responses affinity is isolated by credential and user.
 
+Native provider request metadata is validated and included in the input DLP
+projection. Because it annotates an actual provider invocation, requests carrying
+it bypass exact and semantic response caches so that accepted calls always reach
+the provider log.
+
 Chat cache identity also includes validated provider-native message blocks, their
 reserved input size, Bedrock service tier, latency selection and requested
 additional response-field paths. Semantic

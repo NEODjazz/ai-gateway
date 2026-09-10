@@ -229,6 +229,9 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if request.WebSearchOptions != nil || request.WebFetchOptions != nil {
 		return "", "", false
 	}
+	if len(request.BedrockRequestMetadata) > 0 {
+		return "", "", false
+	}
 	if openai.ChatRequestsAudio(request) {
 		return "", "", false
 	}

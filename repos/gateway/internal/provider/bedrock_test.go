@@ -94,6 +94,27 @@ func TestBedrockConverseForwardsServiceTier(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseForwardsRequestMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			RequestMetadata map[string]string `json:"requestMetadata"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.RequestMetadata["tenant:id"] != "customer-42" {
+			t.Fatalf("request metadata lost: %#v", body.RequestMetadata)
+		}
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`)
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, BedrockRequestMetadata: map[string]string{"tenant:id": "customer-42"}}
+	if _, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	request.BedrockRequestMetadata = map[string]string{"bad!key": "value"}
+	if _, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request); err == nil {
+		t.Fatal("invalid direct request metadata accepted")
+	}
+}
+
 func TestBedrockConversePreservesRequestedAdditionalResponseFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -167,6 +188,11 @@ func TestBedrockNativeControlsFailClosedOnOtherAdapters(t *testing.T) {
 	request.BedrockAdditionalModelResponseFieldPaths = []string{"/stop_sequence"}
 	if err := validateChatAdapter(Demo{}, request); err == nil {
 		t.Fatal("Bedrock additional response paths were dropped by another adapter")
+	}
+	request.BedrockAdditionalModelResponseFieldPaths = nil
+	request.BedrockRequestMetadata = map[string]string{"tenant": "customer"}
+	if err := validateChatAdapter(Demo{}, request); err == nil {
+		t.Fatal("Bedrock request metadata was dropped by another adapter")
 	}
 }
 

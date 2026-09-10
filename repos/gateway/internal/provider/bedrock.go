@@ -135,6 +135,7 @@ type bedrockRequest struct {
 	PerformanceConfig                 *bedrockPerformanceConfig `json:"performanceConfig,omitempty"`
 	OutputConfig                      *bedrockOutputConfig      `json:"outputConfig,omitempty"`
 	AdditionalModelResponseFieldPaths []string                  `json:"additionalModelResponseFieldPaths,omitempty"`
+	RequestMetadata                   map[string]string         `json:"requestMetadata,omitempty"`
 	ToolConfig                        *bedrockToolConfig        `json:"toolConfig,omitempty"`
 }
 
@@ -237,6 +238,9 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 	if err := openai.ValidateBedrockResponseFieldPaths(request.BedrockAdditionalModelResponseFieldPaths); err != nil {
 		return result, bedrockInvalid("additional_model_response_field_paths")
 	}
+	if err := openai.ValidateBedrockRequestMetadata(request.BedrockRequestMetadata); err != nil {
+		return result, bedrockInvalid("request_metadata")
+	}
 	if strings.TrimSpace(request.Model) == "" {
 		return result, bedrockInvalid("model")
 	}
@@ -328,6 +332,12 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 		}
 	}
 	result.AdditionalModelResponseFieldPaths = append([]string(nil), request.BedrockAdditionalModelResponseFieldPaths...)
+	if len(request.BedrockRequestMetadata) > 0 {
+		result.RequestMetadata = make(map[string]string, len(request.BedrockRequestMetadata))
+		for key, value := range request.BedrockRequestMetadata {
+			result.RequestMetadata[key] = value
+		}
+	}
 	if request.ResponseFormat != nil {
 		format := request.ResponseFormat
 		if format.Type != "json_schema" || format.JSONSchema == nil || format.JSONSchema.Schema == nil || format.JSONSchema.Strict != nil && !*format.JSONSchema.Strict || utf8.RuneCountInString(format.JSONSchema.Name) > 256 || utf8.RuneCountInString(format.JSONSchema.Description) > 8192 {
