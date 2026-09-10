@@ -2,9 +2,14 @@ package controlstore
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -180,14 +185,73 @@ func TestPostgresFileListPaginationIntegration(t *testing.T) {
 
 func requiredPostgresTestDSN(t *testing.T) string {
 	t.Helper()
-	dsn := os.Getenv("CONTROL_PLANE_POSTGRES_TEST_DSN")
-	if dsn == "" {
+	baseDSN := os.Getenv("CONTROL_PLANE_POSTGRES_TEST_DSN")
+	if baseDSN == "" {
 		if os.Getenv("POSTGRES_INTEGRATION_REQUIRED") == "true" {
 			t.Fatal("CONTROL_PLANE_POSTGRES_TEST_DSN is required")
 		}
 		t.Skip("CONTROL_PLANE_POSTGRES_TEST_DSN is not set")
 	}
+
+	random := make([]byte, 8)
+	if _, err := rand.Read(random); err != nil {
+		t.Fatalf("generate isolated PostgreSQL schema name: %v", err)
+	}
+	schema := "gateway_test_" + hex.EncodeToString(random)
+	identifier := `"` + schema + `"`
+	ctx := context.Background()
+	adminPool, err := pgxpool.New(ctx, baseDSN)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL for isolated schema: %v", err)
+	}
+	if _, err := adminPool.Exec(ctx, "CREATE SCHEMA "+identifier); err != nil {
+		adminPool.Close()
+		t.Fatalf("create isolated PostgreSQL schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := adminPool.Exec(context.Background(), "DROP SCHEMA "+identifier+" CASCADE"); err != nil {
+			t.Errorf("drop isolated PostgreSQL schema: %v", err)
+		}
+		adminPool.Close()
+	})
+
+	dsn, err := postgresDSNWithSearchPath(baseDSN, schema)
+	if err != nil {
+		t.Fatalf("configure isolated PostgreSQL schema: %v", err)
+	}
+	verificationPool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect to isolated PostgreSQL schema: %v", err)
+	}
+	var currentSchema string
+	if err := verificationPool.QueryRow(ctx, `SELECT current_schema()`).Scan(&currentSchema); err != nil {
+		verificationPool.Close()
+		t.Fatalf("verify isolated PostgreSQL schema: %v", err)
+	}
+	verificationPool.Close()
+	if currentSchema != schema {
+		t.Fatalf("PostgreSQL integration test schema=%q, want %q", currentSchema, schema)
+	}
 	return dsn
+}
+
+func postgresDSNWithSearchPath(dsn, schema string) (string, error) {
+	if strings.Contains(dsn, "://") {
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			return "", err
+		}
+		query := parsed.Query()
+		query.Set("search_path", schema)
+		parsed.RawQuery = query.Encode()
+		return parsed.String(), nil
+	}
+	for _, character := range schema {
+		if character != '_' && (character < 'a' || character > 'z') && (character < '0' || character > '9') {
+			return "", fmt.Errorf("invalid schema name %q", schema)
+		}
+	}
+	return dsn + " search_path=" + schema, nil
 }
 
 func prepareFileTable(t *testing.T, ctx context.Context, dsn string) *pgxpool.Pool {

@@ -17,6 +17,7 @@ func TestPostgresSkillOwnershipIsolationIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
+	prepareSkillOwnershipTable(t, store)
 	owner := "skill-owner/" + time.Now().UTC().Format("20060102150405.000000000")
 	other := owner + "/other"
 	for _, id := range []string{"skill_integration_a", "skill_integration_b"} {
@@ -52,6 +53,16 @@ func TestPostgresSkillOwnershipIsolationIntegration(t *testing.T) {
 	}
 	if _, err := store.ResolveSkill(ctx, owner, claimed.SkillID); !errors.Is(err, skillstate.ErrNotFound) {
 		t.Fatalf("deleted resolve error=%v", err)
+	}
+}
+
+func prepareSkillOwnershipTable(t *testing.T, store *PostgresStore) {
+	t.Helper()
+	_, err := store.pool.Exec(t.Context(), `CREATE TABLE gateway_skill_ownership (
+		skill_id TEXT PRIMARY KEY, owner_key TEXT NOT NULL, endpoint_id TEXT NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
+	if err != nil {
+		t.Fatalf("create isolated skill ownership table: %v", err)
 	}
 }
 

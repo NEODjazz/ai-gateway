@@ -17,6 +17,7 @@ func TestPostgresAsyncJobLifecycleAndFencingIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
+	prepareAsyncJobTable(t, store)
 	kind := "response-test:" + time.Now().UTC().Format("150405.000000000")
 	t.Cleanup(func() {
 		_, _ = store.pool.Exec(context.Background(), `DELETE FROM gateway_async_jobs WHERE kind=$1`, kind)
@@ -65,6 +66,7 @@ func TestPostgresAsyncJobClaimIsExclusiveIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
+	prepareAsyncJobTable(t, store)
 	kind := "claim-test:" + time.Now().UTC().Format("150405.000000000")
 	t.Cleanup(func() {
 		_, _ = store.pool.Exec(context.Background(), `DELETE FROM gateway_async_jobs WHERE kind=$1`, kind)
@@ -101,6 +103,25 @@ func TestPostgresAsyncJobClaimIsExclusiveIntegration(t *testing.T) {
 	}
 	if claimed != 1 {
 		t.Fatalf("claimed jobs=%d, want 1", claimed)
+	}
+}
+
+func prepareAsyncJobTable(t *testing.T, store *PostgresStore) {
+	t.Helper()
+	_, err := store.pool.Exec(t.Context(), `CREATE TABLE gateway_async_jobs (
+		kind TEXT NOT NULL, resource_id TEXT NOT NULL, owner_key TEXT NOT NULL,
+		endpoint_id TEXT NOT NULL, execution_id TEXT NOT NULL UNIQUE, payload BYTEA NOT NULL,
+		state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','leased')),
+		attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+		lease_generation BIGINT NOT NULL DEFAULT 0 CHECK (lease_generation >= 0),
+		available_at TIMESTAMPTZ NOT NULL DEFAULT now(), lease_until TIMESTAMPTZ,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		PRIMARY KEY (kind,resource_id), CHECK (length(kind) BETWEEN 1 AND 64),
+		CHECK (length(resource_id) BETWEEN 1 AND 256), CHECK (length(owner_key) BETWEEN 1 AND 256),
+		CHECK (length(endpoint_id) BETWEEN 1 AND 128), CHECK (length(execution_id) BETWEEN 1 AND 128),
+		CHECK (octet_length(payload) BETWEEN 1 AND 65536))`)
+	if err != nil {
+		t.Fatalf("create isolated async jobs table: %v", err)
 	}
 }
 

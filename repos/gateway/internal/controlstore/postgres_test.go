@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -18,13 +17,7 @@ type memoryRevisionCache struct {
 }
 
 func TestPostgresMCPToolCallIdempotencyIntegration(t *testing.T) {
-	dsn := os.Getenv("CONTROL_PLANE_POSTGRES_TEST_DSN")
-	if dsn == "" {
-		if os.Getenv("POSTGRES_INTEGRATION_REQUIRED") == "true" {
-			t.Fatal("CONTROL_PLANE_POSTGRES_TEST_DSN is required")
-		}
-		t.Skip("CONTROL_PLANE_POSTGRES_TEST_DSN is not set")
-	}
+	dsn := requiredPostgresTestDSN(t)
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -102,13 +95,7 @@ func (c *memoryRevisionCache) Set(_ context.Context, key string, value []byte, _
 }
 
 func TestPostgresControlPlaneSnapshotLifecycleIntegration(t *testing.T) {
-	dsn := os.Getenv("CONTROL_PLANE_POSTGRES_TEST_DSN")
-	if dsn == "" {
-		if os.Getenv("POSTGRES_INTEGRATION_REQUIRED") == "true" {
-			t.Fatal("CONTROL_PLANE_POSTGRES_TEST_DSN is required")
-		}
-		t.Skip("CONTROL_PLANE_POSTGRES_TEST_DSN is not set")
-	}
+	dsn := requiredPostgresTestDSN(t)
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -156,13 +143,7 @@ func TestPostgresControlPlaneSnapshotLifecycleIntegration(t *testing.T) {
 }
 
 func TestPostgresControlPlaneRestoresManagedRouterIntegration(t *testing.T) {
-	dsn := os.Getenv("CONTROL_PLANE_POSTGRES_TEST_DSN")
-	if dsn == "" {
-		if os.Getenv("POSTGRES_INTEGRATION_REQUIRED") == "true" {
-			t.Fatal("CONTROL_PLANE_POSTGRES_TEST_DSN is required")
-		}
-		t.Skip("CONTROL_PLANE_POSTGRES_TEST_DSN is not set")
-	}
+	dsn := requiredPostgresTestDSN(t)
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
