@@ -435,13 +435,30 @@ func BedrockFromChat(response ChatCompletionResponse) (BedrockConverseResponse, 
 		}
 		result.Output.Message.Content = append(result.Output.Message.Content, BedrockContentBlock{ToolUse: &BedrockToolUse{ID: call.ID, Name: call.Function.Name, Input: input}})
 	}
-	stopReasons := map[string]string{"stop": "end_turn", "length": "max_tokens", "tool_calls": "tool_use", "content_filter": "content_filtered"}
-	stopReason, found := stopReasons[choice.FinishReason]
+	stopReason, found := bedrockNativeStopReason(choice.Message.NativeContent)
+	if !found {
+		stopReasons := map[string]string{"stop": "end_turn", "length": "max_tokens", "tool_calls": "tool_use", "content_filter": "content_filtered"}
+		stopReason, found = stopReasons[choice.FinishReason]
+	}
 	if !found || len(result.Output.Message.Content) == 0 {
 		return result, errors.New("chat response cannot be represented as Converse")
 	}
 	result.StopReason = stopReason
 	return result, nil
+}
+
+func bedrockNativeStopReason(content []json.RawMessage) (string, bool) {
+	for _, raw := range content {
+		var marker map[string]any
+		if json.Unmarshal(raw, &marker) != nil || len(marker) != 2 || marker["type"] != "bedrock_stop_reason" {
+			continue
+		}
+		reason, _ := marker["reason"].(string)
+		if reason == "guardrail_intervened" || reason == "malformed_model_output" || reason == "malformed_tool_use" || reason == "model_context_window_exceeded" {
+			return reason, true
+		}
+	}
+	return "", false
 }
 
 func bedrockCitationsFromAnnotations(text string, annotations []ChatAnnotation) (*BedrockCitationsContent, error) {

@@ -311,3 +311,50 @@ func TestBedrockMapsEverySourceCitationLocation(t *testing.T) {
 		})
 	}
 }
+
+func TestBedrockMapsDocumentedStopReasons(t *testing.T) {
+	for reason, expectedFinish := range map[string]string{
+		"guardrail_intervened":          "content_filter",
+		"model_context_window_exceeded": "length",
+	} {
+		t.Run(reason, func(t *testing.T) {
+			response := bedrockResponse{StopReason: reason}
+			response.Output.Message.Content = []bedrockContentBlock{{Text: "partial"}}
+			response.Usage = &struct {
+				InputTokens  int `json:"inputTokens"`
+				OutputTokens int `json:"outputTokens"`
+				TotalTokens  int `json:"totalTokens"`
+			}{InputTokens: 2, OutputTokens: 1, TotalTokens: 3}
+			chat, err := bedrockToChat(response, "model")
+			if err != nil || chat.Choices[0].FinishReason != expectedFinish || len(chat.Choices[0].Message.NativeContent) != 1 {
+				t.Fatalf("chat=%+v err=%v", chat, err)
+			}
+			native, err := openai.BedrockFromChat(chat)
+			if err != nil || native.StopReason != reason {
+				t.Fatalf("native=%+v err=%v", native, err)
+			}
+		})
+	}
+}
+
+func TestBedrockPreservesMalformedOutputStopReasonsAndUsage(t *testing.T) {
+	for _, reason := range []string{"malformed_model_output", "malformed_tool_use"} {
+		t.Run(reason, func(t *testing.T) {
+			response := bedrockResponse{StopReason: reason}
+			response.Output.Message.Content = []bedrockContentBlock{{Text: "partial"}}
+			response.Usage = &struct {
+				InputTokens  int `json:"inputTokens"`
+				OutputTokens int `json:"outputTokens"`
+				TotalTokens  int `json:"totalTokens"`
+			}{InputTokens: 2, OutputTokens: 1, TotalTokens: 3}
+			chat, err := bedrockToChat(response, "model")
+			if err != nil || chat.Usage.TotalTokens != 3 || chat.Choices[0].FinishReason != "error" {
+				t.Fatalf("chat=%+v err=%v", chat, err)
+			}
+			native, err := openai.BedrockFromChat(chat)
+			if err != nil || native.StopReason != reason || native.Usage.TotalTokens != 3 {
+				t.Fatalf("native=%+v err=%v", native, err)
+			}
+		})
+	}
+}

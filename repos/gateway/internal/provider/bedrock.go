@@ -540,10 +540,24 @@ func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletio
 	if message.Content == nil && len(message.ToolCalls) == 0 {
 		return result, errors.New("Bedrock response contains no output")
 	}
-	finishReasons := map[string]string{"end_turn": "stop", "stop_sequence": "stop", "max_tokens": "length", "tool_use": "tool_calls", "content_filtered": "content_filter"}
+	finishReasons := map[string]string{
+		"end_turn":                      "stop",
+		"stop_sequence":                 "stop",
+		"max_tokens":                    "length",
+		"tool_use":                      "tool_calls",
+		"content_filtered":              "content_filter",
+		"guardrail_intervened":          "content_filter",
+		"malformed_model_output":        "error",
+		"malformed_tool_use":            "error",
+		"model_context_window_exceeded": "length",
+	}
 	finishReason, found := finishReasons[response.StopReason]
 	if !found {
 		return result, errors.New("unknown Bedrock stop reason")
+	}
+	if response.StopReason == "guardrail_intervened" || response.StopReason == "malformed_model_output" || response.StopReason == "malformed_tool_use" || response.StopReason == "model_context_window_exceeded" {
+		marker, _ := json.Marshal(map[string]string{"type": "bedrock_stop_reason", "reason": response.StopReason})
+		message.NativeContent = append(message.NativeContent, marker)
 	}
 	result.Choices = []openai.Choice{{Index: 0, Message: message, FinishReason: finishReason}}
 	return result, nil
