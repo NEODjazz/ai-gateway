@@ -117,14 +117,12 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		if len(r.Generation.Modalities) > 1 || len(r.Generation.Modalities) == 1 && r.Generation.Modalities[0] != "TEXT" {
 			return fail("responseModalities")
 		}
-		result.Modalities = []string{"text"}
 	}
 	result.TopK = r.Generation.TopK
 	result.PresencePenalty = r.Generation.PresencePenalty
 	result.FrequencyPenalty = r.Generation.FrequencyPenalty
 	result.Logprobs = r.Generation.ResponseLogprobs
 	result.TopLogprobs = r.Generation.Logprobs
-	result.N = r.Generation.CandidateCount
 	if _, valid := openai.StopSequences(r.Generation.Stop); !valid {
 		return fail("stopSequences")
 	}

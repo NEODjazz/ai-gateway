@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.209
+  version: 0.1.210
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4038,7 +4038,7 @@ components:
             topP: {type: number, minimum: 0, maximum: 1}
             topK: {type: integer, minimum: 1, maximum: 1000000}
             seed: {type: integer, minimum: -2147483648, maximum: 2147483647}
-            candidateCount: {type: integer, enum: [1]}
+            candidateCount: {type: integer, enum: [1], description: The gateway returns exactly one candidate and normalizes this value before provider routing.}
             presencePenalty: {type: number, minimum: -2, maximum: 2}
             frequencyPenalty: {type: number, minimum: -2, maximum: 2}
             responseLogprobs: {type: boolean}

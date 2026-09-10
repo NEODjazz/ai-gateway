@@ -20,7 +20,7 @@ func TestGenerateRequestConvertsNativeContextAndConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chat.Model != "public-model" || !chat.Stream || *chat.MaxCompletionTokens != 50 || *chat.Seed != 7 || chat.TopK == nil || *chat.TopK != 12 || chat.PresencePenalty == nil || *chat.PresencePenalty != 0.3 || chat.FrequencyPenalty == nil || *chat.FrequencyPenalty != -0.2 || chat.Logprobs == nil || !*chat.Logprobs || chat.TopLogprobs == nil || *chat.TopLogprobs != 5 || chat.N == nil || *chat.N != 1 || len(chat.Modalities) != 1 || chat.Modalities[0] != "text" || len(chat.Messages) != 2 || chat.Messages[0].Role != "system" {
+	if chat.Model != "public-model" || !chat.Stream || *chat.MaxCompletionTokens != 50 || *chat.Seed != 7 || chat.TopK == nil || *chat.TopK != 12 || chat.PresencePenalty == nil || *chat.PresencePenalty != 0.3 || chat.FrequencyPenalty == nil || *chat.FrequencyPenalty != -0.2 || chat.Logprobs == nil || !*chat.Logprobs || chat.TopLogprobs == nil || *chat.TopLogprobs != 5 || chat.N != nil || chat.Modalities != nil || len(chat.Messages) != 2 || chat.Messages[0].Role != "system" {
 		t.Fatalf("context/config: %+v", chat)
 	}
 	schema := chat.Tools[0].Function.Parameters.(map[string]any)
