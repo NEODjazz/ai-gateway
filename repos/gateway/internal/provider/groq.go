@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"ai-gateway-gateway/internal/openai"
@@ -17,7 +18,8 @@ func NewGroq(baseURL, apiKey string, stream bool) Groq {
 	return Groq{compatible: compatible}
 }
 
-func (Groq) SupportsResponses() bool        { return false }
+func (Groq) SupportsResponses() bool        { return true }
+func (Groq) SupportsMCP() bool              { return true }
 func (Groq) SupportsTools() bool            { return true }
 func (Groq) SupportsStructuredOutput() bool { return true }
 func (Groq) SupportsVision() bool           { return true }
@@ -63,6 +65,49 @@ func (g Groq) StreamChatCompletions(ctx context.Context, request openai.ChatComp
 	return g.compatible.StreamChatCompletions(ctx, request, write)
 }
 
-func (Groq) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {
-	return openai.ResponseResponse{}, rejectParameters("groq", parameterCheck{"responses", true})
+func (g Groq) ValidateResponseParameters(request openai.ResponseRequest) error {
+	if message := request.Validate(); message != "" {
+		return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	if request.ServiceTier != "" && request.ServiceTier != "auto" && request.ServiceTier != "default" && request.ServiceTier != "flex" {
+		return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "service_tier", Err: errUnsupportedServiceTier}
+	}
+	if reasoning := request.Reasoning; reasoning != nil {
+		if reasoning.Summary != nil || reasoning.GenerateSummary != nil || reasoning.Context != nil || reasoning.Mode != nil {
+			return rejectParameters("groq", parameterCheck{"reasoning", true})
+		}
+		if reasoning.Effort != nil {
+			switch *reasoning.Effort {
+			case "low", "medium", "high":
+			default:
+				return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "reasoning.effort", Err: errors.New("reasoning effort must be low, medium, or high")}
+			}
+		}
+	}
+	return rejectParameters("groq",
+		parameterCheck{"include", len(request.Include) > 0},
+		parameterCheck{"store", request.Store != nil && *request.Store},
+		parameterCheck{"truncation", request.Truncation != nil},
+		parameterCheck{"previous_response_id", request.PreviousResponse != ""},
+		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
+		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
+		parameterCheck{"top_logprobs", request.TopLogprobs != nil},
+		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil},
+		parameterCheck{"presence_penalty", request.PresencePenalty != nil},
+		parameterCheck{"max_tool_calls", request.MaxToolCalls != nil},
+	)
+}
+
+func (g Groq) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
+	if err := g.ValidateResponseParameters(request); err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	return g.compatible.Responses(ctx, request)
+}
+
+func (g Groq) StreamResponses(ctx context.Context, request openai.ResponseRequest, write ResponseStreamWriter) (openai.ResponseResponse, error) {
+	if err := g.ValidateResponseParameters(request); err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	return g.compatible.StreamResponses(ctx, request, write)
 }

@@ -114,7 +114,6 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "bedrock", capability: "responses"},
 		{providerType: "bedrock", capability: "stream"},
 		{providerType: "bedrock", capability: "structured_output"},
-		{providerType: "groq", capability: "responses"},
 		{providerType: "groq", capability: "embeddings"},
 		{providerType: "groq", capability: "audio_transcription"},
 		{providerType: "deepseek", capability: "embeddings"},
@@ -222,7 +221,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "gemini", capabilities: []string{"chat", "tools", "structured_output", "vision"}},
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
 		{providerType: "bedrock", capabilities: []string{"chat", "tools"}},
-		{providerType: "groq", capabilities: []string{"chat", "stream", "tools", "structured_output", "vision"}},
+		{providerType: "groq", capabilities: []string{"chat", "responses", "stream", "tools", "structured_output", "mcp", "vision"}},
 		{providerType: "deepseek", capabilities: []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}},
 		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}},
 		{providerType: "mistral", capabilities: []string{"chat", "tools", "structured_output", "vision", "assistant_prefill"}},
@@ -271,7 +270,7 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Equal(profilesByType["bedrock"].Operations, []string{"chat"}) || !slices.Equal(profilesByType["bedrock"].Capabilities, []string{"chat", "tools"}) {
 		t.Fatalf("bedrock profile=%+v", profilesByType["bedrock"])
 	}
-	if !slices.Equal(profilesByType["groq"].Operations, []string{"chat", "stream"}) || !slices.Equal(profilesByType["groq"].Capabilities, []string{"chat", "stream", "tools", "structured_output", "vision"}) {
+	if !slices.Equal(profilesByType["groq"].Operations, []string{"chat", "responses", "stream"}) || !slices.Equal(profilesByType["groq"].Capabilities, []string{"chat", "responses", "stream", "tools", "structured_output", "mcp", "vision"}) {
 		t.Fatalf("groq profile=%+v", profilesByType["groq"])
 	}
 	if !slices.Equal(profilesByType["deepseek"].Operations, []string{"chat", "responses", "stream"}) || !slices.Equal(profilesByType["deepseek"].Capabilities, []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}) {

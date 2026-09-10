@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -75,5 +76,114 @@ func TestGroqStreamsWithUsage(t *testing.T) {
 	})
 	if err != nil || response.Usage.TotalTokens != 3 || len(payloads) != 2 {
 		t.Fatalf("response=%+v payloads=%v err=%v", response, payloads, err)
+	}
+}
+
+func TestGroqResponsesMapsSupportedContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openai/v1/responses" || r.Header.Get("Authorization") != "Bearer groq-key" {
+			t.Fatalf("path=%q authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		reasoning, ok := body["reasoning"].(map[string]any)
+		if !ok || reasoning["effort"] != "low" {
+			t.Fatalf("reasoning=%#v", body["reasoning"])
+		}
+		tools, ok := body["tools"].([]any)
+		if !ok || len(tools) != 2 || tools[1].(map[string]any)["type"] != "mcp" {
+			t.Fatalf("tools=%#v", body["tools"])
+		}
+		if body["model"] != "model" || body["input"] != "hello" || body["instructions"] != "be brief" || body["max_output_tokens"] != float64(64) || body["service_tier"] != "flex" || body["user"] != "tenant-user" || body["store"] != false || body["parallel_tool_calls"] != true || body["metadata"].(map[string]any)["ticket"] != "42" || body["text"] == nil {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"response","object":"response","status":"completed","model":"model","output":[{"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+	}))
+	defer server.Close()
+
+	maxTokens := 64
+	parallel, store := true, false
+	effort := "low"
+	client := NewGroq(server.URL+"/openai/v1", "groq-key", true)
+	response, err := client.Responses(t.Context(), openai.ResponseRequest{
+		Model: "model", Input: "hello", Instructions: "be brief", MaxOutputTokens: &maxTokens,
+		Metadata: map[string]string{"ticket": "42"}, ParallelToolCalls: &parallel,
+		Reasoning: &openai.ResponseReasoning{Effort: &effort}, Store: &store, ServiceTier: "flex", User: "tenant-user",
+		Text: map[string]any{"format": map[string]any{"type": "json_object"}},
+		Tools: []openai.ResponseTool{
+			{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}},
+			{Type: "mcp", ServerLabel: "catalog", ServerURL: "https://mcp.example.test", RequireApproval: "never"},
+		},
+	})
+	if err != nil || response.Usage.TotalTokens != 3 || response.OutputText != "ok" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGroqStreamsResponsesWithUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["stream"] != true || body["service_tier"] != "default" {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"response\",\"object\":\"response\",\"model\":\"model\",\"status\":\"completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n")
+	}))
+	defer server.Close()
+
+	client := NewGroq(server.URL, "key", true)
+	var events []string
+	response, err := client.StreamResponses(t.Context(), openai.ResponseRequest{Model: "model", Input: "hello", ServiceTier: "default", Stream: true}, func(_ string, payload string) error {
+		events = append(events, payload)
+		return nil
+	})
+	if err != nil || response.Usage.TotalTokens != 3 || response.OutputText != "ok" || len(events) != 2 {
+		t.Fatalf("response=%+v events=%v err=%v", response, events, err)
+	}
+}
+
+func TestGroqResponsesRejectUnsupportedParametersBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewGroq(server.URL, "key", true)
+
+	store := true
+	truncation := "auto"
+	topLogprobs, maxToolCalls := 1, 1
+	penalty := 0.5
+	reasoningSummary, invalidEffort := "auto", "max"
+	tests := []struct {
+		name, param, code string
+		request           openai.ResponseRequest
+	}{
+		{name: "include", param: "include", code: "unsupported_parameter", request: openai.ResponseRequest{Include: []string{"reasoning.encrypted_content"}}},
+		{name: "store", param: "store", code: "unsupported_parameter", request: openai.ResponseRequest{Store: &store}},
+		{name: "truncation", param: "truncation", code: "unsupported_parameter", request: openai.ResponseRequest{Truncation: &truncation}},
+		{name: "continuity", param: "previous_response_id", code: "unsupported_parameter", request: openai.ResponseRequest{PreviousResponse: "response"}},
+		{name: "safety identifier", param: "safety_identifier", code: "unsupported_parameter", request: openai.ResponseRequest{SafetyIdentifier: "user"}},
+		{name: "prompt cache key", param: "prompt_cache_key", code: "unsupported_parameter", request: openai.ResponseRequest{PromptCacheKey: "cache"}},
+		{name: "top logprobs", param: "top_logprobs", code: "unsupported_parameter", request: openai.ResponseRequest{TopLogprobs: &topLogprobs}},
+		{name: "frequency penalty", param: "frequency_penalty", code: "unsupported_parameter", request: openai.ResponseRequest{FrequencyPenalty: &penalty}},
+		{name: "presence penalty", param: "presence_penalty", code: "unsupported_parameter", request: openai.ResponseRequest{PresencePenalty: &penalty}},
+		{name: "max tool calls", param: "max_tool_calls", code: "unsupported_parameter", request: openai.ResponseRequest{MaxToolCalls: &maxToolCalls}},
+		{name: "reasoning summary", param: "reasoning", code: "unsupported_parameter", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Summary: &reasoningSummary}}},
+		{name: "reasoning effort", param: "reasoning.effort", code: "invalid_request", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Effort: &invalidEffort}}},
+		{name: "service tier", param: "service_tier", code: "unsupported_parameter", request: openai.ResponseRequest{ServiceTier: "performance"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.request.Model = "model"
+			test.request.Input = "hello"
+			_, err := client.Responses(t.Context(), test.request)
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Provider != "groq" || failure.Param != test.param || failure.UpstreamCode != test.code || called {
+				t.Fatalf("failure=%+v err=%v called=%v", failure, err, called)
+			}
+		})
 	}
 }
