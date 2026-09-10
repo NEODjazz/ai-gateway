@@ -2,9 +2,7 @@ package provider
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -112,16 +110,5 @@ func TestAudioSpeechRejectsInvalidAndOversizedResponses(t *testing.T) {
 	}
 	if _, err := readAudioSpeechResponse(bytes.NewReader(nil)); err == nil {
 		t.Fatal("empty response was accepted")
-	}
-}
-
-func TestMistralAudioSpeechRejectedBeforeNetwork(t *testing.T) {
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
-	defer server.Close()
-	_, err := NewMistral(server.URL, "secret", false).GenerateSpeech(context.Background(), openai.AudioSpeechRequest{Model: "tts", Input: "hello", Voice: "alloy"})
-	var providerErr *Error
-	if !errors.As(err, &providerErr) || providerErr.UpstreamCode != "unsupported_operation" || calls != 0 {
-		t.Fatalf("err=%v calls=%d", err, calls)
 	}
 }

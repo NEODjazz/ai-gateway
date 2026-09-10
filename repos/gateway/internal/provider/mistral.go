@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -67,7 +68,7 @@ func (Mistral) SupportsImageVariation() bool { return false }
 
 func (Mistral) SupportsAudioTranscription() bool { return false }
 
-func (Mistral) SupportsAudioSpeech() bool { return false }
+func (Mistral) SupportsAudioSpeech() bool { return true }
 
 func (Mistral) GenerateImage(context.Context, openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
 	return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_operation", Err: errors.New("image generation is not supported by this adapter")}
@@ -85,8 +86,79 @@ func (Mistral) TranscribeAudio(context.Context, openai.AudioTranscriptionRequest
 	return openai.AudioTranscriptionResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_operation", Err: errors.New("audio transcription is not supported by this adapter")}
 }
 
-func (Mistral) GenerateSpeech(context.Context, openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
-	return openai.AudioSpeechResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_operation", Err: errors.New("text to speech is not supported by this adapter")}
+func (p Mistral) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
+	if message := request.Validate(); message != "" {
+		return openai.AudioSpeechResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	if err := rejectParameters("mistral",
+		parameterCheck{"instructions", request.Instructions != ""},
+		parameterCheck{"speed", request.Speed != nil},
+		parameterCheck{"stream_format", request.StreamFormat != ""},
+		parameterCheck{"response_format", request.ResponseFormat == "aac"},
+	); err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
+	responseFormat := request.ResponseFormat
+	if responseFormat == "" {
+		responseFormat = "mp3"
+	}
+	payload, err := json.Marshal(struct {
+		Input          string `json:"input"`
+		Model          string `json:"model"`
+		VoiceID        string `json:"voice_id"`
+		ResponseFormat string `json:"response_format,omitempty"`
+		Stream         bool   `json:"stream"`
+	}{Input: request.Input, Model: request.Model, VoiceID: request.Voice, ResponseFormat: responseFormat})
+	if err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(p.baseURL, "audio/speech"), bytes.NewReader(payload))
+	if err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	response, err := p.client.Do(httpRequest)
+	if err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return openai.AudioSpeechResponse{}, responseStatusError("mistral", response)
+	}
+	data, err := decodeMistralAudioSpeech(response.Body)
+	if err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
+	return openai.AudioSpeechResponse{Data: data, ContentType: request.ExpectedContentType(), Model: request.Model}, nil
+}
+
+const maxMistralAudioSpeechResponseBytes = 44 << 20
+
+func decodeMistralAudioSpeech(reader io.Reader) ([]byte, error) {
+	payload, err := io.ReadAll(io.LimitReader(reader, maxMistralAudioSpeechResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(payload) > maxMistralAudioSpeechResponseBytes {
+		return nil, errors.New("Mistral audio speech response exceeds limit")
+	}
+	var response *struct {
+		AudioData string `json:"audio_data"`
+	}
+	if err := json.Unmarshal(payload, &response); err != nil || response == nil || response.AudioData == "" {
+		return nil, errors.New("invalid Mistral audio speech response")
+	}
+	if base64.StdEncoding.DecodedLen(len(response.AudioData)) > maxAudioSpeechResponseBytes {
+		return nil, errors.New("Mistral audio speech response exceeds decoded limit")
+	}
+	data, err := base64.StdEncoding.DecodeString(response.AudioData)
+	if err != nil || len(data) == 0 || len(data) > maxAudioSpeechResponseBytes {
+		return nil, errors.New("invalid Mistral audio speech data")
+	}
+	return data, nil
 }
 
 func (p Mistral) ValidateChatParameters(request openai.ChatCompletionRequest) error {
