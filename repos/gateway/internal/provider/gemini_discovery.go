@@ -12,14 +12,23 @@ import (
 	"time"
 )
 
-func discoverGeminiModels(ctx context.Context, baseURL, secret string) ([]DiscoveredModel, error) {
+func discoverGeminiModels(ctx context.Context, baseURL, secret string, authTypes ...string) ([]DiscoveredModel, error) {
+	authType := "api_key"
+	if len(authTypes) > 0 {
+		authType = authTypes[0]
+	}
+	gemini := NewGeminiWithAuth(baseURL, secret, false, authType)
+	return discoverGeminiModelsWithClient(ctx, gemini)
+}
+
+func discoverGeminiModelsWithClient(ctx context.Context, gemini Gemini) ([]DiscoveredModel, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	base, err := url.Parse(geminiBaseURL(baseURL) + "/models")
+	base, err := url.Parse(geminiBaseURL(gemini.baseURL) + "/models")
 	if err != nil || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
 		return nil, ErrProviderProbeFailed
 	}
-	client := NewGemini(baseURL, secret, false).client
+	client := gemini.client
 	client.Timeout = 10 * time.Second
 	models := map[string]bool{}
 	pages := map[string]bool{}
@@ -35,7 +44,9 @@ func discoverGeminiModels(ctx context.Context, baseURL, secret string) ([]Discov
 		if err != nil {
 			return nil, ErrProviderProbeFailed
 		}
-		req.Header.Set("x-goog-api-key", secret)
+		if err := gemini.authorize(req); err != nil {
+			return nil, ErrProviderProbeFailed
+		}
 		req.Header.Set("Accept", "application/json")
 		response, err := client.Do(req)
 		if err != nil {

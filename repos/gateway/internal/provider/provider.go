@@ -394,7 +394,7 @@ func NewWithError(cfg Config) (Provider, error) {
 		}
 		authType := ""
 		region := ""
-		if endpoint.Type == "azure-openai" {
+		if endpoint.Type == "azure-openai" || endpoint.Type == "gemini" {
 			authType = normalizeAzureAuthType(endpoint.AuthType)
 		} else if endpoint.Type == "bedrock" {
 			authType = strings.ToLower(strings.TrimSpace(endpoint.AuthType))
@@ -2874,7 +2874,7 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 	case "azure-openai":
 		return NewAzureOpenAI(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.APIVersion, endpoint.AuthType)
 	case "gemini":
-		return NewGemini(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
+		return NewGeminiWithAuth(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.AuthType)
 	case "anthropic":
 		return NewAnthropic(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "cohere":

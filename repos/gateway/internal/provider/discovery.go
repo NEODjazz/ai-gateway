@@ -61,7 +61,7 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 		return nil, err
 	}
 	if managed.Type == "gemini" {
-		return discoverGeminiModels(ctx, managed.BaseURL, secret)
+		return discoverGeminiModels(ctx, managed.BaseURL, secret, managed.AuthType)
 	}
 	if managed.Type == "anthropic" {
 		return discoverAnthropicModels(ctx, managed.BaseURL, secret)

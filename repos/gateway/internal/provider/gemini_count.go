@@ -53,7 +53,9 @@ func (g Gemini) CountTokens(ctx context.Context, request TokenCountRequest) (Tok
 		return TokenCountResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", g.apiKey)
+	if err := g.authorize(req); err != nil {
+		return TokenCountResult{}, err
+	}
 	response, err := g.client.Do(req)
 	if err != nil {
 		return TokenCountResult{}, err

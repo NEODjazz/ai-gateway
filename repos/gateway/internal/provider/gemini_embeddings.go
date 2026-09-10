@@ -78,7 +78,9 @@ func (g Gemini) Embeddings(ctx context.Context, request openai.EmbeddingRequest)
 		return openai.EmbeddingResponse{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", g.apiKey)
+	if err := g.authorize(req); err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
 	response, err := g.client.Do(req)
 	if err != nil {
 		return openai.EmbeddingResponse{}, err

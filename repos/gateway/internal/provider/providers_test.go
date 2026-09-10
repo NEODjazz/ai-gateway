@@ -53,6 +53,22 @@ func TestManagedBedrockSigV4ValidatesRegionAndVaultCredential(t *testing.T) {
 	}
 }
 
+func TestManagedGeminiWorkloadAuthentication(t *testing.T) {
+	router := New(Config{}).(*Router)
+	provider, err := router.CreateProvider(ManagedProvider{ID: "gemini", Type: "gemini", BaseURL: "https://generativelanguage.googleapis.com", AuthType: "gcp_adc", Enabled: true})
+	if err != nil || provider.AuthType != "gcp_adc" {
+		t.Fatalf("provider=%+v err=%v", provider, err)
+	}
+	if _, err := router.CreateProvider(ManagedProvider{ID: "invalid", Type: "gemini", BaseURL: "https://example.test", AuthType: "entra", Enabled: true}); !errors.Is(err, ErrInvalidProvider) {
+		t.Fatalf("invalid auth type accepted: %v", err)
+	}
+	static := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "static", Type: "gemini", BaseURL: "https://example.test", AuthType: "gcp_adc", Models: []string{"model"}}}}).(*Router)
+	providers := static.ListProviders(t.Context())
+	if len(providers) != 1 || providers[0].AuthType != "gcp_adc" {
+		t.Fatalf("static auth type lost: %+v", providers)
+	}
+}
+
 func TestManagedBedrockSigV4RejectsExistingBearerCredential(t *testing.T) {
 	router := New(Config{CredentialEncryptionKey: []byte("bedrock-update-test-key")}).(*Router)
 	if _, err := router.CreateProvider(ManagedProvider{ID: "aws", Type: "bedrock", BaseURL: "https://private.example", AuthType: "bearer", Enabled: true}); err != nil {

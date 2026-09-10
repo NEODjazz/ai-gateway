@@ -95,6 +95,14 @@ user-assigned managed identity. Разрешены только loopback и link
 endpoints; redirects и некорректные/просроченные ответы отклоняются. Временный
 access token кэшируется и обновляется до истечения срока.
 
+Для `gemini` режим `auth_type=api_key` использует write-only credential и header
+`x-goog-api-key`. Режим `auth_type=gcp_adc` не требует привязанного credential:
+gateway получает короткоживущий bearer token через фиксированный GCE metadata URL.
+В GKE этот же запрос обслуживает Workload Identity Federation metadata server.
+Gateway требует `Metadata-Flavor: Google` в запросе и ответе, запрещает redirects,
+ограничивает размер и срок жизни ответа, объединяет параллельные refresh и
+использует еще действующий token при кратковременной ошибке обновления.
+
 Для managed provider `bedrock` значение `auth_type=aws_sigv4` требует `region`.
 Write-only credential задается JSON-объектом с `access_key_id`,
 `secret_access_key` и необязательным `session_token`. Если credential не привязан,

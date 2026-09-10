@@ -516,8 +516,11 @@ Managed deployment с capability `stream` включает native streaming в a
 
 Provider type `gemini` uses the GenerateContent protocol, not an OpenAI-compatible
 URL. Set `base_url` to `https://generativelanguage.googleapis.com` (or an explicit
-`/v1beta` or `/v1` base) and use a provider-scoped API-key credential. The key is
-sent only in `x-goog-api-key`; redirects are not followed. Managed deployments
+`/v1beta` or `/v1` base). `auth_type=api_key` sends a provider-scoped write-only
+credential only in `x-goog-api-key`. `auth_type=gcp_adc` obtains a short-lived
+bearer token from the fixed GCE metadata endpoint; GKE Workload Identity
+Federation exposes the same endpoint. Metadata and provider redirects are not
+followed. Managed deployments
 must explicitly include `stream`, `tools`, `vision` or `structured_output` when
 those capabilities are needed.
 
@@ -537,8 +540,8 @@ are limited to 32 MiB and the accumulated SSE wire payload to 64 MiB.
 Discovery follows native pagination with a 30-second overall deadline, a maximum
 of 100 pages/10,000 scanned models and repeated-token detection. Only models
 advertising `generateContent`, `embedContent` or `batchEmbedContents` are offered.
-Native Responses, advanced inbound GenerateContent options, Interactions and cloud
-workload identity remain separate gaps.
+Native Responses, advanced inbound GenerateContent options and Interactions remain
+separate gaps.
 Unsupported generation controls, parallel tool control and strict function
 schemas fail explicitly; seed/output limits must fit the native integer range.
 
@@ -671,14 +674,14 @@ Gemini also implements `TokenCountClient` and is selectable through the same
 with `generateContentRequest`, including system instructions and function schemas
 as well as message contents and inline images. The nested model is the resolved
 provider model. Only x-goog-api-key carries the provider credential; no key is
-placed in the URL. Results use totalTokens as the counted input, including cached
+placed in the URL. With `gcp_adc`, the same operation uses a metadata-issued bearer
+token instead. Results use totalTokens as the counted input, including cached
 context, without creating generation usage or altering reserve estimation.
 
 The same 30-second deadline, inference request-body limit, 64 KiB response limit,
 redirect refusal and invalid-count checks apply. Gemini-specific unsupported
 controls still fail before HTTP. Tests cover complete native context, model alias
-routing, malformed counts, redirect refusal and cancellation. This does not add
-cloud workload credentials.
+routing, malformed counts, redirect refusal and cancellation.
 Protocol: [Gemini token counting](https://ai.google.dev/api/tokens).
 
 ## Native GenerateContent API

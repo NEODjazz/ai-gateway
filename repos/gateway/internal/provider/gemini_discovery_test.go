@@ -31,6 +31,30 @@ func TestGeminiDiscoveryPaginatesAndFiltersCapabilities(t *testing.T) {
 	}
 }
 
+func TestGeminiDiscoveryUsesGCPWorkloadToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/metadata/token":
+			w.Header().Set("Metadata-Flavor", "Google")
+			_, _ = fmt.Fprint(w, `{"access_token":"workload-token","expires_in":3600,"token_type":"Bearer"}`)
+		case "/v1beta/models":
+			if r.Header.Get("Authorization") != "Bearer workload-token" || r.Header.Get("x-goog-api-key") != "" {
+				t.Errorf("invalid workload discovery auth: %v", r.Header)
+			}
+			_, _ = fmt.Fprint(w, `{"models":[{"name":"models/model-a","supportedGenerationMethods":["generateContent"]}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	gemini := NewGeminiWithAuth(server.URL, "", false, "gcp_adc")
+	gemini.tokenSource.metadataURL = server.URL + "/metadata/token"
+	models, err := discoverGeminiModelsWithClient(t.Context(), gemini)
+	if err != nil || len(models) != 1 || models[0].ID != "model-a" {
+		t.Fatalf("models=%+v err=%v", models, err)
+	}
+}
+
 func TestGeminiDiscoveryRejectsPaginationCycles(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = fmt.Fprint(w, `{"nextPageToken":"repeat"}`) }))
 	defer server.Close()

@@ -67,6 +67,21 @@ func TestValidateAzureOpenAIConfiguration(t *testing.T) {
 	}
 }
 
+func TestValidateGeminiWorkloadAuthentication(t *testing.T) {
+	if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "gemini", Type: "gemini", AuthType: "gcp_adc"}}); err != nil {
+		t.Fatalf("valid Gemini workload authentication rejected: %v", err)
+	}
+	for _, endpoint := range []ProviderEndpointConfig{
+		{Name: "gemini", Type: "gemini", AuthType: "entra"},
+		{Name: "gemini", Type: "gemini", AuthType: "gcp_adc", Region: "us-central1"},
+		{Name: "gemini", Type: "gemini", AuthType: "gcp_adc", APIVersion: "v1"},
+	} {
+		if err := validateProviderAdmission([]ProviderEndpointConfig{endpoint}); err == nil {
+			t.Fatalf("invalid Gemini configuration accepted: %+v", endpoint)
+		}
+	}
+}
+
 func TestValidateBedrockSigV4Configuration(t *testing.T) {
 	valid := ProviderEndpointConfig{Name: "bedrock", Type: "bedrock", BaseURL: "https://bedrock-runtime.us-east-1.amazonaws.com", AuthType: "aws_sigv4", Region: "us-east-1", APIKey: `{"access_key_id":"AKID","secret_access_key":"secret","session_token":"token"}`}
 	if err := validateProviderAdmission([]ProviderEndpointConfig{valid}); err != nil {

@@ -189,6 +189,12 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
 		input.Region = ""
+	} else if input.Type == "gemini" {
+		input.APIVersion = ""
+		if input.AuthType != "api_key" && input.AuthType != "gcp_adc" {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
+		input.Region = ""
 	} else if input.Type == "bedrock" {
 		input.APIVersion = ""
 		parsed, _ := url.Parse(input.BaseURL)

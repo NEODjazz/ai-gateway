@@ -299,6 +299,14 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 			if authType != "" && authType != "api_key" && authType != "entra" {
 				result = errors.Join(result, fmt.Errorf("provider %q auth_type must be api_key or entra", name))
 			}
+		} else if endpoint.Type == "gemini" {
+			authType := strings.ToLower(strings.TrimSpace(endpoint.AuthType))
+			if authType != "" && authType != "api_key" && authType != "gcp_adc" {
+				result = errors.Join(result, fmt.Errorf("provider %q auth_type must be api_key or gcp_adc", name))
+			}
+			if endpoint.APIVersion != "" || endpoint.Region != "" {
+				result = errors.Join(result, fmt.Errorf("provider %q api_version or region is unsupported for Gemini", name))
+			}
 		} else if endpoint.Type == "bedrock" {
 			if parsed, err := url.Parse(endpoint.BaseURL); err != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 				result = errors.Join(result, fmt.Errorf("provider %q base_url must not contain query or fragment", name))

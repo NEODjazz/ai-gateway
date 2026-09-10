@@ -17,19 +17,47 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
-// Gemini uses the native GenerateContent API with API-key authentication.
-// Cloud workload identity is a separate authentication contract.
+// Gemini uses the native GenerateContent API with API-key or GCP workload authentication.
 type Gemini struct {
 	baseURL        string
 	apiKey         string
 	upstreamStream bool
 	client         *http.Client
+	authType       string
+	tokenSource    *gcpTokenSource
 }
 
 func NewGemini(baseURL, apiKey string, stream bool) Gemini {
+	return NewGeminiWithAuth(baseURL, apiKey, stream, "api_key")
+}
+
+func NewGeminiWithAuth(baseURL, credential string, stream bool, authType string) Gemini {
 	client := newProviderHTTPClient(180 * time.Second)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return Gemini{baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey, upstreamStream: stream, client: client}
+	authType = strings.ToLower(strings.TrimSpace(authType))
+	if authType == "" {
+		authType = "api_key"
+	}
+	return Gemini{baseURL: strings.TrimRight(baseURL, "/"), apiKey: credential, upstreamStream: stream, client: client, authType: authType, tokenSource: newGCPTokenSource()}
+}
+
+func (g Gemini) authorize(request *http.Request) error {
+	request.Header.Del("Authorization")
+	request.Header.Del("x-goog-api-key")
+	switch g.authType {
+	case "gcp_adc":
+		token, err := g.tokenSource.Token(request.Context())
+		if err != nil {
+			return err
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+		return nil
+	case "api_key":
+		request.Header.Set("x-goog-api-key", g.apiKey)
+		return nil
+	default:
+		return fmt.Errorf("unsupported Gemini authentication type %q", g.authType)
+	}
 }
 
 func (Gemini) SupportsVision() bool { return true }
@@ -487,7 +515,9 @@ func (g Gemini) generate(ctx context.Context, request openai.ChatCompletionReque
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", g.apiKey)
+	if err := g.authorize(req); err != nil {
+		return nil, err
+	}
 	response, err := g.client.Do(req)
 	if err != nil {
 		return nil, err

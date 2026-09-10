@@ -72,12 +72,44 @@ describe("ModelOnboardingPage", () => {
     await userEvent.selectOptions(screen.getByLabelText("Provider type"), "gemini");
     expect(screen.getByLabelText("Provider type")).toHaveValue("gemini");
     expect(screen.queryByLabelText("Azure API version")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Google authentication")).toHaveValue("api_key");
+    await userEvent.selectOptions(screen.getByLabelText("Google authentication"), "gcp_adc");
+    expect(screen.getByLabelText("Google authentication")).toHaveValue("gcp_adc");
     await userEvent.selectOptions(screen.getByLabelText("Provider type"), "azure-openai");
     expect(screen.getByLabelText("Azure API version")).toBeInTheDocument();
     expect(screen.getByLabelText("Azure authentication")).toHaveValue("api_key");
     await userEvent.selectOptions(screen.getByLabelText("Provider type"), "bedrock");
     expect(screen.getByLabelText("Bedrock authentication")).toHaveValue("bearer");
     expect(screen.getByLabelText("AWS region")).toBeInTheDocument();
+  });
+
+  it("preserves Gemini workload authentication when creating a provider", async () => {
+    let providerBody: Record<string, unknown> | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input);
+      if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
+      if (!options?.method) return json({ data: [] });
+      if (path === "/admin/v1/providers" && options.method === "POST") {
+        providerBody = JSON.parse(String(options.body));
+        return json({ ...providerBody, enabled: true });
+      }
+      if (path.endsWith("/test")) return json({ provider_id: "google", status: "available", latency_ms: 1, model_count: 0 });
+      if (path.endsWith("/discover-models")) return json({ data: [] });
+      return json({ error: { message: `Unexpected ${path}` } }, 500);
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ModelOnboardingPage /></AuthProvider></MemoryRouter>);
+
+    await screen.findByRole("option", { name: "+ Create provider" });
+    await userEvent.selectOptions(screen.getByLabelText("Provider"), "__new");
+    await userEvent.type(screen.getByLabelText("Provider ID"), "google");
+    await userEvent.selectOptions(screen.getByLabelText("Provider type"), "gemini");
+    await userEvent.type(screen.getByLabelText("Base URL"), "https://generativelanguage.googleapis.com");
+    await userEvent.selectOptions(screen.getByLabelText("Google authentication"), "gcp_adc");
+    await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
+
+    await waitFor(() => expect(providerBody).toBeDefined());
+    expect(providerBody).toMatchObject({ id: "google", type: "gemini", auth_type: "gcp_adc" });
   });
 
   it("preserves Bedrock signing settings when creating a provider", async () => {

@@ -119,4 +119,25 @@ describe("ProvidersPage", () => {
 	const created = calls.find((call) => call.path === "/admin/v1/providers" && call.method === "POST")!;
 	expect(JSON.parse(created.body!)).toEqual({ id: "aws-bedrock", type: "bedrock", base_url: "https://bedrock-runtime.us-east-1.amazonaws.com", auth_type: "aws_sigv4", region: "us-east-1", rate_limit_rpm: 0, rate_limit_tpm: 0, enabled: true });
   });
+
+  it("configures Gemini workload authentication", async () => {
+    const calls: Array<{ path: string; method?: string; body?: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input); calls.push({ path, method: options?.method, body: String(options?.body || "") });
+      if (path === "/admin/v1/providers" && options?.method === "POST") return json({ id: "google-gemini", type: "gemini", base_url: "https://generativelanguage.googleapis.com", auth_type: "gcp_adc", enabled: true }, 201);
+      return json({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ProvidersPage /></AuthProvider></MemoryRouter>);
+    await userEvent.click(await screen.findByRole("button", { name: "Create Provider" }));
+    const form = screen.getByRole("dialog", { name: "Create Provider" });
+    await userEvent.type(within(form).getByLabelText("ID"), "google-gemini");
+    await userEvent.selectOptions(within(form).getByLabelText("Type"), "gemini");
+    await userEvent.type(within(form).getByLabelText("Base URL"), "https://generativelanguage.googleapis.com");
+    await userEvent.selectOptions(within(form).getByLabelText("Authentication"), "gcp_adc");
+    await userEvent.click(within(form).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.some((call) => call.path === "/admin/v1/providers" && call.method === "POST")).toBe(true));
+    const created = calls.find((call) => call.path === "/admin/v1/providers" && call.method === "POST")!;
+    expect(JSON.parse(created.body!)).toEqual({ id: "google-gemini", type: "gemini", base_url: "https://generativelanguage.googleapis.com", auth_type: "gcp_adc", rate_limit_rpm: 0, rate_limit_tpm: 0, enabled: true });
+  });
 });

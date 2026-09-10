@@ -64,6 +64,44 @@ func TestGeminiNativeChatAndToolSignatures(t *testing.T) {
 	}
 }
 
+func TestGeminiNativeChatUsesGCPWorkloadToken(t *testing.T) {
+	var tokenCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/metadata/token":
+			tokenCalls++
+			if r.Header.Get("Metadata-Flavor") != "Google" {
+				t.Errorf("missing metadata header: %v", r.Header)
+			}
+			w.Header().Set("Metadata-Flavor", "Google")
+			_, _ = fmt.Fprint(w, `{"access_token":"workload-token","expires_in":3600,"token_type":"Bearer"}`)
+		case "/v1beta/models/gemini-test:generateContent":
+			if r.Header.Get("Authorization") != "Bearer workload-token" || r.Header.Get("x-goog-api-key") != "" {
+				t.Errorf("invalid workload auth: %v", r.Header)
+			}
+			_, _ = fmt.Fprint(w, `{"responseId":"native-id","candidates":[{"index":0,"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := NewGeminiWithAuth(server.URL, "", false, "gcp_adc")
+	client.tokenSource.metadataURL = server.URL + "/metadata/token"
+	if _, err := client.ChatCompletions(t.Context(), geminiTestChat()); err != nil {
+		t.Fatal(err)
+	}
+	if tokenCalls != 1 {
+		t.Fatalf("metadata token calls=%d", tokenCalls)
+	}
+}
+
+func TestGeminiRejectsUnknownAuthenticationType(t *testing.T) {
+	client := NewGeminiWithAuth("https://example.invalid", "secret", false, "unknown")
+	if _, err := client.ChatCompletions(t.Context(), geminiTestChat()); err == nil || !strings.Contains(err.Error(), "unsupported Gemini authentication type") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestGeminiNativeLogprobsRoundTrip(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
 		t.Run(fmt.Sprint(streaming), func(t *testing.T) {
