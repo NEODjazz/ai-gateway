@@ -5,6 +5,15 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  016_gateway_skill_ownership.sql: |
+    CREATE TABLE IF NOT EXISTS gateway_skill_ownership (
+        skill_id TEXT PRIMARY KEY,
+        owner_key TEXT NOT NULL,
+        endpoint_id TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS gateway_skill_ownership_owner_endpoint_idx
+        ON gateway_skill_ownership (owner_key, endpoint_id, skill_id);
   015_gateway_files.sql: |
     CREATE TABLE IF NOT EXISTS gateway_files
     (
