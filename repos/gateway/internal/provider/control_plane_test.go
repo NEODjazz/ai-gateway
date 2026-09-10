@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modelcatalog"
+	"ai-gateway-gateway/internal/openai"
 )
 
 type memoryControlPlaneStore struct {
@@ -102,6 +107,105 @@ func TestControlPlanePersistsEncryptedStateAndSynchronizesReplicas(t *testing.T)
 	providers = second.ListProviders(context.Background())
 	if len(providers) != 1 || providers[0].Enabled {
 		t.Fatalf("replica did not refresh provider state: %+v", providers)
+	}
+}
+
+func TestControlPlaneRefreshRebuildsOnlyChangedRuntimeEndpoints(t *testing.T) {
+	var expectedAuthorization atomic.Value
+	expectedAuthorization.Store("Bearer first-secret")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != expectedAuthorization.Load().(string) {
+			t.Errorf("path=%q authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chatcmpl-control","object":"chat.completion","model":"upstream-v2","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstream.Close()
+
+	store := &memoryControlPlaneStore{}
+	config := Config{CredentialEncryptionKey: []byte("runtime-refresh-stable-key"), ControlPlaneStore: store, ControlPlaneRefresh: time.Nanosecond}
+	firstProvider, err := NewWithError(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := firstProvider.(*Router)
+	if _, err := first.CreateProvider(ManagedProvider{ID: "managed", Type: "openai-compatible", BaseURL: upstream.URL + "/v1", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.CreateCredential(CredentialInput{ID: "key", ProviderID: "managed", Secret: "first-secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.CreateModelDeployment(ModelDeployment{ID: "deployment", ProviderID: "managed", CredentialID: "key", UpstreamModel: "upstream-v1", Models: []string{"public-v1"}, Capabilities: []string{"chat"}, Weight: 1, MaxRetries: 1, MaxParallelRequests: 1, RateLimitTPM: 10, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	secondProvider, err := NewWithError(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := secondProvider.(*Router)
+	before := second.configuredEndpoints()[0]
+	if _, err := first.UpdateAdminState(t.Context(), json.RawMessage(`{"revision_only":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := second.AdminState(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	unchanged := second.configuredEndpoints()[0]
+	if unchanged.Admission != before.Admission {
+		t.Fatal("unrelated control-plane revision rebuilt runtime endpoint")
+	}
+
+	if _, err := first.RotateCredential("key", "second-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.UpdateModelDeployment("deployment", ModelDeployment{ProviderID: "managed", CredentialID: "key", CredentialSet: true, UpstreamModel: "upstream-v2", Models: []string{"public-v2"}, Capabilities: []string{"chat"}, Weight: 2, RequestTimeoutMS: 3000, MaxRetries: 2, MaxParallelRequests: 2, RateLimitTPM: 777, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.UpdateProvider("managed", ManagedProvider{Type: "openai-compatible", BaseURL: upstream.URL + "/v1", RateLimitRPM: 999, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := second.AdminState(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	changed := second.configuredEndpoints()[0]
+	if changed.Admission == before.Admission || changed.MaxRetries != 2 || changed.RequestTimeout != 3*time.Second || changed.RateLimitTPM != 777 || changed.ProviderRateLimitRPM != 999 || len(changed.Models) != 1 || changed.Models[0] != "public-v2" || changed.ModelAliases["public-v2"] != "upstream-v2" {
+		t.Fatalf("runtime endpoint was not rebuilt from refreshed state: %+v", changed)
+	}
+	expectedAuthorization.Store("Bearer second-secret")
+	response, err := changed.Provider.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "upstream-v2", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+	if err != nil || response.Usage.TotalTokens != 2 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestControlPlaneRejectsIncompatibleSnapshotAtomically(t *testing.T) {
+	router := New(Config{CredentialEncryptionKey: []byte("atomic-snapshot-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "managed", Type: "openai-compatible", BaseURL: "https://provider.example/v1", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateModelDeployment(ModelDeployment{ID: "deployment", ProviderID: "managed", Models: []string{"public"}, Capabilities: []string{"chat"}, Weight: 1, MaxParallelRequests: 1, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	var beforeEndpoint Endpoint
+	for _, endpoint := range router.configuredEndpoints() {
+		if endpoint.Name == "deployment" {
+			beforeEndpoint = endpoint
+		}
+	}
+	snapshot := router.controlPlaneSnapshot()
+	snapshot.Providers[0].Type = "voyage"
+	if err := router.applyControlPlaneSnapshot(snapshot); !errors.Is(err, ErrUnsupportedProviderCapability) {
+		t.Fatalf("incompatible snapshot error=%v", err)
+	}
+	providers := router.ListProviders(context.Background())
+	deployments := router.ListModelDeployments(context.Background())
+	var afterEndpoint Endpoint
+	for _, endpoint := range router.configuredEndpoints() {
+		if endpoint.Name == "deployment" {
+			afterEndpoint = endpoint
+		}
+	}
+	if len(providers) != 1 || providers[0].Type != "openai-compatible" || len(deployments) != 1 || deployments[0].ProviderType != "openai-compatible" || afterEndpoint.Type != "openai-compatible" || afterEndpoint.Admission != beforeEndpoint.Admission {
+		t.Fatalf("failed snapshot partially applied: providers=%+v deployments=%+v endpoint=%+v", providers, deployments, afterEndpoint)
 	}
 }
 

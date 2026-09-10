@@ -413,6 +413,10 @@ func (r *Router) endpointForManagedDeployment(deployment ModelDeployment, manage
 	if err != nil {
 		return Endpoint{}, err
 	}
+	return r.endpointForManagedDeploymentWithSecret(deployment, managed, secret)
+}
+
+func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployment, managed ManagedProvider, secret string) (Endpoint, error) {
 	providerConfig := config.ProviderEndpointConfig{Type: managed.Type, BaseURL: managed.BaseURL, APIKey: secret, Stream: hasCapability(deployment.Capabilities, "stream"), APIVersion: managed.APIVersion, AuthType: managed.AuthType, Region: managed.Region}
 	client := providerFor(providerConfig)
 	if managed.Type == "bedrock" && managed.AuthType == "aws_sigv4" {

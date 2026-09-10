@@ -1,10 +1,12 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -123,6 +125,7 @@ func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error 
 		providers[normalized.ID] = normalized
 	}
 	credentials := make(map[string]encryptedCredential, len(snapshot.Credentials))
+	credentialSecrets := make(map[string]string, len(snapshot.Credentials))
 	for _, item := range snapshot.Credentials {
 		id := item.Credential.ID
 		if id == "" || credentials[id].ID != "" || len(item.Nonce) != r.credentials.aead.NonceSize() || len(item.Ciphertext) == 0 {
@@ -138,6 +141,7 @@ func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error 
 			}
 		}
 		credentials[id] = encryptedCredential{Credential: item.Credential, Nonce: append([]byte(nil), item.Nonce...), Ciphertext: append([]byte(nil), item.Ciphertext...)}
+		credentialSecrets[id] = string(plaintext)
 	}
 	deployments := make(map[string]ModelDeployment, len(snapshot.Deployments))
 	for _, item := range snapshot.Deployments {
@@ -174,18 +178,10 @@ func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error 
 	if err := validateModelGroupGraph(groups); err != nil {
 		return fmt.Errorf("invalid persisted model group fallback graph: %w", err)
 	}
-	previousEndpoints := map[string]Endpoint{}
-	for _, endpoint := range r.configuredEndpoints() {
-		previousEndpoints[endpoint.Name] = endpoint
-	}
-	r.providers.current.Store(&providers)
-	r.credentials.mu.Lock()
-	r.credentials.current = credentials
-	r.credentials.mu.Unlock()
-	r.deployments.current.Store(&deployments)
-	r.modelGroups.current.Store(&groups)
+	var guardrails map[string]GuardrailPolicy
+	var adminState json.RawMessage
 	if snapshot.SchemaVersion >= 2 {
-		guardrails := make(map[string]GuardrailPolicy, len(snapshot.Guardrails))
+		guardrails = make(map[string]GuardrailPolicy, len(snapshot.Guardrails))
 		for _, item := range snapshot.Guardrails {
 			normalized, err := normalizeGuardrailPolicy(item.Name, item)
 			if err != nil || guardrails[normalized.Name].Name != "" {
@@ -193,29 +189,94 @@ func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error 
 			}
 			guardrails[normalized.Name] = normalized
 		}
-		r.guardrails.current.Store(&guardrails)
-		adminState := append(json.RawMessage(nil), snapshot.AdminState...)
-		r.adminState.current.Store(&adminState)
+		adminState = append(json.RawMessage(nil), snapshot.AdminState...)
 	}
-	if snapshot.SchemaVersion >= 3 && r.catalog != nil {
-		r.catalog.SetAuthoritative(catalog)
+	previousEndpoints := map[string]Endpoint{}
+	for _, endpoint := range r.configuredEndpoints() {
+		previousEndpoints[endpoint.Name] = endpoint
 	}
+	previousProviders := map[string]ManagedProvider{}
+	if current := r.providers.current.Load(); current != nil {
+		for id, provider := range *current {
+			previousProviders[id] = provider
+		}
+	}
+	previousDeployments := map[string]ModelDeployment{}
+	if current := r.deployments.current.Load(); current != nil {
+		for id, deployment := range *current {
+			previousDeployments[id] = deployment
+		}
+	}
+	previousCredentials := map[string]encryptedCredential{}
+	r.credentials.mu.RLock()
+	for id, credential := range r.credentials.current {
+		previousCredentials[id] = credential
+	}
+	r.credentials.mu.RUnlock()
 	endpoints := make([]Endpoint, 0, len(deployments))
 	for _, deployment := range deployments {
 		managed := providers[deployment.ProviderID]
-		if existing, found := previousEndpoints[deployment.ID]; found && existing.Type == managed.Type && existing.BaseURL == managed.BaseURL && existing.CredentialID == deployment.CredentialID {
+		existing, endpointFound := previousEndpoints[deployment.ID]
+		previousDeployment, deploymentFound := previousDeployments[deployment.ID]
+		previousProvider, providerFound := previousProviders[deployment.ProviderID]
+		if endpointFound && deploymentFound && providerFound && previousProvider == managed && sameDeploymentRuntime(previousDeployment, deployment) && sameCredentialMaterial(deployment.CredentialID, previousCredentials, credentials) {
 			endpoints = append(endpoints, existing)
 			continue
 		}
-		endpoint, err := r.endpointForDeployment(deployment)
+		endpoint, err := r.endpointForManagedDeploymentWithSecret(deployment, managed, credentialSecrets[deployment.CredentialID])
 		if err != nil {
 			return fmt.Errorf("build persisted deployment %q: %w", deployment.ID, err)
 		}
 		endpoints = append(endpoints, endpoint)
 	}
 	sort.SliceStable(endpoints, func(i, j int) bool { return endpoints[i].Priority < endpoints[j].Priority })
+	r.providers.current.Store(&providers)
+	r.credentials.mu.Lock()
+	r.credentials.current = credentials
+	r.credentials.mu.Unlock()
+	r.deployments.current.Store(&deployments)
+	r.modelGroups.current.Store(&groups)
+	if snapshot.SchemaVersion >= 2 {
+		r.guardrails.current.Store(&guardrails)
+		r.adminState.current.Store(&adminState)
+	}
+	if snapshot.SchemaVersion >= 3 && r.catalog != nil {
+		r.catalog.SetAuthoritative(catalog)
+	}
 	r.endpointState.current.Store(&endpoints)
 	return nil
+}
+
+func sameDeploymentRuntime(first, second ModelDeployment) bool {
+	return first.ID == second.ID &&
+		first.ProviderID == second.ProviderID &&
+		first.CredentialID == second.CredentialID &&
+		first.ProviderType == second.ProviderType &&
+		first.UpstreamModel == second.UpstreamModel &&
+		slices.Equal(first.Models, second.Models) &&
+		slices.Equal(first.Capabilities, second.Capabilities) &&
+		first.Priority == second.Priority &&
+		first.Weight == second.Weight &&
+		first.GuardrailPolicy == second.GuardrailPolicy &&
+		first.RequestTimeoutMS == second.RequestTimeoutMS &&
+		first.MaxRetries == second.MaxRetries &&
+		first.CooldownAfterFailures == second.CooldownAfterFailures &&
+		first.CooldownSeconds == second.CooldownSeconds &&
+		first.MaxParallelRequests == second.MaxParallelRequests &&
+		first.QueueCapacity == second.QueueCapacity &&
+		first.QueueTimeoutMS == second.QueueTimeoutMS &&
+		first.RateLimitRPM == second.RateLimitRPM &&
+		first.RateLimitTPM == second.RateLimitTPM &&
+		first.Enabled == second.Enabled
+}
+
+func sameCredentialMaterial(id string, previous, next map[string]encryptedCredential) bool {
+	if id == "" {
+		return true
+	}
+	first, firstFound := previous[id]
+	second, secondFound := next[id]
+	return firstFound && secondFound && bytes.Equal(first.Nonce, second.Nonce) && bytes.Equal(first.Ciphertext, second.Ciphertext)
 }
 
 // AdminState returns the opaque durable state used by gateway management
