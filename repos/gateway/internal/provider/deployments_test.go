@@ -298,6 +298,36 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeValidatedChatParameters(t *testing.T) {
+	profiles := ManagedProviderCapabilityProfiles()
+	byType := make(map[string]ProviderChatParameterPolicy, len(profiles))
+	for _, profile := range profiles {
+		byType[profile.Type] = profile.ChatParameters
+	}
+	allReasoning := []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+	allTiers := []string{"auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast", "standard_only"}
+	tests := map[string]ProviderChatParameterPolicy{
+		"demo":              {ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{}},
+		"voyage":            {ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{}},
+		"bedrock":           {ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{}},
+		"anthropic":         {ReasoningEffort: []string{"low", "medium", "high", "xhigh", "max"}, Logprobs: []string{}, ServiceTier: []string{"auto", "standard_only"}},
+		"gemini":            {ReasoningEffort: []string{"minimal", "low", "medium", "high"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{"auto", "default", "flex", "priority", "standard_only"}},
+		"ollama":            {ReasoningEffort: []string{"none", "low", "medium", "high", "max"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
+		"cohere":            {ReasoningEffort: []string{}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
+		"mistral":           {ReasoningEffort: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Logprobs: []string{}, ServiceTier: []string{}},
+		"deepseek":          {ReasoningEffort: []string{}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
+		"groq":              {ReasoningEffort: allReasoning, Logprobs: []string{}, ServiceTier: []string{"auto", "default", "on_demand", "flex", "performance"}},
+		"openrouter":        {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: allTiers},
+		"openai-compatible": {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
+	}
+	for providerType, expected := range tests {
+		actual, found := byType[providerType]
+		if !found || !slices.Equal(actual.ReasoningEffort, expected.ReasoningEffort) || !slices.Equal(actual.Logprobs, expected.Logprobs) || !slices.Equal(actual.ServiceTier, expected.ServiceTier) {
+			t.Fatalf("%s chat parameters=%+v want=%+v", providerType, actual, expected)
+		}
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

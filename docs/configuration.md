@@ -85,8 +85,9 @@ Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 `voyage`, `bedrock`, `groq` и `deepseek`.
 
 `GET /admin/v1/provider-capabilities` возвращает для каждого типа отдельно
-реально реализованные операции адаптера, допустимые capabilities deployment и
-явные значения `auth_type`. Операция `count_tokens` публикуется только для
+реально реализованные операции адаптера, допустимые capabilities deployment,
+явные значения `auth_type` и принятые runtime validator значения
+`reasoning_effort`, `logprobs` и `service_tier`. Операция `count_tokens` публикуется только для
 адаптеров с нативным счетчиком и не является выбираемой capability deployment.
 Пустой `auth_types` означает фиксированный для адаптера способ передачи
 credential.

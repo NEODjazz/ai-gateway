@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"sort"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/openai"
 )
 
 type ManagedProvider struct {
@@ -25,10 +27,17 @@ type ManagedProvider struct {
 }
 
 type ProviderCapabilityProfile struct {
-	Type         string   `json:"type"`
-	Operations   []string `json:"operations"`
-	Capabilities []string `json:"capabilities"`
-	AuthTypes    []string `json:"auth_types"`
+	Type           string                      `json:"type"`
+	Operations     []string                    `json:"operations"`
+	Capabilities   []string                    `json:"capabilities"`
+	AuthTypes      []string                    `json:"auth_types"`
+	ChatParameters ProviderChatParameterPolicy `json:"chat_parameters"`
+}
+
+type ProviderChatParameterPolicy struct {
+	ReasoningEffort []string `json:"reasoning_effort"`
+	Logprobs        []string `json:"logprobs"`
+	ServiceTier     []string `json:"service_tier"`
 }
 
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek"}
@@ -266,9 +275,54 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 				capabilities = append(capabilities, capability)
 			}
 		}
-		profiles = append(profiles, ProviderCapabilityProfile{Type: providerType, Operations: operations, Capabilities: capabilities, AuthTypes: managedProviderAuthTypes(providerType)})
+		profiles = append(profiles, ProviderCapabilityProfile{
+			Type:           providerType,
+			Operations:     operations,
+			Capabilities:   capabilities,
+			AuthTypes:      managedProviderAuthTypes(providerType),
+			ChatParameters: managedProviderChatParameterPolicy(client, slicesContain(operations, "chat")),
+		})
 	}
 	return profiles
+}
+
+func managedProviderChatParameterPolicy(client Client, supportsChat bool) ProviderChatParameterPolicy {
+	policy := ProviderChatParameterPolicy{ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{}}
+	if !supportsChat {
+		return policy
+	}
+	baseline := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "test"}}}
+	for _, value := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"} {
+		request := baseline
+		request.ReasoningEffort = value
+		if validateChatAdapter(client, request) == nil {
+			policy.ReasoningEffort = append(policy.ReasoningEffort, value)
+		}
+	}
+	for _, value := range []bool{false, true} {
+		request := baseline
+		request.Logprobs = &value
+		if validateChatAdapter(client, request) == nil {
+			policy.Logprobs = append(policy.Logprobs, fmt.Sprintf("%t", value))
+		}
+	}
+	for _, value := range []string{"auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast", "standard_only"} {
+		request := baseline
+		request.ServiceTier = value
+		if validateChatAdapter(client, request) == nil {
+			policy.ServiceTier = append(policy.ServiceTier, value)
+		}
+	}
+	return policy
+}
+
+func slicesContain(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func managedProviderAuthTypes(providerType string) []string {

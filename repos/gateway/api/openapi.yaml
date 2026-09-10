@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.181
+  version: 0.1.182
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -5485,7 +5485,7 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations, capabilities, auth_types]
+      required: [type, operations, capabilities, auth_types, chat_parameters]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, cohere, mistral, voyage, bedrock, groq, deepseek]}
         operations:
@@ -5503,6 +5503,26 @@ components:
           uniqueItems: true
           description: Explicit auth_type values accepted by this provider type. An empty list means the adapter uses its fixed credential convention.
           items: {type: string, enum: [api_key, gcp_adc, entra, bearer, aws_sigv4]}
+        chat_parameters:
+          $ref: '#/components/schemas/ProviderChatParameterPolicy'
+    ProviderChatParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [reasoning_effort, logprobs, service_tier]
+      description: Values accepted by the runtime adapter validator for selected Chat Completions parameters. Empty arrays mean the parameter is rejected. Availability can still depend on the upstream model.
+      properties:
+        reasoning_effort:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [none, minimal, low, medium, high, xhigh, max]}
+        logprobs:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: ['false', 'true']}
+        service_tier:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only]}
     ProviderCredentialCreateInput:
       type: object
       additionalProperties: false
