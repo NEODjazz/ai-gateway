@@ -41,6 +41,7 @@ type UsageRequest struct {
 	InputCharacters         int      `json:"input_characters"`
 	InputPages              int      `json:"input_pages"`
 	InputAudioMilliseconds  int      `json:"input_audio_milliseconds"`
+	ToolRequests            int      `json:"tool_requests"`
 	InputTokens             int      `json:"input_tokens"`
 	OutputTokens            int      `json:"output_tokens"`
 	TotalTokens             int      `json:"total_tokens"`
@@ -154,6 +155,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		InputCharacters:        req.InputCharacters,
 		InputPages:             req.InputPages,
 		InputAudioMilliseconds: req.InputAudioMilliseconds,
+		ToolRequests:           req.ToolRequests,
 		CatalogVersion:         metadataValue(req.Metadata, "model_catalog.version"),
 		PricingKey:             metadataValue(req.Metadata, "model_catalog.pricing_key"),
 		InputCostPer1M:         metadataValue(req.Metadata, "model_catalog.input_cost_per_1m"),
@@ -187,6 +189,10 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.APIType = "search"
 	case "ocr":
 		request.APIType = "ocr"
+	case "mcp_tools_list":
+		request.APIType = "mcp_tools_list"
+	case "mcp_tools_call":
+		request.APIType = "mcp_tools_call"
 	}
 	if request.OutputTokens == 0 && req.CompletionRequest == nil {
 		request.OutputTokens = openai.DefaultOutputTokenReserve

@@ -74,6 +74,7 @@ type RequestLog struct {
 	InputCharacters         uint32   `json:"input_characters"`
 	InputPages              uint32   `json:"input_pages"`
 	InputAudioMilliseconds  uint32   `json:"input_audio_milliseconds"`
+	ToolRequests            uint32   `json:"tool_requests"`
 	CacheReadInputTokens    uint32   `json:"cache_read_input_tokens"`
 	CacheWriteInputTokens   uint32   `json:"cache_write_input_tokens"`
 	SearchRequests          uint32   `json:"search_requests"`
@@ -107,6 +108,7 @@ type RequestLogGroup struct {
 	InputCharacters        uint64   `json:"input_characters"`
 	InputPages             uint64   `json:"input_pages"`
 	InputAudioMilliseconds uint64   `json:"input_audio_milliseconds"`
+	ToolRequests           uint64   `json:"tool_requests"`
 	CacheReadInputTokens   uint64   `json:"cache_read_input_tokens"`
 	CacheWriteInputTokens  uint64   `json:"cache_write_input_tokens"`
 	SearchRequests         uint64   `json:"search_requests"`
@@ -166,7 +168,7 @@ func (r *ClickHouseUsageReporter) ListRequestLogGroups(ctx context.Context, filt
 		params.Set("param_before_group_id", filter.BeforeGroupID)
 		params.Set("param_before_currency", filter.BeforeCurrency)
 	}
-	query := fmt.Sprintf(`SELECT group_id,requests,errors,models,providers,total_tokens,input_characters,input_pages,input_audio_milliseconds,cache_read_input_tokens,cache_write_input_tokens,search_requests,cache_hits,latency_ms,cost,currency,started_at,ended_at
+	query := fmt.Sprintf(`SELECT group_id,requests,errors,models,providers,total_tokens,input_characters,input_pages,input_audio_milliseconds,tool_requests,cache_read_input_tokens,cache_write_input_tokens,search_requests,cache_hits,latency_ms,cost,currency,started_at,ended_at
 FROM (
  SELECT %s AS group_id,
   count() AS requests,
@@ -177,6 +179,7 @@ FROM (
   sum(input_characters) AS input_characters,
   sum(input_pages) AS input_pages,
 	 sum(input_audio_milliseconds) AS input_audio_milliseconds,
+	 sum(tool_requests) AS tool_requests,
   sum(cache_read_input_tokens) AS cache_read_input_tokens,
   sum(cache_write_input_tokens) AS cache_write_input_tokens,
   sum(search_requests) AS search_requests,
@@ -323,7 +326,7 @@ func (r *ClickHouseUsageReporter) GetRequestLog(ctx context.Context, requestID s
 var ErrRequestLogNotFound = errors.New("request log not found")
 
 func requestLogColumns() string {
-	return "timestamp,request_id,session_id,trace_id,user_id,team_id,organization_id,roles,tags,api_key_fingerprint AS credential_id,provider,provider_id,provider_endpoint_name,provider_endpoint_type,model,upstream_model,api_type,phase,status,failure_class,latency_ms,first_token_latency_ms,retry_count,fallback_count,cache_status,cache_kind,input_tokens,output_tokens,total_tokens,input_characters,input_pages,input_audio_milliseconds,cache_read_input_tokens,cache_write_input_tokens,search_requests,search_requests_estimated,usage_estimated,cost,currency,false AS content_stored"
+	return "timestamp,request_id,session_id,trace_id,user_id,team_id,organization_id,roles,tags,api_key_fingerprint AS credential_id,provider,provider_id,provider_endpoint_name,provider_endpoint_type,model,upstream_model,api_type,phase,status,failure_class,latency_ms,first_token_latency_ms,retry_count,fallback_count,cache_status,cache_kind,input_tokens,output_tokens,total_tokens,input_characters,input_pages,input_audio_milliseconds,tool_requests,cache_read_input_tokens,cache_write_input_tokens,search_requests,search_requests_estimated,usage_estimated,cost,currency,false AS content_stored"
 }
 
 func (r *ClickHouseUsageReporter) queryRequestLogs(ctx context.Context, params url.Values) ([]RequestLog, error) {

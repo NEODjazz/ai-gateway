@@ -32,6 +32,7 @@ const maxBillableSearchRequests = 1_000_000
 const maxBillableInputCharacters = 100_000_000
 const maxBillableInputPages = 1_000_000
 const maxBillableInputAudioMilliseconds = 7 * 24 * 60 * 60 * 1000
+const maxBillableToolRequests = 1_000_000
 
 func NewBillingModule(required bool) BillingModule {
 	settings := SettingsFromEnv()
@@ -145,6 +146,9 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	if req.InputAudioMilliseconds < 0 || req.InputAudioMilliseconds > maxBillableInputAudioMilliseconds {
 		return errors.New("input_audio_milliseconds is outside the supported range")
 	}
+	if req.ToolRequests < 0 || req.ToolRequests > maxBillableToolRequests {
+		return errors.New("tool_requests is outside the supported range")
+	}
 	phase := req.BillingPhase
 	if phase == "" {
 		if req.PostResponse || req.Response != nil || req.ResponsesResponse != nil {
@@ -186,6 +190,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	req.Metadata["billing.input_characters"] = strconv.Itoa(inputCharacters)
 	req.Metadata["billing.input_pages"] = strconv.Itoa(inputPages)
 	req.Metadata["billing.input_audio_milliseconds"] = strconv.Itoa(inputAudioMilliseconds)
+	req.Metadata["billing.tool_requests"] = strconv.Itoa(req.ToolRequests)
 	req.Metadata["billing.search_requests_estimated"] = strconv.FormatBool(req.SearchRequestsEstimated)
 
 	eventOutputTokens, eventTotalTokens := outputTokens, totalTokens
@@ -223,7 +228,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 			if err != nil {
 				cancelEvent := event
 				cancelEvent.Phase = "cancel"
-				cancelEvent.InputTokens, cancelEvent.OutputTokens, cancelEvent.TotalTokens, cancelEvent.InputCharacters, cancelEvent.InputPages, cancelEvent.InputAudioMilliseconds, cancelEvent.SearchRequests, cancelEvent.Cost = 0, 0, 0, 0, 0, 0, 0, 0
+				cancelEvent.InputTokens, cancelEvent.OutputTokens, cancelEvent.TotalTokens, cancelEvent.InputCharacters, cancelEvent.InputPages, cancelEvent.InputAudioMilliseconds, cancelEvent.ToolRequests, cancelEvent.SearchRequests, cancelEvent.Cost = 0, 0, 0, 0, 0, 0, 0, 0, 0
 				_ = m.policy.Apply(ctx, &cancelEvent)
 				return err
 			}
@@ -236,7 +241,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 			return errors.New("invalid billing phase: " + phase)
 		}
 		if phase == "cancel" {
-			event.InputTokens, event.OutputTokens, event.TotalTokens, event.InputCharacters, event.InputPages, event.InputAudioMilliseconds, event.SearchRequests, event.Cost = 0, 0, 0, 0, 0, 0, 0, 0
+			event.InputTokens, event.OutputTokens, event.TotalTokens, event.InputCharacters, event.InputPages, event.InputAudioMilliseconds, event.ToolRequests, event.SearchRequests, event.Cost = 0, 0, 0, 0, 0, 0, 0, 0, 0
 		}
 		created, err := m.durable.Enqueue(ctx, event)
 		if err != nil {
@@ -269,6 +274,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 		event.InputCharacters = 0
 		event.InputPages = 0
 		event.InputAudioMilliseconds = 0
+		event.ToolRequests = 0
 		event.Cost = 0
 	}
 	if err := m.writer.WriteUsageEvent(ctx, event); err != nil {
@@ -336,6 +342,7 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		InputCharacters:         inputCharacters,
 		InputPages:              inputPages,
 		InputAudioMilliseconds:  inputAudioMilliseconds,
+		ToolRequests:            req.ToolRequests,
 		InputTokens:             inputTokens,
 		OutputTokens:            outputTokens,
 		TotalTokens:             totalTokens,
@@ -570,7 +577,7 @@ func (m BillingModule) handleDurableBudget(ctx context.Context, req *RequestCont
 		created = tag.RowsAffected() == 1
 	} else {
 		if event.Phase == "cancel" {
-			event.InputTokens, event.OutputTokens, event.TotalTokens, event.InputCharacters, event.InputPages, event.InputAudioMilliseconds, event.SearchRequests, event.Cost = 0, 0, 0, 0, 0, 0, 0, 0
+			event.InputTokens, event.OutputTokens, event.TotalTokens, event.InputCharacters, event.InputPages, event.InputAudioMilliseconds, event.ToolRequests, event.SearchRequests, event.Cost = 0, 0, 0, 0, 0, 0, 0, 0, 0
 		}
 		created, err = repository.enqueueTx(ctx, tx, *event)
 		if err != nil {

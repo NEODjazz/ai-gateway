@@ -69,6 +69,7 @@ type RequestLog struct {
 	InputCharacters         uint32   `json:"input_characters"`
 	InputPages              uint32   `json:"input_pages"`
 	InputAudioMilliseconds  uint32   `json:"input_audio_milliseconds"`
+	ToolRequests            uint32   `json:"tool_requests"`
 	CacheReadInputTokens    uint32   `json:"cache_read_input_tokens"`
 	CacheWriteInputTokens   uint32   `json:"cache_write_input_tokens"`
 	SearchRequests          uint32   `json:"search_requests"`
@@ -102,6 +103,7 @@ type RequestLogGroup struct {
 	InputCharacters        uint64   `json:"input_characters"`
 	InputPages             uint64   `json:"input_pages"`
 	InputAudioMilliseconds uint64   `json:"input_audio_milliseconds"`
+	ToolRequests           uint64   `json:"tool_requests"`
 	CacheReadInputTokens   uint64   `json:"cache_read_input_tokens"`
 	CacheWriteInputTokens  uint64   `json:"cache_write_input_tokens"`
 	SearchRequests         uint64   `json:"search_requests"`

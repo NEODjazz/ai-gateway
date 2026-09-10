@@ -58,6 +58,7 @@ func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 		InputCharacters:        4096,
 		InputPages:             4,
 		InputAudioMilliseconds: 90000,
+		ToolRequests:           3,
 		CacheReadInputTokens:   7,
 		CacheWriteInputTokens:  3,
 		CatalogVersion:         "catalog-v1",
@@ -82,7 +83,7 @@ func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 	if receivedEvent.Timestamp != "2026-06-25T10:30:00Z" {
 		t.Fatalf("unexpected timestamp: %+v", receivedEvent)
 	}
-	if receivedEvent.TeamID != "team-1" || len(receivedEvent.Tags) != 2 || receivedEvent.Tags[0] != "production" || receivedEvent.CacheReadInputTokens != 7 || receivedEvent.CacheWriteInputTokens != 3 || receivedEvent.CatalogVersion != "catalog-v1" || receivedEvent.PricingKey != "ollama/test-model" || receivedEvent.SearchRequests != 2 || receivedEvent.SearchCostPer1K != 10 || receivedEvent.InputCharacters != 4096 || receivedEvent.CharacterCostPer1M != 15 || receivedEvent.InputPages != 4 || receivedEvent.PageCostPer1K != 100 || receivedEvent.InputAudioMilliseconds != 90000 || receivedEvent.AudioCostPerMinute != 0.12 {
+	if receivedEvent.TeamID != "team-1" || len(receivedEvent.Tags) != 2 || receivedEvent.Tags[0] != "production" || receivedEvent.CacheReadInputTokens != 7 || receivedEvent.CacheWriteInputTokens != 3 || receivedEvent.CatalogVersion != "catalog-v1" || receivedEvent.PricingKey != "ollama/test-model" || receivedEvent.SearchRequests != 2 || receivedEvent.SearchCostPer1K != 10 || receivedEvent.InputCharacters != 4096 || receivedEvent.CharacterCostPer1M != 15 || receivedEvent.InputPages != 4 || receivedEvent.PageCostPer1K != 100 || receivedEvent.InputAudioMilliseconds != 90000 || receivedEvent.ToolRequests != 3 || receivedEvent.AudioCostPerMinute != 0.12 {
 		t.Fatalf("pricing audit fields were not serialized: %+v", receivedEvent)
 	}
 }

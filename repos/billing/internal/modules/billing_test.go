@@ -327,11 +327,11 @@ func TestBillingFailedWriteCanBeRetried(t *testing.T) {
 func TestBillingCancelHasNoUsageOrCost(t *testing.T) {
 	writer := &recordingUsageWriter{}
 	module := BillingModule{required: true, pricing: PricingConfig{InputPricePer1K: 1, OutputPricePer1K: 1}, writer: writer, policy: NoopPolicyChecker{}, lifecycle: NewLifecycleStore()}
-	req := RequestContext{RequestID: "req-cancel", BillingPhase: "cancel", Usage: &openai.Usage{PromptTokens: 10, TotalTokens: 10}}
+	req := RequestContext{RequestID: "req-cancel", BillingPhase: "cancel", ToolRequests: 1, Usage: &openai.Usage{PromptTokens: 10, TotalTokens: 10}}
 	if err := module.Handle(context.Background(), &req); err != nil {
 		t.Fatal(err)
 	}
-	if len(writer.events) != 1 || writer.events[0].Phase != "cancel" || writer.events[0].TotalTokens != 0 || writer.events[0].Cost != 0 {
+	if len(writer.events) != 1 || writer.events[0].Phase != "cancel" || writer.events[0].TotalTokens != 0 || writer.events[0].ToolRequests != 0 || writer.events[0].Cost != 0 {
 		t.Fatalf("unexpected cancel event: %+v", writer.events)
 	}
 }
@@ -435,6 +435,30 @@ func TestBillingRejectsInvalidInputAudioDurations(t *testing.T) {
 		req := RequestContext{RequestID: "invalid-audio-duration", InputAudioMilliseconds: duration}
 		if err := module.Handle(context.Background(), &req); err == nil {
 			t.Fatalf("accepted input_audio_milliseconds=%d", duration)
+		}
+	}
+}
+
+func TestBillingPersistsBoundedToolRequestsWithoutInventingCost(t *testing.T) {
+	repository := &fakeDurableRepository{seen: map[string]bool{}}
+	module := BillingModule{
+		required: true, pricing: PricingConfig{Currency: "USD"}, policy: NoopPolicyChecker{},
+		lifecycle: NewLifecycleStore(), durable: repository,
+	}
+	req := RequestContext{RequestID: "mcp-call", BillingPhase: "commit", PostResponse: true, APIType: "mcp_tools_call", ToolRequests: 1}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if len(repository.events) != 1 || repository.events[0].ToolRequests != 1 || repository.events[0].APIType != "mcp_tools_call" || repository.events[0].Cost != 0 {
+		t.Fatalf("unexpected durable tool event: %+v", repository.events)
+	}
+	if req.Metadata["billing.tool_requests"] != "1" {
+		t.Fatalf("tool request metadata was not preserved: %+v", req.Metadata)
+	}
+	for _, count := range []int{-1, maxBillableToolRequests + 1} {
+		invalid := RequestContext{RequestID: "invalid-tool-count", ToolRequests: count}
+		if err := module.Handle(context.Background(), &invalid); err == nil {
+			t.Fatalf("accepted tool_requests=%d", count)
 		}
 	}
 }

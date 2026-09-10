@@ -83,6 +83,7 @@ func run() error {
 			InputCharacters:         request.InputCharacters,
 			InputPages:              request.InputPages,
 			InputAudioMilliseconds:  request.InputAudioMilliseconds,
+			ToolRequests:            request.ToolRequests,
 			CacheReadInputTokens:    request.CacheReadInputTokens,
 			CacheWriteInputTokens:   request.CacheWriteInputTokens,
 			SearchRequests:          request.SearchRequests,
@@ -209,6 +210,7 @@ type usageRequest struct {
 	InputCharacters         int      `json:"input_characters"`
 	InputPages              int      `json:"input_pages"`
 	InputAudioMilliseconds  int      `json:"input_audio_milliseconds"`
+	ToolRequests            int      `json:"tool_requests"`
 	InputTokens             int      `json:"input_tokens"`
 	OutputTokens            int      `json:"output_tokens"`
 	TotalTokens             int      `json:"total_tokens"`

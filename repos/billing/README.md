@@ -164,6 +164,12 @@ price for the request lifecycle. Apply PostgreSQL migration
 `013_billing_audio_duration.sql` and ClickHouse migration
 `012_usage_audio_duration.sql` before deploying this version.
 
+External tool execution carries an exact `tool_requests` counter independently
+from token, search, document, and audio dimensions. It is retained through the
+durable outbox and exposed in request logs and usage aggregates. No cost is
+inferred without an explicit tool tariff. Apply ClickHouse migration
+`013_usage_tool_requests.sql` before deploying this version.
+
 `DELETE` is a soft disable. Summary includes committed usage and unexpired
 reservations, using the same period, scope, and currency calculation as
 enforcement. `expand=summaries` calculates every policy in one PostgreSQL query
@@ -206,6 +212,7 @@ migrations/clickhouse/009_usage_server_tools.sql
 migrations/clickhouse/010_usage_characters.sql
 migrations/clickhouse/011_usage_pages.sql
 migrations/clickhouse/012_usage_audio_duration.sql
+migrations/clickhouse/013_usage_tool_requests.sql
 ```
 
 Final usage events retain normalized provider/deployment identity, organization,

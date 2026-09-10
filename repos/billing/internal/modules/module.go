@@ -18,6 +18,7 @@ type RequestContext struct {
 	InputCharacters         int                            `json:"input_characters,omitempty"`
 	InputPages              int                            `json:"input_pages,omitempty"`
 	InputAudioMilliseconds  int                            `json:"input_audio_milliseconds,omitempty"`
+	ToolRequests            int                            `json:"tool_requests,omitempty"`
 	CacheReadInputTokens    int                            `json:"cache_read_input_tokens,omitempty"`
 	CacheWriteInputTokens   int                            `json:"cache_write_input_tokens,omitempty"`
 	SearchRequests          int                            `json:"search_requests,omitempty"`
@@ -73,6 +74,7 @@ type BillingEvent struct {
 	InputCharacters         int      `json:"input_characters"`
 	InputPages              int      `json:"input_pages"`
 	InputAudioMilliseconds  int      `json:"input_audio_milliseconds"`
+	ToolRequests            int      `json:"tool_requests"`
 	InputTokens             int      `json:"input_tokens"`
 	OutputTokens            int      `json:"output_tokens"`
 	TotalTokens             int      `json:"total_tokens"`

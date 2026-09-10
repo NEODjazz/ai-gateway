@@ -18,7 +18,7 @@ async function selectUsageWindow(name: string) {
 
 describe("operational pages", () => {
   it("renders usage totals and changes the bounded window", async () => {
-    const aggregate = { currency: "USD", requests: 4, errors: 0, input_tokens: 8, output_tokens: 12, total_tokens: 20, cache_read_input_tokens: 6, cache_write_input_tokens: 2, search_requests: 3, cost: 0.00265, avg_latency_ms: 12, cache_hits: 1, cost_per_request: 0.0006625 };
+    const aggregate = { currency: "USD", requests: 4, errors: 0, input_tokens: 8, output_tokens: 12, total_tokens: 20, tool_requests: 3, cache_read_input_tokens: 6, cache_write_input_tokens: 2, search_requests: 3, cost: 0.00265, avg_latency_ms: 12, cache_hits: 1, cost_per_request: 0.0006625 };
     const response = {
       totals: [aggregate], daily: [{ ...aggregate, date: "2026-08-28" }], by_model: [{ ...aggregate, name: "gpt" }],
       by_upstream_model: [{ ...aggregate, name: "gpt-5.6-2026-07-09" }], by_provider: [{ ...aggregate, name: "azure-open-ai" }],
