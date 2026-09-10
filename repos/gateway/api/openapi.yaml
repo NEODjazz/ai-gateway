@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.188
+  version: 0.1.189
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -23,6 +23,7 @@ tags:
   - name: Tags
   - name: MCP
   - name: Files
+  - name: Vector stores
   - name: Skills
   - name: Projects and access
   - name: Caching and logging
@@ -41,7 +42,7 @@ paths:
       operationId: bedrockConverse
       tags: [Inference]
       summary: Create a synchronous Converse response
-      description: Uses the gateway authentication, model and tool authorization, quotas, content policy, routing, and billing pipeline. Supports text, function tool use and result blocks, system text, and standard inference limits. Unsupported native fields are rejected before provider execution.
+      description: Uses the gateway authentication, model and tool authorization, quotas, content policy, routing, and billing pipeline. Supports text, bounded base64 user images, function tool use and result blocks, system text, and standard inference limits. Unsupported native fields are rejected before provider execution.
       parameters:
         - in: path
           name: model
@@ -3363,10 +3364,23 @@ components:
       additionalProperties: false
       oneOf:
         - required: [text]
+        - required: [image]
         - required: [toolUse]
         - required: [toolResult]
       properties:
         text: {type: string, minLength: 1}
+        image:
+          type: object
+          additionalProperties: false
+          required: [format, source]
+          properties:
+            format: {type: string, enum: [jpeg, png, gif, webp]}
+            source:
+              type: object
+              additionalProperties: false
+              required: [bytes]
+              properties:
+                bytes: {type: string, minLength: 4, maxLength: 11184812, pattern: '^[A-Za-z0-9+/]+={0,2}$'}
         toolUse:
           type: object
           additionalProperties: false

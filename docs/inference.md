@@ -709,6 +709,14 @@ other native counters. The public gateway flow still performs policy and quota
 admission without generation billing.
 Protocol: [Bedrock CountTokens](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_CountTokens.html).
 
+The synchronous Converse ingress also accepts native `image` content blocks in
+user messages for JPEG, PNG, GIF and WebP. Image bytes are decoded, signature
+checked and bounded by the shared per-image, total-image and request limits before
+authorization reaches a provider. The normalized image remains a media block for
+DLP/AV projection and requires a vision-capable deployment; the native adapter
+then reconstructs the original ordered Converse image block. Images in assistant,
+system and tool-result content, remote URLs and document blocks are rejected.
+
 ## Native GenerateContent API
 
 POST `/v1beta/models/{model}:generateContent` returns native JSON; POST

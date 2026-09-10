@@ -1,6 +1,9 @@
 package openai
 
-import "testing"
+import (
+	"encoding/base64"
+	"testing"
+)
 
 func stringPointer(value string) *string { return &value }
 
@@ -26,6 +29,31 @@ func TestBedrockConverseRejectsAmbiguousContent(t *testing.T) {
 	request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("hello"), ToolUse: &BedrockToolUse{ID: "call", Name: "tool", Input: map[string]any{}}}}}}}
 	if _, err := request.ChatRequest("model", ""); err == nil {
 		t.Fatal("ambiguous content accepted")
+	}
+}
+
+func TestBedrockConverseMapsBoundedUserImages(t *testing.T) {
+	data := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nimage"))
+	request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{
+		{Text: stringPointer("describe")},
+		{Image: &BedrockImage{Format: "png", Source: BedrockImageSource{Bytes: data}}},
+	}}}}
+	chat, err := request.ChatRequest("model", "bedrock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachments, err := ChatImageAttachments(chat.Messages)
+	if err != nil || len(attachments) != 1 || attachments[0].MediaType != "image/png" || len(chat.Messages[0].Content.([]any)) != 2 {
+		t.Fatalf("chat=%+v attachments=%+v err=%v", chat, attachments, err)
+	}
+	request.Messages[0].Role = "assistant"
+	if _, err := request.ChatRequest("model", "bedrock"); err == nil {
+		t.Fatal("assistant image accepted")
+	}
+	request.Messages[0].Role = "user"
+	request.Messages[0].Content[1].Image.Source.Bytes = base64.StdEncoding.EncodeToString([]byte("not a png"))
+	if _, err := request.ChatRequest("model", "bedrock"); err == nil {
+		t.Fatal("invalid image signature accepted")
 	}
 }
 

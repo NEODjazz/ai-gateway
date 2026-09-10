@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,6 +47,33 @@ func TestBedrockConverseMapsMessagesToolsAndUsage(t *testing.T) {
 		Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object"}}}},
 	})
 	if err != nil || response.Usage.TotalTokens != 13 || response.Choices[0].FinishReason != "tool_calls" || openai.ContentText(response.Choices[0].Message.Content) != "checking " || response.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"city":"Paris"}` {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestBedrockConverseForwardsUserImageInOrder(t *testing.T) {
+	data := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nimage"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []bedrockMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		content := body.Messages[0].Content
+		if len(content) != 3 || content[0].Text != "before" || content[1].Image == nil || content[1].Image.Format != "png" || content[1].Image.Source.Bytes != data || content[2].Text != "after" {
+			t.Fatalf("content=%+v", content)
+		}
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","usage":{"inputTokens":5,"outputTokens":1,"totalTokens":6}}`)
+	}))
+	defer server.Close()
+	content := []any{
+		map[string]any{"type": "text", "text": "before"},
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64," + data}},
+		map[string]any{"type": "text", "text": "after"},
+	}
+	response, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: content}}})
+	if err != nil || response.Usage.TotalTokens != 6 {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }
@@ -124,5 +152,20 @@ func TestBedrockRejectsInconsistentUsage(t *testing.T) {
 	}{InputTokens: 2, OutputTokens: 3, TotalTokens: 4}
 	if _, err := bedrockToChat(response, "model"); err == nil {
 		t.Fatal("inconsistent usage accepted")
+	}
+}
+
+func TestBedrockRejectsUnsupportedOutputImage(t *testing.T) {
+	response := bedrockResponse{StopReason: "end_turn"}
+	image := bedrockImage{Format: "png"}
+	image.Source.Bytes = "data"
+	response.Output.Message.Content = []bedrockContentBlock{{Image: &image}}
+	response.Usage = &struct {
+		InputTokens  int `json:"inputTokens"`
+		OutputTokens int `json:"outputTokens"`
+		TotalTokens  int `json:"totalTokens"`
+	}{InputTokens: 2, OutputTokens: 1, TotalTokens: 3}
+	if _, err := bedrockToChat(response, "model"); err == nil {
+		t.Fatal("unsupported output image was silently discarded")
 	}
 }

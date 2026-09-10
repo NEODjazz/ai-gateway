@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 )
 
@@ -37,6 +39,19 @@ func TestBedrockConverseUsesChatPolicyRoutingAndBilling(t *testing.T) {
 	}
 	if calls.Load() != 1 || recorder.calls != 1 || recorder.usage.TotalTokens != 12 {
 		t.Fatalf("calls=%d billing_calls=%d usage=%+v", calls.Load(), recorder.calls, recorder.usage)
+	}
+}
+
+func TestBedrockConverseAcceptsBoundedNativeImage(t *testing.T) {
+	upstream := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	data := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nimage"))
+	body := `{"messages":[{"role":"user","content":[{"text":"describe"},{"image":{"format":"png","source":{"bytes":"` + data + `"}}}]}]}`
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/model/converse", strings.NewReader(body)))
+	attachments, err := openai.ChatImageAttachments(upstream.request.Request.Messages)
+	if response.Code != http.StatusOK || err != nil || len(attachments) != 1 || attachments[0].MediaType != "image/png" {
+		t.Fatalf("status=%d body=%s attachments=%+v err=%v", response.Code, response.Body.String(), attachments, err)
 	}
 }
 

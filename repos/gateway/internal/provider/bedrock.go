@@ -29,8 +29,16 @@ type Bedrock struct {
 
 type bedrockContentBlock struct {
 	Text       string             `json:"text,omitempty"`
+	Image      *bedrockImage      `json:"image,omitempty"`
 	ToolUse    *bedrockToolUse    `json:"toolUse,omitempty"`
 	ToolResult *bedrockToolResult `json:"toolResult,omitempty"`
+}
+
+type bedrockImage struct {
+	Format string `json:"format"`
+	Source struct {
+		Bytes string `json:"bytes"`
+	} `json:"source"`
 }
 
 type bedrockToolUse struct {
@@ -106,6 +114,7 @@ func NewBedrockWithAuth(baseURL, credential, authType, region string) Bedrock {
 
 func (Bedrock) SupportsResponses() bool { return false }
 func (Bedrock) SupportsTools() bool     { return true }
+func (Bedrock) SupportsVision() bool    { return true }
 
 func bedrockInvalid(param string) error {
 	return &Error{Class: FailureClientRequest, Provider: "bedrock", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: param, Err: fmt.Errorf("unsupported or invalid %s for Bedrock adapter", param)}
@@ -142,11 +151,8 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 	if err := rejectChatMessageAudio("bedrock", request.Messages); err != nil {
 		return result, err
 	}
-	attachments, err := openai.ChatImageAttachments(request.Messages)
-	if err != nil {
+	if _, err := openai.ChatImageAttachments(request.Messages); err != nil {
 		return result, err
-	} else if len(attachments) > 0 {
-		return result, bedrockInvalid("messages.content")
 	}
 	if request.MaxTokens != nil && request.MaxCompletionTokens != nil {
 		return result, bedrockInvalid("max_tokens")
@@ -203,9 +209,11 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 			result.System = append(result.System, bedrockContentBlock{Text: text})
 		case "user", "assistant":
 			content := make([]bedrockContentBlock, 0, 1+len(message.ToolCalls))
-			if text != "" {
-				content = append(content, bedrockContentBlock{Text: text})
+			messageContent, err := bedrockInputContent(message.Content)
+			if err != nil {
+				return result, err
 			}
+			content = append(content, messageContent...)
 			if message.Role == "user" && len(message.ToolCalls) > 0 || message.ToolCallID != "" {
 				return result, bedrockInvalid("messages")
 			}
@@ -253,6 +261,57 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 				spec.InputSchema.JSON = map[string]any{"type": "object"}
 			}
 			result.ToolConfig.Tools = append(result.ToolConfig.Tools, bedrockTool{Spec: spec})
+		}
+	}
+	return result, nil
+}
+
+func bedrockInputContent(value any) ([]bedrockContentBlock, error) {
+	if value == nil {
+		return nil, nil
+	}
+	if text, ok := value.(string); ok {
+		if text == "" {
+			return nil, nil
+		}
+		return []bedrockContentBlock{{Text: text}}, nil
+	}
+	parts, ok := value.([]any)
+	if !ok {
+		return nil, bedrockInvalid("messages.content")
+	}
+	result := make([]bedrockContentBlock, 0, len(parts))
+	for _, value := range parts {
+		part, ok := value.(map[string]any)
+		if !ok {
+			return nil, bedrockInvalid("messages.content")
+		}
+		typeName, _ := part["type"].(string)
+		switch typeName {
+		case "text":
+			text, ok := part["text"].(string)
+			if !ok || text == "" || len(part) != 2 {
+				return nil, bedrockInvalid("messages.content")
+			}
+			result = append(result, bedrockContentBlock{Text: text})
+		case "image_url":
+			imageValue, ok := part["image_url"].(map[string]any)
+			if !ok || len(part) != 2 || len(imageValue) != 1 {
+				return nil, bedrockInvalid("messages.content")
+			}
+			dataURL, ok := imageValue["url"].(string)
+			if !ok {
+				return nil, bedrockInvalid("messages.content")
+			}
+			attachment, err := openai.ParseDataImageURL(dataURL)
+			if err != nil {
+				return nil, err
+			}
+			image := bedrockImage{Format: strings.TrimPrefix(attachment.MediaType, "image/")}
+			image.Source.Bytes = attachment.Data
+			result = append(result, bedrockContentBlock{Image: &image})
+		default:
+			return nil, bedrockInvalid("messages.content")
 		}
 	}
 	return result, nil
@@ -337,15 +396,21 @@ func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletio
 	message := openai.Message{Role: "assistant"}
 	var texts []string
 	for _, block := range response.Output.Message.Content {
+		fields := 0
 		if block.Text != "" {
+			fields++
 			texts = append(texts, block.Text)
 		}
 		if block.ToolUse != nil {
+			fields++
 			arguments, err := json.Marshal(block.ToolUse.Input)
 			if err != nil || block.ToolUse.ID == "" || block.ToolUse.Name == "" {
 				return result, errors.New("invalid Bedrock tool use")
 			}
 			message.ToolCalls = append(message.ToolCalls, openai.ToolCall{ID: block.ToolUse.ID, Type: "function", Function: openai.FunctionCall{Name: block.ToolUse.Name, Arguments: string(arguments)}})
+		}
+		if block.Image != nil || block.ToolResult != nil || fields != 1 {
+			return result, errors.New("invalid Bedrock output content block")
 		}
 	}
 	if len(texts) > 0 {

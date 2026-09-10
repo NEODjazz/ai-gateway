@@ -278,7 +278,7 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Contains(profilesByType["mistral"].Operations, "audio_transcription") || !slices.Contains(profilesByType["mistral"].Capabilities, "audio_transcription") {
 		t.Fatalf("mistral profile is missing native transcription: %+v", profilesByType["mistral"])
 	}
-	if !slices.Equal(profilesByType["bedrock"].Operations, []string{"chat", "count_tokens"}) || !slices.Equal(profilesByType["bedrock"].Capabilities, []string{"chat", "tools"}) || !slices.Equal(profilesByType["bedrock"].AuthTypes, []string{"bearer", "aws_sigv4"}) {
+	if !slices.Equal(profilesByType["bedrock"].Operations, []string{"chat", "count_tokens"}) || !slices.Equal(profilesByType["bedrock"].Capabilities, []string{"chat", "tools", "vision"}) || !slices.Equal(profilesByType["bedrock"].AuthTypes, []string{"bearer", "aws_sigv4"}) {
 		t.Fatalf("bedrock profile=%+v", profilesByType["bedrock"])
 	}
 	if !slices.Contains(profilesByType["anthropic"].Operations, "count_tokens") || !slices.Contains(profilesByType["gemini"].Operations, "count_tokens") || !slices.Equal(profilesByType["gemini"].AuthTypes, []string{"api_key", "gcp_adc"}) || !slices.Equal(profilesByType["azure-openai"].AuthTypes, []string{"api_key", "entra"}) {

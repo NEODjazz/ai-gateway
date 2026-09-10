@@ -20,8 +20,18 @@ type BedrockMessage struct {
 
 type BedrockContentBlock struct {
 	Text       *string            `json:"text,omitempty"`
+	Image      *BedrockImage      `json:"image,omitempty"`
 	ToolUse    *BedrockToolUse    `json:"toolUse,omitempty"`
 	ToolResult *BedrockToolResult `json:"toolResult,omitempty"`
+}
+
+type BedrockImage struct {
+	Format string             `json:"format"`
+	Source BedrockImageSource `json:"source"`
+}
+
+type BedrockImageSource struct {
+	Bytes string `json:"bytes"`
 }
 
 type BedrockToolUse struct {
@@ -72,7 +82,7 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		return request, errors.New("model and messages are required")
 	}
 	for _, block := range r.System {
-		if block.Text == nil || strings.TrimSpace(*block.Text) == "" || block.ToolUse != nil || block.ToolResult != nil {
+		if block.Text == nil || strings.TrimSpace(*block.Text) == "" || block.Image != nil || block.ToolUse != nil || block.ToolResult != nil {
 			return request, errors.New("system supports non-empty text blocks only")
 		}
 		request.Messages = append(request.Messages, Message{Role: "system", Content: *block.Text})
@@ -82,9 +92,10 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		if (message.Role != "user" && message.Role != "assistant") || len(message.Content) == 0 {
 			return request, errors.New("messages require user or assistant role and content")
 		}
-		textBlocks, toolUseBlocks, toolResultBlocks := 0, 0, 0
+		textBlocks, imageBlocks, toolUseBlocks, toolResultBlocks := 0, 0, 0, 0
 		var texts []string
 		chat := Message{Role: message.Role}
+		var content []any
 		for _, block := range message.Content {
 			fields := 0
 			if block.Text != nil {
@@ -94,6 +105,23 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 					return request, errors.New("text blocks must be non-empty")
 				}
 				texts = append(texts, *block.Text)
+				content = append(content, map[string]any{"type": "text", "text": *block.Text})
+			}
+			if block.Image != nil {
+				fields++
+				imageBlocks++
+				if message.Role != "user" {
+					return request, errors.New("images are accepted in user messages only")
+				}
+				mediaType := bedrockImageMediaType(block.Image.Format)
+				dataURL := "data:" + mediaType + ";base64," + block.Image.Source.Bytes
+				if mediaType == "" {
+					return request, errors.New("unsupported image format")
+				}
+				if _, err := ParseDataImageURL(dataURL); err != nil {
+					return request, err
+				}
+				content = append(content, map[string]any{"type": "image_url", "image_url": map[string]any{"url": dataURL}})
 			}
 			if block.ToolUse != nil {
 				fields++
@@ -118,23 +146,28 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 			}
 		}
 		if toolResultBlocks > 0 {
-			if message.Role != "user" || toolResultBlocks != 1 || textBlocks != 0 || toolUseBlocks != 0 || len(message.Content) != 1 {
+			if message.Role != "user" || toolResultBlocks != 1 || textBlocks != 0 || imageBlocks != 0 || toolUseBlocks != 0 || len(message.Content) != 1 {
 				return request, errors.New("toolResult must be the only block in a user message")
 			}
 			result := message.Content[0].ToolResult
-			if result.ID == "" || !seenToolUses[result.ID] || len(result.Content) != 1 || result.Content[0].Text == nil || *result.Content[0].Text == "" || result.Content[0].ToolUse != nil || result.Content[0].ToolResult != nil {
+			if result.ID == "" || !seenToolUses[result.ID] || len(result.Content) != 1 || result.Content[0].Text == nil || *result.Content[0].Text == "" || result.Content[0].Image != nil || result.Content[0].ToolUse != nil || result.Content[0].ToolResult != nil {
 				return request, errors.New("invalid toolResult block")
 			}
 			request.Messages = append(request.Messages, Message{Role: "tool", ToolCallID: result.ID, Content: *result.Content[0].Text})
 			continue
 		}
-		if len(texts) > 0 {
+		if imageBlocks > 0 {
+			chat.Content = content
+		} else if len(texts) > 0 {
 			chat.Content = strings.Join(texts, "")
 		}
 		if (message.Role == "user" && len(chat.ToolCalls) > 0) || (chat.Content == nil && len(chat.ToolCalls) == 0) {
 			return request, errors.New("invalid message content")
 		}
 		request.Messages = append(request.Messages, chat)
+	}
+	if _, err := ChatImageAttachments(request.Messages); err != nil {
+		return request, err
 	}
 	if r.ToolConfig != nil {
 		if len(r.ToolConfig.Tools) == 0 {
@@ -151,6 +184,15 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		}
 	}
 	return request, nil
+}
+
+func bedrockImageMediaType(format string) string {
+	switch format {
+	case "jpeg", "png", "gif", "webp":
+		return "image/" + format
+	default:
+		return ""
+	}
 }
 
 type BedrockConverseResponse struct {

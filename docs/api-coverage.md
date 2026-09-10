@@ -50,7 +50,7 @@ availability is not inferred from these tests.
 | MCP | Registry, connector/tool-specific ACL, policy-filtered discovery, Responses passthrough, bounded Streamable HTTP execution with durable PostgreSQL idempotency, fail-closed audit and exact tool-request settlement | Credentialed MCP servers, additional transports and long-lived session reuse |
 | A2A | Not implemented | Agent discovery, task ownership and authenticated execution |
 | Bedrock Invoke | Not implemented | Native protocol, AWS request signing and usage conversion |
-| Bedrock Converse | Synchronous `/model/{model}/converse` through shared authorization, tool policy, quota, retry and exact billing; native Bedrock text/function transport, strict usage validation, separately attributed requests and AWS workload credentials | Event stream and media blocks |
+| Bedrock Converse | Synchronous `/model/{model}/converse` through shared authorization, tool policy, quota, retry and exact billing; native text/function transport, bounded base64 user images with DLP/AV projection, strict usage validation, separately attributed requests and AWS workload credentials | Event stream and document blocks |
 | Containers | Not implemented | Owned lifecycle, expiration and resource accounting |
 | Container files | Not implemented | Owner-scoped file operations and storage limits |
 | Sandbox | Not implemented | Isolated execution, resource quotas and lifecycle |
