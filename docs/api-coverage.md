@@ -21,7 +21,7 @@ availability is not inferred from these tests.
 | --- | --- | --- |
 | Models | Authenticated list and single-model retrieval filtered by credential, access-group and tag policy; hidden and absent models share the same not-found response | Provider-side deletion is intentionally outside the gateway control plane |
 | Chat completions | JSON, tools, structured output, vision input, SSE, generation controls, bounded multi-choice with aggregate reserve; native Cohere v2 text, structured JSON/SSE, generation controls and JSON/SSE function tools/history; native Anthropic web search with citations and actual search usage; domain-allowlisted Anthropic web fetch with citations, content limits and cache exclusion | Additional controls and model-specific policy |
-| Responses | Create, indexed SSE assembly, scoped deployment affinity, function tools, MCP passthrough, stateless reasoning history, native input-token count, owned retrieve/delete/cancel/input-items, generation options and metadata | Durable background lifecycle; remaining provider-specific parameters and counters |
+| Responses | Create, indexed SSE assembly, scoped deployment affinity, function tools, MCP passthrough, stateless reasoning history, native input-token count, owned retrieve/delete/cancel/input-items, durable background settlement, generation options and metadata | Remaining provider-specific parameters and counters |
 | Response compaction | Native compact contract, bounded opaque output, model authorization and usage settlement | Additional provider-native compact request options as demand is confirmed |
 | Embeddings | String/list and bounded token-ID input, exact token-ID accounting, float/base64 output, compatible adapters and native Gemini, Ollama, Cohere v2 and Voyage adapters | Additional provider compatibility |
 | Rerank | Query/documents, compatible adapter, native Cohere v2 and Voyage adapters; exact provider token usage | Additional provider-specific request and usage matrices |
@@ -54,7 +54,7 @@ availability is not inferred from these tests.
 | Containers | Not implemented | Owned lifecycle, expiration and resource accounting |
 | Container files | Not implemented | Owner-scoped file operations and storage limits |
 | Sandbox | Not implemented | Isolated execution, resource quotas and lifecycle |
-| Vector store creation | Not implemented | Owned store lifecycle and storage accounting |
+| Vector store creation | Durable PostgreSQL create/list/get/update/delete lifecycle with credential-and-user isolation, expiry policy, cursor pagination, RPM admission and atomic per-owner cardinality quotas | File ingestion, storage-byte accounting and search are separate lifecycle increments |
 | Vector store files | Not implemented | Durable ingestion jobs, file ownership and indexing failures |
 | Vector store search | Not implemented | Retrieval authorization, filters and usage accounting |
 | RAG ingestion | Not implemented | Durable document ingestion and index ownership |

@@ -5,6 +5,28 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  018_gateway_vector_stores.sql: |
+    CREATE TABLE IF NOT EXISTS gateway_vector_stores (
+        id TEXT PRIMARY KEY,
+        owner_key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        expires_after_days INTEGER NOT NULL DEFAULT 0 CHECK (expires_after_days BETWEEN 0 AND 365),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_active_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (length(id) BETWEEN 1 AND 128),
+        CHECK (length(owner_key) BETWEEN 1 AND 256),
+        CHECK (char_length(name) BETWEEN 1 AND 256),
+        CHECK (jsonb_typeof(metadata) = 'object'),
+        CHECK ((expires_after_days = 0 AND expires_at IS NULL)
+            OR (expires_after_days > 0 AND expires_at IS NOT NULL))
+    );
+    CREATE INDEX IF NOT EXISTS gateway_vector_stores_owner_created_idx
+        ON gateway_vector_stores (owner_key, created_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS gateway_vector_stores_expiry_idx
+        ON gateway_vector_stores (expires_at) WHERE expires_at IS NOT NULL;
   017_gateway_async_jobs.sql: |
     CREATE TABLE IF NOT EXISTS gateway_async_jobs (
         kind TEXT NOT NULL,

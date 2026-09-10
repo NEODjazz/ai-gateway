@@ -84,6 +84,8 @@ spec:
               value: {{ printf "%.0f" (float64 .Values.gateway.files.maxBytes) | quote }}
             - name: FILE_OWNER_QUOTA_BYTES
               value: {{ printf "%.0f" (float64 .Values.gateway.files.ownerQuotaBytes) | quote }}
+            - name: VECTOR_STORE_OWNER_QUOTA
+              value: {{ .Values.gateway.vectorStores.ownerQuota | quote }}
             - name: MODEL_CATALOG_JSON
               valueFrom:
                 configMapKeyRef:

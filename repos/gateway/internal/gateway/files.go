@@ -185,11 +185,15 @@ func (h Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) authorizeFileOperation(w http.ResponseWriter, r *http.Request) (modules.RequestContext, bool) {
+	return h.authorizeOwnedStorageOperation(w, r, "files")
+}
+
+func (h Handler) authorizeOwnedStorageOperation(w http.ResponseWriter, r *http.Request, apiType string) (modules.RequestContext, bool) {
 	req := modules.RequestContext{
 		APIKey:    bearerToken(r.Header.Get("Authorization")),
 		RequestID: executionID(w),
 		SessionID: sessionID(r),
-		Metadata:  map[string]string{"gateway.api_type": "files"},
+		Metadata:  map[string]string{"gateway.api_type": apiType},
 	}
 	if err := h.pipeline.RunAuthentication(r.Context(), &req); err != nil {
 		if errors.Is(err, modules.ErrUnauthorized) {

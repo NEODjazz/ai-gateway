@@ -20,38 +20,41 @@ import (
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 	"ai-gateway-gateway/internal/skillstate"
+	"ai-gateway-gateway/internal/vectorstate"
 )
 
 type Handler struct {
-	pipeline      modules.Pipeline
-	provider      provider.Provider
-	rateLimits    RateLimitStore
-	metrics       *Metrics
-	ready         func(context.Context) error
-	management    ManagementClient
-	directory     IdentityDirectoryClient
-	organizations OrganizationDirectoryClient
-	dlp           modules.Module
-	av            modules.Module
-	guardrails    *GuardrailMonitor
-	cacheConfig   CacheRuntimeConfig
-	logging       *LoggingRegistry
-	agents        *AgentRegistry
-	mcp           *MCPRegistry
-	mcpRuntime    MCPRuntimeFactory
-	mcpCalls      mcpstate.Store
-	files         filestate.Store
-	fileConfig    FileRuntimeConfig
-	skills        skillstate.Store
-	access        *AccessRegistry
-	budgets       BudgetManagementClient
-	usage         UsageManagementClient
-	requestLogs   RequestLogClient
-	models        *modelcatalog.Registry
-	audit         AuditClient
-	apiDocs       apiDocsConfig
-	adminUI       bool
-	adminState    *AdminStateRuntime
+	pipeline          modules.Pipeline
+	provider          provider.Provider
+	rateLimits        RateLimitStore
+	metrics           *Metrics
+	ready             func(context.Context) error
+	management        ManagementClient
+	directory         IdentityDirectoryClient
+	organizations     OrganizationDirectoryClient
+	dlp               modules.Module
+	av                modules.Module
+	guardrails        *GuardrailMonitor
+	cacheConfig       CacheRuntimeConfig
+	logging           *LoggingRegistry
+	agents            *AgentRegistry
+	mcp               *MCPRegistry
+	mcpRuntime        MCPRuntimeFactory
+	mcpCalls          mcpstate.Store
+	files             filestate.Store
+	fileConfig        FileRuntimeConfig
+	skills            skillstate.Store
+	vectorStores      vectorstate.Store
+	vectorStoreConfig VectorStoreRuntimeConfig
+	access            *AccessRegistry
+	budgets           BudgetManagementClient
+	usage             UsageManagementClient
+	requestLogs       RequestLogClient
+	models            *modelcatalog.Registry
+	audit             AuditClient
+	apiDocs           apiDocsConfig
+	adminUI           bool
+	adminState        *AdminStateRuntime
 }
 
 func (h Handler) WithAdminState(runtime *AdminStateRuntime) Handler {

@@ -47,6 +47,9 @@ gateway:
     # Files are durable only when controlPlane.postgresDsn is configured.
     maxBytes: 33554432
     ownerQuotaBytes: 1073741824
+  vectorStores:
+    # Maximum durable stores per credential-and-user owner.
+    ownerQuota: 1000
   exactCache:
     # Disabled by default; bundled cache is process-local and tenant-scoped.
     ttlSeconds: 0

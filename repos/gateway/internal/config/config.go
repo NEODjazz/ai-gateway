@@ -17,24 +17,29 @@ import (
 )
 
 type Config struct {
-	HTTP       HTTPConfig
-	Cache      CacheConfig
-	Redis      RedisConfig
-	Modules    ModuleConfig
-	Provider   ProviderConfig
-	Catalog    modelcatalog.Catalog
-	Telemetry  TelemetryConfig
-	Management ManagementConfig
-	APIDocs    APIDocsConfig
-	AdminUI    AdminUIConfig
-	Guardrails GuardrailMonitorConfig
-	Files      FileConfig
-	InitErr    error
+	HTTP         HTTPConfig
+	Cache        CacheConfig
+	Redis        RedisConfig
+	Modules      ModuleConfig
+	Provider     ProviderConfig
+	Catalog      modelcatalog.Catalog
+	Telemetry    TelemetryConfig
+	Management   ManagementConfig
+	APIDocs      APIDocsConfig
+	AdminUI      AdminUIConfig
+	Guardrails   GuardrailMonitorConfig
+	Files        FileConfig
+	VectorStores VectorStoreConfig
+	InitErr      error
 }
 
 type FileConfig struct {
 	MaxBytes        int64
 	OwnerQuotaBytes int64
+}
+
+type VectorStoreConfig struct {
+	OwnerQuota int
 }
 
 type GuardrailMonitorConfig struct {
@@ -169,9 +174,11 @@ func Load() Config {
 	guardrailMonitorTTLSeconds := envInt("GUARDRAIL_MONITOR_TTL_SECONDS", 604800)
 	fileMaxBytes := envInt64("FILE_MAX_BYTES", 32<<20)
 	fileOwnerQuotaBytes := envInt64("FILE_OWNER_QUOTA_BYTES", 1<<30)
+	vectorStoreOwnerQuota := envInt("VECTOR_STORE_OWNER_QUOTA", 1000)
 	var semanticErr error
 	var guardrailMonitorErr error
 	var fileErr error
+	var vectorStoreErr error
 	controlPlaneDSN := strings.TrimSpace(os.Getenv("PROVIDER_CONTROL_PLANE_POSTGRES_DSN"))
 	credentialKey := os.Getenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY")
 	var controlPlaneErr error
@@ -195,6 +202,9 @@ func Load() Config {
 	}
 	if fileOwnerQuotaBytes < fileMaxBytes {
 		fileErr = errors.Join(fileErr, errors.New("file owner quota bytes must be at least file max bytes"))
+	}
+	if vectorStoreOwnerQuota < 1 || vectorStoreOwnerQuota > 100000 {
+		vectorStoreErr = errors.New("vector store owner quota must be between 1 and 100000")
 	}
 	return Config{
 		HTTP: HTTPConfig{
@@ -251,8 +261,9 @@ func Load() Config {
 			Capacity: guardrailMonitorCapacity,
 			TTL:      time.Duration(guardrailMonitorTTLSeconds) * time.Second,
 		},
-		Files:   FileConfig{MaxBytes: fileMaxBytes, OwnerQuotaBytes: fileOwnerQuotaBytes},
-		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr),
+		Files:        FileConfig{MaxBytes: fileMaxBytes, OwnerQuotaBytes: fileOwnerQuotaBytes},
+		VectorStores: VectorStoreConfig{OwnerQuota: vectorStoreOwnerQuota},
+		InitErr:      errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr, vectorStoreErr),
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
 				Required: envBool("AUTH_REQUIRED", true),

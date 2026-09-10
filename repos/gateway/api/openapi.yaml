@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.187
+  version: 0.1.188
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -521,6 +521,104 @@ paths:
           description: Stored file bytes with the validated media type and attachment filename
           content:
             application/octet-stream: {schema: {type: string, format: binary}}
+        default:
+          description: Authentication or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/vector_stores:
+    post:
+      operationId: createVectorStore
+      tags: [Vector stores]
+      summary: Create an owner-isolated durable vector store
+      description: Persists metadata and expiry policy in PostgreSQL after authentication and RPM admission. An atomic per-owner quota prevents concurrent creation from exceeding the configured limit. File ingestion and search use separate APIs and are not implied by creation.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/VectorStoreCreateRequest'}
+      responses:
+        '200':
+          description: Created vector store
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VectorStore'}
+        default:
+          description: Authentication, validation, quota, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    get:
+      operationId: listVectorStores
+      tags: [Vector stores]
+      summary: List vector stores owned by the authenticated credential and user
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: after, in: query, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200':
+          description: Cursor page of owned vector stores
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VectorStoreList'}
+        default:
+          description: Authentication, validation, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/vector_stores/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+    get:
+      operationId: getVectorStore
+      tags: [Vector stores]
+      summary: Get an owned vector store
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Vector store metadata
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VectorStore'}
+        default:
+          description: Authentication or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    post:
+      operationId: updateVectorStore
+      tags: [Vector stores]
+      summary: Update an owned vector store
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/VectorStoreUpdateRequest'}
+      responses:
+        '200':
+          description: Updated vector store
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VectorStore'}
+        default:
+          description: Authentication, validation, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    delete:
+      operationId: deleteVectorStore
+      tags: [Vector stores]
+      summary: Delete an owned vector store
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Deletion result
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VectorStoreDeletion'}
         default:
           description: Authentication or storage failure
           content:
@@ -3143,6 +3241,81 @@ components:
       properties:
         id: {type: string}
         object: {type: string, const: file}
+        deleted: {type: boolean, const: true}
+    VectorStoreExpiry:
+      type: object
+      additionalProperties: false
+      required: [anchor, days]
+      properties:
+        anchor: {type: string, const: last_active_at}
+        days: {type: integer, minimum: 1, maximum: 365}
+    VectorStoreCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 256}
+        expires_after: {$ref: '#/components/schemas/VectorStoreExpiry'}
+        metadata:
+          type: object
+          maxProperties: 16
+          additionalProperties: {type: string, maxLength: 512}
+    VectorStoreUpdateRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 256}
+        expires_after: {$ref: '#/components/schemas/VectorStoreExpiry'}
+        metadata:
+          type: object
+          maxProperties: 16
+          additionalProperties: {type: string, maxLength: 512}
+    VectorStore:
+      type: object
+      additionalProperties: false
+      required: [id, object, created_at, name, usage_bytes, status, file_counts, metadata, last_active_at]
+      properties:
+        id: {type: string, pattern: '^vs_[a-f0-9]{32}$'}
+        object: {type: string, const: vector_store}
+        created_at: {type: integer, format: int64}
+        name: {type: string, minLength: 1, maxLength: 256}
+        usage_bytes: {type: integer, format: int64, minimum: 0, const: 0}
+        status: {type: string, enum: [completed, expired]}
+        file_counts:
+          type: object
+          additionalProperties: false
+          required: [in_progress, completed, failed, cancelled, total]
+          properties:
+            in_progress: {type: integer, minimum: 0, const: 0}
+            completed: {type: integer, minimum: 0, const: 0}
+            failed: {type: integer, minimum: 0, const: 0}
+            cancelled: {type: integer, minimum: 0, const: 0}
+            total: {type: integer, minimum: 0, const: 0}
+        metadata:
+          type: object
+          maxProperties: 16
+          additionalProperties: {type: string}
+        expires_after: {$ref: '#/components/schemas/VectorStoreExpiry'}
+        expires_at: {type: integer, format: int64}
+        last_active_at: {type: integer, format: int64}
+    VectorStoreList:
+      type: object
+      additionalProperties: false
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, items: {$ref: '#/components/schemas/VectorStore'}}
+        first_id: {type: string}
+        last_id: {type: string}
+        has_more: {type: boolean}
+    VectorStoreDeletion:
+      type: object
+      additionalProperties: false
+      required: [id, object, deleted]
+      properties:
+        id: {type: string}
+        object: {type: string, const: vector_store.deleted}
         deleted: {type: boolean, const: true}
     BedrockConverseRequest:
       type: object
