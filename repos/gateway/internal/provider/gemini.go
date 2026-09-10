@@ -79,6 +79,7 @@ type geminiGeneration struct {
 	PresencePenalty    *float64 `json:"presencePenalty,omitempty"`
 	ResponseLogprobs   *bool    `json:"responseLogprobs,omitempty"`
 	Logprobs           *int     `json:"logprobs,omitempty"`
+	CandidateCount     *int     `json:"candidateCount,omitempty"`
 	Seed               *int64   `json:"seed,omitempty"`
 	Stop               []string `json:"stopSequences,omitempty"`
 	ResponseMIMEType   string   `json:"responseMimeType,omitempty"`
@@ -174,11 +175,15 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	if options.TopLogprobs != nil && (*options.TopLogprobs < 0 || *options.TopLogprobs > 20 || options.Logprobs == nil || !*options.Logprobs) {
 		return result, geminiInvalid("top_logprobs")
 	}
+	if options.N != nil && (*options.N < 1 || *options.N > 20) {
+		return result, geminiInvalid("n")
+	}
 	options.TopK = nil
 	options.FrequencyPenalty = nil
 	options.PresencePenalty = nil
 	options.Logprobs = nil
 	options.TopLogprobs = nil
+	options.N = nil
 	if err := rejectGenerationOptions("gemini", options); err != nil {
 		return result, err
 	}
@@ -211,7 +216,7 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	result.Generation = geminiGeneration{
 		MaxOutputTokens: maxTokens, Temperature: request.Temperature, TopP: request.TopP, TopK: request.TopK,
 		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty,
-		ResponseLogprobs: request.Logprobs, Logprobs: request.TopLogprobs, Seed: request.Seed, Stop: stop,
+		ResponseLogprobs: request.Logprobs, Logprobs: request.TopLogprobs, CandidateCount: request.N, Seed: request.Seed, Stop: stop,
 	}
 	if request.ResponseFormat != nil {
 		switch request.ResponseFormat.Type {
@@ -466,6 +471,9 @@ func (g Gemini) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if err == nil && len(result.Choices) == 0 {
 		err = errors.New("Gemini response produced no candidates")
 	}
+	if err == nil {
+		err = validateRequestedChatChoices(request, result)
+	}
 	return result, err
 }
 
@@ -700,6 +708,9 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		if choice.FinishReason == "" {
 			return openai.ChatCompletionResponse{}, errors.New("Gemini stream ended before completion")
 		}
+	}
+	if err := validateRequestedChatChoices(request, result); err != nil {
+		return openai.ChatCompletionResponse{}, err
 	}
 	return result, nil
 }

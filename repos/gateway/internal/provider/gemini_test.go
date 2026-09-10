@@ -107,6 +107,53 @@ func TestGeminiNativeLogprobsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGeminiNativeMultipleCandidates(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprint(streaming), func(t *testing.T) {
+			var received geminiRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+					t.Error(err)
+					return
+				}
+				payload := `{"responseId":"multi-id","candidates":[{"index":0,"content":{"parts":[{"text":"one"}]},"finishReason":"STOP"},{"index":1,"content":{"parts":[{"text":"two"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":2,"totalTokenCount":3}}`
+				if streaming {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+					return
+				}
+				_, _ = fmt.Fprint(w, payload)
+			}))
+			defer server.Close()
+			count := 2
+			request := openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{N: &count}}
+			client := NewGemini(server.URL, "", streaming)
+			var response openai.ChatCompletionResponse
+			var err error
+			if streaming {
+				response, err = client.StreamChatCompletions(t.Context(), request, func(string) error { return nil })
+			} else {
+				response, err = client.ChatCompletions(t.Context(), request)
+			}
+			if err != nil || received.Generation.CandidateCount == nil || *received.Generation.CandidateCount != 2 || len(response.Choices) != 2 || response.Choices[1].Message.Content != "two" {
+				t.Fatalf("request=%+v response=%+v err=%v", received.Generation, response, err)
+			}
+		})
+	}
+}
+
+func TestGeminiRequiresEveryRequestedCandidate(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"candidates":[{"index":0,"content":{"parts":[{"text":"one"}]},"finishReason":"STOP"}]}`)
+	}))
+	defer server.Close()
+	count := 2
+	request := openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{N: &count}}
+	if _, err := NewGemini(server.URL, "", false).ChatCompletions(t.Context(), request); err == nil || !strings.Contains(err.Error(), "choice count") {
+		t.Fatalf("incomplete candidate set accepted: %v", err)
+	}
+}
+
 func TestGeminiRejectsInvalidLogprobs(t *testing.T) {
 	enabled, count := true, 1
 	for _, request := range []openai.ChatCompletionRequest{
@@ -129,13 +176,14 @@ func TestGeminiRejectsInvalidLogprobs(t *testing.T) {
 func pointerInt(value int) *int { return &value }
 
 func TestGeminiRejectsInvalidNativeSamplingControls(t *testing.T) {
-	zero, tooLarge := 0, 1000001
+	zero, tooLarge, tooManyCandidates := 0, 1000001, 21
 	below, above := -2.1, 2.1
 	for name, request := range map[string]openai.ChatCompletionRequest{
 		"top_k_zero":        {ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &zero}},
 		"top_k_too_large":   {ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &tooLarge}},
 		"frequency_penalty": {ChatGenerationOptions: openai.ChatGenerationOptions{FrequencyPenalty: &below}},
 		"presence_penalty":  {ChatGenerationOptions: openai.ChatGenerationOptions{PresencePenalty: &above}},
+		"n":                 {ChatGenerationOptions: openai.ChatGenerationOptions{N: &tooManyCandidates}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := geminiChatRequest(request); err == nil {
