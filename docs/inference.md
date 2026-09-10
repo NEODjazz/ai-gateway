@@ -211,18 +211,19 @@ Native Mistral transcription передает `language`, `temperature`,
 `timestamp_granularities` и `keywords[]` как `context_bias`; `diarized_json`
 включает diarization. Параметры без точного native соответствия отклоняются до
 сетевого вызова. Billing использует `prompt_audio_seconds` провайдера при
-commit. Для WAV и FLAC reserve рассчитывается из RIFF или STREAMINFO metadata с
-округлением вверх до миллисекунды; для MP3, OGG и WebM резервируется
-документированный предел 60 минут, чтобы сжатый контейнер не мог занизить
-duration budget. Streaming остается отдельным контрактом.
+commit. Для WAV, FLAC и OGG reserve рассчитывается из RIFF, STREAMINFO или Ogg
+granule metadata с округлением вверх до миллисекунды; для MP3 и WebM
+резервируется документированный предел 60 минут, чтобы сжатый контейнер не мог
+занизить duration budget. Streaming остается отдельным контрактом.
 
 Native Groq transcription передает `language`, `prompt`, `temperature` и
 `timestamp_granularities`, а upstream всегда запрашивает `verbose_json`, чтобы
 сохранить доступные timing metadata. Prompt ограничен консервативной оценкой в
 224 tokens. Billing резервирует и фиксирует минимум 10 секунд. Adapter принимает
-WAV и FLAC: RIFF и STREAMINFO metadata позволяют достоверно определить
-длительность до provider call. Другие контейнеры отклоняются до добавления
-codec-aware duration parser, чтобы сжатый файл не мог обойти duration budget.
+WAV, FLAC и однопоточные OGG Opus/Vorbis: RIFF, STREAMINFO и Ogg granule metadata
+позволяют достоверно определить длительность до provider call. Другие контейнеры
+отклоняются до добавления codec-aware duration parser, чтобы сжатый файл не мог
+обойти duration budget.
 
 `POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
 
