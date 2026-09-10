@@ -54,21 +54,29 @@ func TestBedrockConverseMapsMessagesToolsAndUsage(t *testing.T) {
 func TestBedrockConverseForwardsServiceTier(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			ServiceTier *bedrockServiceTier `json:"serviceTier"`
+			ServiceTier       *bedrockServiceTier       `json:"serviceTier"`
+			PerformanceConfig *bedrockPerformanceConfig `json:"performanceConfig"`
 		}
-		if json.NewDecoder(r.Body).Decode(&body) != nil || body.ServiceTier == nil || body.ServiceTier.Type != "flex" {
-			t.Fatalf("service tier lost: %+v", body.ServiceTier)
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.ServiceTier == nil || body.ServiceTier.Type != "reserved" || body.PerformanceConfig == nil || body.PerformanceConfig.Latency != "optimized" {
+			t.Fatalf("native controls lost: %+v %+v", body.ServiceTier, body.PerformanceConfig)
 		}
 		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`)
 	}))
 	defer server.Close()
-	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "flex"}}
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, BedrockServiceTier: "reserved", BedrockPerformanceLatency: "optimized"}
 	if _, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	request.ServiceTier = "performance"
+	request.BedrockPerformanceLatency = "fastest"
 	if _, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request); err == nil {
 		t.Fatal("unsupported service tier accepted")
+	}
+}
+
+func TestBedrockNativeControlsFailClosedOnOtherAdapters(t *testing.T) {
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, BedrockPerformanceLatency: "optimized"}
+	if err := validateChatAdapter(Demo{}, request); err == nil {
+		t.Fatal("Bedrock native control was dropped by another adapter")
 	}
 }
 

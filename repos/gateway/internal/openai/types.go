@@ -14,6 +14,9 @@ type ChatCompletionRequest struct {
 	RequireMatchedStop bool `json:"-"`
 	// NativeInputTokens reserves provider-native context omitted from the public Chat wire shape.
 	NativeInputTokens int `json:"-"`
+	// Bedrock native controls cannot be supplied through the public Chat wire shape.
+	BedrockServiceTier        string `json:"-"`
+	BedrockPerformanceLatency string `json:"-"`
 	ChatGenerationOptions
 	Provider            string                `json:"provider,omitempty"`
 	Model               string                `json:"model"`

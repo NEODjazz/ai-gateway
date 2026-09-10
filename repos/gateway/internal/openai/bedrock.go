@@ -8,15 +8,20 @@ import (
 )
 
 type BedrockConverseRequest struct {
-	Messages        []BedrockMessage       `json:"messages"`
-	System          []BedrockContentBlock  `json:"system,omitempty"`
-	InferenceConfig BedrockInferenceConfig `json:"inferenceConfig,omitempty"`
-	ToolConfig      *BedrockToolConfig     `json:"toolConfig,omitempty"`
-	ServiceTier     *BedrockServiceTier    `json:"serviceTier,omitempty"`
+	Messages          []BedrockMessage          `json:"messages"`
+	System            []BedrockContentBlock     `json:"system,omitempty"`
+	InferenceConfig   BedrockInferenceConfig    `json:"inferenceConfig,omitempty"`
+	ToolConfig        *BedrockToolConfig        `json:"toolConfig,omitempty"`
+	ServiceTier       *BedrockServiceTier       `json:"serviceTier,omitempty"`
+	PerformanceConfig *BedrockPerformanceConfig `json:"performanceConfig,omitempty"`
 }
 
 type BedrockServiceTier struct {
 	Type string `json:"type"`
+}
+
+type BedrockPerformanceConfig struct {
+	Latency string `json:"latency"`
 }
 
 type BedrockMessage struct {
@@ -107,8 +112,18 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		switch r.ServiceTier.Type {
 		case "default", "flex", "priority":
 			request.ServiceTier = r.ServiceTier.Type
+		case "reserved":
+			request.BedrockServiceTier = r.ServiceTier.Type
 		default:
-			return request, errors.New("serviceTier.type must be default, flex, or priority")
+			return request, errors.New("serviceTier.type must be default, flex, priority, or reserved")
+		}
+	}
+	if r.PerformanceConfig != nil {
+		switch r.PerformanceConfig.Latency {
+		case "standard", "optimized":
+			request.BedrockPerformanceLatency = r.PerformanceConfig.Latency
+		default:
+			return request, errors.New("performanceConfig.latency must be standard or optimized")
 		}
 	}
 	for _, block := range r.System {

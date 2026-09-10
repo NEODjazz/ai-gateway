@@ -27,10 +27,20 @@ func TestBedrockConverseMapsToolHistoryAndConfiguration(t *testing.T) {
 	}
 }
 
-func TestBedrockConverseRejectsUnknownServiceTier(t *testing.T) {
-	request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("hello")}}}}, ServiceTier: &BedrockServiceTier{Type: "reserved"}}
+func TestBedrockConverseMapsReservedTierAndPerformance(t *testing.T) {
+	request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("hello")}}}}, ServiceTier: &BedrockServiceTier{Type: "reserved"}, PerformanceConfig: &BedrockPerformanceConfig{Latency: "optimized"}}
+	chat, err := request.ChatRequest("model", "")
+	if err != nil || chat.BedrockServiceTier != "reserved" || chat.BedrockPerformanceLatency != "optimized" {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	request.ServiceTier.Type = "burst"
 	if _, err := request.ChatRequest("model", ""); err == nil {
 		t.Fatal("unknown service tier accepted")
+	}
+	request.ServiceTier.Type = "reserved"
+	request.PerformanceConfig.Latency = "fastest"
+	if _, err := request.ChatRequest("model", ""); err == nil {
+		t.Fatal("unknown performance latency accepted")
 	}
 }
 

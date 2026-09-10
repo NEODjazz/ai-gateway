@@ -81,17 +81,22 @@ type bedrockTool struct {
 }
 
 type bedrockRequest struct {
-	Messages        []bedrockMessage       `json:"messages"`
-	System          []bedrockContentBlock  `json:"system,omitempty"`
-	InferenceConfig bedrockInferenceConfig `json:"inferenceConfig,omitempty"`
-	ServiceTier     *bedrockServiceTier    `json:"serviceTier,omitempty"`
-	ToolConfig      *struct {
+	Messages          []bedrockMessage          `json:"messages"`
+	System            []bedrockContentBlock     `json:"system,omitempty"`
+	InferenceConfig   bedrockInferenceConfig    `json:"inferenceConfig,omitempty"`
+	ServiceTier       *bedrockServiceTier       `json:"serviceTier,omitempty"`
+	PerformanceConfig *bedrockPerformanceConfig `json:"performanceConfig,omitempty"`
+	ToolConfig        *struct {
 		Tools []bedrockTool `json:"tools"`
 	} `json:"toolConfig,omitempty"`
 }
 
 type bedrockServiceTier struct {
 	Type string `json:"type"`
+}
+
+type bedrockPerformanceConfig struct {
+	Latency string `json:"latency"`
 }
 
 type bedrockInferenceConfig struct {
@@ -128,9 +133,10 @@ func NewBedrockWithAuth(baseURL, credential, authType, region string) Bedrock {
 	return Bedrock{baseURL: strings.TrimRight(baseURL, "/"), apiKey: credential, authType: authType, region: region, client: client, now: time.Now, aws: newAWSCredentialSource(credential, region)}
 }
 
-func (Bedrock) SupportsResponses() bool { return false }
-func (Bedrock) SupportsTools() bool     { return true }
-func (Bedrock) SupportsVision() bool    { return true }
+func (Bedrock) SupportsResponses() bool             { return false }
+func (Bedrock) SupportsTools() bool                 { return true }
+func (Bedrock) SupportsVision() bool                { return true }
+func (Bedrock) SupportsBedrockNativeControls() bool { return true }
 
 func bedrockInvalid(param string) error {
 	return &Error{Class: FailureClientRequest, Provider: "bedrock", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: param, Err: fmt.Errorf("unsupported or invalid %s for Bedrock adapter", param)}
@@ -220,6 +226,20 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 			result.ServiceTier = &bedrockServiceTier{Type: request.ServiceTier}
 		default:
 			return result, bedrockInvalid("service_tier")
+		}
+	}
+	if request.BedrockServiceTier != "" {
+		if request.BedrockServiceTier != "reserved" || result.ServiceTier != nil {
+			return result, bedrockInvalid("service_tier")
+		}
+		result.ServiceTier = &bedrockServiceTier{Type: request.BedrockServiceTier}
+	}
+	if request.BedrockPerformanceLatency != "" {
+		switch request.BedrockPerformanceLatency {
+		case "standard", "optimized":
+			result.PerformanceConfig = &bedrockPerformanceConfig{Latency: request.BedrockPerformanceLatency}
+		default:
+			return result, bedrockInvalid("performance_config")
 		}
 	}
 	toolCalls := make(map[string]bool)
