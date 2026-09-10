@@ -298,7 +298,7 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 		return result, bedrockInvalid("stop")
 	}
 	if err := rejectParameters("bedrock",
-		parameterCheck{"stream", request.Stream}, parameterCheck{"stream_options", request.StreamOptions != nil},
+		parameterCheck{"stream_options", request.StreamOptions != nil && !request.Stream},
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 		parameterCheck{"seed", request.Seed != nil},
 		parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"store", request.Store != nil},
@@ -529,6 +529,9 @@ func bedrockInputContent(value any, native []json.RawMessage) ([]bedrockContentB
 }
 
 func (b Bedrock) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	if request.Stream {
+		return openai.ChatCompletionResponse{}, bedrockInvalid("stream")
+	}
 	body, err := bedrockChatRequest(request)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err

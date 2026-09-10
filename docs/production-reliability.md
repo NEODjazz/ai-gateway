@@ -56,6 +56,12 @@ and closes successful streams with `messageStop` followed by provider-reported
 usage metadata. Requests rejected before the first event retain the regular JSON
 error envelope and status.
 
+The Bedrock adapter reads upstream EventStream incrementally with 16 MiB per
+message and 64 MiB per-stream limits. Prelude CRC, message CRC, header framing,
+event order, content unions, tool identifiers and final provider usage are
+validated before settlement. Provider exceptions retain retryable rate-limit and
+availability classes; retries and fallback stop once an output delta is exposed.
+
 Chat cache identity also includes validated provider-native message blocks, their
 reserved input size, Bedrock service tier, latency selection and requested
 additional response-field paths. Semantic

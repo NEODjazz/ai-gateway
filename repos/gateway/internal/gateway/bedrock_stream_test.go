@@ -3,7 +3,6 @@ package gateway
 import (
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"hash/crc32"
 	"net/http"
 	"net/http/httptest"
@@ -73,22 +72,31 @@ func TestBedrockConverseStreamUsesAuthorizationStreamingAndBilling(t *testing.T)
 	upstreamCalls := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamCalls++
-		var request struct {
-			Model  string `json:"model"`
-			Stream bool   `json:"stream"`
+		var request map[string]any
+		if json.NewDecoder(r.Body).Decode(&request) != nil || r.URL.Path != "/model/upstream-model/converse-stream" || r.Header.Get("Authorization") != "Bearer provider-key" || request["messages"] == nil {
+			t.Fatalf("path=%s headers=%v upstream request=%+v", r.URL.Path, r.Header, request)
 		}
-		if json.NewDecoder(r.Body).Decode(&request) != nil || request.Model != "upstream-model" || !request.Stream {
-			t.Fatalf("upstream request=%+v", request)
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+		writeEvent := func(eventType string, payload any) {
+			encoded, err := encodeAWSMessage(map[string]string{":message-type": "event", ":event-type": eventType, ":content-type": "application/json"}, mustJSON(t, payload))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = w.Write(encoded)
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-stream\",\"object\":\"chat.completion.chunk\",\"model\":\"upstream-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hello \"},\"finish_reason\":null}]}\n\n")
-		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-stream\",\"object\":\"chat.completion.chunk\",\"model\":\"upstream-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"stream\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2,\"total_tokens\":6}}\n\ndata: [DONE]\n\n")
+		writeEvent("messageStart", map[string]any{"role": "assistant"})
+		writeEvent("contentBlockStart", map[string]any{"contentBlockIndex": 0, "start": map[string]any{}})
+		writeEvent("contentBlockDelta", map[string]any{"contentBlockIndex": 0, "delta": map[string]any{"text": "hello "}})
+		writeEvent("contentBlockDelta", map[string]any{"contentBlockIndex": 0, "delta": map[string]any{"text": "stream"}})
+		writeEvent("contentBlockStop", map[string]any{"contentBlockIndex": 0})
+		writeEvent("messageStop", map[string]any{"stopReason": "end_turn"})
+		writeEvent("metadata", map[string]any{"usage": map[string]any{"inputTokens": 4, "outputTokens": 2, "totalTokens": 6}, "metrics": map[string]any{"latencyMs": 1}})
 	}))
 	defer upstream.Close()
 
 	billing := &messagesUsageRecorder{}
 	router := provider.New(provider.Config{
-		Endpoints: []config.ProviderEndpointConfig{{Name: "streaming", Type: "openai-compatible", BaseURL: upstream.URL, Models: []string{"public-model"}, ModelAliases: map[string]string{"public-model": "upstream-model"}, Capabilities: []string{"chat", "stream"}, Stream: true}},
+		Endpoints: []config.ProviderEndpointConfig{{Name: "streaming", Type: "bedrock", BaseURL: upstream.URL, APIKey: "provider-key", Models: []string{"public-model"}, ModelAliases: map[string]string{"public-model": "upstream-model"}, Capabilities: []string{"chat", "stream"}, Stream: true}},
 		Modules:   modules.NewPipeline([]modules.Module{billing}),
 	})
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"public-model"}, tpm: 100}}}), router))
@@ -120,6 +128,15 @@ func TestBedrockConverseStreamUsesAuthorizationStreamingAndBilling(t *testing.T)
 	if usage["totalTokens"] != float64(6) || upstreamCalls != 1 || billing.calls != 1 || billing.usage.TotalTokens != 6 {
 		t.Fatalf("metadata=%+v upstream=%d billing=%+v", metadata, upstreamCalls, billing)
 	}
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	payload, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
 }
 
 func TestBedrockConverseStreamReturnsJSONBeforeFirstEvent(t *testing.T) {
