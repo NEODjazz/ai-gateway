@@ -95,7 +95,7 @@ func TestOllamaChatCompletions(t *testing.T) {
 
 		_ = json.NewEncoder(w).Encode(ollamaChatResponse{
 			Model: "test-model",
-			Message: openai.Message{
+			Message: ollamaResponseMessage{
 				Role:    "assistant",
 				Content: "hello",
 			},
@@ -125,6 +125,123 @@ func TestOllamaChatCompletions(t *testing.T) {
 	}
 	if response.Usage.TotalTokens != 6 {
 		t.Fatalf("unexpected total tokens: %d", response.Usage.TotalTokens)
+	}
+}
+
+func TestOllamaNativeReasoningRoundTrip(t *testing.T) {
+	var upstream ollamaChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"model":"qwen3","message":{"role":"assistant","thinking":"new plan","content":"answer"},"done":true,"done_reason":"stop"}`))
+	}))
+	defer server.Close()
+
+	response, err := NewOllama(server.URL, false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "qwen3",
+		Messages: []openai.Message{
+			{Role: "user", Content: "question"},
+			{Role: "assistant", ReasoningContent: "prior plan", Content: "prior answer"},
+		},
+		ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upstream.Think != "high" || len(upstream.Messages) != 2 || upstream.Messages[1].Thinking != "prior plan" {
+		t.Fatalf("native reasoning request was not preserved: %+v", upstream)
+	}
+	if response.Choices[0].Message.ReasoningContent != "new plan" || openai.ContentText(response.Choices[0].Message.Content) != "answer" {
+		t.Fatalf("native reasoning response was not preserved: %+v", response)
+	}
+}
+
+func TestOllamaStreamsNativeReasoning(t *testing.T) {
+	var upstream ollamaChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte("{\"model\":\"qwen3\",\"message\":{\"role\":\"assistant\",\"thinking\":\"plan \"}}\n"))
+		_, _ = w.Write([]byte("{\"model\":\"qwen3\",\"message\":{\"role\":\"assistant\",\"thinking\":\"more\",\"content\":\"answer\"}}\n"))
+		_, _ = w.Write([]byte("{\"model\":\"qwen3\",\"done\":true,\"done_reason\":\"stop\"}\n"))
+	}))
+	defer server.Close()
+
+	var payloads []string
+	response, err := NewOllama(server.URL, true).StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "qwen3", Stream: true, Messages: []openai.Message{{Role: "user", Content: "question"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "medium"},
+	}, func(payload string) error {
+		payloads = append(payloads, payload)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upstream.Think != "medium" {
+		t.Fatalf("native reasoning level=%#v", upstream.Think)
+	}
+	if response.Choices[0].Message.ReasoningContent != "plan more" || openai.ContentText(response.Choices[0].Message.Content) != "answer" {
+		t.Fatalf("native reasoning stream was not collected: %+v", response)
+	}
+	joined := strings.Join(payloads, "\n")
+	if !strings.Contains(joined, `"reasoning_content":"plan "`) || !strings.Contains(joined, `"reasoning_content":"more"`) || !strings.Contains(joined, `"content":"answer"`) {
+		t.Fatalf("native reasoning stream was not translated: %s", joined)
+	}
+}
+
+func TestOllamaReasoningEffortContract(t *testing.T) {
+	for _, level := range []string{"none", "low", "medium", "high", "max"} {
+		t.Run(level, func(t *testing.T) {
+			request := openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: level}}
+			if err := (Ollama{}).ValidateChatParameters(request); err != nil {
+				t.Fatalf("supported reasoning level rejected: %v", err)
+			}
+			if level == "none" {
+				if disabled, ok := ollamaThink(level).(bool); !ok || disabled {
+					t.Fatalf("none mapped to %#v", ollamaThink(level))
+				}
+			} else if ollamaThink(level) != level {
+				t.Fatalf("%s mapped to %#v", level, ollamaThink(level))
+			}
+		})
+	}
+	for _, level := range []string{"minimal", "xhigh"} {
+		var failure *Error
+		err := (Ollama{}).ValidateChatParameters(openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: level}})
+		if !errors.As(err, &failure) || failure.Param != "reasoning_effort" || failure.UpstreamCode != "unsupported_parameter" {
+			t.Fatalf("unrepresentable level %s was not rejected: %v", level, err)
+		}
+	}
+}
+
+func TestOllamaRejectsOversizedReasoningResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(ollamaChatResponse{Model: "qwen3", Message: ollamaResponseMessage{Role: "assistant", Thinking: strings.Repeat("x", openai.MaxChatReasoningContentBytes+1)}})
+	}))
+	defer server.Close()
+
+	if _, err := NewOllama(server.URL, false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "qwen3"}); err == nil || !strings.Contains(err.Error(), "reasoning content") {
+		t.Fatalf("oversized native reasoning was not rejected: %v", err)
+	}
+}
+
+func TestOllamaRejectsOversizedReasoningStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		remaining := openai.MaxChatReasoningContentBytes + 1
+		for remaining > 0 {
+			size := min(remaining, 32<<10)
+			_ = json.NewEncoder(w).Encode(ollamaChatResponse{Model: "qwen3", Message: ollamaResponseMessage{Role: "assistant", Thinking: strings.Repeat("x", size)}})
+			remaining -= size
+		}
+	}))
+	defer server.Close()
+
+	_, err := NewOllama(server.URL, true).StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "qwen3", Stream: true}, func(string) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "reasoning stream exceeds limit") {
+		t.Fatalf("oversized native reasoning stream was not rejected: %v", err)
 	}
 }
 
@@ -355,11 +472,11 @@ func TestOllamaStreamsChatCompletions(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(ollamaChatResponse{
 			Model:   "test-model",
-			Message: openai.Message{Role: "assistant", Content: "hel"},
+			Message: ollamaResponseMessage{Role: "assistant", Content: "hel"},
 		})
 		_ = json.NewEncoder(w).Encode(ollamaChatResponse{
 			Model:   "test-model",
-			Message: openai.Message{Role: "assistant", Content: "lo"},
+			Message: ollamaResponseMessage{Role: "assistant", Content: "lo"},
 		})
 		_ = json.NewEncoder(w).Encode(ollamaChatResponse{
 			Model:           "test-model",

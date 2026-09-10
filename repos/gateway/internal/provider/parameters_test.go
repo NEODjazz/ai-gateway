@@ -23,7 +23,6 @@ func TestChatReasoningContentSupportIsExplicit(t *testing.T) {
 		{name: "cohere", validate: (Cohere{}).ValidateChatParameters},
 		{name: "demo", validate: (Demo{}).ValidateChatParameters},
 		{name: "gemini", validate: (Gemini{}).ValidateChatParameters},
-		{name: "ollama", validate: (Ollama{}).ValidateChatParameters},
 	}
 	for _, adapter := range unsupported {
 		t.Run(adapter.name, func(t *testing.T) {
@@ -42,6 +41,7 @@ func TestChatReasoningContentSupportIsExplicit(t *testing.T) {
 		{name: "deepseek", validate: NewDeepSeek("http://unused.invalid", "", false).ValidateChatParameters},
 		{name: "groq", validate: NewGroq("http://unused.invalid", "", false).ValidateChatParameters},
 		{name: "mistral", validate: NewMistral("http://unused.invalid", "", false).ValidateChatParameters},
+		{name: "ollama", validate: NewOllama("http://unused.invalid", false).ValidateChatParameters},
 	} {
 		t.Run(adapter.name, func(t *testing.T) {
 			if err := adapter.validate(request); err != nil {

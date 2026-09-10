@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -44,9 +45,17 @@ type ollamaOptions struct {
 type ollamaRequestMessage struct {
 	Role       string                  `json:"role"`
 	Content    string                  `json:"content"`
+	Thinking   string                  `json:"thinking,omitempty"`
 	Images     []string                `json:"images,omitempty"`
 	ToolCalls  []ollamaRequestToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string                  `json:"tool_call_id,omitempty"`
+}
+
+type ollamaResponseMessage struct {
+	Role      string            `json:"role"`
+	Content   string            `json:"content"`
+	Thinking  string            `json:"thinking"`
+	ToolCalls []openai.ToolCall `json:"tool_calls"`
 }
 
 type ollamaRequestToolCall struct {
@@ -61,17 +70,17 @@ type ollamaRequestFunctionCall struct {
 }
 
 type ollamaChatResponse struct {
-	Model              string          `json:"model"`
-	Message            openai.Message  `json:"message"`
-	Done               bool            `json:"done"`
-	PromptEvalCount    int             `json:"prompt_eval_count"`
-	EvalCount          int             `json:"eval_count"`
-	DoneReason         string          `json:"done_reason"`
-	TotalDuration      int64           `json:"total_duration"`
-	LoadDuration       int64           `json:"load_duration"`
-	PromptEvalDuration int64           `json:"prompt_eval_duration"`
-	EvalDuration       int64           `json:"eval_duration"`
-	Logprobs           []ollamaLogprob `json:"logprobs"`
+	Model              string                `json:"model"`
+	Message            ollamaResponseMessage `json:"message"`
+	Done               bool                  `json:"done"`
+	PromptEvalCount    int                   `json:"prompt_eval_count"`
+	EvalCount          int                   `json:"eval_count"`
+	DoneReason         string                `json:"done_reason"`
+	TotalDuration      int64                 `json:"total_duration"`
+	LoadDuration       int64                 `json:"load_duration"`
+	PromptEvalDuration int64                 `json:"prompt_eval_duration"`
+	EvalDuration       int64                 `json:"eval_duration"`
+	Logprobs           []ollamaLogprob       `json:"logprobs"`
 }
 
 type ollamaTokenLogprob struct {
@@ -163,17 +172,21 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	normalizeOllamaToolCalls(&ollamaResp.Message)
+	message := ollamaResp.Message.openAI()
+	if err := openai.ValidateChatReasoningContent(message.Role, message.ReasoningContent); err != nil {
+		return openai.ChatCompletionResponse{}, fmt.Errorf("invalid Ollama chat reasoning content: %w", err)
+	}
+	normalizeOllamaToolCalls(&message)
 
 	finishReason := ollamaResp.DoneReason
 	if finishReason == "" {
 		finishReason = "stop"
 	}
 	logprobs, logprobText, err := ollamaChoiceLogprobs(ollamaResp.Logprobs)
-	if err != nil || len(ollamaResp.Logprobs) > 0 && logprobText != openai.ContentText(ollamaResp.Message.Content) {
+	if err != nil || len(ollamaResp.Logprobs) > 0 && logprobText != openai.ContentText(message.Content) {
 		return openai.ChatCompletionResponse{}, errors.New("invalid Ollama chat logprobs")
 	}
-	if request.Logprobs != nil && *request.Logprobs && len(ollamaResp.Logprobs) == 0 && openai.ContentText(ollamaResp.Message.Content) != "" {
+	if request.Logprobs != nil && *request.Logprobs && len(ollamaResp.Logprobs) == 0 && openai.ContentText(message.Content) != "" {
 		return openai.ChatCompletionResponse{}, errors.New("Ollama chat response omitted requested logprobs")
 	}
 	var choiceLogprobs *openai.ChoiceLogprobs
@@ -188,7 +201,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 		Choices: []openai.Choice{
 			{
 				Index:        0,
-				Message:      ollamaResp.Message,
+				Message:      message,
 				FinishReason: finishReason,
 				Logprobs:     choiceLogprobs,
 			},
@@ -310,11 +323,31 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		if chunk.Model != "" {
 			response.Model = chunk.Model
 		}
-		if chunk.Message.Role != "" {
-			response.Choices[0].Message.Role = chunk.Message.Role
+		message := chunk.Message.openAI()
+		if message.Role != "" {
+			response.Choices[0].Message.Role = message.Role
 		}
-		normalizeOllamaToolCalls(&chunk.Message)
-		content := openai.ContentText(chunk.Message.Content)
+		normalizeOllamaToolCalls(&message)
+		reasoningContent := message.ReasoningContent
+		if reasoningContent != "" {
+			current := response.Choices[0].Message.ReasoningContent
+			if len(current) > openai.MaxChatReasoningContentBytes-len(reasoningContent) {
+				return openai.ChatCompletionResponse{}, errors.New("Ollama chat reasoning stream exceeds limit")
+			}
+			response.Choices[0].Message.ReasoningContent += reasoningContent
+			role := ""
+			if !sentRole {
+				role = response.Choices[0].Message.Role
+				if role == "" {
+					role = "assistant"
+				}
+				sentRole = true
+			}
+			if err := write(openAIChatReasoningContentChunkPayload(response.ID, response.Model, role, reasoningContent)); err != nil {
+				return openai.ChatCompletionResponse{}, err
+			}
+		}
+		content := openai.ContentText(message.Content)
 		if content != "" {
 			logprobs, logprobText, err := ollamaChoiceLogprobs(chunk.Logprobs)
 			if err != nil || len(chunk.Logprobs) > 0 && logprobText != content {
@@ -348,7 +381,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 				return openai.ChatCompletionResponse{}, err
 			}
 		}
-		for _, call := range chunk.Message.ToolCalls {
+		for _, call := range message.ToolCalls {
 			toolIndex := len(response.Choices[0].Message.ToolCalls)
 			response.Choices[0].Message.ToolCalls = append(response.Choices[0].Message.ToolCalls, call)
 			if err := write(openAIChatToolCallChunkPayload(response.ID, response.Model, toolIndex, call)); err != nil {
@@ -378,10 +411,29 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 }
 
 func ollamaThink(reasoningEffort string) any {
-	if reasoningEffort == "none" {
+	switch reasoningEffort {
+	case "none":
 		return false
+	case "low", "medium", "high", "max":
+		return reasoningEffort
+	default:
+		return nil
 	}
-	return nil
+}
+
+func openAIChatReasoningContentChunkPayload(id, model, role, reasoningContent string) string {
+	delta := map[string]any{"reasoning_content": reasoningContent}
+	if role != "" {
+		delta["role"] = role
+	}
+	payload, err := json.Marshal(map[string]any{
+		"id": id, "object": "chat.completion.chunk", "created": time.Now().UTC().Unix(), "model": model,
+		"choices": []map[string]any{{"index": 0, "delta": delta, "finish_reason": nil}},
+	})
+	if err != nil {
+		return "{}"
+	}
+	return string(payload)
 }
 
 func ollamaChoiceLogprobs(items []ollamaLogprob) (openai.ChoiceLogprobs, string, error) {
@@ -431,7 +483,7 @@ func ollamaMessages(messages []openai.Message) []ollamaRequestMessage {
 	converted := make([]ollamaRequestMessage, len(messages))
 	for index, message := range messages {
 		converted[index] = ollamaRequestMessage{
-			Role: message.Role, Content: openai.ContentText(message.Content),
+			Role: message.Role, Content: openai.ContentText(message.Content), Thinking: message.ReasoningContent,
 			ToolCalls: ollamaToolCalls(message.ToolCalls), ToolCallID: message.ToolCallID,
 		}
 		attachments, err := openai.ChatImageAttachments([]openai.Message{message})
@@ -443,6 +495,10 @@ func ollamaMessages(messages []openai.Message) []ollamaRequestMessage {
 		}
 	}
 	return converted
+}
+
+func (message ollamaResponseMessage) openAI() openai.Message {
+	return openai.Message{Role: message.Role, Content: message.Content, ReasoningContent: message.Thinking, ToolCalls: message.ToolCalls}
 }
 
 func ollamaToolCalls(calls []openai.ToolCall) []ollamaRequestToolCall {

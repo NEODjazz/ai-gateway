@@ -119,7 +119,7 @@ func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
-	if err := validateChatReasoningContent("ollama", request.Messages, false); err != nil {
+	if err := validateChatReasoningContent("ollama", request.Messages, true); err != nil {
 		return err
 	}
 	if err := validateChatMessagePrefix("ollama", request.Messages, false); err != nil {
@@ -154,7 +154,8 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	options.MinP = nil
 	options.Logprobs = nil
 	options.TopLogprobs = nil
-	if options.ReasoningEffort == "none" {
+	switch options.ReasoningEffort {
+	case "none", "low", "medium", "high", "max":
 		options.ReasoningEffort = ""
 	}
 	if err := rejectGenerationOptions("ollama", options); err != nil {
