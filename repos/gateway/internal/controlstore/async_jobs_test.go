@@ -43,7 +43,7 @@ func TestPostgresAsyncJobLifecycleAndFencingIntegration(t *testing.T) {
 	if err := store.CompleteAsyncJob(t.Context(), kind, job.ResourceID, 2); !errors.Is(err, asyncstate.ErrLeaseLost) {
 		t.Fatalf("stale completion error=%v", err)
 	}
-	if err := store.RetryAsyncJob(t.Context(), kind, job.ResourceID, 1, time.Unix(1, 0)); err != nil {
+	if err := store.RetryAsyncJob(t.Context(), kind, job.ResourceID, 1, 0); err != nil {
 		t.Fatal(err)
 	}
 	claimed, err = store.ClaimAsyncJobs(t.Context(), kind, 1, time.Minute)

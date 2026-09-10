@@ -99,6 +99,7 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 	}
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
 	return rejectParameters("anthropic",
+		parameterCheck{"background", request.Background},
 		parameterCheck{"input", hasOpaqueResponseContext(request.Input)},
 		parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
@@ -115,7 +116,7 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 
 func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
-	return rejectParameters("ollama", parameterCheck{"user", request.User != ""}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"text.verbosity", verbositySupplied}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil}, parameterCheck{"max_tool_calls", request.MaxToolCalls != nil})
+	return rejectParameters("ollama", parameterCheck{"background", request.Background}, parameterCheck{"user", request.User != ""}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"text.verbosity", verbositySupplied}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil}, parameterCheck{"max_tool_calls", request.MaxToolCalls != nil})
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
@@ -467,7 +468,7 @@ func rejectChatMessageAudio(adapter string, messages []openai.Message) error {
 
 func (Demo) ValidateResponseParameters(request openai.ResponseRequest) error {
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
-	return rejectParameters("demo", parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil}, parameterCheck{"user", request.User != ""}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"text.verbosity", verbositySupplied}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil}, parameterCheck{"max_tool_calls", request.MaxToolCalls != nil})
+	return rejectParameters("demo", parameterCheck{"background", request.Background}, parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil}, parameterCheck{"user", request.User != ""}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"text.verbosity", verbositySupplied}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil}, parameterCheck{"max_tool_calls", request.MaxToolCalls != nil})
 }
 
 // Provider-specific reasoning and compaction cannot be flattened into messages.

@@ -355,6 +355,9 @@ func validDeploymentCapabilities(capabilities []string) bool {
 			return false
 		}
 	}
+	if seen["background_responses"] && !seen["responses"] {
+		return false
+	}
 	return !seen["mcp"] || (seen["responses"] && seen["tools"])
 }
 
@@ -364,7 +367,7 @@ func ValidModelCapability(capability string) bool {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills",
 		"stream", "tools", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill":
+		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses":
 		return true
 	default:
 		return false
@@ -488,6 +491,13 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	case "skills":
 		_, ok := endpoint.Provider.(SkillClient)
 		return ok
+	case "background_responses":
+		if endpoint.Type != "openai" && endpoint.Type != "openai-compatible" && endpoint.Type != "azure-openai" {
+			return false
+		}
+		_, retrieves := endpoint.Provider.(responseRetrieveClient)
+		_, cancels := endpoint.Provider.(responseCancelClient)
+		return retrieves && cancels
 	case "stream":
 		_, chat := endpoint.Provider.(StreamingClient)
 		_, responses := endpoint.Provider.(StreamingResponseClient)

@@ -31,7 +31,7 @@ type Job struct {
 type Store interface {
 	EnqueueAsyncJob(context.Context, Job) (bool, error)
 	ClaimAsyncJobs(context.Context, string, int, time.Duration) ([]Job, error)
-	RetryAsyncJob(context.Context, string, string, int64, time.Time) error
+	RetryAsyncJob(context.Context, string, string, int64, time.Duration) error
 	CompleteAsyncJob(context.Context, string, string, int64) error
 }
 

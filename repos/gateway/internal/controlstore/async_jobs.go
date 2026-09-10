@@ -75,15 +75,15 @@ func (s *PostgresStore) ClaimAsyncJobs(ctx context.Context, kind string, limit i
 	return jobs, rows.Err()
 }
 
-func (s *PostgresStore) RetryAsyncJob(ctx context.Context, kind, resourceID string, generation int64, availableAt time.Time) error {
+func (s *PostgresStore) RetryAsyncJob(ctx context.Context, kind, resourceID string, generation int64, delay time.Duration) error {
 	if s == nil || s.pool == nil {
 		return asyncstate.ErrUnavailable
 	}
-	if kind == "" || resourceID == "" || generation < 1 || availableAt.IsZero() {
+	if kind == "" || resourceID == "" || generation < 1 || delay < 0 || delay > 24*time.Hour {
 		return asyncstate.ErrInvalid
 	}
-	command, err := s.pool.Exec(ctx, `UPDATE gateway_async_jobs SET state='pending',available_at=$4,lease_until=NULL,updated_at=now()
-		WHERE kind=$1 AND resource_id=$2 AND state='leased' AND lease_generation=$3`, kind, resourceID, generation, availableAt)
+	command, err := s.pool.Exec(ctx, `UPDATE gateway_async_jobs SET state='pending',available_at=now()+$4::interval,lease_until=NULL,updated_at=now()
+		WHERE kind=$1 AND resource_id=$2 AND state='leased' AND lease_generation=$3`, kind, resourceID, generation, delay.String())
 	if err != nil {
 		return err
 	}

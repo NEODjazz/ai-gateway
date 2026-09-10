@@ -63,6 +63,7 @@ type openAICompatibleResponseRequest struct {
 	SafetyIdentifier  string                    `json:"safety_identifier,omitempty"`
 	PromptCacheKey    string                    `json:"prompt_cache_key,omitempty"`
 	ServiceTier       string                    `json:"service_tier,omitempty"`
+	Background        bool                      `json:"background,omitempty"`
 	Stream            bool                      `json:"stream,omitempty"`
 	MaxOutputTokens   *int                      `json:"max_output_tokens,omitempty"`
 	Temperature       *float64                  `json:"temperature,omitempty"`
@@ -750,7 +751,7 @@ func (p OpenAICompatible) Responses(ctx context.Context, request openai.Response
 		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
-		Text: request.Text, PreviousResponse: request.PreviousResponse, User: request.User, SafetyIdentifier: request.SafetyIdentifier, PromptCacheKey: request.PromptCacheKey, ServiceTier: request.ServiceTier, Stream: false,
+		Text: request.Text, PreviousResponse: request.PreviousResponse, User: request.User, SafetyIdentifier: request.SafetyIdentifier, PromptCacheKey: request.PromptCacheKey, ServiceTier: request.ServiceTier, Background: request.Background, Stream: false,
 		MaxOutputTokens: responseOutputTokenLimit(request),
 		Temperature:     request.Temperature, TopP: request.TopP, FrequencyPenalty: request.FrequencyPenalty,
 		PresencePenalty: request.PresencePenalty, MaxToolCalls: request.MaxToolCalls,

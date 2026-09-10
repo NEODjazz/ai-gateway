@@ -22,6 +22,22 @@ func TestProviderURLDoesNotDuplicateV1(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleForwardsBackgroundResponses(t *testing.T) {
+	var upstream map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(openai.ResponseResponse{ID: "resp_background", Model: "m", Status: "queued"})
+	}))
+	defer server.Close()
+	store := true
+	response, err := NewOpenAICompatible(server.URL, "", false).Responses(t.Context(), openai.ResponseRequest{Model: "m", Input: "hello", Store: &store, Background: true})
+	if err != nil || response.Status != "queued" || string(upstream["background"]) != "true" || string(upstream["store"]) != "true" {
+		t.Fatalf("response=%+v upstream=%s err=%v", response, upstream, err)
+	}
+}
+
 func TestOpenAICompatibleForwardsMaxCompletionTokensWithoutLegacyParameters(t *testing.T) {
 	var upstream map[string]json.RawMessage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

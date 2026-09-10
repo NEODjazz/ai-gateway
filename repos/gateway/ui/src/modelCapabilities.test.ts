@@ -6,6 +6,7 @@ describe("modelCapabilityOptions", () => {
     expect(modelCapabilityOptions.map(({ value }) => value)).toEqual([
       "chat",
       "responses",
+      "background_responses",
       "embeddings",
       "rerank",
       "moderation",

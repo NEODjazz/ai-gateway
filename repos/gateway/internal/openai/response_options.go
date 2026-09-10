@@ -7,6 +7,12 @@ import (
 
 // Validate checks provider-independent Responses generation options.
 func (r ResponseRequest) Validate() string {
+	if r.Background && r.Stream {
+		return "background and stream cannot both be enabled"
+	}
+	if r.Background && (r.Store == nil || !*r.Store) {
+		return "background requires store=true"
+	}
 	if message := ValidateMetadata(r.Metadata); message != "" {
 		return message
 	}

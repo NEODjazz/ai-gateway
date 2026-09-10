@@ -14,6 +14,9 @@ import (
 func TestInferenceEndpointsRejectUnsupportedParameters(t *testing.T) {
 	for field, value := range map[string]string{"unsupported_future_option": `"high"`, "background": "true"} {
 		for _, endpoint := range []string{"chat", "responses", "embeddings", "rerank"} {
+			if endpoint == "responses" && field == "background" {
+				continue
+			}
 			t.Run(endpoint+"/"+field, func(t *testing.T) {
 				access := &countingAccessModule{}
 				handler := NewHandler(modules.NewPipeline([]modules.Module{access}), &chatProvider{})

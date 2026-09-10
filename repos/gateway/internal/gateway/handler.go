@@ -1532,6 +1532,14 @@ func writeProviderFailure(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "response_ownership_conflict", "response ownership conflict")
 		return
 	}
+	if errors.Is(err, provider.ErrBackgroundResponseStorageUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "background_response_unavailable", "background response storage is unavailable")
+		return
+	}
+	if errors.Is(err, provider.ErrBackgroundResponsesUnsupported) {
+		writeProviderParameterError(w, http.StatusBadRequest, "unsupported_operation", "background responses are not supported by the selected deployment", "background")
+		return
+	}
 	if errors.Is(err, modules.ErrContentRejected) {
 		writeError(w, http.StatusUnavailableForLegalReasons, "content_rejected", "content rejected")
 		return

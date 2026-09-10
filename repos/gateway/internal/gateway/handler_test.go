@@ -1100,6 +1100,8 @@ func TestProviderResponseOwnershipFailuresAreNormalized(t *testing.T) {
 		{name: "ownership conflict", err: errors.Join(errors.New("deployment=secret"), provider.ErrResponseOwnershipConflict), status: http.StatusConflict, code: "response_ownership_conflict"},
 		{name: "not found", err: errors.Join(errors.New("record=secret"), provider.ErrResponseNotFound), status: http.StatusNotFound, code: "response_not_found"},
 		{name: "deployment changed", err: errors.Join(errors.New("endpoint=secret"), provider.ErrResponseDeploymentChanged), status: http.StatusConflict, code: "response_deployment_changed"},
+		{name: "background storage unavailable", err: errors.Join(errors.New("database=secret"), provider.ErrBackgroundResponseStorageUnavailable), status: http.StatusServiceUnavailable, code: "background_response_unavailable"},
+		{name: "background unsupported", err: provider.ErrBackgroundResponsesUnsupported, status: http.StatusBadRequest, code: "unsupported_operation"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()

@@ -533,6 +533,7 @@ type ResponseRequest struct {
 	SafetyIdentifier  string             `json:"safety_identifier,omitempty"`
 	PromptCacheKey    string             `json:"prompt_cache_key,omitempty"`
 	ServiceTier       string             `json:"service_tier,omitempty"`
+	Background        bool               `json:"background,omitempty"`
 	Stream            bool               `json:"stream,omitempty"`
 	MaxOutputTokens   *int               `json:"max_output_tokens,omitempty"`
 	MaxTokens         *int               `json:"max_tokens,omitempty"`

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.186
+  version: 0.1.187
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -925,7 +925,7 @@ paths:
       operationId: createResponse
       tags: [Inference]
       summary: Create a Responses API response
-      description: Supports function tools, explicitly scoped MCP connectors, structured output, previous-response affinity, SSE, and inline images. MCP definitions are forwarded to an upstream provider that must support remote MCP; the gateway does not execute MCP calls. Routing requires explicit mcp capability. Tool authorization checks connector identity (label and canonical URL), not individual remote tool names.
+      description: Supports function tools, explicitly scoped MCP connectors, structured output, previous-response affinity, SSE, durable background execution, and inline images. Background requests require store=true, stream=false, and an explicit background_responses deployment capability; billing settlement is resumed from PostgreSQL after process restarts. MCP definitions are forwarded to an upstream provider that must support remote MCP; the gateway does not execute MCP calls. Routing requires explicit mcp capability. Tool authorization checks connector identity (label and canonical URL), not individual remote tool names.
       requestBody:
         required: true
         content:
@@ -947,7 +947,7 @@ paths:
                       server_url: https://mcp.example.test
       responses:
         '200':
-          description: Response JSON or an SSE stream when `stream=true`
+          description: Completed response JSON, queued background response JSON, or an SSE stream when `stream=true`
           headers:
             X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
             X-Request-ID:
@@ -975,7 +975,7 @@ paths:
         '502':
           $ref: '#/components/responses/ProviderFailed'
         '503':
-          description: Response session storage is unavailable; continuation was not sent to a provider. The error code is response_affinity_unavailable.
+          description: Required response affinity, ownership, or background job storage is unavailable.
           content:
             application/json:
               schema:
@@ -3509,6 +3509,7 @@ components:
           maxItems: 4
           items: {type: string, minLength: 1}
           description: Requires an adapter reporting exact matched stops; currently native Anthropic
+        background: {type: boolean, default: false, description: Requires store=true and stream=false. Settlement continues from durable storage after restart.}
         stream: {type: boolean, default: false}
         stream_options:
           type: object
@@ -3701,7 +3702,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
+          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -5777,7 +5778,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
+          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
         auth_types:
           type: array
           uniqueItems: true

@@ -90,6 +90,9 @@ func main() {
 		ControlPlaneRefresh:     cfg.Provider.ControlPlaneRefresh,
 	}
 	providerConfig.ControlPlaneStore = controlPlaneStoreFor(providerControlStore)
+	if providerControlStore != nil {
+		providerConfig.AsyncJobs = providerControlStore
+	}
 	if redisStore != nil {
 		providerConfig.CacheStore = redisStore
 		providerConfig.SessionStore = redisStore
@@ -99,6 +102,15 @@ func main() {
 	llmProvider, err := provider.NewWithError(providerConfig)
 	if err != nil {
 		log.Fatal(err)
+	}
+	var backgroundWorkerDone <-chan struct{}
+	if processor, ok := llmProvider.(provider.BackgroundResponseProcessor); ok && providerControlStore != nil {
+		done := make(chan struct{})
+		backgroundWorkerDone = done
+		go func() {
+			defer close(done)
+			provider.RunBackgroundResponseWorker(appCtx, processor)
+		}()
 	}
 	adminController, ok := llmProvider.(gateway.AdminStateController)
 	if !ok {
@@ -165,10 +177,18 @@ func main() {
 		}
 	case <-appCtx.Done():
 	}
+	stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("gateway shutdown failed: %v", err)
+	}
+	if backgroundWorkerDone != nil {
+		select {
+		case <-backgroundWorkerDone:
+		case <-shutdownCtx.Done():
+			log.Printf("background response worker shutdown timed out")
+		}
 	}
 	if err := shutdownTelemetry(shutdownCtx); err != nil {
 		log.Printf("telemetry shutdown failed: %v", err)

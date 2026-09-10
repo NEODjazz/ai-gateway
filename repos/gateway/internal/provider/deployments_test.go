@@ -129,6 +129,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "ollama", capability: "prompt_cache"},
 		{providerType: "openai", capability: "prompt_cache"},
 		{providerType: "openai", capability: "assistant_prefill"},
+		{providerType: "anthropic", capability: "background_responses"},
 	}
 	for _, test := range tests {
 		t.Run(test.providerType+"/"+test.capability, func(t *testing.T) {
@@ -140,6 +141,8 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 			switch test.capability {
 			case "stream", "tools", "structured_output", "vision", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill":
 				capabilities = append([]string{"chat"}, capabilities...)
+			case "background_responses":
+				capabilities = []string{"responses", "background_responses"}
 			case "mcp":
 				capabilities = []string{"responses", "tools", "mcp"}
 			}
@@ -165,6 +168,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"responses", "audio"},
 		{"responses", "prompt_cache"},
 		{"responses", "assistant_prefill"},
+		{"background_responses"},
 	}
 	for _, capabilities := range tests {
 		if validDeploymentCapabilities(capabilities) {
@@ -178,6 +182,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"responses", "stream"},
 		{"chat", "tools", "structured_output", "vision"},
 		{"responses", "tools", "mcp"},
+		{"responses", "background_responses"},
 		{"chat", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill"},
 		{"embeddings"},
 	} {
@@ -225,7 +230,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "deepseek", capabilities: []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}},
 		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}},
 		{providerType: "mistral", capabilities: []string{"chat", "audio_transcription", "audio_speech", "tools", "structured_output", "vision", "assistant_prefill"}},
-		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "audio_translation", "tools", "structured_output", "mcp", "vision", "web_search", "audio"}},
+		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "background_responses", "audio_translation", "tools", "structured_output", "mcp", "vision", "web_search", "audio"}},
 	}
 	for _, test := range tests {
 		t.Run(test.providerType, func(t *testing.T) {

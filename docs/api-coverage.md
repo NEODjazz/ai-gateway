@@ -139,8 +139,6 @@ The recorded local deployment is source 5d10695, Helm revision 118. Later change
 through 04462e5 are tested and committed but are not covered by that rollout.
 PostgreSQL integration last passed at source 63dbfa9 using three isolated databases.
 
-The major remaining API work is background Responses execution, media APIs,
-async jobs, resource
-storage, search, MCP execution and A2A. Provider workload identity and native cloud
-authentication also remain unimplemented. Further parameter additions alone cannot
+The major remaining API work includes batches, fine-tuning, realtime sessions,
+video jobs, an owned MCP runtime and A2A. Further parameter additions alone cannot
 close these families; each needs its execution, authorization and settlement path.

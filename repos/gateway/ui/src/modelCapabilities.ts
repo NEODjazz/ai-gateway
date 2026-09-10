@@ -3,6 +3,7 @@ import type { ChipOption } from "./components/ChipMultiSelect";
 export const modelCapabilityOptions: ChipOption[] = [
   { value: "chat", label: "Chat", description: "Chat Completions API" },
   { value: "responses", label: "Responses", description: "Responses API" },
+  { value: "background_responses", label: "Background responses", description: "Durable asynchronous Responses execution" },
   { value: "embeddings", label: "Embeddings", description: "Vector embeddings" },
   { value: "rerank", label: "Rerank", description: "Document reranking" },
   { value: "moderation", label: "Moderation", description: "Text and image safety classification" },

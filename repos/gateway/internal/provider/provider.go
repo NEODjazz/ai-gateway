@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
@@ -246,6 +247,7 @@ type Config struct {
 	ControlPlaneStore       ControlPlaneStore
 	ControlPlaneRefresh     time.Duration
 	DeploymentQuotaStore    DeploymentQuotaStore
+	AsyncJobs               asyncstate.Store
 }
 
 type ProviderObserver interface {
@@ -314,6 +316,7 @@ type Router struct {
 	retry            retryScheduler
 	deploymentQuotas DeploymentQuotaStore
 	awsCredentials   *awsCredentialRegistry
+	asyncJobs        asyncstate.Store
 }
 
 func New(cfg Config) Provider {
@@ -444,6 +447,7 @@ func NewWithError(cfg Config) (Provider, error) {
 		routingStrategy:  strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
 		adaptive:         newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
 		deploymentQuotas: deploymentQuotas,
+		asyncJobs:        cfg.AsyncJobs,
 		awsCredentials:   &awsCredentialRegistry{current: make(map[string]managedAWSCredentialSource)},
 		affinity:         newAffinityStore(cfg.AffinityTTL, cfg.SessionStore),
 		ownership:        newResponseOwnershipStore(cfg.ResponseOwnershipTTL, cfg.SessionStore),
@@ -835,6 +839,9 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 	if err := r.validateResponseOwnership(req, *req.ResponseRequest); err != nil {
 		return openai.ResponseResponse{}, err
 	}
+	if req.ResponseRequest.Background && interfaceIsNil(r.asyncJobs) {
+		return openai.ResponseResponse{}, ErrBackgroundResponseStorageUnavailable
+	}
 
 	request := *req.ResponseRequest
 	candidates, affinityErr := r.responseCandidates(ctx, req, request, requiredResponseCapabilities(request, false)...)
@@ -842,6 +849,9 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		return openai.ResponseResponse{}, affinityErr
 	}
 	if len(candidates) == 0 {
+		if request.Background {
+			return openai.ResponseResponse{}, ErrBackgroundResponsesUnsupported
+		}
 		return openai.ResponseResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 
@@ -926,6 +936,19 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			attemptCtx.Metadata["provider.cache.status"] = "miss"
 			cachePayload, _ := json.Marshal(response)
 			attemptCtx.ResponsesResponse = &response
+			if attemptCtx.ResponseRequest.Background && backgroundResponsePending(response) {
+				if err := r.persistResponseOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, request.Model, response.ID, endpoint); err != nil {
+					r.compensateBackgroundResponse(ctx, attemptCtx, response.ID, request.Model, endpoint)
+					r.modules.RunFailure(ctx, &attemptCtx, err)
+					return openai.ResponseResponse{}, err
+				}
+				if err := r.enqueueBackgroundResponse(ctx, attemptCtx, response, endpoint); err != nil {
+					r.compensateBackgroundResponse(ctx, attemptCtx, response.ID, request.Model, endpoint)
+					r.modules.RunFailure(ctx, &attemptCtx, err)
+					return openai.ResponseResponse{}, err
+				}
+				return response, nil
+			}
 			modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
 			r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
 			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
@@ -2629,6 +2652,9 @@ func bindChatAudioHistory(request openai.ChatCompletionRequest, candidates []End
 
 func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) []string {
 	required := []string{"responses"}
+	if request.Background {
+		required = append(required, "background_responses")
+	}
 	if stream {
 		required = append(required, "stream")
 	}
@@ -2790,11 +2816,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill")
+	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill"} {
+	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

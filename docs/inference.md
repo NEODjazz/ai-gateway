@@ -45,15 +45,15 @@ JSON decoder применяет закрытый контракт request types,
 (`additionalProperties: false`). Неизвестные поля верхнего уровня возвращают HTTP 400 `invalid_request` с сообщением
 `json: unknown field "имя"` до выполнения pipeline и provider call.
 Это намеренное изменение совместимости: раньше неизвестные поля игнорировались.
-Например, `background` пока не поддерживается и не передаётся
-upstream. Распознаваемые параметры перечислены ниже; adapter policy может
+Например, Responses `background=true` требует `store=true`, durable PostgreSQL
+job storage и deployment capability `background_responses`. Распознаваемые параметры перечислены ниже; adapter policy может
 отклонить поле до выполнения запроса.
 
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
 | `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `stream_options`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `modalities`, `audio`, `reasoning_effort`, `safe_prompt`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `prompt_cache_retention`, `prompt_mode`, `prediction`, `service_tier`, `user`, `verbosity`, `web_search_options`, `web_fetch_options`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `min_p`, `top_k`, `top_a`, `repetition_penalty`, `logit_bias`; assistant messages may contain signed `reasoning` blocks or bounded `reasoning_content` when the selected adapter supports that history format |
 | `/v1/completions` | `provider`, `model`, `prompt`, `metadata`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `min_tokens`, `n`, `presence_penalty`, `prompt_cache_key`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
-| `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p` |
+| `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `user`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `background`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p`, `frequency_penalty`, `presence_penalty`, `max_tool_calls` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
 | `/v1/responses/compact` | `provider`, `model`, `input`, `instructions` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `metadata`, `input_type`, `encoding_format`, `dimensions`, `output_dtype`, `user` |
@@ -1002,7 +1002,8 @@ non-terminal results fail before SSE begins. A write failure stops replay withou
 emitting a false completion. Events follow the
 [Responses event contract](https://developers.openai.com/api/reference/typescript/resources/beta/subresources/responses/methods/create).
 
-This is buffered replay, not live token streaming or background job support.
+This is buffered replay rather than live token streaming. Background requests use
+the separate durable lifecycle described below.
 Payloads remain limited to the gateway's existing response types. Regression tests
 cover JSON-only deployments, upstream errors, capability denial, text and function
 output ordering, usage, terminal statuses, and client write errors.
@@ -1019,7 +1020,7 @@ Synthetic SSE preserves outcome details in its terminal response and emits
 `response.refusal.delta` / `response.refusal.done` for refusal content. Creation
 and empty content-part events do not expose the future terminal details or refusal
 text. Refusal content follows the existing deanonymization behavior. This does
-not implement retries, background execution, or provider-specific error handling.
+not change provider-specific error handling.
 Regression tests cover JSON round trips, terminal SSE details, refusal events,
 and restoration of anonymized refusal text. Event fields follow the
 [Responses streaming reference](https://developers.openai.com/api/reference/resources/responses/streaming-events).
@@ -1607,6 +1608,22 @@ After a successful provider call, post-response accounting completes before the
 binding is written. A storage failure returns `503 response_ownership_unavailable`;
 an ID collision with a different binding returns `409 response_ownership_conflict`.
 Omitted, null or false `store` values retain the existing stateless behavior.
+
+`background=true` additionally requires `stream=false`, PostgreSQL async-job
+storage and an explicit `background_responses` deployment capability. A queued or
+in-progress upstream response persists an owner-scoped job before success is
+returned. The job contains lifecycle and billing identifiers but never the prompt,
+provider credential or response content. Billing reserve is not committed with
+zero usage at creation time.
+
+Gateway replicas claim jobs with PostgreSQL `SKIP LOCKED` leases and fencing
+generations. They retrieve the resource only through its immutable ownership
+binding, retry nonterminal states with bounded backoff, and commit actual terminal
+usage with the original internal execution ID. A process restart or lost lease can
+repeat settlement safely through billing idempotency; stale workers cannot delete
+or reschedule a newer lease. Storage failure after upstream creation triggers an
+upstream cancellation attempt, removes the ownership binding and cancels the
+billing reserve before the gateway returns an error.
 
 `GET /v1/responses/{id}` runs authentication without opening a generation billing
 lifecycle, resolves the record within the credential and user scope, and rechecks

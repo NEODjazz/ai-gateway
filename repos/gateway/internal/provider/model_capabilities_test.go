@@ -12,7 +12,7 @@ func TestCapabilityContractIsSharedByDeploymentsAndOnboarding(t *testing.T) {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search",
 		"stream", "tools", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill",
+		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses",
 	}
 	if !validDeploymentCapabilities(capabilities) {
 		t.Fatal("deployment rejected a supported model capability")

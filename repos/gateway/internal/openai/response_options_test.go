@@ -19,6 +19,18 @@ func TestResponseOptionsValidation(t *testing.T) {
 	}
 }
 
+func TestResponseBackgroundRequiresDurableNonStreamingStorage(t *testing.T) {
+	store := true
+	if message := (ResponseRequest{Background: true, Store: &store}).Validate(); message != "" {
+		t.Fatal(message)
+	}
+	for _, request := range []ResponseRequest{{Background: true}, {Background: true, Store: &store, Stream: true}} {
+		if request.Validate() == "" {
+			t.Fatalf("invalid background request accepted: %+v", request)
+		}
+	}
+}
+
 func TestResponseRejectsInvalidGenerationControls(t *testing.T) {
 	tooFew, tooMany := 0, 1001
 	below, above, nan := -2.1, 2.1, math.NaN()
