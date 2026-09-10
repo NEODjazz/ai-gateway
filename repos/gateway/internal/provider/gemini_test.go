@@ -64,6 +64,70 @@ func TestGeminiNativeChatAndToolSignatures(t *testing.T) {
 	}
 }
 
+func TestGeminiNativeLogprobsRoundTrip(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprint(streaming), func(t *testing.T) {
+			var received geminiRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+					t.Error(err)
+					return
+				}
+				payload := `{"responseId":"logprobs-id","candidates":[{"index":0,"content":{"parts":[{"text":"é"}]},"finishReason":"STOP","logprobsResult":{"topCandidates":[{"candidates":[{"token":"é","tokenId":1,"logProbability":-0.1},{"token":"e","tokenId":2,"logProbability":-1.2}]}],"chosenCandidates":[{"token":"é","tokenId":1,"logProbability":-0.1}],"logProbabilitySum":-0.1}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}`
+				if streaming {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+					return
+				}
+				_, _ = fmt.Fprint(w, payload)
+			}))
+			defer server.Close()
+			enabled, count := true, 2
+			request := openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &enabled, TopLogprobs: &count}}
+			client := NewGemini(server.URL, "", streaming)
+			var response openai.ChatCompletionResponse
+			var payloads []string
+			var err error
+			if streaming {
+				response, err = client.StreamChatCompletions(t.Context(), request, func(payload string) error { payloads = append(payloads, payload); return nil })
+			} else {
+				response, err = client.ChatCompletions(t.Context(), request)
+			}
+			if err != nil || received.Generation.ResponseLogprobs == nil || !*received.Generation.ResponseLogprobs || received.Generation.Logprobs == nil || *received.Generation.Logprobs != 2 {
+				t.Fatalf("request=%+v response=%+v err=%v", received.Generation, response, err)
+			}
+			logprobs := response.Choices[0].Logprobs
+			if logprobs == nil || len(logprobs.Content) != 1 || logprobs.Content[0].Token != "é" || logprobs.Content[0].Logprob != -0.1 || len(logprobs.Content[0].TopLogprobs) != 2 || fmt.Sprint(logprobs.Content[0].Bytes) != "[195 169]" {
+				t.Fatalf("logprobs were not normalized: %+v", logprobs)
+			}
+			if streaming && (len(payloads) != 1 || !strings.Contains(payloads[0], `"logprobs":{"content"`)) {
+				t.Fatalf("stream logprobs lost: %v", payloads)
+			}
+		})
+	}
+}
+
+func TestGeminiRejectsInvalidLogprobs(t *testing.T) {
+	enabled, count := true, 1
+	for _, request := range []openai.ChatCompletionRequest{
+		{ChatGenerationOptions: openai.ChatGenerationOptions{TopLogprobs: &count}},
+		{ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &enabled, TopLogprobs: pointerInt(21)}},
+	} {
+		if _, err := geminiChatRequest(request); err == nil {
+			t.Fatal("invalid logprobs request accepted")
+		}
+	}
+	for _, body := range []geminiResponse{
+		{Candidates: []geminiResponseCandidate{{LogprobsResult: &geminiLogprobsResult{ChosenCandidates: []geminiLogprobCandidate{{Token: "a", LogProbability: -0.1}}}}}},
+	} {
+		if _, err := geminiToChat(body, "model"); err == nil {
+			t.Fatal("inconsistent native logprobs accepted")
+		}
+	}
+}
+
+func pointerInt(value int) *int { return &value }
+
 func TestGeminiRejectsInvalidNativeSamplingControls(t *testing.T) {
 	zero, tooLarge := 0, 1000001
 	below, above := -2.1, 2.1
@@ -114,7 +178,6 @@ func TestGeminiRejectsInvalidAndUnsupportedRequests(t *testing.T) {
 	for _, change := range []func(*openai.ChatCompletionRequest){
 		func(r *openai.ChatCompletionRequest) { r.Model = "../other" },
 		func(r *openai.ChatCompletionRequest) { r.ParallelToolCalls = &enabled },
-		func(r *openai.ChatCompletionRequest) { r.Logprobs = &enabled },
 		func(r *openai.ChatCompletionRequest) { r.ResponseFormat.JSONSchema.Schema = nil },
 		func(r *openai.ChatCompletionRequest) { r.Messages[0].Role = "invalid" },
 		func(r *openai.ChatCompletionRequest) {

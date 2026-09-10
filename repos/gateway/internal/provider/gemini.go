@@ -77,10 +77,31 @@ type geminiGeneration struct {
 	TopK               *int     `json:"topK,omitempty"`
 	FrequencyPenalty   *float64 `json:"frequencyPenalty,omitempty"`
 	PresencePenalty    *float64 `json:"presencePenalty,omitempty"`
+	ResponseLogprobs   *bool    `json:"responseLogprobs,omitempty"`
+	Logprobs           *int     `json:"logprobs,omitempty"`
 	Seed               *int64   `json:"seed,omitempty"`
 	Stop               []string `json:"stopSequences,omitempty"`
 	ResponseMIMEType   string   `json:"responseMimeType,omitempty"`
 	ResponseJSONSchema any      `json:"responseJsonSchema,omitempty"`
+}
+type geminiLogprobCandidate struct {
+	Token          string  `json:"token"`
+	TokenID        int     `json:"tokenId"`
+	LogProbability float64 `json:"logProbability"`
+}
+type geminiTopCandidates struct {
+	Candidates []geminiLogprobCandidate `json:"candidates"`
+}
+type geminiLogprobsResult struct {
+	TopCandidates     []geminiTopCandidates    `json:"topCandidates"`
+	ChosenCandidates  []geminiLogprobCandidate `json:"chosenCandidates"`
+	LogProbabilitySum float64                  `json:"logProbabilitySum"`
+}
+type geminiResponseCandidate struct {
+	Index          int                   `json:"index"`
+	Content        geminiContent         `json:"content"`
+	FinishReason   string                `json:"finishReason"`
+	LogprobsResult *geminiLogprobsResult `json:"logprobsResult"`
 }
 type geminiRequest struct {
 	Contents   []geminiContent  `json:"contents"`
@@ -90,14 +111,10 @@ type geminiRequest struct {
 	Generation geminiGeneration `json:"generationConfig"`
 }
 type geminiResponse struct {
-	ID         string `json:"responseId"`
-	Model      string `json:"modelVersion"`
-	Candidates []struct {
-		Index        int           `json:"index"`
-		Content      geminiContent `json:"content"`
-		FinishReason string        `json:"finishReason"`
-	} `json:"candidates"`
-	Usage          *geminiUsage `json:"usageMetadata"`
+	ID             string                    `json:"responseId"`
+	Model          string                    `json:"modelVersion"`
+	Candidates     []geminiResponseCandidate `json:"candidates"`
+	Usage          *geminiUsage              `json:"usageMetadata"`
 	PromptFeedback struct {
 		BlockReason string `json:"blockReason"`
 	} `json:"promptFeedback"`
@@ -154,9 +171,14 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 			return result, geminiInvalid(penalty.name)
 		}
 	}
+	if options.TopLogprobs != nil && (*options.TopLogprobs < 0 || *options.TopLogprobs > 20 || options.Logprobs == nil || !*options.Logprobs) {
+		return result, geminiInvalid("top_logprobs")
+	}
 	options.TopK = nil
 	options.FrequencyPenalty = nil
 	options.PresencePenalty = nil
+	options.Logprobs = nil
+	options.TopLogprobs = nil
 	if err := rejectGenerationOptions("gemini", options); err != nil {
 		return result, err
 	}
@@ -188,7 +210,8 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	}
 	result.Generation = geminiGeneration{
 		MaxOutputTokens: maxTokens, Temperature: request.Temperature, TopP: request.TopP, TopK: request.TopK,
-		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty, Seed: request.Seed, Stop: stop,
+		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty,
+		ResponseLogprobs: request.Logprobs, Logprobs: request.TopLogprobs, Seed: request.Seed, Stop: stop,
 	}
 	if request.ResponseFormat != nil {
 		switch request.ResponseFormat.Type {
@@ -493,6 +516,13 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 			return result, errors.New("invalid Gemini candidate index")
 		}
 		choice := openai.Choice{Index: candidate.Index, Message: openai.Message{Role: "assistant"}}
+		if candidate.LogprobsResult != nil {
+			logprobs, err := geminiChoiceLogprobs(*candidate.LogprobsResult)
+			if err != nil {
+				return result, err
+			}
+			choice.Logprobs = &logprobs
+		}
 		var text strings.Builder
 		for _, part := range candidate.Content.Parts {
 			if part.Thought {
@@ -548,6 +578,40 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 	return result, nil
 }
 
+func geminiChoiceLogprobs(result geminiLogprobsResult) (openai.ChoiceLogprobs, error) {
+	if len(result.ChosenCandidates) != len(result.TopCandidates) {
+		return openai.ChoiceLogprobs{}, errors.New("inconsistent Gemini logprobs")
+	}
+	converted := openai.ChoiceLogprobs{Content: make([]openai.TokenLogprob, 0, len(result.ChosenCandidates))}
+	for index, chosen := range result.ChosenCandidates {
+		if !finiteProbability(chosen.LogProbability) || len(result.TopCandidates[index].Candidates) > 20 {
+			return openai.ChoiceLogprobs{}, errors.New("invalid Gemini logprobs")
+		}
+		token := openai.TokenLogprob{Token: chosen.Token, Logprob: chosen.LogProbability, Bytes: tokenBytes(chosen.Token)}
+		for _, candidate := range result.TopCandidates[index].Candidates {
+			if !finiteProbability(candidate.LogProbability) {
+				return openai.ChoiceLogprobs{}, errors.New("invalid Gemini logprobs")
+			}
+			token.TopLogprobs = append(token.TopLogprobs, openai.TopLogprob{Token: candidate.Token, Logprob: candidate.LogProbability, Bytes: tokenBytes(candidate.Token)})
+		}
+		converted.Content = append(converted.Content, token)
+	}
+	return converted, nil
+}
+
+func finiteProbability(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value <= 0
+}
+
+func tokenBytes(token string) []int {
+	data := []byte(token)
+	result := make([]int, len(data))
+	for index, value := range data {
+		result[index] = int(value)
+	}
+	return result
+}
+
 func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	if err := g.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -589,6 +653,12 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 				result.Choices = append(result.Choices, openai.Choice{Index: len(result.Choices), Message: openai.Message{Role: "assistant"}})
 			}
 			current := &result.Choices[choice.Index]
+			if choice.Logprobs != nil {
+				if current.Logprobs == nil {
+					current.Logprobs = &openai.ChoiceLogprobs{}
+				}
+				current.Logprobs.Content = append(current.Logprobs.Content, choice.Logprobs.Content...)
+			}
 			current.Message.Content = openai.ContentText(current.Message.Content) + openai.ContentText(choice.Message.Content)
 			for i := range choice.Message.ToolCalls {
 				index := len(current.Message.ToolCalls)
@@ -608,7 +678,7 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			if choice.FinishReason != "" {
 				finish = choice.FinishReason
 			}
-			choices = append(choices, map[string]any{"index": choice.Index, "delta": choice.Message, "finish_reason": finish})
+			choices = append(choices, map[string]any{"index": choice.Index, "delta": choice.Message, "finish_reason": finish, "logprobs": choice.Logprobs})
 		}
 		event := map[string]any{"id": result.ID, "object": "chat.completion.chunk", "model": result.Model, "choices": choices}
 		if body.Usage != nil {
