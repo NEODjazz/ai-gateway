@@ -36,6 +36,12 @@ type openAICompatibleChatRequest struct {
 	Stop                any                            `json:"stop,omitempty"`
 	Seed                *int64                         `json:"seed,omitempty"`
 	RandomSeed          *int64                         `json:"random_seed,omitempty"`
+	UserID              string                         `json:"user_id,omitempty"`
+	Thinking            *deepSeekThinking              `json:"thinking,omitempty"`
+}
+
+type deepSeekThinking struct {
+	Type string `json:"type"`
 }
 
 type openAICompatibleResponseRequest struct {
@@ -157,13 +163,22 @@ func (p OpenAICompatible) providerName() string {
 }
 
 func (p OpenAICompatible) mapChatParameters(request *openAICompatibleChatRequest) {
-	if p.providerName() == "mistral" {
+	switch p.providerName() {
+	case "mistral":
 		request.RandomSeed = request.Seed
 		request.Seed = nil
 		if request.MaxCompletionTokens != nil {
 			request.MaxTokens = request.MaxCompletionTokens
 			request.MaxCompletionTokens = nil
 		}
+	case "deepseek":
+		if request.MaxCompletionTokens != nil {
+			request.MaxTokens = request.MaxCompletionTokens
+			request.MaxCompletionTokens = nil
+		}
+		request.UserID = request.User
+		request.User = ""
+		request.Thinking = &deepSeekThinking{Type: "disabled"}
 	}
 }
 

@@ -1,0 +1,130 @@
+package provider
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"ai-gateway-gateway/internal/openai"
+)
+
+func TestDeepSeekChatMapsSupportedContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer deepseek-key" {
+			t.Fatalf("path=%q authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		thinking, _ := body["thinking"].(map[string]any)
+		if body["model"] != "model" || body["max_tokens"] != float64(64) || body["max_completion_tokens"] != nil || body["user"] != nil || body["user_id"] != "tenant_1" || thinking["type"] != "disabled" {
+			t.Fatalf("request=%#v", body)
+		}
+		if body["logprobs"] != true || body["top_logprobs"] != float64(4) || len(body["stop"].([]any)) != 5 || len(body["tools"].([]any)) != 1 || body["response_format"] == nil {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12,"prompt_cache_hit_tokens":7}}`)
+	}))
+	defer server.Close()
+	maxTokens, topLogprobs, logprobs, n := 64, 4, true, 1
+	client := NewDeepSeek(server.URL, "deepseek-key", true)
+	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxCompletionTokens: &maxTokens, Stop: []string{"1", "2", "3", "4", "5"},
+		ChatGenerationOptions: openai.ChatGenerationOptions{User: "tenant_1", Logprobs: &logprobs, TopLogprobs: &topLogprobs, N: &n},
+		Tools:                 []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}}}},
+		ResponseFormat:        &openai.ResponseFormat{Type: "json_object"},
+	})
+	if err != nil || response.Usage.PromptTokensDetails == nil || response.Usage.PromptTokensDetails.CachedTokens != 7 || openai.ContentText(response.Choices[0].Message.Content) != "ok" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestDeepSeekResponsesMapsSupportedContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" || r.Header.Get("Authorization") != "Bearer key" {
+			t.Fatalf("path=%q authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		reasoning, _ := body["reasoning"].(map[string]any)
+		text, _ := body["text"].(map[string]any)
+		format, _ := text["format"].(map[string]any)
+		if body["max_output_tokens"] != float64(80) || reasoning["effort"] != "high" || format["type"] != "json_schema" || len(body["tools"].([]any)) != 1 {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"resp","object":"response","created_at":1,"status":"completed","model":"model","output":[{"id":"msg","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4,"input_tokens_details":{"cached_tokens":2}}}`)
+	}))
+	defer server.Close()
+	limit, effort := 80, "high"
+	client := NewDeepSeek(server.URL, "key", true)
+	response, err := client.Responses(t.Context(), openai.ResponseRequest{
+		Model: "model", Input: "hello", MaxOutputTokens: &limit, Reasoning: &openai.ResponseReasoning{Effort: &effort},
+		Tools: []openai.ResponseTool{{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}}},
+		Text:  map[string]any{"format": map[string]any{"type": "json_schema", "name": "answer", "schema": map[string]any{"type": "object"}}},
+	})
+	if err != nil || response.OutputText != "ok" || response.Usage.InputTokensDetails == nil || response.Usage.InputTokensDetails.CachedTokens != 2 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestDeepSeekStreamsResponses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["stream"] != true {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, responseTestTerminal)
+	}))
+	defer server.Close()
+	client := NewDeepSeek(server.URL, "key", true)
+	var events int
+	response, err := client.StreamResponses(t.Context(), openai.ResponseRequest{Model: "model", Input: "hello", Stream: true}, func(string, string) error {
+		events++
+		return nil
+	})
+	if err != nil || response.Status != "completed" || events != 1 {
+		t.Fatalf("response=%+v events=%d err=%v", response, events, err)
+	}
+}
+
+func TestDeepSeekRejectsUnsupportedParametersBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewDeepSeek(server.URL, "key", true)
+	penalty := 0.5
+	_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{FrequencyPenalty: &penalty}})
+	if err == nil || !strings.Contains(err.Error(), "frequency_penalty") || called {
+		t.Fatalf("err=%v called=%v", err, called)
+	}
+	effort, summary := "high", "auto"
+	_, err = client.Responses(t.Context(), openai.ResponseRequest{Model: "model", Input: "hello", Reasoning: &openai.ResponseReasoning{Effort: &effort, Summary: &summary}})
+	if err == nil || !strings.Contains(err.Error(), "reasoning") || called {
+		t.Fatalf("err=%v called=%v", err, called)
+	}
+	_, err = client.Responses(t.Context(), openai.ResponseRequest{Model: "model", Input: "hello", PreviousResponse: "resp_previous"})
+	if err == nil || !strings.Contains(err.Error(), "previous_response_id") || called {
+		t.Fatalf("err=%v called=%v", err, called)
+	}
+}
+
+func TestDeepSeekRejectsInvalidStopAndUser(t *testing.T) {
+	client := NewDeepSeek("http://unused.invalid", "key", true)
+	for _, request := range []openai.ChatCompletionRequest{
+		{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stop: make([]string, 17)},
+		{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{User: "contains space"}},
+	} {
+		if _, err := client.ChatCompletions(t.Context(), request); err == nil {
+			t.Fatalf("request was accepted: %+v", request)
+		}
+	}
+}

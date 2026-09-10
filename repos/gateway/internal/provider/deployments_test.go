@@ -117,6 +117,8 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "groq", capability: "responses"},
 		{providerType: "groq", capability: "embeddings"},
 		{providerType: "groq", capability: "audio_transcription"},
+		{providerType: "deepseek", capability: "embeddings"},
+		{providerType: "deepseek", capability: "audio_transcription"},
 		{providerType: "ollama", capability: "rerank"},
 		{providerType: "demo", capability: "stream"},
 		{providerType: "gemini", capability: "web_fetch"},
@@ -221,6 +223,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
 		{providerType: "bedrock", capabilities: []string{"chat", "tools"}},
 		{providerType: "groq", capabilities: []string{"chat", "stream", "tools", "structured_output", "vision"}},
+		{providerType: "deepseek", capabilities: []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}},
 		{providerType: "mistral", capabilities: []string{"chat", "tools", "structured_output", "vision", "assistant_prefill"}},
 		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "tools", "structured_output", "mcp", "vision", "web_search", "audio"}},
 	}
@@ -269,6 +272,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	}
 	if !slices.Equal(profilesByType["groq"].Operations, []string{"chat", "stream"}) || !slices.Equal(profilesByType["groq"].Capabilities, []string{"chat", "stream", "tools", "structured_output", "vision"}) {
 		t.Fatalf("groq profile=%+v", profilesByType["groq"])
+	}
+	if !slices.Equal(profilesByType["deepseek"].Operations, []string{"chat", "responses", "stream"}) || !slices.Equal(profilesByType["deepseek"].Capabilities, []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}) {
+		t.Fatalf("deepseek profile=%+v", profilesByType["deepseek"])
 	}
 }
 

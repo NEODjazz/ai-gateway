@@ -2852,6 +2852,8 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 		return NewBedrock(endpoint.BaseURL, endpoint.APIKey)
 	case "groq":
 		return NewGroq(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
+	case "deepseek":
+		return NewDeepSeek(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "demo":
 		return Demo{}
 	default:
