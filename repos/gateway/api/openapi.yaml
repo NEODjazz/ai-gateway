@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.141
+  version: 0.1.142
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4012,7 +4012,7 @@ components:
                         required: [mode]
                         properties:
                           mode: {type: string, const: explicit}
-        service_tier: {type: string, enum: [auto, default, flex, scale, priority, fast, ultrafast, standard_only], description: "Forwarded by compatible adapters. Native Gemini accepts auto, default, standard_only, flex, and priority; native Anthropic accepts auto and standard_only."}
+        service_tier: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only], description: "Forwarded by compatible adapters. Native Groq accepts auto, default, on_demand, flex, and performance; native Gemini accepts auto, default, standard_only, flex, and priority; native Anthropic accepts auto and standard_only."}
         user: {type: string, description: "Legacy provider hint; never used as gateway authorization, rate-limit, or billing identity."}
         verbosity: {type: string, enum: [low, medium, high]}
         web_search_options:
@@ -4349,7 +4349,7 @@ components:
         user: {type: string, maxLength: 512, pattern: '^[a-zA-Z0-9_-]+$', description: Provider-specific end-user isolation identifier; native adapters reject it unless explicitly supported.}
         safety_identifier: {type: string, maxLength: 64}
         prompt_cache_key: {type: string}
-        service_tier: {type: string, enum: [auto, default, flex, scale, priority, fast, ultrafast, standard_only], description: Forwarded by compatible adapters; native adapters may reject it.}
+        service_tier: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only], description: Forwarded by compatible adapters; native adapters may reject it.}
         stream: {type: boolean, default: false}
         max_output_tokens: {type: integer, minimum: 1}
         max_tokens: {type: integer, minimum: 1}

@@ -31,7 +31,7 @@ func (g Groq) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil},
 		parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""}, parameterCheck{"prompt_mode", request.PromptMode != ""},
-		parameterCheck{"prediction", request.Prediction != nil}, parameterCheck{"user", request.User != ""}, parameterCheck{"verbosity", request.Verbosity != ""},
+		parameterCheck{"prediction", request.Prediction != nil}, parameterCheck{"verbosity", request.Verbosity != ""},
 		parameterCheck{"web_search_options", request.WebSearchOptions != nil}, parameterCheck{"web_fetch_options", request.WebFetchOptions != nil},
 		parameterCheck{"logprobs", request.Logprobs != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
 		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil},
@@ -42,7 +42,7 @@ func (g Groq) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		return err
 	}
 	switch request.ServiceTier {
-	case "", "auto", "default", "flex":
+	case "", "auto", "default", "on_demand", "flex", "performance":
 	default:
 		return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "service_tier", Err: errUnsupportedServiceTier}
 	}

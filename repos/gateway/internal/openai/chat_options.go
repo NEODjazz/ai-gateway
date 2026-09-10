@@ -290,7 +290,7 @@ func responseTextVerbosity(text any) (string, bool, bool) {
 
 func validServiceTier(value string) bool {
 	switch value {
-	case "", "auto", "default", "flex", "scale", "priority", "fast", "ultrafast", "standard_only":
+	case "", "auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast", "standard_only":
 		return true
 	default:
 		return false

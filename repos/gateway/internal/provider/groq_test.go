@@ -20,21 +20,33 @@ func TestGroqChatMapsSupportedContract(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body["model"] != "model" || body["max_completion_tokens"] != float64(32) || body["service_tier"] != "flex" || len(body["tools"].([]any)) != 1 || body["response_format"] == nil {
+		if body["model"] != "model" || body["max_completion_tokens"] != float64(32) || body["service_tier"] != "performance" || body["user"] != "tenant-user" || len(body["tools"].([]any)) != 1 || body["response_format"] == nil {
 			t.Fatalf("request=%#v", body)
 		}
-		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"model","service_tier":"performance","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
 	}))
 	defer server.Close()
 	maxTokens := 32
 	client := NewGroq(server.URL+"/openai/v1", "groq-key", true)
 	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
-		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxCompletionTokens: &maxTokens, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "flex"},
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxCompletionTokens: &maxTokens, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "performance", User: "tenant-user"},
 		Tools:          []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}}}},
 		ResponseFormat: &openai.ResponseFormat{Type: "json_object"},
 	})
-	if err != nil || response.Usage.TotalTokens != 3 || openai.ContentText(response.Choices[0].Message.Content) != "ok" {
+	if err != nil || response.Usage.TotalTokens != 3 || response.ServiceTier != "performance" || openai.ContentText(response.Choices[0].Message.Content) != "ok" {
 		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGroqAcceptsDocumentedServiceTiers(t *testing.T) {
+	client := NewGroq("http://unused.invalid", "", false)
+	for _, tier := range []string{"auto", "default", "on_demand", "flex", "performance"} {
+		t.Run(tier, func(t *testing.T) {
+			request := openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: tier}}
+			if err := client.ValidateChatParameters(request); err != nil {
+				t.Fatalf("documented service tier rejected: %v", err)
+			}
+		})
 	}
 }
 

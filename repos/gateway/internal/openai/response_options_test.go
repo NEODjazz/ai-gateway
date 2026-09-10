@@ -48,7 +48,7 @@ func TestResponseRejectsUnknownServiceTier(t *testing.T) {
 }
 
 func TestServiceTierValues(t *testing.T) {
-	for _, value := range []string{"", "auto", "default", "flex", "scale", "priority", "fast", "ultrafast"} {
+	for _, value := range []string{"", "auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast"} {
 		if !validServiceTier(value) {
 			t.Fatalf("documented service tier rejected: %q", value)
 		}
