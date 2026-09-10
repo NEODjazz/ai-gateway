@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,9 +18,12 @@ import (
 )
 
 const (
-	azureIMDSTokenURL   = "http://169.254.169.254/metadata/identity/oauth2/token"
-	azureOpenAIResource = "https://cognitiveservices.azure.com/"
-	azureTokenMaxBytes  = 32 << 10
+	azureIMDSTokenURL      = "http://169.254.169.254/metadata/identity/oauth2/token"
+	azureAuthorityURL      = "https://login.microsoftonline.com"
+	azureOpenAIResource    = "https://cognitiveservices.azure.com/"
+	azureOpenAIScope       = azureOpenAIResource + ".default"
+	azureTokenMaxBytes     = 32 << 10
+	azureAssertionMaxBytes = 64 << 10
 )
 
 type azureTokenSource struct {
@@ -28,6 +32,7 @@ type azureTokenSource struct {
 	getenv           func(string) string
 	now              func() time.Time
 	imdsURL          string
+	authorityBaseURL string
 	mu               sync.Mutex
 	token            string
 	refreshAt        time.Time
@@ -41,13 +46,14 @@ type azureTokenSource struct {
 type azureTokenResponse struct {
 	AccessToken string          `json:"access_token"`
 	ExpiresOn   json.RawMessage `json:"expires_on"`
+	ExpiresIn   json.RawMessage `json:"expires_in"`
 	TokenType   string          `json:"token_type"`
 }
 
 func newAzureTokenSource(explicit string) *azureTokenSource {
 	client := newProviderHTTPClient(2 * time.Second)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &azureTokenSource{explicit: explicit, client: client, getenv: os.Getenv, now: time.Now, imdsURL: azureIMDSTokenURL}
+	return &azureTokenSource{explicit: explicit, client: client, getenv: os.Getenv, now: time.Now, imdsURL: azureIMDSTokenURL, authorityBaseURL: azureAuthorityURL}
 }
 
 func (s *azureTokenSource) Token(ctx context.Context) (string, error) {
@@ -114,6 +120,15 @@ func azureTokenRefreshAt(now, expiration time.Time) time.Time {
 }
 
 func (s *azureTokenSource) load(ctx context.Context) (string, time.Time, error) {
+	tenantID := strings.TrimSpace(s.getenv("AZURE_TENANT_ID"))
+	clientID := strings.TrimSpace(s.getenv("AZURE_CLIENT_ID"))
+	tokenFile := strings.TrimSpace(s.getenv("AZURE_FEDERATED_TOKEN_FILE"))
+	if tenantID != "" || tokenFile != "" {
+		if tenantID == "" || clientID == "" || tokenFile == "" {
+			return "", time.Time{}, errors.New("incomplete Azure federated workload identity configuration")
+		}
+		return s.loadFederated(ctx, tenantID, clientID, tokenFile)
+	}
 	endpoint := strings.TrimSpace(s.getenv("IDENTITY_ENDPOINT"))
 	header := s.getenv("IDENTITY_HEADER")
 	apiVersion := "2019-08-01"
@@ -133,7 +148,7 @@ func (s *azureTokenSource) load(ctx context.Context) (string, time.Time, error) 
 	query := parsed.Query()
 	query.Set("api-version", apiVersion)
 	query.Set("resource", azureOpenAIResource)
-	if clientID := strings.TrimSpace(s.getenv("AZURE_CLIENT_ID")); clientID != "" {
+	if clientID != "" {
 		if len(clientID) > 128 || strings.ContainsAny(clientID, "\x00\r\n") {
 			return "", time.Time{}, errors.New("invalid Azure managed identity client ID")
 		}
@@ -149,6 +164,10 @@ func (s *azureTokenSource) load(ctx context.Context) (string, time.Time, error) 
 	} else {
 		request.Header.Set("Metadata", "true")
 	}
+	return s.fetchToken(request, false)
+}
+
+func (s *azureTokenSource) fetchToken(request *http.Request, useExpiresIn bool) (string, time.Time, error) {
 	response, err := s.client.Do(request)
 	if err != nil {
 		return "", time.Time{}, err
@@ -167,10 +186,59 @@ func (s *azureTokenSource) load(ctx context.Context) (string, time.Time, error) 
 		return "", time.Time{}, errors.New("Azure managed identity response is invalid")
 	}
 	expiration, err := azureTokenExpiration(value.ExpiresOn)
+	if useExpiresIn {
+		duration, durationErr := azureTokenLifetime(value.ExpiresIn)
+		if durationErr != nil {
+			err = durationErr
+		} else {
+			expiration = s.now().Add(duration)
+			err = nil
+		}
+	}
 	if err != nil || value.AccessToken == "" || len(value.AccessToken) > 16<<10 || strings.ContainsAny(value.AccessToken, "\r\n") || !strings.EqualFold(value.TokenType, "Bearer") || !expiration.After(s.now()) {
 		return "", time.Time{}, errors.New("Azure managed identity response is invalid")
 	}
 	return value.AccessToken, expiration, nil
+}
+
+func (s *azureTokenSource) loadFederated(ctx context.Context, tenantID, clientID, tokenFile string) (string, time.Time, error) {
+	if !validAzureIdentifier(tenantID) || !validAzureIdentifier(clientID) || !filepath.IsAbs(tokenFile) {
+		return "", time.Time{}, errors.New("invalid Azure federated workload identity configuration")
+	}
+	assertion, err := readBoundedCredentialFile(tokenFile, azureAssertionMaxBytes)
+	if err != nil {
+		return "", time.Time{}, errors.New("invalid Azure federated token file")
+	}
+	assertion = []byte(strings.TrimSpace(string(assertion)))
+	if len(assertion) == 0 || strings.ContainsAny(string(assertion), "\r\n") {
+		return "", time.Time{}, errors.New("invalid Azure federated token file")
+	}
+	form := url.Values{
+		"client_id":             {clientID},
+		"scope":                 {azureOpenAIScope},
+		"client_assertion_type": {"urn:ietf:params:oauth:client-assertion-type:jwt-bearer"},
+		"client_assertion":      {string(assertion)},
+		"grant_type":            {"client_credentials"},
+	}
+	endpoint := strings.TrimRight(s.authorityBaseURL, "/") + "/" + url.PathEscape(tenantID) + "/oauth2/v2.0/token"
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", time.Time{}, errors.New("invalid Azure federated token request")
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return s.fetchToken(request, true)
+}
+
+func validAzureIdentifier(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '-' && char != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 func validAzureIdentityEndpoint(value string) bool {
@@ -190,20 +258,36 @@ func validAzureIdentityEndpoint(value string) bool {
 }
 
 func azureTokenExpiration(raw json.RawMessage) (time.Time, error) {
+	seconds, err := azureTokenInteger(raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(seconds, 0).UTC(), nil
+}
+
+func azureTokenLifetime(raw json.RawMessage) (time.Duration, error) {
+	seconds, err := azureTokenInteger(raw)
+	if err != nil || seconds > int64((24*time.Hour)/time.Second) {
+		return 0, errors.New("invalid token lifetime")
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
+
+func azureTokenInteger(raw json.RawMessage) (int64, error) {
 	var text string
 	if len(raw) == 0 {
-		return time.Time{}, errors.New("missing expiration")
+		return 0, errors.New("missing expiration")
 	}
 	if raw[0] == '"' {
 		if json.Unmarshal(raw, &text) != nil {
-			return time.Time{}, errors.New("invalid expiration")
+			return 0, errors.New("invalid expiration")
 		}
 	} else {
 		text = string(raw)
 	}
 	seconds, err := strconv.ParseInt(text, 10, 64)
 	if err != nil || seconds <= 0 {
-		return time.Time{}, errors.New("invalid expiration")
+		return 0, errors.New("invalid expiration")
 	}
-	return time.Unix(seconds, 0).UTC(), nil
+	return seconds, nil
 }

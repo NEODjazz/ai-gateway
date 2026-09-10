@@ -244,7 +244,7 @@ func (s *awsCredentialSource) loadWebIdentity(ctx context.Context, roleARN, toke
 	if !validAWSRoleSessionName(sessionName) {
 		return awsCredential{}, time.Time{}, errors.New("invalid AWS web identity configuration")
 	}
-	token, err := readAWSBoundedFile(tokenFile, awsWebIdentityMaxBytes)
+	token, err := readBoundedCredentialFile(tokenFile, awsWebIdentityMaxBytes)
 	if err != nil {
 		return awsCredential{}, time.Time{}, errors.New("invalid AWS web identity token file")
 	}
@@ -364,10 +364,10 @@ func (s *awsCredentialSource) containerAuthorization() (string, error) {
 }
 
 func readAWSAuthorizationTokenFile(path string) ([]byte, error) {
-	return readAWSBoundedFile(path, 8<<10)
+	return readBoundedCredentialFile(path, 8<<10)
 }
 
-func readAWSBoundedFile(path string, limit int64) ([]byte, error) {
+func readBoundedCredentialFile(path string, limit int64) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err

@@ -85,12 +85,15 @@ Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 `voyage`, `bedrock`, `groq` и `deepseek`.
 
 Для `azure-openai` режим `auth_type=entra` использует статический bearer token
-из привязанного write-only credential. Без credential gateway получает token для
-`https://cognitiveservices.azure.com/` через локальные `IDENTITY_ENDPOINT` и
-`IDENTITY_HEADER` App Service/Container Apps либо через Azure VM IMDS. Необязательный
-`AZURE_CLIENT_ID` выбирает user-assigned identity. Разрешены только loopback и
-link-local identity endpoints; redirects и некорректные/просроченные ответы
-отклоняются. Временный token кэшируется и обновляется до истечения срока.
+из привязанного write-only credential. Без credential gateway сначала проверяет
+AKS workload identity через `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` и абсолютный
+`AZURE_FEDERATED_TOKEN_FILE`, затем локальные `IDENTITY_ENDPOINT` и
+`IDENTITY_HEADER` App Service/Container Apps, затем Azure VM IMDS. Projected token
+обменивается на scope `https://cognitiveservices.azure.com/.default` через
+фиксированный public-cloud Entra authority. `AZURE_CLIENT_ID` также выбирает
+user-assigned managed identity. Разрешены только loopback и link-local identity
+endpoints; redirects и некорректные/просроченные ответы отклоняются. Временный
+access token кэшируется и обновляется до истечения срока.
 
 Для managed provider `bedrock` значение `auth_type=aws_sigv4` требует `region`.
 Write-only credential задается JSON-объектом с `access_key_id`,
