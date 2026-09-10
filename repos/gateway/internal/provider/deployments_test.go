@@ -78,9 +78,15 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		capability   string
 	}{
 		{providerType: "voyage", capability: "responses"},
+		{providerType: "voyage", capability: "chat"},
 		{providerType: "cohere", capability: "responses"},
+		{providerType: "cohere", capability: "image_generation"},
 		{providerType: "gemini", capability: "responses"},
+		{providerType: "gemini", capability: "moderation"},
 		{providerType: "mistral", capability: "image_generation"},
+		{providerType: "anthropic", capability: "embeddings"},
+		{providerType: "ollama", capability: "rerank"},
+		{providerType: "demo", capability: "stream"},
 		{providerType: "gemini", capability: "web_fetch"},
 	}
 	for _, test := range tests {

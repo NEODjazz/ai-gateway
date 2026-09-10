@@ -76,6 +76,7 @@ func voyageUnsupported(operation string) error {
 }
 
 func (Voyage) SupportsResponses() bool { return false }
+func (Voyage) SupportsChat() bool      { return false }
 
 func (Voyage) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
 	input, err := openai.InspectEmbeddingInput(request.Input)

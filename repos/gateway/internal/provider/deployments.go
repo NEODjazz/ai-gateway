@@ -407,11 +407,55 @@ func (r *Router) endpointForDeployment(deployment ModelDeployment) (Endpoint, er
 	}
 	endpoint := Endpoint{Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second, RateLimitRPM: deployment.RateLimitRPM, RateLimitTPM: deployment.RateLimitTPM, ProviderRateLimitRPM: managed.RateLimitRPM, ProviderRateLimitTPM: managed.RateLimitTPM}
 	for _, capability := range deployment.Capabilities {
-		if !endpoint.supportsCapabilities(capability) {
+		if !supportsManagedAdapterCapability(endpoint, capability) {
 			return Endpoint{}, fmt.Errorf("%w: %s does not support %s", ErrUnsupportedProviderCapability, managed.Type, capability)
 		}
 	}
 	return endpoint, nil
+}
+
+func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool {
+	if !endpoint.supportsCapabilities(capability) {
+		return false
+	}
+	switch capability {
+	case "embeddings":
+		_, ok := endpoint.Provider.(EmbeddingClient)
+		return ok
+	case "rerank":
+		_, ok := endpoint.Provider.(RerankClient)
+		return ok
+	case "moderation":
+		_, ok := endpoint.Provider.(ModerationClient)
+		return ok
+	case "image_generation":
+		_, ok := endpoint.Provider.(ImageGenerationClient)
+		return ok
+	case "image_edit":
+		_, ok := endpoint.Provider.(ImageEditClient)
+		return ok
+	case "image_variation":
+		_, ok := endpoint.Provider.(ImageVariationClient)
+		return ok
+	case "audio_transcription":
+		_, ok := endpoint.Provider.(AudioTranscriptionClient)
+		return ok
+	case "audio_speech":
+		_, ok := endpoint.Provider.(AudioSpeechClient)
+		return ok
+	case "search":
+		_, ok := endpoint.Provider.(SearchClient)
+		return ok
+	case "ocr":
+		_, ok := endpoint.Provider.(OCRClient)
+		return ok
+	case "stream":
+		_, chat := endpoint.Provider.(StreamingClient)
+		_, responses := endpoint.Provider.(StreamingResponseClient)
+		return chat || responses
+	default:
+		return true
+	}
 }
 
 func (r *Router) configuredEndpoints() []Endpoint {

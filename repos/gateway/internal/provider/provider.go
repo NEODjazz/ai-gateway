@@ -2647,6 +2647,11 @@ func (e Endpoint) supportsModel(model string) bool {
 }
 
 func (e Endpoint) supportsCapabilities(required ...string) bool {
+	if hasCapability(required, "chat") {
+		if client, ok := e.Provider.(interface{ SupportsChat() bool }); ok && !client.SupportsChat() {
+			return false
+		}
+	}
 	if hasCapability(required, "responses") {
 		if client, ok := e.Provider.(interface{ SupportsResponses() bool }); ok && !client.SupportsResponses() {
 			return false
