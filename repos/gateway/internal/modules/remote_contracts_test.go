@@ -437,7 +437,7 @@ func TestRemoteBillingAttributesInteractionsSeparately(t *testing.T) {
 }
 
 func TestRemoteBillingPreservesNativeChatSurfaceAPIType(t *testing.T) {
-	for _, apiType := range []string{"messages", "generate_content"} {
+	for _, apiType := range []string{"messages", "generate_content", "bedrock_converse"} {
 		req := sensitiveContext()
 		req.Metadata = map[string]string{"gateway.api_type": apiType}
 		if request := billingRequest(&req); request.APIType != apiType {

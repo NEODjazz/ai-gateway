@@ -173,6 +173,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.APIType = "generate_content"
 	case "interactions":
 		request.APIType = "interactions"
+	case "bedrock_converse":
+		request.APIType = "bedrock_converse"
 	case "image_generation":
 		request.APIType = "image_generation"
 	case "image_edit":
