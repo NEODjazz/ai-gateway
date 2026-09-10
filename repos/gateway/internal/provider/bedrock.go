@@ -236,6 +236,7 @@ func (Bedrock) SupportsTools() bool                 { return true }
 func (Bedrock) SupportsVision() bool                { return true }
 func (Bedrock) SupportsBedrockNativeControls() bool { return true }
 func (Bedrock) SupportsReasoningBlocks() bool       { return true }
+func (Bedrock) SupportsUnsignedReasoning() bool     { return true }
 
 func bedrockInvalid(param string) error {
 	return &Error{Class: FailureClientRequest, Provider: "bedrock", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: param, Err: fmt.Errorf("unsupported or invalid %s for Bedrock adapter", param)}
@@ -413,7 +414,7 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 				if message.Role != "assistant" {
 					return result, bedrockInvalid("messages.reasoning")
 				}
-				if err := openai.ValidateReasoningBlocks(message.Reasoning); err != nil {
+				if err := openai.ValidateBedrockReasoningBlocks(message.Reasoning); err != nil {
 					return result, bedrockInvalid("messages.reasoning")
 				}
 				for _, reasoning := range message.Reasoning {
@@ -725,7 +726,7 @@ func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletio
 	if err := openai.ValidateChatAnnotations(message.Annotations); err != nil {
 		return result, fmt.Errorf("invalid Bedrock citations: %w", err)
 	}
-	if err := openai.ValidateReasoningBlocks(message.Reasoning); err != nil {
+	if err := openai.ValidateBedrockReasoningBlocks(message.Reasoning); err != nil {
 		return result, fmt.Errorf("invalid Bedrock reasoning content: %w", err)
 	}
 	if len(texts) > 0 {

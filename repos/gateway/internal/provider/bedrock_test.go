@@ -79,6 +79,21 @@ func TestBedrockConversePreservesReasoningHistoryAndResponse(t *testing.T) {
 	}
 }
 
+func TestBedrockAllowsUnsignedReasoningWithoutWeakeningOtherAdapters(t *testing.T) {
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{
+		{Role: "user", Content: "question"},
+		{Role: "assistant", Reasoning: []openai.ReasoningBlock{{Type: "thinking", Thinking: "plan"}}},
+	}}
+	bedrock := NewBedrock("http://unused.invalid", "key")
+	if err := validateChatAdapter(bedrock, request); err != nil {
+		t.Fatalf("Bedrock rejected optional reasoning signature: %v", err)
+	}
+	anthropic := NewAnthropic("http://unused.invalid", "key", false)
+	if err := validateChatAdapter(anthropic, request); err == nil {
+		t.Fatal("signed reasoning policy was weakened for Anthropic")
+	}
+}
+
 func TestBedrockConverseMapsNamedToolChoice(t *testing.T) {
 	request := openai.ChatCompletionRequest{
 		Model: "model", Messages: []openai.Message{{Role: "user", Content: "weather"}},

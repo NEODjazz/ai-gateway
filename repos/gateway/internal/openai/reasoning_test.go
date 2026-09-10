@@ -22,6 +22,16 @@ func TestValidateReasoningBlocks(t *testing.T) {
 	}
 }
 
+func TestValidateBedrockReasoningBlocksAllowsOptionalSignature(t *testing.T) {
+	blocks := []ReasoningBlock{{Type: "thinking", Thinking: "plan"}}
+	if err := ValidateBedrockReasoningBlocks(blocks); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateReasoningBlocks(blocks); err == nil {
+		t.Fatal("generic signed reasoning policy accepted a missing signature")
+	}
+}
+
 func TestValidateChatReasoningContent(t *testing.T) {
 	if err := ValidateChatReasoningContent("assistant", strings.Repeat("x", MaxChatReasoningContentBytes)); err != nil {
 		t.Fatalf("valid assistant reasoning_content rejected: %v", err)

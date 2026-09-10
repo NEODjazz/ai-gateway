@@ -321,11 +321,21 @@ func TestBedrockConverseRejectsInvalidReasoning(t *testing.T) {
 		{Role: "assistant", Content: []BedrockContentBlock{{ReasoningContent: &BedrockReasoningContent{}}}},
 		{Role: "assistant", Content: []BedrockContentBlock{{ReasoningContent: &BedrockReasoningContent{ReasoningText: validText, RedactedContent: "b3BhcXVl"}}}},
 		{Role: "assistant", Content: []BedrockContentBlock{{ReasoningContent: &BedrockReasoningContent{RedactedContent: "%%%"}}}},
-		{Role: "assistant", Content: []BedrockContentBlock{{ReasoningContent: &BedrockReasoningContent{ReasoningText: &BedrockReasoningText{Text: "plan"}}}}},
 	} {
 		request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("question")}}}, message}}
 		if _, err := request.ChatRequest("model", "bedrock"); err == nil {
 			t.Fatalf("invalid reasoning accepted: %+v", message)
 		}
+	}
+}
+
+func TestBedrockConverseAcceptsUnsignedReasoningText(t *testing.T) {
+	request := BedrockConverseRequest{Messages: []BedrockMessage{
+		{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("question")}}},
+		{Role: "assistant", Content: []BedrockContentBlock{{ReasoningContent: &BedrockReasoningContent{ReasoningText: &BedrockReasoningText{Text: "plan"}}}}},
+	}}
+	chat, err := request.ChatRequest("model", "bedrock")
+	if err != nil || len(chat.Messages[1].Reasoning) != 1 || chat.Messages[1].Reasoning[0].Signature != "" {
+		t.Fatalf("chat=%+v err=%v", chat, err)
 	}
 }

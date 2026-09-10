@@ -399,7 +399,7 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		} else if len(texts) > 0 {
 			chat.Content = strings.Join(texts, "")
 		}
-		if err := ValidateReasoningBlocks(chat.Reasoning); err != nil {
+		if err := ValidateBedrockReasoningBlocks(chat.Reasoning); err != nil {
 			return request, err
 		}
 		if (message.Role == "user" && len(chat.ToolCalls) > 0) || (chat.Content == nil && len(chat.ToolCalls) == 0 && len(chat.Reasoning) == 0) {
@@ -688,7 +688,7 @@ func BedrockFromChat(response ChatCompletionResponse) (BedrockConverseResponse, 
 		}
 		result.Output.Message.Content = append(result.Output.Message.Content, BedrockContentBlock{ToolUse: &BedrockToolUse{ID: call.ID, Name: call.Function.Name, Input: input}})
 	}
-	if err := ValidateReasoningBlocks(choice.Message.Reasoning); err != nil {
+	if err := ValidateBedrockReasoningBlocks(choice.Message.Reasoning); err != nil {
 		return result, err
 	}
 	for _, reasoning := range choice.Message.Reasoning {

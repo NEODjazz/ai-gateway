@@ -158,6 +158,19 @@ func TestBedrockConverseStreamRejectsMixedReasoningDelta(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseStreamAcceptsUnsignedReasoningText(t *testing.T) {
+	state := bedrockStreamState{model: "model", blocks: map[int]*bedrockStreamBlock{0: {started: true}}}
+	if err := state.contentDelta([]byte(`{"contentBlockIndex":0,"delta":{"reasoningContent":{"text":"plan"}}}`), func(string) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.contentStop([]byte(`{"contentBlockIndex":0}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.response.Output.Message.Content[0].ReasoningContent.ReasoningText; got == nil || got.Text != "plan" || got.Signature != "" {
+		t.Fatalf("reasoning=%+v", got)
+	}
+}
+
 func TestBedrockConverseStreamMapsProviderExceptions(t *testing.T) {
 	var headers bytes.Buffer
 	for _, pair := range [][2]string{{":message-type", "exception"}, {":exception-type", "throttlingException"}, {":content-type", "application/json"}} {

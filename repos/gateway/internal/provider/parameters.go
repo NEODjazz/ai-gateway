@@ -196,7 +196,11 @@ func validateChatAdapter(client Client, request openai.ChatCompletionRequest) er
 		if message.Role != "assistant" {
 			return &Error{Class: FailureClientRequest, Provider: "provider", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.reasoning", Err: errors.New("reasoning blocks require an assistant message")}
 		}
-		if err := openai.ValidateReasoningBlocks(message.Reasoning); err != nil {
+		validateReasoning := openai.ValidateReasoningBlocks
+		if support, ok := client.(interface{ SupportsUnsignedReasoning() bool }); ok && support.SupportsUnsignedReasoning() {
+			validateReasoning = openai.ValidateBedrockReasoningBlocks
+		}
+		if err := validateReasoning(message.Reasoning); err != nil {
 			return &Error{Class: FailureClientRequest, Provider: "provider", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.reasoning", Err: err}
 		}
 		support, ok := client.(interface{ SupportsReasoningBlocks() bool })

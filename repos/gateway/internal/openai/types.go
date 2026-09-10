@@ -90,6 +90,16 @@ type ReasoningBlock struct {
 }
 
 func ValidateReasoningBlocks(blocks []ReasoningBlock) error {
+	return validateReasoningBlocks(blocks, true)
+}
+
+// ValidateBedrockReasoningBlocks accepts unsigned reasoning text because the
+// native Bedrock contract makes the signature optional.
+func ValidateBedrockReasoningBlocks(blocks []ReasoningBlock) error {
+	return validateReasoningBlocks(blocks, false)
+}
+
+func validateReasoningBlocks(blocks []ReasoningBlock, requireSignature bool) error {
 	if len(blocks) > 128 {
 		return errors.New("message contains more than 128 reasoning blocks")
 	}
@@ -107,8 +117,8 @@ func ValidateReasoningBlocks(blocks []ReasoningBlock) error {
 		}
 		switch block.Type {
 		case "thinking":
-			if block.Thinking == "" || block.Signature == "" || block.Data != "" {
-				return errors.New("thinking blocks require thinking and signature")
+			if block.Thinking == "" || requireSignature && block.Signature == "" || block.Data != "" {
+				return errors.New("thinking blocks require thinking and a valid signature policy")
 			}
 			total += len(block.Thinking) + len(block.Signature)
 		case "redacted_thinking":

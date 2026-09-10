@@ -356,7 +356,7 @@ func (s *bedrockStreamState) contentStop(payload []byte) error {
 			reasoning.Data = block.redactedReasoning.String()
 			content.RedactedContent = reasoning.Data
 		}
-		if err := openai.ValidateReasoningBlocks([]openai.ReasoningBlock{reasoning}); err != nil {
+		if err := openai.ValidateBedrockReasoningBlocks([]openai.ReasoningBlock{reasoning}); err != nil {
 			return fmt.Errorf("invalid Bedrock streamed reasoning content: %w", err)
 		}
 		if reasoning.Type == "redacted_thinking" {
