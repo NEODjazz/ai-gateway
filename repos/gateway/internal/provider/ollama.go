@@ -28,6 +28,7 @@ type ollamaChatRequest struct {
 	Stream      bool                   `json:"stream"`
 	Logprobs    *bool                  `json:"logprobs,omitempty"`
 	TopLogprobs *int                   `json:"top_logprobs,omitempty"`
+	Think       any                    `json:"think,omitempty"`
 }
 
 type ollamaOptions struct {
@@ -136,6 +137,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 		Options:  ollamaRequestOptions(request),
 		Stream:   request.Stream && p.upstreamStream,
 		Logprobs: request.Logprobs, TopLogprobs: request.TopLogprobs,
+		Think: ollamaThink(request.ReasoningEffort),
 	})
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -261,6 +263,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		Options:  ollamaRequestOptions(request),
 		Stream:   true,
 		Logprobs: request.Logprobs, TopLogprobs: request.TopLogprobs,
+		Think: ollamaThink(request.ReasoningEffort),
 	})
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -372,6 +375,13 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		response.Choices[0].FinishReason = "stop"
 	}
 	return response, nil
+}
+
+func ollamaThink(reasoningEffort string) any {
+	if reasoningEffort == "none" {
+		return false
+	}
+	return nil
 }
 
 func ollamaChoiceLogprobs(items []ollamaLogprob) (openai.ChoiceLogprobs, string, error) {

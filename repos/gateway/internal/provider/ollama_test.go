@@ -153,7 +153,7 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 			}},
 		}},
 		MaxTokens: &maxTokens, Temperature: &temperature, TopP: &topP, Seed: &seed,
-		ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK, MinP: &minP},
+		ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK, MinP: &minP, ReasoningEffort: "none"},
 		Stop:                  []string{"END"},
 	})
 	if err != nil {
@@ -170,6 +170,9 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 		upstream.Options.MinP == nil || *upstream.Options.MinP != 0.05 ||
 		upstream.Options.Seed == nil || *upstream.Options.Seed != 42 {
 		t.Fatalf("generation options were not forwarded: %+v", upstream.Options)
+	}
+	if disabled, ok := upstream.Think.(bool); !ok || disabled {
+		t.Fatalf("reasoning disable was not forwarded: %#v", upstream.Think)
 	}
 	if len(response.Choices) != 1 || len(response.Choices[0].Message.ToolCalls) != 1 ||
 		response.Choices[0].Message.ToolCalls[0].Type != "function" ||
@@ -194,7 +197,7 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 	minP := 0.1
 	response, err := NewOllama(server.URL, true).StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{
 		Model: "llama3.2:latest", Stream: true, Messages: []openai.Message{{Role: "user", Content: "weather"}},
-		ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK, MinP: &minP},
+		ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK, MinP: &minP, ReasoningEffort: "none"},
 	}, func(payload string) error {
 		payloads = append(payloads, payload)
 		return nil
@@ -207,6 +210,9 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 	}
 	if upstream.Options.TopK == nil || *upstream.Options.TopK != 20 || upstream.Options.MinP == nil || *upstream.Options.MinP != 0.1 {
 		t.Fatalf("streaming generation options were not forwarded: %+v", upstream.Options)
+	}
+	if disabled, ok := upstream.Think.(bool); !ok || disabled {
+		t.Fatalf("streaming reasoning disable was not forwarded: %#v", upstream.Think)
 	}
 	if len(payloads) != 2 || !strings.Contains(payloads[0], `"type":"function"`) ||
 		!strings.Contains(payloads[0], `"arguments":"{\"city\":\"Moscow\"}"`) {

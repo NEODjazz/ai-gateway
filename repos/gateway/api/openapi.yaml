@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.145
+  version: 0.1.146
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3976,7 +3976,7 @@ components:
           items: {type: string, enum: [text, audio]}
           description: Native Gemini accepts text-only output; compatible deployment support is provider-specific.
         audio: {$ref: '#/components/schemas/ChatAudioOptions'}
-        reasoning_effort: {type: string, enum: [none, minimal, low, medium, high, xhigh, max], description: Native Gemini maps minimal through high to thinkingConfig.thinkingLevel; available levels depend on the selected model.}
+        reasoning_effort: {type: string, enum: [none, minimal, low, medium, high, xhigh, max], description: Native Gemini maps minimal through high to thinkingConfig.thinkingLevel; native Ollama maps none to think=false; available levels depend on the selected model.}
         safe_prompt: {type: boolean, description: Enables provider-managed prompt safety for native Mistral Chat deployments; rejected by other adapters.}
         n: {type: integer, minimum: 1, maximum: 128, default: 1, description: Native Gemini supports values up to 20; compatible deployment limits are provider-specific.}
         safety_identifier: {type: string, maxLength: 64}
