@@ -139,6 +139,14 @@ Request Logs и budgets относятся к запросам модели. Э�
 Централизованные MCP discovery, credentials/OAuth, egress policy и аудит
 исполнения потребуют отдельного MCP proxy runtime.
 
+В gateway есть bounded Streamable HTTP client foundation для будущего runtime.
+Он выполняет initialize negotiation, поддерживает JSON и SSE ответы на POST,
+передает protocol/session headers, ограничивает request/response/tool pages и
+отклоняет private, loopback и link-local адреса при каждом DNS resolve. Client
+пока не подключен к публичному endpoint: registry credentials, per-tool ACL,
+usage accounting и durable audit должны быть добавлены вместе, прежде чем
+разрешать прямое выполнение инструментов.
+
 ## Проверка реализации
 
 Источники контрактов:
