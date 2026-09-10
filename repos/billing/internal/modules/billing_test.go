@@ -428,3 +428,13 @@ func TestBillingRejectsInvalidInputPageCounts(t *testing.T) {
 		}
 	}
 }
+
+func TestBillingRejectsInvalidInputAudioDurations(t *testing.T) {
+	module := NewBillingModuleWithPricing(true, PricingConfig{Currency: "USD"})
+	for _, duration := range []int{-1, maxBillableInputAudioMilliseconds + 1} {
+		req := RequestContext{RequestID: "invalid-audio-duration", InputAudioMilliseconds: duration}
+		if err := module.Handle(context.Background(), &req); err == nil {
+			t.Fatalf("accepted input_audio_milliseconds=%d", duration)
+		}
+	}
+}

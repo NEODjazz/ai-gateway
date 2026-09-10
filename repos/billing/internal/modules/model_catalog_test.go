@@ -14,18 +14,19 @@ func TestModelCatalogPricingPrecedenceAndAuditFields(t *testing.T) {
 	catalogJSON := `{
 		"version":"2026-08-21.1","unknown_model_policy":"deny","models":[
 			{"provider":"openai","model":"gpt-test","input_cost_per_1m":1,"output_cost_per_1m":2,"currency":"USD"},
-			{"provider":"endpoint-a","model":"gpt-test","input_cost_per_1m":2,"output_cost_per_1m":4,"search_cost_per_1k":10,"character_cost_per_1m":15,"page_cost_per_1k":100,"currency":"USD"}
+			{"provider":"endpoint-a","model":"gpt-test","input_cost_per_1m":2,"output_cost_per_1m":4,"search_cost_per_1k":10,"character_cost_per_1m":15,"page_cost_per_1k":100,"audio_cost_per_minute":0.12,"currency":"USD"}
 		]}`
 	module := NewBillingModuleWithSettings(true, Settings{
 		Pricing: PricingConfig{Currency: "USD"}, ModelCatalogJSON: catalogJSON,
 	})
 	req := RequestContext{
 		RequestID: "catalog-pricing", BillingPhase: "commit", PostResponse: true,
-		Request:         openai.ChatCompletionRequest{Provider: "openai", Model: "gpt-test"},
-		Usage:           &openai.Usage{PromptTokens: 1000, CompletionTokens: 500, TotalTokens: 1500},
-		SearchRequests:  2,
-		InputCharacters: 2000,
-		InputPages:      3,
+		Request:                openai.ChatCompletionRequest{Provider: "openai", Model: "gpt-test"},
+		Usage:                  &openai.Usage{PromptTokens: 1000, CompletionTokens: 500, TotalTokens: 1500},
+		SearchRequests:         2,
+		InputCharacters:        2000,
+		InputPages:             3,
+		InputAudioMilliseconds: 90000,
 		Metadata: map[string]string{
 			"provider.endpoint.name": "endpoint-a", "provider.endpoint.type": "openai",
 		},
@@ -36,7 +37,7 @@ func TestModelCatalogPricingPrecedenceAndAuditFields(t *testing.T) {
 	if req.BillingEvent == nil || req.BillingEvent.CatalogVersion != "2026-08-21.1" || req.BillingEvent.PricingKey != "endpoint-a/gpt-test" {
 		t.Fatalf("missing catalog audit fields: %+v", req.BillingEvent)
 	}
-	if math.Abs(req.BillingEvent.Cost-0.354) > 1e-12 || req.BillingEvent.InputCostPer1M != 2 || req.BillingEvent.OutputCostPer1M != 4 || req.BillingEvent.SearchCostPer1K != 10 || req.BillingEvent.CharacterCostPer1M != 15 || req.BillingEvent.PageCostPer1K != 100 || req.BillingEvent.InputCharacters != 2000 || req.BillingEvent.InputPages != 3 {
+	if math.Abs(req.BillingEvent.Cost-0.534) > 1e-12 || req.BillingEvent.InputCostPer1M != 2 || req.BillingEvent.OutputCostPer1M != 4 || req.BillingEvent.SearchCostPer1K != 10 || req.BillingEvent.CharacterCostPer1M != 15 || req.BillingEvent.PageCostPer1K != 100 || req.BillingEvent.AudioCostPerMinute != 0.12 || req.BillingEvent.InputCharacters != 2000 || req.BillingEvent.InputPages != 3 || req.BillingEvent.InputAudioMilliseconds != 90000 {
 		t.Fatalf("unexpected catalog price: %+v", req.BillingEvent)
 	}
 }
@@ -65,7 +66,7 @@ func (pinnedPricingPolicy) Apply(_ context.Context, event *BillingEvent) error {
 		event.InputCostPer1M = 1
 		event.OutputCostPer1M = 2
 		event.Currency = "USD"
-		event.Cost = pricingCost(event.InputTokens, event.OutputTokens, event.InputCharacters, event.InputPages, event.SearchRequests, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2})
+		event.Cost = pricingCost(event.InputTokens, event.OutputTokens, event.InputCharacters, event.InputPages, 0, event.SearchRequests, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2})
 	}
 	return nil
 }
@@ -101,6 +102,7 @@ func TestModelCatalogRejectsInvalidEntries(t *testing.T) {
 		`{"version":"v1","models":[{"provider":"p","model":"m","search_cost_per_1k":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m","character_cost_per_1m":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m","page_cost_per_1k":-1}]}`,
+		`{"version":"v1","models":[{"provider":"p","model":"m","audio_cost_per_minute":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m"},{"provider":"p","model":"m"}]}`,
 	} {
 		if _, err := ParseModelCatalog(raw); err == nil {
@@ -121,12 +123,12 @@ func TestDocumentedModelCatalogExampleMatchesBillingSchema(t *testing.T) {
 }
 
 func TestSuppliedRuntimePricingSnapshotOverridesStaticCatalog(t *testing.T) {
-	req := &RequestContext{Metadata: map[string]string{"model_catalog.version": "runtime-v2", "model_catalog.pricing_key": "endpoint/model", "model_catalog.input_cost_per_1m": "2.5", "model_catalog.output_cost_per_1m": "5", "model_catalog.search_cost_per_1k": "12", "model_catalog.character_cost_per_1m": "15", "model_catalog.currency": "EUR"}}
+	req := &RequestContext{Metadata: map[string]string{"model_catalog.version": "runtime-v2", "model_catalog.pricing_key": "endpoint/model", "model_catalog.input_cost_per_1m": "2.5", "model_catalog.output_cost_per_1m": "5", "model_catalog.search_cost_per_1k": "12", "model_catalog.character_cost_per_1m": "15", "model_catalog.audio_cost_per_minute": "0.12", "model_catalog.currency": "EUR"}}
 	pricing, supplied, err := suppliedPricingSnapshot(req)
 	if err != nil || !supplied {
 		t.Fatalf("supplied=%v err=%v", supplied, err)
 	}
-	if pricing.CatalogVersion != "runtime-v2" || pricing.InputCostPer1M != 2.5 || pricing.SearchCostPer1K != 12 || pricing.CharacterCostPer1M != 15 || pricing.Currency != "EUR" {
+	if pricing.CatalogVersion != "runtime-v2" || pricing.InputCostPer1M != 2.5 || pricing.SearchCostPer1K != 12 || pricing.CharacterCostPer1M != 15 || pricing.AudioCostPerMinute != 0.12 || pricing.Currency != "EUR" {
 		t.Fatalf("pricing=%+v", pricing)
 	}
 }
@@ -141,7 +143,7 @@ func TestSuppliedRuntimePricingSnapshotFailsClosed(t *testing.T) {
 func TestSuppliedRuntimePricingSnapshotDefaultsMissingSearchPriceToZero(t *testing.T) {
 	req := &RequestContext{Metadata: map[string]string{"model_catalog.version": "runtime-v1", "model_catalog.pricing_key": "endpoint/model", "model_catalog.input_cost_per_1m": "2.5", "model_catalog.output_cost_per_1m": "5", "model_catalog.currency": "USD"}}
 	pricing, supplied, err := suppliedPricingSnapshot(req)
-	if err != nil || !supplied || pricing.SearchCostPer1K != 0 || pricing.CharacterCostPer1M != 0 {
+	if err != nil || !supplied || pricing.SearchCostPer1K != 0 || pricing.CharacterCostPer1M != 0 || pricing.AudioCostPerMinute != 0 {
 		t.Fatalf("pricing=%+v supplied=%v err=%v", pricing, supplied, err)
 	}
 }

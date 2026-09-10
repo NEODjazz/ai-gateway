@@ -113,6 +113,9 @@ whose catalog pricing uses `character_cost_per_1m`; tokens remain available for
 rate limits and token-based budgets.
 Exact processed-page counts are exposed separately as `input_pages` for models
 whose catalog pricing uses `page_cost_per_1k`.
+Exact processed-audio duration is exposed separately as
+`input_audio_milliseconds` for models whose catalog pricing uses
+`audio_cost_per_minute`.
 
 `POST /v1/audio/speech` routes only to `audio_speech` capable deployments. It
 accepts bounded text, voice, instructions, speed and audio format options,

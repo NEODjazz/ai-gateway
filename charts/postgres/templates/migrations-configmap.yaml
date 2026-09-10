@@ -247,6 +247,9 @@ data:
   012_billing_pages.sql: |
     ALTER TABLE billing_budget_reservations
         ADD COLUMN IF NOT EXISTS page_cost_per_1k NUMERIC(18, 8) NOT NULL DEFAULT 0;
+  013_billing_audio_duration.sql: |
+    ALTER TABLE billing_budget_reservations
+        ADD COLUMN IF NOT EXISTS audio_cost_per_minute NUMERIC(18, 8) NOT NULL DEFAULT 0;
 
   003_virtual_keys.sql: |
     CREATE TABLE IF NOT EXISTS auth_virtual_keys

@@ -68,6 +68,7 @@ type RequestLog struct {
 	TotalTokens             uint32   `json:"total_tokens"`
 	InputCharacters         uint32   `json:"input_characters"`
 	InputPages              uint32   `json:"input_pages"`
+	InputAudioMilliseconds  uint32   `json:"input_audio_milliseconds"`
 	CacheReadInputTokens    uint32   `json:"cache_read_input_tokens"`
 	CacheWriteInputTokens   uint32   `json:"cache_write_input_tokens"`
 	SearchRequests          uint32   `json:"search_requests"`
@@ -92,23 +93,24 @@ type RequestLogGroupFilter struct {
 }
 
 type RequestLogGroup struct {
-	GroupID               string   `json:"group_id"`
-	Requests              uint64   `json:"requests"`
-	Errors                uint64   `json:"errors"`
-	Models                []string `json:"models"`
-	Providers             []string `json:"providers"`
-	TotalTokens           uint64   `json:"total_tokens"`
-	InputCharacters       uint64   `json:"input_characters"`
-	InputPages            uint64   `json:"input_pages"`
-	CacheReadInputTokens  uint64   `json:"cache_read_input_tokens"`
-	CacheWriteInputTokens uint64   `json:"cache_write_input_tokens"`
-	SearchRequests        uint64   `json:"search_requests"`
-	CacheHits             uint64   `json:"cache_hits"`
-	LatencyMS             float64  `json:"latency_ms"`
-	Cost                  float64  `json:"cost"`
-	Currency              string   `json:"currency"`
-	StartedAt             string   `json:"started_at"`
-	EndedAt               string   `json:"ended_at"`
+	GroupID                string   `json:"group_id"`
+	Requests               uint64   `json:"requests"`
+	Errors                 uint64   `json:"errors"`
+	Models                 []string `json:"models"`
+	Providers              []string `json:"providers"`
+	TotalTokens            uint64   `json:"total_tokens"`
+	InputCharacters        uint64   `json:"input_characters"`
+	InputPages             uint64   `json:"input_pages"`
+	InputAudioMilliseconds uint64   `json:"input_audio_milliseconds"`
+	CacheReadInputTokens   uint64   `json:"cache_read_input_tokens"`
+	CacheWriteInputTokens  uint64   `json:"cache_write_input_tokens"`
+	SearchRequests         uint64   `json:"search_requests"`
+	CacheHits              uint64   `json:"cache_hits"`
+	LatencyMS              float64  `json:"latency_ms"`
+	Cost                   float64  `json:"cost"`
+	Currency               string   `json:"currency"`
+	StartedAt              string   `json:"started_at"`
+	EndedAt                string   `json:"ended_at"`
 }
 
 type RequestLogGroupPage struct {

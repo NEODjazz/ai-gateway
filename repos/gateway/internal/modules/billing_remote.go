@@ -40,6 +40,7 @@ type UsageRequest struct {
 	PromptTokensEstimated   int      `json:"prompt_tokens_estimated"`
 	InputCharacters         int      `json:"input_characters"`
 	InputPages              int      `json:"input_pages"`
+	InputAudioMilliseconds  int      `json:"input_audio_milliseconds"`
 	InputTokens             int      `json:"input_tokens"`
 	OutputTokens            int      `json:"output_tokens"`
 	TotalTokens             int      `json:"total_tokens"`
@@ -54,6 +55,7 @@ type UsageRequest struct {
 	SearchCostPer1K         string   `json:"search_cost_per_1k,omitempty"`
 	CharacterCostPer1M      string   `json:"character_cost_per_1m,omitempty"`
 	PageCostPer1K           string   `json:"page_cost_per_1k,omitempty"`
+	AudioCostPerMinute      string   `json:"audio_cost_per_minute,omitempty"`
 	Currency                string   `json:"currency,omitempty"`
 }
 
@@ -123,42 +125,44 @@ func (m RemoteBillingModule) send(ctx context.Context, req *RequestContext, phas
 
 func billingRequest(req *RequestContext) UsageRequest {
 	request := UsageRequest{
-		RequestID:             req.RequestID,
-		SessionID:             req.SessionID,
-		CredentialID:          req.CredentialID,
-		UserID:                req.UserID,
-		TeamID:                req.TeamID,
-		OrganizationID:        req.OrganizationID,
-		Roles:                 append([]string(nil), req.Roles...),
-		Tags:                  append([]string(nil), req.Tags...),
-		Provider:              req.Request.Provider,
-		ProviderID:            metadataValue(req.Metadata, "provider.id"),
-		Model:                 req.Request.Model,
-		APIType:               "chat_completions",
-		Phase:                 "reserve",
-		ProviderEndpointName:  metadataValue(req.Metadata, "provider.endpoint.name"),
-		ProviderEndpointType:  metadataValue(req.Metadata, "provider.endpoint.type"),
-		Status:                metadataValue(req.Metadata, "provider.status"),
-		Error:                 metadataValue(req.Metadata, "provider.error"),
-		FailureClass:          metadataValue(req.Metadata, "provider.failure_class"),
-		LatencyMS:             metadataValue(req.Metadata, "provider.latency_ms"),
-		FirstTokenLatencyMS:   metadataValue(req.Metadata, "provider.first_token_latency_ms"),
-		RetryCount:            metadataIntValue(req.Metadata, "provider.retry_count"),
-		FallbackCount:         metadataIntValue(req.Metadata, "provider.fallback_count"),
-		CacheStatus:           metadataValue(req.Metadata, "provider.cache.status"),
-		CacheKind:             metadataValue(req.Metadata, "provider.cache.kind"),
-		UsageEstimated:        true,
-		PromptTokensEstimated: estimateRequestTokens(req),
-		InputCharacters:       req.InputCharacters,
-		InputPages:            req.InputPages,
-		CatalogVersion:        metadataValue(req.Metadata, "model_catalog.version"),
-		PricingKey:            metadataValue(req.Metadata, "model_catalog.pricing_key"),
-		InputCostPer1M:        metadataValue(req.Metadata, "model_catalog.input_cost_per_1m"),
-		OutputCostPer1M:       metadataValue(req.Metadata, "model_catalog.output_cost_per_1m"),
-		SearchCostPer1K:       metadataValue(req.Metadata, "model_catalog.search_cost_per_1k"),
-		CharacterCostPer1M:    metadataValue(req.Metadata, "model_catalog.character_cost_per_1m"),
-		PageCostPer1K:         metadataValue(req.Metadata, "model_catalog.page_cost_per_1k"),
-		Currency:              metadataValue(req.Metadata, "model_catalog.currency"),
+		RequestID:              req.RequestID,
+		SessionID:              req.SessionID,
+		CredentialID:           req.CredentialID,
+		UserID:                 req.UserID,
+		TeamID:                 req.TeamID,
+		OrganizationID:         req.OrganizationID,
+		Roles:                  append([]string(nil), req.Roles...),
+		Tags:                   append([]string(nil), req.Tags...),
+		Provider:               req.Request.Provider,
+		ProviderID:             metadataValue(req.Metadata, "provider.id"),
+		Model:                  req.Request.Model,
+		APIType:                "chat_completions",
+		Phase:                  "reserve",
+		ProviderEndpointName:   metadataValue(req.Metadata, "provider.endpoint.name"),
+		ProviderEndpointType:   metadataValue(req.Metadata, "provider.endpoint.type"),
+		Status:                 metadataValue(req.Metadata, "provider.status"),
+		Error:                  metadataValue(req.Metadata, "provider.error"),
+		FailureClass:           metadataValue(req.Metadata, "provider.failure_class"),
+		LatencyMS:              metadataValue(req.Metadata, "provider.latency_ms"),
+		FirstTokenLatencyMS:    metadataValue(req.Metadata, "provider.first_token_latency_ms"),
+		RetryCount:             metadataIntValue(req.Metadata, "provider.retry_count"),
+		FallbackCount:          metadataIntValue(req.Metadata, "provider.fallback_count"),
+		CacheStatus:            metadataValue(req.Metadata, "provider.cache.status"),
+		CacheKind:              metadataValue(req.Metadata, "provider.cache.kind"),
+		UsageEstimated:         true,
+		PromptTokensEstimated:  estimateRequestTokens(req),
+		InputCharacters:        req.InputCharacters,
+		InputPages:             req.InputPages,
+		InputAudioMilliseconds: req.InputAudioMilliseconds,
+		CatalogVersion:         metadataValue(req.Metadata, "model_catalog.version"),
+		PricingKey:             metadataValue(req.Metadata, "model_catalog.pricing_key"),
+		InputCostPer1M:         metadataValue(req.Metadata, "model_catalog.input_cost_per_1m"),
+		OutputCostPer1M:        metadataValue(req.Metadata, "model_catalog.output_cost_per_1m"),
+		SearchCostPer1K:        metadataValue(req.Metadata, "model_catalog.search_cost_per_1k"),
+		CharacterCostPer1M:     metadataValue(req.Metadata, "model_catalog.character_cost_per_1m"),
+		PageCostPer1K:          metadataValue(req.Metadata, "model_catalog.page_cost_per_1k"),
+		AudioCostPerMinute:     metadataValue(req.Metadata, "model_catalog.audio_cost_per_minute"),
+		Currency:               metadataValue(req.Metadata, "model_catalog.currency"),
 	}
 	request.InputTokens = request.PromptTokensEstimated
 	request.OutputTokens = requestedOutputTokens(req)

@@ -157,6 +157,13 @@ reserve and commit calculation, and PostgreSQL reservations pin that price for
 the request lifecycle. Apply PostgreSQL migration `012_billing_pages.sql` and
 ClickHouse migration `011_usage_pages.sql` before deploying this version.
 
+Duration-priced audio operations carry exact `input_audio_milliseconds`
+separately from tokens. The model catalog field `audio_cost_per_minute`
+participates in reserve and commit calculation, and the reservation pins that
+price for the request lifecycle. Apply PostgreSQL migration
+`013_billing_audio_duration.sql` and ClickHouse migration
+`012_usage_audio_duration.sql` before deploying this version.
+
 `DELETE` is a soft disable. Summary includes committed usage and unexpired
 reservations, using the same period, scope, and currency calculation as
 enforcement. `expand=summaries` calculates every policy in one PostgreSQL query
@@ -198,6 +205,7 @@ migrations/clickhouse/008_usage_cache_tokens.sql
 migrations/clickhouse/009_usage_server_tools.sql
 migrations/clickhouse/010_usage_characters.sql
 migrations/clickhouse/011_usage_pages.sql
+migrations/clickhouse/012_usage_audio_duration.sql
 ```
 
 Final usage events retain normalized provider/deployment identity, organization,
@@ -230,6 +238,7 @@ migrations/postgres/008_organization_budgets.sql
 migrations/postgres/010_billing_server_tools.sql
 migrations/postgres/011_billing_characters.sql
 migrations/postgres/012_billing_pages.sql
+migrations/postgres/013_billing_audio_duration.sql
 ```
 
 `management_audit_events` is an append-only management journal queried through

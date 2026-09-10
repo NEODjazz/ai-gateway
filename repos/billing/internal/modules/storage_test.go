@@ -45,28 +45,30 @@ func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 	})
 
 	err := writer.WriteUsageEvent(context.Background(), BillingEvent{
-		RequestID:             "req-1",
-		UserID:                "user-1",
-		TeamID:                "team-1",
-		Tags:                  []string{"production", "cost-center-a"},
-		Provider:              "ollama",
-		Model:                 "test-model",
-		Timestamp:             "2026-06-25T10:30:00Z",
-		InputTokens:           10,
-		OutputTokens:          5,
-		TotalTokens:           15,
-		InputCharacters:       4096,
-		InputPages:            4,
-		CacheReadInputTokens:  7,
-		CacheWriteInputTokens: 3,
-		CatalogVersion:        "catalog-v1",
-		PricingKey:            "ollama/test-model",
-		PageCostPer1K:         100,
-		InputCostPer1M:        1,
-		OutputCostPer1M:       2,
-		SearchRequests:        2,
-		SearchCostPer1K:       10,
-		CharacterCostPer1M:    15,
+		RequestID:              "req-1",
+		UserID:                 "user-1",
+		TeamID:                 "team-1",
+		Tags:                   []string{"production", "cost-center-a"},
+		Provider:               "ollama",
+		Model:                  "test-model",
+		Timestamp:              "2026-06-25T10:30:00Z",
+		InputTokens:            10,
+		OutputTokens:           5,
+		TotalTokens:            15,
+		InputCharacters:        4096,
+		InputPages:             4,
+		InputAudioMilliseconds: 90000,
+		CacheReadInputTokens:   7,
+		CacheWriteInputTokens:  3,
+		CatalogVersion:         "catalog-v1",
+		PricingKey:             "ollama/test-model",
+		PageCostPer1K:          100,
+		InputCostPer1M:         1,
+		OutputCostPer1M:        2,
+		SearchRequests:         2,
+		SearchCostPer1K:        10,
+		CharacterCostPer1M:     15,
+		AudioCostPerMinute:     0.12,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +82,7 @@ func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 	if receivedEvent.Timestamp != "2026-06-25T10:30:00Z" {
 		t.Fatalf("unexpected timestamp: %+v", receivedEvent)
 	}
-	if receivedEvent.TeamID != "team-1" || len(receivedEvent.Tags) != 2 || receivedEvent.Tags[0] != "production" || receivedEvent.CacheReadInputTokens != 7 || receivedEvent.CacheWriteInputTokens != 3 || receivedEvent.CatalogVersion != "catalog-v1" || receivedEvent.PricingKey != "ollama/test-model" || receivedEvent.SearchRequests != 2 || receivedEvent.SearchCostPer1K != 10 || receivedEvent.InputCharacters != 4096 || receivedEvent.CharacterCostPer1M != 15 || receivedEvent.InputPages != 4 || receivedEvent.PageCostPer1K != 100 {
+	if receivedEvent.TeamID != "team-1" || len(receivedEvent.Tags) != 2 || receivedEvent.Tags[0] != "production" || receivedEvent.CacheReadInputTokens != 7 || receivedEvent.CacheWriteInputTokens != 3 || receivedEvent.CatalogVersion != "catalog-v1" || receivedEvent.PricingKey != "ollama/test-model" || receivedEvent.SearchRequests != 2 || receivedEvent.SearchCostPer1K != 10 || receivedEvent.InputCharacters != 4096 || receivedEvent.CharacterCostPer1M != 15 || receivedEvent.InputPages != 4 || receivedEvent.PageCostPer1K != 100 || receivedEvent.InputAudioMilliseconds != 90000 || receivedEvent.AudioCostPerMinute != 0.12 {
 		t.Fatalf("pricing audit fields were not serialized: %+v", receivedEvent)
 	}
 }
