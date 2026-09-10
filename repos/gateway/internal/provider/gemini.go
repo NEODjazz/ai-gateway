@@ -109,11 +109,12 @@ type geminiResponseCandidate struct {
 	LogprobsResult *geminiLogprobsResult `json:"logprobsResult"`
 }
 type geminiRequest struct {
-	Contents   []geminiContent  `json:"contents"`
-	System     *geminiContent   `json:"systemInstruction,omitempty"`
-	Tools      []geminiTool     `json:"tools,omitempty"`
-	ToolConfig map[string]any   `json:"toolConfig,omitempty"`
-	Generation geminiGeneration `json:"generationConfig"`
+	Contents    []geminiContent  `json:"contents"`
+	System      *geminiContent   `json:"systemInstruction,omitempty"`
+	Tools       []geminiTool     `json:"tools,omitempty"`
+	ToolConfig  map[string]any   `json:"toolConfig,omitempty"`
+	Generation  geminiGeneration `json:"generationConfig"`
+	ServiceTier string           `json:"serviceTier,omitempty"`
 }
 type geminiResponse struct {
 	ID             string                    `json:"responseId"`
@@ -128,11 +129,12 @@ type geminiResponse struct {
 	} `json:"error"`
 }
 type geminiUsage struct {
-	Prompt     int `json:"promptTokenCount"`
-	Cached     int `json:"cachedContentTokenCount"`
-	Candidates int `json:"candidatesTokenCount"`
-	Thoughts   int `json:"thoughtsTokenCount"`
-	Total      int `json:"totalTokenCount"`
+	Prompt      int    `json:"promptTokenCount"`
+	Cached      int    `json:"cachedContentTokenCount"`
+	Candidates  int    `json:"candidatesTokenCount"`
+	Thoughts    int    `json:"thoughtsTokenCount"`
+	Total       int    `json:"totalTokenCount"`
+	ServiceTier string `json:"serviceTier"`
 }
 
 func geminiInvalid(param string) error {
@@ -191,6 +193,18 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 			return result, geminiInvalid("reasoning_effort")
 		}
 	}
+	serviceTier := ""
+	switch options.ServiceTier {
+	case "":
+	case "auto":
+		serviceTier = "unspecified"
+	case "default", "standard_only":
+		serviceTier = "standard"
+	case "flex", "priority":
+		serviceTier = options.ServiceTier
+	default:
+		return result, geminiInvalid("service_tier")
+	}
 	options.TopK = nil
 	options.FrequencyPenalty = nil
 	options.PresencePenalty = nil
@@ -198,6 +212,7 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	options.TopLogprobs = nil
 	options.N = nil
 	options.ReasoningEffort = ""
+	options.ServiceTier = ""
 	if err := rejectGenerationOptions("gemini", options); err != nil {
 		return result, err
 	}
@@ -233,6 +248,7 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		ResponseLogprobs: request.Logprobs, Logprobs: request.TopLogprobs, CandidateCount: request.N,
 		ThinkingConfig: thinkingConfig, Seed: request.Seed, Stop: stop,
 	}
+	result.ServiceTier = serviceTier
 	if request.ResponseFormat != nil {
 		switch request.ResponseFormat.Type {
 		case "text":
@@ -525,6 +541,15 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 		if u.Cached > 0 {
 			result.Usage.PromptTokensDetails = &openai.PromptTokenDetails{CachedTokens: u.Cached}
 		}
+		switch u.ServiceTier {
+		case "":
+		case "unspecified":
+			result.ServiceTier = "default"
+		case "standard", "flex", "priority":
+			result.ServiceTier = u.ServiceTier
+		default:
+			return result, errors.New("invalid Gemini service tier")
+		}
 	}
 	if len(body.Candidates) > maxChatStreamChoices {
 		return result, errors.New("too many Gemini candidates")
@@ -667,6 +692,12 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			return err
 		}
 		result.Model = chunk.Model
+		if chunk.ServiceTier != "" {
+			if result.ServiceTier != "" && result.ServiceTier != chunk.ServiceTier {
+				return errors.New("Gemini service tier changed during stream")
+			}
+			result.ServiceTier = chunk.ServiceTier
+		}
 		if body.Usage != nil {
 			result.Usage = chunk.Usage
 		}
@@ -704,6 +735,9 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			choices = append(choices, map[string]any{"index": choice.Index, "delta": choice.Message, "finish_reason": finish, "logprobs": choice.Logprobs})
 		}
 		event := map[string]any{"id": result.ID, "object": "chat.completion.chunk", "model": result.Model, "choices": choices}
+		if chunk.ServiceTier != "" {
+			event["service_tier"] = chunk.ServiceTier
+		}
 		if body.Usage != nil {
 			event["usage"] = chunk.Usage
 		}

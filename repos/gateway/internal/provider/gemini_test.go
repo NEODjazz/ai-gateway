@@ -142,6 +142,56 @@ func TestGeminiNativeMultipleCandidates(t *testing.T) {
 	}
 }
 
+func TestGeminiNativeServiceTierRoundTrip(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprint(streaming), func(t *testing.T) {
+			var received geminiRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+					t.Error(err)
+					return
+				}
+				payload := `{"responseId":"tier-id","candidates":[{"index":0,"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2,"serviceTier":"priority"}}`
+				if streaming {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+					return
+				}
+				_, _ = fmt.Fprint(w, payload)
+			}))
+			defer server.Close()
+			request := openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "priority"}}
+			client := NewGemini(server.URL, "", streaming)
+			var response openai.ChatCompletionResponse
+			var payloads []string
+			var err error
+			if streaming {
+				response, err = client.StreamChatCompletions(t.Context(), request, func(payload string) error { payloads = append(payloads, payload); return nil })
+			} else {
+				response, err = client.ChatCompletions(t.Context(), request)
+			}
+			if err != nil || received.ServiceTier != "priority" || response.ServiceTier != "priority" {
+				t.Fatalf("request=%+v response=%+v err=%v", received, response, err)
+			}
+			if streaming && (len(payloads) != 1 || !strings.Contains(payloads[0], `"service_tier":"priority"`)) {
+				t.Fatalf("stream service tier lost: %v", payloads)
+			}
+		})
+	}
+}
+
+func TestGeminiServiceTierMapping(t *testing.T) {
+	for input, want := range map[string]string{"auto": "unspecified", "default": "standard", "standard_only": "standard", "flex": "flex", "priority": "priority"} {
+		t.Run(input, func(t *testing.T) {
+			request := openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: input}}
+			native, err := geminiChatRequest(request)
+			if err != nil || native.ServiceTier != want {
+				t.Fatalf("service tier=%q err=%v", native.ServiceTier, err)
+			}
+		})
+	}
+}
+
 func TestGeminiReasoningEffortMapping(t *testing.T) {
 	for _, level := range []string{"minimal", "low", "medium", "high"} {
 		t.Run(level, func(t *testing.T) {
@@ -197,6 +247,7 @@ func TestGeminiRejectsInvalidNativeSamplingControls(t *testing.T) {
 		"presence_penalty":  {ChatGenerationOptions: openai.ChatGenerationOptions{PresencePenalty: &above}},
 		"n":                 {ChatGenerationOptions: openai.ChatGenerationOptions{N: &tooManyCandidates}},
 		"reasoning_effort":  {ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "xhigh"}},
+		"service_tier":      {ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "scale"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := geminiChatRequest(request); err == nil {

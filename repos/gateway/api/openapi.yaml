@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.137
+  version: 0.1.138
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4011,7 +4011,7 @@ components:
                         required: [mode]
                         properties:
                           mode: {type: string, const: explicit}
-        service_tier: {type: string, enum: [auto, default, flex, scale, priority, fast, ultrafast, standard_only], description: Forwarded by compatible adapters. Native Anthropic accepts auto and standard_only; other native adapters may reject it.}
+        service_tier: {type: string, enum: [auto, default, flex, scale, priority, fast, ultrafast, standard_only], description: "Forwarded by compatible adapters. Native Gemini accepts auto, default, standard_only, flex, and priority; native Anthropic accepts auto and standard_only."}
         user: {type: string, description: "Legacy provider hint; never used as gateway authorization, rate-limit, or billing identity."}
         verbosity: {type: string, enum: [low, medium, high]}
         web_search_options:
