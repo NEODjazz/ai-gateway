@@ -5,6 +5,33 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  017_gateway_async_jobs.sql: |
+    CREATE TABLE IF NOT EXISTS gateway_async_jobs (
+        kind TEXT NOT NULL,
+        resource_id TEXT NOT NULL,
+        owner_key TEXT NOT NULL,
+        endpoint_id TEXT NOT NULL,
+        execution_id TEXT NOT NULL UNIQUE,
+        payload BYTEA NOT NULL,
+        state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','leased')),
+        attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+        lease_generation BIGINT NOT NULL DEFAULT 0 CHECK (lease_generation >= 0),
+        available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        lease_until TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (kind,resource_id),
+        CHECK (length(kind) BETWEEN 1 AND 64),
+        CHECK (length(resource_id) BETWEEN 1 AND 256),
+        CHECK (length(owner_key) BETWEEN 1 AND 256),
+        CHECK (length(endpoint_id) BETWEEN 1 AND 128),
+        CHECK (length(execution_id) BETWEEN 1 AND 128),
+        CHECK (octet_length(payload) BETWEEN 1 AND 65536)
+    );
+    CREATE INDEX IF NOT EXISTS gateway_async_jobs_due_idx
+        ON gateway_async_jobs (kind,available_at,created_at) WHERE state='pending';
+    CREATE INDEX IF NOT EXISTS gateway_async_jobs_expired_lease_idx
+        ON gateway_async_jobs (kind,lease_until) WHERE state='leased';
   016_gateway_skill_ownership.sql: |
     CREATE TABLE IF NOT EXISTS gateway_skill_ownership (
         skill_id TEXT PRIMARY KEY,
