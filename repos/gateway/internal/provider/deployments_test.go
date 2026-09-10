@@ -47,6 +47,31 @@ func TestDeploymentCapabilitiesAcceptImageOperations(t *testing.T) {
 	}
 }
 
+func TestManagedOpenRouterUsesCompatibleAdapter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer router-key" {
+			t.Fatalf("request path=%s authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat","model":"upstream","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer server.Close()
+	router := New(Config{CredentialEncryptionKey: []byte("managed-openrouter-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "router", Type: "openrouter", BaseURL: server.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "router-key", ProviderID: "router", Secret: "router-key"}); err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := router.endpointForDeployment(ModelDeployment{ProviderID: "router", CredentialID: "router-key", UpstreamModel: "upstream", Models: []string{"public"}, Capabilities: []string{"chat"}, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := endpoint.Provider.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "upstream", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+	if err != nil || openai.ContentText(response.Choices[0].Message.Content) != "ok" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

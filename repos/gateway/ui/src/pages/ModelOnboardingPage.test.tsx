@@ -67,6 +67,8 @@ describe("ModelOnboardingPage", () => {
     await userEvent.selectOptions(screen.getByLabelText("Provider"), "__new");
     expect(screen.getByRole("option", { name: "cohere" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "mistral" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "openrouter" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "voyage" })).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Provider type"), "gemini");
     expect(screen.getByLabelText("Provider type")).toHaveValue("gemini");
     expect(screen.queryByLabelText("Azure API version")).not.toBeInTheDocument();
