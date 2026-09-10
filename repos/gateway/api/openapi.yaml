@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.185
+  version: 0.1.186
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -23,6 +23,7 @@ tags:
   - name: Tags
   - name: MCP
   - name: Files
+  - name: Skills
   - name: Projects and access
   - name: Caching and logging
   - name: Agent templates
@@ -632,6 +633,104 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/skills:
+    get:
+      operationId: listSkills
+      tags: [Skills]
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000}}
+        - {name: page, in: query, schema: {type: string, maxLength: 256}}
+        - {name: source, in: query, schema: {type: string, maxLength: 256}}
+      responses:
+        '200': {description: Owner-filtered skills page, content: {application/json: {schema: {$ref: '#/components/schemas/SkillList'}}}}
+        default: {description: Gateway or provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    post:
+      operationId: createSkill
+      tags: [Skills]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files: {type: array, items: {type: string, format: binary}}
+                display_name: {type: string, maxLength: 255}
+      responses:
+        '200': {description: Created custom skill, content: {application/json: {schema: {$ref: '#/components/schemas/Skill'}}}}
+        default: {description: Gateway or provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/skills/{id}:
+    parameters: [{$ref: '#/components/parameters/SkillID'}]
+    get:
+      operationId: getSkill
+      tags: [Skills]
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Owned custom or shared read-only skill, content: {application/json: {schema: {$ref: '#/components/schemas/Skill'}}}}
+        default: {description: Gateway or provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    delete:
+      operationId: deleteSkill
+      tags: [Skills]
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Deleted owned custom skill}
+        default: {description: Gateway or provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/skills/{id}/versions:
+    parameters: [{$ref: '#/components/parameters/SkillID'}]
+    get:
+      operationId: listSkillVersions
+      tags: [Skills]
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000}}
+        - {name: page, in: query, schema: {type: string, maxLength: 256}}
+      responses:
+        '200': {description: Skill versions, content: {application/json: {schema: {type: object}}}}
+        default: {description: Gateway or provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    post:
+      operationId: createSkillVersion
+      tags: [Skills]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files: {type: array, items: {type: string, format: binary}}
+      responses:
+        '200': {description: Created version, content: {application/json: {schema: {$ref: '#/components/schemas/SkillVersion'}}}}
+        default: {description: Gateway or provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/skills/{id}/versions/{version}:
+    parameters: [{$ref: '#/components/parameters/SkillID'}, {$ref: '#/components/parameters/SkillVersionID'}]
+    get:
+      operationId: getSkillVersion
+      tags: [Skills]
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Skill version, content: {application/json: {schema: {$ref: '#/components/schemas/SkillVersion'}}}}
+        default: {description: Gateway or provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    delete:
+      operationId: deleteSkillVersion
+      tags: [Skills]
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Deleted owned custom skill version}
+        default: {description: Gateway or provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/skills/{id}/versions/{version}/content:
+    parameters: [{$ref: '#/components/parameters/SkillID'}, {$ref: '#/components/parameters/SkillVersionID'}]
+    get:
+      operationId: getSkillVersionContent
+      tags: [Skills]
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Bounded skill archive, content: {application/octet-stream: {schema: {type: string, format: binary}}}}
+        default: {description: Gateway or provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /healthz:
     get:
       operationId: getHealth
@@ -2816,6 +2915,16 @@ components:
         type: string
         maxLength: 128
   parameters:
+    SkillID:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+    SkillVersionID:
+      name: version
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
     VirtualKeyID:
       name: id
       in: path
@@ -2973,6 +3082,38 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    Skill:
+      type: object
+      required: [id, type, source]
+      properties:
+        id: {type: string}
+        type: {type: string, const: skill}
+        display_name: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        latest_version_id: {type: string}
+        source:
+          type: object
+          required: [type]
+          properties: {type: {type: string, enum: [custom, anthropic, anthropic_example, plugin]}}
+    SkillVersion:
+      type: object
+      required: [id, type, skill_id]
+      properties:
+        id: {type: string}
+        type: {type: string, const: skill_version}
+        skill_id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        created_at: {type: string, format: date-time}
+    SkillList:
+      type: object
+      required: [data, has_more]
+      properties:
+        data: {type: array, maxItems: 1000, items: {$ref: '#/components/schemas/Skill'}}
+        has_more: {type: boolean}
+        first_id: {type: string}
+        last_id: {type: string}
     FileObject:
       type: object
       additionalProperties: false
@@ -3560,7 +3701,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
+          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -5631,12 +5772,12 @@ components:
           type: array
           uniqueItems: true
           description: Native operations implemented by the managed adapter. count_tokens is used by the inbound token-count endpoint and is not a deployment capability.
-          items: {type: string, enum: [chat, responses, count_tokens, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, stream]}
+          items: {type: string, enum: [chat, responses, count_tokens, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, stream]}
         capabilities:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
+          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
         auth_types:
           type: array
           uniqueItems: true

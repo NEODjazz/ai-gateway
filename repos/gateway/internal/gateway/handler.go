@@ -19,6 +19,7 @@ import (
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
+	"ai-gateway-gateway/internal/skillstate"
 )
 
 type Handler struct {
@@ -41,6 +42,7 @@ type Handler struct {
 	mcpCalls      mcpstate.Store
 	files         filestate.Store
 	fileConfig    FileRuntimeConfig
+	skills        skillstate.Store
 	access        *AccessRegistry
 	budgets       BudgetManagementClient
 	usage         UsageManagementClient

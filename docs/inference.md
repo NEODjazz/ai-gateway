@@ -160,6 +160,8 @@ responses и embeddings flows, но не является неявным opt-in 
 
 `POST /v1/ocr` принимает HTTPS/data URL либо `document: {"type":"file","file_id":"file_..."}`. Ссылка на файл разрешается только внутри пары authenticated credential и user, затем содержимое проверяется по MIME, сигнатуре и лимиту 16 MiB и преобразуется во внутренний data URL до DLP/AV и provider pipeline. Отсутствующий или чужой файл возвращает одинаковый `404`; неподдерживаемый либо поврежденный файл не передается provider adapter.
 
+`/v1/skills` и `/v1/skills/{id}/versions` публикуют capability-gated lifecycle для native Anthropic deployment. Multipart packages ограничены 32 MiB, ответы — 8 MiB, а произвольные provider paths не проксируются. Custom skill после создания атомарно связывается с хешированным credential+user owner key и исходным deployment. List скрывает custom skills других владельцев; чтение shared read-only sources разрешено, а workspace-specific plugin resources скрываются. При сбое ownership claim gateway компенсирует создание upstream delete-запросом и возвращает fail-closed ошибку.
+
 Native Mistral moderation принимает только строку или массив строк и отклоняет
 структурированные text/image parts до provider modules, billing и upstream.
 Bounded `metadata` передается native Mistral Moderations; остальные adapters

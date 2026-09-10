@@ -46,7 +46,7 @@ availability is not inferred from these tests.
 | Fine tuning | Not implemented | Owned training jobs, model ownership and training accounting |
 | Assistants | Not implemented | Assistant/thread/run ownership and lifecycle |
 | Search | Authenticated `/v1/search` for one or bounded batched queries, domain/country filters, explicit capability routing, compatible transport, bounded result validation, retries and per-query search-unit settlement | Additional native provider adapters, tiered result pricing and managed search-tool registry |
-| Skills | Not implemented | Versioned registry, owner isolation and provider execution contract |
+| Skills | Capability-gated native create/list/get/delete and version lifecycle, bounded multipart/binary transport, durable custom-skill ownership and tenant-filtered shared-provider reads | Provider execution references and additional native provider contracts |
 | MCP | Registry, connector/tool-specific ACL, policy-filtered discovery, Responses passthrough, bounded Streamable HTTP execution with durable PostgreSQL idempotency, fail-closed audit and exact tool-request settlement | Credentialed MCP servers, additional transports and long-lived session reuse |
 | A2A | Not implemented | Agent discovery, task ownership and authenticated execution |
 | Bedrock Invoke | Not implemented | Native protocol, AWS request signing and usage conversion |
