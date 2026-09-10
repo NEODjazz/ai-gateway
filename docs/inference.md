@@ -1539,7 +1539,9 @@ cannot preserve them. Both fields participate in cache scope, while authenticate
 billing identity remains independent of client metadata.
 
 Chat и Responses распознают `service_tier` и проверяют известные значения.
-OpenAI-compatible adapters передают их upstream. Native Anthropic Chat и inbound
+Managed OpenAI передает `auto`, `default`, `flex` и `priority`; OpenRouter
+передает значения из общего валидируемого набора. Generic compatible и Azure
+отклоняют поле до подтверждения конкретного upstream-контракта. Native Anthropic Chat и inbound
 Messages принимают `auto` и `standard_only`; остальные native adapters возвращают
 `400 unsupported_parameter` до provider modules, TPM, cache, billing и upstream.
 Назначенный Anthropic tier сохраняется в Chat envelope и native Messages usage.

@@ -319,6 +319,8 @@ func TestManagedProviderCapabilityProfilesExposeValidatedChatParameters(t *testi
 		"groq":              {ReasoningEffort: allReasoning, Logprobs: []string{}, ServiceTier: []string{"auto", "default", "on_demand", "flex", "performance"}},
 		"openrouter":        {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: allTiers},
 		"openai-compatible": {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
+		"openai":            {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{"auto", "default", "flex", "priority"}},
+		"azure-openai":      {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
 	}
 	for providerType, expected := range tests {
 		actual, found := byType[providerType]

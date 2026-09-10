@@ -50,6 +50,7 @@ func NewAzureOpenAI(baseURL, credential string, upstreamStream bool, apiVersion,
 		legacyPath = strings.TrimRight(parsed.Path, "/")
 	}
 	client := NewOpenAICompatible(baseURL, "", upstreamStream)
+	client.errorProvider = "azure-openai"
 	transport := client.client.Transport
 	client.client.Transport = azureOpenAITransport{
 		base: transport, credential: credential, tokenSource: newAzureTokenSource(credential, baseURL), authType: normalizeAzureAuthType(authType), apiVersion: strings.TrimSpace(apiVersion), legacyPath: legacyPath,

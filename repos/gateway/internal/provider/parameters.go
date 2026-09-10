@@ -360,8 +360,22 @@ func (p OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRe
 		parameterCheck{"store", request.Store != nil && *request.Store},
 		parameterCheck{"safe_prompt", request.SafePrompt != nil && !p.supportsSafePrompt},
 		parameterCheck{"prompt_mode", request.PromptMode != "" && !p.supportsPromptMode},
-		parameterCheck{"service_tier", request.ServiceTier != "" && providerName != "groq" && providerName != "openrouter"},
+		parameterCheck{"service_tier", !supportedCompatibleServiceTier(providerName, request.ServiceTier)},
 	)
+}
+
+func supportedCompatibleServiceTier(providerName, value string) bool {
+	if value == "" {
+		return true
+	}
+	switch providerName {
+	case "openai":
+		return value == "auto" || value == "default" || value == "flex" || value == "priority"
+	case "groq", "openrouter":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateChatReasoningContent(adapter string, messages []openai.Message, supported bool) error {
@@ -419,7 +433,7 @@ func (p OpenAICompatible) ValidateResponseParameters(request openai.ResponseRequ
 		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
 	}
 	providerName := p.providerName()
-	return rejectParameters(providerName, parameterCheck{"service_tier", request.ServiceTier != "" && providerName != "openrouter" && providerName != "groq"})
+	return rejectParameters(providerName, parameterCheck{"service_tier", !supportedCompatibleServiceTier(providerName, request.ServiceTier)})
 }
 
 func rejectToolCallMetadata(adapter string, messages []openai.Message) error {

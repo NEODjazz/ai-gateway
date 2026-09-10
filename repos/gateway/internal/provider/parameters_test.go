@@ -2,15 +2,39 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 
+	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
+
+func TestManagedOpenAIServiceTierIsValidatedAndForwarded(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body["service_tier"] != "priority" {
+			t.Fatalf("service tier was not forwarded: %+v", body)
+		}
+		_, _ = w.Write([]byte(`{"id":"chat","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+	client := providerFor(config.ProviderEndpointConfig{Type: "openai", BaseURL: server.URL})
+	request := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "test"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "priority"}}
+	if _, err := client.ChatCompletions(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	request.ServiceTier = "scale"
+	if err := validateChatAdapter(client, request); err == nil || requests != 1 {
+		t.Fatalf("unsupported tier reached provider: err=%v requests=%d", err, requests)
+	}
+}
 
 func TestChatReasoningContentSupportIsExplicit(t *testing.T) {
 	request := openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "assistant", ReasoningContent: "plan"}}}
