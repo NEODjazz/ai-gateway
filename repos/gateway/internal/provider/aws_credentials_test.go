@@ -18,6 +18,102 @@ func awsTestEnvironment(values map[string]string) func(string) string {
 	return func(name string) string { return values[name] }
 }
 
+func TestAWSCredentialSourceUsesSharedCredentialsProfile(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "credentials")
+	data := `[default]
+aws_access_key_id = DEFAULT
+aws_secret_access_key = default-secret
+
+[production]
+aws_access_key_id = PROFILEKEY
+aws_secret_access_key = profile-secret
+aws_session_token = profile-session
+region = us-east-1
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := newAWSCredentialSource("", "us-east-1")
+	source.getenv = awsTestEnvironment(map[string]string{"AWS_SHARED_CREDENTIALS_FILE": path, "AWS_PROFILE": "production"})
+	credential, err := source.Credential(t.Context())
+	if err != nil || credential.AccessKeyID != "PROFILEKEY" || credential.SecretAccessKey != "profile-secret" || credential.SessionToken != "profile-session" {
+		t.Fatalf("credential=%+v err=%v", credential, err)
+	}
+}
+
+func TestAWSCredentialSourceUsesDefaultHomeProfile(t *testing.T) {
+	home := t.TempDir()
+	if err := os.Mkdir(filepath.Join(home, ".aws"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".aws", "credentials"), []byte("[default]\naws_access_key_id=HOMEKEY\naws_secret_access_key=home-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := newAWSCredentialSource("", "us-east-1")
+	source.getenv = awsTestEnvironment(map[string]string{"HOME": home})
+	credential, err := source.Credential(t.Context())
+	if err != nil || credential.AccessKeyID != "HOMEKEY" {
+		t.Fatalf("credential=%+v err=%v", credential, err)
+	}
+}
+
+func TestAWSCredentialSourceEnvironmentPrecedesSharedProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials")
+	if err := os.WriteFile(path, []byte("[default]\naws_access_key_id=FILEKEY\naws_secret_access_key=file-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := newAWSCredentialSource("", "us-east-1")
+	source.getenv = awsTestEnvironment(map[string]string{
+		"AWS_ACCESS_KEY_ID": "ENVKEY", "AWS_SECRET_ACCESS_KEY": "env-secret", "AWS_SHARED_CREDENTIALS_FILE": path,
+	})
+	credential, err := source.Credential(t.Context())
+	if err != nil || credential.AccessKeyID != "ENVKEY" {
+		t.Fatalf("credential=%+v err=%v", credential, err)
+	}
+}
+
+func TestAWSCredentialSourceRejectsInvalidSharedCredentials(t *testing.T) {
+	directory := t.TempDir()
+	files := map[string]string{
+		"missing-key":       "[default]\naws_access_key_id=KEY\n",
+		"duplicate-key":     "[default]\naws_access_key_id=ONE\naws_access_key_id=TWO\naws_secret_access_key=secret\n",
+		"duplicate-profile": "[default]\naws_access_key_id=ONE\naws_secret_access_key=secret\n[default]\naws_access_key_id=TWO\naws_secret_access_key=secret\n",
+	}
+	for name, data := range files {
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		source := newAWSCredentialSource("", "us-east-1")
+		source.getenv = awsTestEnvironment(map[string]string{"AWS_SHARED_CREDENTIALS_FILE": path})
+		if _, err := source.Credential(t.Context()); err == nil {
+			t.Fatalf("%s credentials accepted", name)
+		}
+	}
+	oversized := filepath.Join(directory, "oversized")
+	if err := os.WriteFile(oversized, make([]byte, awsSharedFileMaxBytes+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	defaultOnly := filepath.Join(directory, "default-only")
+	if err := os.WriteFile(defaultOnly, []byte("[default]\naws_access_key_id=KEY\naws_secret_access_key=secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, values := range map[string]map[string]string{
+		"relative path":   {"AWS_SHARED_CREDENTIALS_FILE": "credentials"},
+		"missing file":    {"AWS_SHARED_CREDENTIALS_FILE": filepath.Join(directory, "missing")},
+		"missing profile": {"AWS_SHARED_CREDENTIALS_FILE": defaultOnly, "AWS_PROFILE": "production"},
+		"invalid profile": {"AWS_SHARED_CREDENTIALS_FILE": oversized, "AWS_PROFILE": "bad]profile"},
+		"oversized file":  {"AWS_SHARED_CREDENTIALS_FILE": oversized},
+	} {
+		source := newAWSCredentialSource("", "us-east-1")
+		source.getenv = awsTestEnvironment(values)
+		if _, err := source.Credential(t.Context()); err == nil {
+			t.Fatalf("%s configuration accepted", name)
+		}
+	}
+}
+
 func TestAWSCredentialSourceUsesAndCachesWebIdentity(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	tokenFile := filepath.Join(t.TempDir(), "token")

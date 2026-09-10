@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"encoding/xml"
@@ -21,6 +22,7 @@ const (
 	awsIMDSBaseURL          = "http://169.254.169.254"
 	awsCredentialMaxBytes   = 32 << 10
 	awsWebIdentityMaxBytes  = 64 << 10
+	awsSharedFileMaxBytes   = 256 << 10
 )
 
 type awsCredentialSource struct {
@@ -206,6 +208,11 @@ func (s *awsCredentialSource) load(ctx context.Context) (awsCredential, time.Tim
 		}
 		return s.loadWebIdentity(ctx, roleARN, tokenFile, strings.TrimSpace(s.getenv("AWS_ROLE_SESSION_NAME")))
 	}
+	if credential, found, err := s.loadSharedCredentials(); err != nil {
+		return awsCredential{}, time.Time{}, err
+	} else if found {
+		return credential, time.Time{}, nil
+	}
 	if relativeURI := strings.TrimSpace(s.getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")); relativeURI != "" {
 		endpoint, err := awsContainerRelativeURL(s.ecsBaseURL, relativeURI)
 		if err != nil {
@@ -224,6 +231,119 @@ func (s *awsCredentialSource) load(ctx context.Context) (awsCredential, time.Tim
 		return awsCredential{}, time.Time{}, errors.New("AWS credential source is unavailable")
 	}
 	return s.loadIMDS(ctx)
+}
+
+func (s *awsCredentialSource) loadSharedCredentials() (awsCredential, bool, error) {
+	path := strings.TrimSpace(s.getenv("AWS_SHARED_CREDENTIALS_FILE"))
+	profile := strings.TrimSpace(s.getenv("AWS_PROFILE"))
+	if profile == "" {
+		profile = strings.TrimSpace(s.getenv("AWS_DEFAULT_PROFILE"))
+	}
+	required := path != "" || profile != ""
+	if profile == "" {
+		profile = "default"
+	}
+	if !validAWSProfileName(profile) {
+		return awsCredential{}, false, errors.New("invalid AWS shared credentials profile")
+	}
+	if path != "" {
+		if !filepath.IsAbs(path) {
+			return awsCredential{}, false, errors.New("invalid AWS shared credentials file")
+		}
+	} else {
+		home := strings.TrimSpace(s.getenv("HOME"))
+		if home == "" || !filepath.IsAbs(home) {
+			return awsCredential{}, false, nil
+		}
+		path = filepath.Join(home, ".aws", "credentials")
+	}
+	data, err := readBoundedCredentialFile(path, awsSharedFileMaxBytes)
+	if err != nil {
+		if !required && errors.Is(err, os.ErrNotExist) {
+			return awsCredential{}, false, nil
+		}
+		return awsCredential{}, false, errors.New("invalid AWS shared credentials file")
+	}
+	credential, found, err := parseAWSSharedCredentials(data, profile)
+	if err != nil {
+		return awsCredential{}, false, err
+	}
+	if !found && required {
+		return awsCredential{}, false, errors.New("AWS shared credentials profile is unavailable")
+	}
+	return credential, found, nil
+}
+
+func validAWSProfileName(value string) bool {
+	if len(value) == 0 || len(value) > 128 || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, char := range value {
+		if char < 0x21 || char > 0x7e || char == '[' || char == ']' {
+			return false
+		}
+	}
+	return true
+}
+
+func parseAWSSharedCredentials(data []byte, profile string) (awsCredential, bool, error) {
+	var credential awsCredential
+	inProfile, found := false, false
+	seen := make(map[string]bool)
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	scanner.Buffer(make([]byte, 4096), 64<<10)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			if !strings.HasSuffix(line, "]") || len(line) < 3 {
+				return awsCredential{}, false, errors.New("invalid AWS shared credentials file")
+			}
+			section := strings.TrimSpace(line[1 : len(line)-1])
+			inProfile = section == profile
+			if inProfile {
+				if found {
+					return awsCredential{}, false, errors.New("duplicate AWS shared credentials profile")
+				}
+				found = true
+			}
+			continue
+		}
+		if !inProfile {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		key, value = strings.ToLower(strings.TrimSpace(key)), strings.TrimSpace(value)
+		if !ok || key == "" {
+			return awsCredential{}, false, errors.New("invalid AWS shared credentials file")
+		}
+		switch key {
+		case "aws_access_key_id", "aws_secret_access_key", "aws_session_token":
+			if seen[key] {
+				return awsCredential{}, false, errors.New("duplicate AWS shared credential")
+			}
+			seen[key] = true
+			if key == "aws_access_key_id" {
+				credential.AccessKeyID = value
+			} else if key == "aws_secret_access_key" {
+				credential.SecretAccessKey = value
+			} else {
+				credential.SessionToken = value
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return awsCredential{}, false, errors.New("invalid AWS shared credentials file")
+	}
+	if !found {
+		return awsCredential{}, false, nil
+	}
+	if err := validateAWSCredential(credential); err != nil {
+		return awsCredential{}, false, errors.New("invalid AWS shared credentials profile")
+	}
+	return credential, true, nil
 }
 
 func awsSTSEndpoint(region string) string {

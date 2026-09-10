@@ -107,8 +107,13 @@ Gateway требует `Metadata-Flavor: Google` в запросе и ответ
 Write-only credential задается JSON-объектом с `access_key_id`,
 `secret_access_key` и необязательным `session_token`. Если credential не привязан,
 gateway последовательно проверяет `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`,
-`AWS_ROLE_ARN` вместе с `AWS_WEB_IDENTITY_TOKEN_FILE`, ECS container credentials,
-EKS Pod Identity и EC2 IMDSv2. Web identity обменивается через региональный STS;
+`AWS_ROLE_ARN` вместе с `AWS_WEB_IDENTITY_TOKEN_FILE`, выбранный
+`AWS_PROFILE`/`AWS_DEFAULT_PROFILE` в shared credentials file, ECS container
+credentials, EKS Pod Identity и EC2 IMDSv2. По умолчанию profile читается из
+`$HOME/.aws/credentials`; `AWS_SHARED_CREDENTIALS_FILE` должен быть абсолютным.
+Поддерживаются только статические `aws_access_key_id`, `aws_secret_access_key` и
+необязательный `aws_session_token`; файл, строки, profile и значения имеют жесткие
+лимиты, дубли и неполные credentials отклоняются. Web identity обменивается через региональный STS;
 необязательный `AWS_ROLE_SESSION_NAME` задаёт имя сессии. Временные STS, container и
 instance-role credentials кэшируются и обновляются до истечения срока действия;
 параллельные запросы используют один refresh. Произвольный HTTP host в
@@ -116,8 +121,7 @@ instance-role credentials кэшируются и обновляются до и
 стандартные link-local ECS/EKS addresses. Gateway подписывает каждый Converse
 request для service `bedrock`, включая payload hash и временный session token.
 Неверный JSON credential отклоняется при сохранении. `auth_type=bearer` сохраняет
-прежний режим для частных совместимых endpoints. Shared profile пока не входит в
-credential chain.
+прежний режим для частных совместимых endpoints.
 
 ## Gateway modules
 
