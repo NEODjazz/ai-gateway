@@ -67,8 +67,16 @@ func (r Router) routeAudio(ctx context.Context, req modules.RequestContext, tran
 		progress.enter(endpoint)
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
-		if reserver, ok := endpoint.Provider.(AudioTranscriptionDurationReserver); ok {
-			duration, reserveErr := reserver.ReserveAudioMilliseconds(request)
+		var duration int
+		var reserveErr error
+		if translation {
+			if reserver, ok := endpoint.Provider.(AudioTranslationDurationReserver); ok {
+				duration, reserveErr = reserver.ReserveTranslationAudioMilliseconds(request)
+			}
+		} else if reserver, ok := endpoint.Provider.(AudioTranscriptionDurationReserver); ok {
+			duration, reserveErr = reserver.ReserveAudioMilliseconds(request)
+		}
+		if duration > 0 || reserveErr != nil {
 			if reserveErr != nil {
 				return openai.AudioTranscriptionResponse{}, &Error{Class: FailureClientRequest, Provider: endpoint.Name, StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_audio", Err: reserveErr}
 			}

@@ -86,6 +86,62 @@ func TestAzureAudioTranscriptionContract(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleAudioTranslationContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/audio/translations" || r.Header.Get("Authorization") != "Bearer secret" {
+			t.Fatalf("unexpected request: %s %s headers=%v", r.Method, r.URL.Path, r.Header)
+		}
+		if err := r.ParseMultipartForm(openai.MaxInferenceBodyBytes); err != nil {
+			t.Fatal(err)
+		}
+		if r.FormValue("model") != "whisper-1" || r.FormValue("prompt") != "English names" || r.FormValue("response_format") != "json" || r.FormValue("temperature") != "0.25" {
+			t.Fatalf("form=%v", r.MultipartForm.Value)
+		}
+		_, _ = io.WriteString(w, `{"text":"translated"}`)
+	}))
+	defer server.Close()
+	temperature := 0.25
+	request := openai.AudioTranscriptionRequest{Model: "whisper-1", File: mistralWAVAttachment(1250), Prompt: "English names", ResponseFormat: "json", Temperature: &temperature}
+	response, err := NewOpenAICompatible(server.URL+"/v1", "secret", false).TranslateAudio(t.Context(), request)
+	if err != nil || response.Text != "translated" || response.Duration != 1.25 || response.Usage == nil || response.Usage.Type != "duration" || response.Usage.InputAudioMilliseconds != 1250 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestAzureAudioTranslationContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openai/v1/audio/translations" || r.URL.Query().Get("api-version") != "2025-04-01-preview" || r.Header.Get("api-key") != "secret" || r.Header.Get("Authorization") != "" {
+			t.Fatalf("unexpected Azure request: %s headers=%v", r.URL.String(), r.Header)
+		}
+		_, _ = io.WriteString(w, `{"text":"translated"}`)
+	}))
+	defer server.Close()
+	response, err := NewAzureOpenAI(server.URL, "secret", false, "2025-04-01-preview", "api_key").TranslateAudio(t.Context(), openai.AudioTranscriptionRequest{Model: "whisper", File: mistralWAVAttachment(1000)})
+	if err != nil || response.Text != "translated" || response.Usage == nil || response.Usage.InputAudioMilliseconds != 1000 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestCompatibleAudioTranslationRejectsUnsupportedParametersBeforeNetwork(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	client := NewOpenAICompatible(server.URL, "secret", false)
+	for _, request := range []openai.AudioTranscriptionRequest{
+		{Model: "whisper", File: mistralWAVAttachment(1000), Language: "en"},
+		{Model: "whisper", File: mistralWAVAttachment(1000), ResponseFormat: "verbose_json", TimestampGranularities: []string{"word"}},
+		{Model: "whisper", File: mistralWAVAttachment(1000), Keywords: []string{"Acme"}},
+		{Model: "whisper", File: transcriptionAttachment()},
+	} {
+		if _, err := client.TranslateAudio(t.Context(), request); err == nil {
+			t.Fatalf("unsupported request accepted: %+v", request)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("upstream calls=%d", calls)
+	}
+}
+
 func TestRouterAudioTranscriptionRequiresCapabilityAndAppliesAlias(t *testing.T) {
 	var model string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +162,20 @@ func TestRouterAudioTranscriptionRequiresCapabilityAndAppliesAlias(t *testing.T)
 	missing := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "speech", Type: "openai-compatible", BaseURL: server.URL, Models: []string{"public-audio"}, Capabilities: []string{"chat"}}}}).(*Router)
 	if _, err := missing.TranscribeAudio(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, AudioTranscriptionRequest: &request}); err == nil {
 		t.Fatal("endpoint without explicit capability was selected")
+	}
+}
+
+func TestRouterCompatibleAudioTranslationReservesAndSettlesDuration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"text":"translated"}`)
+	}))
+	defer server.Close()
+	recorder := &transcriptionLifecycleRecorder{}
+	router := New(Config{Modules: modules.NewPipeline([]modules.Module{recorder}), Endpoints: []config.ProviderEndpointConfig{{Name: "translation", Type: "openai-compatible", BaseURL: server.URL, Models: []string{"public-audio"}, ModelAliases: map[string]string{"public-audio": "whisper-1"}, Capabilities: []string{"audio_translation"}}}}).(*Router)
+	request := openai.AudioTranscriptionRequest{Model: "public-audio", File: mistralWAVAttachment(1250)}
+	response, err := router.TranslateAudio(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, AudioTranscriptionRequest: &request, Metadata: map[string]string{"gateway.api_type": "audio_translation"}})
+	if err != nil || response.Text != "translated" || recorder.reserved != 1250 || recorder.settled != 1250 {
+		t.Fatalf("response=%+v recorder=%+v err=%v", response, recorder, err)
 	}
 }
 

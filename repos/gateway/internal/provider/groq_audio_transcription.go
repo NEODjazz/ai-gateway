@@ -67,6 +67,10 @@ func (Groq) ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest) (
 	}
 }
 
+func (g Groq) ReserveTranslationAudioMilliseconds(request openai.AudioTranscriptionRequest) (int, error) {
+	return g.ReserveAudioMilliseconds(request)
+}
+
 func (g Groq) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
 	if err := g.validateAudioRequest(request); err != nil {
 		return openai.AudioTranscriptionResponse{}, err

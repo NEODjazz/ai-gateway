@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.164
+  version: 0.1.165
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -377,7 +377,7 @@ paths:
       operationId: translateAudio
       tags: [Inference]
       summary: Translate uploaded speech to English through an explicitly capable deployment
-      description: Uses the same bounded multipart, authorization, access policy, DLP/AV, RPM/TPM, retry and duration-billing lifecycle as transcription. The native Groq adapter accepts its documented prompt, temperature and structured response controls.
+      description: Uses the same bounded multipart, authorization, access policy, DLP/AV, RPM/TPM, retry and duration-billing lifecycle as transcription. Native Groq, compatible and Azure adapters accept prompt, temperature and structured JSON response controls; compatible transports require reliable container duration metadata before execution.
       security: [{bearerAuth: []}]
       requestBody:
         required: true

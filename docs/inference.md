@@ -239,6 +239,13 @@ transcription-only deployment не выбирается для перевода.
 upstream call. Для учета применяется проверенная длительность контейнера и
 минимум десять оплачиваемых секунд.
 
+Compatible и Azure adapters передают `prompt`, `temperature` и JSON response
+format. Они отклоняют transcription-only параметры до сетевого вызова. Поскольку
+translation response может не содержать token usage, gateway принимает только
+WAV, FLAC, OGG, MP3, завершенный MP4/M4A или audio-only WebM с проверяемой
+длительностью и фиксирует эту длительность при отсутствии точных upstream
+counters. Неполные и неоднозначные контейнеры отклоняются до budget reserve.
+
 `POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
 
 Vision принимает только inline `data:image/{jpeg,png,gif,webp};base64,...`.

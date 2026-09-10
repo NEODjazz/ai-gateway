@@ -168,6 +168,10 @@ type AudioTranscriptionDurationReserver interface {
 	ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest) (int, error)
 }
 
+type AudioTranslationDurationReserver interface {
+	ReserveTranslationAudioMilliseconds(request openai.AudioTranscriptionRequest) (int, error)
+}
+
 type AudioSpeechProvider interface {
 	GenerateSpeech(ctx context.Context, req modules.RequestContext) (openai.AudioSpeechResponse, error)
 }
