@@ -119,6 +119,11 @@ func discoveryURL(managed ManagedProvider) (string, error) {
 	}
 	if managed.Type == "ollama" {
 		base.Path = strings.TrimRight(base.Path, "/") + "/api/tags"
+	} else if managed.Type == "bedrock" {
+		if strings.HasPrefix(base.Hostname(), "bedrock-runtime.") {
+			base.Host = strings.Replace(base.Host, "bedrock-runtime.", "bedrock.", 1)
+		}
+		base.Path = strings.TrimRight(base.Path, "/") + "/foundation-models"
 	} else {
 		path := strings.TrimRight(base.Path, "/")
 		if !strings.HasSuffix(path, "/v1") {
@@ -200,6 +205,21 @@ func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredMod
 				continue
 			}
 			ids = append(ids, item.Name)
+		}
+	} else if providerType == "bedrock" {
+		var body struct {
+			Models *[]struct {
+				ID string `json:"modelId"`
+			} `json:"modelSummaries"`
+		}
+		if err := json.Unmarshal(payload, &body); err != nil {
+			return nil, err
+		}
+		if body.Models == nil {
+			return nil, errors.New("Bedrock discovery response omitted modelSummaries")
+		}
+		for _, item := range *body.Models {
+			ids = append(ids, item.ID)
 		}
 	} else {
 		var body struct {
