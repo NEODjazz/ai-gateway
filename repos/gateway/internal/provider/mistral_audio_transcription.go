@@ -41,7 +41,13 @@ func (Mistral) ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest
 			return 0, errors.New("OGG duration is invalid or exceeds 60 minutes")
 		}
 		return duration, nil
-	case "audio/webm", "video/webm", "audio/mpeg", "audio/mp3":
+	case "audio/mpeg", "audio/mp3":
+		duration, err := mp3DurationMilliseconds(data)
+		if err != nil || duration > mistralMaxAudioMilliseconds {
+			return 0, errors.New("MP3 duration is invalid or exceeds 60 minutes")
+		}
+		return duration, nil
+	case "audio/webm", "video/webm":
 		// Compressed containers need codec-aware parsing. Reserve the documented
 		// provider limit so a request can never bypass a duration-priced budget.
 		return mistralMaxAudioMilliseconds, nil

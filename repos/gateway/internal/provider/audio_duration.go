@@ -136,6 +136,86 @@ func oggDurationMilliseconds(data []byte) (int, error) {
 	return durationMilliseconds(lastGranule-preSkip, sampleRate)
 }
 
+func mp3DurationMilliseconds(data []byte) (int, error) {
+	offset := 0
+	if len(data) >= 10 && string(data[:3]) == "ID3" {
+		majorVersion := data[3]
+		if majorVersion < 2 || majorVersion > 4 || data[4] == 0xff || (majorVersion != 4 && data[5]&0x10 != 0) {
+			return 0, openai.ErrInvalidAudio
+		}
+		if data[6]&0x80 != 0 || data[7]&0x80 != 0 || data[8]&0x80 != 0 || data[9]&0x80 != 0 {
+			return 0, openai.ErrInvalidAudio
+		}
+		tagSize := int(data[6])<<21 | int(data[7])<<14 | int(data[8])<<7 | int(data[9])
+		offset = 10 + tagSize
+		if majorVersion == 4 && data[5]&0x10 != 0 {
+			offset += 10
+		}
+		if offset > len(data) {
+			return 0, openai.ErrInvalidAudio
+		}
+	}
+	var totalSamples uint64
+	sampleRate := 0
+	frames := 0
+	for offset < len(data) {
+		if len(data)-offset == 128 && string(data[offset:offset+3]) == "TAG" {
+			offset = len(data)
+			break
+		}
+		frameLength, frameSamples, frameSampleRate, ok := mp3Frame(data[offset:])
+		if !ok || frameLength > len(data)-offset || (sampleRate != 0 && frameSampleRate != sampleRate) {
+			return 0, openai.ErrInvalidAudio
+		}
+		sampleRate = frameSampleRate
+		if totalSamples > math.MaxUint64-uint64(frameSamples) {
+			return 0, openai.ErrInvalidAudio
+		}
+		totalSamples += uint64(frameSamples)
+		frames++
+		offset += frameLength
+	}
+	if frames == 0 || offset != len(data) {
+		return 0, openai.ErrInvalidAudio
+	}
+	return durationMilliseconds(totalSamples, uint64(sampleRate))
+}
+
+func mp3Frame(data []byte) (length, samples, sampleRate int, ok bool) {
+	if len(data) < 4 || data[0] != 0xff || data[1]&0xe0 != 0xe0 {
+		return 0, 0, 0, false
+	}
+	version := (data[1] >> 3) & 0x03
+	layer := (data[1] >> 1) & 0x03
+	bitrateIndex := (data[2] >> 4) & 0x0f
+	sampleRateIndex := (data[2] >> 2) & 0x03
+	if version == 1 || layer != 1 || bitrateIndex == 0 || bitrateIndex == 15 || sampleRateIndex == 3 {
+		return 0, 0, 0, false
+	}
+	mpeg1Bitrates := [...]int{0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320}
+	mpeg2Bitrates := [...]int{0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160}
+	sampleRates := [...]int{44100, 48000, 32000}
+	sampleRate = sampleRates[sampleRateIndex]
+	bitrate := 0
+	coefficient := 72000
+	samples = 576
+	switch version {
+	case 3:
+		bitrate = mpeg1Bitrates[bitrateIndex]
+		coefficient = 144000
+		samples = 1152
+	case 2:
+		bitrate = mpeg2Bitrates[bitrateIndex]
+		sampleRate /= 2
+	case 0:
+		bitrate = mpeg2Bitrates[bitrateIndex]
+		sampleRate /= 4
+	}
+	padding := int((data[2] >> 1) & 1)
+	length = coefficient*bitrate/sampleRate + padding
+	return length, samples, sampleRate, length >= 4
+}
+
 func durationMilliseconds(units, unitsPerSecond uint64) (int, error) {
 	if unitsPerSecond == 0 || units > (math.MaxUint64-uint64(unitsPerSecond)+1)/1000 {
 		return 0, openai.ErrInvalidAudio

@@ -71,8 +71,8 @@ func TestMistralAudioTranscriptionRejectsUnsupportedParametersAndFormats(t *test
 			t.Fatalf("unsupported request accepted: %+v", request)
 		}
 	}
-	if duration, err := client.ReserveAudioMilliseconds(openai.AudioTranscriptionRequest{File: openai.AudioAttachment{Filename: "audio.mp3", MediaType: "audio/mpeg", Data: base64.StdEncoding.EncodeToString([]byte("ID3payload"))}}); err != nil || duration != mistralMaxAudioMilliseconds {
-		t.Fatalf("compressed reserve duration=%d err=%v", duration, err)
+	if _, err := client.ReserveAudioMilliseconds(openai.AudioTranscriptionRequest{File: openai.AudioAttachment{Filename: "audio.mp3", MediaType: "audio/mpeg", Data: base64.StdEncoding.EncodeToString([]byte("ID3payload"))}}); err == nil {
+		t.Fatal("malformed MP3 reserve accepted")
 	}
 }
 
