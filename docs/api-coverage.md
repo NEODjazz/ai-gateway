@@ -48,7 +48,7 @@ availability is not inferred from these tests.
 | Search | Authenticated `/v1/search` for one or bounded batched queries, domain/country filters, explicit capability routing, compatible transport, bounded result validation, retries and per-query search-unit settlement | Additional native provider adapters, tiered result pricing and managed search-tool registry |
 | Skills | Capability-gated native create/list/get/delete and version lifecycle, bounded multipart/binary transport, durable custom-skill ownership and tenant-filtered shared-provider reads | Provider execution references and additional native provider contracts |
 | MCP | Registry, connector/tool-specific ACL, policy-filtered discovery, Responses passthrough, bounded Streamable HTTP execution with durable PostgreSQL idempotency, fail-closed audit and exact tool-request settlement | Credentialed MCP servers, additional transports and long-lived session reuse |
-| A2A | Not implemented | Agent discovery, task ownership and authenticated execution |
+| A2A | A2A 1.0 profile-scoped Agent Cards and synchronous text `SendMessage` through shared authentication, model policy, quotas, guardrails, routing and billing | Durable task ownership, continuation, streaming, push notifications, extended cards and non-text parts |
 | Bedrock Invoke | Not implemented | Native protocol, AWS request signing and usage conversion |
 | Bedrock Converse | Synchronous `/model/{model}/converse` through shared authorization, tool policy, quota, retry and exact billing; native text/function transport, bounded base64 user images with DLP/AV projection, strict usage validation, separately attributed requests and AWS workload credentials | Event stream and document blocks |
 | Containers | Not implemented | Owned lifecycle, expiration and resource accounting |
@@ -140,5 +140,5 @@ through 04462e5 are tested and committed but are not covered by that rollout.
 PostgreSQL integration last passed at source 63dbfa9 using three isolated databases.
 
 The major remaining API work includes batches, fine-tuning, realtime sessions,
-video jobs, an owned MCP runtime and A2A. Further parameter additions alone cannot
+video jobs, A2A task lifecycle and an owned sandbox runtime. Further parameter additions alone cannot
 close these families; each needs its execution, authorization and settlement path.

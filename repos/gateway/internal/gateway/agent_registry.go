@@ -85,6 +85,20 @@ func (r *AgentRegistry) AgentProfiles() []AgentProfile {
 	return result
 }
 
+func (r *AgentRegistry) AgentProfile(id string) (AgentProfile, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.profiles[id]
+	if !ok {
+		return AgentProfile{}, false
+	}
+	item.AllowedTools = append([]string(nil), item.AllowedTools...)
+	item.DeniedTools = append([]string(nil), item.DeniedTools...)
+	item.ApprovalRequired = append([]string(nil), item.ApprovalRequired...)
+	item.Tags = append([]string(nil), item.Tags...)
+	return item, true
+}
+
 func (r *AgentRegistry) PutToolPolicy(id string, item ToolPolicy) (ToolPolicy, error) {
 	id = strings.TrimSpace(id)
 	item.Name = strings.TrimSpace(item.Name)
@@ -130,7 +144,7 @@ func (r *AgentRegistry) PutAgentProfile(id string, item AgentProfile) (AgentProf
 	item.MaxToolCalls = policy.MaxToolCalls
 	item.Tags = uniqueStrings(item.Tags)
 	item.PolicyMaterializedAt = time.Now().UTC()
-	item.ExecutionSupported = false
+	item.ExecutionSupported = item.Enabled && item.InstructionsTemplateID == ""
 	item.ContentStored = false
 	r.profiles[id] = item
 	return item, nil
@@ -173,7 +187,12 @@ func (h Handler) ListAgentProfiles(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "agent registry is unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": h.agents.AgentProfiles(), "execution_supported": false, "content_stored": false})
+	profiles := h.agents.AgentProfiles()
+	executionSupported := false
+	for _, profile := range profiles {
+		executionSupported = executionSupported || profile.ExecutionSupported
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": profiles, "execution_supported": executionSupported, "content_stored": false})
 }
 
 func (h Handler) PutToolPolicy(w http.ResponseWriter, r *http.Request) {

@@ -14,7 +14,7 @@ func TestAgentProfileMaterializesToolPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	profile, err := registry.PutAgentProfile("research", AgentProfile{Name: "Research", Model: "gpt-5", ToolPolicyID: "safe-tools", MaxIterations: 8, Tags: []string{"internal"}, Enabled: true})
-	if err != nil || len(profile.AllowedTools) != 2 || profile.MaxToolCalls != 5 || profile.ExecutionSupported || profile.ContentStored {
+	if err != nil || len(profile.AllowedTools) != 2 || profile.MaxToolCalls != 5 || !profile.ExecutionSupported || profile.ContentStored {
 		t.Fatalf("unexpected profile: %+v err=%v", profile, err)
 	}
 	_, _ = registry.PutToolPolicy("safe-tools", ToolPolicy{Name: "Changed", AllowedTools: []string{"different"}, MaxToolCalls: 1, Enabled: true})
@@ -39,9 +39,14 @@ func TestToolPolicyValidatesApprovalAndProfileBounds(t *testing.T) {
 	if _, err := registry.PutAgentProfile("agent", AgentProfile{Name: "Agent", Model: "gpt", ToolPolicyID: "disabled", MaxIterations: 3}); err == nil {
 		t.Fatal("disabled policy was materialized")
 	}
+	_, _ = registry.PutToolPolicy("enabled", ToolPolicy{Name: "Enabled", AllowedTools: []string{"weather"}, MaxToolCalls: 2, Enabled: true})
+	profile, err := registry.PutAgentProfile("templated", AgentProfile{Name: "Templated", Model: "gpt", ToolPolicyID: "enabled", InstructionsTemplateID: "missing-runtime", MaxIterations: 3, Enabled: true})
+	if err != nil || profile.ExecutionSupported {
+		t.Fatalf("templated profile advertised unsupported execution: %+v err=%v", profile, err)
+	}
 }
 
-func TestAgentRegistryAdminAPIIsMetadataOnlyAndAudited(t *testing.T) {
+func TestAgentRegistryAdminAPIIsExecutableWithoutStoredContentAndAudited(t *testing.T) {
 	audit := &recordingAuditClient{}
 	handler := NewHandler(modulesPipeline("admin"), nil).WithAgentRegistry(NewAgentRegistry()).WithAudit(audit)
 	router := Routes(handler)

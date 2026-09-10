@@ -17,6 +17,8 @@ For MCP registry management, client-side tools, Responses passthrough and
 permission examples, see [MCP integration](../../docs/mcp.md).
 
 - `GET /healthz`
+- `GET /a2a/{agent}/.well-known/agent-card.json`
+- `POST /a2a/{agent}`
 - `POST /v1/chat/completions`
 - `POST /v1/completions`
 - `POST /v1/responses`
@@ -37,6 +39,14 @@ permission examples, see [MCP integration](../../docs/mcp.md).
 - `GET /admin/v1/policy-attachments`
 - `PUT /admin/v1/policy-attachments/{id}`
 - `DELETE /admin/v1/policy-attachments/{id}`
+
+A2A 1.0 direct discovery and synchronous `SendMessage` are available for
+enabled agent profiles that do not reference an instruction template. The
+profile ID is carried as the declared interface tenant. Execution uses the
+shared Responses authentication, model authorization, quota, guardrail,
+routing and billing path. Agent cards advertise only `text/plain`; task
+continuation, streaming, push notifications, extended cards and non-text parts
+fail with explicit protocol errors.
 
 Gateway-level module:
 
