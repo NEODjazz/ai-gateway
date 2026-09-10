@@ -133,6 +133,8 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("FILE_OWNER_QUOTA_BYTES", "8192")
 	t.Setenv("VECTOR_STORE_OWNER_QUOTA", "25")
 	t.Setenv("VECTOR_STORE_FILE_QUOTA", "250")
+	t.Setenv("A2A_TASK_OWNER_QUOTA", "75")
+	t.Setenv("A2A_TASK_TTL_SECONDS", "3600")
 	t.Setenv("PROVIDERS_JSON", `[{"name":"group-a","type":"demo","model_aliases":{"fast":"upstream-fast"},"weight":3,"capabilities":["chat"],"max_parallel_requests":4,"queue_capacity":8,"queue_timeout_ms":250,"rate_limit_rpm":120,"rate_limit_tpm":64000,"shadow":true,"mirror_percentage":12.5,"mirror_timeout_ms":900}]`)
 	cfg := Load()
 	if cfg.Cache.TTLSeconds != 120 || cfg.Cache.MaxBytes != 2048 || !cfg.Provider.GuardrailPolicies["strict"].DLP || !cfg.Provider.GuardrailPolicies["strict"].AV {
@@ -146,6 +148,9 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	}
 	if cfg.VectorStores.OwnerQuota != 25 || cfg.VectorStores.FileQuota != 250 {
 		t.Fatalf("unexpected vector store config: %+v", cfg.VectorStores)
+	}
+	if cfg.A2ATasks.OwnerQuota != 75 || cfg.A2ATasks.TTL != time.Hour {
+		t.Fatalf("unexpected A2A task config: %+v", cfg.A2ATasks)
 	}
 	if cfg.Redis.Addr != "redis:6379" || cfg.Redis.DB != 2 || cfg.Redis.Prefix != "tenant-gateway" {
 		t.Fatalf("unexpected redis config: %+v", cfg.Redis)
@@ -192,6 +197,16 @@ func TestLoadRejectsUnsafeVectorStoreQuota(t *testing.T) {
 		t.Setenv("VECTOR_STORE_FILE_QUOTA", test.files)
 		if cfg := Load(); cfg.InitErr == nil {
 			t.Fatalf("unsafe vector store quota accepted: owner=%s files=%s", test.owner, test.files)
+		}
+	}
+}
+
+func TestLoadRejectsUnsafeA2ATaskConfiguration(t *testing.T) {
+	for _, test := range []struct{ quota, ttl string }{{"0", "60"}, {"100001", "60"}, {"1", "59"}, {"1", "31536001"}} {
+		t.Setenv("A2A_TASK_OWNER_QUOTA", test.quota)
+		t.Setenv("A2A_TASK_TTL_SECONDS", test.ttl)
+		if cfg := Load(); cfg.InitErr == nil {
+			t.Fatalf("unsafe A2A task config accepted: quota=%s ttl=%s", test.quota, test.ttl)
 		}
 	}
 }

@@ -3,6 +3,7 @@ package gateway
 import (
 	"net/http"
 
+	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
 
@@ -16,7 +17,7 @@ func (h Handler) Interactions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
-	h.serveResponsesAs(w, r, responseRequest, "interactions", func(response openai.ResponseResponse) any {
+	h.serveResponsesAs(w, r, responseRequest, "interactions", func(response openai.ResponseResponse, _ modules.RequestContext) any {
 		return openai.InteractionFromResponse(response)
 	})
 }

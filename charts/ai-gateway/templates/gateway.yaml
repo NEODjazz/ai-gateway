@@ -88,6 +88,10 @@ spec:
               value: {{ .Values.gateway.vectorStores.ownerQuota | quote }}
             - name: VECTOR_STORE_FILE_QUOTA
               value: {{ .Values.gateway.vectorStores.fileQuota | quote }}
+            - name: A2A_TASK_OWNER_QUOTA
+              value: {{ .Values.gateway.a2aTasks.ownerQuota | quote }}
+            - name: A2A_TASK_TTL_SECONDS
+              value: {{ .Values.gateway.a2aTasks.ttlSeconds | quote }}
             - name: MODEL_CATALOG_JSON
               valueFrom:
                 configMapKeyRef:

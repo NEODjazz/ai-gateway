@@ -30,6 +30,7 @@ type Config struct {
 	Guardrails   GuardrailMonitorConfig
 	Files        FileConfig
 	VectorStores VectorStoreConfig
+	A2ATasks     A2ATaskConfig
 	InitErr      error
 }
 
@@ -41,6 +42,11 @@ type FileConfig struct {
 type VectorStoreConfig struct {
 	OwnerQuota int
 	FileQuota  int
+}
+
+type A2ATaskConfig struct {
+	OwnerQuota int
+	TTL        time.Duration
 }
 
 type GuardrailMonitorConfig struct {
@@ -177,10 +183,13 @@ func Load() Config {
 	fileOwnerQuotaBytes := envInt64("FILE_OWNER_QUOTA_BYTES", 1<<30)
 	vectorStoreOwnerQuota := envInt("VECTOR_STORE_OWNER_QUOTA", 1000)
 	vectorStoreFileQuota := envInt("VECTOR_STORE_FILE_QUOTA", 10000)
+	a2aTaskOwnerQuota := envInt("A2A_TASK_OWNER_QUOTA", 1000)
+	a2aTaskTTLSeconds := envInt("A2A_TASK_TTL_SECONDS", 2_592_000)
 	var semanticErr error
 	var guardrailMonitorErr error
 	var fileErr error
 	var vectorStoreErr error
+	var a2aTaskErr error
 	controlPlaneDSN := strings.TrimSpace(os.Getenv("PROVIDER_CONTROL_PLANE_POSTGRES_DSN"))
 	credentialKey := os.Getenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY")
 	var controlPlaneErr error
@@ -210,6 +219,12 @@ func Load() Config {
 	}
 	if vectorStoreFileQuota < 1 || vectorStoreFileQuota > 100000 {
 		vectorStoreErr = errors.Join(vectorStoreErr, errors.New("vector store file quota must be between 1 and 100000"))
+	}
+	if a2aTaskOwnerQuota < 1 || a2aTaskOwnerQuota > 100000 {
+		a2aTaskErr = errors.New("A2A task owner quota must be between 1 and 100000")
+	}
+	if a2aTaskTTLSeconds < 60 || a2aTaskTTLSeconds > 31_536_000 {
+		a2aTaskErr = errors.Join(a2aTaskErr, errors.New("A2A task ttl must be between 60 and 31536000 seconds"))
 	}
 	return Config{
 		HTTP: HTTPConfig{
@@ -268,7 +283,8 @@ func Load() Config {
 		},
 		Files:        FileConfig{MaxBytes: fileMaxBytes, OwnerQuotaBytes: fileOwnerQuotaBytes},
 		VectorStores: VectorStoreConfig{OwnerQuota: vectorStoreOwnerQuota, FileQuota: vectorStoreFileQuota},
-		InitErr:      errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr, vectorStoreErr),
+		A2ATasks:     A2ATaskConfig{OwnerQuota: a2aTaskOwnerQuota, TTL: time.Duration(a2aTaskTTLSeconds) * time.Second},
+		InitErr:      errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr, vectorStoreErr, a2aTaskErr),
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
 				Required: envBool("AUTH_REQUIRED", true),

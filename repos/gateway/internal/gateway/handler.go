@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"ai-gateway-gateway/internal/a2astate"
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/mcpclient"
 	"ai-gateway-gateway/internal/mcpstate"
@@ -38,6 +39,8 @@ type Handler struct {
 	cacheConfig       CacheRuntimeConfig
 	logging           *LoggingRegistry
 	agents            *AgentRegistry
+	a2aTasks          a2astate.Store
+	a2aTaskConfig     A2ATaskRuntimeConfig
 	mcp               *MCPRegistry
 	mcpRuntime        MCPRuntimeFactory
 	mcpCalls          mcpstate.Store
@@ -514,7 +517,7 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	h.serveResponsesAs(w, r, request, "", nil)
 }
 
-func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, request openai.ResponseRequest, apiType string, transform func(openai.ResponseResponse) any) {
+func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, request openai.ResponseRequest, apiType string, transform func(openai.ResponseResponse, modules.RequestContext) any) {
 	if message := request.Validate(); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
@@ -622,7 +625,7 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 		return
 	}
 	if transform != nil {
-		writeJSON(w, http.StatusOK, transform(response))
+		writeJSON(w, http.StatusOK, transform(response, reqCtx))
 		return
 	}
 	writeJSON(w, http.StatusOK, response)

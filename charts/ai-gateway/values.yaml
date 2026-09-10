@@ -52,6 +52,11 @@ gateway:
     ownerQuota: 1000
     # Maximum files attached to one vector store.
     fileQuota: 10000
+  a2aTasks:
+    # Maximum retained tasks per credential-and-user owner.
+    ownerQuota: 1000
+    # Completed task retention period.
+    ttlSeconds: 2592000
   exactCache:
     # Disabled by default; bundled cache is process-local and tenant-scoped.
     ttlSeconds: 0
