@@ -43,6 +43,10 @@ gateway:
     # Metadata-only evaluation history. Redis shares it across replicas.
     capacity: 1000
     ttlSeconds: 604800
+  files:
+    # Files are durable only when controlPlane.postgresDsn is configured.
+    maxBytes: 33554432
+    ownerQuotaBytes: 1073741824
   exactCache:
     # Disabled by default; bundled cache is process-local and tenant-scoped.
     ttlSeconds: 0

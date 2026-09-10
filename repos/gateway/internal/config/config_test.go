@@ -129,6 +129,8 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("GUARDRAIL_POLICIES_JSON", `{"strict":{"dlp":true,"av":true}}`)
 	t.Setenv("GUARDRAIL_MONITOR_CAPACITY", "750")
 	t.Setenv("GUARDRAIL_MONITOR_TTL_SECONDS", "86400")
+	t.Setenv("FILE_MAX_BYTES", "2048")
+	t.Setenv("FILE_OWNER_QUOTA_BYTES", "8192")
 	t.Setenv("PROVIDERS_JSON", `[{"name":"group-a","type":"demo","model_aliases":{"fast":"upstream-fast"},"weight":3,"capabilities":["chat"],"max_parallel_requests":4,"queue_capacity":8,"queue_timeout_ms":250,"rate_limit_rpm":120,"rate_limit_tpm":64000,"shadow":true,"mirror_percentage":12.5,"mirror_timeout_ms":900}]`)
 	cfg := Load()
 	if cfg.Cache.TTLSeconds != 120 || cfg.Cache.MaxBytes != 2048 || !cfg.Provider.GuardrailPolicies["strict"].DLP || !cfg.Provider.GuardrailPolicies["strict"].AV {
@@ -136,6 +138,9 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	}
 	if cfg.Guardrails.Capacity != 750 || cfg.Guardrails.TTL != 24*time.Hour {
 		t.Fatalf("unexpected guardrail monitor config: %+v", cfg.Guardrails)
+	}
+	if cfg.Files.MaxBytes != 2048 || cfg.Files.OwnerQuotaBytes != 8192 {
+		t.Fatalf("unexpected file config: %+v", cfg.Files)
 	}
 	if cfg.Redis.Addr != "redis:6379" || cfg.Redis.DB != 2 || cfg.Redis.Prefix != "tenant-gateway" {
 		t.Fatalf("unexpected redis config: %+v", cfg.Redis)
@@ -156,6 +161,23 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	endpoint := cfg.Provider.Endpoints[0]
 	if endpoint.ModelAliases["fast"] != "upstream-fast" || endpoint.Weight != 3 || len(endpoint.Capabilities) != 1 || endpoint.MaxParallelRequests != 4 || endpoint.QueueCapacity != 8 || endpoint.QueueTimeoutMS != 250 || endpoint.RateLimitRPM != 120 || endpoint.RateLimitTPM != 64000 || !endpoint.Shadow || endpoint.MirrorPercentage != 12.5 || endpoint.MirrorTimeoutMS != 900 {
 		t.Fatalf("unexpected routing config: %+v", endpoint)
+	}
+}
+
+func TestLoadRejectsUnsafeFileLimits(t *testing.T) {
+	for _, test := range []struct {
+		max   string
+		quota string
+	}{
+		{max: "0", quota: "1024"},
+		{max: "536870913", quota: "536870913"},
+		{max: "1024", quota: "512"},
+	} {
+		t.Setenv("FILE_MAX_BYTES", test.max)
+		t.Setenv("FILE_OWNER_QUOTA_BYTES", test.quota)
+		if cfg := Load(); cfg.InitErr == nil {
+			t.Fatalf("unsafe file limits accepted: max=%s quota=%s", test.max, test.quota)
+		}
 	}
 }
 

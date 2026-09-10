@@ -157,6 +157,17 @@ Gateway и соответствующий internal service должны полу
 secret. Это не клиентские Bearer-токены; auth management и billing management
 должны использовать разные значения.
 
+## Durable files
+
+| Переменная | Default | Назначение |
+| --- | --- | --- |
+| `FILE_MAX_BYTES` | `33554432` | Максимальный размер одного multipart-файла; верхняя граница конфигурации 512 MiB |
+| `FILE_OWNER_QUOTA_BYTES` | `1073741824` | Суммарная PostgreSQL-квота для пары credential/user; должна быть не меньше `FILE_MAX_BYTES` |
+
+Files API возвращает `503`, если `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` не
+настроен. Квота сериализуется отдельно для каждого owner key и поэтому не
+переполняется конкурентными загрузками.
+
 ## Cache и telemetry
 
 | Переменная | Default |

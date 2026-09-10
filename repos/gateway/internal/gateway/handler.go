@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/mcpclient"
 	"ai-gateway-gateway/internal/mcpstate"
 	"ai-gateway-gateway/internal/modelcatalog"
@@ -38,6 +39,8 @@ type Handler struct {
 	mcp           *MCPRegistry
 	mcpRuntime    MCPRuntimeFactory
 	mcpCalls      mcpstate.Store
+	files         filestate.Store
+	fileConfig    FileRuntimeConfig
 	access        *AccessRegistry
 	budgets       BudgetManagementClient
 	usage         UsageManagementClient

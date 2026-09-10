@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.183
+  version: 0.1.184
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -22,6 +22,7 @@ tags:
   - name: Guardrails
   - name: Tags
   - name: MCP
+  - name: Files
   - name: Projects and access
   - name: Caching and logging
   - name: Agent templates
@@ -419,6 +420,108 @@ paths:
             application/octet-stream: {schema: {type: string, format: binary}}
         default:
           description: Gateway or provider error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/files:
+    post:
+      operationId: createFile
+      tags: [Files]
+      summary: Store a bounded file for later gateway operations
+      description: Authenticates the virtual key, consumes RPM admission and stores the file in PostgreSQL under a credential-and-user owner key. Uploads fail closed when durable storage is unavailable and an atomic per-owner byte quota prevents concurrent requests from exceeding the configured limit.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file, purpose]
+              properties:
+                file: {type: string, format: binary}
+                purpose: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_.-]+$'}
+      responses:
+        '200':
+          description: Stored file metadata
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FileObject'}
+        default:
+          description: Authentication, validation, quota, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    get:
+      operationId: listFiles
+      tags: [Files]
+      summary: List files owned by the authenticated credential and user
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: purpose, in: query, schema: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_.-]+$'}}
+        - {name: after, in: query, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200':
+          description: Cursor page of owned file metadata
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FileList'}
+        default:
+          description: Authentication, validation, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/files/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+    get:
+      operationId: getFile
+      tags: [Files]
+      summary: Read owned file metadata
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Owned file metadata
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FileObject'}
+        default:
+          description: Authentication or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    delete:
+      operationId: deleteFile
+      tags: [Files]
+      summary: Delete an owned file
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Deletion result
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FileDeletion'}
+        default:
+          description: Authentication or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/files/{id}/content:
+    get:
+      operationId: getFileContent
+      tags: [Files]
+      summary: Download content of an owned file
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+      responses:
+        '200':
+          description: Stored file bytes with the validated media type and attachment filename
+          content:
+            application/octet-stream: {schema: {type: string, format: binary}}
+        default:
+          description: Authentication or storage failure
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -2870,6 +2973,36 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    FileObject:
+      type: object
+      additionalProperties: false
+      required: [id, object, bytes, created_at, filename, purpose, status]
+      properties:
+        id: {type: string, pattern: '^file_[a-f0-9]{32}$'}
+        object: {type: string, const: file}
+        bytes: {type: integer, format: int64, minimum: 1}
+        created_at: {type: integer, format: int64}
+        filename: {type: string, minLength: 1, maxLength: 512}
+        purpose: {type: string, minLength: 1, maxLength: 64}
+        status: {type: string, const: processed}
+    FileList:
+      type: object
+      additionalProperties: false
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, items: {$ref: '#/components/schemas/FileObject'}}
+        first_id: {type: string}
+        last_id: {type: string}
+        has_more: {type: boolean}
+    FileDeletion:
+      type: object
+      additionalProperties: false
+      required: [id, object, deleted]
+      properties:
+        id: {type: string}
+        object: {type: string, const: file}
+        deleted: {type: boolean, const: true}
     BedrockConverseRequest:
       type: object
       additionalProperties: false

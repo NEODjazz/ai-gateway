@@ -23,10 +23,21 @@ Gateway реализует OpenAI-compatible endpoints:
 | `POST /v1/rerank` | Query/documents ranking |
 | `POST /v1/audio/transcriptions` | Транскрипция проверенного multipart audio с token или duration billing |
 | `POST /v1/audio/translations` | Перевод речи на английский через deployment с явной capability |
+| `POST /v1/files` | Durable multipart upload с owner quota |
+| `GET /v1/files` | Cursor-список файлов текущих credential и user |
+| `GET /v1/files/{id}` | Метаданные своего файла |
+| `GET /v1/files/{id}/content` | Содержимое своего файла |
+| `DELETE /v1/files/{id}` | Удаление своего файла |
 
 Полные payloads, ограничения и ошибки описывает
 [OpenAPI](../repos/gateway/api/openapi.yaml). Все endpoints требуют Bearer
 credential и применяют тот же model/tool policy, что `/v1/models` и Playground.
+
+Files API доступен только при настроенном PostgreSQL control-plane store. Файлы
+изолированы по паре credential/user, ограничены `FILE_MAX_BYTES`, а суммарная
+квота `FILE_OWNER_QUOTA_BYTES` проверяется атомарно даже при конкурентных
+загрузках. Gateway не сохраняет multipart upload в process-local memory после
+завершения запроса.
 
 ## Матрица полей запроса
 

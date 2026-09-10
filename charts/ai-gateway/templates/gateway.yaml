@@ -80,6 +80,10 @@ spec:
               value: {{ .Values.gateway.guardrailMonitor.capacity | quote }}
             - name: GUARDRAIL_MONITOR_TTL_SECONDS
               value: {{ .Values.gateway.guardrailMonitor.ttlSeconds | quote }}
+            - name: FILE_MAX_BYTES
+              value: {{ printf "%.0f" (float64 .Values.gateway.files.maxBytes) | quote }}
+            - name: FILE_OWNER_QUOTA_BYTES
+              value: {{ printf "%.0f" (float64 .Values.gateway.files.ownerQuotaBytes) | quote }}
             - name: MODEL_CATALOG_JSON
               valueFrom:
                 configMapKeyRef:

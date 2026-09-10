@@ -28,7 +28,13 @@ type Config struct {
 	APIDocs    APIDocsConfig
 	AdminUI    AdminUIConfig
 	Guardrails GuardrailMonitorConfig
+	Files      FileConfig
 	InitErr    error
+}
+
+type FileConfig struct {
+	MaxBytes        int64
+	OwnerQuotaBytes int64
 }
 
 type GuardrailMonitorConfig struct {
@@ -161,8 +167,11 @@ func Load() Config {
 	semanticModel := strings.TrimSpace(os.Getenv("SEMANTIC_CACHE_EMBEDDING_MODEL"))
 	guardrailMonitorCapacity := envInt("GUARDRAIL_MONITOR_CAPACITY", 1000)
 	guardrailMonitorTTLSeconds := envInt("GUARDRAIL_MONITOR_TTL_SECONDS", 604800)
+	fileMaxBytes := envInt64("FILE_MAX_BYTES", 32<<20)
+	fileOwnerQuotaBytes := envInt64("FILE_OWNER_QUOTA_BYTES", 1<<30)
 	var semanticErr error
 	var guardrailMonitorErr error
+	var fileErr error
 	controlPlaneDSN := strings.TrimSpace(os.Getenv("PROVIDER_CONTROL_PLANE_POSTGRES_DSN"))
 	credentialKey := os.Getenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY")
 	var controlPlaneErr error
@@ -180,6 +189,12 @@ func Load() Config {
 	}
 	if guardrailMonitorTTLSeconds < 1 {
 		guardrailMonitorErr = errors.Join(guardrailMonitorErr, errors.New("guardrail monitor ttl must be positive"))
+	}
+	if fileMaxBytes < 1 || fileMaxBytes > 512<<20 {
+		fileErr = errors.New("file max bytes must be between 1 and 536870912")
+	}
+	if fileOwnerQuotaBytes < fileMaxBytes {
+		fileErr = errors.Join(fileErr, errors.New("file owner quota bytes must be at least file max bytes"))
 	}
 	return Config{
 		HTTP: HTTPConfig{
@@ -236,7 +251,8 @@ func Load() Config {
 			Capacity: guardrailMonitorCapacity,
 			TTL:      time.Duration(guardrailMonitorTTLSeconds) * time.Second,
 		},
-		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr),
+		Files:   FileConfig{MaxBytes: fileMaxBytes, OwnerQuotaBytes: fileOwnerQuotaBytes},
+		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr),
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
 				Required: envBool("AUTH_REQUIRED", true),
@@ -477,6 +493,18 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envInt64(key string, fallback int64) int64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return fallback
 	}
