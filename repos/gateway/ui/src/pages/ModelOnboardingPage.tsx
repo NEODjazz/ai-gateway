@@ -12,7 +12,7 @@ type Credential = { id: string; provider_id?: string; description?: string };
 type Catalog = { version?: string; unknown_model_policy?: string; models?: Row[]; [key: string]: unknown };
 type ModelGroup = { id: string; deployment_ids: string[]; strategy: string; enabled: boolean };
 type OnboardingPlan = { revision: number; catalog_version: string; deployments: Row[]; model_groups: Row[]; changes: string[] };
-type ProviderCapabilityProfile = { type: string; operations: string[] };
+type ProviderCapabilityProfile = { type: string; operations: string[]; capabilities?: string[] };
 type Candidate = {
   upstream: string;
   selected: boolean;
@@ -69,7 +69,7 @@ export function ModelOnboardingPage() {
       const loadedProviders = records<Provider>(providerPayload);
       const loadedCredentials = records<Credential>(credentialPayload);
       setProviders(loadedProviders); setCredentials(loadedCredentials);
-      setProviderCapabilities(Object.fromEntries((capabilityPayload.data || []).map((profile) => [profile.type, profile.operations])));
+      setProviderCapabilities(Object.fromEntries((capabilityPayload.data || []).map((profile) => [profile.type, profile.capabilities || profile.operations])));
       setCatalog(catalogPayload); setGroups(records<ModelGroup>(groupPayload));
       setProviderID((current) => loadedProviders.some((provider) => provider.id === current) ? current : loadedProviders[0]?.id || "");
       setCredentialID((current) => loadedCredentials.some((credential) => credential.id === current && (!credential.provider_id || credential.provider_id === (requestedProviderID || loadedProviders[0]?.id))) ? current : "");

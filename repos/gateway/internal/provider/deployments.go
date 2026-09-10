@@ -423,6 +423,8 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 		return false
 	}
 	switch capability {
+	case "chat", "responses":
+		return true
 	case "embeddings":
 		_, ok := endpoint.Provider.(EmbeddingClient)
 		return ok
@@ -457,8 +459,35 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 		_, chat := endpoint.Provider.(StreamingClient)
 		_, responses := endpoint.Provider.(StreamingResponseClient)
 		return chat || responses
+	case "tools":
+		client, ok := endpoint.Provider.(interface{ SupportsTools() bool })
+		return ok && client.SupportsTools()
+	case "structured_output":
+		client, ok := endpoint.Provider.(interface{ SupportsStructuredOutput() bool })
+		return ok && client.SupportsStructuredOutput()
+	case "mcp":
+		client, ok := endpoint.Provider.(MCPClient)
+		return ok && client.SupportsMCP()
+	case "vision":
+		client, ok := endpoint.Provider.(VisionClient)
+		return ok && client.SupportsVision()
+	case "web_search":
+		client, ok := endpoint.Provider.(interface{ SupportsWebSearch() bool })
+		return ok && client.SupportsWebSearch()
+	case "web_fetch":
+		client, ok := endpoint.Provider.(interface{ SupportsWebFetch() bool })
+		return ok && client.SupportsWebFetch()
+	case "audio":
+		client, ok := endpoint.Provider.(interface{ SupportsChatAudio() bool })
+		return ok && client.SupportsChatAudio()
+	case "prompt_cache":
+		client, ok := endpoint.Provider.(interface{ SupportsPromptCache() bool })
+		return ok && client.SupportsPromptCache()
+	case "assistant_prefill":
+		client, ok := endpoint.Provider.(interface{ SupportsAssistantPrefill() bool })
+		return ok && client.SupportsAssistantPrefill()
 	default:
-		return true
+		return false
 	}
 }
 

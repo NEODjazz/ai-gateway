@@ -25,16 +25,10 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "assistant_prefill", label: "Assistant prefill", description: "Continue a final assistant prefix" }
 ];
 
-const providerOperationCapabilities = new Set([
-  "chat", "responses", "embeddings", "rerank", "moderation",
-  "image_generation", "image_edit", "image_variation",
-  "audio_transcription", "audio_speech", "ocr", "search", "stream"
-]);
-
-export function providerModelCapabilityOptions(operations?: string[]): ChipOption[] {
-  if (!operations) return modelCapabilityOptions;
-  const supported = new Set(operations);
-  return modelCapabilityOptions.filter(({ value }) => !providerOperationCapabilities.has(value) || supported.has(value));
+export function providerModelCapabilityOptions(capabilities?: string[]): ChipOption[] {
+  if (!capabilities) return modelCapabilityOptions;
+  const supported = new Set(capabilities);
+  return modelCapabilityOptions.filter(({ value }) => supported.has(value));
 }
 
 export function defaultModelCapabilities(providerType: string): string[] {

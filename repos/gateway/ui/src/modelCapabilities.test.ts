@@ -37,13 +37,8 @@ describe("modelCapabilityOptions", () => {
     expect(defaultModelCapabilities("openrouter")).toEqual(["chat", "stream"]);
   });
 
-  it("filters adapter operations while preserving feature capabilities", () => {
+  it("filters operations and features against the adapter profile", () => {
     const values = providerModelCapabilityOptions(["embeddings", "rerank"]).map(({ value }) => value);
-    expect(values).toContain("embeddings");
-    expect(values).toContain("rerank");
-    expect(values).toContain("tools");
-    expect(values).not.toContain("chat");
-    expect(values).not.toContain("responses");
-    expect(values).not.toContain("image_generation");
+    expect(values).toEqual(["embeddings", "rerank"]);
   });
 });

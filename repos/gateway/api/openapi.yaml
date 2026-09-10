@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.120
+  version: 0.1.121
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -5084,13 +5084,18 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations]
+      required: [type, operations, capabilities]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, cohere, mistral, voyage]}
         operations:
           type: array
           uniqueItems: true
           items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_speech, ocr, search, stream]}
+        capabilities:
+          type: array
+          uniqueItems: true
+          description: Operations and optional request features preserved by the managed adapter.
+          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_speech, ocr, search, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
     ProviderCredentialCreateInput:
       type: object
       additionalProperties: false

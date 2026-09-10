@@ -89,6 +89,14 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "ollama", capability: "rerank"},
 		{providerType: "demo", capability: "stream"},
 		{providerType: "gemini", capability: "web_fetch"},
+		{providerType: "demo", capability: "tools"},
+		{providerType: "voyage", capability: "structured_output"},
+		{providerType: "cohere", capability: "vision"},
+		{providerType: "anthropic", capability: "mcp"},
+		{providerType: "mistral", capability: "web_search"},
+		{providerType: "ollama", capability: "prompt_cache"},
+		{providerType: "openai", capability: "prompt_cache"},
+		{providerType: "openai", capability: "assistant_prefill"},
 	}
 	for _, test := range tests {
 		t.Run(test.providerType+"/"+test.capability, func(t *testing.T) {
@@ -114,6 +122,31 @@ func TestManagedDeploymentAcceptsSupportedNativeCapabilities(t *testing.T) {
 	}
 }
 
+func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
+	tests := []struct {
+		providerType string
+		capabilities []string
+	}{
+		{providerType: "ollama", capabilities: []string{"tools", "structured_output", "vision"}},
+		{providerType: "anthropic", capabilities: []string{"tools", "structured_output", "vision", "web_search", "web_fetch", "prompt_cache", "assistant_prefill"}},
+		{providerType: "gemini", capabilities: []string{"tools", "structured_output", "vision"}},
+		{providerType: "cohere", capabilities: []string{"tools", "structured_output"}},
+		{providerType: "mistral", capabilities: []string{"tools", "structured_output", "vision", "assistant_prefill"}},
+		{providerType: "openai-compatible", capabilities: []string{"tools", "structured_output", "mcp", "vision", "web_search", "audio"}},
+	}
+	for _, test := range tests {
+		t.Run(test.providerType, func(t *testing.T) {
+			router := New(Config{}).(*Router)
+			if _, err := router.CreateProvider(ManagedProvider{ID: "provider", Type: test.providerType, BaseURL: "https://provider.example", Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.CreateModelDeployment(ModelDeployment{ID: "deployment", ProviderID: "provider", Models: []string{"model"}, Capabilities: test.capabilities, Enabled: true}); err != nil {
+				t.Fatalf("supported capabilities rejected: %v", err)
+			}
+		})
+	}
+}
+
 func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	profiles := ManagedProviderCapabilityProfiles()
 	byType := make(map[string][]string, len(profiles))
@@ -130,6 +163,16 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	}
 	if slices.Contains(byType["anthropic"], "embeddings") || !slices.Contains(byType["anthropic"], "responses") {
 		t.Fatalf("anthropic operations=%v", byType["anthropic"])
+	}
+	profilesByType := make(map[string]ProviderCapabilityProfile, len(profiles))
+	for _, profile := range profiles {
+		profilesByType[profile.Type] = profile
+	}
+	if !slices.Contains(profilesByType["anthropic"].Capabilities, "web_fetch") || slices.Contains(profilesByType["gemini"].Capabilities, "web_fetch") {
+		t.Fatalf("feature profiles are unsafe: anthropic=%v gemini=%v", profilesByType["anthropic"].Capabilities, profilesByType["gemini"].Capabilities)
+	}
+	if slices.Contains(profilesByType["openai"].Capabilities, "assistant_prefill") || !slices.Contains(profilesByType["mistral"].Capabilities, "assistant_prefill") {
+		t.Fatalf("assistant prefill profiles are incorrect: openai=%v mistral=%v", profilesByType["openai"].Capabilities, profilesByType["mistral"].Capabilities)
 	}
 }
 

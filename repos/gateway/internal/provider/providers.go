@@ -24,8 +24,9 @@ type ManagedProvider struct {
 }
 
 type ProviderCapabilityProfile struct {
-	Type       string   `json:"type"`
-	Operations []string `json:"operations"`
+	Type         string   `json:"type"`
+	Operations   []string `json:"operations"`
+	Capabilities []string `json:"capabilities"`
 }
 
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage"}
@@ -34,6 +35,11 @@ var managedOperationCapabilities = []string{
 	"chat", "responses", "embeddings", "rerank", "moderation",
 	"image_generation", "image_edit", "image_variation",
 	"audio_transcription", "audio_speech", "ocr", "search", "stream",
+}
+
+var managedFeatureCapabilities = []string{
+	"tools", "structured_output", "mcp", "vision", "web_search",
+	"web_fetch", "audio", "prompt_cache", "assistant_prefill",
 }
 
 type ProviderController interface {
@@ -196,14 +202,21 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 	profiles := make([]ProviderCapabilityProfile, 0, len(managedProviderTypes))
 	for _, providerType := range managedProviderTypes {
 		client := providerFor(config.ProviderEndpointConfig{Type: providerType, Stream: true})
-		endpoint := Endpoint{Type: providerType, Provider: client, Capabilities: managedOperationCapabilities}
+		available := append(append([]string(nil), managedOperationCapabilities...), managedFeatureCapabilities...)
+		endpoint := Endpoint{Type: providerType, Provider: client, Capabilities: available}
 		operations := make([]string, 0, len(managedOperationCapabilities))
 		for _, capability := range managedOperationCapabilities {
 			if supportsManagedAdapterCapability(endpoint, capability) {
 				operations = append(operations, capability)
 			}
 		}
-		profiles = append(profiles, ProviderCapabilityProfile{Type: providerType, Operations: operations})
+		capabilities := append([]string(nil), operations...)
+		for _, capability := range managedFeatureCapabilities {
+			if supportsManagedAdapterCapability(endpoint, capability) {
+				capabilities = append(capabilities, capability)
+			}
+		}
+		profiles = append(profiles, ProviderCapabilityProfile{Type: providerType, Operations: operations, Capabilities: capabilities})
 	}
 	return profiles
 }
