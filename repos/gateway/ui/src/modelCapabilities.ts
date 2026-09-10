@@ -37,6 +37,8 @@ export function defaultModelCapabilities(providerType: string): string[] {
       return ["embeddings"];
     case "bedrock":
       return ["chat"];
+    case "groq":
+      return ["chat", "stream"];
     case "demo":
       return ["chat", "responses", "embeddings"];
     case "ollama":

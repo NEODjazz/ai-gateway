@@ -114,6 +114,9 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "bedrock", capability: "responses"},
 		{providerType: "bedrock", capability: "stream"},
 		{providerType: "bedrock", capability: "structured_output"},
+		{providerType: "groq", capability: "responses"},
+		{providerType: "groq", capability: "embeddings"},
+		{providerType: "groq", capability: "audio_transcription"},
 		{providerType: "ollama", capability: "rerank"},
 		{providerType: "demo", capability: "stream"},
 		{providerType: "gemini", capability: "web_fetch"},
@@ -217,6 +220,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "gemini", capabilities: []string{"chat", "tools", "structured_output", "vision"}},
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
 		{providerType: "bedrock", capabilities: []string{"chat", "tools"}},
+		{providerType: "groq", capabilities: []string{"chat", "stream", "tools", "structured_output", "vision"}},
 		{providerType: "mistral", capabilities: []string{"chat", "tools", "structured_output", "vision", "assistant_prefill"}},
 		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "tools", "structured_output", "mcp", "vision", "web_search", "audio"}},
 	}
@@ -262,6 +266,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	}
 	if !slices.Equal(profilesByType["bedrock"].Operations, []string{"chat"}) || !slices.Equal(profilesByType["bedrock"].Capabilities, []string{"chat", "tools"}) {
 		t.Fatalf("bedrock profile=%+v", profilesByType["bedrock"])
+	}
+	if !slices.Equal(profilesByType["groq"].Operations, []string{"chat", "stream"}) || !slices.Equal(profilesByType["groq"].Capabilities, []string{"chat", "stream", "tools", "structured_output", "vision"}) {
+		t.Fatalf("groq profile=%+v", profilesByType["groq"])
 	}
 }
 

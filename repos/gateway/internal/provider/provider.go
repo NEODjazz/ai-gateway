@@ -2850,6 +2850,8 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 		return NewVoyage(endpoint.BaseURL, endpoint.APIKey)
 	case "bedrock":
 		return NewBedrock(endpoint.BaseURL, endpoint.APIKey)
+	case "groq":
+		return NewGroq(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "demo":
 		return Demo{}
 	default:

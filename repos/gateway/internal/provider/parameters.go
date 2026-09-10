@@ -25,6 +25,8 @@ func rejectParameters(adapter string, checks ...parameterCheck) error {
 	return nil
 }
 
+var errUnsupportedServiceTier = errors.New("service_tier is not supported by this adapter")
+
 func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := validateChatMessagePrefix("anthropic", request.Messages, true); err != nil {
 		return err
@@ -319,7 +321,7 @@ func (p OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRe
 		parameterCheck{"store", request.Store != nil && *request.Store},
 		parameterCheck{"safe_prompt", request.SafePrompt != nil && !p.supportsSafePrompt},
 		parameterCheck{"prompt_mode", request.PromptMode != "" && !p.supportsPromptMode},
-		parameterCheck{"service_tier", request.ServiceTier != ""},
+		parameterCheck{"service_tier", request.ServiceTier != "" && providerName != "groq"},
 	)
 }
 
