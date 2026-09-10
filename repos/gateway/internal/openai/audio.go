@@ -116,7 +116,7 @@ func (r AudioTranscriptionRequest) Validate() string {
 		return "language or prompt exceeds its limit"
 	}
 	if !oneOfOrEmpty(r.ResponseFormat, "json", "verbose_json", "diarized_json") {
-		return "response_format must preserve token usage"
+		return "response_format must preserve structured usage"
 	}
 	if r.Temperature != nil && (math.IsNaN(*r.Temperature) || math.IsInf(*r.Temperature, 0) || *r.Temperature < 0 || *r.Temperature > 1) {
 		return "temperature must be between 0 and 1"
@@ -404,8 +404,20 @@ func (r AudioTranscriptionResponse) Validate() string {
 			}
 		}
 	}
-	if r.Usage == nil || (r.Usage.Type != "" && r.Usage.Type != "tokens") || !exactPositiveTokenSum(r.Usage.InputTokens, r.Usage.OutputTokens, r.Usage.TotalTokens) {
-		return "exact token usage is required"
+	if r.Usage == nil {
+		return "exact transcription usage is required"
+	}
+	switch r.Usage.Type {
+	case "", "tokens":
+		if !exactPositiveTokenSum(r.Usage.InputTokens, r.Usage.OutputTokens, r.Usage.TotalTokens) || r.Usage.InputAudioMilliseconds != 0 {
+			return "exact token usage is required"
+		}
+	case "duration":
+		if r.Usage.InputTokens != 0 || r.Usage.OutputTokens != 0 || r.Usage.TotalTokens != 0 || r.Usage.InputTokenDetails != nil || r.Usage.InputAudioMilliseconds <= 0 || r.Usage.InputAudioMilliseconds > 7*24*60*60*1000 || r.Duration <= 0 {
+			return "exact audio duration usage is required"
+		}
+	default:
+		return "unsupported transcription usage type"
 	}
 	if details := r.Usage.InputTokenDetails; details != nil {
 		if details.TextTokens < 0 || details.AudioTokens < 0 || details.TextTokens > r.Usage.InputTokens || details.AudioTokens > r.Usage.InputTokens-details.TextTokens {
@@ -449,11 +461,12 @@ func validTimeRange(start, end float64) bool {
 }
 
 type AudioTranscriptionUsage struct {
-	Type              string                               `json:"type,omitempty"`
-	InputTokens       int                                  `json:"input_tokens"`
-	InputTokenDetails *AudioTranscriptionInputTokenDetails `json:"input_token_details,omitempty"`
-	OutputTokens      int                                  `json:"output_tokens"`
-	TotalTokens       int                                  `json:"total_tokens"`
+	Type                   string                               `json:"type,omitempty"`
+	InputTokens            int                                  `json:"input_tokens"`
+	InputTokenDetails      *AudioTranscriptionInputTokenDetails `json:"input_token_details,omitempty"`
+	OutputTokens           int                                  `json:"output_tokens"`
+	TotalTokens            int                                  `json:"total_tokens"`
+	InputAudioMilliseconds int                                  `json:"input_audio_milliseconds,omitempty"`
 }
 
 type AudioTranscriptionInputTokenDetails struct {

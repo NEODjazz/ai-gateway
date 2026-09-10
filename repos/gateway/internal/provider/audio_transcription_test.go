@@ -113,9 +113,14 @@ func TestAudioTranscriptionResponseValidation(t *testing.T) {
 	if _, err := decodeAudioTranscriptionResponse(strings.NewReader(validTranscriptionResponse)); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := decodeAudioTranscriptionResponse(strings.NewReader(`{"text":"hello","duration":1.5,"usage":{"type":"duration","input_tokens":0,"output_tokens":0,"total_tokens":0,"input_audio_milliseconds":10000}}`)); err != nil {
+		t.Fatal(err)
+	}
 	for _, body := range []string{
 		`{"text":"hello"}`,
 		`{"text":"hello","usage":{"type":"duration","input_tokens":0,"output_tokens":0,"total_tokens":0}}`,
+		`{"text":"hello","duration":1,"usage":{"type":"duration","input_tokens":1,"output_tokens":0,"total_tokens":1,"input_audio_milliseconds":10000}}`,
+		`{"text":"hello","duration":1,"usage":{"type":"duration","input_tokens":0,"output_tokens":0,"total_tokens":0,"input_audio_milliseconds":604800001}}`,
 		`{"text":"hello","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":3}}`,
 		validTranscriptionResponse + `{}`,
 	} {

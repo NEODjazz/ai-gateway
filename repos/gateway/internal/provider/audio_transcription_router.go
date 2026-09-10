@@ -78,7 +78,9 @@ func (r Router) TranscribeAudio(ctx context.Context, req modules.RequestContext)
 				err = errors.New(message)
 			} else {
 				attemptCtx.AudioTranscriptionResponse = &response
-				if response.Duration > 0 {
+				if response.Usage != nil && response.Usage.Type == "duration" {
+					attemptCtx.InputAudioMilliseconds = response.Usage.InputAudioMilliseconds
+				} else if response.Duration > 0 {
 					attemptCtx.InputAudioMilliseconds = int(math.Ceil(response.Duration * 1000))
 				}
 				if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {

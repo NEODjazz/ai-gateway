@@ -18,12 +18,13 @@ func NewGroq(baseURL, apiKey string, stream bool) Groq {
 	return Groq{compatible: compatible}
 }
 
-func (Groq) SupportsResponses() bool        { return true }
-func (Groq) SupportsMCP() bool              { return true }
-func (Groq) SupportsAudioSpeech() bool      { return true }
-func (Groq) SupportsTools() bool            { return true }
-func (Groq) SupportsStructuredOutput() bool { return true }
-func (Groq) SupportsVision() bool           { return true }
+func (Groq) SupportsResponses() bool          { return true }
+func (Groq) SupportsMCP() bool                { return true }
+func (Groq) SupportsAudioTranscription() bool { return true }
+func (Groq) SupportsAudioSpeech() bool        { return true }
+func (Groq) SupportsTools() bool              { return true }
+func (Groq) SupportsStructuredOutput() bool   { return true }
+func (Groq) SupportsVision() bool             { return true }
 
 func (g Groq) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := rejectParameters("groq",

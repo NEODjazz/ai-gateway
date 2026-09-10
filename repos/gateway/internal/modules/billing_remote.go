@@ -413,8 +413,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 	if request.CacheStatus == "hit" {
 		request.UsageEstimated = false
 	}
-	providerReportedExactUsage := (req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil) || (req.AudioTranscriptionResponse != nil && req.AudioTranscriptionResponse.Usage != nil)
-	if request.TotalTokens == 0 && request.CacheStatus != "hit" && !providerReportedExactUsage {
+	providerReportedUsage := (req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil) || (req.AudioTranscriptionResponse != nil && req.AudioTranscriptionResponse.Usage != nil)
+	if request.TotalTokens == 0 && request.CacheStatus != "hit" && !providerReportedUsage {
 		if req.CompletionRequest != nil {
 			request.InputTokens = openai.CompletionInputTokens(*req.CompletionRequest)
 			request.TotalTokens = openai.CompletionReserveTokens(*req.CompletionRequest)

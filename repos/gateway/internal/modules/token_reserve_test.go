@@ -46,6 +46,22 @@ func TestLocalBillingUsesAudioTranscriptionUsage(t *testing.T) {
 	}
 }
 
+func TestBillingUsesDurationTranscriptionWithoutEstimatedTokens(t *testing.T) {
+	request := openai.AudioTranscriptionRequest{Model: "audio", File: openai.AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: "UklGRi4uLi5XQVZFZGF0YQ=="}}
+	response := openai.AudioTranscriptionResponse{Text: "hello", Duration: 1.25, Usage: &openai.AudioTranscriptionUsage{Type: "duration", InputAudioMilliseconds: 10000}}
+	req := RequestContext{AudioTranscriptionRequest: &request, AudioTranscriptionResponse: &response, InputAudioMilliseconds: 10000}
+	if err := NewBillingModule(true).Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Usage == nil || req.Usage.PromptTokens != 0 || req.Usage.CompletionTokens != 0 || req.Usage.TotalTokens != 0 {
+		t.Fatalf("local usage=%+v", req.Usage)
+	}
+	remote := billingRequest(&req)
+	if remote.InputTokens != 0 || remote.OutputTokens != 0 || remote.TotalTokens != 0 || remote.InputAudioMilliseconds != 10000 || remote.UsageEstimated {
+		t.Fatalf("remote usage=%+v", remote)
+	}
+}
+
 func TestBillingReserveIncludesEveryChatChoice(t *testing.T) {
 	maxTokens, choices := 200, 3
 	req := RequestContext{Request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{N: &choices}, MaxCompletionTokens: &maxTokens, Messages: []openai.Message{{Role: "user", Content: "test"}}}}

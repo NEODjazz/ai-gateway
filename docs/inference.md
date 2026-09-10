@@ -203,8 +203,9 @@ bounded array fields отклоняются.
 
 Поддерживаются JSON-форматы `json`, `verbose_json` и `diarized_json`. Успешный
 ответ ограничен 8 MiB, transcript — 1 MiB текста, words и segments — 100 000
-элементов суммарно. Provider обязан вернуть точный token usage с согласованной
-суммой; duration-only usage отклоняется.
+элементов суммарно. Token-priced provider обязан вернуть точный token usage с
+согласованной суммой. Duration-priced provider возвращает отдельный usage type с
+нулевыми token counters и положительной billable audio duration.
 
 Native Mistral transcription передает `language`, `temperature`,
 `timestamp_granularities` и `keywords[]` как `context_bias`; `diarized_json`
@@ -214,6 +215,14 @@ commit. Для WAV reserve рассчитывается из RIFF metadata с о
 миллисекунды; для MP3, FLAC, OGG и WebM резервируется документированный предел
 60 минут, чтобы сжатый контейнер не мог занизить duration budget. Streaming
 остается отдельным контрактом.
+
+Native Groq transcription передает `language`, `prompt`, `temperature` и
+`timestamp_granularities`, а upstream всегда запрашивает `verbose_json`, чтобы
+сохранить доступные timing metadata. Prompt ограничен консервативной оценкой в
+224 tokens. Billing резервирует и фиксирует минимум 10 секунд. Сейчас adapter
+принимает WAV: RIFF metadata позволяет достоверно определить длительность до
+provider call. Другие контейнеры отклоняются до добавления codec-aware duration
+parser, чтобы сжатый файл не мог обойти duration budget.
 
 `POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
 
