@@ -70,6 +70,8 @@ func (Mistral) SupportsAudioTranscription() bool { return false }
 
 func (Mistral) SupportsAudioSpeech() bool { return true }
 
+func (Mistral) SupportsSearch() bool { return false }
+
 func (Mistral) GenerateImage(context.Context, openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
 	return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_operation", Err: errors.New("image generation is not supported by this adapter")}
 }

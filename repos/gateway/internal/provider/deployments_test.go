@@ -110,6 +110,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "gemini", capability: "responses"},
 		{providerType: "gemini", capability: "moderation"},
 		{providerType: "mistral", capability: "image_generation"},
+		{providerType: "mistral", capability: "search"},
 		{providerType: "anthropic", capability: "embeddings"},
 		{providerType: "bedrock", capability: "responses"},
 		{providerType: "bedrock", capability: "stream"},
@@ -266,6 +267,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	}
 	if slices.Contains(profilesByType["openai"].Capabilities, "assistant_prefill") || !slices.Contains(profilesByType["mistral"].Capabilities, "assistant_prefill") {
 		t.Fatalf("assistant prefill profiles are incorrect: openai=%v mistral=%v", profilesByType["openai"].Capabilities, profilesByType["mistral"].Capabilities)
+	}
+	if slices.Contains(profilesByType["mistral"].Operations, "search") {
+		t.Fatalf("mistral profile exposes unsupported search: %+v", profilesByType["mistral"])
 	}
 	if !slices.Equal(profilesByType["bedrock"].Operations, []string{"chat"}) || !slices.Equal(profilesByType["bedrock"].Capabilities, []string{"chat", "tools"}) {
 		t.Fatalf("bedrock profile=%+v", profilesByType["bedrock"])
