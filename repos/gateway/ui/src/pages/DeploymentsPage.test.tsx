@@ -15,6 +15,7 @@ describe("DeploymentsPage", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const path = String(input);
       if (path.startsWith("/admin/v1/model-deployments?") && !options?.method) return response({ data: [deployment], total: 1 });
+      if (path === "/admin/v1/provider-capabilities") return response({ data: [{ type: "openai-compatible", capabilities: ["chat", "tools"] }] });
       if (path.includes("/health")) return response({ data: [check], errors: [] });
       if (path === "/admin/v1/model-deployments/azure-gpt" && options?.method === "PUT") return response({ ...deployment, enabled: false });
       return response({ data: [] });
@@ -48,6 +49,7 @@ describe("DeploymentsPage", () => {
     expect(within(edit).getByLabelText("Tokens per minute")).toHaveValue(64000);
     await userEvent.click(within(edit).getByLabelText("Capabilities"));
     await userEvent.click(within(edit).getByRole("option", { name: /Tools/ }));
+    expect(within(edit).queryByRole("option", { name: /MCP/ })).not.toBeInTheDocument();
     await userEvent.click(within(edit).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => {
       if (String(path) !== "/admin/v1/model-deployments/azure-gpt" || options?.method !== "PUT") return false;
