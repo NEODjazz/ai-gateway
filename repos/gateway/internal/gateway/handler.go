@@ -482,7 +482,10 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	if !decodeInferenceRequest(w, r, &request) {
 		return
 	}
+	h.serveResponsesAs(w, r, request, "", nil)
+}
 
+func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, request openai.ResponseRequest, apiType string, transform func(openai.ResponseResponse) any) {
 	if message := request.Validate(); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
@@ -498,6 +501,9 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 			Model:    request.Model,
 			Messages: responseMessages(request),
 		},
+	}
+	if apiType != "" {
+		reqCtx.Metadata = map[string]string{"gateway.api_type": apiType}
 	}
 
 	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
@@ -584,6 +590,10 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeSSEDone(w)
+		return
+	}
+	if transform != nil {
+		writeJSON(w, http.StatusOK, transform(response))
 		return
 	}
 	writeJSON(w, http.StatusOK, response)

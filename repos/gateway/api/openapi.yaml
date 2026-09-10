@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.122
+  version: 0.1.123
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -657,6 +657,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/interactions:
+    post:
+      operationId: createInteraction
+      tags: [Inference]
+      summary: Create a synchronous model interaction
+      description: Converts a synchronous model interaction to the existing Responses execution pipeline. Supports string or step-array input, system instructions, function tools, structured response formats, continuity, storage selection, and bounded generation settings. Streaming, background execution, agents, MCP tools, seed, stop sequences, and thinking level are rejected before provider execution.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InteractionRequest'
+      responses:
+        '200':
+          description: Completed, failed, or incomplete interaction
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InteractionResponse'
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/RequestTooLarge'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '451': {$ref: '#/components/responses/ContentRejected'}
+        '502': {$ref: '#/components/responses/ProviderFailed'}
+        '503':
+          description: Required response affinity or policy storage is unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /v1/responses/input_tokens:
     post:
       operationId: countResponseInputTokens
@@ -4157,6 +4191,100 @@ components:
         max_tokens: {type: integer, minimum: 1}
         temperature: {type: number}
         top_p: {type: number}
+    InteractionGenerationConfig:
+      type: object
+      additionalProperties: false
+      properties:
+        max_output_tokens: {type: integer, minimum: 1}
+        temperature: {type: number, minimum: 0, maximum: 2}
+        top_p: {type: number, minimum: 0, maximum: 1}
+        seed: {type: integer, description: Rejected by this endpoint.}
+        stop_sequences:
+          type: array
+          items: {type: string}
+          description: Rejected when non-empty by this endpoint.
+        thinking_level: {type: string, description: Rejected by this endpoint.}
+    InteractionRequest:
+      type: object
+      additionalProperties: false
+      required: [model, input]
+      properties:
+        provider: {type: string}
+        model: {type: string, minLength: 1}
+        agent: {type: string, description: Rejected by this endpoint.}
+        input:
+          oneOf:
+            - type: string
+              minLength: 1
+            - type: array
+              minItems: 1
+              items: {type: object, additionalProperties: true}
+        system_instruction: {type: string}
+        tools:
+          type: array
+          items: {$ref: '#/components/schemas/FunctionResponseTool'}
+        response_format: {}
+        previous_interaction_id: {type: string}
+        store: {type: boolean}
+        stream: {type: boolean, default: false, description: Must be false.}
+        background: {type: boolean, default: false, description: Must be false.}
+        generation_config: {$ref: '#/components/schemas/InteractionGenerationConfig'}
+    InteractionResponseContent:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: {type: string, const: text}
+        text: {type: string}
+    InteractionStep:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        id: {type: string}
+        type: {type: string, enum: [model_output, function_call, thought]}
+        name: {type: string}
+        arguments: {}
+        content:
+          type: array
+          items: {$ref: '#/components/schemas/InteractionResponseContent'}
+    InteractionUsage:
+      type: object
+      additionalProperties: false
+      properties:
+        total_cached_tokens: {type: integer, minimum: 0}
+        total_input_tokens: {type: integer, minimum: 0}
+        total_output_tokens: {type: integer, minimum: 0}
+        total_thought_tokens: {type: integer, minimum: 0}
+        total_tokens: {type: integer, minimum: 0}
+    InteractionResponse:
+      type: object
+      additionalProperties: false
+      required: [id, object, model, status]
+      properties:
+        id: {type: string}
+        object: {type: string, const: interaction}
+        created: {type: string, format: date-time}
+        updated: {type: string, format: date-time}
+        model: {type: string}
+        status: {type: string}
+        steps:
+          type: array
+          items: {$ref: '#/components/schemas/InteractionStep'}
+        usage: {$ref: '#/components/schemas/InteractionUsage'}
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+        incomplete_details:
+          type: object
+          additionalProperties: false
+          required: [reason]
+          properties:
+            reason: {type: string}
     ResponseInputTokenCountRequest:
       type: object
       additionalProperties: false
