@@ -55,7 +55,7 @@ func TestDeepSeekResponsesMapsSupportedContract(t *testing.T) {
 		reasoning, _ := body["reasoning"].(map[string]any)
 		text, _ := body["text"].(map[string]any)
 		format, _ := text["format"].(map[string]any)
-		if body["max_output_tokens"] != float64(80) || reasoning["effort"] != "high" || format["type"] != "json_schema" || len(body["tools"].([]any)) != 1 {
+		if body["max_output_tokens"] != float64(80) || body["user"] != "tenant_2" || reasoning["effort"] != "high" || format["type"] != "json_schema" || len(body["tools"].([]any)) != 1 {
 			t.Fatalf("request=%#v", body)
 		}
 		_, _ = fmt.Fprint(w, `{"id":"resp","object":"response","created_at":1,"status":"completed","model":"model","output":[{"id":"msg","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4,"input_tokens_details":{"cached_tokens":2}}}`)
@@ -64,7 +64,7 @@ func TestDeepSeekResponsesMapsSupportedContract(t *testing.T) {
 	limit, effort := 80, "high"
 	client := NewDeepSeek(server.URL, "key", true)
 	response, err := client.Responses(t.Context(), openai.ResponseRequest{
-		Model: "model", Input: "hello", MaxOutputTokens: &limit, Reasoning: &openai.ResponseReasoning{Effort: &effort},
+		Model: "model", Input: "hello", User: "tenant_2", MaxOutputTokens: &limit, Reasoning: &openai.ResponseReasoning{Effort: &effort},
 		Tools: []openai.ResponseTool{{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}}},
 		Text:  map[string]any{"format": map[string]any{"type": "json_schema", "name": "answer", "schema": map[string]any{"type": "object"}}},
 	})
@@ -113,6 +113,10 @@ func TestDeepSeekRejectsUnsupportedParametersBeforeHTTP(t *testing.T) {
 	}
 	_, err = client.Responses(t.Context(), openai.ResponseRequest{Model: "model", Input: "hello", PreviousResponse: "resp_previous"})
 	if err == nil || !strings.Contains(err.Error(), "previous_response_id") || called {
+		t.Fatalf("err=%v called=%v", err, called)
+	}
+	_, err = client.Responses(t.Context(), openai.ResponseRequest{Model: "model", Input: "hello", User: "contains space"})
+	if err == nil || !strings.Contains(err.Error(), "user") || called {
 		t.Fatalf("err=%v called=%v", err, called)
 	}
 }

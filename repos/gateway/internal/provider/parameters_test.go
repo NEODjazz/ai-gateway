@@ -122,6 +122,8 @@ func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
 		{"anthropic", "previous_response_id", openai.ResponseRequest{PreviousResponse: "resp_other"}},
 		{"anthropic", "safety_identifier", openai.ResponseRequest{SafetyIdentifier: "provider-user"}},
 		{"ollama", "safety_identifier", openai.ResponseRequest{SafetyIdentifier: "provider-user"}},
+		{"anthropic", "user", openai.ResponseRequest{User: "provider-user"}},
+		{"ollama", "user", openai.ResponseRequest{User: "provider-user"}},
 		{"anthropic", "service_tier", openai.ResponseRequest{ServiceTier: "priority"}},
 		{"ollama", "service_tier", openai.ResponseRequest{ServiceTier: "priority"}},
 		{"anthropic", "prompt_cache_key", openai.ResponseRequest{PromptCacheKey: "tenant-thread"}},
@@ -146,6 +148,8 @@ func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
 	}
 	_, err := (Demo{}).Responses(context.Background(), openai.ResponseRequest{SafetyIdentifier: "provider-user"})
 	assertUnsupportedParameter(t, err, "safety_identifier")
+	_, err = (Demo{}).Responses(context.Background(), openai.ResponseRequest{User: "provider-user"})
+	assertUnsupportedParameter(t, err, "user")
 	_, err = (Demo{}).Responses(context.Background(), openai.ResponseRequest{ServiceTier: "priority"})
 	assertUnsupportedParameter(t, err, "service_tier")
 	_, err = (Demo{}).Responses(context.Background(), openai.ResponseRequest{PromptCacheKey: "tenant-thread"})

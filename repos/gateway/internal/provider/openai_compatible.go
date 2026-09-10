@@ -59,6 +59,7 @@ type openAICompatibleResponseRequest struct {
 	ParallelToolCalls *bool                     `json:"parallel_tool_calls,omitempty"`
 	Text              any                       `json:"text,omitempty"`
 	PreviousResponse  string                    `json:"previous_response_id,omitempty"`
+	User              string                    `json:"user,omitempty"`
 	SafetyIdentifier  string                    `json:"safety_identifier,omitempty"`
 	PromptCacheKey    string                    `json:"prompt_cache_key,omitempty"`
 	Stream            bool                      `json:"stream,omitempty"`
@@ -742,7 +743,7 @@ func (p OpenAICompatible) Responses(ctx context.Context, request openai.Response
 		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
-		Text: request.Text, PreviousResponse: request.PreviousResponse, SafetyIdentifier: request.SafetyIdentifier, PromptCacheKey: request.PromptCacheKey, Stream: false,
+		Text: request.Text, PreviousResponse: request.PreviousResponse, User: request.User, SafetyIdentifier: request.SafetyIdentifier, PromptCacheKey: request.PromptCacheKey, Stream: false,
 		MaxOutputTokens: responseOutputTokenLimit(request),
 		Temperature:     request.Temperature, TopP: request.TopP,
 	})
@@ -784,7 +785,7 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
-		Text: request.Text, PreviousResponse: request.PreviousResponse, SafetyIdentifier: request.SafetyIdentifier, PromptCacheKey: request.PromptCacheKey, Stream: true,
+		Text: request.Text, PreviousResponse: request.PreviousResponse, User: request.User, SafetyIdentifier: request.SafetyIdentifier, PromptCacheKey: request.PromptCacheKey, Stream: true,
 		MaxOutputTokens: responseOutputTokenLimit(request),
 		Temperature:     request.Temperature, TopP: request.TopP,
 	})

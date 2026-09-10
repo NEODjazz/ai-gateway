@@ -91,6 +91,18 @@ func TestResponsesCacheSeparatesSafetyIdentifiers(t *testing.T) {
 	}
 }
 
+func TestResponsesCacheSeparatesUsers(t *testing.T) {
+	request := openai.ResponseRequest{Model: "model", Input: "hello", User: "first"}
+	first := modules.RequestContext{CredentialID: "tenant", Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}
+	secondRequest := request
+	secondRequest.User = "second"
+	second := first
+	second.ResponseRequest = &secondRequest
+	if providerCacheKey("responses", first) == providerCacheKey("responses", second) {
+		t.Fatal("Responses cache shared across user identifiers")
+	}
+}
+
 func TestResponsesCacheSeparatesPromptCacheKeys(t *testing.T) {
 	request := openai.ResponseRequest{Model: "model", Input: "hello", PromptCacheKey: "first"}
 	first := modules.RequestContext{CredentialID: "tenant", Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}

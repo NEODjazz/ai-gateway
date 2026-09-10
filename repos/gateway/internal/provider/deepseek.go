@@ -101,6 +101,9 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 		return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
+	if err := validateDeepSeekUser(request.User); err != nil {
+		return err
+	}
 	if !validDeepSeekResponseText(request.Text) {
 		return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "text", Err: errors.New("text must contain a supported output format")}
 	}

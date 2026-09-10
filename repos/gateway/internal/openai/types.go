@@ -513,6 +513,7 @@ type ResponseRequest struct {
 	ParallelToolCalls *bool              `json:"parallel_tool_calls,omitempty"`
 	Text              any                `json:"text,omitempty"`
 	PreviousResponse  string             `json:"previous_response_id,omitempty"`
+	User              string             `json:"user,omitempty"`
 	SafetyIdentifier  string             `json:"safety_identifier,omitempty"`
 	PromptCacheKey    string             `json:"prompt_cache_key,omitempty"`
 	ServiceTier       string             `json:"service_tier,omitempty"`
