@@ -142,17 +142,19 @@ func chatCacheKeyValue(request openai.ChatCompletionRequest) any {
 		nativeContent[index] = request.Messages[index].NativeContent
 	}
 	return struct {
-		Request                   openai.ChatCompletionRequest `json:"request"`
-		NativeContent             [][]json.RawMessage          `json:"native_content,omitempty"`
-		NativeInputTokens         int                          `json:"native_input_tokens,omitempty"`
-		BedrockServiceTier        string                       `json:"bedrock_service_tier,omitempty"`
-		BedrockPerformanceLatency string                       `json:"bedrock_performance_latency,omitempty"`
+		Request                                  openai.ChatCompletionRequest `json:"request"`
+		NativeContent                            [][]json.RawMessage          `json:"native_content,omitempty"`
+		NativeInputTokens                        int                          `json:"native_input_tokens,omitempty"`
+		BedrockServiceTier                       string                       `json:"bedrock_service_tier,omitempty"`
+		BedrockPerformanceLatency                string                       `json:"bedrock_performance_latency,omitempty"`
+		BedrockAdditionalModelResponseFieldPaths []string                     `json:"bedrock_additional_model_response_field_paths,omitempty"`
 	}{
-		Request:                   request,
-		NativeContent:             nativeContent,
-		NativeInputTokens:         request.NativeInputTokens,
-		BedrockServiceTier:        request.BedrockServiceTier,
-		BedrockPerformanceLatency: request.BedrockPerformanceLatency,
+		Request:                                  request,
+		NativeContent:                            nativeContent,
+		NativeInputTokens:                        request.NativeInputTokens,
+		BedrockServiceTier:                       request.BedrockServiceTier,
+		BedrockPerformanceLatency:                request.BedrockPerformanceLatency,
+		BedrockAdditionalModelResponseFieldPaths: append([]string(nil), request.BedrockAdditionalModelResponseFieldPaths...),
 	}
 }
 

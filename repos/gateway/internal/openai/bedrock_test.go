@@ -44,6 +44,24 @@ func TestBedrockConverseMapsReservedTierAndPerformance(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseValidatesAdditionalResponseFieldPaths(t *testing.T) {
+	request := BedrockConverseRequest{
+		Messages:                          []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("hello")}}}},
+		AdditionalModelResponseFieldPaths: []string{"/stop_sequence", "/nested/a~1b/~0value"},
+	}
+	chat, err := request.ChatRequest("model", "")
+	if err != nil || len(chat.BedrockAdditionalModelResponseFieldPaths) != 2 || chat.BedrockAdditionalModelResponseFieldPaths[1] != "/nested/a~1b/~0value" {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	invalid := [][]string{{""}, {"stop_sequence"}, {"/bad~2escape"}, {"/same", "/same"}, {"/" + strings.Repeat("x", 256)}, make([]string, 11)}
+	for _, paths := range invalid {
+		request.AdditionalModelResponseFieldPaths = paths
+		if _, err := request.ChatRequest("model", ""); err == nil {
+			t.Fatalf("invalid response paths accepted: %#v", paths)
+		}
+	}
+}
+
 func TestBedrockConverseRejectsAmbiguousContent(t *testing.T) {
 	request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("hello"), ToolUse: &BedrockToolUse{ID: "call", Name: "tool", Input: map[string]any{}}}}}}}
 	if _, err := request.ChatRequest("model", ""); err == nil {

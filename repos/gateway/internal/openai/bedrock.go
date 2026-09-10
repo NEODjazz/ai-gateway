@@ -5,15 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"unicode/utf8"
 )
 
 type BedrockConverseRequest struct {
-	Messages          []BedrockMessage          `json:"messages"`
-	System            []BedrockContentBlock     `json:"system,omitempty"`
-	InferenceConfig   BedrockInferenceConfig    `json:"inferenceConfig,omitempty"`
-	ToolConfig        *BedrockToolConfig        `json:"toolConfig,omitempty"`
-	ServiceTier       *BedrockServiceTier       `json:"serviceTier,omitempty"`
-	PerformanceConfig *BedrockPerformanceConfig `json:"performanceConfig,omitempty"`
+	Messages                          []BedrockMessage          `json:"messages"`
+	System                            []BedrockContentBlock     `json:"system,omitempty"`
+	InferenceConfig                   BedrockInferenceConfig    `json:"inferenceConfig,omitempty"`
+	ToolConfig                        *BedrockToolConfig        `json:"toolConfig,omitempty"`
+	ServiceTier                       *BedrockServiceTier       `json:"serviceTier,omitempty"`
+	PerformanceConfig                 *BedrockPerformanceConfig `json:"performanceConfig,omitempty"`
+	AdditionalModelResponseFieldPaths []string                  `json:"additionalModelResponseFieldPaths,omitempty"`
 }
 
 type BedrockServiceTier struct {
@@ -154,6 +156,10 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 	if strings.TrimSpace(model) == "" || len(r.Messages) == 0 {
 		return request, errors.New("model and messages are required")
 	}
+	if err := ValidateBedrockResponseFieldPaths(r.AdditionalModelResponseFieldPaths); err != nil {
+		return request, err
+	}
+	request.BedrockAdditionalModelResponseFieldPaths = append([]string(nil), r.AdditionalModelResponseFieldPaths...)
 	if r.ServiceTier != nil {
 		switch r.ServiceTier.Type {
 		case "default", "flex", "priority":
@@ -298,6 +304,28 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 	return request, nil
 }
 
+func ValidateBedrockResponseFieldPaths(paths []string) error {
+	if len(paths) > 10 {
+		return errors.New("additionalModelResponseFieldPaths supports at most ten paths")
+	}
+	seen := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		if len(path) == 0 || !utf8.ValidString(path) || utf8.RuneCountInString(path) > 256 || path[0] != '/' || seen[path] {
+			return errors.New("additionalModelResponseFieldPaths contains an invalid JSON Pointer")
+		}
+		seen[path] = true
+		for index := 0; index < len(path); index++ {
+			if path[index] == '~' && (index+1 >= len(path) || path[index+1] != '0' && path[index+1] != '1') {
+				return errors.New("additionalModelResponseFieldPaths contains an invalid JSON Pointer")
+			}
+			if path[index] == '~' {
+				index++
+			}
+		}
+	}
+	return nil
+}
+
 func validateBedrockDocument(document BedrockDocument) ([]byte, error) {
 	if !validBedrockDocumentName(document.Name) {
 		return nil, errors.New("document name must contain 1 to 200 letters, digits, single spaces, hyphens, parentheses, or brackets")
@@ -389,9 +417,10 @@ func bedrockImageMediaType(format string) string {
 }
 
 type BedrockConverseResponse struct {
-	Output     BedrockConverseOutput `json:"output"`
-	StopReason string                `json:"stopReason"`
-	Usage      BedrockUsage          `json:"usage"`
+	Output                        BedrockConverseOutput `json:"output"`
+	StopReason                    string                `json:"stopReason"`
+	Usage                         BedrockUsage          `json:"usage"`
+	AdditionalModelResponseFields json.RawMessage       `json:"additionalModelResponseFields,omitempty"`
 }
 
 type BedrockConverseOutput struct {
@@ -414,6 +443,7 @@ func BedrockFromChat(response ChatCompletionResponse) (BedrockConverseResponse, 
 		return result, errors.New("chat response cannot be represented as Converse")
 	}
 	choice := response.Choices[0]
+	result.AdditionalModelResponseFields = bedrockAdditionalResponseFields(choice.Message.NativeContent)
 	text := ContentText(choice.Message.Content)
 	if err := ValidateChatAnnotations(choice.Message.Annotations); err != nil {
 		return result, err
@@ -445,6 +475,20 @@ func BedrockFromChat(response ChatCompletionResponse) (BedrockConverseResponse, 
 	}
 	result.StopReason = stopReason
 	return result, nil
+}
+
+func bedrockAdditionalResponseFields(content []json.RawMessage) json.RawMessage {
+	for _, raw := range content {
+		var marker map[string]json.RawMessage
+		if json.Unmarshal(raw, &marker) != nil || len(marker) != 2 {
+			continue
+		}
+		var markerType string
+		if json.Unmarshal(marker["type"], &markerType) == nil && markerType == "bedrock_additional_model_response_fields" && len(marker["fields"]) > 0 && string(marker["fields"]) != "null" {
+			return append(json.RawMessage(nil), marker["fields"]...)
+		}
+	}
+	return nil
 }
 
 func bedrockNativeStopReason(content []json.RawMessage) (string, bool) {

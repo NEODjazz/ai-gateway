@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.196
+  version: 0.1.197
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3563,6 +3563,12 @@ components:
           required: [latency]
           properties:
             latency: {type: string, enum: [standard, optimized]}
+        additionalModelResponseFieldPaths:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          description: Non-empty RFC 6901 JSON Pointers for bounded model-specific response fields.
+          items: {type: string, minLength: 1, maxLength: 256, pattern: '^/([^~]|~[01])*$'}
     BedrockInferenceConfig:
       type: object
       additionalProperties: false
@@ -3769,6 +3775,9 @@ components:
             inputTokens: {type: integer, minimum: 0}
             outputTokens: {type: integer, minimum: 0}
             totalTokens: {type: integer, minimum: 0}
+        additionalModelResponseFields:
+          description: Model-specific fields explicitly selected by additionalModelResponseFieldPaths.
+          readOnly: true
     GenerateContentError:
       type: object
       required: [error]

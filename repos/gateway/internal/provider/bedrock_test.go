@@ -73,10 +73,48 @@ func TestBedrockConverseForwardsServiceTier(t *testing.T) {
 	}
 }
 
+func TestBedrockConversePreservesRequestedAdditionalResponseFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Paths []string `json:"additionalModelResponseFieldPaths"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || len(body.Paths) != 1 || body.Paths[0] != "/stop_sequence" {
+			t.Fatalf("paths=%v", body.Paths)
+		}
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"additionalModelResponseFields":{"stop_sequence":"DONE","nested":{"value":"scan me"}},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`)
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, BedrockAdditionalModelResponseFieldPaths: []string{"/stop_sequence"}}
+	chat, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request)
+	if err != nil || len(chat.Choices[0].Message.NativeContent) != 1 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	native, err := openai.BedrockFromChat(chat)
+	if err != nil || !strings.Contains(string(native.AdditionalModelResponseFields), `"stop_sequence":"DONE"`) || native.Usage.TotalTokens != 2 {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+}
+
+func TestBedrockRejectsUnrequestedAdditionalResponseFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"additionalModelResponseFields":{"secret":"unexpected"},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`)
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	if _, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request); err == nil {
+		t.Fatal("unrequested additional response fields accepted")
+	}
+}
+
 func TestBedrockNativeControlsFailClosedOnOtherAdapters(t *testing.T) {
 	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, BedrockPerformanceLatency: "optimized"}
 	if err := validateChatAdapter(Demo{}, request); err == nil {
 		t.Fatal("Bedrock native control was dropped by another adapter")
+	}
+	request.BedrockPerformanceLatency = ""
+	request.BedrockAdditionalModelResponseFieldPaths = []string{"/stop_sequence"}
+	if err := validateChatAdapter(Demo{}, request); err == nil {
+		t.Fatal("Bedrock additional response paths were dropped by another adapter")
 	}
 }
 

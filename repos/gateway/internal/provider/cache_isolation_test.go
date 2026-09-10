@@ -63,6 +63,9 @@ func TestCacheIsolationIncludesNativeChatState(t *testing.T) {
 		{"native token reserve", func(request *openai.ChatCompletionRequest) { request.NativeInputTokens = 1 }},
 		{"service tier", func(request *openai.ChatCompletionRequest) { request.BedrockServiceTier = "priority" }},
 		{"performance latency", func(request *openai.ChatCompletionRequest) { request.BedrockPerformanceLatency = "optimized" }},
+		{"additional response fields", func(request *openai.ChatCompletionRequest) {
+			request.BedrockAdditionalModelResponseFieldPaths = []string{"/stop_sequence"}
+		}},
 	}
 	for _, variant := range variants {
 		t.Run(variant.name, func(t *testing.T) {

@@ -128,12 +128,13 @@ type bedrockTool struct {
 }
 
 type bedrockRequest struct {
-	Messages          []bedrockMessage          `json:"messages"`
-	System            []bedrockContentBlock     `json:"system,omitempty"`
-	InferenceConfig   bedrockInferenceConfig    `json:"inferenceConfig,omitempty"`
-	ServiceTier       *bedrockServiceTier       `json:"serviceTier,omitempty"`
-	PerformanceConfig *bedrockPerformanceConfig `json:"performanceConfig,omitempty"`
-	ToolConfig        *struct {
+	Messages                          []bedrockMessage          `json:"messages"`
+	System                            []bedrockContentBlock     `json:"system,omitempty"`
+	InferenceConfig                   bedrockInferenceConfig    `json:"inferenceConfig,omitempty"`
+	ServiceTier                       *bedrockServiceTier       `json:"serviceTier,omitempty"`
+	PerformanceConfig                 *bedrockPerformanceConfig `json:"performanceConfig,omitempty"`
+	AdditionalModelResponseFieldPaths []string                  `json:"additionalModelResponseFieldPaths,omitempty"`
+	ToolConfig                        *struct {
 		Tools []bedrockTool `json:"tools"`
 	} `json:"toolConfig,omitempty"`
 }
@@ -157,8 +158,9 @@ type bedrockResponse struct {
 	Output struct {
 		Message bedrockMessage `json:"message"`
 	} `json:"output"`
-	StopReason string `json:"stopReason"`
-	Usage      *struct {
+	StopReason                    string          `json:"stopReason"`
+	AdditionalModelResponseFields json.RawMessage `json:"additionalModelResponseFields,omitempty"`
+	Usage                         *struct {
 		InputTokens  int `json:"inputTokens"`
 		OutputTokens int `json:"outputTokens"`
 		TotalTokens  int `json:"totalTokens"`
@@ -199,6 +201,9 @@ func (b Bedrock) ValidateChatParameters(request openai.ChatCompletionRequest) er
 
 func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, error) {
 	var result bedrockRequest
+	if err := openai.ValidateBedrockResponseFieldPaths(request.BedrockAdditionalModelResponseFieldPaths); err != nil {
+		return result, bedrockInvalid("additional_model_response_field_paths")
+	}
 	if strings.TrimSpace(request.Model) == "" {
 		return result, bedrockInvalid("model")
 	}
@@ -289,6 +294,7 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 			return result, bedrockInvalid("performance_config")
 		}
 	}
+	result.AdditionalModelResponseFieldPaths = append([]string(nil), request.BedrockAdditionalModelResponseFieldPaths...)
 	toolCalls := make(map[string]bool)
 	for _, message := range request.Messages {
 		if message.Name != "" || len(message.Annotations) > 0 || len(message.Reasoning) > 0 {
@@ -462,6 +468,9 @@ func (b Bedrock) ChatCompletions(ctx context.Context, request openai.ChatComplet
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	if len(decoded.AdditionalModelResponseFields) > 0 && string(decoded.AdditionalModelResponseFields) != "null" && len(request.BedrockAdditionalModelResponseFieldPaths) == 0 {
+		return openai.ChatCompletionResponse{}, errors.New("Bedrock returned unrequested additional model response fields")
+	}
 	return bedrockToChat(decoded, request.Model)
 }
 
@@ -557,6 +566,16 @@ func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletio
 	}
 	if response.StopReason == "guardrail_intervened" || response.StopReason == "malformed_model_output" || response.StopReason == "malformed_tool_use" || response.StopReason == "model_context_window_exceeded" {
 		marker, _ := json.Marshal(map[string]string{"type": "bedrock_stop_reason", "reason": response.StopReason})
+		message.NativeContent = append(message.NativeContent, marker)
+	}
+	if len(response.AdditionalModelResponseFields) > 0 && string(response.AdditionalModelResponseFields) != "null" {
+		marker, err := json.Marshal(struct {
+			Type   string          `json:"type"`
+			Fields json.RawMessage `json:"fields"`
+		}{Type: "bedrock_additional_model_response_fields", Fields: response.AdditionalModelResponseFields})
+		if err != nil {
+			return result, errors.New("invalid Bedrock additional response fields")
+		}
 		message.NativeContent = append(message.NativeContent, marker)
 	}
 	result.Choices = []openai.Choice{{Index: 0, Message: message, FinishReason: finishReason}}

@@ -373,7 +373,7 @@ cache применяется только к поддерживаемому non-
 использует отдельный embedding credential, а не клиентский Bearer.
 
 Exact cache также учитывает native message blocks, native input reserve,
-Bedrock service tier и latency selection. Opaque native blocks отключают
+Bedrock service tier, latency selection и additional response-field paths. Opaque native blocks отключают
 semantic cache; native controls входят в его settings fingerprint.
 
 Gateway cache hit и provider prompt-cache tokens — разные метрики. Billing и
