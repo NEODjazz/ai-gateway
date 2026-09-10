@@ -360,6 +360,225 @@ func mp4MediaDurationMilliseconds(header []byte) (int, error) {
 	return durationMilliseconds(duration, timescale)
 }
 
+func webmAudioDurationMilliseconds(data []byte) (int, error) {
+	topLevel, err := ebmlElements(data, true)
+	if err != nil {
+		return 0, err
+	}
+	foundHeader := false
+	var segment []byte
+	for _, element := range topLevel {
+		switch element.id {
+		case 0x1a45dfa3:
+			if foundHeader || !webmDocumentType(element.content) {
+				return 0, openai.ErrInvalidAudio
+			}
+			foundHeader = true
+		case 0x18538067:
+			if !foundHeader || segment != nil {
+				return 0, openai.ErrInvalidAudio
+			}
+			segment = element.content
+		}
+	}
+	if !foundHeader || segment == nil {
+		return 0, openai.ErrInvalidAudio
+	}
+	segmentElements, err := ebmlElements(segment, false)
+	if err != nil {
+		return 0, err
+	}
+	var info, tracks []byte
+	for _, element := range segmentElements {
+		switch element.id {
+		case 0x1549a966:
+			if info != nil {
+				return 0, openai.ErrInvalidAudio
+			}
+			info = element.content
+		case 0x1654ae6b:
+			if tracks != nil {
+				return 0, openai.ErrInvalidAudio
+			}
+			tracks = element.content
+		}
+	}
+	if info == nil || tracks == nil || !webmSingleAudioTrack(tracks) {
+		return 0, openai.ErrInvalidAudio
+	}
+	return webmInfoDurationMilliseconds(info)
+}
+
+type ebmlElement struct {
+	id      uint64
+	content []byte
+}
+
+func ebmlElements(data []byte, allowUnknownSegment bool) ([]ebmlElement, error) {
+	const maxEBMLElements = 100000
+	elements := make([]ebmlElement, 0, 8)
+	for offset := 0; offset < len(data); {
+		if len(elements) >= maxEBMLElements {
+			return nil, openai.ErrInvalidAudio
+		}
+		id, idWidth, idUnknown, ok := ebmlVariableInteger(data[offset:], true)
+		if !ok || idUnknown || idWidth > 4 {
+			return nil, openai.ErrInvalidAudio
+		}
+		offset += idWidth
+		size, sizeWidth, unknownSize, ok := ebmlVariableInteger(data[offset:], false)
+		if !ok {
+			return nil, openai.ErrInvalidAudio
+		}
+		offset += sizeWidth
+		if unknownSize {
+			if !allowUnknownSegment || id != 0x18538067 {
+				return nil, openai.ErrInvalidAudio
+			}
+			size = uint64(len(data) - offset)
+		}
+		if size > uint64(len(data)-offset) {
+			return nil, openai.ErrInvalidAudio
+		}
+		end := offset + int(size)
+		elements = append(elements, ebmlElement{id: id, content: data[offset:end]})
+		offset = end
+	}
+	return elements, nil
+}
+
+func ebmlVariableInteger(data []byte, keepMarker bool) (value uint64, width int, unknown bool, ok bool) {
+	if len(data) == 0 || data[0] == 0 {
+		return 0, 0, false, false
+	}
+	marker := byte(0x80)
+	for width = 1; width <= 8 && data[0]&marker == 0; width++ {
+		marker >>= 1
+	}
+	if width > 8 || len(data) < width {
+		return 0, 0, false, false
+	}
+	first := data[0]
+	if !keepMarker {
+		first &= marker - 1
+	}
+	value = uint64(first)
+	for index := 1; index < width; index++ {
+		value = value<<8 | uint64(data[index])
+	}
+	if !keepMarker {
+		maximum := (uint64(1) << (7 * width)) - 1
+		unknown = value == maximum
+	}
+	return value, width, unknown, true
+}
+
+func webmDocumentType(header []byte) bool {
+	elements, err := ebmlElements(header, false)
+	if err != nil {
+		return false
+	}
+	found := false
+	for _, element := range elements {
+		if element.id == 0x4282 {
+			if found || string(element.content) != "webm" {
+				return false
+			}
+			found = true
+		}
+	}
+	return found
+}
+
+func webmSingleAudioTrack(tracks []byte) bool {
+	elements, err := ebmlElements(tracks, false)
+	if err != nil {
+		return false
+	}
+	trackCount := 0
+	for _, element := range elements {
+		if element.id != 0xae {
+			continue
+		}
+		trackCount++
+		fields, err := ebmlElements(element.content, false)
+		if err != nil {
+			return false
+		}
+		trackType := uint64(0)
+		seenType := false
+		for _, field := range fields {
+			if field.id == 0x83 {
+				if seenType {
+					return false
+				}
+				seenType = true
+				trackType, err = ebmlUnsignedInteger(field.content)
+				if err != nil {
+					return false
+				}
+			}
+		}
+		if !seenType || trackType != 2 {
+			return false
+		}
+	}
+	return trackCount == 1
+}
+
+func webmInfoDurationMilliseconds(info []byte) (int, error) {
+	elements, err := ebmlElements(info, false)
+	if err != nil {
+		return 0, err
+	}
+	timestampScale := uint64(1000000)
+	duration := 0.0
+	seenScale := false
+	seenDuration := false
+	for _, element := range elements {
+		switch element.id {
+		case 0x2ad7b1:
+			if seenScale {
+				return 0, openai.ErrInvalidAudio
+			}
+			seenScale = true
+			timestampScale, err = ebmlUnsignedInteger(element.content)
+			if err != nil || timestampScale == 0 {
+				return 0, openai.ErrInvalidAudio
+			}
+		case 0x4489:
+			if seenDuration {
+				return 0, openai.ErrInvalidAudio
+			}
+			seenDuration = true
+			switch len(element.content) {
+			case 4:
+				duration = float64(math.Float32frombits(binary.BigEndian.Uint32(element.content)))
+			case 8:
+				duration = math.Float64frombits(binary.BigEndian.Uint64(element.content))
+			default:
+				return 0, openai.ErrInvalidAudio
+			}
+		}
+	}
+	milliseconds := math.Ceil(duration * float64(timestampScale) / 1000000)
+	if !seenDuration || math.IsNaN(milliseconds) || math.IsInf(milliseconds, 0) || milliseconds <= 0 || milliseconds > math.MaxInt {
+		return 0, openai.ErrInvalidAudio
+	}
+	return int(milliseconds), nil
+}
+
+func ebmlUnsignedInteger(data []byte) (uint64, error) {
+	if len(data) == 0 || len(data) > 8 {
+		return 0, openai.ErrInvalidAudio
+	}
+	value := uint64(0)
+	for _, item := range data {
+		value = value<<8 | uint64(item)
+	}
+	return value, nil
+}
+
 func durationMilliseconds(units, unitsPerSecond uint64) (int, error) {
 	if unitsPerSecond == 0 || units > (math.MaxUint64-uint64(unitsPerSecond)+1)/1000 {
 		return 0, openai.ErrInvalidAudio

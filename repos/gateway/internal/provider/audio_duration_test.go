@@ -116,6 +116,61 @@ func mp4Attachment(timescale uint32, duration uint64, version byte) openai.Audio
 	return openai.AudioAttachment{Filename: "meeting.m4a", MediaType: "audio/mp4", Data: base64.StdEncoding.EncodeToString(payload)}
 }
 
+func ebmlSize(value int) []byte {
+	if value < 0x7f {
+		return []byte{0x80 | byte(value)}
+	}
+	if value < 0x3fff {
+		return []byte{0x40 | byte(value>>8), byte(value)}
+	}
+	panic("test EBML element is too large")
+}
+
+func ebmlElementBytes(id []byte, content ...[]byte) []byte {
+	length := 0
+	for _, part := range content {
+		length += len(part)
+	}
+	element := append([]byte(nil), id...)
+	element = append(element, ebmlSize(length)...)
+	for _, part := range content {
+		element = append(element, part...)
+	}
+	return element
+}
+
+func ebmlUnsignedBytes(value uint64) []byte {
+	width := 1
+	for width < 8 && value >= uint64(1)<<(8*width) {
+		width++
+	}
+	result := make([]byte, width)
+	for index := width - 1; index >= 0; index-- {
+		result[index] = byte(value)
+		value >>= 8
+	}
+	return result
+}
+
+func webmAttachment(duration float64, timestampScale uint64, trackTypes ...byte) openai.AudioAttachment {
+	header := ebmlElementBytes([]byte{0x1a, 0x45, 0xdf, 0xa3}, ebmlElementBytes([]byte{0x42, 0x82}, []byte("webm")))
+	durationValue := make([]byte, 8)
+	binary.BigEndian.PutUint64(durationValue, math.Float64bits(duration))
+	infoParts := [][]byte{ebmlElementBytes([]byte{0x44, 0x89}, durationValue)}
+	if timestampScale != 1000000 {
+		infoParts = append(infoParts, ebmlElementBytes([]byte{0x2a, 0xd7, 0xb1}, ebmlUnsignedBytes(timestampScale)))
+	}
+	info := ebmlElementBytes([]byte{0x15, 0x49, 0xa9, 0x66}, infoParts...)
+	trackEntries := make([][]byte, 0, len(trackTypes))
+	for _, trackType := range trackTypes {
+		trackEntries = append(trackEntries, ebmlElementBytes([]byte{0xae}, ebmlElementBytes([]byte{0x83}, []byte{trackType})))
+	}
+	tracks := ebmlElementBytes([]byte{0x16, 0x54, 0xae, 0x6b}, trackEntries...)
+	segment := ebmlElementBytes([]byte{0x18, 0x53, 0x80, 0x67}, info, tracks)
+	payload := append(header, segment...)
+	return openai.AudioAttachment{Filename: "meeting.webm", MediaType: "audio/webm", Data: base64.StdEncoding.EncodeToString(payload)}
+}
+
 func TestFLACDurationMilliseconds(t *testing.T) {
 	attachment := flacAttachment(1250)
 	data, err := base64.StdEncoding.DecodeString(attachment.Data)
@@ -219,6 +274,40 @@ func TestMP4AudioTrackDurationRejectsMalformedMetadata(t *testing.T) {
 	}
 }
 
+func TestWebMAudioDurationMilliseconds(t *testing.T) {
+	for _, attachment := range []openai.AudioAttachment{webmAttachment(1250, 1000000, 2), webmAttachment(1.25, 1000000000, 2)} {
+		data, err := base64.StdEncoding.DecodeString(attachment.Data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if duration, err := webmAudioDurationMilliseconds(data); err != nil || duration != 1250 {
+			t.Fatalf("duration=%d err=%v", duration, err)
+		}
+	}
+	unknownSegmentSize, _ := base64.StdEncoding.DecodeString(webmAttachment(1250, 1000000, 2).Data)
+	for offset := 0; offset+5 <= len(unknownSegmentSize); offset++ {
+		if string(unknownSegmentSize[offset:offset+4]) == "\x18\x53\x80\x67" {
+			unknownSegmentSize[offset+4] = 0xff
+			break
+		}
+	}
+	if duration, err := webmAudioDurationMilliseconds(unknownSegmentSize); err != nil || duration != 1250 {
+		t.Fatalf("unknown segment size duration=%d err=%v", duration, err)
+	}
+}
+
+func TestWebMAudioDurationRejectsAmbiguousOrMalformedMetadata(t *testing.T) {
+	valid, _ := base64.StdEncoding.DecodeString(webmAttachment(1250, 1000000, 2).Data)
+	video, _ := base64.StdEncoding.DecodeString(webmAttachment(1250, 1000000, 1).Data)
+	multiplexed, _ := base64.StdEncoding.DecodeString(webmAttachment(1250, 1000000, 2, 1).Data)
+	notFinite, _ := base64.StdEncoding.DecodeString(webmAttachment(math.NaN(), 1000000, 2).Data)
+	for _, invalid := range [][]byte{nil, valid[:len(valid)-1], video, multiplexed, notFinite, []byte{0x1a, 0x45, 0xdf, 0xa3, 0xff}} {
+		if _, err := webmAudioDurationMilliseconds(invalid); err == nil {
+			t.Fatalf("invalid WebM accepted: %x", invalid)
+		}
+	}
+}
+
 func TestProvidersReserveExactFLACDuration(t *testing.T) {
 	request := openai.AudioTranscriptionRequest{File: flacAttachment(1250)}
 	if duration, err := NewGroq("https://example.test", "", false).ReserveAudioMilliseconds(request); err != nil || duration != 10000 {
@@ -259,5 +348,15 @@ func TestGroqReservesExactMP4AudioTrackDuration(t *testing.T) {
 	}
 	if duration, err := client.ReserveAudioMilliseconds(openai.AudioTranscriptionRequest{File: mp4Attachment(1000, 12500, 0)}); err != nil || duration != 12500 {
 		t.Fatalf("exact duration=%d err=%v", duration, err)
+	}
+}
+
+func TestProvidersReserveWebMAudioDuration(t *testing.T) {
+	request := openai.AudioTranscriptionRequest{File: webmAttachment(12500, 1000000, 2)}
+	if duration, err := NewGroq("https://example.test", "", false).ReserveAudioMilliseconds(request); err != nil || duration != 12500 {
+		t.Fatalf("Groq duration=%d err=%v", duration, err)
+	}
+	if duration, err := NewMistral("https://example.test", "", false).ReserveAudioMilliseconds(request); err != nil || duration != 12500 {
+		t.Fatalf("Mistral duration=%d err=%v", duration, err)
 	}
 }

@@ -48,6 +48,12 @@ func (Mistral) ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest
 		}
 		return duration, nil
 	case "audio/webm", "video/webm":
+		if duration, err := webmAudioDurationMilliseconds(data); err == nil {
+			if duration > mistralMaxAudioMilliseconds {
+				return 0, errors.New("WebM duration exceeds 60 minutes")
+			}
+			return duration, nil
+		}
 		// Compressed containers need codec-aware parsing. Reserve the documented
 		// provider limit so a request can never bypass a duration-priced budget.
 		return mistralMaxAudioMilliseconds, nil
