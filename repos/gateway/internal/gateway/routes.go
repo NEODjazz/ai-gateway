@@ -22,6 +22,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/metrics"}, func(h Handler) http.Handler { return h.metrics }},
 	{RouteContract{http.MethodGet, "/v1/models"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Models) }},
 	{RouteContract{http.MethodGet, "/v1/models/{model}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetModel) }},
+	{RouteContract{http.MethodPost, "/model/{model}/converse"}, func(h Handler) http.Handler { return http.HandlerFunc(h.BedrockConverse) }},
 	{RouteContract{http.MethodPost, "/v1/chat/completions"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ChatCompletions) }},
 	{RouteContract{http.MethodPost, "/v1/completions"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Completions) }},
 	{RouteContract{http.MethodPost, "/v1/messages"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Messages) }},

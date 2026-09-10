@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.124
+  version: 0.1.125
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -34,6 +34,43 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /model/{model}/converse:
+    post:
+      operationId: bedrockConverse
+      tags: [Inference]
+      summary: Create a synchronous Converse response
+      description: Uses the gateway authentication, model and tool authorization, quotas, content policy, routing, and billing pipeline. Supports text, function tool use and result blocks, system text, and standard inference limits. Unsupported native fields are rejected before provider execution.
+      parameters:
+        - in: path
+          name: model
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 2048}
+        - in: query
+          name: provider
+          required: false
+          schema: {type: string}
+          description: Optional gateway deployment selector.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BedrockConverseRequest'}
+      responses:
+        '200':
+          description: Synchronous Converse response with provider-reported usage
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BedrockConverseResponse'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/RequestTooLarge'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '451': {$ref: '#/components/responses/ContentRejected'}
+        '502': {$ref: '#/components/responses/ProviderFailed'}
   /v1beta/models/{model}:countTokens:
     post:
       operationId: countGenerateTokens
@@ -2749,6 +2786,127 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    BedrockConverseRequest:
+      type: object
+      additionalProperties: false
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: {$ref: '#/components/schemas/BedrockMessage'}
+        system:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [text]
+            properties:
+              text: {type: string, minLength: 1}
+        inferenceConfig: {$ref: '#/components/schemas/BedrockInferenceConfig'}
+        toolConfig: {$ref: '#/components/schemas/BedrockToolConfig'}
+    BedrockInferenceConfig:
+      type: object
+      additionalProperties: false
+      properties:
+        maxTokens: {type: integer, minimum: 1, maximum: 2147483647}
+        temperature: {type: number, minimum: 0, maximum: 1}
+        topP: {type: number, minimum: 0, maximum: 1}
+        stopSequences:
+          type: array
+          maxItems: 4
+          items: {type: string, minLength: 1}
+    BedrockMessage:
+      type: object
+      additionalProperties: false
+      required: [role, content]
+      properties:
+        role: {type: string, enum: [user, assistant]}
+        content:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/BedrockContentBlock'}
+    BedrockContentBlock:
+      type: object
+      additionalProperties: false
+      oneOf:
+        - required: [text]
+        - required: [toolUse]
+        - required: [toolResult]
+      properties:
+        text: {type: string, minLength: 1}
+        toolUse:
+          type: object
+          additionalProperties: false
+          required: [toolUseId, name, input]
+          properties:
+            toolUseId: {type: string, minLength: 1}
+            name: {type: string, minLength: 1}
+            input: {}
+        toolResult:
+          type: object
+          additionalProperties: false
+          required: [toolUseId, content]
+          properties:
+            toolUseId: {type: string, minLength: 1}
+            content:
+              type: array
+              minItems: 1
+              maxItems: 1
+              items:
+                type: object
+                additionalProperties: false
+                required: [text]
+                properties:
+                  text: {type: string, minLength: 1}
+    BedrockToolConfig:
+      type: object
+      additionalProperties: false
+      required: [tools]
+      properties:
+        tools:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items:
+            type: object
+            additionalProperties: false
+            required: [toolSpec]
+            properties:
+              toolSpec:
+                type: object
+                additionalProperties: false
+                required: [name, inputSchema]
+                properties:
+                  name: {type: string, minLength: 1}
+                  description: {type: string}
+                  inputSchema:
+                    type: object
+                    additionalProperties: false
+                    required: [json]
+                    properties:
+                      json: {}
+    BedrockConverseResponse:
+      type: object
+      additionalProperties: false
+      required: [output, stopReason, usage]
+      properties:
+        output:
+          type: object
+          additionalProperties: false
+          required: [message]
+          properties:
+            message: {$ref: '#/components/schemas/BedrockMessage'}
+        stopReason: {type: string, enum: [end_turn, max_tokens, tool_use, content_filtered]}
+        usage:
+          type: object
+          additionalProperties: false
+          required: [inputTokens, outputTokens, totalTokens]
+          properties:
+            inputTokens: {type: integer, minimum: 0}
+            outputTokens: {type: integer, minimum: 0}
+            totalTokens: {type: integer, minimum: 0}
     GenerateContentError:
       type: object
       required: [error]

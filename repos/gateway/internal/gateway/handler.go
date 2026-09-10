@@ -176,6 +176,10 @@ func (h Handler) serveChat(w http.ResponseWriter, r *http.Request, request opena
 }
 
 func (h Handler) serveChatAs(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, apiType string) {
+	h.serveChatAdapted(w, r, request, apiType, nil)
+}
+
+func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, apiType string, transform func(openai.ChatCompletionResponse) (any, error)) {
 	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -320,6 +324,15 @@ func (h Handler) serveChatAs(w http.ResponseWriter, r *http.Request, request ope
 
 	if stream {
 		writeChatCompletionStream(w, response, request.StreamOptions)
+		return
+	}
+	if transform != nil {
+		adapted, err := transform(response)
+		if err != nil {
+			writeProviderFailure(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, adapted)
 		return
 	}
 
