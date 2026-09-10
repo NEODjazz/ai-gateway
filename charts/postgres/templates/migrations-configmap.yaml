@@ -5,6 +5,28 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  015_gateway_files.sql: |
+    CREATE TABLE IF NOT EXISTS gateway_files
+    (
+        id TEXT PRIMARY KEY,
+        owner_key TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        bytes BIGINT NOT NULL CHECK (bytes >= 0),
+        content BYTEA NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (length(id) BETWEEN 1 AND 128),
+        CHECK (length(owner_key) BETWEEN 1 AND 256),
+        CHECK (length(filename) BETWEEN 1 AND 512),
+        CHECK (length(purpose) BETWEEN 1 AND 64),
+        CHECK (length(content_type) BETWEEN 1 AND 255),
+        CHECK (octet_length(content) = bytes)
+    );
+    CREATE INDEX IF NOT EXISTS gateway_files_owner_created_idx
+        ON gateway_files (owner_key, created_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS gateway_files_owner_purpose_created_idx
+        ON gateway_files (owner_key, purpose, created_at DESC, id DESC);
   014_gateway_mcp_tool_calls.sql: |
     CREATE TABLE IF NOT EXISTS gateway_mcp_tool_calls
     (
