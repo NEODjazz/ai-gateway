@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.211
+  version: 0.1.212
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -370,7 +370,7 @@ paths:
       operationId: generateImage
       tags: [Inference]
       summary: Generate images through an explicitly capable deployment
-      description: Applies gateway authentication, model policy, RPM/TPM admission, provider retries and billing settlement. Responses and decoded images are bounded.
+      description: Applies gateway authentication, model policy, RPM/TPM admission, provider retries and billing settlement. Responses and decoded images are bounded. Native Gemini deployments support one inline base64 image plus the documented native aspect-ratio and resolution controls; unsupported parameters are rejected before upstream execution.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -5960,17 +5960,17 @@ components:
         provider: {type: string, description: Optional exact deployment selector}
         model: {type: string, minLength: 1}
         prompt: {type: string, minLength: 1, maxLength: 32000}
-        n: {type: integer, minimum: 1, maximum: 10, default: 1}
+        n: {type: integer, minimum: 1, maximum: 10, default: 1, description: Native Gemini supports one result per request.}
         quality: {type: string, enum: [auto, low, medium, high, xhigh, max]}
-        response_format: {type: string, enum: [url, b64_json]}
+        response_format: {type: string, enum: [url, b64_json], description: Native Gemini supports b64_json.}
         size: {type: string, enum: [auto, 256x256, 512x512, 1024x1024, 1536x1024, 1024x1536, 1792x1024, 1024x1792]}
         style: {type: string, enum: [vivid, natural]}
         user: {type: string}
         background: {type: string, enum: [auto, transparent, opaque]}
         output_format: {type: string, enum: [png, webp, jpeg, svg]}
         output_compression: {type: integer, minimum: 0, maximum: 100}
-        resolution: {type: string, enum: ['512', 1K, 2K, 4K]}
-        aspect_ratio: {type: string, pattern: '^(auto|[1-9][0-9]?:[1-9][0-9]?)$'}
+        resolution: {type: string, enum: ['512', 1K, 2K, 4K], description: Native Gemini image size control.}
+        aspect_ratio: {type: string, pattern: '^(auto|[1-9][0-9]?:[1-9][0-9]?)$', description: Native Gemini accepts auto or one of its documented image aspect ratios.}
         seed: {type: integer, format: int64}
     ImageEditRequest:
       type: object

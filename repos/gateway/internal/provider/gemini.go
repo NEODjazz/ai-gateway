@@ -113,11 +113,16 @@ type geminiGeneration struct {
 	Logprobs           *int                  `json:"logprobs,omitempty"`
 	CandidateCount     *int                  `json:"candidateCount,omitempty"`
 	ThinkingConfig     *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+	ImageConfig        *geminiImageConfig    `json:"imageConfig,omitempty"`
 	ResponseModalities []string              `json:"responseModalities,omitempty"`
 	Seed               *int64                `json:"seed,omitempty"`
 	Stop               []string              `json:"stopSequences,omitempty"`
 	ResponseMIMEType   string                `json:"responseMimeType,omitempty"`
 	ResponseJSONSchema any                   `json:"responseJsonSchema,omitempty"`
+}
+type geminiImageConfig struct {
+	AspectRatio string `json:"aspectRatio,omitempty"`
+	ImageSize   string `json:"imageSize,omitempty"`
 }
 type geminiThinkingConfig struct {
 	ThinkingLevel string `json:"thinkingLevel"`

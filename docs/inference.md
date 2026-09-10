@@ -175,8 +175,14 @@ Provider categories и scores проходят общий validator; отсут�
 `POST /v1/images/generations` выполняется только через deployment и model с
 capability `image_generation`. Gateway проверяет prompt и параметры до policy
 pipeline, учитывает prompt при TPM, резервирует output на каждый запрошенный
-image и запускает обычные admission, retry, failure и billing phases. Первый
-adapter использует совместимый JSON transport, включая Azure transport.
+image и запускает обычные admission, retry, failure и billing phases.
+Совместимые и Azure deployments используют JSON transport семейства Images.
+Native Gemini deployment преобразует запрос в GenerateContent с image-only
+response modality. Он поддерживает один inline `b64_json` результат, точные
+`aspect_ratio` из native API и `resolution` 512/1K/2K/4K. Параметры без точного
+native эквивалента, URL output и `n` больше единицы отклоняются до upstream.
+Gemini `usageMetadata.totalTokenCount` используется для полного settlement,
+включая reasoning и другие учтенные upstream output tokens.
 
 Ответ ограничен 64 MiB, содержит ровно запрошенное число результатов и для
 каждого результата допускает ровно один источник: HTTP(S) URL без credentials
