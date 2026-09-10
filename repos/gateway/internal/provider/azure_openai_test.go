@@ -3,9 +3,11 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -41,6 +43,60 @@ func TestAzureOpenAIVersionedDeploymentUsesEntraBearer(t *testing.T) {
 	client := NewAzureOpenAI(server.URL+"/openai/deployments/deployment-a", "entra-token", false, "2025-04-01-preview", "entra")
 	if _, err := client.Embeddings(context.Background(), openai.EmbeddingRequest{Model: "deployment-a", Input: "hello"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAzureOpenAIUsesAmbientManagedIdentity(t *testing.T) {
+	now := time.Now().Add(time.Hour).Unix()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/identity/token":
+			if r.Header.Get("X-IDENTITY-HEADER") != "identity-header" || r.URL.Query().Get("resource") != azureOpenAIResource {
+				t.Fatalf("unexpected identity request: %s headers=%v", r.URL.String(), r.Header)
+			}
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"access_token":"ambient-token","expires_on":%d,"token_type":"Bearer"}`, now)))
+		case "/openai/v1/chat/completions":
+			if r.Header.Get("Authorization") != "Bearer ambient-token" || r.Header.Get("api-key") != "" {
+				t.Fatalf("unexpected auth headers: %v", r.Header)
+			}
+			_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{ID: "chat-azure", Model: "deployment"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("IDENTITY_ENDPOINT", server.URL+"/identity/token")
+	t.Setenv("IDENTITY_HEADER", "identity-header")
+	client := NewAzureOpenAI(server.URL, "", false, "", "entra")
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestManagedAzureDiscoveryUsesAmbientManagedIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/identity/token":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"access_token":"ambient-token","expires_on":%d,"token_type":"Bearer"}`, time.Now().Add(time.Hour).Unix())))
+		case "/openai/v1/models":
+			if r.Header.Get("Authorization") != "Bearer ambient-token" || r.Header.Get("api-key") != "" {
+				t.Fatalf("unexpected discovery auth: %v", r.Header)
+			}
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("IDENTITY_ENDPOINT", server.URL+"/identity/token")
+	t.Setenv("IDENTITY_HEADER", "identity-header")
+	router := New(Config{CredentialEncryptionKey: []byte("azure-ambient-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL, AuthType: "entra", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	models, err := router.DiscoverProviderModels(t.Context(), "azure", "")
+	if err != nil || len(models) != 1 || models[0].ID != "model-a" {
+		t.Fatalf("models=%+v err=%v", models, err)
 	}
 }
 

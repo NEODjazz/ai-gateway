@@ -80,11 +80,17 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 		if credentialErr != nil || signAWSRequest(request, nil, credential, managed.Region, "bedrock", time.Now()) != nil {
 			return nil, ErrProviderProbeFailed
 		}
+	} else if managed.Type == "azure-openai" && normalizeAzureAuthType(managed.AuthType) == "entra" {
+		token, tokenErr := newAzureTokenSource(secret).Token(ctx)
+		if tokenErr != nil {
+			return nil, ErrProviderProbeFailed
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
 	} else if secret != "" {
 		if managed.Type == "anthropic" {
 			request.Header.Set("x-api-key", secret)
 			request.Header.Set("anthropic-version", "2023-06-01")
-		} else if managed.Type == "azure-openai" && normalizeAzureAuthType(managed.AuthType) == "api_key" {
+		} else if managed.Type == "azure-openai" {
 			request.Header.Set("api-key", secret)
 		} else {
 			request.Header.Set("Authorization", "Bearer "+secret)

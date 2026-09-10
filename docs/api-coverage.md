@@ -65,8 +65,8 @@ availability is not inferred from these tests.
 | Capability | Current implementation | Remaining work |
 | --- | --- | --- |
 | Native provider catalog | Anthropic, Ollama, Gemini, Cohere Chat/Rerank/Embeddings, Mistral Chat/Embeddings/FIM and Voyage Embeddings/Rerank; compatible HTTP adapter; native operations have protocol tests | Additional native providers with protocol tests |
-| Azure | Native resource-root `/openai/v1` and explicit deployment paths, API version forwarding, API-key and static Entra bearer authentication, discovery and shared inference lifecycle | Managed Entra acquisition and refresh |
-| Workload identity | Bedrock SigV4 supports encrypted explicit credentials, environment keys, regional web-identity STS exchange, refreshable ECS/EKS container roles and EC2 IMDSv2 instance roles | AWS shared profiles, GCP credentials and Azure refresh/cancellation |
+| Azure | Native resource-root `/openai/v1` and explicit deployment paths, API version forwarding, API-key and Entra bearer authentication, ambient App Service/Container Apps/VM managed identity with refresh, discovery and shared inference lifecycle | Federated AKS workload identity and sovereign-cloud resource audiences |
+| Workload identity | Bedrock SigV4 supports encrypted explicit credentials, environment keys, regional web-identity STS exchange, refreshable ECS/EKS container roles and EC2 IMDSv2 instance roles; Azure Entra supports local managed-identity endpoints and IMDS | AWS shared profiles, GCP credentials and Azure federated workload identity |
 | Model tokenization | Context estimate including tool schemas; native Anthropic/Gemini counter API | Exact model tokenizers/counters with versioned provenance |
 | Catalog synchronization | Versioned catalog and hot update | Validated upstream sync, rollback and price provenance |
 | Arbitrary passthrough | Not implemented | Explicit route allowlists, identity isolation and accounting |

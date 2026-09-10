@@ -260,7 +260,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | Type | Особенности |
 | --- | --- |
 | `openai`, `openai-compatible`, `openrouter` | OpenAI wire format, including bounded compatible `reasoning_content` passthrough |
-| `azure-openai` | Native Azure OpenAI URL, версия API и выбор способа аутентификации |
+| `azure-openai` | Native Azure OpenAI URL, API version, API key, static Entra token or refreshable ambient managed identity |
 | `anthropic` | Преобразование chat/tools/vision в native Messages API |
 | `ollama` | Native chat/stream/embeddings и provider completions JSON/SSE для строкового prompt; native `top_k`, `min_p`, log probabilities и reasoning history/output |
 | `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output, text embeddings; API key |
@@ -1607,4 +1607,4 @@ gateway returns `503 response_ownership_unavailable` and retains the binding; a
 retry treats upstream 404 as the desired deleted state and retries atomic cleanup.
 Once cleanup succeeds, later requests return `404 response_not_found` without an
 upstream call. Deletion does not open a generation billing lifecycle.
-Provider type `azure-openai` добавляет `/openai/v1` к resource-root URL и сохраняет явно настроенный path, включая `/openai/deployments/{deployment}` для versioned data plane. Непустой `api_version` передается ровно один раз как query parameter `api-version` во всех inference и resource operations. `auth_type=api_key` использует header `api-key`; `auth_type=entra` использует статический bearer token из write-only credential vault. Redirects запрещены, чтобы credential не мог перейти на другой origin. Discovery для versioned deployment path выполняется через resource-level `/openai/models` с теми же version и authentication settings. Получение и обновление Entra token этим adapter не выполняется.
+Provider type `azure-openai` добавляет `/openai/v1` к resource-root URL и сохраняет явно настроенный path, включая `/openai/deployments/{deployment}` для versioned data plane. Непустой `api_version` передается ровно один раз как query parameter `api-version` во всех inference и resource operations. `auth_type=api_key` использует header `api-key`; `auth_type=entra` использует статический bearer token из write-only credential vault либо, при отсутствии credential, refreshable App Service/Container Apps/VM managed identity. Redirects запрещены, чтобы credential не мог перейти на другой origin. Discovery использует тот же authentication contract; для versioned deployment path оно выполняется через resource-level `/openai/models`.

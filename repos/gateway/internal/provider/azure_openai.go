@@ -7,11 +7,12 @@ import (
 )
 
 type azureOpenAITransport struct {
-	base       http.RoundTripper
-	credential string
-	authType   string
-	apiVersion string
-	legacyPath string
+	base        http.RoundTripper
+	credential  string
+	tokenSource *azureTokenSource
+	authType    string
+	apiVersion  string
+	legacyPath  string
 }
 
 func (t azureOpenAITransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -26,12 +27,14 @@ func (t azureOpenAITransport) RoundTrip(request *http.Request) (*http.Response, 
 	}
 	cloned.Header.Del("Authorization")
 	cloned.Header.Del("api-key")
-	if t.credential != "" {
-		if t.authType == "entra" {
-			cloned.Header.Set("Authorization", "Bearer "+t.credential)
-		} else {
-			cloned.Header.Set("api-key", t.credential)
+	if t.authType == "entra" {
+		token, err := t.tokenSource.Token(request.Context())
+		if err != nil {
+			return nil, err
 		}
+		cloned.Header.Set("Authorization", "Bearer "+token)
+	} else if t.credential != "" {
+		cloned.Header.Set("api-key", t.credential)
 	}
 	base := t.base
 	if base == nil {
@@ -49,7 +52,7 @@ func NewAzureOpenAI(baseURL, credential string, upstreamStream bool, apiVersion,
 	client := NewOpenAICompatible(baseURL, "", upstreamStream)
 	transport := client.client.Transport
 	client.client.Transport = azureOpenAITransport{
-		base: transport, credential: credential, authType: normalizeAzureAuthType(authType), apiVersion: strings.TrimSpace(apiVersion), legacyPath: legacyPath,
+		base: transport, credential: credential, tokenSource: newAzureTokenSource(credential), authType: normalizeAzureAuthType(authType), apiVersion: strings.TrimSpace(apiVersion), legacyPath: legacyPath,
 	}
 	client.client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return client
