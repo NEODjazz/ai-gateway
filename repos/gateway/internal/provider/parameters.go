@@ -322,7 +322,7 @@ func (p OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRe
 		parameterCheck{"store", request.Store != nil && *request.Store},
 		parameterCheck{"safe_prompt", request.SafePrompt != nil && !p.supportsSafePrompt},
 		parameterCheck{"prompt_mode", request.PromptMode != "" && !p.supportsPromptMode},
-		parameterCheck{"service_tier", request.ServiceTier != "" && providerName != "groq"},
+		parameterCheck{"service_tier", request.ServiceTier != "" && providerName != "groq" && providerName != "openrouter"},
 	)
 }
 
@@ -368,7 +368,7 @@ func (p OpenAICompatible) ValidateResponseParameters(request openai.ResponseRequ
 	if message := request.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
 	}
-	return rejectParameters(p.providerName(), parameterCheck{"service_tier", request.ServiceTier != ""})
+	return rejectParameters(p.providerName(), parameterCheck{"service_tier", request.ServiceTier != "" && p.providerName() != "openrouter"})
 }
 
 func rejectToolCallMetadata(adapter string, messages []openai.Message) error {

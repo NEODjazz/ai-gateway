@@ -37,7 +37,7 @@ describe("modelCapabilityOptions", () => {
     expect(defaultModelCapabilities("demo")).toEqual(["chat", "responses", "embeddings"]);
     expect(defaultModelCapabilities("ollama")).toEqual(["chat", "responses", "embeddings", "stream"]);
     expect(defaultModelCapabilities("anthropic")).toEqual(["chat", "responses", "stream"]);
-    expect(defaultModelCapabilities("openrouter")).toEqual(["chat", "stream"]);
+    expect(defaultModelCapabilities("openrouter")).toEqual(["chat", "responses", "stream"]);
   });
 
   it("filters operations and features against the adapter profile", () => {

@@ -2834,8 +2834,10 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 	switch endpoint.Type {
 	case "ollama":
 		return NewOllama(endpoint.BaseURL, endpoint.Stream)
-	case "openai", "openai-compatible", "openrouter":
+	case "openai", "openai-compatible":
 		return NewOpenAICompatibleWithRerankPath(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.RerankPath)
+	case "openrouter":
+		return NewOpenRouter(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.RerankPath)
 	case "azure-openai":
 		return NewAzureOpenAI(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.APIVersion, endpoint.AuthType)
 	case "gemini":

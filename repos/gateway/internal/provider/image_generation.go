@@ -78,6 +78,10 @@ func decodeImageGenerationResponse(body io.Reader, request openai.ImageGeneratio
 }
 
 func validateImageGenerationResponse(response openai.ImageGenerationResponse, request openai.ImageGenerationRequest) error {
+	return validateImageGenerationResponseCount(response, request, true)
+}
+
+func validateImageGenerationResponseCount(response openai.ImageGenerationResponse, request openai.ImageGenerationRequest, exactCount bool) error {
 	if response.Created < 0 || !oneOfOrEmptyImageValue(response.Background, "auto", "transparent", "opaque") || !oneOfOrEmptyImageValue(response.OutputFormat, "png", "webp", "jpeg") || !oneOfOrEmptyImageValue(response.Quality, "auto", "low", "medium", "high", "xhigh", "max") || !oneOfOrEmptyImageValue(response.Size, "auto", "256x256", "512x512", "1024x1024", "1536x1024", "1024x1536", "1792x1024", "1024x1792") {
 		return errors.New("provider returned invalid image metadata")
 	}
@@ -85,7 +89,7 @@ func validateImageGenerationResponse(response openai.ImageGenerationResponse, re
 	if request.N != nil {
 		want = *request.N
 	}
-	if len(response.Data) != want || len(response.Data) > openai.MaxGeneratedImages {
+	if len(response.Data) == 0 || len(response.Data) > want || len(response.Data) > openai.MaxGeneratedImages || (exactCount && len(response.Data) != want) {
 		return errors.New("provider returned an invalid image count")
 	}
 	for _, image := range response.Data {
