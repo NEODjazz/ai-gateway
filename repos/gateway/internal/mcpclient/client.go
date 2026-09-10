@@ -185,6 +185,12 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments map[string
 	if result.Content == nil || len(result.Content) > 1000 {
 		return CallResult{}, errors.New("invalid MCP tool result")
 	}
+	for _, content := range result.Content {
+		var object map[string]any
+		if json.Unmarshal(content, &object) != nil || object == nil {
+			return CallResult{}, errors.New("invalid MCP tool result content")
+		}
+	}
 	if len(result.StructuredContent) > 0 {
 		var object map[string]any
 		if json.Unmarshal(result.StructuredContent, &object) != nil || object == nil {

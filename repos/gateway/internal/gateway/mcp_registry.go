@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"ai-gateway-gateway/internal/mcpclient"
+	"ai-gateway-gateway/internal/mcpstate"
 )
 
 type MCPServer struct {
@@ -76,12 +77,18 @@ func (r *MCPRegistry) Server(id string) (MCPServer, bool) {
 
 type MCPRuntimeClient interface {
 	ListTools(context.Context, string) (mcpclient.ToolPage, error)
+	CallTool(context.Context, string, map[string]any) (mcpclient.CallResult, error)
 }
 
 type MCPRuntimeFactory func(string) (MCPRuntimeClient, error)
 
 func (h Handler) WithMCPRuntimeFactory(factory MCPRuntimeFactory) Handler {
 	h.mcpRuntime = factory
+	return h
+}
+
+func (h Handler) WithMCPCallStore(store mcpstate.Store) Handler {
+	h.mcpCalls = store
 	return h
 }
 func (r *MCPRegistry) Toolsets() []MCPToolset {

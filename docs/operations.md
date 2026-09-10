@@ -73,8 +73,10 @@ kubectl get pods -n ai-gateway
 5. Для streaming используйте `curl -N`; gateway пишет `X-Accel-Buffering: no`
    и flush-ит SSE. Крупные upstream chunks остаются крупными.
 
-Request Logs не содержат prompt, response или raw provider error. Прямые MCP
-`tools/call`, выполняемые клиентом, также не являются gateway inference events.
+Request Logs не содержат prompt, response или raw provider error. MCP
+`tools/call`, выполненный клиентом вне gateway, не является gateway event.
+Вызов через публичный gateway MCP route фиксируется как `mcp_tools_call` и
+увеличивает `tool_requests` после успешного protocol result.
 
 ## Проверки кода
 

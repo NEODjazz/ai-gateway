@@ -67,6 +67,37 @@ func TestStreamableHTTPInitializationListAndCall(t *testing.T) {
 	}
 }
 
+func TestCallToolRejectsNonObjectContent(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if request.Method == "initialize" {
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":%q}}`, request.ID, ProtocolVersion)
+			return
+		}
+		if request.Method == "notifications/initialized" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"content":["invalid"]}}`, request.ID)
+	}))
+	defer server.Close()
+	client, err := New(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.http = server.Client()
+	if _, err := client.CallTool(t.Context(), "forecast", map[string]any{}); err == nil || !strings.Contains(err.Error(), "content") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestClientRejectsUnsafeEndpointsAndAddresses(t *testing.T) {
 	for _, endpoint := range []string{"http://example.com/mcp", "https://user@example.com/mcp", "https://example.com/mcp?token=x", "https://example.com/mcp#fragment"} {
 		if _, err := New(endpoint); err == nil {

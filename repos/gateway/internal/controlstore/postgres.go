@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"ai-gateway-gateway/internal/mcpstate"
 	"ai-gateway-gateway/internal/provider"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,6 +18,66 @@ const revisionCacheKey = "provider-control-plane-revision"
 type RevisionCache interface {
 	Get(context.Context, string) ([]byte, bool, error)
 	Set(context.Context, string, []byte, time.Duration) error
+}
+
+func (s *PostgresStore) Claim(ctx context.Context, claim mcpstate.Record) (mcpstate.Record, bool, error) {
+	if s == nil || s.pool == nil {
+		return mcpstate.Record{}, false, mcpstate.ErrUnavailable
+	}
+	if _, err := s.pool.Exec(ctx, `DELETE FROM gateway_mcp_tool_calls WHERE updated_at < now() - interval '24 hours'`); err != nil {
+		return mcpstate.Record{}, false, err
+	}
+	command, err := s.pool.Exec(ctx, `INSERT INTO gateway_mcp_tool_calls
+		(scope_key, idempotency_key, request_hash, execution_id, state)
+		VALUES ($1,$2,$3,$4,'pending') ON CONFLICT (scope_key, idempotency_key) DO NOTHING`,
+		claim.ScopeKey, claim.IdempotencyKey, claim.RequestHash, claim.ExecutionID)
+	if err != nil {
+		return mcpstate.Record{}, false, err
+	}
+	var record mcpstate.Record
+	var response []byte
+	err = s.pool.QueryRow(ctx, `SELECT scope_key, idempotency_key, request_hash, execution_id, state, http_status, response
+		FROM gateway_mcp_tool_calls WHERE scope_key=$1 AND idempotency_key=$2`, claim.ScopeKey, claim.IdempotencyKey).
+		Scan(&record.ScopeKey, &record.IdempotencyKey, &record.RequestHash, &record.ExecutionID, &record.State, &record.HTTPStatus, &response)
+	if err != nil {
+		return mcpstate.Record{}, false, err
+	}
+	if record.RequestHash != claim.RequestHash {
+		return mcpstate.Record{}, false, mcpstate.ErrConflict
+	}
+	record.Response = append(json.RawMessage(nil), response...)
+	return record, command.RowsAffected() == 1, nil
+}
+
+func (s *PostgresStore) Complete(ctx context.Context, scope, key, executionID string, status int, response json.RawMessage) error {
+	if s == nil || s.pool == nil {
+		return mcpstate.ErrUnavailable
+	}
+	command, err := s.pool.Exec(ctx, `UPDATE gateway_mcp_tool_calls
+		SET state='completed', http_status=$4, response=$5, updated_at=now()
+		WHERE scope_key=$1 AND idempotency_key=$2 AND execution_id=$3 AND state='pending'`, scope, key, executionID, status, []byte(response))
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() != 1 {
+		return mcpstate.ErrConflict
+	}
+	return nil
+}
+
+func (s *PostgresStore) Release(ctx context.Context, scope, key, executionID string) error {
+	if s == nil || s.pool == nil {
+		return mcpstate.ErrUnavailable
+	}
+	command, err := s.pool.Exec(ctx, `DELETE FROM gateway_mcp_tool_calls
+		WHERE scope_key=$1 AND idempotency_key=$2 AND execution_id=$3 AND state='pending'`, scope, key, executionID)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() != 1 {
+		return mcpstate.ErrConflict
+	}
+	return nil
 }
 
 type PostgresStore struct {

@@ -3,8 +3,8 @@
 Gateway реализует реестр MCP, разрешения на инструменты, безопасное discovery
 через `GET /v1/mcp/servers/{id}/tools` и passthrough remote MCP connectors через
 Responses API. Discovery выполняет `initialize` и `tools/list` через bounded
-Streamable HTTP client. Публичного `tools/call`, запуска stdio-процессов и
-исполнения инструментов в gateway пока нет.
+Streamable HTTP client. Прямой `POST /v1/mcp/servers/{id}/tools/{tool}` выполняет
+`tools/call` с обязательной идемпотентностью. Запуска stdio-процессов в gateway нет.
 
 ## Два сценария
 
@@ -13,6 +13,7 @@ Streamable HTTP client. Публичного `tools/call`, запуска stdio-
 | OpenCode через `/v1/chat/completions` | Описания `type: function`, затем сообщения с результатами | OpenCode, со своими MCP credentials | `tools`, плюс `stream` для streaming |
 | Remote MCP через `/v1/responses` | `type: mcp` с label, URL и настройками коннектора | Upstream provider модели | Явная `mcp`, плюс `stream` для streaming |
 | Gateway discovery | ID включенного MCP Server и optional cursor | Gateway выполняет `initialize` и `tools/list` без credentials | Не зависит от model route |
+| Gateway tool call | ID включенного MCP Server, имя tool и JSON arguments | Gateway выполняет `initialize` и один `tools/call` без credentials | Не зависит от model route |
 
 В первом сценарии клиент получает список инструментов у своего MCP-сервера,
 передаёт их описания модели через gateway, получает `tool_calls`, выполняет
@@ -141,13 +142,26 @@ Access Groups и RPM admission. Оно фиксируется durable billing li
 usage reports доступен отдельный `tool_requests`; discovery оставляет его
 нулевым, потому что инструмент не выполнялся.
 
+Прямой tool call проходит те же authentication, connector ACL, Access Groups и
+RPM checks. Клиент обязан передать один `Idempotency-Key` длиной до 128 visible
+ASCII characters. Ключ scoped по credential, server ID и tool name. Gateway
+хранит request hash, первый execution ID и итоговый HTTP response в PostgreSQL
+24 часа. Повтор с теми же arguments получает сохраненный ответ без нового
+вызова и billing; другой payload получает `409 idempotency_conflict`, а
+параллельный незавершенный вызов — `409 idempotency_in_progress`.
+
+До сетевого вызова gateway обязан записать audit attempt; недоступный audit
+блокирует выполнение. Audit содержит server ID и tool name, но не arguments,
+result или сам idempotency key. Успешный protocol result учитывается как один
+`tool_requests`, включая результат с `isError=true`; transport/protocol failure
+закрывает billing через cancel и сохраняется для безопасного replay.
+
 Bounded Streamable HTTP client выполняет initialize negotiation, поддерживает
 JSON и SSE ответы на POST,
 передает protocol/session headers, ограничивает request/response/tool pages и
 отклоняет private, loopback и link-local адреса при каждом DNS resolve. Реестр
-не хранит credentials, поэтому discovery работает только с серверами, которым
-они не нужны. Прямое выполнение требует отдельной idempotency и durable audit
-семантики до публикации endpoint.
+не хранит credentials, поэтому discovery и прямое выполнение работают только с
+серверами, которым они не нужны.
 
 ## Проверка реализации
 

@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"ai-gateway-gateway/internal/mcpclient"
+	"ai-gateway-gateway/internal/mcpstate"
 	"ai-gateway-gateway/internal/modules"
 )
 
@@ -32,8 +34,9 @@ func (m mcpRuntimeAuth) Handle(_ context.Context, req *modules.RequestContext) e
 }
 
 type mcpBillingRecorder struct {
-	phases   []string
-	apiTypes []string
+	phases       []string
+	apiTypes     []string
+	toolRequests []int
 }
 
 func (*mcpBillingRecorder) Name() string              { return "billing" }
@@ -51,14 +54,27 @@ func (m *mcpBillingRecorder) HandleFailure(_ context.Context, req *modules.Reque
 func (m *mcpBillingRecorder) record(phase string, req *modules.RequestContext) error {
 	m.phases = append(m.phases, phase)
 	m.apiTypes = append(m.apiTypes, req.Metadata["gateway.api_type"])
+	m.toolRequests = append(m.toolRequests, req.ToolRequests)
 	return nil
 }
 
 type fakeMCPRuntimeClient struct {
-	page   mcpclient.ToolPage
-	err    error
-	cursor string
-	calls  int
+	page       mcpclient.ToolPage
+	err        error
+	cursor     string
+	calls      int
+	callResult mcpclient.CallResult
+	callErr    error
+	callName   string
+	callArgs   map[string]any
+	callCalls  int
+}
+
+func (c *fakeMCPRuntimeClient) CallTool(_ context.Context, name string, arguments map[string]any) (mcpclient.CallResult, error) {
+	c.callCalls++
+	c.callName = name
+	c.callArgs = arguments
+	return c.callResult, c.callErr
 }
 
 func (c *fakeMCPRuntimeClient) ListTools(_ context.Context, cursor string) (mcpclient.ToolPage, error) {
@@ -151,5 +167,100 @@ func TestMCPRuntimeConsumesCredentialRPMBeforeDiscovery(t *testing.T) {
 	router.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/v1/mcp/servers/weather/tools", nil))
 	if first.Code != http.StatusOK || second.Code != http.StatusTooManyRequests || !strings.Contains(second.Body.String(), "rate_limit_exceeded") || client.calls != 1 {
 		t.Fatalf("first=%d second=%d body=%s calls=%d", first.Code, second.Code, second.Body.String(), client.calls)
+	}
+}
+
+func TestMCPRuntimeCallsToolOnceAndReplaysDurableResult(t *testing.T) {
+	billing := &mcpBillingRecorder{}
+	audit := &recordingAuditClient{}
+	client := &fakeMCPRuntimeClient{callResult: mcpclient.CallResult{Content: []json.RawMessage{json.RawMessage(`{"type":"text","text":"sunny"}`)}, StructuredContent: json.RawMessage(`{"temperature":21}`)}}
+	store := mcpstate.NewMemoryStore(10, time.Hour)
+	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{tools: []string{"mcp:weather@https://mcp.example.test/v1"}}, billing}), nil).
+		WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPCallStore(store).WithAudit(audit).
+		WithMCPRuntimeFactory(func(string) (MCPRuntimeClient, error) { return client, nil })
+	router := Routes(handler)
+	call := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/v1/mcp/servers/weather/tools/forecast", strings.NewReader(body))
+		request.Header.Set("Idempotency-Key", "forecast-2026-09-10")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	first := call(`{"arguments":{"city":"Rome"}}`)
+	second := call(`{"arguments":{"city":"Rome"}}`)
+	if first.Code != http.StatusOK || second.Code != http.StatusOK || first.Body.String() != second.Body.String() || client.callCalls != 1 || client.callName != "forecast" || client.callArgs["city"] != "Rome" {
+		t.Fatalf("first=%d/%s second=%d/%s client=%+v", first.Code, first.Body.String(), second.Code, second.Body.String(), client)
+	}
+	if first.Header().Get("X-Execution-ID") == "" || second.Header().Get("X-Execution-ID") != first.Header().Get("X-Execution-ID") {
+		t.Fatalf("execution IDs first=%q second=%q", first.Header().Get("X-Execution-ID"), second.Header().Get("X-Execution-ID"))
+	}
+	if strings.Join(billing.phases, ",") != "reserve,commit" || strings.Join(billing.apiTypes, ",") != "mcp_tools_call,mcp_tools_call" {
+		t.Fatalf("billing phases=%v apiTypes=%v", billing.phases, billing.apiTypes)
+	}
+	if len(billing.toolRequests) != 2 || billing.toolRequests[0] != 1 || billing.toolRequests[1] != 1 {
+		t.Fatalf("billing tool requests=%v", billing.toolRequests)
+	}
+	if len(audit.events) != 2 || audit.events[0].Outcome != "attempted" || audit.events[1].Outcome != "succeeded" || audit.events[0].Details["tool"] != "forecast" {
+		t.Fatalf("audit=%+v", audit.events)
+	}
+	if encoded, _ := json.Marshal(audit.events); strings.Contains(string(encoded), "Rome") || strings.Contains(string(encoded), "forecast-2026-09-10") {
+		t.Fatalf("audit leaked arguments or idempotency key: %s", encoded)
+	}
+	conflict := call(`{"arguments":{"city":"Paris"}}`)
+	if conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), "idempotency_conflict") || client.callCalls != 1 {
+		t.Fatalf("conflict=%d/%s calls=%d", conflict.Code, conflict.Body.String(), client.callCalls)
+	}
+}
+
+func TestMCPRuntimeCachesUpstreamFailureWithoutReexecution(t *testing.T) {
+	billing := &mcpBillingRecorder{}
+	audit := &recordingAuditClient{}
+	client := &fakeMCPRuntimeClient{callErr: errors.New("connection lost")}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{}, billing}), nil).
+		WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPCallStore(mcpstate.NewMemoryStore(10, time.Hour)).WithAudit(audit).
+		WithMCPRuntimeFactory(func(string) (MCPRuntimeClient, error) { return client, nil })
+	router := Routes(handler)
+	for attempt := 0; attempt < 2; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/v1/mcp/servers/weather/tools/forecast", strings.NewReader(`{"arguments":{}}`))
+		request.Header.Set("Idempotency-Key", "failed-call")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "mcp_server_failed") {
+			t.Fatalf("attempt=%d status=%d body=%s", attempt, response.Code, response.Body.String())
+		}
+	}
+	if client.callCalls != 1 || strings.Join(billing.phases, ",") != "reserve,cancel" || len(audit.events) != 2 || audit.events[1].Outcome != "failed" {
+		t.Fatalf("calls=%d phases=%v audit=%+v", client.callCalls, billing.phases, audit.events)
+	}
+}
+
+func TestMCPRuntimeFailsClosedBeforeToolCallWhenAuditUnavailable(t *testing.T) {
+	audit := &recordingAuditClient{appendErr: errors.New("postgres down")}
+	client := &fakeMCPRuntimeClient{callResult: mcpclient.CallResult{Content: []json.RawMessage{json.RawMessage(`{"type":"text","text":"sunny"}`)}}}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{}}), nil).
+		WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPCallStore(mcpstate.NewMemoryStore(10, time.Hour)).WithAudit(audit).
+		WithMCPRuntimeFactory(func(string) (MCPRuntimeClient, error) { return client, nil })
+	request := httptest.NewRequest(http.MethodPost, "/v1/mcp/servers/weather/tools/forecast", strings.NewReader(`{"arguments":{}}`))
+	request.Header.Set("Idempotency-Key", "audit-failure")
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "audit_unavailable") || client.callCalls != 0 {
+		t.Fatalf("status=%d body=%s calls=%d", response.Code, response.Body.String(), client.callCalls)
+	}
+}
+
+func TestMCPRuntimeRejectsMissingIdempotencyKeyAndInvalidBody(t *testing.T) {
+	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{}}), nil).WithMCPRegistry(runtimeRegistry(t, "streamable-http"))
+	missing := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(missing, httptest.NewRequest(http.MethodPost, "/v1/mcp/servers/weather/tools/forecast", strings.NewReader(`{"arguments":{}}`)))
+	if missing.Code != http.StatusBadRequest || !strings.Contains(missing.Body.String(), "invalid_idempotency_key") {
+		t.Fatalf("missing status=%d body=%s", missing.Code, missing.Body.String())
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/mcp/servers/weather/tools/forecast", strings.NewReader(`{"arguments":null}`))
+	request.Header.Set("Idempotency-Key", "invalid-body")
+	invalid := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(invalid, request)
+	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), "invalid_request") {
+		t.Fatalf("invalid status=%d body=%s", invalid.Code, invalid.Body.String())
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/mcpclient"
+	"ai-gateway-gateway/internal/mcpstate"
 	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
@@ -36,6 +37,7 @@ type Handler struct {
 	agents        *AgentRegistry
 	mcp           *MCPRegistry
 	mcpRuntime    MCPRuntimeFactory
+	mcpCalls      mcpstate.Store
 	access        *AccessRegistry
 	budgets       BudgetManagementClient
 	usage         UsageManagementClient

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.169
+  version: 0.1.170
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -466,6 +466,43 @@ paths:
               schema: {$ref: '#/components/schemas/MCPRuntimeToolPage'}
         default:
           description: Authentication, policy, rate-limit, billing, transport, or upstream failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/mcp/servers/{id}/tools/{tool}:
+    post:
+      operationId: callMCPServerTool
+      tags: [MCP]
+      summary: Execute a tool on an enabled registered MCP server
+      description: Authenticates the virtual key, enforces connector and access-group grants, consumes RPM admission, requires a scoped idempotency key, writes a fail-closed durable audit attempt, and settles one external tool request through billing. The first execution and its bounded result are persisted in PostgreSQL for 24 hours; retries replay the stored HTTP response without invoking the tool or billing again. A concurrent retry receives 409 and a Retry-After header. The gateway sends no client bearer token or stored credential to the MCP server.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128}}
+        - {name: tool, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 256}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 128}, description: "Visible ASCII key scoped to the authenticated credential, server and tool. Reusing it with different arguments returns 409."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MCPToolCallRequest'}
+      responses:
+        '200':
+          description: Bounded MCP tool result, or the exact persisted response for an idempotent retry
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MCPToolCallResult'}
+        '409':
+          description: The key is in progress or conflicts with different arguments
+          headers:
+            Retry-After: {schema: {type: integer, minimum: 1}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default:
+          description: Authentication, policy, rate-limit, audit, billing, transport, persistence, or upstream failure
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -6009,6 +6046,20 @@ components:
       properties:
         tools: {type: array, maxItems: 1000, items: {$ref: '#/components/schemas/MCPRuntimeTool'}}
         nextCursor: {type: string, maxLength: 2048}
+    MCPToolCallRequest:
+      type: object
+      additionalProperties: false
+      required: [arguments]
+      properties:
+        arguments: {type: object, additionalProperties: true}
+    MCPToolCallResult:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content: {type: array, maxItems: 1000, items: {type: object, additionalProperties: true}}
+        structuredContent: {type: object, additionalProperties: true}
+        isError: {type: boolean}
     MCPToolsetInput:
       type: object
       additionalProperties: false

@@ -2,17 +2,93 @@ package controlstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
 	"time"
 
+	"ai-gateway-gateway/internal/mcpstate"
 	"ai-gateway-gateway/internal/provider"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type memoryRevisionCache struct {
 	values map[string][]byte
+}
+
+func TestPostgresMCPToolCallIdempotencyIntegration(t *testing.T) {
+	dsn := os.Getenv("CONTROL_PLANE_POSTGRES_TEST_DSN")
+	if dsn == "" {
+		if os.Getenv("POSTGRES_INTEGRATION_REQUIRED") == "true" {
+			t.Fatal("CONTROL_PLANE_POSTGRES_TEST_DSN is required")
+		}
+		t.Skip("CONTROL_PLANE_POSTGRES_TEST_DSN is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	_, err = pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS gateway_mcp_tool_calls
+		(scope_key TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL,
+		execution_id TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending','completed')),
+		http_status INTEGER NOT NULL DEFAULT 0, response BYTEA, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (scope_key, idempotency_key))`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var responseType string
+	if err := pool.QueryRow(ctx, `SELECT data_type FROM information_schema.columns WHERE table_name='gateway_mcp_tool_calls' AND column_name='response'`).Scan(&responseType); err != nil {
+		t.Fatal(err)
+	}
+	if responseType != "bytea" {
+		if _, err := pool.Exec(ctx, `ALTER TABLE gateway_mcp_tool_calls ALTER COLUMN response TYPE BYTEA USING convert_to(response::text, 'UTF8')`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scope := "integration/" + time.Now().UTC().Format("20060102150405.000000000")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM gateway_mcp_tool_calls WHERE scope_key=$1`, scope)
+	})
+	store, err := NewPostgresStore(ctx, dsn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	claim := mcpstate.Record{ScopeKey: scope, IdempotencyKey: "forecast", RequestHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ExecutionID: "execution-1"}
+	record, owner, err := store.Claim(ctx, claim)
+	if err != nil || !owner || record.State != mcpstate.StatePending {
+		t.Fatalf("claim=%+v owner=%v err=%v", record, owner, err)
+	}
+	duplicate, owner, err := store.Claim(ctx, claim)
+	if err != nil || owner || duplicate.ExecutionID != claim.ExecutionID {
+		t.Fatalf("duplicate=%+v owner=%v err=%v", duplicate, owner, err)
+	}
+	conflict := claim
+	conflict.RequestHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	if _, _, err := store.Claim(ctx, conflict); !errors.Is(err, mcpstate.ErrConflict) {
+		t.Fatalf("conflicting payload error=%v", err)
+	}
+	payload := json.RawMessage(`{"content":[{"type":"text","text":"sunny"}]}`)
+	if err := store.Complete(ctx, scope, claim.IdempotencyKey, claim.ExecutionID, 200, payload); err != nil {
+		t.Fatal(err)
+	}
+	replayed, owner, err := store.Claim(ctx, claim)
+	if err != nil || owner || replayed.State != mcpstate.StateCompleted || replayed.HTTPStatus != 200 || string(replayed.Response) != string(payload) {
+		t.Fatalf("replay=%+v owner=%v err=%v", replayed, owner, err)
+	}
+	releasable := mcpstate.Record{ScopeKey: scope, IdempotencyKey: "retry", RequestHash: claim.RequestHash, ExecutionID: "execution-2"}
+	if _, owner, err := store.Claim(ctx, releasable); err != nil || !owner {
+		t.Fatalf("release claim owner=%v err=%v", owner, err)
+	}
+	if err := store.Release(ctx, scope, releasable.IdempotencyKey, releasable.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, owner, err := store.Claim(ctx, releasable); err != nil || !owner {
+		t.Fatalf("reclaimed owner=%v err=%v", owner, err)
+	}
 }
 
 func (c *memoryRevisionCache) Get(_ context.Context, key string) ([]byte, bool, error) {

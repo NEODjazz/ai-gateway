@@ -129,6 +129,9 @@ func main() {
 		}
 	}
 	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithGuardrailMonitor(guardrailMonitor).WithCacheDiagnostics(gateway.CacheRuntimeConfig{ExactTTLSeconds: cfg.Cache.TTLSeconds, ExactMaxBytes: cfg.Cache.MaxBytes, SemanticTTLSeconds: cfg.Cache.Semantic.TTLSeconds, SemanticMaxEntries: cfg.Cache.Semantic.MaxEntries, SemanticMaxBytes: cfg.Cache.Semantic.MaxBytes}).WithLoggingRegistry(loggingRegistry).WithAgentRegistry(agentRegistry).WithMCPRegistry(mcpRegistry).WithAccessRegistry(accessRegistry).WithAdminState(adminState)
+	if providerControlStore != nil {
+		handler = handler.WithMCPCallStore(providerControlStore)
+	}
 	if cfg.APIDocs.Enabled {
 		handler = handler.WithAPIDocs(cfg.APIDocs.TryItOutEnabled)
 	}

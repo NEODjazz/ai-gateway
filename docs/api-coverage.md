@@ -47,7 +47,7 @@ availability is not inferred from these tests.
 | Assistants | Not implemented | Assistant/thread/run ownership and lifecycle |
 | Search | Authenticated `/v1/search` for one or bounded batched queries, domain/country filters, explicit capability routing, compatible transport, bounded result validation, retries and per-query search-unit settlement | Additional native provider adapters, tiered result pricing and managed search-tool registry |
 | Skills | Not implemented | Versioned registry, owner isolation and provider execution contract |
-| MCP | Registry, ACL and Responses passthrough | Runtime transport, bounded sessions and tool execution accounting |
+| MCP | Registry, ACL, Responses passthrough, bounded Streamable HTTP discovery and direct tool execution with durable PostgreSQL idempotency, fail-closed audit and exact tool-request settlement | Credentialed MCP servers, additional transports and long-lived session reuse |
 | A2A | Not implemented | Agent discovery, task ownership and authenticated execution |
 | Bedrock Invoke | Not implemented | Native protocol, AWS request signing and usage conversion |
 | Bedrock Converse | Synchronous `/model/{model}/converse` through shared authorization, tool policy, quota, retry and exact billing; native Bedrock text/function transport, strict usage validation and separately attributed requests | Event stream, media blocks and workload authentication |
