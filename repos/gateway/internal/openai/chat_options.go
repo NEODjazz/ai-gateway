@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"math"
 	"strconv"
 	"unicode/utf8"
 )
@@ -34,6 +35,10 @@ type ChatGenerationOptions struct {
 	TopLogprobs          *int                  `json:"top_logprobs,omitempty"`
 	FrequencyPenalty     *float64              `json:"frequency_penalty,omitempty"`
 	PresencePenalty      *float64              `json:"presence_penalty,omitempty"`
+	MinP                 *float64              `json:"min_p,omitempty"`
+	TopK                 *int                  `json:"top_k,omitempty"`
+	TopA                 *float64              `json:"top_a,omitempty"`
+	RepetitionPenalty    *float64              `json:"repetition_penalty,omitempty"`
 	LogitBias            map[string]int        `json:"logit_bias,omitempty"`
 }
 
@@ -178,9 +183,20 @@ func (o ChatGenerationOptions) Validate() string {
 		}
 	}
 	for _, value := range []*float64{o.FrequencyPenalty, o.PresencePenalty} {
-		if value != nil && (*value < -2 || *value > 2) {
+		if value != nil && (!finiteFloat(*value) || *value < -2 || *value > 2) {
 			return "frequency_penalty and presence_penalty must be between -2 and 2"
 		}
+	}
+	for _, value := range []*float64{o.MinP, o.TopA} {
+		if value != nil && (!finiteFloat(*value) || *value < 0 || *value > 1) {
+			return "min_p and top_a must be between 0 and 1"
+		}
+	}
+	if o.TopK != nil && (*o.TopK < 0 || *o.TopK > 1000000) {
+		return "top_k must be between 0 and 1000000"
+	}
+	if o.RepetitionPenalty != nil && (!finiteFloat(*o.RepetitionPenalty) || *o.RepetitionPenalty <= 0) {
+		return "repetition_penalty must be greater than 0"
 	}
 	for token, bias := range o.LogitBias {
 		if _, err := strconv.ParseUint(token, 10, 64); err != nil || bias < -100 || bias > 100 {
@@ -188,6 +204,10 @@ func (o ChatGenerationOptions) Validate() string {
 		}
 	}
 	return ""
+}
+
+func finiteFloat(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 func validateChatPrediction(prediction *ChatPrediction) string {

@@ -93,18 +93,21 @@ func TestOpenRouterImageGenerationUsesDedicatedContract(t *testing.T) {
 	}
 }
 
-func TestOpenRouterPreservesServiceTier(t *testing.T) {
+func TestOpenRouterPreservesChatGenerationControls(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["service_tier"] != "priority" {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["service_tier"] != "priority" || request["min_p"] != 0.05 || request["top_k"] != float64(40) || request["top_a"] != 0.2 || request["repetition_penalty"] != 1.1 {
 			t.Fatalf("request=%#v err=%v", request, err)
 		}
 		_, _ = fmt.Fprint(w, `{"id":"chat","model":"model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
 	}))
 	defer server.Close()
 
+	minP, topK, topA, repetitionPenalty := 0.05, 40, 0.2, 1.1
 	response, err := NewOpenRouter(server.URL+"/v1", "", false, "").ChatCompletions(t.Context(), openai.ChatCompletionRequest{
-		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hi"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "priority"},
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hi"}}, ChatGenerationOptions: openai.ChatGenerationOptions{
+			ServiceTier: "priority", MinP: &minP, TopK: &topK, TopA: &topA, RepetitionPenalty: &repetitionPenalty,
+		},
 	})
 	if err != nil || response.ID != "chat" {
 		t.Fatalf("response=%+v err=%v", response, err)

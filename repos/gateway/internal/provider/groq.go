@@ -35,6 +35,8 @@ func (g Groq) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		parameterCheck{"web_search_options", request.WebSearchOptions != nil}, parameterCheck{"web_fetch_options", request.WebFetchOptions != nil},
 		parameterCheck{"logprobs", request.Logprobs != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
 		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil},
+		parameterCheck{"min_p", request.MinP != nil}, parameterCheck{"top_k", request.TopK != nil}, parameterCheck{"top_a", request.TopA != nil},
+		parameterCheck{"repetition_penalty", request.RepetitionPenalty != nil},
 		parameterCheck{"logit_bias", request.LogitBias != nil},
 	); err != nil {
 		return err

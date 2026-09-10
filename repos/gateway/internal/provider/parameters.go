@@ -271,6 +271,10 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 		parameterCheck{"top_logprobs", options.TopLogprobs != nil},
 		parameterCheck{"frequency_penalty", options.FrequencyPenalty != nil},
 		parameterCheck{"presence_penalty", options.PresencePenalty != nil},
+		parameterCheck{"min_p", options.MinP != nil},
+		parameterCheck{"top_k", options.TopK != nil},
+		parameterCheck{"top_a", options.TopA != nil},
+		parameterCheck{"repetition_penalty", options.RepetitionPenalty != nil},
 		parameterCheck{"logit_bias", options.LogitBias != nil},
 	)
 }

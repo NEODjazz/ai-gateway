@@ -69,6 +69,8 @@ func (d DeepSeek) ValidateChatParameters(request openai.ChatCompletionRequest) e
 		parameterCheck{"verbosity", request.Verbosity != ""}, parameterCheck{"web_search_options", request.WebSearchOptions != nil},
 		parameterCheck{"web_fetch_options", request.WebFetchOptions != nil}, parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil},
 		parameterCheck{"presence_penalty", request.PresencePenalty != nil}, parameterCheck{"logit_bias", request.LogitBias != nil},
+		parameterCheck{"min_p", request.MinP != nil}, parameterCheck{"top_k", request.TopK != nil}, parameterCheck{"top_a", request.TopA != nil},
+		parameterCheck{"repetition_penalty", request.RepetitionPenalty != nil},
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil}, parameterCheck{"seed", request.Seed != nil},
 	); err != nil {
 		return err

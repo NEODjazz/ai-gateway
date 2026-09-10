@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 )
@@ -16,7 +17,7 @@ func TestChatGenerationOptionValidation(t *testing.T) {
 		{`{"modalities":[]}`, false},
 		{`{"modalities":["audio"]}`, false},
 		{`{"modalities":["text","text"]}`, false},
-		{`{"metadata":{"trace":"one"},"store":false,"prompt_cache_options":{"mode":"explicit","ttl":"30m"},"prompt_cache_retention":"24h","prediction":{"type":"content","content":"expected"},"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","user":"legacy-user","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-2,"logit_bias":{"10":-100}}`, true},
+		{`{"metadata":{"trace":"one"},"store":false,"prompt_cache_options":{"mode":"explicit","ttl":"30m"},"prompt_cache_retention":"24h","prediction":{"type":"content","content":"expected"},"reasoning_effort":"high","n":2,"safety_identifier":"hashed-user","user":"legacy-user","logprobs":true,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":-2,"min_p":0.05,"top_k":40,"top_a":0.2,"repetition_penalty":1.1,"logit_bias":{"10":-100}}`, true},
 		{`{"web_search_options":{"search_context_size":"high","user_location":{"type":"approximate","approximate":{"city":"Paris","country":"FR","region":"Ile-de-France","timezone":"Europe/Paris"}}}}`, true},
 		{`{"web_search_options":{}}`, true},
 		{`{"web_search_options":{"max_uses":1}}`, true},
@@ -52,6 +53,14 @@ func TestChatGenerationOptionValidation(t *testing.T) {
 		{`{"top_logprobs":1}`, false},
 		{`{"frequency_penalty":2.1}`, false},
 		{`{"presence_penalty":-2.1}`, false},
+		{`{"min_p":-0.1}`, false},
+		{`{"min_p":1.1}`, false},
+		{`{"top_k":-1}`, false},
+		{`{"top_k":1000001}`, false},
+		{`{"top_a":-0.1}`, false},
+		{`{"top_a":1.1}`, false},
+		{`{"repetition_penalty":0}`, false},
+		{`{"repetition_penalty":-1}`, false},
 		{`{"logit_bias":{"10":101}}`, false},
 		{`{"logit_bias":{"-1":1}}`, false},
 		{`{"logit_bias":{"word":1}}`, false},
@@ -67,3 +76,22 @@ func TestChatGenerationOptionValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestChatGenerationOptionRejectsNonFiniteNumbers(t *testing.T) {
+	values := []*float64{pointerFloat(math.NaN()), pointerFloat(math.Inf(1)), pointerFloat(math.Inf(-1))}
+	for _, value := range values {
+		for _, options := range []ChatGenerationOptions{
+			{FrequencyPenalty: value},
+			{PresencePenalty: value},
+			{MinP: value},
+			{TopA: value},
+			{RepetitionPenalty: value},
+		} {
+			if message := options.Validate(); message == "" {
+				t.Fatalf("non-finite value accepted: %+v", options)
+			}
+		}
+	}
+}
+
+func pointerFloat(value float64) *float64 { return &value }

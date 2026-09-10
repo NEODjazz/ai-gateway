@@ -117,6 +117,10 @@ func (p Mistral) ValidateChatParameters(request openai.ChatCompletionRequest) er
 		parameterCheck{"verbosity", options.Verbosity != ""},
 		parameterCheck{"top_logprobs", options.TopLogprobs != nil},
 		parameterCheck{"logprobs", options.Logprobs != nil},
+		parameterCheck{"min_p", options.MinP != nil},
+		parameterCheck{"top_k", options.TopK != nil},
+		parameterCheck{"top_a", options.TopA != nil},
+		parameterCheck{"repetition_penalty", options.RepetitionPenalty != nil},
 		parameterCheck{"logit_bias", options.LogitBias != nil},
 		parameterCheck{"stream_options.include_obfuscation", request.StreamOptions != nil && request.StreamOptions.IncludeObfuscation != nil},
 	); err != nil {
