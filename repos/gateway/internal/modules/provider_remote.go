@@ -199,6 +199,11 @@ func scanPayload(req *RequestContext) string {
 				parts = append(parts, "tool_arguments: "+call.Function.Arguments)
 			}
 		}
+		for _, block := range message.Reasoning {
+			if block.Thinking != "" {
+				parts = append(parts, "reasoning: "+block.Thinking)
+			}
+		}
 	}
 	if text := openai.BedrockDocumentText(req.Request.Messages); text != "" {
 		parts = append(parts, "document: "+text)

@@ -290,3 +290,42 @@ func TestBedrockConverseResponseRejectsUnknownFinishReason(t *testing.T) {
 		t.Fatal("unknown finish reason accepted")
 	}
 }
+
+func TestBedrockConversePreservesSignedAndRedactedReasoning(t *testing.T) {
+	text := "answer"
+	request := BedrockConverseRequest{Messages: []BedrockMessage{
+		{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("question")}}},
+		{Role: "assistant", Content: []BedrockContentBlock{
+			{ReasoningContent: &BedrockReasoningContent{ReasoningText: &BedrockReasoningText{Text: "private plan", Signature: "signed"}}},
+			{Text: &text},
+			{ReasoningContent: &BedrockReasoningContent{RedactedContent: "b3BhcXVl"}},
+		}},
+	}}
+	chat, err := request.ChatRequest("model", "bedrock")
+	if err != nil || len(chat.Messages) != 2 || len(chat.Messages[1].Reasoning) != 2 || *chat.Messages[1].Reasoning[0].Index != 0 || *chat.Messages[1].Reasoning[1].Index != 2 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	response, err := BedrockFromChat(ChatCompletionResponse{
+		Choices: []Choice{{Message: chat.Messages[1], FinishReason: "stop"}},
+		Usage:   Usage{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5},
+	})
+	if err != nil || len(response.Output.Message.Content) != 3 || response.Output.Message.Content[0].ReasoningContent.ReasoningText.Signature != "signed" || response.Output.Message.Content[1].Text == nil || response.Output.Message.Content[2].ReasoningContent.RedactedContent != "b3BhcXVl" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestBedrockConverseRejectsInvalidReasoning(t *testing.T) {
+	validText := &BedrockReasoningText{Text: "plan", Signature: "signed"}
+	for _, message := range []BedrockMessage{
+		{Role: "user", Content: []BedrockContentBlock{{ReasoningContent: &BedrockReasoningContent{ReasoningText: validText}}}},
+		{Role: "assistant", Content: []BedrockContentBlock{{ReasoningContent: &BedrockReasoningContent{}}}},
+		{Role: "assistant", Content: []BedrockContentBlock{{ReasoningContent: &BedrockReasoningContent{ReasoningText: validText, RedactedContent: "b3BhcXVl"}}}},
+		{Role: "assistant", Content: []BedrockContentBlock{{ReasoningContent: &BedrockReasoningContent{RedactedContent: "%%%"}}}},
+		{Role: "assistant", Content: []BedrockContentBlock{{ReasoningContent: &BedrockReasoningContent{ReasoningText: &BedrockReasoningText{Text: "plan"}}}}},
+	} {
+		request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("question")}}}, message}}
+		if _, err := request.ChatRequest("model", "bedrock"); err == nil {
+			t.Fatalf("invalid reasoning accepted: %+v", message)
+		}
+	}
+}

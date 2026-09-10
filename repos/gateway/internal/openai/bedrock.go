@@ -69,6 +69,17 @@ type BedrockContentBlock struct {
 	ToolUse          *BedrockToolUse          `json:"toolUse,omitempty"`
 	ToolResult       *BedrockToolResult       `json:"toolResult,omitempty"`
 	CitationsContent *BedrockCitationsContent `json:"citationsContent,omitempty"`
+	ReasoningContent *BedrockReasoningContent `json:"reasoningContent,omitempty"`
+}
+
+type BedrockReasoningContent struct {
+	ReasoningText   *BedrockReasoningText `json:"reasoningText,omitempty"`
+	RedactedContent string                `json:"redactedContent,omitempty"`
+}
+
+type BedrockReasoningText struct {
+	Text      string `json:"text"`
+	Signature string `json:"signature,omitempty"`
 }
 
 type BedrockCitationsContent struct {
@@ -259,21 +270,21 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		}
 	}
 	for _, block := range r.System {
-		if block.Text == nil || strings.TrimSpace(*block.Text) == "" || block.Image != nil || block.Document != nil || block.ToolUse != nil || block.ToolResult != nil {
+		if block.Text == nil || strings.TrimSpace(*block.Text) == "" || block.Image != nil || block.Document != nil || block.ToolUse != nil || block.ToolResult != nil || block.CitationsContent != nil || block.ReasoningContent != nil {
 			return request, errors.New("system supports non-empty text blocks only")
 		}
 		request.Messages = append(request.Messages, Message{Role: "system", Content: *block.Text})
 	}
 	seenToolUses := make(map[string]bool)
 	for _, message := range r.Messages {
-		if (message.Role != "user" && message.Role != "assistant") || len(message.Content) == 0 {
+		if (message.Role != "user" && message.Role != "assistant") || len(message.Content) == 0 || len(message.Content) > 128 {
 			return request, errors.New("messages require user or assistant role and content")
 		}
-		textBlocks, imageBlocks, documentBlocks, toolUseBlocks, toolResultBlocks := 0, 0, 0, 0, 0
+		textBlocks, imageBlocks, documentBlocks, toolUseBlocks, toolResultBlocks, reasoningBlocks := 0, 0, 0, 0, 0, 0
 		var texts []string
 		chat := Message{Role: message.Role}
 		var content []any
-		for _, block := range message.Content {
+		for blockIndex, block := range message.Content {
 			fields := 0
 			if block.Text != nil {
 				fields++
@@ -336,16 +347,45 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 				fields++
 				toolResultBlocks++
 			}
+			if block.ReasoningContent != nil {
+				fields++
+				reasoningBlocks++
+				if message.Role != "assistant" {
+					return request, errors.New("reasoningContent is accepted in assistant messages only")
+				}
+				reasoning := block.ReasoningContent
+				members := 0
+				index := blockIndex
+				converted := ReasoningBlock{Index: &index}
+				if reasoning.ReasoningText != nil {
+					members++
+					converted.Type = "thinking"
+					converted.Thinking = reasoning.ReasoningText.Text
+					converted.Signature = reasoning.ReasoningText.Signature
+				}
+				if reasoning.RedactedContent != "" {
+					members++
+					if _, err := base64.StdEncoding.DecodeString(reasoning.RedactedContent); err != nil {
+						return request, errors.New("reasoningContent.redactedContent must be valid base64")
+					}
+					converted.Type = "redacted_thinking"
+					converted.Data = reasoning.RedactedContent
+				}
+				if members != 1 {
+					return request, errors.New("reasoningContent must contain exactly one union member")
+				}
+				chat.Reasoning = append(chat.Reasoning, converted)
+			}
 			if fields != 1 {
 				return request, errors.New("content blocks must contain exactly one supported field")
 			}
 		}
 		if toolResultBlocks > 0 {
-			if message.Role != "user" || toolResultBlocks != 1 || textBlocks != 0 || imageBlocks != 0 || documentBlocks != 0 || toolUseBlocks != 0 || len(message.Content) != 1 {
+			if message.Role != "user" || toolResultBlocks != 1 || textBlocks != 0 || imageBlocks != 0 || documentBlocks != 0 || toolUseBlocks != 0 || reasoningBlocks != 0 || len(message.Content) != 1 {
 				return request, errors.New("toolResult must be the only block in a user message")
 			}
 			result := message.Content[0].ToolResult
-			if result.ID == "" || !seenToolUses[result.ID] || len(result.Content) != 1 || result.Content[0].Text == nil || *result.Content[0].Text == "" || result.Content[0].Image != nil || result.Content[0].Document != nil || result.Content[0].ToolUse != nil || result.Content[0].ToolResult != nil {
+			if result.ID == "" || !seenToolUses[result.ID] || len(result.Content) != 1 || result.Content[0].Text == nil || *result.Content[0].Text == "" || result.Content[0].Image != nil || result.Content[0].Document != nil || result.Content[0].ToolUse != nil || result.Content[0].ToolResult != nil || result.Content[0].CitationsContent != nil || result.Content[0].ReasoningContent != nil {
 				return request, errors.New("invalid toolResult block")
 			}
 			request.Messages = append(request.Messages, Message{Role: "tool", ToolCallID: result.ID, Content: *result.Content[0].Text})
@@ -359,7 +399,10 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		} else if len(texts) > 0 {
 			chat.Content = strings.Join(texts, "")
 		}
-		if (message.Role == "user" && len(chat.ToolCalls) > 0) || (chat.Content == nil && len(chat.ToolCalls) == 0) {
+		if err := ValidateReasoningBlocks(chat.Reasoning); err != nil {
+			return request, err
+		}
+		if (message.Role == "user" && len(chat.ToolCalls) > 0) || (chat.Content == nil && len(chat.ToolCalls) == 0 && len(chat.Reasoning) == 0) {
 			return request, errors.New("invalid message content")
 		}
 		request.Messages = append(request.Messages, chat)
@@ -644,6 +687,34 @@ func BedrockFromChat(response ChatCompletionResponse) (BedrockConverseResponse, 
 			input = call.Function.Arguments
 		}
 		result.Output.Message.Content = append(result.Output.Message.Content, BedrockContentBlock{ToolUse: &BedrockToolUse{ID: call.ID, Name: call.Function.Name, Input: input}})
+	}
+	if err := ValidateReasoningBlocks(choice.Message.Reasoning); err != nil {
+		return result, err
+	}
+	for _, reasoning := range choice.Message.Reasoning {
+		block := BedrockContentBlock{ReasoningContent: &BedrockReasoningContent{}}
+		switch reasoning.Type {
+		case "thinking":
+			block.ReasoningContent.ReasoningText = &BedrockReasoningText{Text: reasoning.Thinking, Signature: reasoning.Signature}
+		case "redacted_thinking":
+			if _, err := base64.StdEncoding.DecodeString(reasoning.Data); err != nil {
+				return result, errors.New("invalid redacted reasoning data")
+			}
+			block.ReasoningContent.RedactedContent = reasoning.Data
+		}
+		position := len(result.Output.Message.Content)
+		if reasoning.Index != nil {
+			position = *reasoning.Index
+			if position > len(result.Output.Message.Content) {
+				position = len(result.Output.Message.Content)
+			}
+		}
+		result.Output.Message.Content = append(result.Output.Message.Content, BedrockContentBlock{})
+		copy(result.Output.Message.Content[position+1:], result.Output.Message.Content[position:])
+		result.Output.Message.Content[position] = block
+	}
+	if len(result.Output.Message.Content) > 128 {
+		return result, errors.New("chat response contains more than 128 Converse content blocks")
 	}
 	stopReason, found := bedrockNativeStopReason(choice.Message.NativeContent)
 	if !found {

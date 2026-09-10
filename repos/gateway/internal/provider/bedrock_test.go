@@ -52,6 +52,33 @@ func TestBedrockConverseMapsMessagesToolsAndUsage(t *testing.T) {
 	}
 }
 
+func TestBedrockConversePreservesReasoningHistoryAndResponse(t *testing.T) {
+	first, third := 0, 2
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{
+		{Role: "user", Content: "question"},
+		{Role: "assistant", Content: "answer", Reasoning: []openai.ReasoningBlock{
+			{Index: &first, Type: "thinking", Thinking: "private plan", Signature: "signed"},
+			{Index: &third, Type: "redacted_thinking", Data: "b3BhcXVl"},
+		}},
+	}}
+	converted, err := bedrockChatRequest(request)
+	if err != nil || len(converted.Messages[1].Content) != 3 || converted.Messages[1].Content[0].ReasoningContent.ReasoningText.Signature != "signed" || converted.Messages[1].Content[2].ReasoningContent.RedactedContent != "b3BhcXVl" {
+		t.Fatalf("request=%+v err=%v", converted, err)
+	}
+	var upstream bedrockResponse
+	upstream.Output.Message = bedrockMessage{Role: "assistant", Content: converted.Messages[1].Content}
+	upstream.StopReason = "end_turn"
+	upstream.Usage = &struct {
+		InputTokens  int `json:"inputTokens"`
+		OutputTokens int `json:"outputTokens"`
+		TotalTokens  int `json:"totalTokens"`
+	}{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}
+	response, err := bedrockToChat(upstream, "model")
+	if err != nil || len(response.Choices[0].Message.Reasoning) != 2 || *response.Choices[0].Message.Reasoning[0].Index != 0 || response.Choices[0].Message.Reasoning[1].Data != "b3BhcXVl" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
 func TestBedrockConverseMapsNamedToolChoice(t *testing.T) {
 	request := openai.ChatCompletionRequest{
 		Model: "model", Messages: []openai.Message{{Role: "user", Content: "weather"}},

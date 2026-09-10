@@ -188,3 +188,35 @@ func TestBedrockStreamWriterBuffersSplitToolUse(t *testing.T) {
 		t.Fatalf("messages=%+v", messages)
 	}
 }
+
+func TestBedrockStreamWriterEmitsReasoningContent(t *testing.T) {
+	destination := httptest.NewRecorder()
+	w := newBedrockStreamWriter(destination)
+	w.Header().Set("Content-Type", "text/event-stream")
+	response := openai.ChatCompletionResponse{
+		Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "answer", Reasoning: []openai.ReasoningBlock{
+			{Type: "thinking", Thinking: "private plan", Signature: "signed"},
+			{Type: "redacted_thinking", Data: "b3BhcXVl"},
+		}}, FinishReason: "stop"}},
+		Usage: openai.Usage{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5},
+	}
+	w.chatResult(response, false)
+	w.finish()
+	if w.err != nil {
+		t.Fatal(w.err)
+	}
+	messages := decodeAWSMessages(t, destination.Body.Bytes())
+	var reasoning []map[string]any
+	for _, message := range messages {
+		if message.headers[":event-type"] != "contentBlockDelta" {
+			continue
+		}
+		delta, _ := message.payload["delta"].(map[string]any)
+		if value, ok := delta["reasoningContent"].(map[string]any); ok {
+			reasoning = append(reasoning, value)
+		}
+	}
+	if len(reasoning) != 3 || reasoning[0]["text"] != "private plan" || reasoning[1]["signature"] != "signed" || reasoning[2]["redactedContent"] != "b3BhcXVl" {
+		t.Fatalf("reasoning=%+v messages=%+v", reasoning, messages)
+	}
+}

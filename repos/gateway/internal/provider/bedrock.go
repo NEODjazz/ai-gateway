@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,6 +36,17 @@ type bedrockContentBlock struct {
 	ToolUse          *bedrockToolUse          `json:"toolUse,omitempty"`
 	ToolResult       *bedrockToolResult       `json:"toolResult,omitempty"`
 	CitationsContent *bedrockCitationsContent `json:"citationsContent,omitempty"`
+	ReasoningContent *bedrockReasoningContent `json:"reasoningContent,omitempty"`
+}
+
+type bedrockReasoningContent struct {
+	ReasoningText   *bedrockReasoningText `json:"reasoningText,omitempty"`
+	RedactedContent string                `json:"redactedContent,omitempty"`
+}
+
+type bedrockReasoningText struct {
+	Text      string `json:"text"`
+	Signature string `json:"signature,omitempty"`
 }
 
 type bedrockCitationsContent struct {
@@ -223,6 +235,7 @@ func (Bedrock) SupportsResponses() bool             { return false }
 func (Bedrock) SupportsTools() bool                 { return true }
 func (Bedrock) SupportsVision() bool                { return true }
 func (Bedrock) SupportsBedrockNativeControls() bool { return true }
+func (Bedrock) SupportsReasoningBlocks() bool       { return true }
 
 func bedrockInvalid(param string) error {
 	return &Error{Class: FailureClientRequest, Provider: "bedrock", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: param, Err: fmt.Errorf("unsupported or invalid %s for Bedrock adapter", param)}
@@ -365,7 +378,7 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 	}
 	toolCalls := make(map[string]bool)
 	for _, message := range request.Messages {
-		if message.Name != "" || len(message.Annotations) > 0 || len(message.Reasoning) > 0 {
+		if message.Name != "" || len(message.Annotations) > 0 {
 			return result, bedrockInvalid("messages")
 		}
 		text := openai.ContentText(message.Content)
@@ -395,6 +408,39 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 				}
 				toolCalls[call.ID] = true
 				content = append(content, bedrockContentBlock{ToolUse: &bedrockToolUse{ID: call.ID, Name: call.Function.Name, Input: input}})
+			}
+			if len(message.Reasoning) > 0 {
+				if message.Role != "assistant" {
+					return result, bedrockInvalid("messages.reasoning")
+				}
+				if err := openai.ValidateReasoningBlocks(message.Reasoning); err != nil {
+					return result, bedrockInvalid("messages.reasoning")
+				}
+				for _, reasoning := range message.Reasoning {
+					block := bedrockContentBlock{ReasoningContent: &bedrockReasoningContent{}}
+					switch reasoning.Type {
+					case "thinking":
+						block.ReasoningContent.ReasoningText = &bedrockReasoningText{Text: reasoning.Thinking, Signature: reasoning.Signature}
+					case "redacted_thinking":
+						if _, err := base64.StdEncoding.DecodeString(reasoning.Data); err != nil {
+							return result, bedrockInvalid("messages.reasoning")
+						}
+						block.ReasoningContent.RedactedContent = reasoning.Data
+					}
+					position := len(content)
+					if reasoning.Index != nil {
+						position = *reasoning.Index
+						if position > len(content) {
+							position = len(content)
+						}
+					}
+					content = append(content, bedrockContentBlock{})
+					copy(content[position+1:], content[position:])
+					content[position] = block
+				}
+			}
+			if len(content) > 128 {
+				return result, bedrockInvalid("messages.content")
 			}
 			if len(content) == 0 {
 				return result, bedrockInvalid("messages.content")
@@ -617,9 +663,12 @@ func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletio
 	}
 	result.Usage = openai.Usage{PromptTokens: usage.InputTokens, CompletionTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens}
 	message := openai.Message{Role: "assistant"}
+	if len(response.Output.Message.Content) == 0 || len(response.Output.Message.Content) > 128 {
+		return result, errors.New("invalid Bedrock output content length")
+	}
 	var texts []string
 	offset := 0
-	for _, block := range response.Output.Message.Content {
+	for blockIndex, block := range response.Output.Message.Content {
 		fields := 0
 		if block.Text != "" {
 			fields++
@@ -644,6 +693,31 @@ func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletio
 			message.Annotations = append(message.Annotations, annotations...)
 			offset += utf8.RuneCountInString(text)
 		}
+		if block.ReasoningContent != nil {
+			fields++
+			reasoning := block.ReasoningContent
+			members := 0
+			index := blockIndex
+			converted := openai.ReasoningBlock{Index: &index}
+			if reasoning.ReasoningText != nil {
+				members++
+				converted.Type = "thinking"
+				converted.Thinking = reasoning.ReasoningText.Text
+				converted.Signature = reasoning.ReasoningText.Signature
+			}
+			if reasoning.RedactedContent != "" {
+				members++
+				if _, err := base64.StdEncoding.DecodeString(reasoning.RedactedContent); err != nil {
+					return result, errors.New("invalid Bedrock redacted reasoning content")
+				}
+				converted.Type = "redacted_thinking"
+				converted.Data = reasoning.RedactedContent
+			}
+			if members != 1 {
+				return result, errors.New("invalid Bedrock reasoning content union")
+			}
+			message.Reasoning = append(message.Reasoning, converted)
+		}
 		if block.Image != nil || block.Document != nil || block.ToolResult != nil || fields != 1 {
 			return result, errors.New("invalid Bedrock output content block")
 		}
@@ -651,10 +725,13 @@ func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletio
 	if err := openai.ValidateChatAnnotations(message.Annotations); err != nil {
 		return result, fmt.Errorf("invalid Bedrock citations: %w", err)
 	}
+	if err := openai.ValidateReasoningBlocks(message.Reasoning); err != nil {
+		return result, fmt.Errorf("invalid Bedrock reasoning content: %w", err)
+	}
 	if len(texts) > 0 {
 		message.Content = strings.Join(texts, "")
 	}
-	if message.Content == nil && len(message.ToolCalls) == 0 {
+	if message.Content == nil && len(message.ToolCalls) == 0 && len(message.Reasoning) == 0 {
 		return result, errors.New("Bedrock response contains no output")
 	}
 	finishReasons := map[string]string{

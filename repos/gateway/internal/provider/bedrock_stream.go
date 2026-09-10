@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -22,11 +23,15 @@ const (
 )
 
 type bedrockStreamBlock struct {
-	started   bool
-	tool      *bedrockToolUse
-	toolInput strings.Builder
-	text      strings.Builder
-	citations []bedrockCitation
+	started            bool
+	tool               *bedrockToolUse
+	toolInput          strings.Builder
+	text               strings.Builder
+	citations          []bedrockCitation
+	reasoningType      string
+	reasoningText      strings.Builder
+	reasoningSignature strings.Builder
+	redactedReasoning  strings.Builder
 }
 
 type bedrockStreamState struct {
@@ -219,7 +224,12 @@ func (s *bedrockStreamState) contentDelta(payload []byte, write ChatCompletionSt
 			ToolUse *struct {
 				Input string `json:"input"`
 			} `json:"toolUse"`
-			Citation *bedrockCitation `json:"citation"`
+			Citation         *bedrockCitation `json:"citation"`
+			ReasoningContent *struct {
+				Text            *string `json:"text"`
+				Signature       *string `json:"signature"`
+				RedactedContent *string `json:"redactedContent"`
+			} `json:"reasoningContent"`
 		} `json:"delta"`
 	}
 	if json.Unmarshal(payload, &event) != nil {
@@ -232,7 +242,7 @@ func (s *bedrockStreamState) contentDelta(payload []byte, write ChatCompletionSt
 	members := 0
 	if event.Delta.Text != nil {
 		members++
-		if block.tool != nil || len(*event.Delta.Text) > maxBedrockStreamBytes-s.written {
+		if block.tool != nil || block.reasoningType != "" || len(*event.Delta.Text) > maxBedrockStreamBytes-s.written {
 			return errors.New("invalid Bedrock text delta")
 		}
 		s.written += len(*event.Delta.Text)
@@ -255,10 +265,59 @@ func (s *bedrockStreamState) contentDelta(payload []byte, write ChatCompletionSt
 	}
 	if event.Delta.Citation != nil {
 		members++
-		if block.tool != nil || len(block.citations) >= 128 {
+		if block.tool != nil || block.reasoningType != "" || len(block.citations) >= 128 {
 			return errors.New("invalid Bedrock citation delta")
 		}
 		block.citations = append(block.citations, *event.Delta.Citation)
+	}
+	if event.Delta.ReasoningContent != nil {
+		members++
+		reasoning := event.Delta.ReasoningContent
+		reasoningMembers := 0
+		if reasoning.Text != nil {
+			reasoningMembers++
+			if block.tool != nil || block.text.Len() > 0 || len(block.citations) > 0 || block.reasoningType == "redacted_thinking" || len(*reasoning.Text) > maxBedrockStreamBytes-s.written {
+				return errors.New("invalid Bedrock reasoning text delta")
+			}
+			block.reasoningType = "thinking"
+			block.reasoningText.WriteString(*reasoning.Text)
+			s.written += len(*reasoning.Text)
+		}
+		if reasoning.Signature != nil {
+			reasoningMembers++
+			if block.tool != nil || block.text.Len() > 0 || len(block.citations) > 0 || block.reasoningType == "redacted_thinking" || len(*reasoning.Signature) > maxBedrockStreamBytes-s.written {
+				return errors.New("invalid Bedrock reasoning signature delta")
+			}
+			block.reasoningType = "thinking"
+			block.reasoningSignature.WriteString(*reasoning.Signature)
+			s.written += len(*reasoning.Signature)
+		}
+		if reasoning.RedactedContent != nil {
+			reasoningMembers++
+			if block.tool != nil || block.text.Len() > 0 || len(block.citations) > 0 || block.reasoningType != "" || len(*reasoning.RedactedContent) > maxBedrockStreamBytes-s.written {
+				return errors.New("invalid Bedrock redacted reasoning delta")
+			}
+			block.reasoningType = "redacted_thinking"
+			block.redactedReasoning.WriteString(*reasoning.RedactedContent)
+			s.written += len(*reasoning.RedactedContent)
+		}
+		if reasoningMembers != 1 {
+			return errors.New("Bedrock reasoning delta must contain one union member")
+		}
+		index := event.Index
+		delta := openai.ReasoningBlock{Index: &index, Type: block.reasoningType}
+		if reasoning.Text != nil {
+			delta.Thinking = *reasoning.Text
+		}
+		if reasoning.Signature != nil {
+			delta.Signature = *reasoning.Signature
+		}
+		if reasoning.RedactedContent != nil {
+			delta.Data = *reasoning.RedactedContent
+		}
+		if err := writeBedrockChatChunk(write, map[string]any{"id": "", "object": "chat.completion.chunk", "model": s.model, "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"reasoning": []openai.ReasoningBlock{delta}}, "finish_reason": nil}}}); err != nil {
+			return err
+		}
 	}
 	if members != 1 {
 		return errors.New("Bedrock content delta must contain one union member")
@@ -285,6 +344,27 @@ func (s *bedrockStreamState) contentStop(payload []byte) error {
 			return errors.New("invalid Bedrock streamed tool input")
 		}
 		s.response.Output.Message.Content = append(s.response.Output.Message.Content, bedrockContentBlock{ToolUse: block.tool})
+	} else if block.reasoningType != "" {
+		index := event.Index
+		reasoning := openai.ReasoningBlock{Index: &index, Type: block.reasoningType}
+		content := bedrockReasoningContent{}
+		if block.reasoningType == "thinking" {
+			reasoning.Thinking = block.reasoningText.String()
+			reasoning.Signature = block.reasoningSignature.String()
+			content.ReasoningText = &bedrockReasoningText{Text: reasoning.Thinking, Signature: reasoning.Signature}
+		} else {
+			reasoning.Data = block.redactedReasoning.String()
+			content.RedactedContent = reasoning.Data
+		}
+		if err := openai.ValidateReasoningBlocks([]openai.ReasoningBlock{reasoning}); err != nil {
+			return fmt.Errorf("invalid Bedrock streamed reasoning content: %w", err)
+		}
+		if reasoning.Type == "redacted_thinking" {
+			if _, err := base64.StdEncoding.DecodeString(reasoning.Data); err != nil {
+				return errors.New("invalid Bedrock streamed redacted reasoning content")
+			}
+		}
+		s.response.Output.Message.Content = append(s.response.Output.Message.Content, bedrockContentBlock{ReasoningContent: &content})
 	} else {
 		text := block.text.String()
 		if text == "" {

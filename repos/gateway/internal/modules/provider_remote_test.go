@@ -163,6 +163,17 @@ func TestScanPayloadIncludesToolArgumentsAndResponseFunctionOutput(t *testing.T)
 	}
 }
 
+func TestScanPayloadIncludesReasoningTextWithoutOpaqueData(t *testing.T) {
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "assistant", Reasoning: []openai.ReasoningBlock{
+		{Type: "thinking", Thinking: "private plan", Signature: "secret-signature"},
+		{Type: "redacted_thinking", Data: "b3BhcXVl"},
+	}}}}}
+	payload := scanPayload(&req)
+	if payload != "reasoning: private plan" || strings.Contains(payload, "secret-signature") || strings.Contains(payload, "b3BhcXVl") {
+		t.Fatalf("reasoning DLP projection=%q", payload)
+	}
+}
+
 func TestProviderRemoteModuleRequiresURLWhenEnabled(t *testing.T) {
 	module := NewProviderRemoteModule("av", true, "")
 	err := module.Handle(context.Background(), &RequestContext{

@@ -103,6 +103,40 @@ func TestBedrockConverseStreamConsumesToolUse(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseStreamPreservesReasoning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+		for _, event := range [][]byte{
+			bedrockTestEvent(t, "messageStart", map[string]any{"role": "assistant"}),
+			bedrockTestEvent(t, "contentBlockStart", map[string]any{"contentBlockIndex": 0, "start": map[string]any{}}),
+			bedrockTestEvent(t, "contentBlockDelta", map[string]any{"contentBlockIndex": 0, "delta": map[string]any{"reasoningContent": map[string]any{"text": "private plan"}}}),
+			bedrockTestEvent(t, "contentBlockDelta", map[string]any{"contentBlockIndex": 0, "delta": map[string]any{"reasoningContent": map[string]any{"signature": "signed"}}}),
+			bedrockTestEvent(t, "contentBlockStop", map[string]any{"contentBlockIndex": 0}),
+			bedrockTestEvent(t, "contentBlockStart", map[string]any{"contentBlockIndex": 1, "start": map[string]any{}}),
+			bedrockTestEvent(t, "contentBlockDelta", map[string]any{"contentBlockIndex": 1, "delta": map[string]any{"text": "answer"}}),
+			bedrockTestEvent(t, "contentBlockStop", map[string]any{"contentBlockIndex": 1}),
+			bedrockTestEvent(t, "contentBlockStart", map[string]any{"contentBlockIndex": 2, "start": map[string]any{}}),
+			bedrockTestEvent(t, "contentBlockDelta", map[string]any{"contentBlockIndex": 2, "delta": map[string]any{"reasoningContent": map[string]any{"redactedContent": "b3BhcXVl"}}}),
+			bedrockTestEvent(t, "contentBlockStop", map[string]any{"contentBlockIndex": 2}),
+			bedrockTestEvent(t, "messageStop", map[string]any{"stopReason": "end_turn"}),
+			bedrockTestEvent(t, "metadata", map[string]any{"usage": map[string]any{"inputTokens": 2, "outputTokens": 3, "totalTokens": 5}}),
+		} {
+			_, _ = w.Write(event)
+		}
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Stream: true, Messages: []openai.Message{{Role: "user", Content: "question"}}}
+	var payloads []string
+	response, err := NewBedrock(server.URL, "key").StreamChatCompletions(t.Context(), request, func(payload string) error { payloads = append(payloads, payload); return nil })
+	if err != nil || len(response.Choices[0].Message.Reasoning) != 2 || response.Choices[0].Message.Reasoning[0].Signature != "signed" || response.Choices[0].Message.Reasoning[1].Data != "b3BhcXVl" || openai.ContentText(response.Choices[0].Message.Content) != "answer" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+	joined := strings.Join(payloads, "\n")
+	if !strings.Contains(joined, `"thinking":"private plan"`) || !strings.Contains(joined, `"signature":"signed"`) || !strings.Contains(joined, `"data":"b3BhcXVl"`) {
+		t.Fatalf("reasoning stream chunks=%s", joined)
+	}
+}
+
 func TestBedrockEventStreamRejectsCorruptChecksumAndTruncation(t *testing.T) {
 	valid := bedrockTestEvent(t, "messageStart", map[string]any{"role": "assistant"})
 	corrupt := append([]byte(nil), valid...)
@@ -113,6 +147,14 @@ func TestBedrockEventStreamRejectsCorruptChecksumAndTruncation(t *testing.T) {
 				t.Fatal("invalid event stream accepted")
 			}
 		})
+	}
+}
+
+func TestBedrockConverseStreamRejectsMixedReasoningDelta(t *testing.T) {
+	state := bedrockStreamState{model: "model", blocks: map[int]*bedrockStreamBlock{0: {started: true}}}
+	err := state.contentDelta([]byte(`{"contentBlockIndex":0,"delta":{"reasoningContent":{"text":"plan","signature":"signed"}}}`), func(string) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "one union member") {
+		t.Fatalf("mixed reasoning union accepted: %v", err)
 	}
 }
 

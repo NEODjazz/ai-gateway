@@ -216,6 +216,33 @@ func (w *bedrockStreamWriter) complete(response openai.ChatCompletionResponse) e
 	if w.textBlock {
 		blockIndex = 1
 	}
+	for _, block := range native.Output.Message.Content {
+		if block.ReasoningContent == nil {
+			continue
+		}
+		if err := w.event("contentBlockStart", map[string]any{"contentBlockIndex": blockIndex, "start": map[string]any{}}); err != nil {
+			return err
+		}
+		reasoning := block.ReasoningContent
+		if reasoning.ReasoningText != nil {
+			if err := w.event("contentBlockDelta", map[string]any{"contentBlockIndex": blockIndex, "delta": map[string]any{"reasoningContent": map[string]any{"text": reasoning.ReasoningText.Text}}}); err != nil {
+				return err
+			}
+			if reasoning.ReasoningText.Signature != "" {
+				if err := w.event("contentBlockDelta", map[string]any{"contentBlockIndex": blockIndex, "delta": map[string]any{"reasoningContent": map[string]any{"signature": reasoning.ReasoningText.Signature}}}); err != nil {
+					return err
+				}
+			}
+		} else {
+			if err := w.event("contentBlockDelta", map[string]any{"contentBlockIndex": blockIndex, "delta": map[string]any{"reasoningContent": map[string]any{"redactedContent": reasoning.RedactedContent}}}); err != nil {
+				return err
+			}
+		}
+		if err := w.event("contentBlockStop", map[string]any{"contentBlockIndex": blockIndex}); err != nil {
+			return err
+		}
+		blockIndex++
+	}
 	for index := range w.tools {
 		if !w.toolSeen[index] {
 			continue

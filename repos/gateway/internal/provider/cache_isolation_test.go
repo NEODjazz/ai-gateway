@@ -164,3 +164,13 @@ func TestSemanticCacheHasGlobalByteLimit(t *testing.T) {
 		t.Fatalf("unbounded semantic cache: %d entries, %d bytes", count, bytes)
 	}
 }
+
+func TestReasoningHistoryBypassesSemanticCache(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{
+		{Role: "user", Content: "question"},
+		{Role: "assistant", Content: "answer", Reasoning: []openai.ReasoningBlock{{Type: "thinking", Thinking: "private plan", Signature: "signed"}}},
+	}}}
+	if _, _, eligible := semanticRequest(request, Endpoint{Name: "endpoint"}); eligible {
+		t.Fatal("semantic cache accepted signed reasoning history")
+	}
+}
