@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/vectorstate"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -58,6 +59,102 @@ func TestPostgresVectorStoreLifecycleIsolationAndPaginationIntegration(t *testin
 	}
 	if err := store.DeleteVectorStore(ctx, owner, "vs_integration_a"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPostgresVectorStoreFileLifecycleIsolationAndQuotaIntegration(t *testing.T) {
+	dsn := requiredPostgresTestDSN(t)
+	ctx := context.Background()
+	pool := prepareVectorStoreTable(t, ctx, dsn)
+	owner := "vector-files/" + time.Now().UTC().Format("20060102150405.000000000")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM gateway_vector_store_files WHERE owner_key=$1`, owner)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM gateway_files WHERE owner_key=$1`, owner)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM gateway_vector_stores WHERE owner_key=$1`, owner)
+		pool.Close()
+	})
+	store, err := NewPostgresStore(ctx, dsn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err = store.CreateVectorStore(ctx, vectorstate.VectorStore{ID: "vs_files", OwnerKey: owner, Name: "files", Metadata: map[string]string{}}, 1); err != nil {
+		t.Fatal(err)
+	}
+	for index, id := range []string{"file_vector_a", "file_vector_b", "file_vector_c"} {
+		content := []byte{byte('a' + index)}
+		_, err = store.Create(ctx, filestate.File{ID: id, OwnerKey: owner, Filename: id + ".txt", Purpose: "assistants", ContentType: "text/plain", Bytes: int64(len(content)), Content: content}, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "missing", 2); !errors.Is(err, vectorstate.ErrFileNotFound) {
+		t.Fatalf("missing file error=%v", err)
+	}
+	for _, id := range []string{"file_vector_a", "file_vector_b"} {
+		attached, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_files", id, 2)
+		if attachErr != nil || attached.Status != "completed" || attached.Bytes != 1 {
+			t.Fatalf("attached=%+v err=%v", attached, attachErr)
+		}
+	}
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_a", 2); !errors.Is(err, vectorstate.ErrConflict) {
+		t.Fatalf("duplicate error=%v", err)
+	}
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_c", 2); !errors.Is(err, vectorstate.ErrFileQuotaExceeded) {
+		t.Fatalf("quota error=%v", err)
+	}
+	if _, err = store.GetVectorStoreFile(ctx, owner+"/other", "vs_files", "file_vector_a"); !errors.Is(err, vectorstate.ErrFileNotFound) {
+		t.Fatalf("cross-owner error=%v", err)
+	}
+	first, after, err := store.ListVectorStoreFiles(ctx, owner, "vs_files", 1, "")
+	if err != nil || len(first) != 1 || after == "" {
+		t.Fatalf("first=%+v after=%q err=%v", first, after, err)
+	}
+	second, next, err := store.ListVectorStoreFiles(ctx, owner, "vs_files", 1, after)
+	if err != nil || len(second) != 1 || next != "" || second[0].FileID == first[0].FileID {
+		t.Fatalf("second=%+v next=%q err=%v", second, next, err)
+	}
+	vectorStore, err := store.GetVectorStore(ctx, owner, "vs_files")
+	if err != nil || vectorStore.FileCount != 2 || vectorStore.UsageBytes != 2 {
+		t.Fatalf("vector store totals=%+v err=%v", vectorStore, err)
+	}
+	if err = store.DeleteVectorStoreFile(ctx, owner, "vs_files", "file_vector_a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.GetVectorStoreFile(ctx, owner, "vs_files", "file_vector_a"); !errors.Is(err, vectorstate.ErrFileNotFound) {
+		t.Fatalf("deleted file error=%v", err)
+	}
+	if _, err = store.CreateVectorStore(ctx, vectorstate.VectorStore{ID: "vs_files_concurrent", OwnerKey: owner, Name: "concurrent", Metadata: map[string]string{}}, 2); err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var workers sync.WaitGroup
+	for _, fileID := range []string{"file_vector_a", "file_vector_c"} {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			_, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_files_concurrent", fileID, 1)
+			results <- attachErr
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	var succeeded, rejected int
+	for result := range results {
+		switch {
+		case result == nil:
+			succeeded++
+		case errors.Is(result, vectorstate.ErrFileQuotaExceeded):
+			rejected++
+		default:
+			t.Fatalf("unexpected concurrent attach result: %v", result)
+		}
+	}
+	if succeeded != 1 || rejected != 1 {
+		t.Fatalf("concurrent attach succeeded=%d rejected=%d", succeeded, rejected)
 	}
 }
 
@@ -131,6 +228,19 @@ func prepareVectorStoreTable(t *testing.T, ctx context.Context, dsn string) *pgx
 		expires_after_days INTEGER NOT NULL DEFAULT 0 CHECK (expires_after_days BETWEEN 0 AND 365),
 		created_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_active_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 		expires_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
+	if err == nil {
+		_, err = pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS gateway_files (
+			id TEXT PRIMARY KEY, owner_key TEXT NOT NULL, filename TEXT NOT NULL, purpose TEXT NOT NULL,
+			content_type TEXT NOT NULL, bytes BIGINT NOT NULL CHECK (bytes >= 0), content BYTEA NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(), CHECK (octet_length(content) = bytes))`)
+	}
+	if err == nil {
+		_, err = pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS gateway_vector_store_files (
+			vector_store_id TEXT NOT NULL REFERENCES gateway_vector_stores(id) ON DELETE CASCADE,
+			file_id TEXT NOT NULL REFERENCES gateway_files(id) ON DELETE CASCADE,
+			owner_key TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'completed', created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			PRIMARY KEY (vector_store_id,file_id))`)
+	}
 	if err != nil {
 		pool.Close()
 		t.Fatal(err)

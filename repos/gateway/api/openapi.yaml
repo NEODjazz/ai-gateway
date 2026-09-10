@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.210
+  version: 0.1.211
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -614,7 +614,7 @@ paths:
       operationId: createVectorStore
       tags: [Vector stores]
       summary: Create an owner-isolated durable vector store
-      description: Persists metadata and expiry policy in PostgreSQL after authentication and RPM admission. An atomic per-owner quota prevents concurrent creation from exceeding the configured limit. File ingestion and search use separate APIs and are not implied by creation.
+      description: Persists metadata and expiry policy in PostgreSQL after authentication and RPM admission. An atomic per-owner quota prevents concurrent creation from exceeding the configured limit. Files are attached through the dedicated file lifecycle API; search is a separate operation.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -704,6 +704,86 @@ paths:
               schema: {$ref: '#/components/schemas/VectorStoreDeletion'}
         default:
           description: Authentication or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/vector_stores/{id}/files:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+    post:
+      operationId: attachVectorStoreFile
+      tags: [Vector stores]
+      summary: Attach an owned file to an owned vector store
+      description: Atomically verifies file and vector-store ownership in PostgreSQL, enforces the configured per-store file quota, and refreshes last-active expiry.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/VectorStoreFileCreateRequest'}
+      responses:
+        '200':
+          description: Attached file
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VectorStoreFile'}
+        default:
+          description: Authentication, ownership, quota, validation, conflict, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    get:
+      operationId: listVectorStoreFiles
+      tags: [Vector stores]
+      summary: List files attached to an owned vector store
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: after, in: query, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200':
+          description: Cursor page of attached files
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VectorStoreFileList'}
+        default:
+          description: Authentication, ownership, validation, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/vector_stores/{id}/files/{file_id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+      - {name: file_id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+    get:
+      operationId: getVectorStoreFile
+      tags: [Vector stores]
+      summary: Get an attached file
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Attached file
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VectorStoreFile'}
+        default:
+          description: Authentication, ownership, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    delete:
+      operationId: deleteVectorStoreFile
+      tags: [Vector stores]
+      summary: Detach a file without deleting the owned file
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Detachment result
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VectorStoreFileDeletion'}
+        default:
+          description: Authentication, ownership, or storage failure
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -3531,7 +3611,7 @@ components:
         object: {type: string, const: vector_store}
         created_at: {type: integer, format: int64}
         name: {type: string, minLength: 1, maxLength: 256}
-        usage_bytes: {type: integer, format: int64, minimum: 0, const: 0}
+        usage_bytes: {type: integer, format: int64, minimum: 0}
         status: {type: string, enum: [completed, expired]}
         file_counts:
           type: object
@@ -3539,10 +3619,10 @@ components:
           required: [in_progress, completed, failed, cancelled, total]
           properties:
             in_progress: {type: integer, minimum: 0, const: 0}
-            completed: {type: integer, minimum: 0, const: 0}
+            completed: {type: integer, minimum: 0}
             failed: {type: integer, minimum: 0, const: 0}
             cancelled: {type: integer, minimum: 0, const: 0}
-            total: {type: integer, minimum: 0, const: 0}
+            total: {type: integer, minimum: 0}
         metadata:
           type: object
           maxProperties: 16
@@ -3567,6 +3647,46 @@ components:
       properties:
         id: {type: string}
         object: {type: string, const: vector_store.deleted}
+        deleted: {type: boolean, const: true}
+    VectorStoreFileCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [file_id]
+      properties:
+        file_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+    VectorStoreFile:
+      type: object
+      additionalProperties: false
+      required: [id, object, usage_bytes, created_at, vector_store_id, status, last_error, attributes]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 128}
+        object: {type: string, const: vector_store.file}
+        usage_bytes: {type: integer, format: int64, minimum: 0}
+        created_at: {type: integer, format: int64}
+        vector_store_id: {type: string, minLength: 1, maxLength: 128}
+        status: {type: string, const: completed}
+        last_error: {type: 'null'}
+        attributes:
+          type: object
+          additionalProperties: {type: string}
+          maxProperties: 16
+    VectorStoreFileList:
+      type: object
+      additionalProperties: false
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, items: {$ref: '#/components/schemas/VectorStoreFile'}}
+        first_id: {type: string}
+        last_id: {type: string}
+        has_more: {type: boolean}
+    VectorStoreFileDeletion:
+      type: object
+      additionalProperties: false
+      required: [id, object, deleted]
+      properties:
+        id: {type: string}
+        object: {type: string, const: vector_store.file.deleted}
         deleted: {type: boolean, const: true}
     BedrockConverseRequest:
       type: object

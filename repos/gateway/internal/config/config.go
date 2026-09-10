@@ -40,6 +40,7 @@ type FileConfig struct {
 
 type VectorStoreConfig struct {
 	OwnerQuota int
+	FileQuota  int
 }
 
 type GuardrailMonitorConfig struct {
@@ -175,6 +176,7 @@ func Load() Config {
 	fileMaxBytes := envInt64("FILE_MAX_BYTES", 32<<20)
 	fileOwnerQuotaBytes := envInt64("FILE_OWNER_QUOTA_BYTES", 1<<30)
 	vectorStoreOwnerQuota := envInt("VECTOR_STORE_OWNER_QUOTA", 1000)
+	vectorStoreFileQuota := envInt("VECTOR_STORE_FILE_QUOTA", 10000)
 	var semanticErr error
 	var guardrailMonitorErr error
 	var fileErr error
@@ -205,6 +207,9 @@ func Load() Config {
 	}
 	if vectorStoreOwnerQuota < 1 || vectorStoreOwnerQuota > 100000 {
 		vectorStoreErr = errors.New("vector store owner quota must be between 1 and 100000")
+	}
+	if vectorStoreFileQuota < 1 || vectorStoreFileQuota > 100000 {
+		vectorStoreErr = errors.Join(vectorStoreErr, errors.New("vector store file quota must be between 1 and 100000"))
 	}
 	return Config{
 		HTTP: HTTPConfig{
@@ -262,7 +267,7 @@ func Load() Config {
 			TTL:      time.Duration(guardrailMonitorTTLSeconds) * time.Second,
 		},
 		Files:        FileConfig{MaxBytes: fileMaxBytes, OwnerQuotaBytes: fileOwnerQuotaBytes},
-		VectorStores: VectorStoreConfig{OwnerQuota: vectorStoreOwnerQuota},
+		VectorStores: VectorStoreConfig{OwnerQuota: vectorStoreOwnerQuota, FileQuota: vectorStoreFileQuota},
 		InitErr:      errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr, vectorStoreErr),
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{

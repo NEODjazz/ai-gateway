@@ -132,6 +132,7 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("FILE_MAX_BYTES", "2048")
 	t.Setenv("FILE_OWNER_QUOTA_BYTES", "8192")
 	t.Setenv("VECTOR_STORE_OWNER_QUOTA", "25")
+	t.Setenv("VECTOR_STORE_FILE_QUOTA", "250")
 	t.Setenv("PROVIDERS_JSON", `[{"name":"group-a","type":"demo","model_aliases":{"fast":"upstream-fast"},"weight":3,"capabilities":["chat"],"max_parallel_requests":4,"queue_capacity":8,"queue_timeout_ms":250,"rate_limit_rpm":120,"rate_limit_tpm":64000,"shadow":true,"mirror_percentage":12.5,"mirror_timeout_ms":900}]`)
 	cfg := Load()
 	if cfg.Cache.TTLSeconds != 120 || cfg.Cache.MaxBytes != 2048 || !cfg.Provider.GuardrailPolicies["strict"].DLP || !cfg.Provider.GuardrailPolicies["strict"].AV {
@@ -143,7 +144,7 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	if cfg.Files.MaxBytes != 2048 || cfg.Files.OwnerQuotaBytes != 8192 {
 		t.Fatalf("unexpected file config: %+v", cfg.Files)
 	}
-	if cfg.VectorStores.OwnerQuota != 25 {
+	if cfg.VectorStores.OwnerQuota != 25 || cfg.VectorStores.FileQuota != 250 {
 		t.Fatalf("unexpected vector store config: %+v", cfg.VectorStores)
 	}
 	if cfg.Redis.Addr != "redis:6379" || cfg.Redis.DB != 2 || cfg.Redis.Prefix != "tenant-gateway" {
@@ -186,10 +187,11 @@ func TestLoadRejectsUnsafeFileLimits(t *testing.T) {
 }
 
 func TestLoadRejectsUnsafeVectorStoreQuota(t *testing.T) {
-	for _, quota := range []string{"0", "100001"} {
-		t.Setenv("VECTOR_STORE_OWNER_QUOTA", quota)
+	for _, test := range []struct{ owner, files string }{{"0", "1"}, {"100001", "1"}, {"1", "0"}, {"1", "100001"}} {
+		t.Setenv("VECTOR_STORE_OWNER_QUOTA", test.owner)
+		t.Setenv("VECTOR_STORE_FILE_QUOTA", test.files)
 		if cfg := Load(); cfg.InitErr == nil {
-			t.Fatalf("unsafe vector store quota accepted: %s", quota)
+			t.Fatalf("unsafe vector store quota accepted: owner=%s files=%s", test.owner, test.files)
 		}
 	}
 }

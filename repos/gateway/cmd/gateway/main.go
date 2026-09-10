@@ -145,7 +145,7 @@ func main() {
 		handler = handler.WithMCPCallStore(providerControlStore).
 			WithFileStore(providerControlStore, gateway.FileRuntimeConfig{MaxBytes: cfg.Files.MaxBytes, OwnerQuotaBytes: cfg.Files.OwnerQuotaBytes}).
 			WithSkillStore(providerControlStore).
-			WithVectorStore(providerControlStore, gateway.VectorStoreRuntimeConfig{OwnerQuota: cfg.VectorStores.OwnerQuota})
+			WithVectorStore(providerControlStore, gateway.VectorStoreRuntimeConfig{OwnerQuota: cfg.VectorStores.OwnerQuota, FileQuota: cfg.VectorStores.FileQuota})
 	}
 	if cfg.APIDocs.Enabled {
 		handler = handler.WithAPIDocs(cfg.APIDocs.TryItOutEnabled)

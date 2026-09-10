@@ -5,6 +5,20 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  019_gateway_vector_store_files.sql: |
+    CREATE TABLE IF NOT EXISTS gateway_vector_store_files (
+        vector_store_id TEXT NOT NULL REFERENCES gateway_vector_stores(id) ON DELETE CASCADE,
+        file_id TEXT NOT NULL REFERENCES gateway_files(id) ON DELETE CASCADE,
+        owner_key TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('completed')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (vector_store_id, file_id),
+        CHECK (length(vector_store_id) BETWEEN 1 AND 128),
+        CHECK (length(file_id) BETWEEN 1 AND 128),
+        CHECK (length(owner_key) BETWEEN 1 AND 256)
+    );
+    CREATE INDEX IF NOT EXISTS gateway_vector_store_files_owner_created_idx
+        ON gateway_vector_store_files (owner_key, vector_store_id, created_at DESC, file_id DESC);
   018_gateway_vector_stores.sql: |
     CREATE TABLE IF NOT EXISTS gateway_vector_stores (
         id TEXT PRIMARY KEY,

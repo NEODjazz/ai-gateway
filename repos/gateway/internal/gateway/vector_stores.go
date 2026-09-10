@@ -13,7 +13,10 @@ import (
 	"ai-gateway-gateway/internal/vectorstate"
 )
 
-type VectorStoreRuntimeConfig struct{ OwnerQuota int }
+type VectorStoreRuntimeConfig struct {
+	OwnerQuota int
+	FileQuota  int
+}
 
 type vectorStoreRequest struct {
 	Name         string                    `json:"name"`
@@ -246,7 +249,7 @@ func newVectorStoreID() (string, bool) {
 func publicVectorStore(store vectorstate.VectorStore) map[string]any {
 	result := map[string]any{
 		"id": store.ID, "object": "vector_store", "created_at": store.CreatedAt.Unix(), "name": store.Name,
-		"usage_bytes": 0, "status": store.Status, "file_counts": map[string]int{"in_progress": 0, "completed": 0, "failed": 0, "cancelled": 0, "total": 0},
+		"usage_bytes": store.UsageBytes, "status": store.Status, "file_counts": map[string]int{"in_progress": 0, "completed": store.FileCount, "failed": 0, "cancelled": 0, "total": store.FileCount},
 		"metadata": normalizedMetadata(store.Metadata), "last_active_at": store.LastActiveAt.Unix(),
 	}
 	if store.ExpiresAfter > 0 {

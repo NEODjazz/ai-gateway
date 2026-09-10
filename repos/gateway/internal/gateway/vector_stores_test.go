@@ -16,8 +16,96 @@ import (
 )
 
 type memoryVectorStore struct {
-	mu     sync.Mutex
-	stores map[string]vectorstate.VectorStore
+	mu             sync.Mutex
+	stores         map[string]vectorstate.VectorStore
+	files          map[string]vectorstate.File
+	availableFiles map[string]int64
+}
+
+func (s *memoryVectorStore) AttachVectorStoreFile(_ context.Context, owner, storeID, fileID string, quota int) (vectorstate.File, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	store, ok := s.stores[storeID]
+	if !ok || store.OwnerKey != owner {
+		return vectorstate.File{}, vectorstate.ErrNotFound
+	}
+	bytes, ok := s.availableFiles[fileID]
+	if !ok {
+		return vectorstate.File{}, vectorstate.ErrFileNotFound
+	}
+	key := storeID + "/" + fileID
+	if _, ok := s.files[key]; ok {
+		return vectorstate.File{}, vectorstate.ErrConflict
+	}
+	count := 0
+	for _, file := range s.files {
+		if file.OwnerKey == owner && file.VectorStoreID == storeID {
+			count++
+		}
+	}
+	if count >= quota {
+		return vectorstate.File{}, vectorstate.ErrFileQuotaExceeded
+	}
+	file := vectorstate.File{VectorStoreID: storeID, FileID: fileID, OwnerKey: owner, Status: "completed", Bytes: bytes, CreatedAt: time.Unix(200+int64(count), 0).UTC()}
+	s.files[key] = file
+	return file, nil
+}
+
+func (s *memoryVectorStore) ListVectorStoreFiles(_ context.Context, owner, storeID string, limit int, after string) ([]vectorstate.File, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	store, ok := s.stores[storeID]
+	if !ok || store.OwnerKey != owner {
+		return nil, "", vectorstate.ErrNotFound
+	}
+	files := make([]vectorstate.File, 0)
+	for _, file := range s.files {
+		if file.OwnerKey == owner && file.VectorStoreID == storeID {
+			files = append(files, file)
+		}
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].FileID > files[j].FileID })
+	start := 0
+	if after != "" {
+		start = -1
+		for index := range files {
+			if files[index].FileID == after {
+				start = index + 1
+			}
+		}
+		if start < 0 {
+			return nil, "", vectorstate.ErrFileNotFound
+		}
+	}
+	files = files[start:]
+	next := ""
+	if len(files) > limit {
+		next = files[limit-1].FileID
+		files = files[:limit]
+	}
+	return files, next, nil
+}
+
+func (s *memoryVectorStore) GetVectorStoreFile(_ context.Context, owner, storeID, fileID string) (vectorstate.File, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	file, ok := s.files[storeID+"/"+fileID]
+	if !ok || file.OwnerKey != owner {
+		return vectorstate.File{}, vectorstate.ErrFileNotFound
+	}
+	return file, nil
+}
+
+func (s *memoryVectorStore) DeleteVectorStoreFile(_ context.Context, owner, storeID, fileID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := storeID + "/" + fileID
+	file, ok := s.files[key]
+	if !ok || file.OwnerKey != owner {
+		return vectorstate.ErrFileNotFound
+	}
+	delete(s.files, key)
+	return nil
 }
 
 func (s *memoryVectorStore) CreateVectorStore(_ context.Context, store vectorstate.VectorStore, quota int) (vectorstate.VectorStore, error) {
@@ -52,6 +140,12 @@ func (s *memoryVectorStore) ListVectorStores(_ context.Context, owner string, li
 	values := make([]vectorstate.VectorStore, 0, len(s.stores))
 	for _, store := range s.stores {
 		if store.OwnerKey == owner {
+			for _, file := range s.files {
+				if file.OwnerKey == owner && file.VectorStoreID == store.ID {
+					store.FileCount++
+					store.UsageBytes += file.Bytes
+				}
+			}
 			values = append(values, store)
 		}
 	}
@@ -83,6 +177,12 @@ func (s *memoryVectorStore) GetVectorStore(_ context.Context, owner, id string) 
 	store, exists := s.stores[id]
 	if !exists || store.OwnerKey != owner {
 		return vectorstate.VectorStore{}, vectorstate.ErrNotFound
+	}
+	for _, file := range s.files {
+		if file.OwnerKey == owner && file.VectorStoreID == id {
+			store.FileCount++
+			store.UsageBytes += file.Bytes
+		}
 	}
 	return store, nil
 }
@@ -160,6 +260,79 @@ func TestVectorStoreHTTPLifecycleAndIsolation(t *testing.T) {
 	deleted := callVectorStore(handler, http.MethodDelete, "/v1/vector_stores/"+id, "")
 	if deleted.Code != http.StatusOK || !strings.Contains(deleted.Body.String(), `"deleted":true`) {
 		t.Fatalf("delete status=%d body=%s", deleted.Code, deleted.Body.String())
+	}
+}
+
+func TestVectorStoreFileHTTPLifecyclePaginationAndIsolation(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	store := &memoryVectorStore{
+		stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: owner, Name: "docs", Status: "completed"}},
+		files:  map[string]vectorstate.File{}, availableFiles: map[string]int64{"file_one": 11, "file_two": 22},
+	}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}}), modelsProvider{}).
+		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 2}))
+	for _, fileID := range []string{"file_one", "file_two"} {
+		response := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files", `{"file_id":"`+fileID+`"}`)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"object":"vector_store.file"`) || !strings.Contains(response.Body.String(), fileID) {
+			t.Fatalf("attach %s status=%d body=%s", fileID, response.Code, response.Body.String())
+		}
+	}
+	listed := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files?limit=1", "")
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"has_more":true`) || !strings.Contains(listed.Body.String(), `"file_two"`) {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+	got := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_one", "")
+	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"usage_bytes":11`) {
+		t.Fatalf("get status=%d body=%s", got.Code, got.Body.String())
+	}
+	parent := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned", "")
+	if parent.Code != http.StatusOK || !strings.Contains(parent.Body.String(), `"usage_bytes":33`) || !strings.Contains(parent.Body.String(), `"completed":2`) || !strings.Contains(parent.Body.String(), `"total":2`) {
+		t.Fatalf("parent totals status=%d body=%s", parent.Code, parent.Body.String())
+	}
+	other := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "other"}}), modelsProvider{}).
+		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 2}))
+	if response := callVectorStore(other, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_one", ""); response.Code != http.StatusNotFound {
+		t.Fatalf("cross-owner get status=%d body=%s", response.Code, response.Body.String())
+	}
+	deleted := callVectorStore(handler, http.MethodDelete, "/v1/vector_stores/vs_owned/files/file_one", "")
+	if deleted.Code != http.StatusOK || !strings.Contains(deleted.Body.String(), `"deleted":true`) {
+		t.Fatalf("delete status=%d body=%s", deleted.Code, deleted.Body.String())
+	}
+	if response := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_one", ""); response.Code != http.StatusNotFound {
+		t.Fatalf("deleted get status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestVectorStoreFilesRejectInvalidMissingDuplicateAndQuota(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	store := &memoryVectorStore{
+		stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: owner, Name: "docs", Status: "completed"}},
+		files:  map[string]vectorstate.File{}, availableFiles: map[string]int64{"file_one": 1, "file_two": 2},
+	}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}}), modelsProvider{}).
+		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 1}))
+	for _, test := range []struct {
+		path, body string
+		code       int
+	}{
+		{"/v1/vector_stores/vs_owned/files", `{}`, http.StatusBadRequest},
+		{"/v1/vector_stores/vs_owned/files", `{"file_id":"missing"}`, http.StatusNotFound},
+		{"/v1/vector_stores/missing/files", `{"file_id":"file_one"}`, http.StatusNotFound},
+		{"/v1/vector_stores/vs_owned/files?extra=1", `{"file_id":"file_one"}`, http.StatusBadRequest},
+	} {
+		response := callVectorStore(handler, http.MethodPost, test.path, test.body)
+		if response.Code != test.code {
+			t.Fatalf("path=%s status=%d body=%s", test.path, response.Code, response.Body.String())
+		}
+	}
+	if response := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files", `{"file_id":"file_one"}`); response.Code != http.StatusOK {
+		t.Fatalf("first attach status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files", `{"file_id":"file_one"}`); response.Code != http.StatusConflict {
+		t.Fatalf("duplicate status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files", `{"file_id":"file_two"}`); response.Code != http.StatusTooManyRequests {
+		t.Fatalf("quota status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
