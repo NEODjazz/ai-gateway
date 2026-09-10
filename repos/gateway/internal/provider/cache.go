@@ -104,6 +104,9 @@ func providerCacheKey(kind string, req modules.RequestContext) string {
 	if kind == "chat" && request.RequireMatchedStop {
 		kind = "chat-matched-stop"
 	}
+	if kind == "chat" {
+		value = chatCacheKeyValue(request)
+	}
 	if kind == "responses" && req.ResponseRequest != nil {
 		responseRequest := *req.ResponseRequest
 		if logicalModel := req.Metadata["provider.requested_model"]; logicalModel != "" {
@@ -126,8 +129,31 @@ func providerCacheKey(kind string, req modules.RequestContext) string {
 	if err != nil {
 		return ""
 	}
-	sum := sha256.Sum256(append([]byte("v2\x00"+kind+"\x00"+tenant+"\x00"), body...))
+	sum := sha256.Sum256(append([]byte("v3\x00"+kind+"\x00"+tenant+"\x00"), body...))
 	return hex.EncodeToString(sum[:])
+}
+
+// chatCacheKeyValue includes provider-native request state hidden from the
+// public Chat JSON shape. Every new internal field that changes provider output
+// must be added here before it is enabled for cached execution.
+func chatCacheKeyValue(request openai.ChatCompletionRequest) any {
+	nativeContent := make([][]json.RawMessage, len(request.Messages))
+	for index := range request.Messages {
+		nativeContent[index] = request.Messages[index].NativeContent
+	}
+	return struct {
+		Request                   openai.ChatCompletionRequest `json:"request"`
+		NativeContent             [][]json.RawMessage          `json:"native_content,omitempty"`
+		NativeInputTokens         int                          `json:"native_input_tokens,omitempty"`
+		BedrockServiceTier        string                       `json:"bedrock_service_tier,omitempty"`
+		BedrockPerformanceLatency string                       `json:"bedrock_performance_latency,omitempty"`
+	}{
+		Request:                   request,
+		NativeContent:             nativeContent,
+		NativeInputTokens:         request.NativeInputTokens,
+		BedrockServiceTier:        request.BedrockServiceTier,
+		BedrockPerformanceLatency: request.BedrockPerformanceLatency,
+	}
 }
 
 func decodeCached[T any](payload []byte) (T, bool) {

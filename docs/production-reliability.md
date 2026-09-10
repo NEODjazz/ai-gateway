@@ -33,6 +33,13 @@ The external `X-Request-ID` remains a correlation identifier. Every inference ex
 
 Exact and semantic response cache scopes include credential ID, user, team, organization, sorted roles/tags/model/tool grants, evaluated access-group grants and effective policy metadata (`policy.*`, `provider.modules.*`, `provider.guardrail.*`). Scope data is hashed. Requests without a credential do not use the response cache. There is no implicit sharing between members of a team. Changes to effective policy cause cache misses; old entries expire normally. Exact cache uses a new key namespace. Responses affinity is isolated by credential and user.
 
+Chat cache identity also includes validated provider-native message blocks, their
+reserved input size, Bedrock service tier and Bedrock latency selection. Semantic
+cache rejects opaque native message blocks because their meaning cannot be
+represented by the text embedding. Provider-native controls remain part of the
+semantic settings fingerprint. This prevents requests with different documents
+or execution controls from sharing a cached result.
+
 Global limits apply per in-memory store instance, shared across its request scopes:
 
 | Store | Entry limit | Data limit | Reclamation |

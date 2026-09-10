@@ -4,6 +4,7 @@ import (
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -47,6 +48,40 @@ func TestCacheIsolationIncludesIdentityAndEffectivePolicy(t *testing.T) {
 	}
 	if affinityKey(base, "response") == affinityKey(modules.RequestContext{CredentialID: "other", UserID: base.UserID, TeamID: base.TeamID}, "response") {
 		t.Fatal("affinity shared across credentials")
+	}
+}
+
+func TestCacheIsolationIncludesNativeChatState(t *testing.T) {
+	base := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}}
+	variants := []struct {
+		name   string
+		change func(*openai.ChatCompletionRequest)
+	}{
+		{"native input", func(request *openai.ChatCompletionRequest) {
+			request.Messages[0].NativeContent = []json.RawMessage{json.RawMessage(`{"document":{"name":"A","source":{"bytes":"QQ=="}}}`)}
+		}},
+		{"native token reserve", func(request *openai.ChatCompletionRequest) { request.NativeInputTokens = 1 }},
+		{"service tier", func(request *openai.ChatCompletionRequest) { request.BedrockServiceTier = "priority" }},
+		{"performance latency", func(request *openai.ChatCompletionRequest) { request.BedrockPerformanceLatency = "optimized" }},
+	}
+	for _, variant := range variants {
+		t.Run(variant.name, func(t *testing.T) {
+			changed := base
+			changed.Request.Messages = append([]openai.Message(nil), base.Request.Messages...)
+			variant.change(&changed.Request)
+			if providerCacheKey("chat", base) == providerCacheKey("chat", changed) {
+				t.Fatal("exact cache shared across native request state")
+			}
+			baseScope, _, baseEligible := semanticRequest(base, Endpoint{Name: "endpoint"})
+			changedScope, _, changedEligible := semanticRequest(changed, Endpoint{Name: "endpoint"})
+			if variant.name == "native input" {
+				if !baseEligible || changedEligible {
+					t.Fatalf("native content semantic eligibility: base=%v changed=%v", baseEligible, changedEligible)
+				}
+			} else if !baseEligible || !changedEligible || baseScope == changedScope {
+				t.Fatal("semantic cache shared across native controls")
+			}
+		})
 	}
 }
 func TestMemoryCacheAndAffinityBounded(t *testing.T) {

@@ -372,6 +372,10 @@ credential/identity, public model, normalized request и policy context. Semanti
 cache применяется только к поддерживаемому non-streaming text-only chat и
 использует отдельный embedding credential, а не клиентский Bearer.
 
+Exact cache также учитывает native message blocks, native input reserve,
+Bedrock service tier и latency selection. Opaque native blocks отключают
+semantic cache; native controls входят в его settings fingerprint.
+
 Gateway cache hit и provider prompt-cache tokens — разные метрики. Billing и
 Logs сохраняют `cache_status`/`cache_kind`, а также отдельные
 `cache_read_input_tokens` и `cache_write_input_tokens`.
