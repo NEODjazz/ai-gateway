@@ -158,6 +158,8 @@ responses и embeddings flows, но не является неявным opt-in 
 
 `POST /v1/moderations` принимает одиночный текст, batch строк либо массив `text`/`image_url` частей. Пустые, смешанные и неизвестные вложенные формы отклоняются до provider call. Запрос проходит общие authentication, access, TPM, guardrail, retry и billing стадии. Routing требует явную deployment и model capability `moderation`; при отсутствии model используется `omni-moderation-latest`. Provider response ограничен по размеру и проверяется на число результатов, диапазон scores, одинаковые category keys, допустимые input types и согласованность общего `flagged`. Так как публичный ответ не содержит token usage, billing commit использует консервативную оценку входного текста и помечает usage как estimated. При включенном AV remote image URL отклоняется fail-closed, поскольку gateway не загружает внешний контент от имени scanner; проверенные data image URL передаются scanner как bounded attachment.
 
+`POST /v1/ocr` принимает HTTPS/data URL либо `document: {"type":"file","file_id":"file_..."}`. Ссылка на файл разрешается только внутри пары authenticated credential и user, затем содержимое проверяется по MIME, сигнатуре и лимиту 16 MiB и преобразуется во внутренний data URL до DLP/AV и provider pipeline. Отсутствующий или чужой файл возвращает одинаковый `404`; неподдерживаемый либо поврежденный файл не передается provider adapter.
+
 Native Mistral moderation принимает только строку или массив строк и отклоняет
 структурированные text/image parts до provider modules, billing и upstream.
 Bounded `metadata` передается native Mistral Moderations; остальные adapters

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +34,19 @@ func TestMistralOCRContract(t *testing.T) {
 	response, err := NewMistral(server.URL+"/v1", "secret", false).OCR(t.Context(), request)
 	if err != nil || response.Model != "ocr-upstream-2026" || response.UsageInfo.PagesProcessed != 2 || len(response.Pages) != 2 {
 		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestMistralOCRRejectsUnresolvedFileReference(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("unresolved file reference reached provider")
+	}))
+	defer server.Close()
+	client := NewMistral(server.URL, "key", false)
+	_, err := client.OCR(context.Background(), openai.OCRRequest{Model: "ocr", Document: openai.OCRDocument{Type: "file", FileID: "file_input"}})
+	var providerErr *Error
+	if !errors.As(err, &providerErr) || providerErr.Class != FailureClientRequest {
+		t.Fatalf("error=%v", err)
 	}
 }
 

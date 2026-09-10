@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.184
+  version: 0.1.185
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -614,7 +614,7 @@ paths:
       operationId: createOCR
       tags: [Inference]
       summary: Extract text and structured content from a document or image
-      description: Routes to an explicitly OCR-capable native deployment. Applies strict document, page-selection and annotation validation, model authorization, RPM/TPM admission, bounded provider response validation, retries and exact processed-page settlement. Inline PDF and image data are projected to configured antivirus scanning; annotation prompts are projected to text policy modules.
+      description: Routes to an explicitly OCR-capable native deployment. Applies strict document, page-selection and annotation validation, model authorization, RPM/TPM admission, bounded provider response validation, retries and exact processed-page settlement. Inline PDF and image data, including owner-scoped file references, are projected to configured antivirus scanning; annotation prompts are projected to text policy modules.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -5223,6 +5223,12 @@ components:
               properties:
                 type: {type: string, const: image_url}
                 image_url: {type: string, maxLength: 25165824, description: "HTTPS URL without credentials or fragment, or a supported base64 image data URL with at most 16 MiB decoded data."}
+            - type: object
+              additionalProperties: false
+              required: [type, file_id]
+              properties:
+                type: {type: string, const: file}
+                file_id: {type: string, pattern: '^file_[A-Za-z0-9_.-]+$', maxLength: 128, description: "An existing file owned by the authenticated credential and user. PDF, JPEG, PNG, GIF and WebP are supported up to 16 MiB."}
         pages:
           oneOf:
             - {type: string, minLength: 1, maxLength: 16384, description: "Zero-based comma-separated pages and inclusive ranges such as 0,2-4."}

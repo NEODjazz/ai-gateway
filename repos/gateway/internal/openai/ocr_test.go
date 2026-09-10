@@ -77,3 +77,29 @@ func TestOCRRequestRejectsInvalidInputs(t *testing.T) {
 		}
 	}
 }
+
+func TestOCRFileReferenceValidation(t *testing.T) {
+	valid := OCRRequest{Model: "ocr", Document: OCRDocument{Type: "file", FileID: "file_abc-123"}}
+	if message := valid.Validate(); message != "" {
+		t.Fatalf("valid file reference rejected: %s", message)
+	}
+	if valid.ReservePages() != MaxOCRPages {
+		t.Fatalf("file reserve=%d", valid.ReservePages())
+	}
+	for _, document := range []OCRDocument{
+		{Type: "file"},
+		{Type: "file", FileID: "other_abc"},
+		{Type: "file", FileID: "file_bad/id"},
+		{Type: "file", FileID: "file_ok", DocumentURL: "https://example.test/a.pdf"},
+		{Type: "document_url", DocumentURL: "https://example.test/a.pdf", FileID: "file_extra"},
+	} {
+		request := valid
+		request.Document = document
+		if message := request.Validate(); message == "" {
+			t.Fatalf("invalid document accepted: %+v", document)
+		}
+	}
+	if _, err := valid.Document.Attachment(); err == nil {
+		t.Fatal("unresolved file reference produced an attachment")
+	}
+}

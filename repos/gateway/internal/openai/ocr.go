@@ -25,6 +25,7 @@ type OCRDocument struct {
 	Type        string `json:"type"`
 	DocumentURL string `json:"document_url,omitempty"`
 	ImageURL    string `json:"image_url,omitempty"`
+	FileID      string `json:"file_id,omitempty"`
 }
 
 type OCRRequest struct {
@@ -119,6 +120,9 @@ func (r OCRRequest) InputTokens() int {
 }
 
 func (d OCRDocument) Attachment() (*ImageAttachment, error) {
+	if d.Type == "file" {
+		return nil, errors.New("file document must be resolved before inference")
+	}
 	value := d.value()
 	if !strings.HasPrefix(value, "data:") {
 		return nil, nil
@@ -153,10 +157,16 @@ func (d OCRDocument) Attachment() (*ImageAttachment, error) {
 }
 
 func (d OCRDocument) validate() error {
-	if d.Type != "document_url" && d.Type != "image_url" {
-		return errors.New("document.type must be document_url or image_url")
+	if d.Type != "document_url" && d.Type != "image_url" && d.Type != "file" {
+		return errors.New("document.type must be document_url, image_url, or file")
 	}
-	if d.Type == "document_url" && (d.DocumentURL == "" || d.ImageURL != "") || d.Type == "image_url" && (d.ImageURL == "" || d.DocumentURL != "") {
+	if d.Type == "file" {
+		if d.DocumentURL != "" || d.ImageURL != "" || !validOCRFileID(d.FileID) {
+			return errors.New("file_id must match document.type")
+		}
+		return nil
+	}
+	if d.FileID != "" || d.Type == "document_url" && (d.DocumentURL == "" || d.ImageURL != "") || d.Type == "image_url" && (d.ImageURL == "" || d.DocumentURL != "") {
 		return errors.New("document URL must match document.type")
 	}
 	value := d.value()
@@ -172,6 +182,19 @@ func (d OCRDocument) validate() error {
 		return errors.New("document URL must be an HTTPS URL without credentials or fragment")
 	}
 	return nil
+}
+
+func validOCRFileID(value string) bool {
+	if !strings.HasPrefix(value, "file_") || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '_' || character == '-' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (d OCRDocument) value() string {

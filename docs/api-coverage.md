@@ -39,12 +39,11 @@ availability is not inferred from these tests.
 | Files | Durable PostgreSQL upload/list/metadata/content/delete lifecycle, bounded multipart input, credential-and-user ownership, cursor pagination, RPM admission and atomic per-owner byte quotas | Purpose-specific retention policies and object-storage backends when scale requires them |
 | Realtime | Not implemented | Session authorization, WebSocket lifecycle, quotas and usage settlement |
 | Videos | Not implemented | Durable owned jobs, polling/cancellation and artifact accounting |
-| OCR | Authenticated `/v1/ocr` for bounded HTTPS or inline PDF/image input, zero-based page selection, annotation options, DLP/AV projection, explicit native Mistral capability routing, bounded response validation, retries and exact processed-page settlement | Owner-scoped file references and additional native provider adapters |
+| OCR | Authenticated `/v1/ocr` for bounded HTTPS, inline PDF/image input and owner-scoped durable file references; zero-based page selection, annotation options, DLP/AV projection, explicit native Mistral capability routing, bounded response validation, retries and exact processed-page settlement | Additional native provider adapters |
 | Moderation | Text batches and text/image input through the shared authentication, policy, routing, retry, observability and billing lifecycle; compatible and native Mistral provider adapters | Additional native provider protocols and credentialed image conformance tests |
 | Apply guardrail | Authenticated public execution with attached-policy authorization, access groups, RPM/TPM, fail-closed durable audit, bounded DLP/AV scans and metadata-only monitoring | Additional scanner protocols when justified by configured policy needs |
 | Batches | Not implemented | Durable jobs, files/results, quotas and idempotent batch settlement |
 | Fine tuning | Not implemented | Owned training jobs, model ownership and training accounting |
-| Files | Not implemented | Owner-scoped upload/content/delete, retention and storage quotas |
 | Assistants | Not implemented | Assistant/thread/run ownership and lifecycle |
 | Search | Authenticated `/v1/search` for one or bounded batched queries, domain/country filters, explicit capability routing, compatible transport, bounded result validation, retries and per-query search-unit settlement | Additional native provider adapters, tiered result pricing and managed search-tool registry |
 | Skills | Not implemented | Versioned registry, owner isolation and provider execution contract |

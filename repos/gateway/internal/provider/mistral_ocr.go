@@ -18,6 +18,9 @@ func (p Mistral) OCR(ctx context.Context, request openai.OCRRequest) (openai.OCR
 	if message := request.Validate(); message != "" {
 		return openai.OCRResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
+	if request.Document.Type == "file" {
+		return openai.OCRResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New("OCR file reference was not resolved")}
+	}
 	payload, err := json.Marshal(struct {
 		Model                       string                 `json:"model"`
 		Document                    openai.OCRDocument     `json:"document"`

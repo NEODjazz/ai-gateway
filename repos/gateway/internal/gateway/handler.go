@@ -1375,6 +1375,25 @@ func (h Handler) OCR(w http.ResponseWriter, r *http.Request) {
 		Request:    openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model},
 		Metadata:   map[string]string{"gateway.api_type": "ocr"},
 	}
+	if request.Document.Type == "file" {
+		identity := reqCtx
+		if err := h.pipeline.RunAuthentication(r.Context(), &identity); err != nil {
+			if errors.Is(err, modules.ErrUnauthorized) {
+				writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+				return
+			}
+			writeError(w, http.StatusBadGateway, "module_failed", "authentication failed")
+			return
+		}
+		resolved, err := h.resolveOCRFile(r.Context(), fileOwnerKey(identity), request.Document.FileID)
+		if err != nil {
+			writeOCRFileError(w, err)
+			return
+		}
+		request.Document = resolved
+		reqCtx.OCRRequest = &request
+		reqCtx.InputPages = request.ReservePages()
+	}
 	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
 		if errors.Is(err, modules.ErrUnauthorized) {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
@@ -1390,6 +1409,10 @@ func (h Handler) OCR(w http.ResponseWriter, r *http.Request) {
 	}
 	request = *reqCtx.OCRRequest
 	reqCtx.InputPages = request.ReservePages()
+	if request.Document.Type == "file" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module returned an unresolved OCR file reference")
+		return
+	}
 	if message := request.Validate(); message != "" {
 		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid OCR request")
 		return
