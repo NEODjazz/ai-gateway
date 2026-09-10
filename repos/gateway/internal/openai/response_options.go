@@ -1,6 +1,9 @@
 package openai
 
-import "unicode/utf8"
+import (
+	"math"
+	"unicode/utf8"
+)
 
 // Validate checks provider-independent Responses generation options.
 func (r ResponseRequest) Validate() string {
@@ -30,6 +33,14 @@ func (r ResponseRequest) Validate() string {
 	}
 	if r.Truncation != nil && *r.Truncation != "auto" && *r.Truncation != "disabled" {
 		return "truncation must be auto or disabled"
+	}
+	for _, penalty := range []*float64{r.FrequencyPenalty, r.PresencePenalty} {
+		if penalty != nil && (math.IsNaN(*penalty) || math.IsInf(*penalty, 0) || *penalty < -2 || *penalty > 2) {
+			return "frequency_penalty and presence_penalty must be between -2 and 2"
+		}
+	}
+	if r.MaxToolCalls != nil && (*r.MaxToolCalls < 1 || *r.MaxToolCalls > 1000) {
+		return "max_tool_calls must be between 1 and 1000"
 	}
 	return ""
 }

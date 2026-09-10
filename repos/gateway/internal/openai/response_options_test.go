@@ -2,18 +2,32 @@ package openai
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 )
 
 func TestResponseOptionsValidation(t *testing.T) {
-	for _, body := range []string{`{"max_output_tokens":1}`, `{"max_tokens":1}`, `{"max_output_tokens":null,"max_tokens":null}`, `{}`, `{"top_logprobs":null,"truncation":null}`, `{"top_logprobs":0,"truncation":"auto"}`, `{"top_logprobs":20,"truncation":"disabled"}`, `{"service_tier":"priority"}`, `{"text":{"verbosity":"low"}}`, `{"text":{"verbosity":null}}`} {
+	for _, body := range []string{`{"max_output_tokens":1}`, `{"max_tokens":1}`, `{"max_output_tokens":null,"max_tokens":null}`, `{}`, `{"top_logprobs":null,"truncation":null}`, `{"top_logprobs":0,"truncation":"auto"}`, `{"top_logprobs":20,"truncation":"disabled"}`, `{"service_tier":"priority"}`, `{"text":{"verbosity":"low"}}`, `{"text":{"verbosity":null}}`, `{"frequency_penalty":-2,"presence_penalty":2,"max_tool_calls":1000}`} {
 		var request ResponseRequest
 		if err := json.Unmarshal([]byte(body), &request); err != nil {
 			t.Fatal(err)
 		}
 		if message := request.Validate(); message != "" {
 			t.Fatalf("%s: %s", body, message)
+		}
+	}
+}
+
+func TestResponseRejectsInvalidGenerationControls(t *testing.T) {
+	tooFew, tooMany := 0, 1001
+	below, above, nan := -2.1, 2.1, math.NaN()
+	for _, request := range []ResponseRequest{
+		{FrequencyPenalty: &below}, {FrequencyPenalty: &nan}, {PresencePenalty: &above},
+		{MaxToolCalls: &tooFew}, {MaxToolCalls: &tooMany},
+	} {
+		if request.Validate() == "" {
+			t.Fatalf("invalid controls accepted: %+v", request)
 		}
 	}
 }

@@ -522,6 +522,9 @@ type ResponseRequest struct {
 	MaxTokens         *int               `json:"max_tokens,omitempty"`
 	Temperature       *float64           `json:"temperature,omitempty"`
 	TopP              *float64           `json:"top_p,omitempty"`
+	FrequencyPenalty  *float64           `json:"frequency_penalty,omitempty"`
+	PresencePenalty   *float64           `json:"presence_penalty,omitempty"`
+	MaxToolCalls      *int               `json:"max_tool_calls,omitempty"`
 }
 
 type ResponseInputTokenCountRequest struct {

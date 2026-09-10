@@ -66,6 +66,9 @@ type openAICompatibleResponseRequest struct {
 	MaxOutputTokens   *int                      `json:"max_output_tokens,omitempty"`
 	Temperature       *float64                  `json:"temperature,omitempty"`
 	TopP              *float64                  `json:"top_p,omitempty"`
+	FrequencyPenalty  *float64                  `json:"frequency_penalty,omitempty"`
+	PresencePenalty   *float64                  `json:"presence_penalty,omitempty"`
+	MaxToolCalls      *int                      `json:"max_tool_calls,omitempty"`
 }
 
 type openAICompatibleCompactRequest struct {
@@ -745,7 +748,8 @@ func (p OpenAICompatible) Responses(ctx context.Context, request openai.Response
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, User: request.User, SafetyIdentifier: request.SafetyIdentifier, PromptCacheKey: request.PromptCacheKey, Stream: false,
 		MaxOutputTokens: responseOutputTokenLimit(request),
-		Temperature:     request.Temperature, TopP: request.TopP,
+		Temperature:     request.Temperature, TopP: request.TopP, FrequencyPenalty: request.FrequencyPenalty,
+		PresencePenalty: request.PresencePenalty, MaxToolCalls: request.MaxToolCalls,
 	})
 	if err != nil {
 		return openai.ResponseResponse{}, err
@@ -787,7 +791,8 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, User: request.User, SafetyIdentifier: request.SafetyIdentifier, PromptCacheKey: request.PromptCacheKey, Stream: true,
 		MaxOutputTokens: responseOutputTokenLimit(request),
-		Temperature:     request.Temperature, TopP: request.TopP,
+		Temperature:     request.Temperature, TopP: request.TopP, FrequencyPenalty: request.FrequencyPenalty,
+		PresencePenalty: request.PresencePenalty, MaxToolCalls: request.MaxToolCalls,
 	})
 	if err != nil {
 		return openai.ResponseResponse{}, err
