@@ -49,6 +49,13 @@ validated before routing. Returned trace data is accepted only when tracing was
 explicitly enabled, remains subject to the bounded response and output DLP paths,
 and is preserved in the native response.
 
+Native Converse streaming reuses the gateway Chat streaming lifecycle. It emits
+bounded AWS EventStream messages with prelude and message CRC validation by
+contract, permits retries and deployment fallback only before the first event,
+and closes successful streams with `messageStop` followed by provider-reported
+usage metadata. Requests rejected before the first event retain the regular JSON
+error envelope and status.
+
 Chat cache identity also includes validated provider-native message blocks, their
 reserved input size, Bedrock service tier, latency selection and requested
 additional response-field paths. Semantic

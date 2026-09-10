@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.202
+  version: 0.1.203
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -82,6 +82,43 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/A2AJSONRPCResponse'}
+  /model/{model}/converse-stream:
+    post:
+      operationId: bedrockConverseStream
+      tags: [Inference]
+      summary: Stream a Converse response
+      description: Uses the same authorization, model and tool policy, quota, guardrail, routing and billing lifecycle as Chat streaming. Successful responses use checksummed AWS EventStream frames. Provider fallback is allowed only before the first event; non-streaming deployments produce a bounded event stream after the full response passes output policy.
+      parameters:
+        - in: path
+          name: model
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 2048}
+        - in: query
+          name: provider
+          required: false
+          schema: {type: string}
+          description: Optional gateway deployment selector.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BedrockConverseRequest'}
+      responses:
+        '200':
+          description: Checksummed event stream ending in messageStop and usage metadata
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+          content:
+            application/vnd.amazon.eventstream:
+              schema: {type: string, format: binary}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/RequestTooLarge'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '451': {$ref: '#/components/responses/ContentRejected'}
+        '502': {$ref: '#/components/responses/ProviderFailed'}
   /model/{model}/converse:
     post:
       operationId: bedrockConverse

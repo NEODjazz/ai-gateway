@@ -1,0 +1,173 @@
+package gateway
+
+import (
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"hash/crc32"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
+	"ai-gateway-gateway/internal/provider"
+)
+
+type decodedAWSMessage struct {
+	headers map[string]string
+	payload map[string]any
+}
+
+func decodeAWSMessages(t *testing.T, data []byte) []decodedAWSMessage {
+	t.Helper()
+	var messages []decodedAWSMessage
+	for len(data) > 0 {
+		if len(data) < 16 {
+			t.Fatalf("truncated event stream message: %d bytes", len(data))
+		}
+		total := int(binary.BigEndian.Uint32(data[:4]))
+		headerLength := int(binary.BigEndian.Uint32(data[4:8]))
+		if total < 16 || total > len(data) || headerLength > total-16 || binary.BigEndian.Uint32(data[8:12]) != crc32.ChecksumIEEE(data[:8]) || binary.BigEndian.Uint32(data[total-4:total]) != crc32.ChecksumIEEE(data[:total-4]) {
+			t.Fatal("invalid event stream length or checksum")
+		}
+		headers := make(map[string]string)
+		encodedHeaders := data[12 : 12+headerLength]
+		for len(encodedHeaders) > 0 {
+			nameLength := int(encodedHeaders[0])
+			if len(encodedHeaders) < 1+nameLength+3 || encodedHeaders[1+nameLength] != 7 {
+				t.Fatal("invalid event stream string header")
+			}
+			name := string(encodedHeaders[1 : 1+nameLength])
+			valueLength := int(binary.BigEndian.Uint16(encodedHeaders[2+nameLength : 4+nameLength]))
+			if len(encodedHeaders) < 4+nameLength+valueLength {
+				t.Fatal("truncated event stream header")
+			}
+			headers[name] = string(encodedHeaders[4+nameLength : 4+nameLength+valueLength])
+			encodedHeaders = encodedHeaders[4+nameLength+valueLength:]
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(data[12+headerLength:total-4], &payload); err != nil {
+			t.Fatalf("decode event payload: %v", err)
+		}
+		messages = append(messages, decodedAWSMessage{headers: headers, payload: payload})
+		data = data[total:]
+	}
+	return messages
+}
+
+func TestEncodeAWSMessageProducesValidChecksumsAndHeaders(t *testing.T) {
+	encoded, err := encodeAWSMessage(map[string]string{":message-type": "event", ":event-type": "messageStart", ":content-type": "application/json"}, []byte(`{"role":"assistant"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := decodeAWSMessages(t, encoded)
+	if len(messages) != 1 || messages[0].headers[":event-type"] != "messageStart" || messages[0].payload["role"] != "assistant" {
+		t.Fatalf("messages=%+v", messages)
+	}
+}
+
+func TestBedrockConverseStreamUsesAuthorizationStreamingAndBilling(t *testing.T) {
+	upstreamCalls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		var request struct {
+			Model  string `json:"model"`
+			Stream bool   `json:"stream"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil || request.Model != "upstream-model" || !request.Stream {
+			t.Fatalf("upstream request=%+v", request)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-stream\",\"object\":\"chat.completion.chunk\",\"model\":\"upstream-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hello \"},\"finish_reason\":null}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-stream\",\"object\":\"chat.completion.chunk\",\"model\":\"upstream-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"stream\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2,\"total_tokens\":6}}\n\ndata: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	billing := &messagesUsageRecorder{}
+	router := provider.New(provider.Config{
+		Endpoints: []config.ProviderEndpointConfig{{Name: "streaming", Type: "openai-compatible", BaseURL: upstream.URL, Models: []string{"public-model"}, ModelAliases: map[string]string{"public-model": "upstream-model"}, Capabilities: []string{"chat", "stream"}, Stream: true}},
+		Modules:   modules.NewPipeline([]modules.Module{billing}),
+	})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"public-model"}, tpm: 100}}}), router))
+	request := httptest.NewRequest(http.MethodPost, "/model/public-model/converse-stream?provider=streaming", strings.NewReader(`{"messages":[{"role":"user","content":[{"text":"hello"}]}],"inferenceConfig":{"maxTokens":8}}`))
+	request.Header.Set("Authorization", "Bearer gateway-test-key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/vnd.amazon.eventstream" || response.Header().Get("X-Execution-ID") == "" {
+		t.Fatalf("status=%d headers=%v body=%q", response.Code, response.Header(), response.Body.Bytes())
+	}
+	messages := decodeAWSMessages(t, response.Body.Bytes())
+	var eventTypes []string
+	var streamedText string
+	for _, message := range messages {
+		eventTypes = append(eventTypes, message.headers[":event-type"])
+		if message.headers[":event-type"] == "contentBlockDelta" {
+			delta, _ := message.payload["delta"].(map[string]any)
+			if text, ok := delta["text"].(string); ok {
+				streamedText += text
+			}
+		}
+	}
+	if strings.Join(eventTypes, ",") != "messageStart,contentBlockStart,contentBlockDelta,contentBlockDelta,contentBlockStop,messageStop,metadata" || streamedText != "hello stream" {
+		t.Fatalf("events=%v text=%q", eventTypes, streamedText)
+	}
+	metadata := messages[len(messages)-1].payload
+	usage, _ := metadata["usage"].(map[string]any)
+	if usage["totalTokens"] != float64(6) || upstreamCalls != 1 || billing.calls != 1 || billing.usage.TotalTokens != 6 {
+		t.Fatalf("metadata=%+v upstream=%d billing=%+v", metadata, upstreamCalls, billing)
+	}
+}
+
+func TestBedrockConverseStreamReturnsJSONBeforeFirstEvent(t *testing.T) {
+	response := httptest.NewRecorder()
+	Routes(Handler{}).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/model/converse-stream", strings.NewReader(`{"messages":[]}`)))
+	if response.Code != http.StatusBadRequest || response.Header().Get("Content-Type") == "application/vnd.amazon.eventstream" || !strings.Contains(response.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+}
+
+func TestBedrockConverseStreamSynthesizesNonStreamingResponse(t *testing.T) {
+	upstream := &chatProvider{}
+	response := httptest.NewRecorder()
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/model/converse-stream", strings.NewReader(`{"messages":[{"role":"user","content":[{"text":"hello"}]}]}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.Bytes())
+	}
+	messages := decodeAWSMessages(t, response.Body.Bytes())
+	if len(messages) != 6 || messages[2].headers[":event-type"] != "contentBlockDelta" || messages[2].payload["delta"].(map[string]any)["text"] != "hello stream" || messages[5].headers[":event-type"] != "metadata" {
+		t.Fatalf("messages=%+v", messages)
+	}
+}
+
+func TestBedrockStreamWriterBuffersSplitToolUse(t *testing.T) {
+	destination := httptest.NewRecorder()
+	w := newBedrockStreamWriter(destination)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+	for _, frame := range []string{
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_","type":"function","function":{"name":"wea","arguments":"{\"city\":"}}]}}]}` + "\n\n",
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"1","function":{"name":"ther","arguments":"\"Paris\"}"}}]}}]}` + "\n\n",
+	} {
+		if _, err := w.Write([]byte(frame)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response := openai.ChatCompletionResponse{
+		Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call_1", Type: "function", Function: openai.FunctionCall{Name: "weather", Arguments: `{"city":"Paris"}`}}}}, FinishReason: "tool_calls"}},
+		Usage:   openai.Usage{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5},
+	}
+	w.chatStreamResult(response)
+	if _, err := w.Write([]byte("data: [DONE]\n\n")); err != nil {
+		t.Fatal(err)
+	}
+	w.finish()
+	messages := decodeAWSMessages(t, destination.Body.Bytes())
+	if len(messages) != 6 || messages[1].headers[":event-type"] != "contentBlockStart" || messages[1].payload["start"].(map[string]any)["toolUse"].(map[string]any)["name"] != "weather" || messages[2].payload["delta"].(map[string]any)["toolUse"].(map[string]any)["input"] != `{"city":"Paris"}` {
+		t.Fatalf("messages=%+v", messages)
+	}
+}

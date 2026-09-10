@@ -25,6 +25,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/a2a/{agent}/.well-known/agent-card.json"}, func(h Handler) http.Handler { return http.HandlerFunc(h.A2AAgentCard) }},
 	{RouteContract{http.MethodPost, "/a2a/{agent}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.A2AJSONRPC) }},
 	{RouteContract{http.MethodPost, "/model/{model}/converse"}, func(h Handler) http.Handler { return http.HandlerFunc(h.BedrockConverse) }},
+	{RouteContract{http.MethodPost, "/model/{model}/converse-stream"}, func(h Handler) http.Handler { return http.HandlerFunc(h.BedrockConverseStream) }},
 	{RouteContract{http.MethodPost, "/v1/chat/completions"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ChatCompletions) }},
 	{RouteContract{http.MethodPost, "/v1/completions"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Completions) }},
 	{RouteContract{http.MethodPost, "/v1/messages"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Messages) }},
