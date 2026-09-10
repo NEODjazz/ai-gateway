@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"ai-gateway-gateway/internal/config"
 )
 
 func TestProviderUpdateRejectsIncompatibleExistingDeploymentAtomically(t *testing.T) {
@@ -83,5 +85,17 @@ func TestControlPlaneRejectsInvalidBedrockSigV4Credential(t *testing.T) {
 	snapshot.Providers[0].Region = "us-east-1"
 	if err := router.applyControlPlaneSnapshot(snapshot); err == nil {
 		t.Fatal("invalid persisted SigV4 credential accepted")
+	}
+}
+
+func TestStaticBedrockSigV4SettingsReachManagedState(t *testing.T) {
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "aws", Type: "bedrock", BaseURL: "https://bedrock-runtime.us-east-1.amazonaws.com", AuthType: " AWS_SIGV4 ", Region: "US-EAST-1", Models: []string{"model"}, Capabilities: []string{"chat"}}}}).(*Router)
+	providers := router.ListProviders(context.Background())
+	if len(providers) != 1 || providers[0].AuthType != "aws_sigv4" || providers[0].Region != "us-east-1" {
+		t.Fatalf("providers=%+v", providers)
+	}
+	snapshot := router.controlPlaneSnapshot()
+	if len(snapshot.Providers) != 1 || snapshot.Providers[0].AuthType != "aws_sigv4" || snapshot.Providers[0].Region != "us-east-1" {
+		t.Fatalf("snapshot providers=%+v", snapshot.Providers)
 	}
 }

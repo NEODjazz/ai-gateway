@@ -72,6 +72,11 @@ func TestValidateBedrockSigV4Configuration(t *testing.T) {
 	if err := validateProviderAdmission([]ProviderEndpointConfig{valid}); err != nil {
 		t.Fatalf("valid configuration rejected: %v", err)
 	}
+	ambient := valid
+	ambient.APIKey = ""
+	if err := validateProviderAdmission([]ProviderEndpointConfig{ambient}); err != nil {
+		t.Fatalf("ambient credential configuration rejected: %v", err)
+	}
 	for _, endpoint := range []ProviderEndpointConfig{
 		{Name: "bedrock", Type: "bedrock", BaseURL: valid.BaseURL, AuthType: "aws_sigv4", APIKey: valid.APIKey},
 		{Name: "bedrock", Type: "bedrock", BaseURL: valid.BaseURL, AuthType: "aws_sigv4", Region: "US_EAST_1", APIKey: valid.APIKey},

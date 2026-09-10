@@ -176,6 +176,9 @@ func (r *Router) storeCredential(id string, input CredentialInput, preserveMetad
 	r.credentials.mu.Lock()
 	r.credentials.current[input.ID] = encryptedCredential{Credential: credential, Nonce: nonce, Ciphertext: ciphertext}
 	r.credentials.mu.Unlock()
+	if found {
+		r.dropAWSCredentialSources(existing.ProviderID, input.ID)
+	}
 	if id != "" {
 		if deployments := r.deployments.current.Load(); deployments != nil {
 			for _, deployment := range *deployments {
@@ -211,12 +214,14 @@ func (r *Router) DeleteCredential(id string) error {
 		}
 	}
 	r.credentials.mu.Lock()
-	if _, found := r.credentials.current[id]; !found {
+	credential, found := r.credentials.current[id]
+	if !found {
 		r.credentials.mu.Unlock()
 		return ErrCredentialNotFound
 	}
 	delete(r.credentials.current, id)
 	r.credentials.mu.Unlock()
+	r.dropAWSCredentialSources(credential.ProviderID, id)
 	return r.persistControlMutation(context.Background(), previous)
 }
 

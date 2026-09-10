@@ -27,7 +27,7 @@ func parseAWSCredential(raw string) (awsCredential, error) {
 	if err := decoder.Decode(&credential); err != nil {
 		return credential, errors.New("invalid AWS credential")
 	}
-	if decoder.Decode(&struct{}{}) != io.EOF || strings.TrimSpace(credential.AccessKeyID) == "" || len(credential.AccessKeyID) > 128 || credential.SecretAccessKey == "" || len(credential.SecretAccessKey) > 256 || len(credential.SessionToken) > 4096 {
+	if decoder.Decode(&struct{}{}) != io.EOF || validateAWSCredential(credential) != nil {
 		return credential, errors.New("invalid AWS credential")
 	}
 	return credential, nil
@@ -45,7 +45,10 @@ func signAWSRequest(request *http.Request, payload []byte, credential awsCredent
 	if credential.SessionToken != "" {
 		request.Header.Set("X-Amz-Security-Token", credential.SessionToken)
 	}
-	headerNames := []string{"content-type", "host", "x-amz-content-sha256", "x-amz-date"}
+	headerNames := []string{"host", "x-amz-content-sha256", "x-amz-date"}
+	if request.Header.Get("Content-Type") != "" {
+		headerNames = append(headerNames, "content-type")
+	}
 	if credential.SessionToken != "" {
 		headerNames = append(headerNames, "x-amz-security-token")
 	}

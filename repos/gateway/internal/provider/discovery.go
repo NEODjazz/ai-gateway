@@ -75,7 +75,12 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 		return nil, ErrProviderProbeFailed
 	}
 	request.Header.Set("Accept", "application/json")
-	if secret != "" {
+	if managed.Type == "bedrock" && managed.AuthType == "aws_sigv4" {
+		credential, credentialErr := r.awsCredentialSource(managed.ID, credentialID, secret).Credential(ctx)
+		if credentialErr != nil || signAWSRequest(request, nil, credential, managed.Region, "bedrock", time.Now()) != nil {
+			return nil, ErrProviderProbeFailed
+		}
+	} else if secret != "" {
 		if managed.Type == "anthropic" {
 			request.Header.Set("x-api-key", secret)
 			request.Header.Set("anthropic-version", "2023-06-01")
@@ -86,7 +91,7 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 		}
 	}
 	client := newProviderHTTPClient(10 * time.Second)
-	if managed.Type == "azure-openai" {
+	if managed.Type == "azure-openai" || managed.Type == "bedrock" {
 		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	}
 	response, err := client.Do(request)

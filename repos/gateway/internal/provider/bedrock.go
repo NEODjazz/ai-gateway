@@ -24,6 +24,7 @@ type Bedrock struct {
 	region   string
 	client   *http.Client
 	now      func() time.Time
+	aws      *awsCredentialSource
 }
 
 type bedrockContentBlock struct {
@@ -99,7 +100,7 @@ func NewBedrockWithAuth(baseURL, credential, authType, region string) Bedrock {
 	if authType == "" || authType == "api_key" {
 		authType = "bearer"
 	}
-	return Bedrock{baseURL: strings.TrimRight(baseURL, "/"), apiKey: credential, authType: authType, region: strings.ToLower(strings.TrimSpace(region)), client: client, now: time.Now}
+	return Bedrock{baseURL: strings.TrimRight(baseURL, "/"), apiKey: credential, authType: authType, region: strings.ToLower(strings.TrimSpace(region)), client: client, now: time.Now, aws: newAWSCredentialSource(credential)}
 }
 
 func (Bedrock) SupportsResponses() bool { return false }
@@ -272,9 +273,9 @@ func (b Bedrock) ChatCompletions(ctx context.Context, request openai.ChatComplet
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	if b.authType == "aws_sigv4" {
-		credential, err := parseAWSCredential(b.apiKey)
+		credential, err := b.aws.Credential(ctx)
 		if err != nil {
-			return openai.ChatCompletionResponse{}, bedrockInvalid("credential")
+			return openai.ChatCompletionResponse{}, &Error{Class: FailureUnavailable, Provider: "bedrock", StatusCode: http.StatusServiceUnavailable, UpstreamCode: "credential_unavailable", Err: errors.New("AWS credential source is unavailable")}
 		}
 		if err := signAWSRequest(httpRequest, payload, credential, b.region, "bedrock", b.now()); err != nil {
 			return openai.ChatCompletionResponse{}, bedrockInvalid("credential")

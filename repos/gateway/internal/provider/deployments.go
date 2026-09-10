@@ -413,7 +413,13 @@ func (r *Router) endpointForManagedDeployment(deployment ModelDeployment, manage
 	if err != nil {
 		return Endpoint{}, err
 	}
-	client := providerFor(config.ProviderEndpointConfig{Type: managed.Type, BaseURL: managed.BaseURL, APIKey: secret, Stream: hasCapability(deployment.Capabilities, "stream"), APIVersion: managed.APIVersion, AuthType: managed.AuthType, Region: managed.Region})
+	providerConfig := config.ProviderEndpointConfig{Type: managed.Type, BaseURL: managed.BaseURL, APIKey: secret, Stream: hasCapability(deployment.Capabilities, "stream"), APIVersion: managed.APIVersion, AuthType: managed.AuthType, Region: managed.Region}
+	client := providerFor(providerConfig)
+	if managed.Type == "bedrock" && managed.AuthType == "aws_sigv4" {
+		bedrock := NewBedrockWithAuth(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.AuthType, providerConfig.Region)
+		bedrock.aws = r.awsCredentialSource(managed.ID, deployment.CredentialID, secret)
+		client = bedrock
+	}
 	if client == nil {
 		return Endpoint{}, ErrInvalidDeployment
 	}

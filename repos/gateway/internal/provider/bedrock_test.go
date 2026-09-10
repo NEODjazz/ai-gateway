@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -63,6 +64,40 @@ func TestBedrockConverseUsesSigV4TemporaryCredentials(t *testing.T) {
 	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
 	if err != nil || response.Usage.TotalTokens != 2 {
 		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestBedrockConverseUsesAmbientEnvironmentCredentials(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "ENVKEY")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "environment-secret")
+	t.Setenv("AWS_SESSION_TOKEN", "environment-session")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Authorization"), "Credential=ENVKEY/") || r.Header.Get("X-Amz-Security-Token") != "environment-session" {
+			t.Fatalf("headers=%v", r.Header)
+		}
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`)
+	}))
+	defer server.Close()
+	client := NewBedrockWithAuth(server.URL, "", "aws_sigv4", "us-east-1")
+	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+	if err != nil || response.Usage.TotalTokens != 2 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestBedrockConverseFailsClosedWithoutAmbientCredentials(t *testing.T) {
+	for _, name := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_CONTAINER_CREDENTIALS_FULL_URI"} {
+		t.Setenv(name, "")
+	}
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewBedrockWithAuth(server.URL, "", "aws_sigv4", "us-east-1")
+	_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+	var failure *Error
+	if !errors.As(err, &failure) || failure.StatusCode != http.StatusServiceUnavailable || called {
+		t.Fatalf("err=%v called=%v", err, called)
 	}
 }
 

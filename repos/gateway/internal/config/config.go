@@ -313,7 +313,7 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 			if authType == "aws_sigv4" && !validAWSRegion(endpoint.Region) {
 				result = errors.Join(result, fmt.Errorf("provider %q region is required for aws_sigv4", name))
 			}
-			if authType == "aws_sigv4" && !validAWSCredentialJSON(endpoint.APIKey) {
+			if authType == "aws_sigv4" && endpoint.APIKey != "" && !validAWSCredentialJSON(endpoint.APIKey) {
 				result = errors.Join(result, fmt.Errorf("provider %q has invalid aws_sigv4 credential", name))
 			}
 		} else if endpoint.APIVersion != "" || endpoint.AuthType != "" || endpoint.Region != "" {

@@ -163,6 +163,7 @@ func (r *Router) DeleteProvider(id string) error {
 	next := cloneProviders(*current)
 	delete(next, id)
 	r.providers.current.Store(&next)
+	r.dropAWSCredentialSources(id, "")
 	return r.persistControlMutation(context.Background(), previous)
 }
 

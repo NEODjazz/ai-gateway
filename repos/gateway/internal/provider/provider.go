@@ -313,6 +313,7 @@ type Router struct {
 	deploymentHealth *deploymentHealthRegistry
 	retry            retryScheduler
 	deploymentQuotas DeploymentQuotaStore
+	awsCredentials   *awsCredentialRegistry
 }
 
 func New(cfg Config) Provider {
@@ -392,10 +393,19 @@ func NewWithError(cfg Config) (Provider, error) {
 			upstreamModel = endpoint.Models[0]
 		}
 		authType := ""
+		region := ""
 		if endpoint.Type == "azure-openai" {
 			authType = normalizeAzureAuthType(endpoint.AuthType)
+		} else if endpoint.Type == "bedrock" {
+			authType = strings.ToLower(strings.TrimSpace(endpoint.AuthType))
+			if authType == "" || authType == "api_key" {
+				authType = "bearer"
+			}
+			if authType == "aws_sigv4" {
+				region = strings.ToLower(strings.TrimSpace(endpoint.Region))
+			}
 		}
-		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(endpoint.BaseURL, "/"), APIVersion: strings.TrimSpace(endpoint.APIVersion), AuthType: authType, Enabled: enabled}
+		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(endpoint.BaseURL, "/"), APIVersion: strings.TrimSpace(endpoint.APIVersion), AuthType: authType, Region: region, Enabled: enabled}
 		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, UpstreamModel: upstreamModel, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, MaxRetries: endpoint.MaxRetries, CooldownAfterFailures: endpoint.CooldownAfterFailures, CooldownSeconds: endpoint.CooldownSeconds, MaxParallelRequests: endpoint.MaxParallelRequests, QueueCapacity: endpoint.QueueCapacity, QueueTimeoutMS: endpoint.QueueTimeoutMS, RateLimitRPM: endpoint.RateLimitRPM, RateLimitTPM: endpoint.RateLimitTPM, Enabled: enabled}
 	}
 
@@ -434,6 +444,7 @@ func NewWithError(cfg Config) (Provider, error) {
 		routingStrategy:  strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
 		adaptive:         newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
 		deploymentQuotas: deploymentQuotas,
+		awsCredentials:   &awsCredentialRegistry{current: make(map[string]managedAWSCredentialSource)},
 		affinity:         newAffinityStore(cfg.AffinityTTL, cfg.SessionStore),
 		ownership:        newResponseOwnershipStore(cfg.ResponseOwnershipTTL, cfg.SessionStore),
 		semantic: newSemanticResponseCache(semanticCacheConfig{
