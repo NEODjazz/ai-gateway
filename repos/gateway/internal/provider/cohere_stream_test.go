@@ -15,8 +15,8 @@ import (
 
 const cohereValidChatStream = "event: message-start\ndata: {\"type\":\"message-start\",\"id\":\"chat-stream\",\"delta\":{\"message\":{\"role\":\"assistant\"}}}\n\n" +
 	"event: content-start\ndata: {\"type\":\"content-start\",\"index\":0,\"delta\":{\"message\":{\"content\":{\"type\":\"text\",\"text\":\"\"}}}}\n\n" +
-	"event: content-delta\ndata: {\"type\":\"content-delta\",\"index\":0,\"delta\":{\"message\":{\"content\":{\"text\":\"hel\"}}}}\n\n" +
-	"event: content-delta\ndata: {\"type\":\"content-delta\",\"index\":0,\"delta\":{\"message\":{\"content\":{\"text\":\"lo\"}}}}\n\n" +
+	"event: content-delta\ndata: {\"type\":\"content-delta\",\"index\":0,\"delta\":{\"message\":{\"content\":{\"text\":\"hel\"}}},\"logprobs\":{\"text\":\"hel\",\"token_ids\":[1],\"logprobs\":[-0.1]}}\n\n" +
+	"event: content-delta\ndata: {\"type\":\"content-delta\",\"index\":0,\"delta\":{\"message\":{\"content\":{\"text\":\"lo\"}}},\"logprobs\":{\"text\":\"lo\",\"token_ids\":[2],\"logprobs\":[-0.2]}}\n\n" +
 	"event: content-end\ndata: {\"type\":\"content-end\",\"index\":0}\n\n" +
 	"event: message-end\ndata: {\"type\":\"message-end\",\"delta\":{\"finish_reason\":\"COMPLETE\",\"usage\":{\"billed_units\":{\"input_tokens\":4,\"output_tokens\":2}}}}\n\n"
 
@@ -47,12 +47,13 @@ func TestCohereNativeChatStreamProtocolAndUsage(t *testing.T) {
 
 	var chunks []string
 	topK := 20
-	response, err := NewCohere(server.URL, "key", true).StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "command", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: true, ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK}}, func(payload string) error {
+	logprobs := true
+	response, err := NewCohere(server.URL, "key", true).StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "command", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: true, ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK, Logprobs: &logprobs}}, func(payload string) error {
 		chunks = append(chunks, payload)
 		return nil
 	})
 	joined := strings.Join(chunks, "")
-	if err != nil || response.ID != "chat-stream" || response.Choices[0].Message.Content != "hello" || response.Choices[0].FinishReason != "stop" || response.Usage.TotalTokens != 6 || len(chunks) != 4 || !strings.Contains(joined, `"role":"assistant"`) || !strings.Contains(joined, `"finish_reason":"stop"`) {
+	if err != nil || response.ID != "chat-stream" || response.Choices[0].Message.Content != "hello" || response.Choices[0].FinishReason != "stop" || response.Choices[0].Logprobs == nil || len(response.Choices[0].Logprobs.Content) != 2 || response.Usage.TotalTokens != 6 || len(chunks) != 4 || !strings.Contains(joined, `"role":"assistant"`) || !strings.Contains(joined, `"logprobs":{"content"`) || !strings.Contains(joined, `"finish_reason":"stop"`) {
 		t.Fatalf("response=%+v chunks=%v err=%v", response, chunks, err)
 	}
 }
@@ -104,7 +105,7 @@ func TestCohereChatStreamRejectsMalformedLifecycle(t *testing.T) {
 		"invalid tool arguments":  strings.Replace(cohereValidToolStream, `\"Paris\"}`, `Paris}`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := streamCohereChat(strings.NewReader(wire), "command", func(string) error { return nil }); err == nil {
+			if _, err := streamCohereChat(strings.NewReader(wire), "command", false, func(string) error { return nil }); err == nil {
 				t.Fatal("malformed stream accepted")
 			}
 		})
@@ -119,7 +120,7 @@ func TestCohereChatStreamLimitsToolArguments(t *testing.T) {
 	oversized := "event: message-start\ndata: {\"type\":\"message-start\",\"id\":\"chat-tools\",\"delta\":{\"message\":{\"role\":\"assistant\"}}}\n\n" +
 		"event: tool-call-start\ndata: {\"type\":\"tool-call-start\",\"index\":0,\"delta\":{\"message\":{\"tool_calls\":{\"id\":\"call\",\"type\":\"function\",\"function\":{\"name\":\"weather\",\"arguments\":\"\"}}}}}\n\n" +
 		"event: tool-call-delta\ndata: " + string(delta) + "\n\n"
-	if _, err := streamCohereChat(strings.NewReader(oversized), "command", func(string) error { return nil }); err == nil {
+	if _, err := streamCohereChat(strings.NewReader(oversized), "command", false, func(string) error { return nil }); err == nil {
 		t.Fatalf("oversized arguments accepted: %v", err)
 	}
 }
@@ -130,7 +131,7 @@ func TestCohereChatStreamHonorsConfigurationAndWriterFailure(t *testing.T) {
 		t.Fatalf("disabled stream returned %v", err)
 	}
 	sentinel := errors.New("client disconnected")
-	if _, err := streamCohereChat(strings.NewReader(cohereValidChatStream), "command", func(string) error { return sentinel }); !errors.Is(err, sentinel) {
+	if _, err := streamCohereChat(strings.NewReader(cohereValidChatStream), "command", false, func(string) error { return sentinel }); !errors.Is(err, sentinel) {
 		t.Fatalf("writer failure lost: %v", err)
 	}
 }

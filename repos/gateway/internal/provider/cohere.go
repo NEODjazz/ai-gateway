@@ -55,6 +55,7 @@ type cohereChatRequest struct {
 	Seed             *int64                `json:"seed,omitempty"`
 	FrequencyPenalty *float64              `json:"frequency_penalty,omitempty"`
 	PresencePenalty  *float64              `json:"presence_penalty,omitempty"`
+	Logprobs         *bool                 `json:"logprobs,omitempty"`
 	Tools            []openai.Tool         `json:"tools,omitempty"`
 	ToolChoice       string                `json:"tool_choice,omitempty"`
 	StrictTools      bool                  `json:"strict_tools,omitempty"`
@@ -103,14 +104,22 @@ type cohereChatResponse struct {
 		} `json:"content"`
 		ToolCalls []openai.ToolCall `json:"tool_calls"`
 	} `json:"message"`
-	Usage *cohereChatUsageResponse `json:"usage"`
+	Usage    *cohereChatUsageResponse `json:"usage"`
+	Logprobs []cohereLogprobItem      `json:"logprobs"`
+}
+
+type cohereLogprobItem struct {
+	Text     *string    `json:"text"`
+	TokenIDs []int      `json:"token_ids"`
+	Logprobs *[]float64 `json:"logprobs"`
 }
 
 type cohereChatStreamEvent struct {
-	Type  string `json:"type"`
-	ID    string `json:"id"`
-	Index *int   `json:"index"`
-	Delta struct {
+	Type     string             `json:"type"`
+	ID       string             `json:"id"`
+	Index    *int               `json:"index"`
+	Logprobs *cohereLogprobItem `json:"logprobs"`
+	Delta    struct {
 		Message struct {
 			Role      string           `json:"role"`
 			ToolCalls *openai.ToolCall `json:"tool_calls"`
@@ -261,7 +270,7 @@ func (Cohere) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},
 		parameterCheck{"prompt_mode", request.PromptMode != ""},
 		parameterCheck{"prediction", request.Prediction != nil}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"user", request.User != ""}, parameterCheck{"verbosity", request.Verbosity != ""},
-		parameterCheck{"web_search_options", request.WebSearchOptions != nil}, parameterCheck{"logprobs", request.Logprobs != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
+		parameterCheck{"web_search_options", request.WebSearchOptions != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
 		parameterCheck{"min_p", request.MinP != nil}, parameterCheck{"top_a", request.TopA != nil},
 		parameterCheck{"repetition_penalty", request.RepetitionPenalty != nil},
 		parameterCheck{"logit_bias", request.LogitBias != nil},
@@ -317,7 +326,17 @@ func (p Cohere) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	return openai.ChatCompletionResponse{ID: upstream.ID, Object: "chat.completion", Created: time.Now().Unix(), Model: request.Model, Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: content.String(), ToolCalls: upstream.Message.ToolCalls}, FinishReason: finishReason}}, Usage: usage}, nil
+	var logprobs *openai.ChoiceLogprobs
+	if len(upstream.Logprobs) > 0 {
+		converted, logprobText, err := cohereChoiceLogprobs(upstream.Logprobs)
+		if err != nil || logprobText != content.String() {
+			return openai.ChatCompletionResponse{}, errors.New("invalid Cohere chat logprobs")
+		}
+		logprobs = &converted
+	} else if request.Logprobs != nil && *request.Logprobs && content.Len() > 0 {
+		return openai.ChatCompletionResponse{}, errors.New("Cohere chat response omitted requested logprobs")
+	}
+	return openai.ChatCompletionResponse{ID: upstream.ID, Object: "chat.completion", Created: time.Now().Unix(), Model: request.Model, Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: content.String(), ToolCalls: upstream.Message.ToolCalls}, FinishReason: finishReason, Logprobs: logprobs}}, Usage: usage}, nil
 }
 
 func cohereNativeChatRequest(request openai.ChatCompletionRequest, stream bool) (cohereChatRequest, error) {
@@ -349,7 +368,7 @@ func cohereNativeChatRequest(request openai.ChatCompletionRequest, stream bool) 
 	native := cohereChatRequest{
 		Model: request.Model, Messages: messages, MaxTokens: maxTokens, StopSequences: stop,
 		Temperature: request.Temperature, P: request.TopP, K: request.TopK, Seed: request.Seed,
-		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty, Stream: stream,
+		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty, Logprobs: request.Logprobs, Stream: stream,
 	}
 	native.Tools = append([]openai.Tool(nil), request.Tools...)
 	for index := range native.Tools {
@@ -444,10 +463,11 @@ func (p Cohere) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	if !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
 		return openai.ChatCompletionResponse{}, errors.New("Cohere chat stream returned non-SSE content")
 	}
-	return streamCohereChat(&responseStreamReader{source: response.Body, remaining: maxResponseStreamBytes}, request.Model, write)
+	wantLogprobs := request.Logprobs != nil && *request.Logprobs
+	return streamCohereChat(&responseStreamReader{source: response.Body, remaining: maxResponseStreamBytes}, request.Model, wantLogprobs, write)
 }
 
-func streamCohereChat(body io.Reader, model string, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+func streamCohereChat(body io.Reader, model string, wantLogprobs bool, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	result := openai.ChatCompletionResponse{Object: "chat.completion", Created: time.Now().Unix(), Model: model, Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant"}}}}
 	started, active, ended := false, false, false
 	nextIndex := 0
@@ -482,8 +502,29 @@ func streamCohereChat(body io.Reader, model string, write ChatCompletionStreamWr
 			if text == "" {
 				return nil
 			}
+			var logprobs *openai.ChoiceLogprobs
+			if item.Logprobs != nil {
+				converted, logprobText, err := cohereChoiceLogprobs([]cohereLogprobItem{*item.Logprobs})
+				if err != nil || logprobText != text {
+					return errors.New("invalid Cohere content-delta logprobs")
+				}
+				logprobs = &converted
+				if result.Choices[0].Logprobs == nil {
+					result.Choices[0].Logprobs = &openai.ChoiceLogprobs{}
+				}
+				result.Choices[0].Logprobs.Content = append(result.Choices[0].Logprobs.Content, converted.Content...)
+			} else if wantLogprobs {
+				return errors.New("Cohere content-delta omitted requested logprobs")
+			}
 			result.Choices[0].Message.Content = openai.ContentText(result.Choices[0].Message.Content) + text
-			return write(openAIChatCompletionChunkPayload(result.ID, result.Model, 0, "", text, nil))
+			if logprobs == nil {
+				return write(openAIChatCompletionChunkPayload(result.ID, result.Model, 0, "", text, nil))
+			}
+			payload, err := cohereLogprobChunkPayload(result.ID, result.Model, result.Created, text, logprobs)
+			if err != nil {
+				return err
+			}
+			return write(payload)
 		case "content-end":
 			if !active || item.Index == nil || *item.Index != nextIndex {
 				return errors.New("invalid Cohere content-end event")
@@ -578,6 +619,27 @@ func streamCohereChat(body io.Reader, model string, write ChatCompletionStreamWr
 		return openai.ChatCompletionResponse{}, errors.New("Cohere chat stream ended before message-end")
 	}
 	return result, nil
+}
+
+func cohereChoiceLogprobs(items []cohereLogprobItem) (openai.ChoiceLogprobs, string, error) {
+	converted := openai.ChoiceLogprobs{Content: make([]openai.TokenLogprob, 0, len(items))}
+	var text strings.Builder
+	for _, item := range items {
+		if item.Text == nil || *item.Text == "" || len(item.TokenIDs) != 1 || item.TokenIDs[0] < 0 || item.Logprobs == nil || len(*item.Logprobs) != 1 || !finiteProbability((*item.Logprobs)[0]) {
+			return openai.ChoiceLogprobs{}, "", errors.New("invalid Cohere logprob item")
+		}
+		text.WriteString(*item.Text)
+		converted.Content = append(converted.Content, openai.TokenLogprob{Token: *item.Text, Logprob: (*item.Logprobs)[0], Bytes: tokenBytes(*item.Text), TopLogprobs: []openai.TopLogprob{}})
+	}
+	return converted, text.String(), nil
+}
+
+func cohereLogprobChunkPayload(id, model string, created int64, content string, logprobs *openai.ChoiceLogprobs) (string, error) {
+	payload, err := json.Marshal(map[string]any{
+		"id": id, "object": "chat.completion.chunk", "created": created, "model": model,
+		"choices": []map[string]any{{"index": 0, "delta": map[string]any{"content": content}, "finish_reason": nil, "logprobs": logprobs}},
+	})
+	return string(payload), err
 }
 
 func cohereChatError(param, message string) error {

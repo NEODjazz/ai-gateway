@@ -344,7 +344,7 @@ func TestExtendedSamplingControlsAreRejectedBySpecializedAdapters(t *testing.T) 
 		request.Messages = []openai.Message{{Role: "user", Content: "hello"}}
 		for _, adapter := range adapters {
 			t.Run(adapter.name+body, func(t *testing.T) {
-				if adapter.name == "cohere" && request.TopK != nil {
+				if adapter.name == "cohere" && (request.TopK != nil || request.Logprobs != nil) {
 					return
 				}
 				var failure *Error
