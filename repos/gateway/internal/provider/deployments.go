@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -49,6 +50,7 @@ var ErrDeploymentNotFound = errors.New("model deployment not found")
 var ErrDeploymentExists = errors.New("model deployment already exists")
 var ErrDeploymentInUse = errors.New("model deployment is used by a model group")
 var ErrInvalidDeployment = errors.New("invalid model deployment")
+var ErrUnsupportedProviderCapability = errors.New("model deployment capability is not supported by the provider adapter")
 
 type deploymentRegistry struct {
 	current atomic.Pointer[map[string]ModelDeployment]
@@ -135,6 +137,9 @@ func (r *Router) UpdateModelDeployment(id string, deployment ModelDeployment) (M
 	deployment.ProviderType = providerConfig.Type
 	endpoint, err := r.endpointForDeployment(deployment)
 	if err != nil {
+		if errors.Is(err, ErrUnsupportedProviderCapability) {
+			return ModelDeployment{}, err
+		}
 		return ModelDeployment{}, ErrInvalidDeployment
 	}
 	if deployment.Weight == 0 {
@@ -182,6 +187,9 @@ func (r *Router) CreateModelDeployment(deployment ModelDeployment) (ModelDeploym
 	}
 	endpoint, err := r.endpointForDeployment(deployment)
 	if err != nil {
+		if errors.Is(err, ErrUnsupportedProviderCapability) {
+			return ModelDeployment{}, err
+		}
 		return ModelDeployment{}, ErrInvalidDeployment
 	}
 	deployment.Models = append([]string(nil), deployment.Models...)
@@ -397,7 +405,13 @@ func (r *Router) endpointForDeployment(deployment ModelDeployment) (Endpoint, er
 			aliases[model] = deployment.UpstreamModel
 		}
 	}
-	return Endpoint{Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second, RateLimitRPM: deployment.RateLimitRPM, RateLimitTPM: deployment.RateLimitTPM, ProviderRateLimitRPM: managed.RateLimitRPM, ProviderRateLimitTPM: managed.RateLimitTPM}, nil
+	endpoint := Endpoint{Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second, RateLimitRPM: deployment.RateLimitRPM, RateLimitTPM: deployment.RateLimitTPM, ProviderRateLimitRPM: managed.RateLimitRPM, ProviderRateLimitTPM: managed.RateLimitTPM}
+	for _, capability := range deployment.Capabilities {
+		if !endpoint.supportsCapabilities(capability) {
+			return Endpoint{}, fmt.Errorf("%w: %s does not support %s", ErrUnsupportedProviderCapability, managed.Type, capability)
+		}
+	}
+	return endpoint, nil
 }
 
 func (r *Router) configuredEndpoints() []Endpoint {

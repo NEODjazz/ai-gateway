@@ -167,6 +167,10 @@ func (h Handler) mutateModelDeployment(w http.ResponseWriter, r *http.Request, i
 			writeError(w, http.StatusBadRequest, "invalid_request", "invalid model deployment")
 			return
 		}
+		if errors.Is(err, provider.ErrUnsupportedProviderCapability) {
+			writeError(w, http.StatusBadRequest, "unsupported_provider_capability", err.Error())
+			return
+		}
 		if errors.Is(err, provider.ErrControlPlaneConflict) {
 			writeError(w, http.StatusConflict, "revision_conflict", "control plane changed; retry the request")
 			return

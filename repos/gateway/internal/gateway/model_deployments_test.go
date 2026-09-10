@@ -118,3 +118,18 @@ func TestAdminCreatesAndDeletesRoutableModelDeployment(t *testing.T) {
 		t.Fatalf("deployment delete failed: %d %s", remove.Code, remove.Body.String())
 	}
 }
+
+func TestAdminRejectsCapabilityUnsupportedByManagedProvider(t *testing.T) {
+	runtime := provider.New(provider.Config{})
+	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
+	createProvider := httptest.NewRecorder()
+	handler.ServeHTTP(createProvider, httptest.NewRequest(http.MethodPost, "/admin/v1/providers", strings.NewReader(`{"id":"managed-voyage","type":"voyage","base_url":"https://provider.example","enabled":true}`)))
+	if createProvider.Code != http.StatusCreated {
+		t.Fatalf("provider create failed: %d %s", createProvider.Code, createProvider.Body.String())
+	}
+	createDeployment := httptest.NewRecorder()
+	handler.ServeHTTP(createDeployment, httptest.NewRequest(http.MethodPost, "/admin/v1/model-deployments", strings.NewReader(`{"id":"invalid-chat","provider_id":"managed-voyage","models":["model"],"capabilities":["responses"],"enabled":true}`)))
+	if createDeployment.Code != http.StatusBadRequest || !strings.Contains(createDeployment.Body.String(), `"code":"unsupported_provider_capability"`) || !strings.Contains(createDeployment.Body.String(), "voyage does not support responses") {
+		t.Fatalf("unsupported capability was not explained: %d %s", createDeployment.Code, createDeployment.Body.String())
+	}
+}

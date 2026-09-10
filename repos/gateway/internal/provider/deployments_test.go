@@ -72,6 +72,41 @@ func TestManagedOpenRouterUsesCompatibleAdapter(t *testing.T) {
 	}
 }
 
+func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
+	tests := []struct {
+		providerType string
+		capability   string
+	}{
+		{providerType: "voyage", capability: "responses"},
+		{providerType: "cohere", capability: "responses"},
+		{providerType: "gemini", capability: "responses"},
+		{providerType: "mistral", capability: "image_generation"},
+		{providerType: "gemini", capability: "web_fetch"},
+	}
+	for _, test := range tests {
+		t.Run(test.providerType+"/"+test.capability, func(t *testing.T) {
+			router := New(Config{}).(*Router)
+			if _, err := router.CreateProvider(ManagedProvider{ID: "provider", Type: test.providerType, BaseURL: "https://provider.example", Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			_, err := router.CreateModelDeployment(ModelDeployment{ID: "deployment", ProviderID: "provider", Models: []string{"model"}, Capabilities: []string{test.capability}, Enabled: true})
+			if !errors.Is(err, ErrUnsupportedProviderCapability) {
+				t.Fatalf("capability %q accepted for %s: %v", test.capability, test.providerType, err)
+			}
+		})
+	}
+}
+
+func TestManagedDeploymentAcceptsSupportedNativeCapabilities(t *testing.T) {
+	router := New(Config{}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "voyage", Type: "voyage", BaseURL: "https://provider.example", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateModelDeployment(ModelDeployment{ID: "voyage-embed", ProviderID: "voyage", Models: []string{"model"}, Capabilities: []string{"embeddings", "rerank"}, Enabled: true}); err != nil {
+		t.Fatalf("supported capabilities rejected: %v", err)
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
