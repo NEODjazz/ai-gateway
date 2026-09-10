@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.192
+  version: 0.1.193
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3551,6 +3551,12 @@ components:
               text: {type: string, minLength: 1}
         inferenceConfig: {$ref: '#/components/schemas/BedrockInferenceConfig'}
         toolConfig: {$ref: '#/components/schemas/BedrockToolConfig'}
+        serviceTier:
+          type: object
+          additionalProperties: false
+          required: [type]
+          properties:
+            type: {type: string, enum: [default, flex, priority]}
     BedrockInferenceConfig:
       type: object
       additionalProperties: false

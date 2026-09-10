@@ -84,9 +84,14 @@ type bedrockRequest struct {
 	Messages        []bedrockMessage       `json:"messages"`
 	System          []bedrockContentBlock  `json:"system,omitempty"`
 	InferenceConfig bedrockInferenceConfig `json:"inferenceConfig,omitempty"`
+	ServiceTier     *bedrockServiceTier    `json:"serviceTier,omitempty"`
 	ToolConfig      *struct {
 		Tools []bedrockTool `json:"tools"`
 	} `json:"toolConfig,omitempty"`
+}
+
+type bedrockServiceTier struct {
+	Type string `json:"type"`
 }
 
 type bedrockInferenceConfig struct {
@@ -198,7 +203,7 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
 		parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},
 		parameterCheck{"prompt_mode", request.PromptMode != ""}, parameterCheck{"prediction", request.Prediction != nil},
-		parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"user", request.User != ""},
+		parameterCheck{"user", request.User != ""},
 		parameterCheck{"verbosity", request.Verbosity != ""}, parameterCheck{"web_search_options", request.WebSearchOptions != nil},
 		parameterCheck{"web_fetch_options", request.WebFetchOptions != nil}, parameterCheck{"logprobs", request.Logprobs != nil},
 		parameterCheck{"top_logprobs", request.TopLogprobs != nil}, parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil},
@@ -209,6 +214,14 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 		return result, err
 	}
 	result.InferenceConfig = bedrockInferenceConfig{MaxTokens: maxTokens, Temperature: request.Temperature, TopP: request.TopP, StopSequences: stop}
+	if request.ServiceTier != "" {
+		switch request.ServiceTier {
+		case "default", "flex", "priority":
+			result.ServiceTier = &bedrockServiceTier{Type: request.ServiceTier}
+		default:
+			return result, bedrockInvalid("service_tier")
+		}
+	}
 	toolCalls := make(map[string]bool)
 	for _, message := range request.Messages {
 		if message.Name != "" || len(message.Annotations) > 0 || len(message.Reasoning) > 0 {

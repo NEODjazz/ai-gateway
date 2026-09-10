@@ -12,6 +12,11 @@ type BedrockConverseRequest struct {
 	System          []BedrockContentBlock  `json:"system,omitempty"`
 	InferenceConfig BedrockInferenceConfig `json:"inferenceConfig,omitempty"`
 	ToolConfig      *BedrockToolConfig     `json:"toolConfig,omitempty"`
+	ServiceTier     *BedrockServiceTier    `json:"serviceTier,omitempty"`
+}
+
+type BedrockServiceTier struct {
+	Type string `json:"type"`
 }
 
 type BedrockMessage struct {
@@ -97,6 +102,14 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 	}
 	if strings.TrimSpace(model) == "" || len(r.Messages) == 0 {
 		return request, errors.New("model and messages are required")
+	}
+	if r.ServiceTier != nil {
+		switch r.ServiceTier.Type {
+		case "default", "flex", "priority":
+			request.ServiceTier = r.ServiceTier.Type
+		default:
+			return request, errors.New("serviceTier.type must be default, flex, or priority")
+		}
 	}
 	for _, block := range r.System {
 		if block.Text == nil || strings.TrimSpace(*block.Text) == "" || block.Image != nil || block.Document != nil || block.ToolUse != nil || block.ToolResult != nil {

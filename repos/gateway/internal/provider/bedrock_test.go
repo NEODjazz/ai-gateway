@@ -51,6 +51,27 @@ func TestBedrockConverseMapsMessagesToolsAndUsage(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseForwardsServiceTier(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ServiceTier *bedrockServiceTier `json:"serviceTier"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.ServiceTier == nil || body.ServiceTier.Type != "flex" {
+			t.Fatalf("service tier lost: %+v", body.ServiceTier)
+		}
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`)
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "flex"}}
+	if _, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	request.ServiceTier = "performance"
+	if _, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request); err == nil {
+		t.Fatal("unsupported service tier accepted")
+	}
+}
+
 func TestBedrockConverseForwardsUserImageInOrder(t *testing.T) {
 	data := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nimage"))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

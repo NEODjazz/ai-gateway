@@ -314,7 +314,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedChatParameters(t *testi
 	tests := map[string]ProviderChatParameterPolicy{
 		"demo":              {ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{}},
 		"voyage":            {ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{}},
-		"bedrock":           {ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{}},
+		"bedrock":           {ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{"default", "flex", "priority"}},
 		"anthropic":         {ReasoningEffort: []string{"low", "medium", "high", "xhigh", "max"}, Logprobs: []string{}, ServiceTier: []string{"auto", "standard_only"}},
 		"gemini":            {ReasoningEffort: []string{"minimal", "low", "medium", "high"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{"auto", "default", "flex", "priority", "standard_only"}},
 		"ollama":            {ReasoningEffort: []string{"none", "low", "medium", "high", "max"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},

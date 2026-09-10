@@ -19,10 +19,18 @@ func TestBedrockConverseMapsToolHistoryAndConfiguration(t *testing.T) {
 		},
 		InferenceConfig: BedrockInferenceConfig{MaxTokens: &maxTokens},
 		ToolConfig:      &BedrockToolConfig{Tools: []BedrockTool{{Spec: BedrockToolSpec{Name: "weather", InputSchema: BedrockToolInputSchema{JSON: map[string]any{"type": "object"}}}}}},
+		ServiceTier:     &BedrockServiceTier{Type: "priority"},
 	}
 	chat, err := request.ChatRequest("public", "deployment")
-	if err != nil || chat.Model != "public" || chat.Provider != "deployment" || chat.MaxCompletionTokens == nil || *chat.MaxCompletionTokens != 32 || len(chat.Messages) != 4 || chat.Messages[2].ToolCalls[0].Function.Arguments != `{"city":"Paris"}` || chat.Messages[3].Role != "tool" || len(chat.Tools) != 1 {
+	if err != nil || chat.Model != "public" || chat.Provider != "deployment" || chat.ServiceTier != "priority" || chat.MaxCompletionTokens == nil || *chat.MaxCompletionTokens != 32 || len(chat.Messages) != 4 || chat.Messages[2].ToolCalls[0].Function.Arguments != `{"city":"Paris"}` || chat.Messages[3].Role != "tool" || len(chat.Tools) != 1 {
 		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+}
+
+func TestBedrockConverseRejectsUnknownServiceTier(t *testing.T) {
+	request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("hello")}}}}, ServiceTier: &BedrockServiceTier{Type: "reserved"}}
+	if _, err := request.ChatRequest("model", ""); err == nil {
+		t.Fatal("unknown service tier accepted")
 	}
 }
 
