@@ -1,0 +1,75 @@
+package provider
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"ai-gateway-gateway/internal/openai"
+)
+
+func TestBedrockConverseMapsMessagesToolsAndUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/model/us.anthropic.claude-v1:0/converse" || r.Header.Get("Authorization") != "Bearer provider-key" {
+			t.Fatalf("path=%q authorization=%q", r.URL.EscapedPath(), r.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		messages := body["messages"].([]any)
+		if len(messages) != 3 || len(body["system"].([]any)) != 1 || body["inferenceConfig"].(map[string]any)["maxTokens"] != float64(32) {
+			t.Fatalf("request=%#v", body)
+		}
+		toolConfig := body["toolConfig"].(map[string]any)
+		if len(toolConfig["tools"].([]any)) != 1 {
+			t.Fatalf("tool config=%#v", toolConfig)
+		}
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"checking "},{"toolUse":{"toolUseId":"call_2","name":"weather","input":{"city":"Paris"}}}]}},"stopReason":"tool_use","usage":{"inputTokens":9,"outputTokens":4,"totalTokens":13}}`)
+	}))
+	defer server.Close()
+	maxTokens := 32
+	client := NewBedrock(server.URL, "provider-key")
+	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "us.anthropic.claude-v1:0", MaxCompletionTokens: &maxTokens,
+		Messages: []openai.Message{
+			{Role: "system", Content: "be concise"},
+			{Role: "user", Content: "weather"},
+			{Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call_1", Type: "function", Function: openai.FunctionCall{Name: "weather", Arguments: `{"city":"Rome"}`}}}},
+			{Role: "tool", ToolCallID: "call_1", Content: "sunny"},
+		},
+		Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object"}}}},
+	})
+	if err != nil || response.Usage.TotalTokens != 13 || response.Choices[0].FinishReason != "tool_calls" || openai.ContentText(response.Choices[0].Message.Content) != "checking " || response.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"city":"Paris"}` {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestBedrockRejectsUnrepresentableParametersBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewBedrock(server.URL, "key")
+	seed := int64(1)
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Seed: &seed}
+	_, err := client.ChatCompletions(t.Context(), request)
+	if err == nil || !strings.Contains(err.Error(), "seed") || called {
+		t.Fatalf("err=%v called=%v", err, called)
+	}
+}
+
+func TestBedrockRejectsInconsistentUsage(t *testing.T) {
+	response := bedrockResponse{StopReason: "end_turn"}
+	response.Output.Message.Content = []bedrockContentBlock{{Text: "hello"}}
+	response.Usage = &struct {
+		InputTokens  int `json:"inputTokens"`
+		OutputTokens int `json:"outputTokens"`
+		TotalTokens  int `json:"totalTokens"`
+	}{InputTokens: 2, OutputTokens: 3, TotalTokens: 4}
+	if _, err := bedrockToChat(response, "model"); err == nil {
+		t.Fatal("inconsistent usage accepted")
+	}
+}

@@ -2848,6 +2848,8 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 		return NewMistral(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "voyage":
 		return NewVoyage(endpoint.BaseURL, endpoint.APIKey)
+	case "bedrock":
+		return NewBedrock(endpoint.BaseURL, endpoint.APIKey)
 	case "demo":
 		return Demo{}
 	default:

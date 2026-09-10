@@ -35,6 +35,8 @@ export function defaultModelCapabilities(providerType: string): string[] {
   switch (providerType) {
     case "voyage":
       return ["embeddings"];
+    case "bedrock":
+      return ["chat"];
     case "demo":
       return ["chat", "responses", "embeddings"];
     case "ollama":

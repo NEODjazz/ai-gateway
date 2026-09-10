@@ -29,7 +29,7 @@ type ProviderCapabilityProfile struct {
 	Capabilities []string `json:"capabilities"`
 }
 
-var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage"}
+var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock"}
 
 var managedOperationCapabilities = []string{
 	"chat", "responses", "embeddings", "rerank", "moderation",

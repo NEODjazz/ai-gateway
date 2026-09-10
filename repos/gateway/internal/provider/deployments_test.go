@@ -73,6 +73,31 @@ func TestManagedOpenRouterUsesCompatibleAdapter(t *testing.T) {
 	}
 }
 
+func TestManagedBedrockUsesConverseAdapter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/model/upstream:0/converse" || r.Header.Get("Authorization") != "Bearer bedrock-key" {
+			t.Fatalf("path=%q authorization=%q", r.URL.EscapedPath(), r.Header.Get("Authorization"))
+		}
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`)
+	}))
+	defer server.Close()
+	router := New(Config{CredentialEncryptionKey: []byte("managed-bedrock-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "bedrock", Type: "bedrock", BaseURL: server.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "bedrock-key", ProviderID: "bedrock", Secret: "bedrock-key"}); err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := router.endpointForDeployment(ModelDeployment{ProviderID: "bedrock", CredentialID: "bedrock-key", UpstreamModel: "upstream:0", Models: []string{"public"}, Capabilities: []string{"chat", "tools"}, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := endpoint.Provider.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "upstream:0", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+	if err != nil || openai.ContentText(response.Choices[0].Message.Content) != "ok" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
 func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 	tests := []struct {
 		providerType string
@@ -86,6 +111,9 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "gemini", capability: "moderation"},
 		{providerType: "mistral", capability: "image_generation"},
 		{providerType: "anthropic", capability: "embeddings"},
+		{providerType: "bedrock", capability: "responses"},
+		{providerType: "bedrock", capability: "stream"},
+		{providerType: "bedrock", capability: "structured_output"},
 		{providerType: "ollama", capability: "rerank"},
 		{providerType: "demo", capability: "stream"},
 		{providerType: "gemini", capability: "web_fetch"},
@@ -188,6 +216,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "anthropic", capabilities: []string{"chat", "tools", "structured_output", "vision", "web_search", "web_fetch", "prompt_cache", "assistant_prefill"}},
 		{providerType: "gemini", capabilities: []string{"chat", "tools", "structured_output", "vision"}},
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
+		{providerType: "bedrock", capabilities: []string{"chat", "tools"}},
 		{providerType: "mistral", capabilities: []string{"chat", "tools", "structured_output", "vision", "assistant_prefill"}},
 		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "tools", "structured_output", "mcp", "vision", "web_search", "audio"}},
 	}
@@ -230,6 +259,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	}
 	if slices.Contains(profilesByType["openai"].Capabilities, "assistant_prefill") || !slices.Contains(profilesByType["mistral"].Capabilities, "assistant_prefill") {
 		t.Fatalf("assistant prefill profiles are incorrect: openai=%v mistral=%v", profilesByType["openai"].Capabilities, profilesByType["mistral"].Capabilities)
+	}
+	if !slices.Equal(profilesByType["bedrock"].Operations, []string{"chat"}) || !slices.Equal(profilesByType["bedrock"].Capabilities, []string{"chat", "tools"}) {
+		t.Fatalf("bedrock profile=%+v", profilesByType["bedrock"])
 	}
 }
 
