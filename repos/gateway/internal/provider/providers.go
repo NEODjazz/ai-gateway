@@ -107,17 +107,24 @@ func (r *Router) UpdateProvider(id string, input ManagedProvider) (ManagedProvid
 	if err != nil {
 		return ManagedProvider{}, err
 	}
+	rebuilt := make([]Endpoint, 0)
+	if deployments := r.deployments.current.Load(); deployments != nil {
+		for _, deployment := range *deployments {
+			if deployment.ProviderID != id {
+				continue
+			}
+			endpoint, buildErr := r.endpointForManagedDeployment(deployment, provider)
+			if buildErr != nil {
+				return ManagedProvider{}, buildErr
+			}
+			rebuilt = append(rebuilt, endpoint)
+		}
+	}
 	next := cloneProviders(*current)
 	next[id] = provider
 	r.providers.current.Store(&next)
-	if deployments := r.deployments.current.Load(); deployments != nil {
-		for _, deployment := range *deployments {
-			if deployment.ProviderID == id {
-				if endpoint, buildErr := r.endpointForDeployment(deployment); buildErr == nil {
-					r.replaceRuntimeEndpoint(deployment.ID, endpoint)
-				}
-			}
-		}
+	for _, endpoint := range rebuilt {
+		r.replaceRuntimeEndpoint(endpoint.Name, endpoint)
 	}
 	if err := r.persistControlMutation(context.Background(), previous); err != nil {
 		return ManagedProvider{}, err

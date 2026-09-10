@@ -55,3 +55,28 @@ func TestAdminListsProviderCapabilityProfiles(t *testing.T) {
 		t.Fatalf("unexpected capability profiles: status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestAdminProviderUpdateReportsIncompatibleDeployments(t *testing.T) {
+	runtime := provider.New(provider.Config{})
+	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
+	for _, request := range []*http.Request{
+		httptest.NewRequest(http.MethodPost, "/admin/v1/providers", strings.NewReader(`{"id":"managed","type":"openai-compatible","base_url":"https://provider.example","enabled":true}`)),
+		httptest.NewRequest(http.MethodPost, "/admin/v1/model-deployments", strings.NewReader(`{"id":"images","provider_id":"managed","models":["image-model"],"capabilities":["image_generation"],"enabled":true}`)),
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("setup failed: %d %s", response.Code, response.Body.String())
+		}
+	}
+	update := httptest.NewRecorder()
+	handler.ServeHTTP(update, httptest.NewRequest(http.MethodPut, "/admin/v1/providers/managed", strings.NewReader(`{"type":"voyage","base_url":"https://provider.example","enabled":true}`)))
+	if update.Code != http.StatusBadRequest || !strings.Contains(update.Body.String(), `"code":"unsupported_provider_capability"`) || !strings.Contains(update.Body.String(), "voyage does not support image_generation") {
+		t.Fatalf("incompatible update was not explained: %d %s", update.Code, update.Body.String())
+	}
+	list := httptest.NewRecorder()
+	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/admin/v1/providers", nil))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"type":"openai-compatible"`) || strings.Contains(list.Body.String(), `"type":"voyage"`) {
+		t.Fatalf("failed update was not rolled back: %d %s", list.Code, list.Body.String())
+	}
+}

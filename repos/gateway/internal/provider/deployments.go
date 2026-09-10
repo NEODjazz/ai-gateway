@@ -391,6 +391,10 @@ func (r *Router) endpointForDeployment(deployment ModelDeployment) (Endpoint, er
 	if !found {
 		return Endpoint{}, ErrInvalidDeployment
 	}
+	return r.endpointForManagedDeployment(deployment, managed)
+}
+
+func (r *Router) endpointForManagedDeployment(deployment ModelDeployment, managed ManagedProvider) (Endpoint, error) {
 	secret, err := r.providerCredentialSecret(deployment.ProviderID, deployment.CredentialID)
 	if err != nil {
 		return Endpoint{}, err
