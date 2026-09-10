@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modelCapabilityOptions } from "./modelCapabilities";
+import { defaultModelCapabilities, modelCapabilityOptions } from "./modelCapabilities";
 
 describe("modelCapabilityOptions", () => {
   it("exposes every configurable inference capability", () => {
@@ -27,5 +27,13 @@ describe("modelCapabilityOptions", () => {
       "prompt_cache",
       "assistant_prefill"
     ]);
+  });
+
+  it("uses adapter-safe onboarding defaults", () => {
+    expect(defaultModelCapabilities("voyage")).toEqual(["embeddings"]);
+    expect(defaultModelCapabilities("demo")).toEqual(["chat", "responses", "embeddings"]);
+    expect(defaultModelCapabilities("ollama")).toEqual(["chat", "responses", "embeddings", "stream"]);
+    expect(defaultModelCapabilities("anthropic")).toEqual(["chat", "responses", "stream"]);
+    expect(defaultModelCapabilities("openrouter")).toEqual(["chat", "stream"]);
   });
 });

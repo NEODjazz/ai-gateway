@@ -77,4 +77,30 @@ describe("ModelOnboardingPage", () => {
     expect(screen.getByLabelText("Azure authentication")).toHaveValue("api_key");
   });
 
+  it("uses embedding capabilities when onboarding a Voyage model", async () => {
+    const calls: Array<{ path: string; body?: unknown }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input);
+      const body = options?.body ? JSON.parse(String(options.body)) as { deployments?: unknown; model_groups?: unknown } : undefined;
+      calls.push({ path, body });
+      if (!options?.method && path === "/admin/v1/providers") return json({ data: [{ id: "voyage", type: "voyage", base_url: "https://provider.example", enabled: true }] });
+      if (!options?.method && path === "/admin/v1/credentials") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
+      if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
+      if (path.endsWith("/test")) return json({ provider_id: "voyage", status: "available", latency_ms: 1, model_count: 1 });
+      if (path.endsWith("/discover-models")) return json({ data: [{ id: "voyage-4" }] });
+      if (path === "/admin/v1/model-onboarding/plan") return json({ revision: 1, catalog_version: "v1", deployments: body?.deployments, model_groups: body?.model_groups, changes: [] });
+      return json({ error: { message: `Unexpected ${path}` } }, 500);
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ModelOnboardingPage /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("option", { name: "voyage — voyage" });
+    await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
+    await userEvent.click((await screen.findAllByRole("checkbox"))[0]);
+    await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
+    await screen.findByText("Review onboarding plan");
+    const plan = calls.find((call) => call.path === "/admin/v1/model-onboarding/plan")?.body as { deployments?: Array<{ capabilities?: string[] }> };
+    expect(plan.deployments?.[0].capabilities).toEqual(["embeddings"]);
+  });
+
 });

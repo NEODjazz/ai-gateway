@@ -5,7 +5,7 @@ import { ErrorState, LoadingState } from "../components/AsyncState";
 import { PageHeader } from "../components/PageHeader";
 import type { Row } from "../components/DataTable";
 import { ChipMultiSelect } from "../components/ChipMultiSelect";
-import { modelCapabilityOptions } from "../modelCapabilities";
+import { defaultModelCapabilities, modelCapabilityOptions } from "../modelCapabilities";
 
 type Provider = { id: string; type: string; base_url: string; api_version?: string; auth_type?: string; enabled: boolean };
 type Credential = { id: string; provider_id?: string; description?: string };
@@ -86,10 +86,12 @@ export function ModelOnboardingPage() {
 
   async function ensureProviderAndCredential() {
     let nextProviderID = providerID;
+    let nextProviderType = selectedProvider?.type || newProvider.type;
     if (providerID === "__new") {
       const providerInput = newProvider.type === "azure-openai" ? newProvider : { id: newProvider.id, type: newProvider.type, base_url: newProvider.base_url };
       const created = await client.request<Provider>("/admin/v1/providers", { method: "POST", body: { ...providerInput, enabled: true } });
       nextProviderID = created.id;
+      nextProviderType = created.type;
       setProviders((current) => [...current, created]); setProviderID(created.id);
     }
     let nextCredentialID = credentialID;
@@ -98,7 +100,7 @@ export function ModelOnboardingPage() {
       nextCredentialID = created.id;
       setCredentials((current) => [...current, created]); setCredentialID(created.id);
     }
-    return { providerID: nextProviderID, credentialID: nextCredentialID };
+    return { providerID: nextProviderID, providerType: nextProviderType, credentialID: nextCredentialID };
   }
 
   async function discover(event: FormEvent) {
@@ -111,7 +113,7 @@ export function ModelOnboardingPage() {
         client.request<{ data?: Array<{ id: string }> }>(`/admin/v1/providers/${encodeURIComponent(selected.providerID)}/discover-models`, { method: "POST", body })
       ]);
       setProbe(probeResult);
-      setCandidates((discovery.data || []).map(({ id }) => ({ upstream: id, selected: false, publicModel: id, deploymentID: safeID(`${selected.providerID}-${id}`), capabilities: ["chat", "stream"], inputCost: "", outputCost: "", currency: "USD" })));
+      setCandidates((discovery.data || []).map(({ id }) => ({ upstream: id, selected: false, publicModel: id, deploymentID: safeID(`${selected.providerID}-${id}`), capabilities: defaultModelCapabilities(selected.providerType), inputCost: "", outputCost: "", currency: "USD" })));
       setStep(2);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Provider discovery failed"); }
     finally { setBusy(false); }

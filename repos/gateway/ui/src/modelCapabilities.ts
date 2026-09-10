@@ -24,3 +24,18 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "prompt_cache", label: "Prompt cache", description: "Explicit provider prompt caching" },
   { value: "assistant_prefill", label: "Assistant prefill", description: "Continue a final assistant prefix" }
 ];
+
+export function defaultModelCapabilities(providerType: string): string[] {
+  switch (providerType) {
+    case "voyage":
+      return ["embeddings"];
+    case "demo":
+      return ["chat", "responses", "embeddings"];
+    case "ollama":
+      return ["chat", "responses", "embeddings", "stream"];
+    case "anthropic":
+      return ["chat", "responses", "stream"];
+    default:
+      return ["chat", "stream"];
+  }
+}
