@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"time"
 
@@ -42,6 +43,13 @@ func (r Router) TranscribeAudio(ctx context.Context, req modules.RequestContext)
 		progress.enter(endpoint)
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
+		if reserver, ok := endpoint.Provider.(AudioTranscriptionDurationReserver); ok {
+			duration, reserveErr := reserver.ReserveAudioMilliseconds(request)
+			if reserveErr != nil {
+				return openai.AudioTranscriptionResponse{}, &Error{Class: FailureClientRequest, Provider: endpoint.Name, StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_audio", Err: reserveErr}
+			}
+			attemptCtx.InputAudioMilliseconds = duration
+		}
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
 			errs = append(errs, err)
@@ -70,6 +78,9 @@ func (r Router) TranscribeAudio(ctx context.Context, req modules.RequestContext)
 				err = errors.New(message)
 			} else {
 				attemptCtx.AudioTranscriptionResponse = &response
+				if response.Duration > 0 {
+					attemptCtx.InputAudioMilliseconds = int(math.Ceil(response.Duration * 1000))
+				}
 				if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 					return openai.AudioTranscriptionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 				}

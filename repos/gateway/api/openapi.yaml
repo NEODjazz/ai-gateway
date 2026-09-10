@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.156
+  version: 0.1.157
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -354,7 +354,7 @@ paths:
       operationId: transcribeAudio
       tags: [Inference]
       summary: Transcribe an uploaded audio file through an explicitly capable deployment
-      description: Applies bounded multipart decoding, file signature checks, AV and prompt DLP policies, RPM/TPM admission, retries and exact token-usage billing.
+      description: Applies bounded multipart decoding, file signature checks, AV and prompt DLP policies, RPM/TPM admission, retries and exact token-usage billing. Native Mistral deployments also settle provider-reported audio duration; WAV reserves its parsed duration while compressed formats conservatively reserve the provider's 60-minute limit.
       security: [{bearerAuth: []}]
       requestBody:
         required: true

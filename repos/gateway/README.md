@@ -123,6 +123,11 @@ applies the shared text policy, and returns a buffered binary response capped at
 32 MiB. Character pricing uses the exact Unicode input count. The `audio`
 stream format is supported; unsupported stream formats fail explicitly.
 
+Native Mistral `POST /v1/audio/transcriptions` maps the supported language,
+temperature, timestamp, diarization and context-bias fields, normalizes its
+token usage, and settles provider-reported audio duration. WAV duration is
+reserved exactly; compressed formats reserve the provider's 60-minute bound.
+
 `POST /v1/search` routes only to explicitly `search` capable deployments. It
 accepts a bounded string or list of queries plus result, domain, page-token and
 country filters. Queries pass through the shared content policy; compatible

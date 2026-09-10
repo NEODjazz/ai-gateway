@@ -156,6 +156,10 @@ type AudioTranscriptionClient interface {
 	TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error)
 }
 
+type AudioTranscriptionDurationReserver interface {
+	ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest) (int, error)
+}
+
 type AudioSpeechProvider interface {
 	GenerateSpeech(ctx context.Context, req modules.RequestContext) (openai.AudioSpeechResponse, error)
 }

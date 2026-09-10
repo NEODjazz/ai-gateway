@@ -204,9 +204,16 @@ bounded array fields отклоняются.
 Поддерживаются JSON-форматы `json`, `verbose_json` и `diarized_json`. Успешный
 ответ ограничен 8 MiB, transcript — 1 MiB текста, words и segments — 100 000
 элементов суммарно. Provider обязан вернуть точный token usage с согласованной
-суммой; duration-only usage отклоняется, поскольку существующий TPM и billing
-контракт начисляет токены. Streaming, duration-priced models и дополнительные
-native adapters остаются отдельными контрактами.
+суммой; duration-only usage отклоняется.
+
+Native Mistral transcription передает `language`, `temperature`,
+`timestamp_granularities` и `keywords[]` как `context_bias`; `diarized_json`
+включает diarization. Параметры без точного native соответствия отклоняются до
+сетевого вызова. Billing использует `prompt_audio_seconds` провайдера при
+commit. Для WAV reserve рассчитывается из RIFF metadata с округлением вверх до
+миллисекунды; для MP3, FLAC, OGG и WebM резервируется документированный предел
+60 минут, чтобы сжатый контейнер не мог занизить duration budget. Streaming
+остается отдельным контрактом.
 
 `POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
 

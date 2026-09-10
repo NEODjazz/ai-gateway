@@ -129,14 +129,14 @@ func TestAudioTranscriptionResponseValidation(t *testing.T) {
 	}
 }
 
-func TestMistralAudioTranscriptionRejectedBeforeNetwork(t *testing.T) {
+func TestMistralUnsupportedAudioTranscriptionParameterRejectedBeforeNetwork(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
 	defer server.Close()
 	client := NewMistral(server.URL, "secret", false)
-	_, err := client.TranscribeAudio(context.Background(), openai.AudioTranscriptionRequest{Model: "audio", File: transcriptionAttachment()})
+	_, err := client.TranscribeAudio(context.Background(), openai.AudioTranscriptionRequest{Model: "audio", File: mistralWAVAttachment(1000), Prompt: "unsupported"})
 	var providerErr *Error
-	if !errors.As(err, &providerErr) || providerErr.UpstreamCode != "unsupported_operation" || calls != 0 {
+	if !errors.As(err, &providerErr) || providerErr.UpstreamCode != "unsupported_parameter" || calls != 0 {
 		t.Fatalf("err=%v calls=%d", err, calls)
 	}
 }
