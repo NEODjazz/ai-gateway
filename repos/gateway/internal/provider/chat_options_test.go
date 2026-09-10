@@ -399,6 +399,19 @@ func TestLogprobsDisableSemanticCacheAndScopeExactCache(t *testing.T) {
 	}
 }
 
+func TestReasoningContentScopesExactCacheAndDisablesSemanticCache(t *testing.T) {
+	base := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "hello"}}}}
+	changed := base
+	changed.Request.Messages = append([]openai.Message(nil), base.Request.Messages...)
+	changed.Request.Messages = append(changed.Request.Messages, openai.Message{Role: "assistant", Content: "answer", ReasoningContent: "plan"})
+	if providerCacheKey("chat", base) == providerCacheKey("chat", changed) {
+		t.Fatal("exact cache ignored reasoning_content")
+	}
+	if _, _, ok := semanticRequest(changed, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache accepted reasoning_content")
+	}
+}
+
 func TestSafetyIdentifierScopesCaches(t *testing.T) {
 	base := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "hello"}}}}
 	changed := base

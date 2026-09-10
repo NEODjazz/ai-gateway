@@ -21,3 +21,18 @@ func TestValidateReasoningBlocks(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateChatReasoningContent(t *testing.T) {
+	if err := ValidateChatReasoningContent("assistant", strings.Repeat("x", MaxChatReasoningContentBytes)); err != nil {
+		t.Fatalf("valid assistant reasoning_content rejected: %v", err)
+	}
+	if err := ValidateChatReasoningContent("user", "plan"); err == nil {
+		t.Fatal("reasoning_content on a user message was accepted")
+	}
+	if err := ValidateChatReasoningContent("assistant", strings.Repeat("x", MaxChatReasoningContentBytes+1)); err == nil {
+		t.Fatal("oversized reasoning_content was accepted")
+	}
+	if err := ValidateChatReasoningContent("user", ""); err != nil {
+		t.Fatalf("empty reasoning_content should be ignored: %v", err)
+	}
+}

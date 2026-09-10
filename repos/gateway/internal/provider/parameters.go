@@ -29,6 +29,9 @@ func rejectParameters(adapter string, checks ...parameterCheck) error {
 var errUnsupportedServiceTier = errors.New("service_tier is not supported by this adapter")
 
 func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := validateChatReasoningContent("anthropic", request.Messages, false); err != nil {
+		return err
+	}
 	if err := validateChatMessagePrefix("anthropic", request.Messages, true); err != nil {
 		return err
 	}
@@ -116,6 +119,9 @@ func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := validateChatReasoningContent("ollama", request.Messages, false); err != nil {
+		return err
+	}
 	if err := validateChatMessagePrefix("ollama", request.Messages, false); err != nil {
 		return err
 	}
@@ -298,6 +304,9 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 }
 
 func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := validateChatReasoningContent("demo", request.Messages, false); err != nil {
+		return err
+	}
 	if err := validateChatMessagePrefix("demo", request.Messages, false); err != nil {
 		return err
 	}
@@ -321,6 +330,9 @@ func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 
 func (p OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	providerName := p.providerName()
+	if err := validateChatReasoningContent(providerName, request.Messages, true); err != nil {
+		return err
+	}
 	if err := validateChatMessagePrefix(providerName, request.Messages, p.supportsMessagePrefix); err != nil {
 		return err
 	}
@@ -349,6 +361,18 @@ func (p OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRe
 		parameterCheck{"prompt_mode", request.PromptMode != "" && !p.supportsPromptMode},
 		parameterCheck{"service_tier", request.ServiceTier != "" && providerName != "groq" && providerName != "openrouter"},
 	)
+}
+
+func validateChatReasoningContent(adapter string, messages []openai.Message, supported bool) error {
+	for _, message := range messages {
+		if err := openai.ValidateChatReasoningContent(message.Role, message.ReasoningContent); err != nil {
+			return &Error{Class: FailureClientRequest, Provider: adapter, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "messages.reasoning_content", Err: err}
+		}
+		if message.ReasoningContent != "" && !supported {
+			return rejectParameters(adapter, parameterCheck{"messages.reasoning_content", true})
+		}
+	}
+	return nil
 }
 
 func validateChatMessagePrefix(adapter string, messages []openai.Message, supported bool) error {

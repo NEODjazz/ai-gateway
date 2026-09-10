@@ -83,6 +83,34 @@ func TestOpenAICompatiblePreservesChatCacheTokenDetails(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatiblePreservesReasoningContent(t *testing.T) {
+	var upstream openAICompatibleChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"id":"chat-reasoning","object":"chat.completion","model":"reasoning-model","choices":[{"index":0,"message":{"role":"assistant","reasoning_content":"new plan","content":"answer"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	response, err := NewOpenAICompatible(server.URL, "", false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{
+		Model: "reasoning-model",
+		Messages: []openai.Message{
+			{Role: "user", Content: "question"},
+			{Role: "assistant", ReasoningContent: "prior plan", Content: "prior answer"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(upstream.Messages) != 2 || upstream.Messages[1].ReasoningContent != "prior plan" {
+		t.Fatalf("request reasoning_content was not preserved: %+v", upstream.Messages)
+	}
+	if got := response.Choices[0].Message.ReasoningContent; got != "new plan" {
+		t.Fatalf("response reasoning_content=%q", got)
+	}
+}
+
 func TestOpenAICompatiblePreservesResponseCacheTokenDetails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{
@@ -479,8 +507,8 @@ func TestOpenAICompatibleCollectsChatStreamWhenEnabled(t *testing.T) {
 			t.Fatal(err)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte(`data: {"id":"chatcmpl-test","model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":"hel"},"finish_reason":null}]}` + "\n\n"))
-		_, _ = w.Write([]byte(`data: {"id":"chatcmpl-test","model":"test-model","choices":[{"index":0,"delta":{"content":"lo"},"finish_reason":"stop"}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"id":"chatcmpl-test","model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"plan ","content":"hel"},"finish_reason":null}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"id":"chatcmpl-test","model":"test-model","choices":[{"index":0,"delta":{"reasoning_content":"more","content":"lo"},"finish_reason":"stop"}]}` + "\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
@@ -501,6 +529,33 @@ func TestOpenAICompatibleCollectsChatStreamWhenEnabled(t *testing.T) {
 	}
 	if openai.ContentText(response.Choices[0].Message.Content) != "hello" {
 		t.Fatalf("expected collected stream content, got %+v", response.Choices[0].Message.Content)
+	}
+	if got := response.Choices[0].Message.ReasoningContent; got != "plan more" {
+		t.Fatalf("expected collected stream reasoning_content, got %q", got)
+	}
+}
+
+func TestOpenAICompatibleRejectsOversizedStreamingReasoningContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		remaining := openai.MaxChatReasoningContentBytes + 1
+		for remaining > 0 {
+			size := min(remaining, 32<<10)
+			delta := map[string]any{"role": "assistant", "reasoning_content": strings.Repeat("x", size)}
+			choice := map[string]any{"index": 0, "delta": delta}
+			chunk, err := json.Marshal(map[string]any{"id": "chatcmpl-test", "model": "test-model", "choices": []any{choice}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", chunk)
+			remaining -= size
+		}
+	}))
+	defer server.Close()
+
+	_, err := NewOpenAICompatible(server.URL, "", true).ChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "test-model", Stream: true})
+	if err == nil || !strings.Contains(err.Error(), "reasoning_content stream exceeds limit") {
+		t.Fatalf("oversized stream reasoning_content was not rejected: %v", err)
 	}
 }
 

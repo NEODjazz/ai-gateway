@@ -145,6 +145,9 @@ func NewCohere(baseURL, apiKey string, stream ...bool) Cohere {
 func (Cohere) SupportsResponses() bool { return false }
 
 func (Cohere) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := validateChatReasoningContent("cohere", request.Messages, false); err != nil {
+		return err
+	}
 	if err := validateChatMessagePrefix("cohere", request.Messages, false); err != nil {
 		return err
 	}

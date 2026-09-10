@@ -193,6 +193,10 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		return
 	}
 	for _, message := range request.Messages {
+		if err := openai.ValidateChatReasoningContent(message.Role, message.ReasoningContent); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
 		if message.Annotations != nil {
 			writeError(w, http.StatusBadRequest, "invalid_request", "messages.annotations is response-only")
 			return

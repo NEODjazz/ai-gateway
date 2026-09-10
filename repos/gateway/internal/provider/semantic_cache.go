@@ -239,7 +239,7 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	structure := make([]string, 0, len(request.Messages))
 	userMessages := 0
 	for _, message := range request.Messages {
-		if len(message.ToolCalls) > 0 || message.ToolCallID != "" || message.Audio != nil || !textOnlyContent(message.Content) {
+		if len(message.ToolCalls) > 0 || message.ToolCallID != "" || message.Audio != nil || message.ReasoningContent != "" || !textOnlyContent(message.Content) {
 			return "", "", false
 		}
 		text := openai.ContentText(message.Content)

@@ -38,20 +38,36 @@ type ChatStreamOptions struct {
 }
 
 type Message struct {
-	Role         string           `json:"role"`
-	Content      any              `json:"content"`
-	Prefix       *bool            `json:"prefix,omitempty"`
-	Refusal      *string          `json:"refusal,omitempty"`
-	Annotations  []ChatAnnotation `json:"annotations,omitempty"`
-	Audio        *ChatAudio       `json:"audio,omitempty"`
-	Name         string           `json:"name,omitempty"`
-	ToolCallID   string           `json:"tool_call_id,omitempty"`
-	ToolCalls    []ToolCall       `json:"tool_calls,omitempty"`
-	FunctionCall *FunctionCall    `json:"function_call,omitempty"`
-	Reasoning    []ReasoningBlock `json:"reasoning,omitempty"`
+	Role             string           `json:"role"`
+	Content          any              `json:"content"`
+	Prefix           *bool            `json:"prefix,omitempty"`
+	Refusal          *string          `json:"refusal,omitempty"`
+	Annotations      []ChatAnnotation `json:"annotations,omitempty"`
+	Audio            *ChatAudio       `json:"audio,omitempty"`
+	Name             string           `json:"name,omitempty"`
+	ToolCallID       string           `json:"tool_call_id,omitempty"`
+	ToolCalls        []ToolCall       `json:"tool_calls,omitempty"`
+	FunctionCall     *FunctionCall    `json:"function_call,omitempty"`
+	Reasoning        []ReasoningBlock `json:"reasoning,omitempty"`
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
 	// NativeContent is an internal, validated response representation used by
 	// protocol adapters that must preserve provider-native content block order.
 	NativeContent []json.RawMessage `json:"-"`
+}
+
+const MaxChatReasoningContentBytes = 1 << 20
+
+func ValidateChatReasoningContent(role, content string) error {
+	if content == "" {
+		return nil
+	}
+	if role != "assistant" {
+		return errors.New("reasoning_content requires role=assistant")
+	}
+	if len(content) > MaxChatReasoningContentBytes {
+		return errors.New("reasoning_content exceeds its size limit")
+	}
+	return nil
 }
 
 // ReasoningBlock preserves signed and redacted reasoning returned by native

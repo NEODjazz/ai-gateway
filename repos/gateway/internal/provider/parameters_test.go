@@ -12,6 +12,45 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
+func TestChatReasoningContentSupportIsExplicit(t *testing.T) {
+	request := openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "assistant", ReasoningContent: "plan"}}}
+	unsupported := []struct {
+		name     string
+		validate func(openai.ChatCompletionRequest) error
+	}{
+		{name: "anthropic", validate: (Anthropic{}).ValidateChatParameters},
+		{name: "bedrock", validate: (Bedrock{}).ValidateChatParameters},
+		{name: "cohere", validate: (Cohere{}).ValidateChatParameters},
+		{name: "demo", validate: (Demo{}).ValidateChatParameters},
+		{name: "gemini", validate: (Gemini{}).ValidateChatParameters},
+		{name: "ollama", validate: (Ollama{}).ValidateChatParameters},
+	}
+	for _, adapter := range unsupported {
+		t.Run(adapter.name, func(t *testing.T) {
+			var failure *Error
+			if err := adapter.validate(request); !errors.As(err, &failure) || failure.Param != "messages.reasoning_content" || failure.UpstreamCode != "unsupported_parameter" {
+				t.Fatalf("reasoning_content was not rejected explicitly: %v", err)
+			}
+		})
+	}
+
+	for _, adapter := range []struct {
+		name     string
+		validate func(openai.ChatCompletionRequest) error
+	}{
+		{name: "compatible", validate: NewOpenAICompatible("http://unused.invalid", "", false).ValidateChatParameters},
+		{name: "deepseek", validate: NewDeepSeek("http://unused.invalid", "", false).ValidateChatParameters},
+		{name: "groq", validate: NewGroq("http://unused.invalid", "", false).ValidateChatParameters},
+		{name: "mistral", validate: NewMistral("http://unused.invalid", "", false).ValidateChatParameters},
+	} {
+		t.Run(adapter.name, func(t *testing.T) {
+			if err := adapter.validate(request); err != nil {
+				t.Fatalf("reasoning_content rejected: %v", err)
+			}
+		})
+	}
+}
+
 func TestNativeAdaptersRejectUnrepresentableChatParameters(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(500) }))

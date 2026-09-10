@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.146
+  version: 0.1.147
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3813,6 +3813,10 @@ components:
           maxItems: 128
           description: Signed or redacted native reasoning history. Supported only by deployments with an explicit reasoning-block contract.
           items: {$ref: '#/components/schemas/ReasoningBlock'}
+        reasoning_content:
+          type: string
+          maxLength: 1048576
+          description: Unsigned assistant reasoning preserved by compatible deployments. It is counted as request context and disables semantic cache reuse.
     ReasoningBlock:
       oneOf:
         - type: object

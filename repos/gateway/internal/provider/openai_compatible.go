@@ -549,6 +549,9 @@ func validateChatCompletionEnvelope(response openai.ChatCompletionResponse) erro
 		if err := openai.ValidateReasoningBlocks(choice.Message.Reasoning); err != nil {
 			return fmt.Errorf("provider returned invalid chat completion reasoning: %w", err)
 		}
+		if err := openai.ValidateChatReasoningContent(choice.Message.Role, choice.Message.ReasoningContent); err != nil {
+			return fmt.Errorf("provider returned invalid chat completion reasoning_content: %w", err)
+		}
 	}
 	return nil
 }
@@ -888,12 +891,13 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			Choices           []struct {
 				Index int `json:"index"`
 				Delta struct {
-					Role         string               `json:"role"`
-					Content      string               `json:"content"`
-					Refusal      *string              `json:"refusal"`
-					Audio        *openai.ChatAudio    `json:"audio"`
-					FunctionCall *openai.FunctionCall `json:"function_call"`
-					ToolCalls    []openai.ToolCall    `json:"tool_calls,omitempty"`
+					Role             string               `json:"role"`
+					Content          string               `json:"content"`
+					Refusal          *string              `json:"refusal"`
+					Audio            *openai.ChatAudio    `json:"audio"`
+					FunctionCall     *openai.FunctionCall `json:"function_call"`
+					ToolCalls        []openai.ToolCall    `json:"tool_calls,omitempty"`
+					ReasoningContent string               `json:"reasoning_content"`
 				} `json:"delta"`
 				FinishReason *string                `json:"finish_reason"`
 				StopSequence *string                `json:"stop_sequence"`
@@ -978,6 +982,12 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 			}
 			if choice.Delta.Content != "" {
 				current.Message.Content = openai.ContentText(current.Message.Content) + choice.Delta.Content
+			}
+			if choice.Delta.ReasoningContent != "" {
+				if len(current.Message.ReasoningContent) > openai.MaxChatReasoningContentBytes-len(choice.Delta.ReasoningContent) {
+					return errors.New("provider chat reasoning_content stream exceeds limit")
+				}
+				current.Message.ReasoningContent += choice.Delta.ReasoningContent
 			}
 			if choice.Delta.Refusal != nil {
 				value := *choice.Delta.Refusal

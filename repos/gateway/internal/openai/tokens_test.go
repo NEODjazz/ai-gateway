@@ -49,6 +49,11 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	if ChatInputTokens(withAudio) <= ChatInputTokens(base)+100 {
 		t.Fatal("assistant audio reference omitted")
 	}
+	withReasoning := base
+	withReasoning.Messages = []Message{{Role: "assistant", ReasoningContent: strings.Repeat("reasoning", 1000)}}
+	if ChatInputTokens(withReasoning) <= ChatInputTokens(base)+1000 {
+		t.Fatal("assistant reasoning_content omitted")
+	}
 	maximumFetches := 3
 	withFetch := base
 	withFetch.WebFetchOptions = &ChatWebFetchOptions{AllowedDomains: []string{"docs.example.com"}, MaxUses: &maximumFetches, MaxContentTokens: 20000}
