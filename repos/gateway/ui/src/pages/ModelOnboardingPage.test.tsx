@@ -59,6 +59,11 @@ describe("ModelOnboardingPage", () => {
   it("offers native provider settings when creating a provider", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       if (String(input) === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
+      if (String(input) === "/admin/v1/provider-capabilities") return json({ data: [
+        { type: "azure-openai", operations: ["chat"], auth_types: ["api_key", "entra"] },
+        { type: "gemini", operations: ["chat"], auth_types: ["api_key", "gcp_adc"] },
+        { type: "bedrock", operations: ["chat"], auth_types: ["bearer", "aws_sigv4"] }
+      ] });
       return json({ data: [] });
     });
     sessionStorage.setItem("ai-gateway.admin-token", "token");
@@ -73,6 +78,8 @@ describe("ModelOnboardingPage", () => {
     expect(screen.getByLabelText("Provider type")).toHaveValue("gemini");
     expect(screen.queryByLabelText("Azure API version")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Google authentication")).toHaveValue("api_key");
+    expect(screen.queryByRole("option", { name: "entra" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "aws_sigv4" })).not.toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Google authentication"), "gcp_adc");
     expect(screen.getByLabelText("Google authentication")).toHaveValue("gcp_adc");
     await userEvent.selectOptions(screen.getByLabelText("Provider type"), "azure-openai");
