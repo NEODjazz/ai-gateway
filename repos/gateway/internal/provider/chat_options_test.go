@@ -360,9 +360,9 @@ func TestExtendedSamplingControlsScopeExactCache(t *testing.T) {
 	}
 }
 
-func TestChatModalitiesAreRejectedByEveryNativeAdapter(t *testing.T) {
+func TestChatModalitiesAreRejectedByUnsupportedNativeAdapters(t *testing.T) {
 	request := openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{Modalities: []string{"text"}}}
-	for _, client := range []Client{NewAnthropic("http://unused.invalid", "", false), NewOllama("http://unused.invalid", false), NewGemini("http://unused.invalid", "", false), Demo{}} {
+	for _, client := range []Client{NewAnthropic("http://unused.invalid", "", false), NewOllama("http://unused.invalid", false), Demo{}} {
 		var failure *Error
 		err := validateChatAdapter(client, request)
 		if !errors.As(err, &failure) || failure.Param != "modalities" || failure.UpstreamCode != "unsupported_parameter" {

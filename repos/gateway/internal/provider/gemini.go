@@ -81,6 +81,7 @@ type geminiGeneration struct {
 	Logprobs           *int                  `json:"logprobs,omitempty"`
 	CandidateCount     *int                  `json:"candidateCount,omitempty"`
 	ThinkingConfig     *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+	ResponseModalities []string              `json:"responseModalities,omitempty"`
 	Seed               *int64                `json:"seed,omitempty"`
 	Stop               []string              `json:"stopSequences,omitempty"`
 	ResponseMIMEType   string                `json:"responseMimeType,omitempty"`
@@ -209,6 +210,13 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	if options.Store != nil && *options.Store {
 		return result, geminiInvalid("store")
 	}
+	var responseModalities []string
+	if options.Modalities != nil {
+		if len(options.Modalities) != 1 || options.Modalities[0] != "text" || options.Audio != nil {
+			return result, geminiInvalid("modalities")
+		}
+		responseModalities = []string{"TEXT"}
+	}
 	options.TopK = nil
 	options.FrequencyPenalty = nil
 	options.PresencePenalty = nil
@@ -218,6 +226,7 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	options.ReasoningEffort = ""
 	options.ServiceTier = ""
 	options.Store = nil
+	options.Modalities = nil
 	if err := rejectGenerationOptions("gemini", options); err != nil {
 		return result, err
 	}
@@ -252,6 +261,7 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty,
 		ResponseLogprobs: request.Logprobs, Logprobs: request.TopLogprobs, CandidateCount: request.N,
 		ThinkingConfig: thinkingConfig, Seed: request.Seed, Stop: stop,
+		ResponseModalities: responseModalities,
 	}
 	result.ServiceTier = serviceTier
 	result.Store = request.Store
