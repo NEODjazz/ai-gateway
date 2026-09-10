@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ type BedrockConverseRequest struct {
 	ServiceTier                       *BedrockServiceTier       `json:"serviceTier,omitempty"`
 	PerformanceConfig                 *BedrockPerformanceConfig `json:"performanceConfig,omitempty"`
 	OutputConfig                      *BedrockOutputConfig      `json:"outputConfig,omitempty"`
+	AdditionalModelRequestFields      json.RawMessage           `json:"additionalModelRequestFields,omitempty"`
 	AdditionalModelResponseFieldPaths []string                  `json:"additionalModelResponseFieldPaths,omitempty"`
 	RequestMetadata                   map[string]string         `json:"requestMetadata,omitempty"`
 }
@@ -191,10 +193,17 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 	if err := ValidateBedrockResponseFieldPaths(r.AdditionalModelResponseFieldPaths); err != nil {
 		return request, err
 	}
+	if err := ValidateBedrockAdditionalModelRequestFields(r.AdditionalModelRequestFields); err != nil {
+		return request, err
+	}
 	if err := ValidateBedrockRequestMetadata(r.RequestMetadata); err != nil {
 		return request, err
 	}
 	request.BedrockAdditionalModelResponseFieldPaths = append([]string(nil), r.AdditionalModelResponseFieldPaths...)
+	request.BedrockAdditionalModelRequestFields = append(json.RawMessage(nil), r.AdditionalModelRequestFields...)
+	if len(r.AdditionalModelRequestFields) > 0 {
+		request.NativeInputTokens = ReserveTokens(request.NativeInputTokens, EstimateContextTokens(r.AdditionalModelRequestFields))
+	}
 	if len(r.RequestMetadata) > 0 {
 		request.BedrockRequestMetadata = make(map[string]string, len(r.RequestMetadata))
 		for key, value := range r.RequestMetadata {
@@ -379,6 +388,21 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		}
 	}
 	return request, nil
+}
+
+const MaxBedrockAdditionalModelRequestFieldsBytes = 64 << 10
+
+func ValidateBedrockAdditionalModelRequestFields(fields json.RawMessage) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	if len(fields) > MaxBedrockAdditionalModelRequestFieldsBytes {
+		return errors.New("additionalModelRequestFields exceeds its size limit")
+	}
+	if !json.Valid(fields) || bytes.Equal(bytes.TrimSpace(fields), []byte("null")) {
+		return errors.New("additionalModelRequestFields must contain a non-null JSON value")
+	}
+	return nil
 }
 
 func ValidateBedrockRequestMetadata(metadata map[string]string) error {

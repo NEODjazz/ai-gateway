@@ -213,6 +213,9 @@ func scanPayload(req *RequestContext) string {
 			parts = append(parts, "request_metadata: "+key+"="+req.Request.BedrockRequestMetadata[key])
 		}
 	}
+	if len(req.Request.BedrockAdditionalModelRequestFields) > 0 {
+		parts = append(parts, "additional_model_request_fields: "+string(req.Request.BedrockAdditionalModelRequestFields))
+	}
 	if req.ResponseRequest != nil {
 		if req.ResponseRequest.Instructions != "" {
 			parts = append(parts, "instructions: "+req.ResponseRequest.Instructions)

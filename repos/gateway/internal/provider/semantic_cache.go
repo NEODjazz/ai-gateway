@@ -232,6 +232,9 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if len(request.BedrockRequestMetadata) > 0 {
 		return "", "", false
 	}
+	if len(request.BedrockAdditionalModelRequestFields) > 0 {
+		return "", "", false
+	}
 	if openai.ChatRequestsAudio(request) {
 		return "", "", false
 	}

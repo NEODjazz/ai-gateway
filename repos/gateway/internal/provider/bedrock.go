@@ -134,6 +134,7 @@ type bedrockRequest struct {
 	ServiceTier                       *bedrockServiceTier       `json:"serviceTier,omitempty"`
 	PerformanceConfig                 *bedrockPerformanceConfig `json:"performanceConfig,omitempty"`
 	OutputConfig                      *bedrockOutputConfig      `json:"outputConfig,omitempty"`
+	AdditionalModelRequestFields      json.RawMessage           `json:"additionalModelRequestFields,omitempty"`
 	AdditionalModelResponseFieldPaths []string                  `json:"additionalModelResponseFieldPaths,omitempty"`
 	RequestMetadata                   map[string]string         `json:"requestMetadata,omitempty"`
 	ToolConfig                        *bedrockToolConfig        `json:"toolConfig,omitempty"`
@@ -238,6 +239,9 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 	if err := openai.ValidateBedrockResponseFieldPaths(request.BedrockAdditionalModelResponseFieldPaths); err != nil {
 		return result, bedrockInvalid("additional_model_response_field_paths")
 	}
+	if err := openai.ValidateBedrockAdditionalModelRequestFields(request.BedrockAdditionalModelRequestFields); err != nil {
+		return result, bedrockInvalid("additional_model_request_fields")
+	}
 	if err := openai.ValidateBedrockRequestMetadata(request.BedrockRequestMetadata); err != nil {
 		return result, bedrockInvalid("request_metadata")
 	}
@@ -332,6 +336,7 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 		}
 	}
 	result.AdditionalModelResponseFieldPaths = append([]string(nil), request.BedrockAdditionalModelResponseFieldPaths...)
+	result.AdditionalModelRequestFields = append(json.RawMessage(nil), request.BedrockAdditionalModelRequestFields...)
 	if len(request.BedrockRequestMetadata) > 0 {
 		result.RequestMetadata = make(map[string]string, len(request.BedrockRequestMetadata))
 		for key, value := range request.BedrockRequestMetadata {

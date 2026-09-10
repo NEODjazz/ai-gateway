@@ -74,6 +74,13 @@ func TestBedrockRequestMetadataReachesDLPProjection(t *testing.T) {
 	}
 }
 
+func TestBedrockAdditionalModelRequestFieldsReachDLPProjection(t *testing.T) {
+	req := RequestContext{Request: openai.ChatCompletionRequest{BedrockAdditionalModelRequestFields: json.RawMessage(`{"user_context":"user@example.com"}`)}}
+	if payload := scanPayload(&req); payload != `additional_model_request_fields: {"user_context":"user@example.com"}` {
+		t.Fatalf("additional model request fields missing: %q", payload)
+	}
+}
+
 func TestScanPayloadIncludesImageGenerationPrompt(t *testing.T) {
 	req := RequestContext{ImageGenerationRequest: &openai.ImageGenerationRequest{Model: "image", Prompt: "private image prompt"}}
 	if payload := scanPayload(&req); payload != "image_prompt: private image prompt" {

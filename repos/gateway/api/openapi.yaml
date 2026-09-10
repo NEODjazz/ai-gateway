@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.200
+  version: 0.1.201
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3565,6 +3565,8 @@ components:
             latency: {type: string, enum: [standard, optimized]}
         outputConfig:
           $ref: '#/components/schemas/BedrockOutputConfig'
+        additionalModelRequestFields:
+          description: A non-null JSON value of model-specific inference parameters, bounded to 64 KiB by the gateway.
         additionalModelResponseFieldPaths:
           type: array
           maxItems: 10

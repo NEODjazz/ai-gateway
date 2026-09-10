@@ -66,6 +66,9 @@ func TestCacheIsolationIncludesNativeChatState(t *testing.T) {
 		{"additional response fields", func(request *openai.ChatCompletionRequest) {
 			request.BedrockAdditionalModelResponseFieldPaths = []string{"/stop_sequence"}
 		}},
+		{"additional model request fields", func(request *openai.ChatCompletionRequest) {
+			request.BedrockAdditionalModelRequestFields = json.RawMessage(`{"top_k":42}`)
+		}},
 	}
 	for _, variant := range variants {
 		t.Run(variant.name, func(t *testing.T) {
@@ -77,9 +80,9 @@ func TestCacheIsolationIncludesNativeChatState(t *testing.T) {
 			}
 			baseScope, _, baseEligible := semanticRequest(base, Endpoint{Name: "endpoint"})
 			changedScope, _, changedEligible := semanticRequest(changed, Endpoint{Name: "endpoint"})
-			if variant.name == "native input" {
+			if variant.name == "native input" || variant.name == "additional model request fields" {
 				if !baseEligible || changedEligible {
-					t.Fatalf("native content semantic eligibility: base=%v changed=%v", baseEligible, changedEligible)
+					t.Fatalf("opaque native state semantic eligibility: base=%v changed=%v", baseEligible, changedEligible)
 				}
 			} else if !baseEligible || !changedEligible || baseScope == changedScope {
 				t.Fatal("semantic cache shared across native controls")

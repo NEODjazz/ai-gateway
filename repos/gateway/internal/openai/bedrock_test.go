@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -119,6 +120,32 @@ func TestBedrockConverseValidatesAndCopiesRequestMetadata(t *testing.T) {
 		request.RequestMetadata = metadata
 		if _, err := request.ChatRequest("model", ""); err == nil {
 			t.Fatalf("invalid request metadata accepted: %#v", metadata)
+		}
+	}
+}
+
+func TestBedrockConverseValidatesAndCopiesAdditionalModelRequestFields(t *testing.T) {
+	request := BedrockConverseRequest{
+		Messages:                     []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("hello")}}}},
+		AdditionalModelRequestFields: json.RawMessage(`{"top_k":42,"thinking":{"budget_tokens":128}}`),
+	}
+	chat, err := request.ChatRequest("model", "")
+	if err != nil || string(chat.BedrockAdditionalModelRequestFields) != string(request.AdditionalModelRequestFields) || chat.NativeInputTokens <= 0 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	request.AdditionalModelRequestFields[2] = 'X'
+	if string(chat.BedrockAdditionalModelRequestFields) != `{"top_k":42,"thinking":{"budget_tokens":128}}` {
+		t.Fatal("additional model request fields were not copied")
+	}
+	for _, fields := range []json.RawMessage{
+		json.RawMessage(`null`),
+		json.RawMessage(" \nnull "),
+		json.RawMessage(`{"broken":`),
+		json.RawMessage(`"` + strings.Repeat("x", MaxBedrockAdditionalModelRequestFieldsBytes) + `"`),
+	} {
+		request.AdditionalModelRequestFields = fields
+		if _, err := request.ChatRequest("model", ""); err == nil {
+			t.Fatalf("invalid additional model request fields accepted: %d bytes", len(fields))
 		}
 	}
 }

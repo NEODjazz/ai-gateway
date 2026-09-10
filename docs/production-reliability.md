@@ -38,6 +38,11 @@ projection. Because it annotates an actual provider invocation, requests carryin
 it bypass exact and semantic response caches so that accepted calls always reach
 the provider log.
 
+Opaque native model inference fields are limited to 64 KiB, validated as non-null
+JSON and included in the input DLP projection. They participate in exact-cache
+identity and bypass semantic cache because their effect cannot be normalized by
+the gateway.
+
 Chat cache identity also includes validated provider-native message blocks, their
 reserved input size, Bedrock service tier, latency selection and requested
 additional response-field paths. Semantic

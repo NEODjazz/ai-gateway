@@ -70,9 +70,20 @@ func TestBedrockConverseAcceptsBoundedNativeDocument(t *testing.T) {
 
 func TestBedrockConverseRejectsUnknownFieldsBeforeExecution(t *testing.T) {
 	response := httptest.NewRecorder()
-	Routes(Handler{}).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/model/converse", strings.NewReader(`{"messages":[{"role":"user","content":[{"text":"hello"}]}],"additionalModelRequestFields":{"top_k":1}}`)))
+	Routes(Handler{}).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/model/converse", strings.NewReader(`{"messages":[{"role":"user","content":[{"text":"hello"}]}],"unknownField":{"top_k":1}}`)))
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_request"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestBedrockConverseAcceptsAdditionalModelRequestFields(t *testing.T) {
+	upstream := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	body := `{"messages":[{"role":"user","content":[{"text":"hello"}]}],"additionalModelRequestFields":{"top_k":42}}`
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/model/converse", strings.NewReader(body)))
+	if response.Code != http.StatusOK || string(upstream.request.Request.BedrockAdditionalModelRequestFields) != `{"top_k":42}` || upstream.request.Request.NativeInputTokens <= 0 {
+		t.Fatalf("status=%d body=%s request=%+v", response.Code, response.Body.String(), upstream.request.Request)
 	}
 }
 

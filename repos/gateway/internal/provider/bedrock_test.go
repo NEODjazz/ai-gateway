@@ -115,6 +115,27 @@ func TestBedrockConverseForwardsRequestMetadata(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseForwardsAdditionalModelRequestFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Fields map[string]any `json:"additionalModelRequestFields"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.Fields["top_k"] != float64(42) {
+			t.Fatalf("additional model fields lost: %#v", body.Fields)
+		}
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`)
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, BedrockAdditionalModelRequestFields: json.RawMessage(`{"top_k":42}`)}
+	if _, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	request.BedrockAdditionalModelRequestFields = json.RawMessage(`null`)
+	if _, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request); err == nil {
+		t.Fatal("invalid direct additional model fields accepted")
+	}
+}
+
 func TestBedrockConversePreservesRequestedAdditionalResponseFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -193,6 +214,11 @@ func TestBedrockNativeControlsFailClosedOnOtherAdapters(t *testing.T) {
 	request.BedrockRequestMetadata = map[string]string{"tenant": "customer"}
 	if err := validateChatAdapter(Demo{}, request); err == nil {
 		t.Fatal("Bedrock request metadata was dropped by another adapter")
+	}
+	request.BedrockRequestMetadata = nil
+	request.BedrockAdditionalModelRequestFields = json.RawMessage(`{"top_k":42}`)
+	if err := validateChatAdapter(Demo{}, request); err == nil {
+		t.Fatal("Bedrock additional model request fields were dropped by another adapter")
 	}
 }
 

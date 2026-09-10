@@ -18,6 +18,7 @@ type ChatCompletionRequest struct {
 	BedrockServiceTier                       string            `json:"-"`
 	BedrockPerformanceLatency                string            `json:"-"`
 	BedrockAdditionalModelResponseFieldPaths []string          `json:"-"`
+	BedrockAdditionalModelRequestFields      json.RawMessage   `json:"-"`
 	BedrockRequestMetadata                   map[string]string `json:"-"`
 	ChatGenerationOptions
 	Provider            string                `json:"provider,omitempty"`
