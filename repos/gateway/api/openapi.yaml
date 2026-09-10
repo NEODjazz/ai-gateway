@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.197
+  version: 0.1.198
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3563,6 +3563,8 @@ components:
           required: [latency]
           properties:
             latency: {type: string, enum: [standard, optimized]}
+        outputConfig:
+          $ref: '#/components/schemas/BedrockOutputConfig'
         additionalModelResponseFieldPaths:
           type: array
           maxItems: 10
@@ -3580,6 +3582,30 @@ components:
           type: array
           maxItems: 4
           items: {type: string, minLength: 1}
+    BedrockOutputConfig:
+      type: object
+      additionalProperties: false
+      required: [textFormat]
+      properties:
+        textFormat:
+          type: object
+          additionalProperties: false
+          required: [type, structure]
+          properties:
+            type: {type: string, const: json_schema}
+            structure:
+              type: object
+              additionalProperties: false
+              required: [jsonSchema]
+              properties:
+                jsonSchema:
+                  type: object
+                  additionalProperties: false
+                  required: [schema]
+                  properties:
+                    schema: {type: string, minLength: 1, maxLength: 1048576, description: JSON-encoded schema object}
+                    name: {type: string, maxLength: 256}
+                    description: {type: string, maxLength: 8192}
     BedrockMessage:
       type: object
       additionalProperties: false

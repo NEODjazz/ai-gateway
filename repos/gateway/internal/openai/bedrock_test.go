@@ -62,6 +62,36 @@ func TestBedrockConverseValidatesAdditionalResponseFieldPaths(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseMapsStructuredOutput(t *testing.T) {
+	request := BedrockConverseRequest{
+		Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("extract")}}}},
+		OutputConfig: &BedrockOutputConfig{TextFormat: BedrockOutputFormat{Type: "json_schema", Structure: BedrockOutputFormatStructure{JSONSchema: &BedrockJSONSchemaDefinition{
+			Name: "answer", Description: "structured answer", Schema: `{"type":"object","properties":{"value":{"type":"string"}},"required":["value"]}`,
+		}}}},
+	}
+	chat, err := request.ChatRequest("model", "")
+	if err != nil || chat.ResponseFormat == nil || chat.ResponseFormat.JSONSchema == nil || chat.ResponseFormat.JSONSchema.Name != "answer" {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	schema, ok := chat.ResponseFormat.JSONSchema.Schema.(map[string]any)
+	if !ok || schema["type"] != "object" {
+		t.Fatalf("schema=%#v", chat.ResponseFormat.JSONSchema.Schema)
+	}
+
+	invalid := []*BedrockOutputConfig{
+		{TextFormat: BedrockOutputFormat{Type: "json_object", Structure: BedrockOutputFormatStructure{JSONSchema: request.OutputConfig.TextFormat.Structure.JSONSchema}}},
+		{TextFormat: BedrockOutputFormat{Type: "json_schema"}},
+		{TextFormat: BedrockOutputFormat{Type: "json_schema", Structure: BedrockOutputFormatStructure{JSONSchema: &BedrockJSONSchemaDefinition{Schema: `[]`}}}},
+		{TextFormat: BedrockOutputFormat{Type: "json_schema", Structure: BedrockOutputFormatStructure{JSONSchema: &BedrockJSONSchemaDefinition{Schema: `{`}}}},
+	}
+	for _, output := range invalid {
+		request.OutputConfig = output
+		if _, err := request.ChatRequest("model", ""); err == nil {
+			t.Fatalf("invalid output config accepted: %+v", output)
+		}
+	}
+}
+
 func TestBedrockConverseRejectsAmbiguousContent(t *testing.T) {
 	request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("hello"), ToolUse: &BedrockToolUse{ID: "call", Name: "tool", Input: map[string]any{}}}}}}}
 	if _, err := request.ChatRequest("model", ""); err == nil {

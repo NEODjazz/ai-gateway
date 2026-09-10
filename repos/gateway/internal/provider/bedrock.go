@@ -133,6 +133,7 @@ type bedrockRequest struct {
 	InferenceConfig                   bedrockInferenceConfig    `json:"inferenceConfig,omitempty"`
 	ServiceTier                       *bedrockServiceTier       `json:"serviceTier,omitempty"`
 	PerformanceConfig                 *bedrockPerformanceConfig `json:"performanceConfig,omitempty"`
+	OutputConfig                      *bedrockOutputConfig      `json:"outputConfig,omitempty"`
 	AdditionalModelResponseFieldPaths []string                  `json:"additionalModelResponseFieldPaths,omitempty"`
 	ToolConfig                        *struct {
 		Tools []bedrockTool `json:"tools"`
@@ -145,6 +146,25 @@ type bedrockServiceTier struct {
 
 type bedrockPerformanceConfig struct {
 	Latency string `json:"latency"`
+}
+
+type bedrockOutputConfig struct {
+	TextFormat bedrockOutputFormat `json:"textFormat"`
+}
+
+type bedrockOutputFormat struct {
+	Type      string                       `json:"type"`
+	Structure bedrockOutputFormatStructure `json:"structure"`
+}
+
+type bedrockOutputFormatStructure struct {
+	JSONSchema bedrockJSONSchemaDefinition `json:"jsonSchema"`
+}
+
+type bedrockJSONSchemaDefinition struct {
+	Schema      string `json:"schema"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type bedrockInferenceConfig struct {
@@ -254,7 +274,7 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 	if err := rejectParameters("bedrock",
 		parameterCheck{"stream", request.Stream}, parameterCheck{"stream_options", request.StreamOptions != nil},
 		parameterCheck{"tool_choice", request.ToolChoice != nil}, parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
-		parameterCheck{"response_format", request.ResponseFormat != nil}, parameterCheck{"seed", request.Seed != nil},
+		parameterCheck{"seed", request.Seed != nil},
 		parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"store", request.Store != nil},
 		parameterCheck{"modalities", request.Modalities != nil}, parameterCheck{"reasoning_effort", request.ReasoningEffort != ""},
 		parameterCheck{"safe_prompt", request.SafePrompt != nil}, parameterCheck{"n", request.N != nil && *request.N != 1},
@@ -295,6 +315,17 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 		}
 	}
 	result.AdditionalModelResponseFieldPaths = append([]string(nil), request.BedrockAdditionalModelResponseFieldPaths...)
+	if request.ResponseFormat != nil {
+		format := request.ResponseFormat
+		if format.Type != "json_schema" || format.JSONSchema == nil || format.JSONSchema.Schema == nil || format.JSONSchema.Strict != nil && !*format.JSONSchema.Strict || utf8.RuneCountInString(format.JSONSchema.Name) > 256 || utf8.RuneCountInString(format.JSONSchema.Description) > 8192 {
+			return result, bedrockInvalid("response_format")
+		}
+		schema, err := json.Marshal(format.JSONSchema.Schema)
+		if err != nil || len(schema) == 0 || len(schema) > 1<<20 || schema[0] != '{' {
+			return result, bedrockInvalid("response_format")
+		}
+		result.OutputConfig = &bedrockOutputConfig{TextFormat: bedrockOutputFormat{Type: "json_schema", Structure: bedrockOutputFormatStructure{JSONSchema: bedrockJSONSchemaDefinition{Schema: string(schema), Name: format.JSONSchema.Name, Description: format.JSONSchema.Description}}}}
+	}
 	toolCalls := make(map[string]bool)
 	for _, message := range request.Messages {
 		if message.Name != "" || len(message.Annotations) > 0 || len(message.Reasoning) > 0 {

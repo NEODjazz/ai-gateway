@@ -15,7 +15,27 @@ type BedrockConverseRequest struct {
 	ToolConfig                        *BedrockToolConfig        `json:"toolConfig,omitempty"`
 	ServiceTier                       *BedrockServiceTier       `json:"serviceTier,omitempty"`
 	PerformanceConfig                 *BedrockPerformanceConfig `json:"performanceConfig,omitempty"`
+	OutputConfig                      *BedrockOutputConfig      `json:"outputConfig,omitempty"`
 	AdditionalModelResponseFieldPaths []string                  `json:"additionalModelResponseFieldPaths,omitempty"`
+}
+
+type BedrockOutputConfig struct {
+	TextFormat BedrockOutputFormat `json:"textFormat"`
+}
+
+type BedrockOutputFormat struct {
+	Type      string                       `json:"type"`
+	Structure BedrockOutputFormatStructure `json:"structure"`
+}
+
+type BedrockOutputFormatStructure struct {
+	JSONSchema *BedrockJSONSchemaDefinition `json:"jsonSchema,omitempty"`
+}
+
+type BedrockJSONSchemaDefinition struct {
+	Schema      string `json:"schema"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type BedrockServiceTier struct {
@@ -160,6 +180,21 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		return request, err
 	}
 	request.BedrockAdditionalModelResponseFieldPaths = append([]string(nil), r.AdditionalModelResponseFieldPaths...)
+	if r.OutputConfig != nil {
+		format := r.OutputConfig.TextFormat
+		definition := format.Structure.JSONSchema
+		if format.Type != "json_schema" || definition == nil || definition.Schema == "" || len(definition.Schema) > 1<<20 || utf8.RuneCountInString(definition.Name) > 256 || utf8.RuneCountInString(definition.Description) > 8192 {
+			return request, errors.New("outputConfig.textFormat requires a bounded json_schema structure")
+		}
+		var schema any
+		if json.Unmarshal([]byte(definition.Schema), &schema) != nil {
+			return request, errors.New("outputConfig.textFormat.schema must contain valid JSON")
+		}
+		if _, ok := schema.(map[string]any); !ok {
+			return request, errors.New("outputConfig.textFormat.schema must contain a JSON object")
+		}
+		request.ResponseFormat = &ResponseFormat{Type: "json_schema", JSONSchema: &JSONSchemaFormat{Name: definition.Name, Description: definition.Description, Schema: schema}}
+	}
 	if r.ServiceTier != nil {
 		switch r.ServiceTier.Type {
 		case "default", "flex", "priority":

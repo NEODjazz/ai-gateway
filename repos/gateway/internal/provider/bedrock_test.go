@@ -95,6 +95,37 @@ func TestBedrockConversePreservesRequestedAdditionalResponseFields(t *testing.T)
 	}
 }
 
+func TestBedrockConverseForwardsStructuredOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			OutputConfig *bedrockOutputConfig `json:"outputConfig"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.OutputConfig == nil {
+			t.Fatal("outputConfig missing")
+		}
+		format := body.OutputConfig.TextFormat
+		var schema map[string]any
+		if format.Type != "json_schema" || format.Structure.JSONSchema.Name != "answer" || json.Unmarshal([]byte(format.Structure.JSONSchema.Schema), &schema) != nil || schema["type"] != "object" {
+			t.Fatalf("outputConfig=%+v", body.OutputConfig)
+		}
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"{\"value\":\"ok\"}"}]}},"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":3,"totalTokens":5}}`)
+	}))
+	defer server.Close()
+	strict := true
+	request := openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "extract"}},
+		ResponseFormat: &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "answer", Schema: map[string]any{"type": "object"}, Strict: &strict}},
+	}
+	response, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request)
+	if err != nil || openai.ContentText(response.Choices[0].Message.Content) != `{"value":"ok"}` || response.Usage.TotalTokens != 5 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+	strict = false
+	if _, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request); err == nil {
+		t.Fatal("non-strict response format was silently strengthened")
+	}
+}
+
 func TestBedrockRejectsUnrequestedAdditionalResponseFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"additionalModelResponseFields":{"secret":"unexpected"},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`)
