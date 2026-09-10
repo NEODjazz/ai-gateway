@@ -702,6 +702,10 @@ func validateResponseCompactRequest(request openai.ResponseCompactRequest) strin
 }
 
 func (h Handler) GetResponse(w http.ResponseWriter, r *http.Request) {
+	h.getResponseAs(w, r, func(response openai.ResponseResponse) any { return response })
+}
+
+func (h Handler) getResponseAs(w http.ResponseWriter, r *http.Request, transform func(openai.ResponseResponse) any) {
 	resourceProvider, ok := h.provider.(provider.ResponseResourceProvider)
 	if !ok {
 		writeError(w, http.StatusNotImplemented, "response_lifecycle_unsupported", "response lifecycle is not supported")
@@ -717,10 +721,14 @@ func (h Handler) GetResponse(w http.ResponseWriter, r *http.Request) {
 		writeProviderFailure(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, http.StatusOK, transform(response))
 }
 
 func (h Handler) DeleteResponse(w http.ResponseWriter, r *http.Request) {
+	h.deleteResponseAs(w, r, false)
+}
+
+func (h Handler) deleteResponseAs(w http.ResponseWriter, r *http.Request, noContent bool) {
 	resourceProvider, ok := h.provider.(provider.ResponseDeletionProvider)
 	if !ok {
 		writeError(w, http.StatusNotImplemented, "response_lifecycle_unsupported", "response deletion is not supported")
@@ -736,10 +744,18 @@ func (h Handler) DeleteResponse(w http.ResponseWriter, r *http.Request) {
 		writeProviderFailure(w, err)
 		return
 	}
+	if noContent {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) CancelResponse(w http.ResponseWriter, r *http.Request) {
+	h.cancelResponseAs(w, r, func(response openai.ResponseResponse) any { return response })
+}
+
+func (h Handler) cancelResponseAs(w http.ResponseWriter, r *http.Request, transform func(openai.ResponseResponse) any) {
 	resourceProvider, ok := h.provider.(provider.ResponseCancellationProvider)
 	if !ok {
 		writeError(w, http.StatusNotImplemented, "response_lifecycle_unsupported", "response cancellation is not supported")
@@ -755,7 +771,7 @@ func (h Handler) CancelResponse(w http.ResponseWriter, r *http.Request) {
 		writeProviderFailure(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, http.StatusOK, transform(response))
 }
 
 func (h Handler) ListResponseInputItems(w http.ResponseWriter, r *http.Request) {

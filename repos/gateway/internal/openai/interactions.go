@@ -54,9 +54,6 @@ func (r InteractionRequest) ResponseRequest() (ResponseRequest, string) {
 	if r.Stream {
 		return ResponseRequest{}, "streaming interactions are not supported"
 	}
-	if r.Background {
-		return ResponseRequest{}, "background interactions are not supported"
-	}
 	if r.GenerationConfig.Seed != nil {
 		return ResponseRequest{}, "generation_config.seed is not supported"
 	}
@@ -81,9 +78,14 @@ func (r InteractionRequest) ResponseRequest() (ResponseRequest, string) {
 	if r.ResponseFormat != nil {
 		text = map[string]any{"format": r.ResponseFormat}
 	}
+	store := r.Store
+	if r.Background && store == nil {
+		stored := true
+		store = &stored
+	}
 	result := ResponseRequest{
 		Provider: r.Provider, Model: r.Model, Input: r.Input, Instructions: r.SystemInstruction,
-		Tools: r.Tools, Text: text, PreviousResponse: r.PreviousInteractionID, Store: r.Store,
+		Tools: r.Tools, Text: text, PreviousResponse: r.PreviousInteractionID, Store: store, Background: r.Background,
 		MaxOutputTokens: r.GenerationConfig.MaxOutputTokens, Temperature: r.GenerationConfig.Temperature,
 		TopP: r.GenerationConfig.TopP,
 	}

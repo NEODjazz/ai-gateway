@@ -20,3 +20,19 @@ func (h Handler) Interactions(w http.ResponseWriter, r *http.Request) {
 		return openai.InteractionFromResponse(response)
 	})
 }
+
+func (h Handler) GetInteraction(w http.ResponseWriter, r *http.Request) {
+	h.getResponseAs(w, r, func(response openai.ResponseResponse) any {
+		return openai.InteractionFromResponse(response)
+	})
+}
+
+func (h Handler) CancelInteraction(w http.ResponseWriter, r *http.Request) {
+	h.cancelResponseAs(w, r, func(response openai.ResponseResponse) any {
+		return openai.InteractionFromResponse(response)
+	})
+}
+
+func (h Handler) DeleteInteraction(w http.ResponseWriter, r *http.Request) {
+	h.deleteResponseAs(w, r, true)
+}

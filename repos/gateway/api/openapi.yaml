@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.190
+  version: 0.1.191
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1128,8 +1128,8 @@ paths:
     post:
       operationId: createInteraction
       tags: [Inference]
-      summary: Create a synchronous model interaction
-      description: Converts a synchronous model interaction to the existing Responses execution pipeline. Supports string or step-array input, system instructions, function tools, structured response formats, continuity, storage selection, and bounded generation settings. Streaming, background execution, agents, MCP tools, seed, stop sequences, and thinking level are rejected before provider execution.
+      summary: Create a model interaction
+      description: Converts a model interaction to the existing Responses execution pipeline. Supports synchronous and durable background execution, string or step-array input, system instructions, function tools, structured response formats, continuity, storage selection, and bounded generation settings. Background execution defaults to store=true and rejects an explicit store=false. Streaming, agents, MCP tools, seed, stop sequences, and thinking level are rejected before provider execution.
       requestBody:
         required: true
         content:
@@ -1138,7 +1138,7 @@ paths:
               $ref: '#/components/schemas/InteractionRequest'
       responses:
         '200':
-          description: Completed, failed, or incomplete interaction
+          description: Completed, queued, failed, or incomplete interaction
           headers:
             X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
             X-Request-ID: {$ref: '#/components/headers/XRequestID'}
@@ -1154,7 +1154,102 @@ paths:
         '451': {$ref: '#/components/responses/ContentRejected'}
         '502': {$ref: '#/components/responses/ProviderFailed'}
         '503':
-          description: Required response affinity or policy storage is unavailable.
+          description: Required response affinity, policy, ownership, or background job storage is unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/interactions/{id}:
+    get:
+      operationId: retrieveInteraction
+      tags: [Inference]
+      summary: Retrieve a stored interaction
+      description: Resolves the authenticated owner's immutable deployment binding and rechecks current model policy before reading the durable resource. Retrieval does not create inference usage or billing.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, maxLength: 256}}
+      responses:
+        '200':
+          description: Stored interaction
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/InteractionResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404':
+          description: The interaction does not exist for the authenticated owner.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: The original deployment binding no longer matches the active deployment.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Interaction ownership storage is unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    delete:
+      operationId: deleteInteraction
+      tags: [Inference]
+      summary: Delete a stored interaction
+      description: Deletes the resource from its original deployment and removes its matching ownership binding. An upstream not-found response is treated as an idempotent delete while the ownership binding exists.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, maxLength: 256}}
+      responses:
+        '204':
+          description: Interaction deleted
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404':
+          description: The interaction does not exist for the authenticated owner.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: The original deployment or ownership binding changed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Interaction ownership storage is unavailable or could not be cleaned after upstream deletion.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/interactions/{id}/cancel:
+    post:
+      operationId: cancelInteraction
+      tags: [Inference]
+      summary: Cancel a stored background interaction
+      description: Resolves the authenticated owner's immutable deployment binding and rechecks current model policy before cancellation. Cancellation does not create a new inference billing lifecycle.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, maxLength: 256}}
+      responses:
+        '200':
+          description: Updated interaction
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/InteractionResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404':
+          description: The interaction does not exist for the authenticated owner.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: The original deployment binding no longer matches the active deployment.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Interaction ownership storage is unavailable.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -5069,7 +5164,7 @@ components:
         previous_interaction_id: {type: string}
         store: {type: boolean}
         stream: {type: boolean, default: false, description: Must be false.}
-        background: {type: boolean, default: false, description: Must be false.}
+        background: {type: boolean, default: false, description: Runs durably when true; store defaults to true and an explicit false is rejected.}
         generation_config: {$ref: '#/components/schemas/InteractionGenerationConfig'}
     InteractionResponseContent:
       type: object

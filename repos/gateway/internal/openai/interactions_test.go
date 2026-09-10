@@ -27,6 +27,17 @@ func TestInteractionRequestMapsSupportedResponseSemantics(t *testing.T) {
 	}
 }
 
+func TestInteractionRequestMapsDurableBackgroundSemantics(t *testing.T) {
+	response, message := (InteractionRequest{Model: "model", Input: "hello", Background: true}).ResponseRequest()
+	if message != "" || !response.Background || response.Store == nil || !*response.Store {
+		t.Fatalf("response=%+v message=%q", response, message)
+	}
+	store := false
+	if _, message := (InteractionRequest{Model: "model", Input: "hello", Background: true, Store: &store}).ResponseRequest(); message != "background requires store=true" {
+		t.Fatalf("explicit store=false message=%q", message)
+	}
+}
+
 func TestInteractionRequestRejectsUnsupportedOrInvalidSemantics(t *testing.T) {
 	seed := int64(1)
 	zero := 0
@@ -34,7 +45,6 @@ func TestInteractionRequestRejectsUnsupportedOrInvalidSemantics(t *testing.T) {
 		{Agent: "research", Input: "hello"},
 		{Model: "model"},
 		{Model: "model", Input: "hello", Stream: true},
-		{Model: "model", Input: "hello", Background: true},
 		{Model: "model", Input: "hello", GenerationConfig: InteractionGenerationConfig{Seed: &seed}},
 		{Model: "model", Input: "hello", GenerationConfig: InteractionGenerationConfig{StopSequences: []string{"stop"}}},
 		{Model: "model", Input: "hello", GenerationConfig: InteractionGenerationConfig{ThinkingLevel: "high"}},

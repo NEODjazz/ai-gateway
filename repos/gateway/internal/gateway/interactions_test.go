@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,8 +12,19 @@ import (
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 )
+
+type interactionRequestProvider struct {
+	chatProvider
+	request *openai.ResponseRequest
+}
+
+func (p *interactionRequestProvider) Responses(_ context.Context, request modules.RequestContext) (openai.ResponseResponse, error) {
+	p.request = request.ResponseRequest
+	return openai.ResponseResponse{ID: "interaction_queued", Model: request.Request.Model, Status: "queued"}, nil
+}
 
 func TestInteractionsUsesResponsesPolicyRoutingAndBilling(t *testing.T) {
 	var calls atomic.Int32
@@ -54,11 +66,57 @@ func TestInteractionsUsesResponsesPolicyRoutingAndBilling(t *testing.T) {
 }
 
 func TestInteractionsRejectsUnsupportedModesBeforeExecution(t *testing.T) {
-	for _, field := range []string{`"stream":true`, `"background":true`, `"agent":"research"`, `"generation_config":{"seed":1}`, `"unknown":true`} {
+	for _, field := range []string{`"stream":true`, `"background":true,"store":false`, `"agent":"research"`, `"generation_config":{"seed":1}`, `"unknown":true`} {
 		response := httptest.NewRecorder()
 		Handler{}.Interactions(response, httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"model":"model","input":"hello",`+field+`}`)))
 		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_request"`) {
 			t.Fatalf("field=%s status=%d body=%s", field, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestInteractionsPassesDurableBackgroundRequestToExecution(t *testing.T) {
+	provider := &interactionRequestProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"model"}}}), provider)
+	request := httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"model":"model","input":"hello","background":true}`))
+	response := httptest.NewRecorder()
+	handler.Interactions(response, request)
+	if response.Code != http.StatusOK || provider.request == nil || !provider.request.Background || provider.request.Store == nil || !*provider.request.Store {
+		t.Fatalf("status=%d request=%+v body=%s", response.Code, provider.request, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"object":"interaction"`) || !strings.Contains(response.Body.String(), `"status":"queued"`) {
+		t.Fatalf("unexpected interaction response: %s", response.Body.String())
+	}
+}
+
+func TestInteractionLifecycleUsesResponseOwnershipWithoutBilling(t *testing.T) {
+	tests := []struct {
+		name      string
+		method    string
+		path      string
+		status    int
+		body      string
+		callCount func(*lifecycleResourceProvider) int
+	}{
+		{name: "retrieve", method: http.MethodGet, path: "/v1/interactions/resp_123", status: http.StatusOK, body: `"object":"interaction"`, callCount: func(p *lifecycleResourceProvider) int { return p.retrieveCalls }},
+		{name: "cancel", method: http.MethodPost, path: "/v1/interactions/resp_123/cancel", status: http.StatusOK, body: `"status":"cancelled"`, callCount: func(p *lifecycleResourceProvider) int { return p.cancelCalls }},
+		{name: "delete", method: http.MethodDelete, path: "/v1/interactions/resp_123", status: http.StatusNoContent, body: "", callCount: func(p *lifecycleResourceProvider) int { return p.deleteCalls }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resource := &lifecycleResourceProvider{}
+			billing := &lifecycleBillingModule{}
+			handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{modules.NewAuthModule(true), billing}), resource))
+			request := httptest.NewRequest(test.method, test.path, nil)
+			request.Header.Set("Authorization", "Bearer demo-user-key")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.status || resource.resolveCalls != 1 || test.callCount(resource) != 1 || billing.calls != 0 || response.Body.String() != test.body && !strings.Contains(response.Body.String(), test.body) {
+				t.Fatalf("status=%d resolve=%d calls=%d billing=%d body=%q", response.Code, resource.resolveCalls, test.callCount(resource), billing.calls, response.Body.String())
+			}
+			if response.Header().Get("X-Execution-ID") == "" {
+				t.Fatalf("missing execution ID: headers=%v", response.Header())
+			}
+		})
 	}
 }
