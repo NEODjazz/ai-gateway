@@ -420,6 +420,22 @@ func TestRemoteBillingCommitsCompactionUsageSeparately(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingAttributesInteractionsSeparately(t *testing.T) {
+	req := sensitiveContext()
+	maxOutputTokens := 9
+	req.ResponseRequest = &openai.ResponseRequest{Provider: "provider", Model: "interaction-model", Input: "private input", MaxOutputTokens: &maxOutputTokens}
+	req.Metadata = map[string]string{"gateway.api_type": "interactions"}
+	reserved := billingRequest(&req)
+	if reserved.APIType != "interactions" || reserved.OutputTokens != 9 || reserved.TotalTokens != reserved.InputTokens+9 {
+		t.Fatalf("unexpected interaction reserve: %+v", reserved)
+	}
+	req.ResponsesResponse = &openai.ResponseResponse{ID: "resp_1", Model: "interaction-model", Status: "completed", Usage: openai.ResponseUsage{InputTokens: 7, OutputTokens: 5, TotalTokens: 12}}
+	committed := billingRequest(&req)
+	if committed.APIType != "interactions" || committed.Phase != "commit" || committed.InputTokens != 7 || committed.OutputTokens != 5 || committed.TotalTokens != 12 || committed.UsageEstimated {
+		t.Fatalf("unexpected interaction commit: %+v", committed)
+	}
+}
+
 func TestRemoteBillingPreservesNativeChatSurfaceAPIType(t *testing.T) {
 	for _, apiType := range []string{"messages", "generate_content"} {
 		req := sensitiveContext()

@@ -54,7 +54,7 @@ func TestInteractionsUsesResponsesPolicyRoutingAndBilling(t *testing.T) {
 }
 
 func TestInteractionsRejectsUnsupportedModesBeforeExecution(t *testing.T) {
-	for _, field := range []string{`"stream":true`, `"background":true`, `"agent":"research"`, `"generation_config":{"seed":1}`} {
+	for _, field := range []string{`"stream":true`, `"background":true`, `"agent":"research"`, `"generation_config":{"seed":1}`, `"unknown":true`} {
 		response := httptest.NewRecorder()
 		Handler{}.Interactions(response, httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"model":"model","input":"hello",`+field+`}`)))
 		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_request"`) {

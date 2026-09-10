@@ -171,6 +171,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.APIType = "messages"
 	case "generate_content":
 		request.APIType = "generate_content"
+	case "interactions":
+		request.APIType = "interactions"
 	case "image_generation":
 		request.APIType = "image_generation"
 	case "image_edit":
@@ -204,9 +206,13 @@ func billingRequest(req *RequestContext) UsageRequest {
 	if req.ResponseRequest != nil {
 		request.Provider = req.ResponseRequest.Provider
 		request.Model = req.ResponseRequest.Model
-		request.APIType = "responses"
-		if metadataValue(req.Metadata, "gateway.api_type") == "responses_compact" {
+		switch metadataValue(req.Metadata, "gateway.api_type") {
+		case "responses_compact":
 			request.APIType = "responses_compact"
+		case "interactions":
+			request.APIType = "interactions"
+		default:
+			request.APIType = "responses"
 		}
 	}
 	if req.EmbeddingRequest != nil {

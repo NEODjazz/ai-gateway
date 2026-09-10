@@ -13,6 +13,7 @@ Gateway реализует OpenAI-compatible endpoints:
 | `POST /v1/responses` | Responses, continuity, function tools и MCP passthrough |
 | `POST /v1/responses/input_tokens` | Native-подсчет полного Responses input без generation billing lifecycle |
 | `POST /v1/responses/compact` | Native compaction с авторизацией модели и учетом фактического usage |
+| `POST /v1/interactions` | Синхронное взаимодействие через Responses policy/routing с отдельной billing attribution |
 | `GET /v1/responses/{id}` | Чтение сохраненного Response владельцем credential |
 | `DELETE /v1/responses/{id}` | Удаление сохраненного Response и ownership binding |
 | `POST /v1/responses/{id}/cancel` | Отмена сохраненного background Response владельцем credential |
