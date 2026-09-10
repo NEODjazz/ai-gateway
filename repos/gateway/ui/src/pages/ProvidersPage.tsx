@@ -9,6 +9,7 @@ import { PageHeader } from "../components/PageHeader";
 import { ResourceForm } from "../components/ResourceForm";
 import { StatCard } from "../components/StatCard";
 import type { Row } from "../components/DataTable";
+import type { Field } from "../components/ResourceForm";
 import { resourceConfigs } from "./resourceConfigs";
 import { GatewayButton } from "../components/GatewayButton";
 import { ModalCloseButton } from "../components/ModalCloseButton";
@@ -19,6 +20,7 @@ type Deployment = { id: string; provider_id: string; enabled: boolean };
 type ProviderProbe = { provider_id: string; status: string; latency_ms: number; model_count: number };
 type DiscoveredModel = { id: string };
 type ConnectionDialog = { provider: Provider; mode: "test" | "discover" };
+type ProviderCapabilityProfile = { type: string; auth_types?: string[] };
 
 function records<T>(payload: unknown): T[] {
   if (Array.isArray(payload)) return payload as T[];
@@ -60,16 +62,19 @@ export function ProvidersPage() {
   const [connectionError, setConnectionError] = useState("");
   const [busy, setBusy] = useState(false);
   const [discovered, setDiscovered] = useState<DiscoveredModel[]>();
+  const [providerAuthTypes, setProviderAuthTypes] = useState<Record<string, string[]>>({});
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const [providerPayload, credentialPayload, deploymentPayload] = await Promise.all([
-        client.request("/admin/v1/providers"), client.request("/admin/v1/credentials"), client.request("/admin/v1/model-deployments")
+      const [providerPayload, credentialPayload, deploymentPayload, capabilityPayload] = await Promise.all([
+        client.request("/admin/v1/providers"), client.request("/admin/v1/credentials"), client.request("/admin/v1/model-deployments"),
+        client.request<{ data?: ProviderCapabilityProfile[] }>("/admin/v1/provider-capabilities").catch(() => ({ data: [] }))
       ]);
       setProviders(records<Provider>(providerPayload));
       setCredentials(records<Credential>(credentialPayload));
       setDeployments(records<Deployment>(deploymentPayload));
+      setProviderAuthTypes(Object.fromEntries((capabilityPayload.data || []).map((profile) => [profile.type, profile.auth_types || []])));
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load providers"); }
     finally { setLoading(false); }
   }, [client]);
@@ -86,6 +91,9 @@ export function ProvidersPage() {
     };
   }), [credentials, deployments, probes, providers]);
   const connectionCredentials = connection ? credentials.filter((credential) => !credential.provider_id || credential.provider_id === connection.provider.id) : [];
+  const providerFields = useMemo(() => resourceConfigs.providers.fields!.map((field): Field => field.key === "auth_type" && Object.keys(providerAuthTypes).length
+    ? { ...field, optionsBy: { fieldKey: "type", values: providerAuthTypes } }
+    : field), [providerAuthTypes]);
 
   function openConnection(provider: Provider, mode: ConnectionDialog["mode"]) {
     const available = credentials.filter((credential) => !credential.provider_id || credential.provider_id === provider.id);
@@ -138,7 +146,7 @@ export function ProvidersPage() {
         { label: "Delete", tone: "danger", onSelect: () => void deleteProvider(provider) }
       ]} />;
     }} />}
-    {editing !== undefined && <ResourceForm title={`${editing ? "Edit" : "Create"} Provider`} fields={resourceConfigs.providers.fields!} initial={editing || undefined} loadOptions={(path) => client.request(path)} onClose={() => setEditing(undefined)} onSubmit={saveProvider} />}
+    {editing !== undefined && <ResourceForm title={`${editing ? "Edit" : "Create"} Provider`} fields={providerFields} initial={editing || undefined} loadOptions={(path) => client.request(path)} onClose={() => setEditing(undefined)} onSubmit={saveProvider} />}
     {connection && <ModalFrame label={connection.mode === "test" ? "Test provider connection" : "Discover provider models"} onClose={() => setConnection(undefined)}><section className="modal provider-connection-modal">
       <div className="modal-heading"><div><h2>{connection.mode === "test" ? "Test connection" : "Discover models"}</h2><span className="muted">{connection.provider.id} · {connection.provider.type}</span></div><ModalCloseButton label="Close provider connection" onClick={() => setConnection(undefined)} /></div>
       <label>Credential<select aria-label="Provider credential" value={credentialID} onChange={(event) => setCredentialID(event.target.value)}><option value="">No credential</option>{connectionCredentials.map((credential) => <option key={credential.id} value={credential.id}>{credential.id}{credential.description ? ` — ${credential.description}` : ""}{credential.provider_id ? "" : " — shared"}</option>)}</select></label>

@@ -41,6 +41,22 @@ describe("ResourceForm", () => {
     expect(submit).toHaveBeenCalledWith({ type: "cohere" });
   });
 
+  it("restricts dependent select options and clears a stale selection", async () => {
+    const submit = vi.fn().mockResolvedValue(undefined);
+    render(<ResourceForm title="Add provider" fields={[
+      { key: "type", label: "Type", type: "select", options: ["azure-openai", "gemini"], defaultValue: "azure-openai" },
+      { key: "auth_type", label: "Authentication", type: "select", optionsBy: { fieldKey: "type", values: { "azure-openai": ["api_key", "entra"], gemini: ["api_key", "gcp_adc"] } } }
+    ]} onClose={() => {}} onSubmit={submit} />);
+
+    expect(screen.getByRole("option", { name: "entra" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "gcp_adc" })).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Authentication"), "entra");
+    await userEvent.selectOptions(screen.getByLabelText("Type"), "gemini");
+    expect(screen.getByLabelText("Authentication")).toHaveValue("");
+    expect(screen.queryByRole("option", { name: "entra" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "gcp_adc" })).toBeInTheDocument();
+  });
+
   it("selects multiple fixed values as removable chips", async () => {
     const submit = vi.fn().mockResolvedValue(undefined);
     render(<ResourceForm title="Edit model" fields={[{

@@ -91,6 +91,9 @@ Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 адаптеров с нативным счетчиком и не является выбираемой capability deployment.
 Пустой `auth_types` означает фиксированный для адаптера способ передачи
 credential.
+Provider form загружает этот профиль и показывает только допустимые варианты
+аутентификации для выбранного типа. Ошибка capability endpoint не блокирует
+список и редактирование providers: форма использует встроенный безопасный набор.
 
 Для `azure-openai` режим `auth_type=entra` использует статический bearer token
 из привязанного write-only credential. Без credential gateway сначала проверяет

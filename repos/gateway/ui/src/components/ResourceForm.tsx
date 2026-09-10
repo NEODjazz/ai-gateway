@@ -24,6 +24,7 @@ export type Field = {
   required?: boolean;
   placeholder?: string;
   options?: string[];
+  optionsBy?: { fieldKey: string; values: Record<string, string[]> };
   chipOptions?: ChipOption[];
   reference?: FieldReference;
   referenceBy?: { fieldKey: string; values: Record<string, FieldReference> };
@@ -85,7 +86,10 @@ export function ResourceForm({ title, fields, initial, loadOptions, onClose, onS
   }, [loadOptions, references]);
   function optionsFor(field: Field) {
     const reference = field.reference || field.referenceBy?.values[String(values[field.referenceBy.fieldKey] || "")];
-    if (!reference) return (field.options || []).map((value) => ({ value, label: value }));
+    if (!reference) {
+      const options = field.optionsBy?.values[String(values[field.optionsBy.fieldKey] || "")] || field.options || [];
+      return options.map((value) => ({ value, label: value }));
+    }
     const valueKey = reference.valueKey || "id";
     const filter = reference.filter;
     const seen = new Set<string>();
@@ -106,6 +110,7 @@ export function ResourceForm({ title, fields, initial, loadOptions, onClose, onS
       const next = { ...current, [key]: value };
       for (const field of fields) if (field.reference?.filter?.fieldKey === key) next[field.key] = "";
       for (const field of fields) if (field.referenceBy?.fieldKey === key) next[field.key] = "";
+      for (const field of fields) if (field.optionsBy?.fieldKey === key) next[field.key] = "";
       for (const cleared of fields.find((field) => field.key === key)?.clears || []) next[cleared] = "";
       return next;
     });

@@ -12,6 +12,20 @@ function LocationProbe() {
 }
 
 describe("ProvidersPage", () => {
+  it("keeps provider management available when capability discovery fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = String(input);
+      if (path === "/admin/v1/providers") return json({ data: [{ id: "available", type: "openai-compatible", base_url: "https://example.test", enabled: true }] });
+      if (path === "/admin/v1/provider-capabilities") return json({ error: { message: "temporarily unavailable" } }, 503);
+      return json({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ProvidersPage /></AuthProvider></MemoryRouter>);
+
+    expect(await screen.findByText("available")).toBeInTheDocument();
+    expect(screen.queryByText("temporarily unavailable")).not.toBeInTheDocument();
+  });
+
   it("selects a matching credential for test and discovery, then links to onboarding", async () => {
     const calls: Array<{ path: string; method?: string; body?: string }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
@@ -81,6 +95,7 @@ describe("ProvidersPage", () => {
 	vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
 	  const path = String(input); calls.push({ path, method: options?.method, body: String(options?.body || "") });
 	  if (path === "/admin/v1/providers" && options?.method === "POST") return json({ id: "azure-native", type: "azure-openai", base_url: "https://resource.openai.azure.com", api_version: "2025-04-01-preview", auth_type: "entra", enabled: true }, 201);
+	  if (path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "azure-openai", auth_types: ["api_key", "entra"] }, { type: "gemini", auth_types: ["api_key", "gcp_adc"] }, { type: "bedrock", auth_types: ["bearer", "aws_sigv4"] }] });
 	  return json({ data: [] });
 	});
 	sessionStorage.setItem("ai-gateway.admin-token", "token");
@@ -89,6 +104,8 @@ describe("ProvidersPage", () => {
 	const form = screen.getByRole("dialog", { name: "Create Provider" });
 	await userEvent.type(within(form).getByLabelText("ID"), "azure-native");
 	await userEvent.selectOptions(within(form).getByLabelText("Type"), "azure-openai");
+	expect(within(form).queryByRole("option", { name: "gcp_adc" })).not.toBeInTheDocument();
+	expect(within(form).queryByRole("option", { name: "aws_sigv4" })).not.toBeInTheDocument();
 	await userEvent.type(within(form).getByLabelText("Base URL"), "https://resource.openai.azure.com");
 	await userEvent.type(within(form).getByLabelText("Azure API version"), "2025-04-01-preview");
 	await userEvent.selectOptions(within(form).getByLabelText("Authentication"), "entra");
