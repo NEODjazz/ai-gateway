@@ -87,6 +87,18 @@ func TestBedrockConverseAcceptsAdditionalModelRequestFields(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseAcceptsGuardrailConfig(t *testing.T) {
+	upstream := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	body := `{"messages":[{"role":"user","content":[{"text":"hello"}]}],"guardrailConfig":{"guardrailIdentifier":"guardrail123","guardrailVersion":"1","trace":"enabled"}}`
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/model/converse", strings.NewReader(body)))
+	config := upstream.request.Request.BedrockGuardrailConfig
+	if response.Code != http.StatusOK || config == nil || config.GuardrailIdentifier != "guardrail123" || config.Trace != "enabled" {
+		t.Fatalf("status=%d body=%s config=%+v", response.Code, response.Body.String(), config)
+	}
+}
+
 func TestBedrockConverseRouteAcceptsEscapedARNModel(t *testing.T) {
 	handler := Routes(NewHandler(modules.NewPipeline(nil), &chatProvider{}))
 	response := httptest.NewRecorder()

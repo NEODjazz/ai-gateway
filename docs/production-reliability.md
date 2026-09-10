@@ -43,6 +43,12 @@ JSON and included in the input DLP projection. They participate in exact-cache
 identity and bypass semantic cache because their effect cannot be normalized by
 the gateway.
 
+Native provider guardrail requests bypass both response caches so every accepted
+call is evaluated upstream. Guardrail identifiers, versions and trace modes are
+validated before routing. Returned trace data is accepted only when tracing was
+explicitly enabled, remains subject to the bounded response and output DLP paths,
+and is preserved in the native response.
+
 Chat cache identity also includes validated provider-native message blocks, their
 reserved input size, Bedrock service tier, latency selection and requested
 additional response-field paths. Semantic

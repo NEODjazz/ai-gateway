@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.201
+  version: 0.1.202
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3565,6 +3565,14 @@ components:
             latency: {type: string, enum: [standard, optimized]}
         outputConfig:
           $ref: '#/components/schemas/BedrockOutputConfig'
+        guardrailConfig:
+          type: object
+          additionalProperties: false
+          required: [guardrailIdentifier, guardrailVersion]
+          properties:
+            guardrailIdentifier: {type: string, minLength: 1, maxLength: 2048, pattern: '^(?:[a-z0-9]+|arn:aws(?:-[^:]+)?:bedrock:[a-z0-9-]{1,20}:[0-9]{12}:guardrail/[a-z0-9]+)$'}
+            guardrailVersion: {type: string, pattern: '^(?:[1-9][0-9]{0,7}|DRAFT)$'}
+            trace: {type: string, enum: [enabled, disabled, enabled_full]}
         additionalModelRequestFields:
           description: A non-null JSON value of model-specific inference parameters, bounded to 64 KiB by the gateway.
         additionalModelResponseFieldPaths:
@@ -3829,6 +3837,9 @@ components:
             totalTokens: {type: integer, minimum: 0}
         additionalModelResponseFields:
           description: Model-specific fields explicitly selected by additionalModelResponseFieldPaths.
+          readOnly: true
+        trace:
+          description: Provider guardrail trace returned only when tracing was explicitly enabled.
           readOnly: true
     GenerateContentError:
       type: object

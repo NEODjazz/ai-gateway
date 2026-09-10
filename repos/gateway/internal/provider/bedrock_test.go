@@ -136,6 +136,39 @@ func TestBedrockConverseForwardsAdditionalModelRequestFields(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseForwardsGuardrailAndPreservesTrace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Guardrail *openai.BedrockGuardrailConfig `json:"guardrailConfig"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.Guardrail == nil || body.Guardrail.GuardrailIdentifier != "guardrail123" || body.Guardrail.GuardrailVersion != "2" || body.Guardrail.Trace != "enabled" {
+			t.Fatalf("guardrail config lost: %+v", body.Guardrail)
+		}
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"blocked"}]}},"stopReason":"guardrail_intervened","trace":{"guardrail":{"actionReason":"policy"}},"usage":{"inputTokens":3,"outputTokens":1,"totalTokens":4}}`)
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, BedrockGuardrailConfig: &openai.BedrockGuardrailConfig{GuardrailIdentifier: "guardrail123", GuardrailVersion: "2", Trace: "enabled"}}
+	chat, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request)
+	if err != nil || chat.Choices[0].FinishReason != "content_filter" || len(chat.Choices[0].Message.NativeContent) != 2 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	native, err := openai.BedrockFromChat(chat)
+	if err != nil || !strings.Contains(string(native.Trace), `"actionReason":"policy"`) || native.StopReason != "guardrail_intervened" {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+}
+
+func TestBedrockConverseRejectsUnrequestedGuardrailTrace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","trace":{"guardrail":{}},"usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`)
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	if _, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request); err == nil {
+		t.Fatal("unrequested guardrail trace accepted")
+	}
+}
+
 func TestBedrockConversePreservesRequestedAdditionalResponseFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -219,6 +252,11 @@ func TestBedrockNativeControlsFailClosedOnOtherAdapters(t *testing.T) {
 	request.BedrockAdditionalModelRequestFields = json.RawMessage(`{"top_k":42}`)
 	if err := validateChatAdapter(Demo{}, request); err == nil {
 		t.Fatal("Bedrock additional model request fields were dropped by another adapter")
+	}
+	request.BedrockAdditionalModelRequestFields = nil
+	request.BedrockGuardrailConfig = &openai.BedrockGuardrailConfig{GuardrailIdentifier: "guardrail123", GuardrailVersion: "1"}
+	if err := validateChatAdapter(Demo{}, request); err == nil {
+		t.Fatal("Bedrock guardrail config was dropped by another adapter")
 	}
 }
 

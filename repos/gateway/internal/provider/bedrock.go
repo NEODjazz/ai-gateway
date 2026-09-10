@@ -128,16 +128,17 @@ type bedrockTool struct {
 }
 
 type bedrockRequest struct {
-	Messages                          []bedrockMessage          `json:"messages"`
-	System                            []bedrockContentBlock     `json:"system,omitempty"`
-	InferenceConfig                   bedrockInferenceConfig    `json:"inferenceConfig,omitempty"`
-	ServiceTier                       *bedrockServiceTier       `json:"serviceTier,omitempty"`
-	PerformanceConfig                 *bedrockPerformanceConfig `json:"performanceConfig,omitempty"`
-	OutputConfig                      *bedrockOutputConfig      `json:"outputConfig,omitempty"`
-	AdditionalModelRequestFields      json.RawMessage           `json:"additionalModelRequestFields,omitempty"`
-	AdditionalModelResponseFieldPaths []string                  `json:"additionalModelResponseFieldPaths,omitempty"`
-	RequestMetadata                   map[string]string         `json:"requestMetadata,omitempty"`
-	ToolConfig                        *bedrockToolConfig        `json:"toolConfig,omitempty"`
+	Messages                          []bedrockMessage               `json:"messages"`
+	System                            []bedrockContentBlock          `json:"system,omitempty"`
+	InferenceConfig                   bedrockInferenceConfig         `json:"inferenceConfig,omitempty"`
+	ServiceTier                       *bedrockServiceTier            `json:"serviceTier,omitempty"`
+	PerformanceConfig                 *bedrockPerformanceConfig      `json:"performanceConfig,omitempty"`
+	OutputConfig                      *bedrockOutputConfig           `json:"outputConfig,omitempty"`
+	GuardrailConfig                   *openai.BedrockGuardrailConfig `json:"guardrailConfig,omitempty"`
+	AdditionalModelRequestFields      json.RawMessage                `json:"additionalModelRequestFields,omitempty"`
+	AdditionalModelResponseFieldPaths []string                       `json:"additionalModelResponseFieldPaths,omitempty"`
+	RequestMetadata                   map[string]string              `json:"requestMetadata,omitempty"`
+	ToolConfig                        *bedrockToolConfig             `json:"toolConfig,omitempty"`
 }
 
 type bedrockToolConfig struct {
@@ -195,6 +196,7 @@ type bedrockResponse struct {
 	} `json:"output"`
 	StopReason                    string          `json:"stopReason"`
 	AdditionalModelResponseFields json.RawMessage `json:"additionalModelResponseFields,omitempty"`
+	Trace                         json.RawMessage `json:"trace,omitempty"`
 	Usage                         *struct {
 		InputTokens  int `json:"inputTokens"`
 		OutputTokens int `json:"outputTokens"`
@@ -241,6 +243,9 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 	}
 	if err := openai.ValidateBedrockAdditionalModelRequestFields(request.BedrockAdditionalModelRequestFields); err != nil {
 		return result, bedrockInvalid("additional_model_request_fields")
+	}
+	if err := openai.ValidateBedrockGuardrailConfig(request.BedrockGuardrailConfig); err != nil {
+		return result, bedrockInvalid("guardrail_config")
 	}
 	if err := openai.ValidateBedrockRequestMetadata(request.BedrockRequestMetadata); err != nil {
 		return result, bedrockInvalid("request_metadata")
@@ -337,6 +342,10 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 	}
 	result.AdditionalModelResponseFieldPaths = append([]string(nil), request.BedrockAdditionalModelResponseFieldPaths...)
 	result.AdditionalModelRequestFields = append(json.RawMessage(nil), request.BedrockAdditionalModelRequestFields...)
+	if request.BedrockGuardrailConfig != nil {
+		config := *request.BedrockGuardrailConfig
+		result.GuardrailConfig = &config
+	}
 	if len(request.BedrockRequestMetadata) > 0 {
 		result.RequestMetadata = make(map[string]string, len(request.BedrockRequestMetadata))
 		for key, value := range request.BedrockRequestMetadata {
@@ -561,6 +570,12 @@ func (b Bedrock) ChatCompletions(ctx context.Context, request openai.ChatComplet
 	if len(decoded.AdditionalModelResponseFields) > 0 && string(decoded.AdditionalModelResponseFields) != "null" && len(request.BedrockAdditionalModelResponseFieldPaths) == 0 {
 		return openai.ChatCompletionResponse{}, errors.New("Bedrock returned unrequested additional model response fields")
 	}
+	if len(decoded.Trace) > 0 && string(decoded.Trace) != "null" {
+		traceEnabled := request.BedrockGuardrailConfig != nil && (request.BedrockGuardrailConfig.Trace == "enabled" || request.BedrockGuardrailConfig.Trace == "enabled_full")
+		if !traceEnabled || len(decoded.Trace) > 1<<20 || !json.Valid(decoded.Trace) || bytes.Equal(bytes.TrimSpace(decoded.Trace), []byte("null")) {
+			return openai.ChatCompletionResponse{}, errors.New("Bedrock returned invalid or unrequested guardrail trace")
+		}
+	}
 	return bedrockToChat(decoded, request.Model)
 }
 
@@ -665,6 +680,16 @@ func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletio
 		}{Type: "bedrock_additional_model_response_fields", Fields: response.AdditionalModelResponseFields})
 		if err != nil {
 			return result, errors.New("invalid Bedrock additional response fields")
+		}
+		message.NativeContent = append(message.NativeContent, marker)
+	}
+	if len(response.Trace) > 0 && string(response.Trace) != "null" {
+		marker, err := json.Marshal(struct {
+			Type  string          `json:"type"`
+			Trace json.RawMessage `json:"trace"`
+		}{Type: "bedrock_guardrail_trace", Trace: response.Trace})
+		if err != nil {
+			return result, errors.New("invalid Bedrock guardrail trace")
 		}
 		message.NativeContent = append(message.NativeContent, marker)
 	}

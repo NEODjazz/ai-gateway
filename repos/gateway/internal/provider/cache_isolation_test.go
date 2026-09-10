@@ -103,6 +103,18 @@ func TestBedrockRequestMetadataBypassesResponseCaches(t *testing.T) {
 	}
 }
 
+func TestBedrockGuardrailBypassesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, BedrockGuardrailConfig: &openai.BedrockGuardrailConfig{GuardrailIdentifier: "guardrail123", GuardrailVersion: "1"},
+	}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache enabled for provider guardrail execution")
+	}
+	if _, _, eligible := semanticRequest(request, Endpoint{Name: "endpoint"}); eligible {
+		t.Fatal("semantic cache enabled for provider guardrail execution")
+	}
+}
+
 func TestMemoryCacheAndAffinityBounded(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1, 0)

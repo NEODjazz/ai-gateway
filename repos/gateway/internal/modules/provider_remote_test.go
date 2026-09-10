@@ -284,14 +284,17 @@ func TestDLPScansProviderOutputAndRejectsBeforeDelivery(t *testing.T) {
 				Title: "report", Source: "citation source secret", SourceContent: []string{"citation excerpt secret"},
 				LocationType: "document_page", DocumentIndex: &documentIndex,
 			}}},
-			NativeContent: []json.RawMessage{json.RawMessage(`{"type":"web_fetch_tool_result","content":{"type":"document","source":{"type":"text","data":"native document secret"}}}`)},
+			NativeContent: []json.RawMessage{
+				json.RawMessage(`{"type":"web_fetch_tool_result","content":{"type":"document","source":{"type":"text","data":"native document secret"}}}`),
+				json.RawMessage(`{"type":"bedrock_guardrail_trace","trace":{"guardrail":{"actionReason":"trace secret"}}}`),
+			},
 		}}}},
 	}
 	err := NewPipeline([]Module{module}).RunPostResponse(context.Background(), &req)
 	if !errors.Is(err, ErrContentRejected) {
 		t.Fatalf("expected output rejection, got %v", err)
 	}
-	if received.RequestID != "execution-1" || !strings.Contains(received.Content, "response secret") || !strings.Contains(received.Content, "user@example.com") || !strings.Contains(received.Content, "citation source secret") || !strings.Contains(received.Content, "citation excerpt secret") || !strings.Contains(received.Content, "native document secret") || strings.Contains(received.Content, "request secret") {
+	if received.RequestID != "execution-1" || !strings.Contains(received.Content, "response secret") || !strings.Contains(received.Content, "user@example.com") || !strings.Contains(received.Content, "citation source secret") || !strings.Contains(received.Content, "citation excerpt secret") || !strings.Contains(received.Content, "native document secret") || !strings.Contains(received.Content, "trace secret") || strings.Contains(received.Content, "request secret") {
 		t.Fatalf("unexpected output projection: %+v", received)
 	}
 }

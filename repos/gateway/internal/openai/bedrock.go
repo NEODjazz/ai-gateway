@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -17,6 +18,7 @@ type BedrockConverseRequest struct {
 	ServiceTier                       *BedrockServiceTier       `json:"serviceTier,omitempty"`
 	PerformanceConfig                 *BedrockPerformanceConfig `json:"performanceConfig,omitempty"`
 	OutputConfig                      *BedrockOutputConfig      `json:"outputConfig,omitempty"`
+	GuardrailConfig                   *BedrockGuardrailConfig   `json:"guardrailConfig,omitempty"`
 	AdditionalModelRequestFields      json.RawMessage           `json:"additionalModelRequestFields,omitempty"`
 	AdditionalModelResponseFieldPaths []string                  `json:"additionalModelResponseFieldPaths,omitempty"`
 	RequestMetadata                   map[string]string         `json:"requestMetadata,omitempty"`
@@ -24,6 +26,12 @@ type BedrockConverseRequest struct {
 
 type BedrockOutputConfig struct {
 	TextFormat BedrockOutputFormat `json:"textFormat"`
+}
+
+type BedrockGuardrailConfig struct {
+	GuardrailIdentifier string `json:"guardrailIdentifier"`
+	GuardrailVersion    string `json:"guardrailVersion"`
+	Trace               string `json:"trace,omitempty"`
 }
 
 type BedrockOutputFormat struct {
@@ -196,11 +204,18 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 	if err := ValidateBedrockAdditionalModelRequestFields(r.AdditionalModelRequestFields); err != nil {
 		return request, err
 	}
+	if err := ValidateBedrockGuardrailConfig(r.GuardrailConfig); err != nil {
+		return request, err
+	}
 	if err := ValidateBedrockRequestMetadata(r.RequestMetadata); err != nil {
 		return request, err
 	}
 	request.BedrockAdditionalModelResponseFieldPaths = append([]string(nil), r.AdditionalModelResponseFieldPaths...)
 	request.BedrockAdditionalModelRequestFields = append(json.RawMessage(nil), r.AdditionalModelRequestFields...)
+	if r.GuardrailConfig != nil {
+		config := *r.GuardrailConfig
+		request.BedrockGuardrailConfig = &config
+	}
 	if len(r.AdditionalModelRequestFields) > 0 {
 		request.NativeInputTokens = ReserveTokens(request.NativeInputTokens, EstimateContextTokens(r.AdditionalModelRequestFields))
 	}
@@ -392,6 +407,27 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 
 const MaxBedrockAdditionalModelRequestFieldsBytes = 64 << 10
 
+var (
+	bedrockGuardrailIDPattern      = regexp.MustCompile(`^(?:[a-z0-9]+|arn:aws(?:-[^:]+)?:bedrock:[a-z0-9-]{1,20}:[0-9]{12}:guardrail/[a-z0-9]+)$`)
+	bedrockGuardrailVersionPattern = regexp.MustCompile(`^(?:[1-9][0-9]{0,7}|DRAFT)$`)
+)
+
+func ValidateBedrockGuardrailConfig(config *BedrockGuardrailConfig) error {
+	if config == nil {
+		return nil
+	}
+	if len(config.GuardrailIdentifier) > 2048 || !bedrockGuardrailIDPattern.MatchString(config.GuardrailIdentifier) {
+		return errors.New("guardrailConfig contains an invalid guardrailIdentifier")
+	}
+	if !bedrockGuardrailVersionPattern.MatchString(config.GuardrailVersion) {
+		return errors.New("guardrailConfig contains an invalid guardrailVersion")
+	}
+	if config.Trace != "" && config.Trace != "enabled" && config.Trace != "disabled" && config.Trace != "enabled_full" {
+		return errors.New("guardrailConfig contains an invalid trace value")
+	}
+	return nil
+}
+
 func ValidateBedrockAdditionalModelRequestFields(fields json.RawMessage) error {
 	if len(fields) == 0 {
 		return nil
@@ -563,6 +599,7 @@ type BedrockConverseResponse struct {
 	StopReason                    string                `json:"stopReason"`
 	Usage                         BedrockUsage          `json:"usage"`
 	AdditionalModelResponseFields json.RawMessage       `json:"additionalModelResponseFields,omitempty"`
+	Trace                         json.RawMessage       `json:"trace,omitempty"`
 }
 
 type BedrockConverseOutput struct {
@@ -586,6 +623,7 @@ func BedrockFromChat(response ChatCompletionResponse) (BedrockConverseResponse, 
 	}
 	choice := response.Choices[0]
 	result.AdditionalModelResponseFields = bedrockAdditionalResponseFields(choice.Message.NativeContent)
+	result.Trace = bedrockTrace(choice.Message.NativeContent)
 	text := ContentText(choice.Message.Content)
 	if err := ValidateChatAnnotations(choice.Message.Annotations); err != nil {
 		return result, err
@@ -617,6 +655,20 @@ func BedrockFromChat(response ChatCompletionResponse) (BedrockConverseResponse, 
 	}
 	result.StopReason = stopReason
 	return result, nil
+}
+
+func bedrockTrace(content []json.RawMessage) json.RawMessage {
+	for _, raw := range content {
+		var marker map[string]json.RawMessage
+		if json.Unmarshal(raw, &marker) != nil || len(marker) != 2 {
+			continue
+		}
+		var markerType string
+		if json.Unmarshal(marker["type"], &markerType) == nil && markerType == "bedrock_guardrail_trace" && len(marker["trace"]) > 0 && string(marker["trace"]) != "null" {
+			return append(json.RawMessage(nil), marker["trace"]...)
+		}
+	}
+	return nil
 }
 
 func bedrockAdditionalResponseFields(content []json.RawMessage) json.RawMessage {

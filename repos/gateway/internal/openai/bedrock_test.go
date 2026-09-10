@@ -150,6 +150,32 @@ func TestBedrockConverseValidatesAndCopiesAdditionalModelRequestFields(t *testin
 	}
 }
 
+func TestBedrockConverseValidatesAndCopiesGuardrailConfig(t *testing.T) {
+	request := BedrockConverseRequest{
+		Messages:        []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("hello")}}}},
+		GuardrailConfig: &BedrockGuardrailConfig{GuardrailIdentifier: "guardrail123", GuardrailVersion: "DRAFT", Trace: "enabled_full"},
+	}
+	chat, err := request.ChatRequest("model", "")
+	if err != nil || chat.BedrockGuardrailConfig == nil || chat.BedrockGuardrailConfig.Trace != "enabled_full" {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	request.GuardrailConfig.Trace = "disabled"
+	if chat.BedrockGuardrailConfig.Trace != "enabled_full" {
+		t.Fatal("guardrail config was not copied")
+	}
+	for _, config := range []*BedrockGuardrailConfig{
+		{GuardrailVersion: "1"},
+		{GuardrailIdentifier: "UPPER", GuardrailVersion: "1"},
+		{GuardrailIdentifier: "guardrail123", GuardrailVersion: "0"},
+		{GuardrailIdentifier: "guardrail123", GuardrailVersion: "1", Trace: "full"},
+	} {
+		request.GuardrailConfig = config
+		if _, err := request.ChatRequest("model", ""); err == nil {
+			t.Fatalf("invalid guardrail config accepted: %+v", config)
+		}
+	}
+}
+
 func TestBedrockConverseMapsStructuredOutput(t *testing.T) {
 	request := BedrockConverseRequest{
 		Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("extract")}}}},

@@ -183,7 +183,7 @@ func (p OpenAICompatible) ValidateEmbeddingParameters(request openai.EmbeddingRe
 }
 
 func validateChatAdapter(client Client, request openai.ChatCompletionRequest) error {
-	if request.BedrockServiceTier != "" || request.BedrockPerformanceLatency != "" || len(request.BedrockAdditionalModelRequestFields) > 0 || len(request.BedrockAdditionalModelResponseFieldPaths) > 0 || len(request.BedrockRequestMetadata) > 0 {
+	if request.BedrockServiceTier != "" || request.BedrockPerformanceLatency != "" || len(request.BedrockAdditionalModelRequestFields) > 0 || len(request.BedrockAdditionalModelResponseFieldPaths) > 0 || len(request.BedrockRequestMetadata) > 0 || request.BedrockGuardrailConfig != nil {
 		support, ok := client.(interface{ SupportsBedrockNativeControls() bool })
 		if !ok || !support.SupportsBedrockNativeControls() {
 			return rejectParameters("provider", parameterCheck{"bedrock_native_controls", true})
