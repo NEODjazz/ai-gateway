@@ -18,6 +18,7 @@ type ManagedProvider struct {
 	BaseURL      string `json:"base_url,omitempty"`
 	APIVersion   string `json:"api_version,omitempty"`
 	AuthType     string `json:"auth_type,omitempty"`
+	Region       string `json:"region,omitempty"`
 	RateLimitRPM int    `json:"rate_limit_rpm,omitempty"`
 	RateLimitTPM int    `json:"rate_limit_tpm,omitempty"`
 	Enabled      bool   `json:"enabled"`
@@ -113,6 +114,9 @@ func (r *Router) UpdateProvider(id string, input ManagedProvider) (ManagedProvid
 	if err != nil {
 		return ManagedProvider{}, err
 	}
+	if err := r.validateCredentialsForProvider(provider); err != nil {
+		return ManagedProvider{}, err
+	}
 	rebuilt := make([]Endpoint, 0)
 	if deployments := r.deployments.current.Load(); deployments != nil {
 		for _, deployment := range *deployments {
@@ -168,6 +172,7 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 	input.BaseURL = strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
 	input.APIVersion = strings.TrimSpace(input.APIVersion)
 	input.AuthType = normalizeAzureAuthType(input.AuthType)
+	input.Region = strings.ToLower(strings.TrimSpace(input.Region))
 	if input.ID == "" || len(input.ID) > 128 || !validProviderType(input.Type) || len(input.BaseURL) > 2048 || input.RateLimitRPM < 0 || input.RateLimitRPM > 10000000 || input.RateLimitTPM < 0 || input.RateLimitTPM > 1000000000 {
 		return ManagedProvider{}, ErrInvalidProvider
 	}
@@ -182,11 +187,43 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 		if parsed.RawQuery != "" || parsed.Fragment != "" || !validAzureProviderVersion(input.APIVersion) || (input.AuthType != "api_key" && input.AuthType != "entra") {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
+		input.Region = ""
+	} else if input.Type == "bedrock" {
+		input.APIVersion = ""
+		parsed, _ := url.Parse(input.BaseURL)
+		if parsed.RawQuery != "" || parsed.Fragment != "" {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
+		if input.AuthType == "api_key" {
+			input.AuthType = "bearer"
+		}
+		if input.AuthType != "bearer" && input.AuthType != "aws_sigv4" {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
+		if input.AuthType == "aws_sigv4" && !validBedrockRegion(input.Region) {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
+		if input.AuthType == "bearer" {
+			input.Region = ""
+		}
 	} else {
 		input.APIVersion = ""
 		input.AuthType = ""
+		input.Region = ""
 	}
 	return input, nil
+}
+
+func validBedrockRegion(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func validProviderType(value string) bool {

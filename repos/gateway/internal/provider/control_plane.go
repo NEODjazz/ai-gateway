@@ -128,8 +128,14 @@ func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error 
 		if id == "" || credentials[id].ID != "" || len(item.Nonce) != r.credentials.aead.NonceSize() || len(item.Ciphertext) == 0 {
 			return fmt.Errorf("invalid persisted credential %q", id)
 		}
-		if _, err := r.credentials.aead.Open(nil, item.Nonce, item.Ciphertext, []byte(id)); err != nil {
+		plaintext, err := r.credentials.aead.Open(nil, item.Nonce, item.Ciphertext, []byte(id))
+		if err != nil {
 			return fmt.Errorf("decrypt persisted credential %q: %w", id, err)
+		}
+		if provider := providers[item.Credential.ProviderID]; provider.Type == "bedrock" && provider.AuthType == "aws_sigv4" {
+			if _, err := parseAWSCredential(string(plaintext)); err != nil {
+				return fmt.Errorf("invalid persisted credential %q for aws_sigv4 provider", id)
+			}
 		}
 		credentials[id] = encryptedCredential{Credential: item.Credential, Nonce: append([]byte(nil), item.Nonce...), Ciphertext: append([]byte(nil), item.Ciphertext...)}
 	}

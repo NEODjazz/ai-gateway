@@ -142,6 +142,13 @@ func (r *Router) storeCredential(id string, input CredentialInput, preserveMetad
 		input.ProviderID = existing.ProviderID
 		input.Description = existing.Description
 	}
+	if input.Secret != "" && input.ProviderID != "" && r.providers != nil && r.providers.current.Load() != nil {
+		if managed, found := (*r.providers.current.Load())[input.ProviderID]; found && managed.Type == "bedrock" && managed.AuthType == "aws_sigv4" {
+			if _, err := parseAWSCredential(input.Secret); err != nil {
+				return Credential{}, ErrInvalidCredential
+			}
+		}
+	}
 	if input.ProviderID != "" && r.deployments != nil {
 		if deployments := r.deployments.current.Load(); deployments != nil {
 			for _, deployment := range *deployments {
@@ -247,4 +254,25 @@ func (r *Router) providerCredentialSecret(providerID, credentialID string) (stri
 		return "", errors.New("credential decryption failed")
 	}
 	return string(plaintext), nil
+}
+
+func (r *Router) validateCredentialsForProvider(provider ManagedProvider) error {
+	if provider.Type != "bedrock" || provider.AuthType != "aws_sigv4" {
+		return nil
+	}
+	r.credentials.mu.RLock()
+	defer r.credentials.mu.RUnlock()
+	for id, item := range r.credentials.current {
+		if item.ProviderID != provider.ID {
+			continue
+		}
+		plaintext, err := r.credentials.aead.Open(nil, item.Nonce, item.Ciphertext, []byte(id))
+		if err != nil {
+			return ErrInvalidCredential
+		}
+		if _, err := parseAWSCredential(string(plaintext)); err != nil {
+			return ErrInvalidCredential
+		}
+	}
+	return nil
 }

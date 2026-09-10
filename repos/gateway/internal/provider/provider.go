@@ -2873,7 +2873,7 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 	case "voyage":
 		return NewVoyage(endpoint.BaseURL, endpoint.APIKey)
 	case "bedrock":
-		return NewBedrock(endpoint.BaseURL, endpoint.APIKey)
+		return NewBedrockWithAuth(endpoint.BaseURL, endpoint.APIKey, endpoint.AuthType, endpoint.Region)
 	case "groq":
 		return NewGroq(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "deepseek":

@@ -18,9 +18,12 @@ import (
 )
 
 type Bedrock struct {
-	baseURL string
-	apiKey  string
-	client  *http.Client
+	baseURL  string
+	apiKey   string
+	authType string
+	region   string
+	client   *http.Client
+	now      func() time.Time
 }
 
 type bedrockContentBlock struct {
@@ -86,9 +89,17 @@ type bedrockResponse struct {
 }
 
 func NewBedrock(baseURL, apiKey string) Bedrock {
+	return NewBedrockWithAuth(baseURL, apiKey, "bearer", "")
+}
+
+func NewBedrockWithAuth(baseURL, credential, authType, region string) Bedrock {
 	client := newProviderHTTPClient(180 * time.Second)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return Bedrock{baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey, client: client}
+	authType = strings.ToLower(strings.TrimSpace(authType))
+	if authType == "" || authType == "api_key" {
+		authType = "bearer"
+	}
+	return Bedrock{baseURL: strings.TrimRight(baseURL, "/"), apiKey: credential, authType: authType, region: strings.ToLower(strings.TrimSpace(region)), client: client, now: time.Now}
 }
 
 func (Bedrock) SupportsResponses() bool { return false }
@@ -260,7 +271,15 @@ func (b Bedrock) ChatCompletions(ctx context.Context, request openai.ChatComplet
 		return openai.ChatCompletionResponse{}, err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	if b.apiKey != "" {
+	if b.authType == "aws_sigv4" {
+		credential, err := parseAWSCredential(b.apiKey)
+		if err != nil {
+			return openai.ChatCompletionResponse{}, bedrockInvalid("credential")
+		}
+		if err := signAWSRequest(httpRequest, payload, credential, b.region, "bedrock", b.now()); err != nil {
+			return openai.ChatCompletionResponse{}, bedrockInvalid("credential")
+		}
+	} else if b.apiKey != "" {
 		httpRequest.Header.Set("Authorization", "Bearer "+b.apiKey)
 	}
 	response, err := b.client.Do(httpRequest)

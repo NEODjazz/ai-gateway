@@ -29,7 +29,7 @@ export type Field = {
   referenceBy?: { fieldKey: string; values: Record<string, FieldReference> };
   defaultValue?: unknown;
   readOnlyOnEdit?: boolean;
-  visibleWhen?: { fieldKey: string; equals: string };
+  visibleWhen?: { fieldKey: string; equals?: string; oneOf?: string[] };
   clears?: string[];
 };
 
@@ -110,12 +110,17 @@ export function ResourceForm({ title, fields, initial, loadOptions, onClose, onS
       return next;
     });
   }
+  function fieldVisible(field: Field) {
+    if (!field.visibleWhen) return true;
+    const current = String(values[field.visibleWhen.fieldKey]);
+    return field.visibleWhen.oneOf ? field.visibleWhen.oneOf.includes(current) : current === field.visibleWhen.equals;
+  }
   async function submit(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
     setError("");
     try {
-      const payload = Object.fromEntries(fields.filter((field) => !field.visibleWhen || String(values[field.visibleWhen.fieldKey]) === field.visibleWhen.equals).map((field) => [field.key, outputValue(field, values[field.key])])) as Row;
+      const payload = Object.fromEntries(fields.filter(fieldVisible).map((field) => [field.key, outputValue(field, values[field.key])])) as Row;
       await onSubmit(payload);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save the record");
@@ -131,7 +136,7 @@ export function ResourceForm({ title, fields, initial, loadOptions, onClose, onS
     if (field.type === "multi-select") return <ChipMultiSelect id={fieldID} label={field.label} options={field.chipOptions || (field.options || []).map((value) => ({ value, label: value }))} value={selectedValues(values[field.key])} onChange={(selected) => setFieldValue(field.key, selected.join(","))} controlOnly />;
     return <GravityThemeScope className="gravity-form-control"><TextInput id={fieldID} size="l" type={field.type === "password" ? "password" : field.type === "number" ? "number" : "text"} controlProps={{ required: field.required }} readOnly={Boolean(initial && field.readOnlyOnEdit)} placeholder={field.placeholder} value={String(values[field.key] ?? "")} onUpdate={(value) => setFieldValue(field.key, field.type === "number" ? Number(value) : value)} /></GravityThemeScope>;
   }
-  return <ModalFrame label={title} onClose={onClose}><section className="modal"><div className="modal-heading"><h2>{title}</h2><GatewayButton view="flat" size="l" aria-label="Close" title="Close" onClick={onClose}><Icon data={Xmark} size={18} /></GatewayButton></div><form onSubmit={submit}><div className="form-grid">{fields.filter((field) => !field.visibleWhen || String(values[field.visibleWhen.fieldKey]) === field.visibleWhen.equals).map((field) => {
+  return <ModalFrame label={title} onClose={onClose}><section className="modal"><div className="modal-heading"><h2>{title}</h2><GatewayButton view="flat" size="l" aria-label="Close" title="Close" onClick={onClose}><Icon data={Xmark} size={18} /></GatewayButton></div><form onSubmit={submit}><div className="form-grid">{fields.filter(fieldVisible).map((field) => {
     const fieldID = `resource-field-${field.key}`;
     return <div key={field.key} className={`resource-form-row${field.type === "textarea" || field.type === "json" || field.type === "reference-multi" || field.type === "multi-select" ? " span-2" : ""}`}><label htmlFor={fieldID}>{field.label}</label>{renderControl(field, fieldID)}</div>;
   })}</div>{referenceError && <p className="form-error" role="alert">Could not load configured items: {referenceError}</p>}{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><GatewayButton type="button" view="outlined" size="l" onClick={onClose}>Cancel</GatewayButton><GatewayButton type="submit" size="l" disabled={saving}>{saving ? "Saving…" : "Save"}</GatewayButton></div></form></section></ModalFrame>;

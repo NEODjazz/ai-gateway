@@ -266,7 +266,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output, text embeddings; API key |
 | `mistral` | Native Chat JSON/SSE and embeddings wire contract; FIM completions; Bearer API key |
 | `voyage` | Native text embeddings and rerank; Bearer API key |
-| `bedrock` | Native Converse chat/tools contract with bearer credential boundary |
+| `bedrock` | Native Converse chat/tools; bearer mode for compatible private endpoints or AWS SigV4 with region-scoped static/STS credentials |
 | `groq` | Chat/stream, tools, structured output, vision, user attribution and service tiers |
 | `deepseek` | Chat/stream and Responses with provider-specific validation and reasoning history passthrough |
 | `demo` | Локальный deterministic fallback для разработки |

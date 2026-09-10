@@ -84,6 +84,14 @@ Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`,
 `voyage`, `bedrock`, `groq` и `deepseek`.
 
+Для managed provider `bedrock` значение `auth_type=aws_sigv4` требует `region`.
+Write-only credential задается JSON-объектом с `access_key_id`,
+`secret_access_key` и необязательным `session_token`. Gateway подписывает каждый
+Converse request для service `bedrock`, включая payload hash и временный session
+token. Неверный JSON credential отклоняется при сохранении. `auth_type=bearer`
+сохраняет прежний режим для частных совместимых endpoints. Автоматическое
+получение или обновление credentials из metadata/STS в этот контракт не входит.
+
 ## Gateway modules
 
 | Модуль | URL | Required default | Особенность |

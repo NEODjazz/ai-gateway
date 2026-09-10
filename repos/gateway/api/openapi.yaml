@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.171
+  version: 0.1.172
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -5472,8 +5472,13 @@ components:
           description: Azure data-plane version. Empty selects the current /openai/v1 contract; dated and preview values are forwarded as api-version.
         auth_type:
           type: string
-          enum: [api_key, entra]
-          description: Azure credential transport. The credential remains write-only in the credential vault.
+          enum: [api_key, entra, bearer, aws_sigv4]
+          description: Azure accepts api_key or entra. Bedrock accepts bearer for compatible private endpoints or aws_sigv4 for AWS IAM authentication. The credential remains write-only in the credential vault.
+        region:
+          type: string
+          maxLength: 64
+          pattern: '^[a-z0-9-]+$'
+          description: Required AWS region for Bedrock aws_sigv4 authentication; rejected for other provider types.
         rate_limit_rpm: {type: integer, minimum: 0, maximum: 10000000, description: Shared request quota across every deployment backed by this provider; zero disables it.}
         rate_limit_tpm: {type: integer, minimum: 0, maximum: 1000000000, description: Shared estimated token quota across every deployment backed by this provider; zero disables it.}
         enabled: {type: boolean}

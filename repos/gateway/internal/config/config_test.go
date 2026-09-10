@@ -67,6 +67,23 @@ func TestValidateAzureOpenAIConfiguration(t *testing.T) {
 	}
 }
 
+func TestValidateBedrockSigV4Configuration(t *testing.T) {
+	valid := ProviderEndpointConfig{Name: "bedrock", Type: "bedrock", BaseURL: "https://bedrock-runtime.us-east-1.amazonaws.com", AuthType: "aws_sigv4", Region: "us-east-1", APIKey: `{"access_key_id":"AKID","secret_access_key":"secret","session_token":"token"}`}
+	if err := validateProviderAdmission([]ProviderEndpointConfig{valid}); err != nil {
+		t.Fatalf("valid configuration rejected: %v", err)
+	}
+	for _, endpoint := range []ProviderEndpointConfig{
+		{Name: "bedrock", Type: "bedrock", BaseURL: valid.BaseURL, AuthType: "aws_sigv4", APIKey: valid.APIKey},
+		{Name: "bedrock", Type: "bedrock", BaseURL: valid.BaseURL, AuthType: "aws_sigv4", Region: "US_EAST_1", APIKey: valid.APIKey},
+		{Name: "bedrock", Type: "bedrock", BaseURL: valid.BaseURL + "?token=x", AuthType: "aws_sigv4", Region: "us-east-1", APIKey: valid.APIKey},
+		{Name: "bedrock", Type: "bedrock", BaseURL: valid.BaseURL, AuthType: "aws_sigv4", Region: "us-east-1", APIKey: `{}`},
+	} {
+		if err := validateProviderAdmission([]ProviderEndpointConfig{endpoint}); err == nil {
+			t.Fatalf("invalid configuration accepted: %+v", endpoint)
+		}
+	}
+}
+
 func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("EXACT_CACHE_TTL_SECONDS", "120")
 	t.Setenv("EXACT_CACHE_MAX_BYTES", "2048")

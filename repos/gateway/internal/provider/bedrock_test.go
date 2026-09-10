@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -44,6 +45,23 @@ func TestBedrockConverseMapsMessagesToolsAndUsage(t *testing.T) {
 		Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object"}}}},
 	})
 	if err != nil || response.Usage.TotalTokens != 13 || response.Choices[0].FinishReason != "tool_calls" || openai.ContentText(response.Choices[0].Message.Content) != "checking " || response.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"city":"Paris"}` {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestBedrockConverseUsesSigV4TemporaryCredentials(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256 Credential=AKID/20260102/us-east-1/bedrock/aws4_request") || r.Header.Get("X-Amz-Security-Token") != "session" || r.Header.Get("X-Amz-Date") != "20260102T030405Z" || r.Header.Get("X-Amz-Content-Sha256") == "" {
+			t.Fatalf("headers=%v", r.Header)
+		}
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`)
+	}))
+	defer server.Close()
+	credential := `{"access_key_id":"AKID","secret_access_key":"secret","session_token":"session"}`
+	client := NewBedrockWithAuth(server.URL, credential, " AWS_SIGV4 ", "us-east-1")
+	client.now = func() time.Time { return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC) }
+	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+	if err != nil || response.Usage.TotalTokens != 2 {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }

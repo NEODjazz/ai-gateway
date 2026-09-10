@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"sort"
@@ -147,6 +148,7 @@ type ProviderEndpointConfig struct {
 	RerankPath            string            `json:"rerank_path,omitempty"`
 	APIVersion            string            `json:"api_version,omitempty"`
 	AuthType              string            `json:"auth_type,omitempty"`
+	Region                string            `json:"region,omitempty"`
 }
 
 func Load() Config {
@@ -297,14 +299,55 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 			if authType != "" && authType != "api_key" && authType != "entra" {
 				result = errors.Join(result, fmt.Errorf("provider %q auth_type must be api_key or entra", name))
 			}
-		} else if endpoint.APIVersion != "" || endpoint.AuthType != "" {
-			result = errors.Join(result, fmt.Errorf("provider %q api_version and auth_type require type azure-openai", name))
+		} else if endpoint.Type == "bedrock" {
+			if parsed, err := url.Parse(endpoint.BaseURL); err != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+				result = errors.Join(result, fmt.Errorf("provider %q base_url must not contain query or fragment", name))
+			}
+			authType := strings.ToLower(strings.TrimSpace(endpoint.AuthType))
+			if authType == "" {
+				authType = "bearer"
+			}
+			if authType != "bearer" && authType != "aws_sigv4" {
+				result = errors.Join(result, fmt.Errorf("provider %q auth_type must be bearer or aws_sigv4", name))
+			}
+			if authType == "aws_sigv4" && !validAWSRegion(endpoint.Region) {
+				result = errors.Join(result, fmt.Errorf("provider %q region is required for aws_sigv4", name))
+			}
+			if authType == "aws_sigv4" && !validAWSCredentialJSON(endpoint.APIKey) {
+				result = errors.Join(result, fmt.Errorf("provider %q has invalid aws_sigv4 credential", name))
+			}
+		} else if endpoint.APIVersion != "" || endpoint.AuthType != "" || endpoint.Region != "" {
+			result = errors.Join(result, fmt.Errorf("provider %q api_version, auth_type or region is unsupported for this type", name))
 		}
 		if endpoint.QueueCapacity > 0 && endpoint.QueueTimeoutMS <= 0 {
 			result = errors.Join(result, fmt.Errorf("provider %q queue requires queue_timeout_ms", name))
 		}
 	}
 	return result
+}
+
+func validAWSCredentialJSON(raw string) bool {
+	var value struct {
+		AccessKeyID     string `json:"access_key_id"`
+		SecretAccessKey string `json:"secret_access_key"`
+		SessionToken    string `json:"session_token,omitempty"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(&value) == nil && decoder.Decode(&struct{}{}) == io.EOF && strings.TrimSpace(value.AccessKeyID) != "" && len(value.AccessKeyID) <= 128 && value.SecretAccessKey != "" && len(value.SecretAccessKey) <= 256 && len(value.SessionToken) <= 4096
+}
+
+func validAWSRegion(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func validAzureAPIVersion(value string) bool {
