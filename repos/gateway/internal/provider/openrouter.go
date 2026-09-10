@@ -108,6 +108,35 @@ func (p OpenRouter) GenerateSpeech(ctx context.Context, request openai.AudioSpee
 }
 
 func (p OpenRouter) GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
+	return p.generateImage(ctx, request, nil)
+}
+
+func (p OpenRouter) EditImage(ctx context.Context, request openai.ImageEditRequest) (openai.ImageGenerationResponse, error) {
+	if message := request.Validate(); message != "" {
+		return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, Provider: "openrouter", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	if err := rejectParameters("openrouter",
+		parameterCheck{"mask", request.Mask != nil}, parameterCheck{"response_format", request.ResponseFormat != ""},
+	); err != nil {
+		return openai.ImageGenerationResponse{}, err
+	}
+	references := make([]openRouterImageReference, len(request.Images))
+	for index, image := range request.Images {
+		references[index] = openRouterImageReference{Type: "image_url", ImageURL: struct {
+			URL string `json:"url"`
+		}{URL: "data:" + image.MediaType + ";base64," + image.Data}}
+	}
+	return p.generateImage(ctx, request.GenerationRequest(), references)
+}
+
+type openRouterImageReference struct {
+	Type     string `json:"type"`
+	ImageURL struct {
+		URL string `json:"url"`
+	} `json:"image_url"`
+}
+
+func (p OpenRouter) generateImage(ctx context.Context, request openai.ImageGenerationRequest, references []openRouterImageReference) (openai.ImageGenerationResponse, error) {
 	if message := request.Validate(); message != "" {
 		return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, Provider: "openrouter", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
@@ -117,19 +146,20 @@ func (p OpenRouter) GenerateImage(ctx context.Context, request openai.ImageGener
 		return openai.ImageGenerationResponse{}, err
 	}
 	body, err := json.Marshal(struct {
-		Model             string `json:"model"`
-		Prompt            string `json:"prompt"`
-		N                 *int   `json:"n,omitempty"`
-		Quality           string `json:"quality,omitempty"`
-		Size              string `json:"size,omitempty"`
-		Background        string `json:"background,omitempty"`
-		OutputFormat      string `json:"output_format,omitempty"`
-		OutputCompression *int   `json:"output_compression,omitempty"`
-		User              string `json:"user,omitempty"`
-		Resolution        string `json:"resolution,omitempty"`
-		AspectRatio       string `json:"aspect_ratio,omitempty"`
-		Seed              *int64 `json:"seed,omitempty"`
-	}{request.Model, request.Prompt, request.N, request.Quality, request.Size, request.Background, request.OutputFormat, request.OutputCompression, request.User, request.Resolution, request.AspectRatio, request.Seed})
+		Model             string                     `json:"model"`
+		Prompt            string                     `json:"prompt"`
+		N                 *int                       `json:"n,omitempty"`
+		Quality           string                     `json:"quality,omitempty"`
+		Size              string                     `json:"size,omitempty"`
+		Background        string                     `json:"background,omitempty"`
+		OutputFormat      string                     `json:"output_format,omitempty"`
+		OutputCompression *int                       `json:"output_compression,omitempty"`
+		User              string                     `json:"user,omitempty"`
+		Resolution        string                     `json:"resolution,omitempty"`
+		AspectRatio       string                     `json:"aspect_ratio,omitempty"`
+		Seed              *int64                     `json:"seed,omitempty"`
+		InputReferences   []openRouterImageReference `json:"input_references,omitempty"`
+	}{request.Model, request.Prompt, request.N, request.Quality, request.Size, request.Background, request.OutputFormat, request.OutputCompression, request.User, request.Resolution, request.AspectRatio, request.Seed, references})
 	if err != nil {
 		return openai.ImageGenerationResponse{}, err
 	}

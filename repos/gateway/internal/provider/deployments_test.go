@@ -224,7 +224,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "bedrock", capabilities: []string{"chat", "tools"}},
 		{providerType: "groq", capabilities: []string{"chat", "stream", "tools", "structured_output", "vision"}},
 		{providerType: "deepseek", capabilities: []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}},
-		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}},
+		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}},
 		{providerType: "mistral", capabilities: []string{"chat", "tools", "structured_output", "vision", "assistant_prefill"}},
 		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "tools", "structured_output", "mcp", "vision", "web_search", "audio"}},
 	}
@@ -277,7 +277,7 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Equal(profilesByType["deepseek"].Operations, []string{"chat", "responses", "stream"}) || !slices.Equal(profilesByType["deepseek"].Capabilities, []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}) {
 		t.Fatalf("deepseek profile=%+v", profilesByType["deepseek"])
 	}
-	if !slices.Equal(profilesByType["openrouter"].Operations, []string{"chat", "responses", "embeddings", "rerank", "image_generation", "audio_transcription", "audio_speech", "stream"}) || !slices.Equal(profilesByType["openrouter"].Capabilities, []string{"chat", "responses", "embeddings", "rerank", "image_generation", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}) {
+	if !slices.Equal(profilesByType["openrouter"].Operations, []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream"}) || !slices.Equal(profilesByType["openrouter"].Capabilities, []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}) {
 		t.Fatalf("openrouter profile=%+v", profilesByType["openrouter"])
 	}
 }

@@ -19,6 +19,7 @@ func TestOpenRouterExposesOnlyImplementedOperations(t *testing.T) {
 		"embedding":           implements[EmbeddingClient](client),
 		"rerank":              implements[RerankClient](client),
 		"image_generation":    implements[ImageGenerationClient](client),
+		"image_edit":          implements[ImageEditClient](client),
 		"audio_transcription": implements[AudioTranscriptionClient](client),
 		"audio_speech":        implements[AudioSpeechClient](client),
 	} {
@@ -28,7 +29,6 @@ func TestOpenRouterExposesOnlyImplementedOperations(t *testing.T) {
 	}
 	for name, supported := range map[string]bool{
 		"moderation":      implements[ModerationClient](client),
-		"image_edit":      implements[ImageEditClient](client),
 		"image_variation": implements[ImageVariationClient](client),
 		"search":          implements[SearchClient](client),
 		"mcp":             implements[MCPClient](client),
@@ -36,6 +36,35 @@ func TestOpenRouterExposesOnlyImplementedOperations(t *testing.T) {
 		if supported {
 			t.Errorf("unexpected %s support", name)
 		}
+	}
+}
+
+func TestOpenRouterImageEditUsesInputReferences(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/images" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		var request struct {
+			InputReferences []struct {
+				Type     string `json:"type"`
+				ImageURL struct {
+					URL string `json:"url"`
+				} `json:"image_url"`
+			} `json:"input_references"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.InputReferences) != 1 || request.InputReferences[0].Type != "image_url" || request.InputReferences[0].ImageURL.URL != "data:image/png;base64,iVBORw0KGgpmaXh0dXJl" {
+			t.Fatalf("request=%+v err=%v", request, err)
+		}
+		_, _ = fmt.Fprint(w, `{"created":7,"data":[{"b64_json":"aW1hZ2U=","media_type":"image/png"}],"usage":{"prompt_tokens":7,"completion_tokens":5,"total_tokens":12}}`)
+	}))
+	defer server.Close()
+	image, err := openai.ParseDataImageURL("data:image/png;base64,iVBORw0KGgpmaXh0dXJl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := NewOpenRouter(server.URL+"/api/v1", "", false, "").EditImage(t.Context(), openai.ImageEditRequest{Model: "image", Prompt: "edit", Images: []openai.ImageAttachment{image}})
+	if err != nil || len(response.Data) != 1 || response.Usage == nil || response.Usage.TotalTokens != 12 {
+		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }
 
@@ -101,6 +130,14 @@ func TestOpenRouterRejectsUnsupportedOperationParametersBeforeNetwork(t *testing
 			return err
 		},
 	}
+	image, err := openai.ParseDataImageURL("data:image/png;base64,iVBORw0KGgpmaXh0dXJl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests = append(requests, func() error {
+		_, err := client.EditImage(t.Context(), openai.ImageEditRequest{Model: "image", Prompt: "edit", Images: []openai.ImageAttachment{image}, Mask: &image})
+		return err
+	})
 	for _, call := range requests {
 		var providerErr *Error
 		if err := call(); !errors.As(err, &providerErr) || providerErr.Provider != "openrouter" || providerErr.UpstreamCode != "unsupported_parameter" {
