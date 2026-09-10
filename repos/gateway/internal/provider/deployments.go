@@ -127,6 +127,9 @@ func (r *Router) UpdateModelDeployment(id string, deployment ModelDeployment) (M
 	if !deployment.CredentialSet {
 		deployment.CredentialID = existing.CredentialID
 	}
+	if deployment.Capabilities == nil {
+		deployment.Capabilities = append([]string(nil), existing.Capabilities...)
+	}
 	if err := r.validateDeployment(deployment); err != nil {
 		return ModelDeployment{}, ErrInvalidDeployment
 	}
@@ -341,7 +344,18 @@ func validDeploymentCapabilities(capabilities []string) bool {
 		}
 		seen[capability] = true
 	}
-	return true
+	requiresChatOrResponses := []string{"stream", "tools", "structured_output", "vision"}
+	for _, capability := range requiresChatOrResponses {
+		if seen[capability] && !seen["chat"] && !seen["responses"] {
+			return false
+		}
+	}
+	for _, capability := range []string{"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill"} {
+		if seen[capability] && !seen["chat"] {
+			return false
+		}
+	}
+	return !seen["mcp"] || (seen["responses"] && seen["tools"])
 }
 
 func ValidModelCapability(capability string) bool {

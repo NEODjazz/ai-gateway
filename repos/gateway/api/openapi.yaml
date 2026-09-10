@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.121
+  version: 0.1.122
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -5219,7 +5219,7 @@ components:
         credential_id: {type: string, maxLength: 128}
         upstream_model: {type: string, maxLength: 256}
         models: {type: array, maxItems: 128, items: {type: string, minLength: 1, maxLength: 256}}
-        capabilities: {type: array, maxItems: 128, items: {type: string, minLength: 1, maxLength: 256}}
+        capabilities: {type: array, maxItems: 128, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 256}}
         priority: {type: integer, minimum: 0}
         weight: {type: integer, minimum: 1}
         guardrail_policy: {type: string, maxLength: 128}

@@ -133,3 +133,21 @@ func TestAdminRejectsCapabilityUnsupportedByManagedProvider(t *testing.T) {
 		t.Fatalf("unsupported capability was not explained: %d %s", createDeployment.Code, createDeployment.Body.String())
 	}
 }
+
+func TestAdminRejectsUnroutableFeatureCapabilities(t *testing.T) {
+	runtime := provider.New(provider.Config{})
+	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
+	createProvider := httptest.NewRecorder()
+	handler.ServeHTTP(createProvider, httptest.NewRequest(http.MethodPost, "/admin/v1/providers", strings.NewReader(`{"id":"managed","type":"openai","base_url":"https://provider.example","enabled":true}`)))
+	if createProvider.Code != http.StatusCreated {
+		t.Fatalf("provider create failed: %d %s", createProvider.Code, createProvider.Body.String())
+	}
+	for _, capabilities := range []string{`["tools"]`, `["responses","mcp"]`, `["responses","audio"]`} {
+		response := httptest.NewRecorder()
+		body := `{"id":"invalid","provider_id":"managed","models":["model"],"capabilities":` + capabilities + `,"enabled":true}`
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/admin/v1/model-deployments", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_request"`) {
+			t.Fatalf("capabilities %s accepted: %d %s", capabilities, response.Code, response.Body.String())
+		}
+	}
+}

@@ -104,11 +104,68 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 			if _, err := router.CreateProvider(ManagedProvider{ID: "provider", Type: test.providerType, BaseURL: "https://provider.example", Enabled: true}); err != nil {
 				t.Fatal(err)
 			}
-			_, err := router.CreateModelDeployment(ModelDeployment{ID: "deployment", ProviderID: "provider", Models: []string{"model"}, Capabilities: []string{test.capability}, Enabled: true})
+			capabilities := []string{test.capability}
+			switch test.capability {
+			case "stream", "tools", "structured_output", "vision", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill":
+				capabilities = append([]string{"chat"}, capabilities...)
+			case "mcp":
+				capabilities = []string{"responses", "tools", "mcp"}
+			}
+			_, err := router.CreateModelDeployment(ModelDeployment{ID: "deployment", ProviderID: "provider", Models: []string{"model"}, Capabilities: capabilities, Enabled: true})
 			if !errors.Is(err, ErrUnsupportedProviderCapability) {
 				t.Fatalf("capability %q accepted for %s: %v", test.capability, test.providerType, err)
 			}
 		})
+	}
+}
+
+func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
+	tests := [][]string{
+		{"stream"},
+		{"tools"},
+		{"structured_output"},
+		{"vision"},
+		{"mcp"},
+		{"responses", "mcp"},
+		{"chat", "mcp", "tools"},
+		{"web_search"},
+		{"responses", "web_fetch"},
+		{"responses", "audio"},
+		{"responses", "prompt_cache"},
+		{"responses", "assistant_prefill"},
+	}
+	for _, capabilities := range tests {
+		if validDeploymentCapabilities(capabilities) {
+			t.Fatalf("unroutable capabilities accepted: %v", capabilities)
+		}
+	}
+	for _, capabilities := range [][]string{
+		nil,
+		{},
+		{"chat"},
+		{"responses", "stream"},
+		{"chat", "tools", "structured_output", "vision"},
+		{"responses", "tools", "mcp"},
+		{"chat", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill"},
+		{"embeddings"},
+	} {
+		if !validDeploymentCapabilities(capabilities) {
+			t.Fatalf("routable capabilities rejected: %v", capabilities)
+		}
+	}
+}
+
+func TestModelDeploymentUpdatePreservesOmittedCapabilities(t *testing.T) {
+	router := New(Config{}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "provider", Type: "demo", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateModelDeployment(ModelDeployment{ID: "deployment", ProviderID: "provider", Models: []string{"model"}, Capabilities: []string{"chat"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := router.UpdateModelDeployment("deployment", ModelDeployment{Models: []string{"model"}, Weight: 1, Enabled: false})
+	if err != nil || !slices.Equal(updated.Capabilities, []string{"chat"}) {
+		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
 }
 
@@ -127,12 +184,12 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		providerType string
 		capabilities []string
 	}{
-		{providerType: "ollama", capabilities: []string{"tools", "structured_output", "vision"}},
-		{providerType: "anthropic", capabilities: []string{"tools", "structured_output", "vision", "web_search", "web_fetch", "prompt_cache", "assistant_prefill"}},
-		{providerType: "gemini", capabilities: []string{"tools", "structured_output", "vision"}},
-		{providerType: "cohere", capabilities: []string{"tools", "structured_output"}},
-		{providerType: "mistral", capabilities: []string{"tools", "structured_output", "vision", "assistant_prefill"}},
-		{providerType: "openai-compatible", capabilities: []string{"tools", "structured_output", "mcp", "vision", "web_search", "audio"}},
+		{providerType: "ollama", capabilities: []string{"chat", "tools", "structured_output", "vision"}},
+		{providerType: "anthropic", capabilities: []string{"chat", "tools", "structured_output", "vision", "web_search", "web_fetch", "prompt_cache", "assistant_prefill"}},
+		{providerType: "gemini", capabilities: []string{"chat", "tools", "structured_output", "vision"}},
+		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
+		{providerType: "mistral", capabilities: []string{"chat", "tools", "structured_output", "vision", "assistant_prefill"}},
+		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "tools", "structured_output", "mcp", "vision", "web_search", "audio"}},
 	}
 	for _, test := range tests {
 		t.Run(test.providerType, func(t *testing.T) {
