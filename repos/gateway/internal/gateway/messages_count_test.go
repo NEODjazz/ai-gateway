@@ -150,3 +150,23 @@ func TestCountEndpointUsesNativeGeminiCounter(t *testing.T) {
 		t.Fatalf("Gemini public count: %d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestCountEndpointUsesNativeBedrockCounter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/model/bedrock-upstream/count-tokens" || r.Header.Get("Authorization") != "Bearer upstream-key" {
+			t.Errorf("Bedrock counter routing/auth lost: path=%q headers=%v", r.URL.Path, r.Header)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["input"] == nil {
+			t.Errorf("invalid Bedrock count body: %#v err=%v", body, err)
+		}
+		_, _ = w.Write([]byte(`{"inputTokens":41}`))
+	}))
+	defer server.Close()
+	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "bedrock", Type: "bedrock", BaseURL: server.URL, APIKey: "upstream-key", Models: []string{"public-model"}, ModelAliases: map[string]string{"public-model": "bedrock-upstream"}}}})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"public-model"}}}}), router))
+	response := countEndpointCall(handler, `{"model":"public-model","messages":[{"role":"user","content":"hi"}]}`, "gateway-test-key")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"input_tokens":41`) {
+		t.Fatalf("Bedrock public count: %d %s", response.Code, response.Body.String())
+	}
+}

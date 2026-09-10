@@ -684,6 +684,16 @@ controls still fail before HTTP. Tests cover complete native context, model alia
 routing, malformed counts, redirect refusal and cancellation.
 Protocol: [Gemini token counting](https://ai.google.dev/api/tokens).
 
+Bedrock implements the same internal counter contract with native
+`POST /model/{model}/count-tokens`. The request uses the resolved upstream model
+and wraps the complete native Converse context under `input.converse`, including
+system messages and tool schemas. Bearer and SigV4 modes reuse the inference
+credential chain and signing rules. The response must contain a nonnegative
+`inputTokens`; body size, response size, deadline and redirect limits match the
+other native counters. The public gateway flow still performs policy and quota
+admission without generation billing.
+Protocol: [Bedrock CountTokens](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_CountTokens.html).
+
 ## Native GenerateContent API
 
 POST `/v1beta/models/{model}:generateContent` returns native JSON; POST

@@ -273,16 +273,8 @@ func (b Bedrock) ChatCompletions(ctx context.Context, request openai.ChatComplet
 		return openai.ChatCompletionResponse{}, err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	if b.authType == "aws_sigv4" {
-		credential, err := b.aws.Credential(ctx)
-		if err != nil {
-			return openai.ChatCompletionResponse{}, &Error{Class: FailureUnavailable, Provider: "bedrock", StatusCode: http.StatusServiceUnavailable, UpstreamCode: "credential_unavailable", Err: errors.New("AWS credential source is unavailable")}
-		}
-		if err := signAWSRequest(httpRequest, payload, credential, b.region, "bedrock", b.now()); err != nil {
-			return openai.ChatCompletionResponse{}, bedrockInvalid("credential")
-		}
-	} else if b.apiKey != "" {
-		httpRequest.Header.Set("Authorization", "Bearer "+b.apiKey)
+	if err := b.authorize(ctx, httpRequest, payload); err != nil {
+		return openai.ChatCompletionResponse{}, err
 	}
 	response, err := b.client.Do(httpRequest)
 	if err != nil {
@@ -306,6 +298,30 @@ func (b Bedrock) ChatCompletions(ctx context.Context, request openai.ChatComplet
 		return openai.ChatCompletionResponse{}, err
 	}
 	return bedrockToChat(decoded, request.Model)
+}
+
+func (b Bedrock) authorize(ctx context.Context, request *http.Request, payload []byte) error {
+	request.Header.Del("Authorization")
+	request.Header.Del("X-Amz-Security-Token")
+	request.Header.Del("X-Amz-Date")
+	request.Header.Del("X-Amz-Content-Sha256")
+	if b.authType == "aws_sigv4" {
+		credential, err := b.aws.Credential(ctx)
+		if err != nil {
+			return &Error{Class: FailureUnavailable, Provider: "bedrock", StatusCode: http.StatusServiceUnavailable, UpstreamCode: "credential_unavailable", Err: errors.New("AWS credential source is unavailable")}
+		}
+		if err := signAWSRequest(request, payload, credential, b.region, "bedrock", b.now()); err != nil {
+			return bedrockInvalid("credential")
+		}
+		return nil
+	}
+	if b.authType != "bearer" {
+		return bedrockInvalid("auth_type")
+	}
+	if b.apiKey != "" {
+		request.Header.Set("Authorization", "Bearer "+b.apiKey)
+	}
+	return nil
 }
 
 func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletionResponse, error) {
