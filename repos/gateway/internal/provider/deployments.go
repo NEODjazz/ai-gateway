@@ -362,7 +362,7 @@ func ValidModelCapability(capability string) bool {
 	switch capability {
 	case "chat", "responses", "embeddings", "rerank", "moderation",
 		"image_generation", "image_edit", "image_variation",
-		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search",
+		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills",
 		"stream", "tools", "structured_output", "mcp", "vision",
 		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill":
 		return true
@@ -484,6 +484,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 		return ok
 	case "ocr":
 		_, ok := endpoint.Provider.(OCRClient)
+		return ok
+	case "skills":
+		_, ok := endpoint.Provider.(SkillClient)
 		return ok
 	case "stream":
 		_, chat := endpoint.Provider.(StreamingClient)
