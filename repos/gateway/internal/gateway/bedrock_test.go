@@ -55,6 +55,19 @@ func TestBedrockConverseAcceptsBoundedNativeImage(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseAcceptsBoundedNativeDocument(t *testing.T) {
+	upstream := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	data := base64.StdEncoding.EncodeToString([]byte("%PDF-test"))
+	body := `{"messages":[{"role":"user","content":[{"text":"summarize"},{"document":{"format":"pdf","name":"Report","source":{"bytes":"` + data + `"}}}]}]}`
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/model/converse", strings.NewReader(body)))
+	documents, err := openai.BedrockDocumentAttachments(upstream.request.Request.Messages)
+	if response.Code != http.StatusOK || err != nil || len(documents) != 1 || documents[0].MediaType != "application/pdf" || upstream.request.Request.NativeInputTokens != len([]byte("%PDF-test")) {
+		t.Fatalf("status=%d body=%s documents=%+v reserve=%d err=%v", response.Code, response.Body.String(), documents, upstream.request.Request.NativeInputTokens, err)
+	}
+}
+
 func TestBedrockConverseRejectsUnknownFieldsBeforeExecution(t *testing.T) {
 	response := httptest.NewRecorder()
 	Routes(Handler{}).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/model/converse", strings.NewReader(`{"messages":[{"role":"user","content":[{"text":"hello"}]}],"additionalModelRequestFields":{"top_k":1}}`)))

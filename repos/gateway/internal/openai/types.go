@@ -12,6 +12,8 @@ import (
 type ChatCompletionRequest struct {
 	// RequireMatchedStop is an internal protocol requirement, never client JSON.
 	RequireMatchedStop bool `json:"-"`
+	// NativeInputTokens reserves provider-native context omitted from the public Chat wire shape.
+	NativeInputTokens int `json:"-"`
 	ChatGenerationOptions
 	Provider            string                `json:"provider,omitempty"`
 	Model               string                `json:"model"`

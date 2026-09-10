@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -21,9 +22,25 @@ type BedrockMessage struct {
 type BedrockContentBlock struct {
 	Text       *string            `json:"text,omitempty"`
 	Image      *BedrockImage      `json:"image,omitempty"`
+	Document   *BedrockDocument   `json:"document,omitempty"`
 	ToolUse    *BedrockToolUse    `json:"toolUse,omitempty"`
 	ToolResult *BedrockToolResult `json:"toolResult,omitempty"`
 }
+
+type BedrockDocument struct {
+	Format string                `json:"format,omitempty"`
+	Name   string                `json:"name"`
+	Source BedrockDocumentSource `json:"source"`
+}
+
+type BedrockDocumentSource struct {
+	Bytes string `json:"bytes"`
+}
+
+const (
+	maxBedrockDocuments    = 5
+	maxBedrockDocumentSize = 4718592
+)
 
 type BedrockImage struct {
 	Format string             `json:"format"`
@@ -82,7 +99,7 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		return request, errors.New("model and messages are required")
 	}
 	for _, block := range r.System {
-		if block.Text == nil || strings.TrimSpace(*block.Text) == "" || block.Image != nil || block.ToolUse != nil || block.ToolResult != nil {
+		if block.Text == nil || strings.TrimSpace(*block.Text) == "" || block.Image != nil || block.Document != nil || block.ToolUse != nil || block.ToolResult != nil {
 			return request, errors.New("system supports non-empty text blocks only")
 		}
 		request.Messages = append(request.Messages, Message{Role: "system", Content: *block.Text})
@@ -92,7 +109,7 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		if (message.Role != "user" && message.Role != "assistant") || len(message.Content) == 0 {
 			return request, errors.New("messages require user or assistant role and content")
 		}
-		textBlocks, imageBlocks, toolUseBlocks, toolResultBlocks := 0, 0, 0, 0
+		textBlocks, imageBlocks, documentBlocks, toolUseBlocks, toolResultBlocks := 0, 0, 0, 0, 0
 		var texts []string
 		chat := Message{Role: message.Role}
 		var content []any
@@ -123,6 +140,24 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 				}
 				content = append(content, map[string]any{"type": "image_url", "image_url": map[string]any{"url": dataURL}})
 			}
+			if block.Document != nil {
+				fields++
+				documentBlocks++
+				if message.Role != "user" {
+					return request, errors.New("documents are accepted in user messages only")
+				}
+				decoded, err := validateBedrockDocument(*block.Document)
+				if err != nil {
+					return request, err
+				}
+				request.NativeInputTokens = ReserveTokens(request.NativeInputTokens, len(decoded))
+				raw, err := json.Marshal(BedrockContentBlock{Document: block.Document})
+				if err != nil {
+					return request, errors.New("document block is not valid JSON")
+				}
+				content = append(content, map[string]any{"type": "bedrock_document", "index": len(chat.NativeContent)})
+				chat.NativeContent = append(chat.NativeContent, raw)
+			}
 			if block.ToolUse != nil {
 				fields++
 				toolUseBlocks++
@@ -146,17 +181,20 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 			}
 		}
 		if toolResultBlocks > 0 {
-			if message.Role != "user" || toolResultBlocks != 1 || textBlocks != 0 || imageBlocks != 0 || toolUseBlocks != 0 || len(message.Content) != 1 {
+			if message.Role != "user" || toolResultBlocks != 1 || textBlocks != 0 || imageBlocks != 0 || documentBlocks != 0 || toolUseBlocks != 0 || len(message.Content) != 1 {
 				return request, errors.New("toolResult must be the only block in a user message")
 			}
 			result := message.Content[0].ToolResult
-			if result.ID == "" || !seenToolUses[result.ID] || len(result.Content) != 1 || result.Content[0].Text == nil || *result.Content[0].Text == "" || result.Content[0].Image != nil || result.Content[0].ToolUse != nil || result.Content[0].ToolResult != nil {
+			if result.ID == "" || !seenToolUses[result.ID] || len(result.Content) != 1 || result.Content[0].Text == nil || *result.Content[0].Text == "" || result.Content[0].Image != nil || result.Content[0].Document != nil || result.Content[0].ToolUse != nil || result.Content[0].ToolResult != nil {
 				return request, errors.New("invalid toolResult block")
 			}
 			request.Messages = append(request.Messages, Message{Role: "tool", ToolCallID: result.ID, Content: *result.Content[0].Text})
 			continue
 		}
-		if imageBlocks > 0 {
+		if documentBlocks > 0 && (documentBlocks > maxBedrockDocuments || textBlocks == 0) {
+			return request, errors.New("documents require accompanying text and at most five documents per message")
+		}
+		if imageBlocks > 0 || documentBlocks > 0 {
 			chat.Content = content
 		} else if len(texts) > 0 {
 			chat.Content = strings.Join(texts, "")
@@ -184,6 +222,87 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		}
 	}
 	return request, nil
+}
+
+func validateBedrockDocument(document BedrockDocument) ([]byte, error) {
+	if !validBedrockDocumentName(document.Name) {
+		return nil, errors.New("document name must contain 1 to 200 letters, digits, single spaces, hyphens, parentheses, or brackets")
+	}
+	mediaTypes := map[string]string{"pdf": "application/pdf", "csv": "text/csv", "doc": "application/msword", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "xls": "application/vnd.ms-excel", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "html": "text/html", "txt": "text/plain", "md": "text/markdown"}
+	if mediaTypes[document.Format] == "" || document.Source.Bytes == "" || base64.StdEncoding.DecodedLen(len(document.Source.Bytes)) > maxBedrockDocumentSize {
+		return nil, errors.New("document format or size is invalid")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(document.Source.Bytes)
+	if err != nil || len(decoded) == 0 || len(decoded) > maxBedrockDocumentSize || !validBedrockDocumentSignature(document.Format, decoded) {
+		return nil, errors.New("document bytes are invalid for the declared format")
+	}
+	return decoded, nil
+}
+
+func validBedrockDocumentName(name string) bool {
+	if len(name) == 0 || len(name) > 200 || strings.TrimSpace(name) != name || strings.Contains(name, "  ") {
+		return false
+	}
+	for _, character := range name {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || strings.ContainsRune(" -()[]", character) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validBedrockDocumentSignature(format string, data []byte) bool {
+	switch format {
+	case "pdf":
+		return len(data) >= 5 && string(data[:5]) == "%PDF-"
+	case "doc", "xls":
+		return len(data) >= 8 && string(data[:8]) == "\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+	case "docx", "xlsx":
+		return len(data) >= 4 && string(data[:4]) == "PK\x03\x04"
+	default:
+		return true
+	}
+}
+
+func BedrockDocumentAttachments(messages []Message) ([]ImageAttachment, error) {
+	var attachments []ImageAttachment
+	mediaTypes := map[string]string{"pdf": "application/pdf", "csv": "text/csv", "doc": "application/msword", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "xls": "application/vnd.ms-excel", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "html": "text/html", "txt": "text/plain", "md": "text/markdown"}
+	for _, message := range messages {
+		messageDocuments := 0
+		for _, raw := range message.NativeContent {
+			var block BedrockContentBlock
+			if json.Unmarshal(raw, &block) != nil || block.Document == nil {
+				continue
+			}
+			if _, err := validateBedrockDocument(*block.Document); err != nil {
+				return nil, err
+			}
+			messageDocuments++
+			attachments = append(attachments, ImageAttachment{MediaType: mediaTypes[block.Document.Format], Data: block.Document.Source.Bytes})
+		}
+		if messageDocuments > 0 && (message.Role != "user" || messageDocuments > maxBedrockDocuments || strings.TrimSpace(ContentText(message.Content)) == "") {
+			return nil, errors.New("documents require a user message with accompanying text and at most five documents")
+		}
+	}
+	return attachments, nil
+}
+
+func BedrockDocumentText(messages []Message) string {
+	var texts []string
+	for _, message := range messages {
+		for _, raw := range message.NativeContent {
+			var block BedrockContentBlock
+			if json.Unmarshal(raw, &block) != nil || block.Document == nil || !strings.Contains(" csv html txt md ", " "+block.Document.Format+" ") {
+				continue
+			}
+			decoded, err := base64.StdEncoding.DecodeString(block.Document.Source.Bytes)
+			if err == nil {
+				texts = append(texts, string(decoded))
+			}
+		}
+	}
+	return strings.Join(texts, "\n")
 }
 
 func bedrockImageMediaType(format string) string {

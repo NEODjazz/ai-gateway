@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -41,6 +42,26 @@ func TestScanPayloadIncludesEmbeddingText(t *testing.T) {
 	payload := scanPayload(&req)
 	if !strings.Contains(payload, "embedding_input: first secret\nsecond secret") {
 		t.Fatalf("embedding text missing from scan projection: %q", payload)
+	}
+}
+
+func TestBedrockDocumentsReachDLPAndAVProjections(t *testing.T) {
+	data := base64.StdEncoding.EncodeToString([]byte("account user@example.com"))
+	prompt := "inspect"
+	chat, err := (openai.BedrockConverseRequest{Messages: []openai.BedrockMessage{{Role: "user", Content: []openai.BedrockContentBlock{
+		{Text: &prompt},
+		{Document: &openai.BedrockDocument{Format: "txt", Name: "Customer Export", Source: openai.BedrockDocumentSource{Bytes: data}}},
+	}}}}).ChatRequest("model", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := RequestContext{Request: chat}
+	attachments, err := requestImageAttachments(&request)
+	if err != nil || len(attachments) != 1 || attachments[0].MediaType != "text/plain" || attachments[0].Data != data {
+		t.Fatalf("attachments=%+v err=%v", attachments, err)
+	}
+	if payload := scanPayload(&request); !strings.Contains(payload, "document: account user@example.com") {
+		t.Fatalf("document missing from DLP projection: %q", payload)
 	}
 }
 

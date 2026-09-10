@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.191
+  version: 0.1.192
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -87,7 +87,7 @@ paths:
       operationId: bedrockConverse
       tags: [Inference]
       summary: Create a synchronous Converse response
-      description: Uses the gateway authentication, model and tool authorization, quotas, content policy, routing, and billing pipeline. Supports text, bounded base64 user images, function tool use and result blocks, system text, and standard inference limits. Unsupported native fields are rejected before provider execution.
+      description: Uses the gateway authentication, model and tool authorization, quotas, content policy, routing, and billing pipeline. Supports text, bounded base64 user images and documents, function tool use and result blocks, system text, and standard inference limits. Documents are limited to five per user message and 4.5 MiB each, require accompanying text, contribute to TPM reserve, and are projected to configured scanners. Unsupported native fields are rejected before provider execution.
       parameters:
         - in: path
           name: model
@@ -3578,6 +3578,7 @@ components:
       oneOf:
         - required: [text]
         - required: [image]
+        - required: [document]
         - required: [toolUse]
         - required: [toolResult]
       properties:
@@ -3594,6 +3595,19 @@ components:
               required: [bytes]
               properties:
                 bytes: {type: string, minLength: 4, maxLength: 11184812, pattern: '^[A-Za-z0-9+/]+={0,2}$'}
+        document:
+          type: object
+          additionalProperties: false
+          required: [format, name, source]
+          properties:
+            format: {type: string, enum: [pdf, csv, doc, docx, xls, xlsx, html, txt, md]}
+            name: {type: string, minLength: 1, maxLength: 200, pattern: '^[A-Za-z0-9][A-Za-z0-9 ()\[\]-]*[A-Za-z0-9)\]]$|^[A-Za-z0-9]$'}
+            source:
+              type: object
+              additionalProperties: false
+              required: [bytes]
+              properties:
+                bytes: {type: string, minLength: 4, maxLength: 6291456, pattern: '^[A-Za-z0-9+/]+={0,2}$'}
         toolUse:
           type: object
           additionalProperties: false

@@ -86,7 +86,7 @@ func EstimateContextTokens(value any) int {
 }
 
 func ChatInputTokens(r ChatCompletionRequest) int {
-	return EstimateContextTokens(struct {
+	estimated := EstimateContextTokens(struct {
 		Messages     []Message             `json:"messages"`
 		Functions    []FunctionDefinition  `json:"functions,omitempty"`
 		FunctionCall *LegacyFunctionChoice `json:"function_call,omitempty"`
@@ -96,6 +96,10 @@ func ChatInputTokens(r ChatCompletionRequest) int {
 		WebSearch    *ChatWebSearchOptions `json:"web_search_options,omitempty"`
 		WebFetch     *ChatWebFetchOptions  `json:"web_fetch_options,omitempty"`
 	}{r.Messages, r.Functions, r.FunctionCall, r.Tools, r.ToolChoice, r.ResponseFormat, r.WebSearchOptions, r.WebFetchOptions})
+	if r.NativeInputTokens > intMax()-estimated {
+		return intMax()
+	}
+	return estimated + max(0, r.NativeInputTokens)
 }
 
 func ResponseInputTokens(r ResponseRequest) int {

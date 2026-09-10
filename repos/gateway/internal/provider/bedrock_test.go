@@ -78,6 +78,38 @@ func TestBedrockConverseForwardsUserImageInOrder(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseForwardsValidatedNativeDocument(t *testing.T) {
+	data := base64.StdEncoding.EncodeToString([]byte("%PDF-test"))
+	prompt := "summarize"
+	after := "after"
+	request, err := (openai.BedrockConverseRequest{Messages: []openai.BedrockMessage{{Role: "user", Content: []openai.BedrockContentBlock{
+		{Text: &prompt},
+		{Document: &openai.BedrockDocument{Format: "pdf", Name: "Report", Source: openai.BedrockDocumentSource{Bytes: data}}},
+		{Text: &after},
+	}}}}).ChatRequest("model", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []bedrockMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		content := body.Messages[0].Content
+		if len(content) != 3 || content[0].Text != "summarize" || content[1].Document == nil || content[1].Document.Name != "Report" || content[1].Document.Source.Bytes != data || content[2].Text != "after" {
+			t.Fatalf("content=%+v", content)
+		}
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","usage":{"inputTokens":5,"outputTokens":1,"totalTokens":6}}`)
+	}))
+	defer server.Close()
+	response, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request)
+	if err != nil || response.Usage.TotalTokens != 6 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
 func TestBedrockConverseUsesSigV4TemporaryCredentials(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256 Credential=AKID/20260102/us-east-1/bedrock/aws4_request") || r.Header.Get("X-Amz-Security-Token") != "session" || r.Header.Get("X-Amz-Date") != "20260102T030405Z" || r.Header.Get("X-Amz-Content-Sha256") == "" {

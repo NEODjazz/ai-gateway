@@ -154,6 +154,11 @@ func requestImageAttachments(req *RequestContext) ([]openai.ImageAttachment, err
 			attachments = append(attachments, *attachment)
 		}
 	}
+	documents, err := openai.BedrockDocumentAttachments(req.Request.Messages)
+	if err != nil {
+		return nil, err
+	}
+	attachments = append(attachments, documents...)
 	if req.ResponseRequest == nil {
 		if req.ModerationRequest == nil {
 			return attachments, nil
@@ -194,6 +199,9 @@ func scanPayload(req *RequestContext) string {
 				parts = append(parts, "tool_arguments: "+call.Function.Arguments)
 			}
 		}
+	}
+	if text := openai.BedrockDocumentText(req.Request.Messages); text != "" {
+		parts = append(parts, "document: "+text)
 	}
 	if req.ResponseRequest != nil {
 		if req.ResponseRequest.Instructions != "" {

@@ -30,8 +30,19 @@ type Bedrock struct {
 type bedrockContentBlock struct {
 	Text       string             `json:"text,omitempty"`
 	Image      *bedrockImage      `json:"image,omitempty"`
+	Document   *bedrockDocument   `json:"document,omitempty"`
 	ToolUse    *bedrockToolUse    `json:"toolUse,omitempty"`
 	ToolResult *bedrockToolResult `json:"toolResult,omitempty"`
+}
+
+type bedrockDocument struct {
+	Format string                `json:"format,omitempty"`
+	Name   string                `json:"name"`
+	Source bedrockDocumentSource `json:"source"`
+}
+
+type bedrockDocumentSource struct {
+	Bytes string `json:"bytes"`
 }
 
 type bedrockImage struct {
@@ -154,6 +165,9 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 	if _, err := openai.ChatImageAttachments(request.Messages); err != nil {
 		return result, err
 	}
+	if _, err := openai.BedrockDocumentAttachments(request.Messages); err != nil {
+		return result, err
+	}
 	if request.MaxTokens != nil && request.MaxCompletionTokens != nil {
 		return result, bedrockInvalid("max_tokens")
 	}
@@ -209,7 +223,7 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 			result.System = append(result.System, bedrockContentBlock{Text: text})
 		case "user", "assistant":
 			content := make([]bedrockContentBlock, 0, 1+len(message.ToolCalls))
-			messageContent, err := bedrockInputContent(message.Content)
+			messageContent, err := bedrockInputContent(message.Content, message.NativeContent)
 			if err != nil {
 				return result, err
 			}
@@ -266,7 +280,7 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 	return result, nil
 }
 
-func bedrockInputContent(value any) ([]bedrockContentBlock, error) {
+func bedrockInputContent(value any, native []json.RawMessage) ([]bedrockContentBlock, error) {
 	if value == nil {
 		return nil, nil
 	}
@@ -310,6 +324,18 @@ func bedrockInputContent(value any) ([]bedrockContentBlock, error) {
 			image := bedrockImage{Format: strings.TrimPrefix(attachment.MediaType, "image/")}
 			image.Source.Bytes = attachment.Data
 			result = append(result, bedrockContentBlock{Image: &image})
+		case "bedrock_document":
+			index, ok := part["index"].(int)
+			if !ok || len(part) != 2 || index < 0 || index >= len(native) {
+				return nil, bedrockInvalid("messages.content")
+			}
+			var block struct {
+				Document *bedrockDocument `json:"document"`
+			}
+			if json.Unmarshal(native[index], &block) != nil || block.Document == nil {
+				return nil, bedrockInvalid("messages.content")
+			}
+			result = append(result, bedrockContentBlock{Document: block.Document})
 		default:
 			return nil, bedrockInvalid("messages.content")
 		}
