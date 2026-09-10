@@ -25,7 +25,7 @@ func TestCohereChatV2ProtocolAndUsage(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		if request.Model != "command" || len(request.Messages) != 3 || request.Messages[1].Role != "system" || request.Messages[2].Content != "hello" || request.MaxTokens == nil || *request.MaxTokens != 7 || request.P == nil || *request.P != 0.8 || request.Seed == nil || *request.Seed != 42 || request.FrequencyPenalty == nil || *request.FrequencyPenalty != 0.2 || request.PresencePenalty == nil || *request.PresencePenalty != 0.3 || len(request.StopSequences) != 1 || request.ResponseFormat == nil || request.ResponseFormat.Type != "json_object" {
+		if request.Model != "command" || len(request.Messages) != 3 || request.Messages[1].Role != "system" || request.Messages[2].Content != "hello" || request.MaxTokens == nil || *request.MaxTokens != 7 || request.P == nil || *request.P != 0.8 || request.K == nil || *request.K != 40 || request.Seed == nil || *request.Seed != 42 || request.FrequencyPenalty == nil || *request.FrequencyPenalty != 0.2 || request.PresencePenalty == nil || *request.PresencePenalty != 0.3 || len(request.StopSequences) != 1 || request.ResponseFormat == nil || request.ResponseFormat.Type != "json_object" {
 			t.Fatalf("request fields lost: %+v", request)
 		}
 		schema, _ := request.ResponseFormat.Schema.(map[string]any)
@@ -36,13 +36,13 @@ func TestCohereChatV2ProtocolAndUsage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	maxTokens, topP, frequencyPenalty, presencePenalty := 7, 0.8, 0.2, 0.3
+	maxTokens, topP, topK, frequencyPenalty, presencePenalty := 7, 0.8, 40, 0.2, 0.3
 	seed := int64(42)
 	response, err := NewCohere(server.URL+"/proxy/v1", "provider-key").ChatCompletions(context.Background(), openai.ChatCompletionRequest{
 		Model: "command", Messages: []openai.Message{{Role: "system", Content: "first"}, {Role: "developer", Content: "second"}, {Role: "user", Content: "hello"}},
 		ResponseFormat:      &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "answer", Schema: map[string]any{"type": "object"}}},
 		MaxCompletionTokens: &maxTokens, TopP: &topP, Seed: &seed, Stop: []string{"done"}, Stream: true, StreamOptions: &openai.ChatStreamOptions{IncludeUsage: true},
-		ChatGenerationOptions: openai.ChatGenerationOptions{FrequencyPenalty: &frequencyPenalty, PresencePenalty: &presencePenalty},
+		ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK, FrequencyPenalty: &frequencyPenalty, PresencePenalty: &presencePenalty},
 	})
 	if err != nil || calls.Load() != 1 || response.ID != "chat-1" || response.Choices[0].Message.Content != `{"ok":true}` || response.Choices[0].FinishReason != "stop" || response.Usage.PromptTokens != 3 || response.Usage.CompletionTokens != 2 || response.Usage.TotalTokens != 5 {
 		t.Fatalf("response=%+v calls=%d err=%v", response, calls.Load(), err)
@@ -55,6 +55,7 @@ func TestCohereChatRejectsUnsupportedParametersBeforeUpstream(t *testing.T) {
 	defer server.Close()
 	max, completionMax := 1, 2
 	invalidTemperature, invalidTopP := 1.1, 0.0
+	invalidTopK := 501
 	negativeSeed := int64(-1)
 	invalidPenalty := 1.1
 	enabled := true
@@ -69,6 +70,7 @@ func TestCohereChatRejectsUnsupportedParametersBeforeUpstream(t *testing.T) {
 		{param: "max_tokens", value: openai.ChatCompletionRequest{MaxTokens: new(int)}},
 		{param: "temperature", value: openai.ChatCompletionRequest{Temperature: &invalidTemperature}},
 		{param: "top_p", value: openai.ChatCompletionRequest{TopP: &invalidTopP}},
+		{param: "top_k", value: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &invalidTopK}}},
 		{param: "seed", value: openai.ChatCompletionRequest{Seed: &negativeSeed}},
 		{param: "frequency_penalty", value: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{FrequencyPenalty: &invalidPenalty}}},
 		{param: "presence_penalty", value: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{PresencePenalty: &invalidPenalty}}},

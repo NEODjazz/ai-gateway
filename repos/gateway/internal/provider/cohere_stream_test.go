@@ -37,7 +37,7 @@ func TestCohereNativeChatStreamProtocolAndUsage(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		if r.URL.Path != "/v2/chat" || r.Header.Get("Authorization") != "Bearer key" || r.Header.Get("Accept") != "text/event-stream" || !request.Stream {
+		if r.URL.Path != "/v2/chat" || r.Header.Get("Authorization") != "Bearer key" || r.Header.Get("Accept") != "text/event-stream" || !request.Stream || request.K == nil || *request.K != 20 {
 			t.Fatalf("invalid stream request: path=%s headers=%v body=%+v", r.URL.Path, r.Header, request)
 		}
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
@@ -46,7 +46,8 @@ func TestCohereNativeChatStreamProtocolAndUsage(t *testing.T) {
 	defer server.Close()
 
 	var chunks []string
-	response, err := NewCohere(server.URL, "key", true).StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "command", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: true}, func(payload string) error {
+	topK := 20
+	response, err := NewCohere(server.URL, "key", true).StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "command", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: true, ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK}}, func(payload string) error {
 		chunks = append(chunks, payload)
 		return nil
 	})

@@ -51,6 +51,7 @@ type cohereChatRequest struct {
 	StopSequences    []string              `json:"stop_sequences,omitempty"`
 	Temperature      *float64              `json:"temperature,omitempty"`
 	P                *float64              `json:"p,omitempty"`
+	K                *int                  `json:"k,omitempty"`
 	Seed             *int64                `json:"seed,omitempty"`
 	FrequencyPenalty *float64              `json:"frequency_penalty,omitempty"`
 	PresencePenalty  *float64              `json:"presence_penalty,omitempty"`
@@ -165,6 +166,9 @@ func (Cohere) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	if request.TopP != nil && (*request.TopP < 0.01 || *request.TopP > 0.99) {
 		return cohereChatError("top_p", "top_p must be between 0.01 and 0.99")
 	}
+	if request.TopK != nil && (*request.TopK < 0 || *request.TopK > 500) {
+		return cohereChatError("top_k", "top_k must be between 0 and 500")
+	}
 	if request.Seed != nil && *request.Seed < 0 {
 		return cohereChatError("seed", "seed must be nonnegative")
 	}
@@ -258,7 +262,7 @@ func (Cohere) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		parameterCheck{"prompt_mode", request.PromptMode != ""},
 		parameterCheck{"prediction", request.Prediction != nil}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"user", request.User != ""}, parameterCheck{"verbosity", request.Verbosity != ""},
 		parameterCheck{"web_search_options", request.WebSearchOptions != nil}, parameterCheck{"logprobs", request.Logprobs != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
-		parameterCheck{"min_p", request.MinP != nil}, parameterCheck{"top_k", request.TopK != nil}, parameterCheck{"top_a", request.TopA != nil},
+		parameterCheck{"min_p", request.MinP != nil}, parameterCheck{"top_a", request.TopA != nil},
 		parameterCheck{"repetition_penalty", request.RepetitionPenalty != nil},
 		parameterCheck{"logit_bias", request.LogitBias != nil},
 	)
@@ -344,7 +348,7 @@ func cohereNativeChatRequest(request openai.ChatCompletionRequest, stream bool) 
 	stop, _ := openai.StopSequences(request.Stop)
 	native := cohereChatRequest{
 		Model: request.Model, Messages: messages, MaxTokens: maxTokens, StopSequences: stop,
-		Temperature: request.Temperature, P: request.TopP, Seed: request.Seed,
+		Temperature: request.Temperature, P: request.TopP, K: request.TopK, Seed: request.Seed,
 		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty, Stream: stream,
 	}
 	native.Tools = append([]openai.Tool(nil), request.Tools...)
