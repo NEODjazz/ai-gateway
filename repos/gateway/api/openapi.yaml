@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.114
+  version: 0.1.115
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3142,7 +3142,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_speech, ocr, search, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio]}
+          items: {type: string, enum: [chat, responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_speech, ocr, search, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}

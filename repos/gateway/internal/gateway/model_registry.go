@@ -91,7 +91,6 @@ func (h Handler) PutModelCatalog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "runtime model catalog requires a bounded version and models")
 		return
 	}
-	allowedCapabilities := map[string]bool{"chat": true, "responses": true, "embeddings": true, "rerank": true, "moderation": true, "image_generation": true, "image_edit": true, "image_variation": true, "audio_transcription": true, "audio_speech": true, "ocr": true, "search": true, "stream": true, "tools": true, "structured_output": true, "mcp": true, "vision": true, "web_search": true, "web_fetch": true, "audio": true, "prompt_cache": true, "assistant_prefill": true}
 	for _, entry := range catalog.Models {
 		if len(entry.Provider) > 256 || len(entry.Model) > 256 {
 			writeError(w, http.StatusBadRequest, "invalid_request", "model catalog entry is too long")
@@ -99,7 +98,7 @@ func (h Handler) PutModelCatalog(w http.ResponseWriter, r *http.Request) {
 		}
 		seenCapabilities := map[string]bool{}
 		for _, capability := range entry.Capabilities {
-			if !allowedCapabilities[capability] || seenCapabilities[capability] {
+			if !provider.ValidModelCapability(capability) || seenCapabilities[capability] {
 				writeError(w, http.StatusBadRequest, "invalid_request", "invalid model capability")
 				return
 			}

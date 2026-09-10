@@ -144,6 +144,9 @@ caching for the request. The native `/v1/messages` route accepts the bounded
 validated server-tool result blocks in provider order. Streaming requests use a
 bounded buffered response so output policy checks complete before the gateway
 emits native SSE events.
+Model catalog updates, deployment management and atomic model onboarding use
+the same capability contract, including moderation, media, retrieval, prompt
+cache and assistant-prefill capabilities.
 Project details remain access-policy metadata rather than a synthetic billing
 identity. The console joins owner teams, project access groups and their
 virtual-key impact. Repeated `access_group_id` key-list query parameters use
