@@ -71,19 +71,23 @@ type geminiTool struct {
 	Functions []geminiFunction `json:"functionDeclarations"`
 }
 type geminiGeneration struct {
-	MaxOutputTokens    *int     `json:"maxOutputTokens,omitempty"`
-	Temperature        *float64 `json:"temperature,omitempty"`
-	TopP               *float64 `json:"topP,omitempty"`
-	TopK               *int     `json:"topK,omitempty"`
-	FrequencyPenalty   *float64 `json:"frequencyPenalty,omitempty"`
-	PresencePenalty    *float64 `json:"presencePenalty,omitempty"`
-	ResponseLogprobs   *bool    `json:"responseLogprobs,omitempty"`
-	Logprobs           *int     `json:"logprobs,omitempty"`
-	CandidateCount     *int     `json:"candidateCount,omitempty"`
-	Seed               *int64   `json:"seed,omitempty"`
-	Stop               []string `json:"stopSequences,omitempty"`
-	ResponseMIMEType   string   `json:"responseMimeType,omitempty"`
-	ResponseJSONSchema any      `json:"responseJsonSchema,omitempty"`
+	MaxOutputTokens    *int                  `json:"maxOutputTokens,omitempty"`
+	Temperature        *float64              `json:"temperature,omitempty"`
+	TopP               *float64              `json:"topP,omitempty"`
+	TopK               *int                  `json:"topK,omitempty"`
+	FrequencyPenalty   *float64              `json:"frequencyPenalty,omitempty"`
+	PresencePenalty    *float64              `json:"presencePenalty,omitempty"`
+	ResponseLogprobs   *bool                 `json:"responseLogprobs,omitempty"`
+	Logprobs           *int                  `json:"logprobs,omitempty"`
+	CandidateCount     *int                  `json:"candidateCount,omitempty"`
+	ThinkingConfig     *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+	Seed               *int64                `json:"seed,omitempty"`
+	Stop               []string              `json:"stopSequences,omitempty"`
+	ResponseMIMEType   string                `json:"responseMimeType,omitempty"`
+	ResponseJSONSchema any                   `json:"responseJsonSchema,omitempty"`
+}
+type geminiThinkingConfig struct {
+	ThinkingLevel string `json:"thinkingLevel"`
 }
 type geminiLogprobCandidate struct {
 	Token          string  `json:"token"`
@@ -178,12 +182,22 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	if options.N != nil && (*options.N < 1 || *options.N > 20) {
 		return result, geminiInvalid("n")
 	}
+	var thinkingConfig *geminiThinkingConfig
+	if options.ReasoningEffort != "" {
+		switch options.ReasoningEffort {
+		case "minimal", "low", "medium", "high":
+			thinkingConfig = &geminiThinkingConfig{ThinkingLevel: options.ReasoningEffort}
+		default:
+			return result, geminiInvalid("reasoning_effort")
+		}
+	}
 	options.TopK = nil
 	options.FrequencyPenalty = nil
 	options.PresencePenalty = nil
 	options.Logprobs = nil
 	options.TopLogprobs = nil
 	options.N = nil
+	options.ReasoningEffort = ""
 	if err := rejectGenerationOptions("gemini", options); err != nil {
 		return result, err
 	}
@@ -216,7 +230,8 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	result.Generation = geminiGeneration{
 		MaxOutputTokens: maxTokens, Temperature: request.Temperature, TopP: request.TopP, TopK: request.TopK,
 		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty,
-		ResponseLogprobs: request.Logprobs, Logprobs: request.TopLogprobs, CandidateCount: request.N, Seed: request.Seed, Stop: stop,
+		ResponseLogprobs: request.Logprobs, Logprobs: request.TopLogprobs, CandidateCount: request.N,
+		ThinkingConfig: thinkingConfig, Seed: request.Seed, Stop: stop,
 	}
 	if request.ResponseFormat != nil {
 		switch request.ResponseFormat.Type {

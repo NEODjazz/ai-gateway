@@ -19,7 +19,7 @@ import (
 func geminiTestChat() openai.ChatCompletionRequest {
 	limit := 123
 	topK, frequencyPenalty, presencePenalty := 40, 0.2, -0.1
-	return openai.ChatCompletionRequest{Model: "gemini-test", MaxCompletionTokens: &limit, Messages: []openai.Message{{Role: "system", Content: "Be concise"}, {Role: "user", Content: "Weather?"}}, Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object"}}}}, ToolChoice: "required", ResponseFormat: &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "answer", Schema: map[string]any{"type": "object"}}}, ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK, FrequencyPenalty: &frequencyPenalty, PresencePenalty: &presencePenalty}}
+	return openai.ChatCompletionRequest{Model: "gemini-test", MaxCompletionTokens: &limit, Messages: []openai.Message{{Role: "system", Content: "Be concise"}, {Role: "user", Content: "Weather?"}}, Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object"}}}}, ToolChoice: "required", ResponseFormat: &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "answer", Schema: map[string]any{"type": "object"}}}, ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK, FrequencyPenalty: &frequencyPenalty, PresencePenalty: &presencePenalty, ReasoningEffort: "medium"}}
 }
 
 func TestGeminiNativeChatAndToolSignatures(t *testing.T) {
@@ -40,7 +40,7 @@ func TestGeminiNativeChatAndToolSignatures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.System == nil || request.System.Parts[0].Text != "Be concise" || request.Generation.MaxOutputTokens == nil || *request.Generation.MaxOutputTokens != 123 || request.Generation.TopK == nil || *request.Generation.TopK != 40 || request.Generation.FrequencyPenalty == nil || *request.Generation.FrequencyPenalty != 0.2 || request.Generation.PresencePenalty == nil || *request.Generation.PresencePenalty != -0.1 || request.Generation.ResponseMIMEType != "application/json" || len(request.Tools) != 1 {
+	if request.System == nil || request.System.Parts[0].Text != "Be concise" || request.Generation.MaxOutputTokens == nil || *request.Generation.MaxOutputTokens != 123 || request.Generation.TopK == nil || *request.Generation.TopK != 40 || request.Generation.FrequencyPenalty == nil || *request.Generation.FrequencyPenalty != 0.2 || request.Generation.PresencePenalty == nil || *request.Generation.PresencePenalty != -0.1 || request.Generation.ThinkingConfig == nil || request.Generation.ThinkingConfig.ThinkingLevel != "medium" || request.Generation.ResponseMIMEType != "application/json" || len(request.Tools) != 1 {
 		t.Fatalf("native mapping incomplete: %+v", request)
 	}
 	if response.Usage.TotalTokens != 15 || response.Usage.CompletionTokens != 5 || response.Usage.PromptTokensDetails.CachedTokens != 4 {
@@ -142,6 +142,18 @@ func TestGeminiNativeMultipleCandidates(t *testing.T) {
 	}
 }
 
+func TestGeminiReasoningEffortMapping(t *testing.T) {
+	for _, level := range []string{"minimal", "low", "medium", "high"} {
+		t.Run(level, func(t *testing.T) {
+			request := openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: level}}
+			native, err := geminiChatRequest(request)
+			if err != nil || native.Generation.ThinkingConfig == nil || native.Generation.ThinkingConfig.ThinkingLevel != level {
+				t.Fatalf("thinking config=%+v err=%v", native.Generation.ThinkingConfig, err)
+			}
+		})
+	}
+}
+
 func TestGeminiRequiresEveryRequestedCandidate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, `{"candidates":[{"index":0,"content":{"parts":[{"text":"one"}]},"finishReason":"STOP"}]}`)
@@ -184,6 +196,7 @@ func TestGeminiRejectsInvalidNativeSamplingControls(t *testing.T) {
 		"frequency_penalty": {ChatGenerationOptions: openai.ChatGenerationOptions{FrequencyPenalty: &below}},
 		"presence_penalty":  {ChatGenerationOptions: openai.ChatGenerationOptions{PresencePenalty: &above}},
 		"n":                 {ChatGenerationOptions: openai.ChatGenerationOptions{N: &tooManyCandidates}},
+		"reasoning_effort":  {ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "xhigh"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := geminiChatRequest(request); err == nil {
