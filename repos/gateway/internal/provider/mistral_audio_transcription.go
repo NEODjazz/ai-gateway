@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
-	"math"
 	"mime/multipart"
 	"net/http"
 	"strconv"
@@ -31,48 +29,19 @@ func (Mistral) ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest
 			return 0, errors.New("WAV duration is invalid or exceeds 60 minutes")
 		}
 		return duration, nil
-	case "audio/flac", "audio/ogg", "audio/webm", "video/webm", "audio/mpeg", "audio/mp3":
+	case "audio/flac":
+		duration, err := flacDurationMilliseconds(data)
+		if err != nil || duration > mistralMaxAudioMilliseconds {
+			return 0, errors.New("FLAC duration is invalid or exceeds 60 minutes")
+		}
+		return duration, nil
+	case "audio/ogg", "audio/webm", "video/webm", "audio/mpeg", "audio/mp3":
 		// Compressed containers need codec-aware parsing. Reserve the documented
 		// provider limit so a request can never bypass a duration-priced budget.
 		return mistralMaxAudioMilliseconds, nil
 	default:
 		return 0, errors.New("Mistral transcription supports WAV, MP3, FLAC, OGG and WEBM audio")
 	}
-}
-
-func wavDurationMilliseconds(data []byte) (int, error) {
-	if len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WAVE" {
-		return 0, openai.ErrInvalidAudio
-	}
-	byteRate := uint32(0)
-	dataSize := uint32(0)
-	for offset := 12; offset+8 <= len(data); {
-		size := binary.LittleEndian.Uint32(data[offset+4 : offset+8])
-		start := offset + 8
-		end64 := uint64(start) + uint64(size)
-		if end64 > uint64(len(data)) {
-			return 0, openai.ErrInvalidAudio
-		}
-		end := int(end64)
-		switch string(data[offset : offset+4]) {
-		case "fmt ":
-			if size < 16 {
-				return 0, openai.ErrInvalidAudio
-			}
-			byteRate = binary.LittleEndian.Uint32(data[start+8 : start+12])
-		case "data":
-			dataSize = size
-		}
-		offset = end + int(size&1)
-	}
-	if byteRate == 0 || dataSize == 0 {
-		return 0, openai.ErrInvalidAudio
-	}
-	milliseconds := (uint64(dataSize)*1000 + uint64(byteRate) - 1) / uint64(byteRate)
-	if milliseconds == 0 || milliseconds > math.MaxInt {
-		return 0, openai.ErrInvalidAudio
-	}
-	return int(milliseconds), nil
 }
 
 func (p Mistral) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {

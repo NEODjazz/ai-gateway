@@ -32,8 +32,14 @@ func (Groq) ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest) (
 			return 0, errors.New("WAV duration is invalid")
 		}
 		return max(duration, groqMinimumBilledAudioMilliseconds), nil
+	case "audio/flac":
+		duration, err := flacDurationMilliseconds(data)
+		if err != nil || duration > groqMaximumBilledAudioMilliseconds {
+			return 0, errors.New("FLAC duration is invalid")
+		}
+		return max(duration, groqMinimumBilledAudioMilliseconds), nil
 	default:
-		return 0, errors.New("Groq transcription currently requires WAV audio for reliable duration billing")
+		return 0, errors.New("Groq transcription currently requires WAV or FLAC audio for reliable duration billing")
 	}
 }
 
@@ -59,8 +65,16 @@ func (g Groq) TranscribeAudio(ctx context.Context, request openai.AudioTranscrip
 	if err != nil {
 		return openai.AudioTranscriptionResponse{}, groqAudioClientError("unsupported_audio", "file", err.Error())
 	}
-	data, _ := base64.StdEncoding.DecodeString(request.File.Data)
-	actualDuration, _ := wavDurationMilliseconds(data)
+	actualDuration := billableDuration
+	if billableDuration == groqMinimumBilledAudioMilliseconds {
+		data, _ := base64.StdEncoding.DecodeString(request.File.Data)
+		switch strings.ToLower(request.File.MediaType) {
+		case "audio/wav", "audio/wave", "audio/x-wav":
+			actualDuration, _ = wavDurationMilliseconds(data)
+		case "audio/flac":
+			actualDuration, _ = flacDurationMilliseconds(data)
+		}
+	}
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)

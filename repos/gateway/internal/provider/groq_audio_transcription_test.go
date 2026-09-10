@@ -57,6 +57,9 @@ func TestGroqAudioTranscriptionRejectsUnsupportedParametersAndFormats(t *testing
 	if duration, err := client.ReserveAudioMilliseconds(openai.AudioTranscriptionRequest{File: mistralWAVAttachment(12500)}); err != nil || duration != 12500 {
 		t.Fatalf("duration=%d err=%v", duration, err)
 	}
+	if duration, err := client.ReserveAudioMilliseconds(openai.AudioTranscriptionRequest{File: flacAttachment(12500)}); err != nil || duration != 12500 {
+		t.Fatalf("FLAC duration=%d err=%v", duration, err)
+	}
 }
 
 func TestRouterGroqTranscriptionUsesMinimumBillableDuration(t *testing.T) {
