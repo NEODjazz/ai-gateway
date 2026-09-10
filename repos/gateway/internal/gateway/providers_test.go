@@ -51,7 +51,7 @@ func TestAdminListsProviderCapabilityProfiles(t *testing.T) {
 	runtime := provider.New(provider.Config{})
 	response := httptest.NewRecorder()
 	Routes(NewHandler(modulesPipeline("admin"), runtime)).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/v1/provider-capabilities", nil))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"type":"voyage","operations":["embeddings","rerank"],"capabilities":["embeddings","rerank"]`) || !strings.Contains(response.Body.String(), `"web_fetch"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"type":"voyage","operations":["embeddings","rerank"],"capabilities":["embeddings","rerank"],"auth_types":[]`) || !strings.Contains(response.Body.String(), `"web_fetch"`) || !strings.Contains(response.Body.String(), `"auth_types":["api_key","gcp_adc"]`) || !strings.Contains(response.Body.String(), `"count_tokens"`) {
 		t.Fatalf("unexpected capability profiles: status=%d body=%s", response.Code, response.Body.String())
 	}
 }

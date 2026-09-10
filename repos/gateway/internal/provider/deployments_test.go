@@ -273,8 +273,19 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Contains(profilesByType["mistral"].Operations, "audio_transcription") || !slices.Contains(profilesByType["mistral"].Capabilities, "audio_transcription") {
 		t.Fatalf("mistral profile is missing native transcription: %+v", profilesByType["mistral"])
 	}
-	if !slices.Equal(profilesByType["bedrock"].Operations, []string{"chat"}) || !slices.Equal(profilesByType["bedrock"].Capabilities, []string{"chat", "tools"}) {
+	if !slices.Equal(profilesByType["bedrock"].Operations, []string{"chat", "count_tokens"}) || !slices.Equal(profilesByType["bedrock"].Capabilities, []string{"chat", "tools"}) || !slices.Equal(profilesByType["bedrock"].AuthTypes, []string{"bearer", "aws_sigv4"}) {
 		t.Fatalf("bedrock profile=%+v", profilesByType["bedrock"])
+	}
+	if !slices.Contains(profilesByType["anthropic"].Operations, "count_tokens") || !slices.Contains(profilesByType["gemini"].Operations, "count_tokens") || !slices.Equal(profilesByType["gemini"].AuthTypes, []string{"api_key", "gcp_adc"}) || !slices.Equal(profilesByType["azure-openai"].AuthTypes, []string{"api_key", "entra"}) {
+		t.Fatalf("native count/auth profiles are incomplete: anthropic=%+v gemini=%+v azure=%+v", profilesByType["anthropic"], profilesByType["gemini"], profilesByType["azure-openai"])
+	}
+	for _, providerType := range []string{"anthropic", "gemini", "bedrock"} {
+		if slices.Contains(profilesByType[providerType].Capabilities, "count_tokens") {
+			t.Fatalf("adapter operation leaked into %s deployment capabilities: %+v", providerType, profilesByType[providerType])
+		}
+	}
+	if slices.Contains(profilesByType["openai-compatible"].Operations, "count_tokens") {
+		t.Fatalf("compatible adapter falsely advertises native token counting: %+v", profilesByType["openai-compatible"])
 	}
 	if !slices.Equal(profilesByType["groq"].Operations, []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream"}) || !slices.Equal(profilesByType["groq"].Capabilities, []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}) {
 		t.Fatalf("groq profile=%+v", profilesByType["groq"])

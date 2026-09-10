@@ -28,12 +28,13 @@ type ProviderCapabilityProfile struct {
 	Type         string   `json:"type"`
 	Operations   []string `json:"operations"`
 	Capabilities []string `json:"capabilities"`
+	AuthTypes    []string `json:"auth_types"`
 }
 
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek"}
 
 var managedOperationCapabilities = []string{
-	"chat", "responses", "embeddings", "rerank", "moderation",
+	"chat", "responses", "count_tokens", "embeddings", "rerank", "moderation",
 	"image_generation", "image_edit", "image_variation",
 	"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "stream",
 }
@@ -254,15 +255,33 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 				operations = append(operations, capability)
 			}
 		}
-		capabilities := append([]string(nil), operations...)
+		capabilities := make([]string, 0, len(operations)+len(managedFeatureCapabilities))
+		for _, operation := range operations {
+			if operation != "count_tokens" {
+				capabilities = append(capabilities, operation)
+			}
+		}
 		for _, capability := range managedFeatureCapabilities {
 			if supportsManagedAdapterCapability(endpoint, capability) {
 				capabilities = append(capabilities, capability)
 			}
 		}
-		profiles = append(profiles, ProviderCapabilityProfile{Type: providerType, Operations: operations, Capabilities: capabilities})
+		profiles = append(profiles, ProviderCapabilityProfile{Type: providerType, Operations: operations, Capabilities: capabilities, AuthTypes: managedProviderAuthTypes(providerType)})
 	}
 	return profiles
+}
+
+func managedProviderAuthTypes(providerType string) []string {
+	switch providerType {
+	case "azure-openai":
+		return []string{"api_key", "entra"}
+	case "gemini":
+		return []string{"api_key", "gcp_adc"}
+	case "bedrock":
+		return []string{"bearer", "aws_sigv4"}
+	default:
+		return []string{}
+	}
 }
 
 func validAzureProviderVersion(value string) bool {

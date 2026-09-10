@@ -449,6 +449,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	switch capability {
 	case "chat", "responses":
 		return true
+	case "count_tokens":
+		_, ok := endpoint.Provider.(TokenCountClient)
+		return ok
 	case "embeddings":
 		_, ok := endpoint.Provider.(EmbeddingClient)
 		return ok

@@ -84,6 +84,13 @@ Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`,
 `voyage`, `bedrock`, `groq` и `deepseek`.
 
+`GET /admin/v1/provider-capabilities` возвращает для каждого типа отдельно
+реально реализованные операции адаптера, допустимые capabilities deployment и
+явные значения `auth_type`. Операция `count_tokens` публикуется только для
+адаптеров с нативным счетчиком и не является выбираемой capability deployment.
+Пустой `auth_types` означает фиксированный для адаптера способ передачи
+credential.
+
 Для `azure-openai` режим `auth_type=entra` использует статический bearer token
 из привязанного write-only credential. Без credential gateway сначала проверяет
 AKS workload identity через `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` и абсолютный
