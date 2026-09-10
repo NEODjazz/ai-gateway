@@ -58,6 +58,70 @@ func TestAzureTokenSourceUsesAndCachesFederatedWorkloadIdentity(t *testing.T) {
 	}
 }
 
+func TestAzureIdentityEndpointsSelectSupportedCloud(t *testing.T) {
+	for _, test := range []struct {
+		baseURL   string
+		authority string
+		resource  string
+	}{
+		{baseURL: "https://resource.openai.azure.com", authority: azureAuthorityURL, resource: azureOpenAIResource},
+		{baseURL: "https://resource.openai.azure.us/openai/v1", authority: azureGovernmentAuthority, resource: azureGovernmentResource},
+		{baseURL: "https://resource.cognitiveservices.azure.us", authority: azureGovernmentAuthority, resource: azureGovernmentResource},
+		{baseURL: "https://custom.example.test", authority: azureAuthorityURL, resource: azureOpenAIResource},
+	} {
+		authority, resource := azureIdentityEndpoints(test.baseURL)
+		if authority != test.authority || resource != test.resource {
+			t.Fatalf("base_url=%q authority=%q resource=%q", test.baseURL, authority, resource)
+		}
+	}
+}
+
+func TestAzureGovernmentWorkloadIdentityUsesSovereignAudience(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("assertion"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tenant/oauth2/v2.0/token" {
+			t.Errorf("path=%q", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		if r.Form.Get("scope") != azureGovernmentResource+".default" {
+			t.Errorf("scope=%q", r.Form.Get("scope"))
+		}
+		_, _ = fmt.Fprint(w, `{"access_token":"token","expires_in":3600,"token_type":"Bearer"}`)
+	}))
+	defer server.Close()
+	source := newAzureTokenSource("", "https://resource.openai.azure.us")
+	source.now = func() time.Time { return now }
+	source.authorityBaseURL = server.URL
+	source.getenv = awsTestEnvironment(map[string]string{"AZURE_TENANT_ID": "tenant", "AZURE_CLIENT_ID": "client", "AZURE_FEDERATED_TOKEN_FILE": tokenFile})
+	if _, err := source.Token(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAzureGovernmentManagedIdentityUsesSovereignResource(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("resource") != azureGovernmentResource {
+			t.Errorf("resource=%q", r.URL.Query().Get("resource"))
+		}
+		_, _ = fmt.Fprintf(w, `{"access_token":"token","expires_on":%d,"token_type":"Bearer"}`, now.Add(time.Hour).Unix())
+	}))
+	defer server.Close()
+	source := newAzureTokenSource("", "https://resource.cognitiveservices.azure.us")
+	source.now = func() time.Time { return now }
+	source.imdsURL = server.URL
+	source.getenv = awsTestEnvironment(nil)
+	if _, err := source.Token(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAzureTokenSourceRejectsInvalidFederatedConfiguration(t *testing.T) {
 	oversized := filepath.Join(t.TempDir(), "oversized")
 	if err := os.WriteFile(oversized, make([]byte, azureAssertionMaxBytes+1), 0o600); err != nil {

@@ -81,7 +81,7 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 			return nil, ErrProviderProbeFailed
 		}
 	} else if managed.Type == "azure-openai" && normalizeAzureAuthType(managed.AuthType) == "entra" {
-		token, tokenErr := newAzureTokenSource(secret).Token(ctx)
+		token, tokenErr := newAzureTokenSource(secret, managed.BaseURL).Token(ctx)
 		if tokenErr != nil {
 			return nil, ErrProviderProbeFailed
 		}

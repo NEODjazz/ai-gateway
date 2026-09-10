@@ -52,7 +52,7 @@ func NewAzureOpenAI(baseURL, credential string, upstreamStream bool, apiVersion,
 	client := NewOpenAICompatible(baseURL, "", upstreamStream)
 	transport := client.client.Transport
 	client.client.Transport = azureOpenAITransport{
-		base: transport, credential: credential, tokenSource: newAzureTokenSource(credential), authType: normalizeAzureAuthType(authType), apiVersion: strings.TrimSpace(apiVersion), legacyPath: legacyPath,
+		base: transport, credential: credential, tokenSource: newAzureTokenSource(credential, baseURL), authType: normalizeAzureAuthType(authType), apiVersion: strings.TrimSpace(apiVersion), legacyPath: legacyPath,
 	}
 	client.client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return client

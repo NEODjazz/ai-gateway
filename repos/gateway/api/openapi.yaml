@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.178
+  version: 0.1.179
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -5473,7 +5473,7 @@ components:
         auth_type:
           type: string
           enum: [api_key, gcp_adc, entra, bearer, aws_sigv4]
-          description: Azure accepts api_key or entra. Azure entra uses a bound static token or ambient AKS federated workload identity, App Service, Container Apps or VM managed identity when no credential is bound. Gemini accepts api_key or gcp_adc; gcp_adc obtains a short-lived bearer token from the GCE or GKE metadata server and does not require a bound credential. Bedrock accepts bearer for compatible private endpoints or aws_sigv4 for AWS IAM authentication. A Bedrock aws_sigv4 deployment without a bound credential uses environment, projected web identity, bounded shared credentials profiles, ECS/EKS container or EC2 IMDSv2 role credentials. Explicit credentials remain write-only in the credential vault.
+          description: Azure accepts api_key or entra. Azure entra uses the public or Azure US Government authority and resource audience selected from the provider endpoint, with a bound static token or ambient AKS federated workload identity, App Service, Container Apps or VM managed identity when no credential is bound. Gemini accepts api_key or gcp_adc; gcp_adc obtains a short-lived bearer token from the GCE or GKE metadata server and does not require a bound credential. Bedrock accepts bearer for compatible private endpoints or aws_sigv4 for AWS IAM authentication. A Bedrock aws_sigv4 deployment without a bound credential uses environment, projected web identity, bounded shared credentials profiles, ECS/EKS container or EC2 IMDSv2 role credentials. Explicit credentials remain write-only in the credential vault.
         region:
           type: string
           maxLength: 64

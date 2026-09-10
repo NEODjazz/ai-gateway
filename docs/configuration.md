@@ -90,7 +90,12 @@ AKS workload identity через `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` и абс�
 `AZURE_FEDERATED_TOKEN_FILE`, затем локальные `IDENTITY_ENDPOINT` и
 `IDENTITY_HEADER` App Service/Container Apps, затем Azure VM IMDS. Projected token
 обменивается на scope `https://cognitiveservices.azure.com/.default` через
-фиксированный public-cloud Entra authority. `AZURE_CLIENT_ID` также выбирает
+public-cloud Entra authority. Для endpoint с suffix `.openai.azure.us` или
+`.cognitiveservices.azure.us` gateway автоматически использует authority
+`https://login.microsoftonline.us` и resource
+`https://cognitiveservices.azure.us/` как для federation, так и для managed
+identity. Другие неизвестные host suffix не меняют identity endpoints.
+`AZURE_CLIENT_ID` также выбирает
 user-assigned managed identity. Разрешены только loopback и link-local identity
 endpoints; redirects и некорректные/просроченные ответы отклоняются. Временный
 access token кэшируется и обновляется до истечения срока.

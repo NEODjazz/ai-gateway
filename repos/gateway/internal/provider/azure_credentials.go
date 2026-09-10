@@ -18,12 +18,14 @@ import (
 )
 
 const (
-	azureIMDSTokenURL      = "http://169.254.169.254/metadata/identity/oauth2/token"
-	azureAuthorityURL      = "https://login.microsoftonline.com"
-	azureOpenAIResource    = "https://cognitiveservices.azure.com/"
-	azureOpenAIScope       = azureOpenAIResource + ".default"
-	azureTokenMaxBytes     = 32 << 10
-	azureAssertionMaxBytes = 64 << 10
+	azureIMDSTokenURL        = "http://169.254.169.254/metadata/identity/oauth2/token"
+	azureAuthorityURL        = "https://login.microsoftonline.com"
+	azureOpenAIResource      = "https://cognitiveservices.azure.com/"
+	azureOpenAIScope         = azureOpenAIResource + ".default"
+	azureGovernmentAuthority = "https://login.microsoftonline.us"
+	azureGovernmentResource  = "https://cognitiveservices.azure.us/"
+	azureTokenMaxBytes       = 32 << 10
+	azureAssertionMaxBytes   = 64 << 10
 )
 
 type azureTokenSource struct {
@@ -33,6 +35,8 @@ type azureTokenSource struct {
 	now              func() time.Time
 	imdsURL          string
 	authorityBaseURL string
+	resource         string
+	scope            string
 	mu               sync.Mutex
 	token            string
 	refreshAt        time.Time
@@ -50,10 +54,23 @@ type azureTokenResponse struct {
 	TokenType   string          `json:"token_type"`
 }
 
-func newAzureTokenSource(explicit string) *azureTokenSource {
+func newAzureTokenSource(explicit string, providerBaseURL ...string) *azureTokenSource {
 	client := newProviderHTTPClient(2 * time.Second)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &azureTokenSource{explicit: explicit, client: client, getenv: os.Getenv, now: time.Now, imdsURL: azureIMDSTokenURL, authorityBaseURL: azureAuthorityURL}
+	authority, resource := azureIdentityEndpoints(providerBaseURL...)
+	return &azureTokenSource{explicit: explicit, client: client, getenv: os.Getenv, now: time.Now, imdsURL: azureIMDSTokenURL, authorityBaseURL: authority, resource: resource, scope: resource + ".default"}
+}
+
+func azureIdentityEndpoints(providerBaseURL ...string) (string, string) {
+	if len(providerBaseURL) > 0 {
+		if parsed, err := url.Parse(providerBaseURL[0]); err == nil {
+			host := strings.ToLower(parsed.Hostname())
+			if strings.HasSuffix(host, ".openai.azure.us") || strings.HasSuffix(host, ".cognitiveservices.azure.us") {
+				return azureGovernmentAuthority, azureGovernmentResource
+			}
+		}
+	}
+	return azureAuthorityURL, azureOpenAIResource
 }
 
 func (s *azureTokenSource) Token(ctx context.Context) (string, error) {
@@ -147,7 +164,7 @@ func (s *azureTokenSource) load(ctx context.Context) (string, time.Time, error) 
 	}
 	query := parsed.Query()
 	query.Set("api-version", apiVersion)
-	query.Set("resource", azureOpenAIResource)
+	query.Set("resource", s.resource)
 	if clientID != "" {
 		if len(clientID) > 128 || strings.ContainsAny(clientID, "\x00\r\n") {
 			return "", time.Time{}, errors.New("invalid Azure managed identity client ID")
@@ -215,7 +232,7 @@ func (s *azureTokenSource) loadFederated(ctx context.Context, tenantID, clientID
 	}
 	form := url.Values{
 		"client_id":             {clientID},
-		"scope":                 {azureOpenAIScope},
+		"scope":                 {s.scope},
 		"client_assertion_type": {"urn:ietf:params:oauth:client-assertion-type:jwt-bearer"},
 		"client_assertion":      {string(assertion)},
 		"grant_type":            {"client_credentials"},
