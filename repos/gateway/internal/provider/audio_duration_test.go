@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/base64"
 	"encoding/binary"
+	"math"
 	"testing"
 
 	"ai-gateway-gateway/internal/openai"
@@ -72,6 +73,47 @@ func mp3Attachment(frames int) openai.AudioAttachment {
 		payload = append(payload, frame...)
 	}
 	return openai.AudioAttachment{Filename: "meeting.mp3", MediaType: "audio/mpeg", Data: base64.StdEncoding.EncodeToString(payload)}
+}
+
+func mp4AtomBytes(kind string, content ...[]byte) []byte {
+	size := 8
+	for _, part := range content {
+		size += len(part)
+	}
+	atom := make([]byte, size)
+	binary.BigEndian.PutUint32(atom[:4], uint32(size))
+	copy(atom[4:8], kind)
+	offset := 8
+	for _, part := range content {
+		copy(atom[offset:], part)
+		offset += len(part)
+	}
+	return atom
+}
+
+func mp4Track(handler string, timescale uint32, duration uint64, version byte) []byte {
+	handlerHeader := make([]byte, 12)
+	copy(handlerHeader[8:12], handler)
+	mediaHeader := make([]byte, 20)
+	mediaHeader[0] = version
+	if version == 0 {
+		binary.BigEndian.PutUint32(mediaHeader[12:16], timescale)
+		binary.BigEndian.PutUint32(mediaHeader[16:20], uint32(duration))
+	} else {
+		mediaHeader = make([]byte, 32)
+		mediaHeader[0] = version
+		binary.BigEndian.PutUint32(mediaHeader[20:24], timescale)
+		binary.BigEndian.PutUint64(mediaHeader[24:32], duration)
+	}
+	media := mp4AtomBytes("mdia", mp4AtomBytes("mdhd", mediaHeader), mp4AtomBytes("hdlr", handlerHeader))
+	return mp4AtomBytes("trak", media)
+}
+
+func mp4Attachment(timescale uint32, duration uint64, version byte) openai.AudioAttachment {
+	fileType := mp4AtomBytes("ftyp", []byte("isom\x00\x00\x00\x00"))
+	movie := mp4AtomBytes("moov", mp4Track("vide", 1000, 60000, 0), mp4Track("soun", timescale, duration, version))
+	payload := append(fileType, movie...)
+	return openai.AudioAttachment{Filename: "meeting.m4a", MediaType: "audio/mp4", Data: base64.StdEncoding.EncodeToString(payload)}
 }
 
 func TestFLACDurationMilliseconds(t *testing.T) {
@@ -150,6 +192,33 @@ func TestMP3FrameVersions(t *testing.T) {
 	}
 }
 
+func TestMP4AudioTrackDurationMilliseconds(t *testing.T) {
+	for _, attachment := range []openai.AudioAttachment{mp4Attachment(1000, 1250, 0), mp4Attachment(100000, 125000, 1)} {
+		data, err := base64.StdEncoding.DecodeString(attachment.Data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if duration, err := mp4DurationMilliseconds(data); err != nil || duration != 1250 {
+			t.Fatalf("duration=%d err=%v", duration, err)
+		}
+	}
+}
+
+func TestMP4AudioTrackDurationRejectsMalformedMetadata(t *testing.T) {
+	valid, _ := base64.StdEncoding.DecodeString(mp4Attachment(1000, 1250, 0).Data)
+	fileType := mp4AtomBytes("ftyp", []byte("isom\x00\x00\x00\x00"))
+	onlyVideo := append(fileType, mp4AtomBytes("moov", mp4Track("vide", 1000, 60000, 0))...)
+	missingHeader := append(fileType, mp4AtomBytes("moov", mp4AtomBytes("trak", mp4AtomBytes("mdia", mp4AtomBytes("hdlr", append(make([]byte, 8), []byte("soun")...)))))...)
+	duplicateMovie := append(append([]byte(nil), valid...), mp4AtomBytes("moov")...)
+	zeroTimescale, _ := base64.StdEncoding.DecodeString(mp4Attachment(0, 1250, 0).Data)
+	unknownDuration, _ := base64.StdEncoding.DecodeString(mp4Attachment(1000, math.MaxUint32, 0).Data)
+	for _, invalid := range [][]byte{nil, valid[:len(valid)-1], onlyVideo, missingHeader, duplicateMovie, zeroTimescale, unknownDuration, []byte("\x00\x00\x00\x04ftyp")} {
+		if _, err := mp4DurationMilliseconds(invalid); err == nil {
+			t.Fatalf("invalid MP4 accepted: %x", invalid)
+		}
+	}
+}
+
 func TestProvidersReserveExactFLACDuration(t *testing.T) {
 	request := openai.AudioTranscriptionRequest{File: flacAttachment(1250)}
 	if duration, err := NewGroq("https://example.test", "", false).ReserveAudioMilliseconds(request); err != nil || duration != 10000 {
@@ -180,5 +249,15 @@ func TestProvidersReserveExactMP3Duration(t *testing.T) {
 	}
 	if duration, err := NewMistral("https://example.test", "", false).ReserveAudioMilliseconds(request); err != nil || duration != expected {
 		t.Fatalf("Mistral duration=%d err=%v", duration, err)
+	}
+}
+
+func TestGroqReservesExactMP4AudioTrackDuration(t *testing.T) {
+	client := NewGroq("https://example.test", "", false)
+	if duration, err := client.ReserveAudioMilliseconds(openai.AudioTranscriptionRequest{File: mp4Attachment(1000, 1250, 0)}); err != nil || duration != 10000 {
+		t.Fatalf("minimum duration=%d err=%v", duration, err)
+	}
+	if duration, err := client.ReserveAudioMilliseconds(openai.AudioTranscriptionRequest{File: mp4Attachment(1000, 12500, 0)}); err != nil || duration != 12500 {
+		t.Fatalf("exact duration=%d err=%v", duration, err)
 	}
 }

@@ -216,6 +216,150 @@ func mp3Frame(data []byte) (length, samples, sampleRate int, ok bool) {
 	return length, samples, sampleRate, length >= 4
 }
 
+func mp4DurationMilliseconds(data []byte) (int, error) {
+	topLevel, err := mp4Atoms(data)
+	if err != nil {
+		return 0, err
+	}
+	foundFileType := false
+	var movie []byte
+	for _, atom := range topLevel {
+		switch atom.kind {
+		case "ftyp":
+			foundFileType = true
+		case "moov":
+			if movie != nil {
+				return 0, openai.ErrInvalidAudio
+			}
+			movie = atom.content
+		}
+	}
+	if !foundFileType || movie == nil {
+		return 0, openai.ErrInvalidAudio
+	}
+	duration, found, err := mp4FirstAudioTrackDuration(movie)
+	if err != nil || !found {
+		return 0, openai.ErrInvalidAudio
+	}
+	return duration, nil
+}
+
+type mp4Atom struct {
+	kind    string
+	content []byte
+}
+
+func mp4Atoms(data []byte) ([]mp4Atom, error) {
+	const maxMP4Atoms = 100000
+	atoms := make([]mp4Atom, 0, 8)
+	for offset := 0; offset < len(data); {
+		if len(atoms) >= maxMP4Atoms {
+			return nil, openai.ErrInvalidAudio
+		}
+		if len(data)-offset < 8 {
+			return nil, openai.ErrInvalidAudio
+		}
+		size := uint64(binary.BigEndian.Uint32(data[offset : offset+4]))
+		headerSize := uint64(8)
+		if size == 1 {
+			if len(data)-offset < 16 {
+				return nil, openai.ErrInvalidAudio
+			}
+			size = binary.BigEndian.Uint64(data[offset+8 : offset+16])
+			headerSize = 16
+		} else if size == 0 {
+			size = uint64(len(data) - offset)
+		}
+		if size < headerSize || size > uint64(len(data)-offset) {
+			return nil, openai.ErrInvalidAudio
+		}
+		end := offset + int(size)
+		atoms = append(atoms, mp4Atom{kind: string(data[offset+4 : offset+8]), content: data[offset+int(headerSize) : end]})
+		offset = end
+	}
+	return atoms, nil
+}
+
+func mp4FirstAudioTrackDuration(movie []byte) (int, bool, error) {
+	atoms, err := mp4Atoms(movie)
+	if err != nil {
+		return 0, false, err
+	}
+	for _, atom := range atoms {
+		if atom.kind != "trak" {
+			continue
+		}
+		trackAtoms, err := mp4Atoms(atom.content)
+		if err != nil {
+			return 0, false, err
+		}
+		mediaCount := 0
+		for _, trackAtom := range trackAtoms {
+			if trackAtom.kind != "mdia" {
+				continue
+			}
+			mediaCount++
+			if mediaCount > 1 {
+				return 0, false, openai.ErrInvalidAudio
+			}
+			mediaAtoms, err := mp4Atoms(trackAtom.content)
+			if err != nil {
+				return 0, false, err
+			}
+			isAudio := false
+			handlers := 0
+			var mediaHeader []byte
+			for _, mediaAtom := range mediaAtoms {
+				switch mediaAtom.kind {
+				case "hdlr":
+					handlers++
+					if handlers > 1 || len(mediaAtom.content) < 12 {
+						return 0, false, openai.ErrInvalidAudio
+					}
+					isAudio = string(mediaAtom.content[8:12]) == "soun"
+				case "mdhd":
+					if mediaHeader != nil {
+						return 0, false, openai.ErrInvalidAudio
+					}
+					mediaHeader = mediaAtom.content
+				}
+			}
+			if isAudio {
+				duration, err := mp4MediaDurationMilliseconds(mediaHeader)
+				return duration, true, err
+			}
+		}
+	}
+	return 0, false, nil
+}
+
+func mp4MediaDurationMilliseconds(header []byte) (int, error) {
+	if len(header) < 20 {
+		return 0, openai.ErrInvalidAudio
+	}
+	var timescale, duration uint64
+	switch header[0] {
+	case 0:
+		timescale = uint64(binary.BigEndian.Uint32(header[12:16]))
+		duration = uint64(binary.BigEndian.Uint32(header[16:20]))
+		if duration == math.MaxUint32 {
+			return 0, openai.ErrInvalidAudio
+		}
+	case 1:
+		if len(header) < 32 {
+			return 0, openai.ErrInvalidAudio
+		}
+		timescale = uint64(binary.BigEndian.Uint32(header[20:24]))
+		duration = binary.BigEndian.Uint64(header[24:32])
+		if duration == math.MaxUint64 {
+			return 0, openai.ErrInvalidAudio
+		}
+	default:
+		return 0, openai.ErrInvalidAudio
+	}
+	return durationMilliseconds(duration, timescale)
+}
+
 func durationMilliseconds(units, unitsPerSecond uint64) (int, error) {
 	if unitsPerSecond == 0 || units > (math.MaxUint64-uint64(unitsPerSecond)+1)/1000 {
 		return 0, openai.ErrInvalidAudio

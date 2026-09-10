@@ -221,10 +221,11 @@ Native Groq transcription передает `language`, `prompt`, `temperature` �
 `timestamp_granularities`, а upstream всегда запрашивает `verbose_json`, чтобы
 сохранить доступные timing metadata. Prompt ограничен консервативной оценкой в
 224 tokens. Billing резервирует и фиксирует минимум 10 секунд. Adapter принимает
-WAV, FLAC, однопоточные OGG Opus/Vorbis и MP3 Layer III: RIFF, STREAMINFO, Ogg
-granule metadata и полный frame scan позволяют достоверно определить длительность
-до provider call. Другие контейнеры отклоняются до добавления codec-aware duration
-parser, чтобы сжатый файл не мог обойти duration budget.
+WAV, FLAC, однопоточные OGG Opus/Vorbis, MP3 Layer III и MP4/M4A с полной media
+duration: RIFF, STREAMINFO, Ogg granule metadata, полный frame scan или `mdhd`
+первого `soun` track позволяют определить длительность до provider call. Другие
+контейнеры и fragmented MP4 без полной track duration отклоняются до добавления
+codec-aware duration parser, чтобы сжатый файл не мог обойти duration budget.
 
 `POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
 

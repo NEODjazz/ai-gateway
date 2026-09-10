@@ -50,8 +50,14 @@ func (Groq) ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest) (
 			return 0, errors.New("MP3 duration is invalid")
 		}
 		return max(duration, groqMinimumBilledAudioMilliseconds), nil
+	case "audio/mp4", "video/mp4", "audio/x-m4a":
+		duration, err := mp4DurationMilliseconds(data)
+		if err != nil || duration > groqMaximumBilledAudioMilliseconds {
+			return 0, errors.New("MP4 audio track duration is invalid")
+		}
+		return max(duration, groqMinimumBilledAudioMilliseconds), nil
 	default:
-		return 0, errors.New("Groq transcription currently requires WAV, FLAC, OGG or MP3 audio for reliable duration billing")
+		return 0, errors.New("Groq transcription currently requires WAV, FLAC, OGG, MP3 or MP4/M4A audio for reliable duration billing")
 	}
 }
 
@@ -89,6 +95,8 @@ func (g Groq) TranscribeAudio(ctx context.Context, request openai.AudioTranscrip
 			actualDuration, _ = oggDurationMilliseconds(data)
 		case "audio/mpeg", "audio/mp3":
 			actualDuration, _ = mp3DurationMilliseconds(data)
+		case "audio/mp4", "video/mp4", "audio/x-m4a":
+			actualDuration, _ = mp4DurationMilliseconds(data)
 		}
 	}
 
