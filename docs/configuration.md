@@ -80,9 +80,9 @@ Managed-режим намеренно разделяет конфигураци�
 Provider и Credential должны быть созданы до ссылающегося Deployment, а
 Deployment — до Model Group. UI использует выбор из уже созданных ресурсов, API
 принимает их IDs и возвращает `409` при удалении используемого ресурса. Managed
-Provider сейчас принимает `demo`, `ollama`, `openai`, `openai-compatible`,
-`azure-openai`, `anthropic`, `gemini`, `cohere` и `mistral`; отдельный тип `openrouter` доступен только static-конфигурации и в
-managed mode задаётся как OpenAI-compatible endpoint.
+Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
+`openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`,
+`voyage`, `bedrock`, `groq` и `deepseek`.
 
 ## Gateway modules
 
