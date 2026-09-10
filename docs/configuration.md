@@ -88,15 +88,17 @@ Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 Write-only credential задается JSON-объектом с `access_key_id`,
 `secret_access_key` и необязательным `session_token`. Если credential не привязан,
 gateway последовательно проверяет `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`,
-ECS container credentials, EKS Pod Identity и EC2 IMDSv2. Временные container и
+`AWS_ROLE_ARN` вместе с `AWS_WEB_IDENTITY_TOKEN_FILE`, ECS container credentials,
+EKS Pod Identity и EC2 IMDSv2. Web identity обменивается через региональный STS;
+необязательный `AWS_ROLE_SESSION_NAME` задаёт имя сессии. Временные STS, container и
 instance-role credentials кэшируются и обновляются до истечения срока действия;
 параллельные запросы используют один refresh. Произвольный HTTP host в
 `AWS_CONTAINER_CREDENTIALS_FULL_URI` отклоняется: разрешены только loopback и
 стандартные link-local ECS/EKS addresses. Gateway подписывает каждый Converse
 request для service `bedrock`, включая payload hash и временный session token.
 Неверный JSON credential отклоняется при сохранении. `auth_type=bearer` сохраняет
-прежний режим для частных совместимых endpoints. Shared profile и web-identity
-STS exchange пока не входят в credential chain.
+прежний режим для частных совместимых endpoints. Shared profile пока не входит в
+credential chain.
 
 ## Gateway modules
 

@@ -317,3 +317,25 @@ were retained. Deployment databases were not used. The CI postgres-integration j
 still invokes the same required-test script; this run did not dispatch GitHub
 Actions. This is database integration evidence, not external-provider execution
 or browser QA. The deployed image remains source `5d10695` at Helm revision 118.
+
+## AWS web identity rollout (2026-09-10)
+
+Source `188030f` adds projected web-identity credentials to the Bedrock SigV4
+credential chain. The gateway exchanges `AWS_ROLE_ARN` and the bounded token file
+from `AWS_WEB_IDENTITY_TOKEN_FILE` through the regional STS endpoint, caches the
+temporary credential, coalesces refreshes and stops using it at expiration.
+Malformed configuration and responses fail closed before Bedrock execution.
+
+- Go formatting, vet, all unit/regression tests, race tests and build passed.
+- Protocol tests used a local STS server and covered the exact form request,
+  caching, regional endpoints, incomplete configuration, unsafe token paths,
+  size limits, malformed XML, non-success status and expired credentials.
+- Rancher Desktop built `ai-gateway-gateway:api-188030f`; Helm revision 277
+  completed successfully with one Ready gateway pod and zero restarts.
+- Ingress checks returned 204 for health/readiness and 200 for the UI and admin
+  SPA route. The served OpenAPI contract reported version 0.1.174 and the
+  projected web-identity credential chain.
+
+No live cloud role was assumed and no paid provider inference was performed.
+The protocol and signing paths are covered by isolated tests; cloud IAM policy,
+trust relationship and provider availability remain deployment responsibilities.

@@ -50,7 +50,7 @@ availability is not inferred from these tests.
 | MCP | Registry, connector/tool-specific ACL, policy-filtered discovery, Responses passthrough, bounded Streamable HTTP execution with durable PostgreSQL idempotency, fail-closed audit and exact tool-request settlement | Credentialed MCP servers, additional transports and long-lived session reuse |
 | A2A | Not implemented | Agent discovery, task ownership and authenticated execution |
 | Bedrock Invoke | Not implemented | Native protocol, AWS request signing and usage conversion |
-| Bedrock Converse | Synchronous `/model/{model}/converse` through shared authorization, tool policy, quota, retry and exact billing; native Bedrock text/function transport, strict usage validation and separately attributed requests | Event stream, media blocks and workload authentication |
+| Bedrock Converse | Synchronous `/model/{model}/converse` through shared authorization, tool policy, quota, retry and exact billing; native Bedrock text/function transport, strict usage validation, separately attributed requests and AWS workload credentials | Event stream and media blocks |
 | Containers | Not implemented | Owned lifecycle, expiration and resource accounting |
 | Container files | Not implemented | Owner-scoped file operations and storage limits |
 | Sandbox | Not implemented | Isolated execution, resource quotas and lifecycle |
@@ -66,7 +66,7 @@ availability is not inferred from these tests.
 | --- | --- | --- |
 | Native provider catalog | Anthropic, Ollama, Gemini, Cohere Chat/Rerank/Embeddings, Mistral Chat/Embeddings/FIM and Voyage Embeddings/Rerank; compatible HTTP adapter; native operations have protocol tests | Additional native providers with protocol tests |
 | Azure | Native resource-root `/openai/v1` and explicit deployment paths, API version forwarding, API-key and static Entra bearer authentication, discovery and shared inference lifecycle | Managed Entra acquisition and refresh |
-| Workload identity | Bedrock SigV4 supports encrypted explicit credentials, environment keys, refreshable ECS/EKS container roles and EC2 IMDSv2 instance roles | AWS web-identity STS exchange and shared profiles, GCP credentials and Azure refresh/cancellation |
+| Workload identity | Bedrock SigV4 supports encrypted explicit credentials, environment keys, regional web-identity STS exchange, refreshable ECS/EKS container roles and EC2 IMDSv2 instance roles | AWS shared profiles, GCP credentials and Azure refresh/cancellation |
 | Model tokenization | Context estimate including tool schemas; native Anthropic/Gemini counter API | Exact model tokenizers/counters with versioned provenance |
 | Catalog synchronization | Versioned catalog and hot update | Validated upstream sync, rollback and price provenance |
 | Arbitrary passthrough | Not implemented | Explicit route allowlists, identity isolation and accounting |
