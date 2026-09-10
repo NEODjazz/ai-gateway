@@ -3,6 +3,7 @@ package provider
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"unicode/utf8"
 
@@ -133,7 +134,16 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	if err := rejectChatMessageAudio("ollama", request.Messages); err != nil {
 		return err
 	}
-	if err := rejectGenerationOptions("ollama", request.ChatGenerationOptions); err != nil {
+	options := request.ChatGenerationOptions
+	if options.TopK != nil && (*options.TopK < 0 || *options.TopK > 1_000_000) {
+		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_parameter", Param: "top_k", Err: fmt.Errorf("parameter top_k must be between 0 and 1000000")}
+	}
+	if options.MinP != nil && (math.IsNaN(*options.MinP) || math.IsInf(*options.MinP, 0) || *options.MinP < 0 || *options.MinP > 1) {
+		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_parameter", Param: "min_p", Err: fmt.Errorf("parameter min_p must be a finite number between 0 and 1")}
+	}
+	options.TopK = nil
+	options.MinP = nil
+	if err := rejectGenerationOptions("ollama", options); err != nil {
 		return err
 	}
 	return rejectParameters("ollama",

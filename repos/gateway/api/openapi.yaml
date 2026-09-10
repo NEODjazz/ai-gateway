@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.140
+  version: 0.1.141
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4053,8 +4053,8 @@ components:
         top_logprobs: {type: integer, minimum: 0, maximum: 20, description: Requires logprobs=true. Native Gemini maps this to the per-step candidate count.}
         frequency_penalty: {type: number, minimum: -2, maximum: 2}
         presence_penalty: {type: number, minimum: -2, maximum: 2}
-        min_p: {type: number, minimum: 0, maximum: 1, description: Relative minimum token probability forwarded by compatible adapters.}
-        top_k: {type: integer, minimum: 0, maximum: 1000000, description: Maximum candidate token count forwarded by compatible and native Gemini adapters.}
+        min_p: {type: number, minimum: 0, maximum: 1, description: "Relative minimum token probability forwarded by compatible and native Ollama adapters."}
+        top_k: {type: integer, minimum: 0, maximum: 1000000, description: "Maximum candidate token count forwarded by compatible, native Gemini, and native Ollama adapters."}
         top_a: {type: number, minimum: 0, maximum: 1, description: Dynamic token probability threshold forwarded by compatible adapters.}
         repetition_penalty: {type: number, exclusiveMinimum: 0, description: Multiplicative repetition penalty forwarded by compatible adapters.}
         logit_bias:

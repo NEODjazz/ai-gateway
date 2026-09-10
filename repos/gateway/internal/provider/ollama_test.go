@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -139,6 +140,8 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 	maxTokens := 32
 	temperature := 0.0
 	topP := 0.7
+	topK := 40
+	minP := 0.05
 	seed := int64(42)
 	response, err := NewOllama(server.URL, false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{
 		Model: "llama3.2:latest",
@@ -149,7 +152,8 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 			}},
 		}},
 		MaxTokens: &maxTokens, Temperature: &temperature, TopP: &topP, Seed: &seed,
-		Stop: []string{"END"},
+		ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK, MinP: &minP},
+		Stop:                  []string{"END"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -161,6 +165,8 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 	if upstream.Options.NumPredict == nil || *upstream.Options.NumPredict != 32 ||
 		upstream.Options.Temperature == nil || *upstream.Options.Temperature != 0 ||
 		upstream.Options.TopP == nil || *upstream.Options.TopP != 0.7 ||
+		upstream.Options.TopK == nil || *upstream.Options.TopK != 40 ||
+		upstream.Options.MinP == nil || *upstream.Options.MinP != 0.05 ||
 		upstream.Options.Seed == nil || *upstream.Options.Seed != 42 {
 		t.Fatalf("generation options were not forwarded: %+v", upstream.Options)
 	}
@@ -172,15 +178,22 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 }
 
 func TestOllamaStreamsNativeToolCalls(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	var upstream ollamaChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
 		_, _ = w.Write([]byte("{\"model\":\"llama3.2:latest\",\"message\":{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"call_1\",\"function\":{\"name\":\"weather.get\",\"arguments\":{\"city\":\"Moscow\"}}}]}}\n"))
 		_, _ = w.Write([]byte("{\"model\":\"llama3.2:latest\",\"done\":true,\"done_reason\":\"stop\"}\n"))
 	}))
 	defer server.Close()
 
 	var payloads []string
+	topK := 20
+	minP := 0.1
 	response, err := NewOllama(server.URL, true).StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{
 		Model: "llama3.2:latest", Stream: true, Messages: []openai.Message{{Role: "user", Content: "weather"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK, MinP: &minP},
 	}, func(payload string) error {
 		payloads = append(payloads, payload)
 		return nil
@@ -191,9 +204,33 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 	if len(response.Choices[0].Message.ToolCalls) != 1 || response.Choices[0].Message.ToolCalls[0].Type != "function" {
 		t.Fatalf("streamed tool call was not accumulated: %+v", response)
 	}
+	if upstream.Options.TopK == nil || *upstream.Options.TopK != 20 || upstream.Options.MinP == nil || *upstream.Options.MinP != 0.1 {
+		t.Fatalf("streaming generation options were not forwarded: %+v", upstream.Options)
+	}
 	if len(payloads) != 2 || !strings.Contains(payloads[0], `"type":"function"`) ||
 		!strings.Contains(payloads[0], `"arguments":"{\"city\":\"Moscow\"}"`) {
 		t.Fatalf("unexpected streamed tool payloads: %v", payloads)
+	}
+}
+
+func TestOllamaRejectsInvalidNativeSamplingOptions(t *testing.T) {
+	invalidTopK := -1
+	invalidMinP := 1.1
+	for _, test := range []struct {
+		name    string
+		request openai.ChatCompletionRequest
+		param   string
+	}{
+		{name: "top_k", request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &invalidTopK}}, param: "top_k"},
+		{name: "min_p", request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{MinP: &invalidMinP}}, param: "min_p"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var failure *Error
+			err := NewOllama("http://unused.invalid", false).ValidateChatParameters(test.request)
+			if !errors.As(err, &failure) || failure.UpstreamCode != "invalid_parameter" || failure.Param != test.param {
+				t.Fatalf("invalid sampling option was not rejected: %v", err)
+			}
+		})
 	}
 }
 

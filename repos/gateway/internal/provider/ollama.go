@@ -32,6 +32,8 @@ type ollamaOptions struct {
 	NumPredict  *int     `json:"num_predict,omitempty"`
 	Temperature *float64 `json:"temperature,omitempty"`
 	TopP        *float64 `json:"top_p,omitempty"`
+	TopK        *int     `json:"top_k,omitempty"`
+	MinP        *float64 `json:"min_p,omitempty"`
 	Stop        any      `json:"stop,omitempty"`
 	Seed        *int64   `json:"seed,omitempty"`
 }
@@ -379,7 +381,7 @@ func ollamaRequestOptions(request openai.ChatCompletionRequest) ollamaOptions {
 	}
 	return ollamaOptions{
 		NumPredict: maxTokens, Temperature: request.Temperature, TopP: request.TopP,
-		Stop: request.Stop, Seed: request.Seed,
+		TopK: request.TopK, MinP: request.MinP, Stop: request.Stop, Seed: request.Seed,
 	}
 }
 
