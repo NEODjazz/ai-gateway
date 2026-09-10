@@ -55,7 +55,7 @@ availability is not inferred from these tests.
 | Container files | Not implemented | Owner-scoped file operations and storage limits |
 | Sandbox | Not implemented | Isolated execution, resource quotas and lifecycle |
 | Vector store creation | Durable PostgreSQL create/list/get/update/delete lifecycle with credential-and-user isolation, expiry policy, cursor pagination, RPM admission and atomic per-owner cardinality quotas | File ingestion, storage-byte accounting and search are separate lifecycle increments |
-| Vector store files | Not implemented | Durable ingestion jobs, file ownership and indexing failures |
+| Vector store files | Durable PostgreSQL attach/list/get/delete lifecycle with credential-and-user isolation, source-file ownership checks, cursor pagination and atomic per-owner quotas | Ingestion processing, indexing failures and storage-byte accounting |
 | Vector store search | Not implemented | Retrieval authorization, filters and usage accounting |
 | RAG ingestion | Not implemented | Durable document ingestion and index ownership |
 | RAG query | Not implemented | Retrieval/generation policy composition and combined accounting |
