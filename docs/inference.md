@@ -293,6 +293,13 @@ WAV, FLAC, OGG, MP3, завершенный MP4/M4A или audio-only WebM с п
 длительностью и фиксирует эту длительность при отсутствии точных upstream
 counters. Неполные и неоднозначные контейнеры отклоняются до budget reserve.
 
+Native Gemini deployment с capability `audio_speech` вызывает Interactions API,
+запрашивает inline audio и проверяет completed model-output до декодирования.
+Поддерживаются voice, natural-language `instructions` и форматы MP3, Opus, WAV
+и raw PCM. `speed`, AAC и FLAC отклоняются до upstream call. Base64 envelope и
+декодированный audio ограничены независимо; billing фиксирует точное число
+Unicode-символов исходного текста.
+
 `POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
 
 Vision принимает только inline `data:image/{jpeg,png,gif,webp};base64,...`.
@@ -308,7 +315,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `azure-openai` | Native Azure OpenAI URL, API version, API key, static Entra token, AKS workload federation or refreshable ambient managed identity |
 | `anthropic` | Преобразование chat/tools/vision в native Messages API |
 | `ollama` | Native chat/stream/embeddings и provider completions JSON/SSE для строкового prompt; native `top_k`, `min_p`, log probabilities и reasoning history/output |
-| `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output, text embeddings; API key |
+| `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output, text embeddings, audio transcription/translation; Interactions text-to-speech; API key or GCP workload identity |
 | `mistral` | Native Chat JSON/SSE and embeddings wire contract; FIM completions; Bearer API key |
 | `voyage` | Native text embeddings and rerank; Bearer API key |
 | `bedrock` | Native Converse chat/tools and JSON Schema output; bearer mode for compatible private endpoints or AWS SigV4 with explicit credentials, environment keys, bounded shared credentials profiles, regional web-identity STS, ECS/EKS container roles and EC2 IMDSv2 instance roles |
