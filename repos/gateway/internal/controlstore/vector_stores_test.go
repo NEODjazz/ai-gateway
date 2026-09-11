@@ -3,6 +3,7 @@ package controlstore
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -287,6 +288,63 @@ func TestPostgresVectorStoreQuotaIsAtomicIntegration(t *testing.T) {
 	}
 }
 
+func TestPostgresVectorStoreFileBatchAtomicIntegration(t *testing.T) {
+	dsn := requiredPostgresTestDSN(t)
+	ctx := context.Background()
+	pool := prepareVectorStoreTable(t, ctx, dsn)
+	owner := "vector-batch/" + time.Now().UTC().Format("20060102150405.000000000")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM gateway_vector_store_file_batches WHERE owner_key=$1`, owner)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM gateway_vector_store_files WHERE owner_key=$1`, owner)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM gateway_files WHERE owner_key=$1`, owner)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM gateway_vector_stores WHERE owner_key=$1`, owner)
+		pool.Close()
+	})
+	store, err := NewPostgresStore(ctx, dsn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err = store.CreateVectorStore(ctx, vectorstate.VectorStore{ID: "vs_batch", OwnerKey: owner, Name: "batch", Metadata: map[string]string{}}, 1); err != nil {
+		t.Fatal(err)
+	}
+	for index, id := range []string{"file_batch_a", "file_batch_b", "file_batch_c"} {
+		content := []byte(strings.Repeat("x", index+1))
+		_, err = store.Create(ctx, filestate.File{ID: id, OwnerKey: owner, Filename: id + ".txt", Purpose: "assistants", ContentType: "text/plain", Bytes: int64(len(content)), Content: content}, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	created, err := store.CreateVectorStoreFileBatch(ctx, vectorstate.FileBatch{ID: "vsfb_integration", VectorStoreID: "vs_batch", OwnerKey: owner}, []vectorstate.FileBatchEntry{
+		{FileID: "file_batch_a", Attributes: map[string]any{"region": "eu"}},
+		{FileID: "file_batch_b", Attributes: map[string]any{"priority": float64(2)}},
+	}, 3, 10)
+	if err != nil || created.Status != "completed" || created.Total != 2 || created.Completed != 2 {
+		t.Fatalf("created=%+v err=%v", created, err)
+	}
+	if _, err = store.GetVectorStoreFileBatch(ctx, owner+"/other", "vs_batch", created.ID); !errors.Is(err, vectorstate.ErrFileBatchNotFound) {
+		t.Fatalf("cross-owner batch error=%v", err)
+	}
+	first, next, err := store.ListVectorStoreFileBatchFiles(ctx, owner, "vs_batch", created.ID, vectorstate.FileListOptions{Limit: 1, Order: "asc"})
+	if err != nil || len(first) != 1 || next == "" {
+		t.Fatalf("first=%+v next=%q err=%v", first, next, err)
+	}
+	second, next, err := store.ListVectorStoreFileBatchFiles(ctx, owner, "vs_batch", created.ID, vectorstate.FileListOptions{Limit: 1, After: next, Order: "asc"})
+	if err != nil || len(second) != 1 || next != "" || first[0].FileID == second[0].FileID {
+		t.Fatalf("second=%+v next=%q err=%v", second, next, err)
+	}
+	_, err = store.CreateVectorStoreFileBatch(ctx, vectorstate.FileBatch{ID: "vsfb_failed", VectorStoreID: "vs_batch", OwnerKey: owner}, []vectorstate.FileBatchEntry{{FileID: "file_batch_c"}, {FileID: "missing"}}, 4, 10)
+	if !errors.Is(err, vectorstate.ErrFileNotFound) {
+		t.Fatalf("missing file error=%v", err)
+	}
+	if _, err = store.GetVectorStoreFile(ctx, owner, "vs_batch", "file_batch_c"); !errors.Is(err, vectorstate.ErrFileNotFound) {
+		t.Fatalf("failed batch left an attachment: %v", err)
+	}
+	if _, err = store.GetVectorStoreFileBatch(ctx, owner, "vs_batch", "vsfb_failed"); !errors.Is(err, vectorstate.ErrFileBatchNotFound) {
+		t.Fatalf("failed batch left a record: %v", err)
+	}
+}
+
 func prepareVectorStoreTable(t *testing.T, ctx context.Context, dsn string) *pgxpool.Pool {
 	t.Helper()
 	pool, err := pgxpool.New(ctx, dsn)
@@ -310,6 +368,19 @@ func prepareVectorStoreTable(t *testing.T, ctx context.Context, dsn string) *pgx
 			file_id TEXT NOT NULL REFERENCES gateway_files(id) ON DELETE CASCADE,
 			owner_key TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'completed', attributes JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			PRIMARY KEY (vector_store_id,file_id))`)
+	}
+	if err == nil {
+		_, err = pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS gateway_vector_store_file_batches (
+			id TEXT PRIMARY KEY, vector_store_id TEXT NOT NULL REFERENCES gateway_vector_stores(id) ON DELETE CASCADE,
+			owner_key TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('completed')), total INTEGER NOT NULL,
+			completed INTEGER NOT NULL, failed INTEGER NOT NULL DEFAULT 0, cancelled INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (id,vector_store_id,owner_key));
+			CREATE TABLE IF NOT EXISTS gateway_vector_store_file_batch_files (
+			batch_id TEXT NOT NULL,
+			vector_store_id TEXT NOT NULL, file_id TEXT NOT NULL, owner_key TEXT NOT NULL, ordinal INTEGER NOT NULL,
+			PRIMARY KEY (batch_id,file_id), UNIQUE (batch_id,ordinal),
+			FOREIGN KEY (batch_id,vector_store_id,owner_key) REFERENCES gateway_vector_store_file_batches(id,vector_store_id,owner_key) ON DELETE CASCADE,
+			FOREIGN KEY (vector_store_id,file_id) REFERENCES gateway_vector_store_files(vector_store_id,file_id) ON DELETE CASCADE)`)
 	}
 	if err != nil {
 		pool.Close()

@@ -1742,6 +1742,17 @@ The attachment list accepts one of `after` or `before`, a limit from 1 to 100,
 lookup, status filtering, and ordering run in PostgreSQL using `created_at` plus
 the file ID as a stable tie-breaker.
 
+`POST /v1/vector_stores/{id}/file_batches` atomically attaches 1 to 2000 owned,
+non-expired files. The request accepts either `file_ids` with shared attributes
+and chunking policy, or `files` with per-file options. These forms cannot be
+combined. All ownership, duplicate, count-quota and overflow-safe byte-quota
+checks run in one PostgreSQL transaction, so a failed batch leaves no attachment
+or batch record. Successful batches complete synchronously and remain available
+through `GET /v1/vector_stores/{id}/file_batches/{batch_id}` and the paginated
+`GET .../{batch_id}/files` collection. Because there is no background ingestion
+phase, `POST .../{batch_id}/cancel` is an idempotent retrieval of the completed
+terminal state.
+
 `GET /v1/vector_stores/{id}/files/{file_id}/content` verifies the owner-scoped
 attachment before reading the source file. It returns at most 100 Unicode-safe
 text chunks from up to 1 MiB of `purpose=assistants` UTF-8 text, Markdown, CSV,

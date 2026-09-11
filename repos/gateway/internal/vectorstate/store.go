@@ -14,6 +14,7 @@ var ErrInvalid = errors.New("invalid vector store request")
 var ErrFileNotFound = errors.New("vector store file not found")
 var ErrFileQuotaExceeded = errors.New("vector store file quota exceeded")
 var ErrByteQuotaExceeded = errors.New("vector store byte quota exceeded")
+var ErrFileBatchNotFound = errors.New("vector store file batch not found")
 
 type VectorStore struct {
 	ID           string
@@ -37,6 +38,23 @@ type File struct {
 	Bytes         int64
 	Attributes    map[string]any
 	CreatedAt     time.Time
+}
+
+type FileBatch struct {
+	ID            string
+	VectorStoreID string
+	OwnerKey      string
+	Status        string
+	Total         int
+	Completed     int
+	Failed        int
+	Cancelled     int
+	CreatedAt     time.Time
+}
+
+type FileBatchEntry struct {
+	FileID     string
+	Attributes map[string]any
 }
 
 type Update struct {
@@ -69,4 +87,10 @@ type Store interface {
 	GetVectorStoreFile(context.Context, string, string, string) (File, error)
 	UpdateVectorStoreFile(context.Context, string, string, string, map[string]any) (File, error)
 	DeleteVectorStoreFile(context.Context, string, string, string) error
+}
+
+type FileBatchStore interface {
+	CreateVectorStoreFileBatch(context.Context, FileBatch, []FileBatchEntry, int, int64) (FileBatch, error)
+	GetVectorStoreFileBatch(context.Context, string, string, string) (FileBatch, error)
+	ListVectorStoreFileBatchFiles(context.Context, string, string, string, FileListOptions) ([]File, string, error)
 }

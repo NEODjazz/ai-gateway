@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,163 @@ type memoryVectorStore struct {
 	stores         map[string]vectorstate.VectorStore
 	files          map[string]vectorstate.File
 	availableFiles map[string]int64
+	batches        map[string]vectorstate.FileBatch
+	batchFiles     map[string][]string
+}
+
+func TestVectorStoreFileBatchHTTPLifecycleAtomicityAndIsolation(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	store := &memoryVectorStore{
+		stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: owner, Name: "docs", Status: "completed"}},
+		files:  map[string]vectorstate.File{}, availableFiles: map[string]int64{"file_a": 2, "file_b": 3, "file_c": 5},
+	}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}}), modelsProvider{}).
+		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10, ByteQuota: 100}))
+	created := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/file_batches", `{"file_ids":["file_a","file_b"],"attributes":{"region":"eu"},"chunking_strategy":{"type":"auto"}}`)
+	var payload struct {
+		ID, Status string
+		FileCounts map[string]int `json:"file_counts"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &payload); err != nil || created.Code != http.StatusOK || payload.ID == "" || payload.Status != "completed" || payload.FileCounts["completed"] != 2 || payload.FileCounts["total"] != 2 {
+		t.Fatalf("created status=%d payload=%+v err=%v body=%s", created.Code, payload, err, created.Body.String())
+	}
+	for _, path := range []string{
+		"/v1/vector_stores/vs_owned/file_batches/" + payload.ID,
+		"/v1/vector_stores/vs_owned/file_batches/" + payload.ID + "/cancel",
+	} {
+		method := http.MethodGet
+		if strings.HasSuffix(path, "/cancel") {
+			method = http.MethodPost
+		}
+		response := callVectorStore(handler, method, path, "")
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"completed"`) {
+			t.Fatalf("path=%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+	listed := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/file_batches/"+payload.ID+"/files?limit=1&order=asc", "")
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"file_a"`) || !strings.Contains(listed.Body.String(), `"region":"eu"`) || !strings.Contains(listed.Body.String(), `"has_more":true`) {
+		t.Fatalf("listed status=%d body=%s", listed.Code, listed.Body.String())
+	}
+	other := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "other"}}), modelsProvider{}).
+		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10, ByteQuota: 100}))
+	if response := callVectorStore(other, http.MethodGet, "/v1/vector_stores/vs_owned/file_batches/"+payload.ID, ""); response.Code != http.StatusNotFound {
+		t.Fatalf("cross-owner status=%d body=%s", response.Code, response.Body.String())
+	}
+	missing := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/file_batches", `{"file_ids":["file_c","missing"]}`)
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing status=%d body=%s", missing.Code, missing.Body.String())
+	}
+	if _, found := store.files["vs_owned/file_c"]; found {
+		t.Fatal("partial attachment survived failed batch")
+	}
+	for _, body := range []string{
+		`{"file_ids":["file_c","file_c"]}`,
+		`{"file_ids":["file_c"],"files":[{"file_id":"file_c"}]}`,
+		`{"files":[{"file_id":"file_c"}],"attributes":{"global":true}}`,
+	} {
+		if response := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/file_batches", body); response.Code != http.StatusBadRequest {
+			t.Fatalf("body=%s status=%d response=%s", body, response.Code, response.Body.String())
+		}
+	}
+	static := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/file_batches", `{"file_ids":["file_c"],"chunking_strategy":{"type":"static","static":{"max_chunk_size_tokens":800,"chunk_overlap_tokens":400}}}`)
+	if static.Code != http.StatusUnprocessableEntity || !strings.Contains(static.Body.String(), `"vector_store_chunking_unsupported"`) {
+		t.Fatalf("static status=%d body=%s", static.Code, static.Body.String())
+	}
+	perFile := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/file_batches", `{"files":[{"file_id":"file_c","attributes":{"region":"us"},"chunking_strategy":{"type":"auto"}}]}`)
+	if perFile.Code != http.StatusOK || !strings.Contains(perFile.Body.String(), `"completed":1`) {
+		t.Fatalf("per-file status=%d body=%s", perFile.Code, perFile.Body.String())
+	}
+}
+
+func (s *memoryVectorStore) CreateVectorStoreFileBatch(_ context.Context, batch vectorstate.FileBatch, entries []vectorstate.FileBatchEntry, quota int, byteQuota int64) (vectorstate.FileBatch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if batch.ID == "" || batch.VectorStoreID == "" || batch.OwnerKey == "" || len(entries) < 1 || len(entries) > 2000 || quota < 1 || byteQuota < 1 {
+		return vectorstate.FileBatch{}, vectorstate.ErrInvalid
+	}
+	store, ok := s.stores[batch.VectorStoreID]
+	if !ok || store.OwnerKey != batch.OwnerKey {
+		return vectorstate.FileBatch{}, vectorstate.ErrNotFound
+	}
+	if s.batches == nil {
+		s.batches = map[string]vectorstate.FileBatch{}
+	}
+	if s.batchFiles == nil {
+		s.batchFiles = map[string][]string{}
+	}
+	if _, found := s.batches[batch.ID]; found {
+		return vectorstate.FileBatch{}, vectorstate.ErrConflict
+	}
+	count, used := 0, int64(0)
+	for _, file := range s.files {
+		if file.OwnerKey == batch.OwnerKey && file.VectorStoreID == batch.VectorStoreID {
+			count++
+			used += file.Bytes
+		}
+	}
+	if count > quota || len(entries) > quota-count {
+		return vectorstate.FileBatch{}, vectorstate.ErrFileQuotaExceeded
+	}
+	seen := map[string]struct{}{}
+	added := int64(0)
+	for _, entry := range entries {
+		if entry.FileID == "" || vectorstate.ValidateAttributes(entry.Attributes) != "" {
+			return vectorstate.FileBatch{}, vectorstate.ErrInvalid
+		}
+		size, found := s.availableFiles[entry.FileID]
+		if !found {
+			return vectorstate.FileBatch{}, vectorstate.ErrFileNotFound
+		}
+		if _, duplicate := seen[entry.FileID]; duplicate {
+			return vectorstate.FileBatch{}, vectorstate.ErrConflict
+		}
+		seen[entry.FileID] = struct{}{}
+		if _, attached := s.files[batch.VectorStoreID+"/"+entry.FileID]; attached {
+			return vectorstate.FileBatch{}, vectorstate.ErrConflict
+		}
+		if size < 0 || added > byteQuota || size > byteQuota-added {
+			return vectorstate.FileBatch{}, vectorstate.ErrByteQuotaExceeded
+		}
+		added += size
+	}
+	if used < 0 || used > byteQuota || added > byteQuota-used {
+		return vectorstate.FileBatch{}, vectorstate.ErrByteQuotaExceeded
+	}
+	batch.Status, batch.Total, batch.Completed, batch.CreatedAt = "completed", len(entries), len(entries), time.Unix(300, 0).UTC()
+	ids := make([]string, len(entries))
+	for index, entry := range entries {
+		ids[index] = entry.FileID
+		s.files[batch.VectorStoreID+"/"+entry.FileID] = vectorstate.File{VectorStoreID: batch.VectorStoreID, FileID: entry.FileID, OwnerKey: batch.OwnerKey, Status: "completed", Bytes: s.availableFiles[entry.FileID], Attributes: normalizedVectorStoreAttributes(entry.Attributes), CreatedAt: time.Unix(300+int64(index), 0).UTC()}
+	}
+	s.batches[batch.ID], s.batchFiles[batch.ID] = batch, ids
+	return batch, nil
+}
+
+func (s *memoryVectorStore) GetVectorStoreFileBatch(_ context.Context, owner, storeID, batchID string) (vectorstate.FileBatch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	batch, found := s.batches[batchID]
+	if !found || batch.OwnerKey != owner || batch.VectorStoreID != storeID {
+		return vectorstate.FileBatch{}, vectorstate.ErrFileBatchNotFound
+	}
+	return batch, nil
+}
+
+func (s *memoryVectorStore) ListVectorStoreFileBatchFiles(ctx context.Context, owner, storeID, batchID string, options vectorstate.FileListOptions) ([]vectorstate.File, string, error) {
+	s.mu.Lock()
+	batch, found := s.batches[batchID]
+	ids := append([]string(nil), s.batchFiles[batchID]...)
+	selected := make(map[string]vectorstate.File, len(ids))
+	for _, id := range ids {
+		selected[storeID+"/"+id] = s.files[storeID+"/"+id]
+	}
+	store := s.stores[storeID]
+	s.mu.Unlock()
+	if !found || batch.OwnerKey != owner || batch.VectorStoreID != storeID {
+		return nil, "", vectorstate.ErrFileBatchNotFound
+	}
+	temporary := &memoryVectorStore{stores: map[string]vectorstate.VectorStore{storeID: store}, files: selected}
+	return temporary.ListVectorStoreFiles(ctx, owner, storeID, options)
 }
 
 func (s *memoryVectorStore) AttachVectorStoreFile(_ context.Context, owner, storeID, fileID string, attributes map[string]any, quota int, byteQuota int64) (vectorstate.File, error) {
