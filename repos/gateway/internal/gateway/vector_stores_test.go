@@ -22,7 +22,7 @@ type memoryVectorStore struct {
 	availableFiles map[string]int64
 }
 
-func (s *memoryVectorStore) AttachVectorStoreFile(_ context.Context, owner, storeID, fileID string, attributes map[string]string, quota int, byteQuota int64) (vectorstate.File, error) {
+func (s *memoryVectorStore) AttachVectorStoreFile(_ context.Context, owner, storeID, fileID string, attributes map[string]any, quota int, byteQuota int64) (vectorstate.File, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	store, ok := s.stores[storeID]
@@ -50,7 +50,7 @@ func (s *memoryVectorStore) AttachVectorStoreFile(_ context.Context, owner, stor
 	if usedBytes < 0 || bytes < 0 || usedBytes > byteQuota || bytes > byteQuota-usedBytes {
 		return vectorstate.File{}, vectorstate.ErrByteQuotaExceeded
 	}
-	file := vectorstate.File{VectorStoreID: storeID, FileID: fileID, OwnerKey: owner, Status: "completed", Bytes: bytes, Attributes: normalizedMetadata(attributes), CreatedAt: time.Unix(200+int64(count), 0).UTC()}
+	file := vectorstate.File{VectorStoreID: storeID, FileID: fileID, OwnerKey: owner, Status: "completed", Bytes: bytes, Attributes: normalizedVectorStoreAttributes(attributes), CreatedAt: time.Unix(200+int64(count), 0).UTC()}
 	s.files[key] = file
 	return file, nil
 }
@@ -100,7 +100,7 @@ func (s *memoryVectorStore) GetVectorStoreFile(_ context.Context, owner, storeID
 	return file, nil
 }
 
-func (s *memoryVectorStore) UpdateVectorStoreFile(_ context.Context, owner, storeID, fileID string, attributes map[string]string) (vectorstate.File, error) {
+func (s *memoryVectorStore) UpdateVectorStoreFile(_ context.Context, owner, storeID, fileID string, attributes map[string]any) (vectorstate.File, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := storeID + "/" + fileID
@@ -108,7 +108,7 @@ func (s *memoryVectorStore) UpdateVectorStoreFile(_ context.Context, owner, stor
 	if !ok || file.OwnerKey != owner {
 		return vectorstate.File{}, vectorstate.ErrFileNotFound
 	}
-	file.Attributes = normalizedMetadata(attributes)
+	file.Attributes = normalizedVectorStoreAttributes(attributes)
 	s.files[key] = file
 	return file, nil
 }
@@ -291,13 +291,13 @@ func TestVectorStoreFileHTTPLifecyclePaginationAndIsolation(t *testing.T) {
 	for _, fileID := range []string{"file_one", "file_two"} {
 		body := `{"file_id":"` + fileID + `"}`
 		if fileID == "file_one" {
-			body = `{"file_id":"file_one","attributes":{"region":"eu","category":"docs"}}`
+			body = `{"file_id":"file_one","attributes":{"region":"eu","priority":2,"active":true}}`
 		}
 		response := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files", body)
 		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"object":"vector_store.file"`) || !strings.Contains(response.Body.String(), fileID) {
 			t.Fatalf("attach %s status=%d body=%s", fileID, response.Code, response.Body.String())
 		}
-		if fileID == "file_one" && !strings.Contains(response.Body.String(), `"region":"eu"`) {
+		if fileID == "file_one" && (!strings.Contains(response.Body.String(), `"priority":2`) || !strings.Contains(response.Body.String(), `"active":true`)) {
 			t.Fatalf("attach attributes body=%s", response.Body.String())
 		}
 	}
@@ -306,15 +306,15 @@ func TestVectorStoreFileHTTPLifecyclePaginationAndIsolation(t *testing.T) {
 		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
 	}
 	got := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_one", "")
-	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"usage_bytes":11`) || !strings.Contains(got.Body.String(), `"category":"docs"`) {
+	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"usage_bytes":11`) || !strings.Contains(got.Body.String(), `"priority":2`) || !strings.Contains(got.Body.String(), `"active":true`) {
 		t.Fatalf("get status=%d body=%s", got.Code, got.Body.String())
 	}
-	updated := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files/file_one", `{"attributes":{"region":"us"}}`)
-	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"region":"us"`) || strings.Contains(updated.Body.String(), `"category":"docs"`) {
+	updated := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files/file_one", `{"attributes":{"region":"us","priority":3.5,"active":false}}`)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"region":"us"`) || !strings.Contains(updated.Body.String(), `"priority":3.5`) || !strings.Contains(updated.Body.String(), `"active":false`) {
 		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body.String())
 	}
 	got = callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_one", "")
-	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"region":"us"`) || strings.Contains(got.Body.String(), `"category":"docs"`) {
+	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"region":"us"`) || !strings.Contains(got.Body.String(), `"priority":3.5`) || !strings.Contains(got.Body.String(), `"active":false`) {
 		t.Fatalf("updated get status=%d body=%s", got.Code, got.Body.String())
 	}
 	parent := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned", "")
@@ -353,6 +353,7 @@ func TestVectorStoreFilesRejectInvalidMissingDuplicateAndQuota(t *testing.T) {
 		{"/v1/vector_stores/vs_owned/files", `{}`, http.StatusBadRequest},
 		{"/v1/vector_stores/vs_owned/files", `{"file_id":"missing"}`, http.StatusNotFound},
 		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","attributes":{"too_long":"` + strings.Repeat("x", 513) + `"}}`, http.StatusBadRequest},
+		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","attributes":{"nested":{"bad":true}}}`, http.StatusBadRequest},
 		{"/v1/vector_stores/missing/files", `{"file_id":"file_one"}`, http.StatusNotFound},
 		{"/v1/vector_stores/vs_owned/files?extra=1", `{"file_id":"file_one"}`, http.StatusBadRequest},
 		{"/v1/vector_stores/vs_owned/files/file_one", `{}`, http.StatusBadRequest},

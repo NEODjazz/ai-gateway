@@ -100,9 +100,12 @@ func TestPostgresVectorStoreFileLifecycleIsolationAndQuotaIntegration(t *testing
 	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "missing", nil, 2, 100); !errors.Is(err, vectorstate.ErrFileNotFound) {
 		t.Fatalf("missing file error=%v", err)
 	}
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_a", map[string]any{"nested": map[string]any{"bad": true}}, 2, 100); !errors.Is(err, vectorstate.ErrInvalid) {
+		t.Fatalf("nested attributes error=%v", err)
+	}
 	for _, id := range []string{"file_vector_a", "file_vector_b"} {
-		attached, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_files", id, map[string]string{"region": "eu"}, 2, 100)
-		if attachErr != nil || attached.Status != "completed" || attached.Bytes != 1 || attached.Attributes["region"] != "eu" {
+		attached, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_files", id, map[string]any{"region": "eu", "priority": float64(2), "active": true}, 2, 100)
+		if attachErr != nil || attached.Status != "completed" || attached.Bytes != 1 || attached.Attributes["region"] != "eu" || attached.Attributes["priority"] != float64(2) || attached.Attributes["active"] != true {
 			t.Fatalf("attached=%+v err=%v", attached, attachErr)
 		}
 	}
@@ -127,11 +130,11 @@ func TestPostgresVectorStoreFileLifecycleIsolationAndQuotaIntegration(t *testing
 	if err != nil || gotFile.Attributes["region"] != "eu" {
 		t.Fatalf("got file=%+v err=%v", gotFile, err)
 	}
-	updatedFile, err := store.UpdateVectorStoreFile(ctx, owner, "vs_files", "file_vector_a", map[string]string{"region": "us"})
-	if err != nil || updatedFile.Attributes["region"] != "us" || len(updatedFile.Attributes) != 1 {
+	updatedFile, err := store.UpdateVectorStoreFile(ctx, owner, "vs_files", "file_vector_a", map[string]any{"region": "us", "priority": float64(3.5), "active": false})
+	if err != nil || updatedFile.Attributes["region"] != "us" || updatedFile.Attributes["priority"] != float64(3.5) || updatedFile.Attributes["active"] != false || len(updatedFile.Attributes) != 3 {
 		t.Fatalf("updated file=%+v err=%v", updatedFile, err)
 	}
-	if _, err = store.UpdateVectorStoreFile(ctx, owner+"/other", "vs_files", "file_vector_a", map[string]string{}); !errors.Is(err, vectorstate.ErrFileNotFound) {
+	if _, err = store.UpdateVectorStoreFile(ctx, owner+"/other", "vs_files", "file_vector_a", map[string]any{}); !errors.Is(err, vectorstate.ErrFileNotFound) {
 		t.Fatalf("cross-owner update error=%v", err)
 	}
 	vectorStore, err := store.GetVectorStore(ctx, owner, "vs_files")

@@ -1726,8 +1726,9 @@ metadata lifecycle.
 
 Attaching a file applies both the atomic per-store file-count limit and the
 overflow-safe aggregate byte limit configured by `VECTOR_STORE_FILE_QUOTA` and
-`VECTOR_STORE_BYTE_QUOTA`. Each attachment can persist up to 16 string
-attributes with keys up to 64 characters and values up to 512 characters.
+`VECTOR_STORE_BYTE_QUOTA`. Each attachment can persist up to 16 string, finite
+number, or boolean attributes. Keys are limited to 64 characters and string
+values to 512 characters.
 Expired source files do not consume either limit.
 `POST /v1/vector_stores/{id}/files/{file_id}` atomically replaces the complete
 attribute map for an owned attachment; an empty object clears it.

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.265
+  version: 0.1.266
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -5056,7 +5056,11 @@ components:
         attributes:
           type: object
           propertyNames: {maxLength: 64}
-          additionalProperties: {type: string, maxLength: 512}
+          additionalProperties:
+            oneOf:
+              - {type: string, maxLength: 512}
+              - {type: number}
+              - {type: boolean}
           maxProperties: 16
     VectorStoreFile:
       type: object
@@ -5073,7 +5077,11 @@ components:
         attributes:
           type: object
           propertyNames: {maxLength: 64}
-          additionalProperties: {type: string, maxLength: 512}
+          additionalProperties:
+            oneOf:
+              - {type: string, maxLength: 512}
+              - {type: number}
+              - {type: boolean}
           maxProperties: 16
     VectorStoreFileUpdateRequest:
       type: object
@@ -5083,7 +5091,11 @@ components:
         attributes:
           type: object
           propertyNames: {maxLength: 64}
-          additionalProperties: {type: string, maxLength: 512}
+          additionalProperties:
+            oneOf:
+              - {type: string, maxLength: 512}
+              - {type: number}
+              - {type: boolean}
           maxProperties: 16
     VectorStoreFileList:
       type: object
@@ -5118,7 +5130,11 @@ components:
       anyOf:
         - type: object
           propertyNames: {maxLength: 64}
-          additionalProperties: {type: string, maxLength: 512}
+          additionalProperties:
+            oneOf:
+              - {type: string, maxLength: 512}
+              - {type: number}
+              - {type: boolean}
           maxProperties: 16
         - $ref: '#/components/schemas/VectorStoreSearchComparisonFilter'
         - $ref: '#/components/schemas/VectorStoreSearchCompoundFilter'
@@ -5174,7 +5190,11 @@ components:
         attributes:
           type: object
           propertyNames: {maxLength: 64}
-          additionalProperties: {type: string, maxLength: 512}
+          additionalProperties:
+            oneOf:
+              - {type: string, maxLength: 512}
+              - {type: number}
+              - {type: boolean}
           maxProperties: 16
         content: {type: array, minItems: 1, maxItems: 1, items: {$ref: '#/components/schemas/VectorStoreSearchContent'}}
     VectorStoreSearchResultPage:

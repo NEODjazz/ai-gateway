@@ -5,17 +5,16 @@ import (
 	"net/http"
 	"strconv"
 
-	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/vectorstate"
 )
 
 type attachVectorStoreFileRequest struct {
-	FileID     string            `json:"file_id"`
-	Attributes map[string]string `json:"attributes,omitempty"`
+	FileID     string         `json:"file_id"`
+	Attributes map[string]any `json:"attributes,omitempty"`
 }
 
 type updateVectorStoreFileRequest struct {
-	Attributes *map[string]string `json:"attributes"`
+	Attributes *map[string]any `json:"attributes"`
 }
 
 func (h Handler) AttachVectorStoreFile(w http.ResponseWriter, r *http.Request) {
@@ -31,11 +30,11 @@ func (h Handler) AttachVectorStoreFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "file_id is invalid")
 		return
 	}
-	if message := openai.ValidateMetadata(input.Attributes); message != "" {
+	if message := vectorstate.ValidateAttributes(input.Attributes); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
-	file, err := h.vectorStores.AttachVectorStoreFile(r.Context(), fileOwnerKey(req), r.PathValue("id"), input.FileID, normalizedMetadata(input.Attributes), h.vectorStoreConfig.FileQuota, h.vectorStoreConfig.ByteQuota)
+	file, err := h.vectorStores.AttachVectorStoreFile(r.Context(), fileOwnerKey(req), r.PathValue("id"), input.FileID, normalizedVectorStoreAttributes(input.Attributes), h.vectorStoreConfig.FileQuota, h.vectorStoreConfig.ByteQuota)
 	if err != nil {
 		writeVectorStoreFileError(w, err)
 		return
@@ -108,11 +107,11 @@ func (h Handler) UpdateVectorStoreFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "attributes are required")
 		return
 	}
-	if message := openai.ValidateMetadata(*input.Attributes); message != "" {
+	if message := vectorstate.ValidateAttributes(*input.Attributes); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
-	file, err := h.vectorStores.UpdateVectorStoreFile(r.Context(), fileOwnerKey(req), r.PathValue("id"), fileID, normalizedMetadata(*input.Attributes))
+	file, err := h.vectorStores.UpdateVectorStoreFile(r.Context(), fileOwnerKey(req), r.PathValue("id"), fileID, normalizedVectorStoreAttributes(*input.Attributes))
 	if err != nil {
 		writeVectorStoreFileError(w, err)
 		return
@@ -176,7 +175,7 @@ func publicVectorStoreFile(file vectorstate.File) map[string]any {
 	return map[string]any{
 		"id": file.FileID, "object": "vector_store.file", "usage_bytes": file.Bytes,
 		"created_at": file.CreatedAt.Unix(), "vector_store_id": file.VectorStoreID,
-		"status": file.Status, "last_error": nil, "attributes": normalizedMetadata(file.Attributes),
+		"status": file.Status, "last_error": nil, "attributes": normalizedVectorStoreAttributes(file.Attributes),
 	}
 }
 

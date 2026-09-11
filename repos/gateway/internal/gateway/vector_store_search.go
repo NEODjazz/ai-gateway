@@ -35,7 +35,7 @@ type vectorStoreSearchRequest struct {
 type vectorSearchChunk struct {
 	fileID     string
 	filename   string
-	attributes map[string]string
+	attributes map[string]any
 	text       string
 	index      int
 }
@@ -44,7 +44,7 @@ type vectorSearchResult struct {
 	FileID     string             `json:"file_id"`
 	Filename   string             `json:"filename"`
 	Score      float64            `json:"score"`
-	Attributes map[string]string  `json:"attributes"`
+	Attributes map[string]any     `json:"attributes"`
 	Content    []vectorSearchText `json:"content"`
 	chunkIndex int
 }
@@ -185,7 +185,7 @@ func (h Handler) loadVectorSearchChunks(r *http.Request, owner, storeID string, 
 			if len(chunks) >= maxVectorSearchChunks {
 				return nil, errVectorSearchTooLarge
 			}
-			chunks = append(chunks, vectorSearchChunk{fileID: file.ID, filename: file.Filename, attributes: normalizedMetadata(attached.Attributes), text: text, index: len(chunks)})
+			chunks = append(chunks, vectorSearchChunk{fileID: file.ID, filename: file.Filename, attributes: normalizedVectorStoreAttributes(attached.Attributes), text: text, index: len(chunks)})
 		}
 	}
 	if len(chunks) == 0 {

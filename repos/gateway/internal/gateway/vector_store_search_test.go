@@ -70,8 +70,8 @@ func TestVectorStoreSearchUsesOwnedTextPolicyAndEmbeddingBilling(t *testing.T) {
 	vectors := &memoryVectorStore{
 		stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: owner, Name: "docs", Status: "completed"}},
 		files: map[string]vectorstate.File{
-			"vs_owned/file_alpha": {VectorStoreID: "vs_owned", FileID: "file_alpha", OwnerKey: owner, Status: "completed", Bytes: 10, Attributes: map[string]string{"region": "eu"}, CreatedAt: time.Unix(2, 0)},
-			"vs_owned/file_beta":  {VectorStoreID: "vs_owned", FileID: "file_beta", OwnerKey: owner, Status: "completed", Bytes: 9, Attributes: map[string]string{"region": "us"}, CreatedAt: time.Unix(1, 0)},
+			"vs_owned/file_alpha": {VectorStoreID: "vs_owned", FileID: "file_alpha", OwnerKey: owner, Status: "completed", Bytes: 10, Attributes: map[string]any{"region": "eu", "priority": float64(2), "active": true}, CreatedAt: time.Unix(2, 0)},
+			"vs_owned/file_beta":  {VectorStoreID: "vs_owned", FileID: "file_beta", OwnerKey: owner, Status: "completed", Bytes: 9, Attributes: map[string]any{"region": "us"}, CreatedAt: time.Unix(1, 0)},
 		},
 	}
 	files := &memoryFileStore{files: map[string]filestate.File{
@@ -115,7 +115,7 @@ func TestVectorStoreSearchUsesOwnedTextPolicyAndEmbeddingBilling(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Object != "vector_store.search_results.page" || len(body.SearchQuery) != 1 || body.SearchQuery[0] != "alpha" || body.HasMore || len(body.Data) != 1 || body.Data[0].FileID != "file_alpha" || body.Data[0].Attributes["region"] != "eu" || body.Data[0].Content[0].Text != "alpha text" {
+	if body.Object != "vector_store.search_results.page" || len(body.SearchQuery) != 1 || body.SearchQuery[0] != "alpha" || body.HasMore || len(body.Data) != 1 || body.Data[0].FileID != "file_alpha" || body.Data[0].Attributes["region"] != "eu" || body.Data[0].Attributes["priority"] != float64(2) || body.Data[0].Attributes["active"] != true || body.Data[0].Content[0].Text != "alpha text" {
 		t.Fatalf("response=%+v", body)
 	}
 }
@@ -172,7 +172,7 @@ func TestVectorSearchRankingRejectsMalformedVectors(t *testing.T) {
 }
 
 func TestVectorSearchFiltersSupportExactComparisonAndCompounds(t *testing.T) {
-	attributes := map[string]string{"region": "eu", "category": "docs"}
+	attributes := map[string]any{"region": "eu", "category": "docs"}
 	for _, test := range []struct {
 		raw   string
 		match bool
@@ -194,7 +194,7 @@ func TestVectorSearchFiltersSupportExactComparisonAndCompounds(t *testing.T) {
 			t.Fatalf("filter=%s match=%t want=%t", test.raw, match, test.match)
 		}
 	}
-	numeric := map[string]string{"score": "10.5", "active": "true"}
+	numeric := map[string]any{"score": float64(10.5), "active": true}
 	for _, raw := range []string{
 		`{"type":"gt","key":"score","value":10}`,
 		`{"type":"lte","key":"score","value":10.5}`,

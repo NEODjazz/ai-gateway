@@ -5,10 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-	"strconv"
 	"unicode/utf8"
 
-	"ai-gateway-gateway/internal/openai"
+	"ai-gateway-gateway/internal/vectorstate"
 )
 
 const (
@@ -18,14 +17,15 @@ const (
 )
 
 type vectorSearchFilter interface {
-	matches(map[string]string) bool
+	matches(map[string]any) bool
 }
 
-type vectorSearchExactFilter map[string]string
+type vectorSearchExactFilter map[string]any
 
-func (f vectorSearchExactFilter) matches(attributes map[string]string) bool {
+func (f vectorSearchExactFilter) matches(attributes map[string]any) bool {
 	for key, value := range f {
-		if attributes[key] != value {
+		attribute, exists := attributes[key]
+		if !exists || !compareVectorSearchAttribute(attribute, value, "eq") {
 			return false
 		}
 	}
@@ -38,7 +38,7 @@ type vectorSearchComparisonFilter struct {
 	values []any
 }
 
-func (f vectorSearchComparisonFilter) matches(attributes map[string]string) bool {
+func (f vectorSearchComparisonFilter) matches(attributes map[string]any) bool {
 	attribute, exists := attributes[f.key]
 	if !exists {
 		return false
@@ -61,7 +61,7 @@ type vectorSearchCompoundFilter struct {
 	children []vectorSearchFilter
 }
 
-func (f vectorSearchCompoundFilter) matches(attributes map[string]string) bool {
+func (f vectorSearchCompoundFilter) matches(attributes map[string]any) bool {
 	if f.kind == "and" {
 		for _, child := range f.children {
 			if !child.matches(attributes) {
@@ -91,11 +91,11 @@ func parseVectorSearchFilter(raw json.RawMessage) (vectorSearchFilter, error) {
 	_, hasValue := object["value"]
 	_, hasChildren := object["filters"]
 	if !hasType || !hasChildren && !(hasKey && hasValue) {
-		var exact map[string]string
+		var exact map[string]any
 		if err := json.Unmarshal(raw, &exact); err != nil {
-			return nil, errors.New("filters must map attribute names to string values")
+			return nil, errors.New("filters must map attribute names to scalar values")
 		}
-		if message := openai.ValidateMetadata(exact); message != "" {
+		if message := vectorstate.ValidateAttributes(exact); message != "" {
 			return nil, errors.New(message)
 		}
 		return vectorSearchExactFilter(exact), nil
@@ -193,32 +193,50 @@ func decodeVectorSearchFilterValues(raw json.RawMessage, list bool) ([]any, erro
 	return values, nil
 }
 
-func compareVectorSearchAttribute(attribute string, value any, kind string) bool {
+func compareVectorSearchAttribute(attribute, value any, kind string) bool {
 	switch typed := value.(type) {
 	case string:
-		return attribute == typed
+		actual, ok := attribute.(string)
+		return ok && actual == typed
 	case bool:
-		parsed, err := strconv.ParseBool(attribute)
-		return err == nil && parsed == typed
+		actual, ok := attribute.(bool)
+		return ok && actual == typed
 	case float64:
-		parsed, err := strconv.ParseFloat(attribute, 64)
-		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+		actual, ok := vectorSearchNumber(attribute)
+		if !ok {
 			return false
 		}
 		switch kind {
 		case "gt":
-			return parsed > typed
+			return actual > typed
 		case "gte":
-			return parsed >= typed
+			return actual >= typed
 		case "lt":
-			return parsed < typed
+			return actual < typed
 		case "lte":
-			return parsed <= typed
+			return actual <= typed
 		default:
-			return parsed == typed
+			return actual == typed
 		}
 	}
 	return false
+}
+
+func vectorSearchNumber(value any) (float64, bool) {
+	var number float64
+	switch typed := value.(type) {
+	case float64:
+		number = typed
+	case json.Number:
+		parsed, err := typed.Float64()
+		if err != nil {
+			return 0, false
+		}
+		number = parsed
+	default:
+		return 0, false
+	}
+	return number, !math.IsNaN(number) && !math.IsInf(number, 0)
 }
 
 func onlyVectorFilterKeys(object map[string]json.RawMessage, keys ...string) bool {

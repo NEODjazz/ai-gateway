@@ -162,7 +162,7 @@ func (s *PostgresStore) DeleteVectorStore(ctx context.Context, owner, id string)
 	return nil
 }
 
-func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vectorStoreID, fileID string, attributes map[string]string, quota int, byteQuota int64) (vectorstate.File, error) {
+func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vectorStoreID, fileID string, attributes map[string]any, quota int, byteQuota int64) (vectorstate.File, error) {
 	if s == nil || s.pool == nil {
 		return vectorstate.File{}, vectorstate.ErrUnavailable
 	}
@@ -170,7 +170,10 @@ func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vector
 		return vectorstate.File{}, vectorstate.ErrInvalid
 	}
 	if attributes == nil {
-		attributes = map[string]string{}
+		attributes = map[string]any{}
+	}
+	if vectorstate.ValidateAttributes(attributes) != "" {
+		return vectorstate.File{}, vectorstate.ErrInvalid
 	}
 	encodedAttributes, err := json.Marshal(attributes)
 	if err != nil {
@@ -292,11 +295,14 @@ func (s *PostgresStore) GetVectorStoreFile(ctx context.Context, owner, vectorSto
 	return getVectorStoreFile(ctx, s.pool, owner, vectorStoreID, fileID)
 }
 
-func (s *PostgresStore) UpdateVectorStoreFile(ctx context.Context, owner, vectorStoreID, fileID string, attributes map[string]string) (vectorstate.File, error) {
+func (s *PostgresStore) UpdateVectorStoreFile(ctx context.Context, owner, vectorStoreID, fileID string, attributes map[string]any) (vectorstate.File, error) {
 	if s == nil || s.pool == nil {
 		return vectorstate.File{}, vectorstate.ErrUnavailable
 	}
 	if owner == "" || vectorStoreID == "" || fileID == "" || attributes == nil {
+		return vectorstate.File{}, vectorstate.ErrInvalid
+	}
+	if vectorstate.ValidateAttributes(attributes) != "" {
 		return vectorstate.File{}, vectorstate.ErrInvalid
 	}
 	encodedAttributes, err := json.Marshal(attributes)
