@@ -417,13 +417,19 @@ func TestVideoBillingFailuresCompensateProviderAndOwnership(t *testing.T) {
 
 	t.Run("commit is retried durably", func(t *testing.T) {
 		runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
-		billing := &videoBillingModule{commitErr: errors.New("billing unavailable")}
+		commitErr := errors.New("billing unavailable")
+		billing := &videoBillingModule{commitErr: commitErr}
 		store := &memoryVideoStore{records: map[string]videostate.Record{}}
 		gateway := videoTestGateway(store, runtime, billing)
 		response := videoRequest(t, Routes(gateway), http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat"}`)
 		processed, err := gateway.ProcessVideoSettlements(t.Context())
-		if response.Code != http.StatusOK || processed != 1 || err != nil || strings.Join(runtime.actions, ",") != "create,retrieve" || strings.Join(billing.phases, ",") != "reserve,commit" || len(store.records) != 1 || len(store.jobs) != 1 {
+		if response.Code != http.StatusOK || processed != 1 || !errors.Is(err, commitErr) || strings.Join(runtime.actions, ",") != "create,retrieve" || strings.Join(billing.phases, ",") != "reserve,commit" || len(store.records) != 1 || len(store.jobs) != 1 {
 			t.Fatalf("status=%d actions=%v phases=%v records=%v body=%s", response.Code, runtime.actions, billing.phases, store.records, response.Body.String())
+		}
+		for _, job := range store.jobs {
+			if job.Attempts != 1 || !job.LeaseUntil.IsZero() {
+				t.Fatalf("retry job=%+v", job)
+			}
 		}
 	})
 }

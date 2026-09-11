@@ -465,26 +465,26 @@ func (h Handler) ProcessVideoSettlements(ctx context.Context) (int, error) {
 func (h Handler) processVideoSettlement(ctx context.Context, claimed asyncstate.Job) error {
 	var job videoSettlementJob
 	if json.Unmarshal(claimed.Payload, &job) != nil || job.RequestID != claimed.ExecutionID || job.CredentialID == "" || job.Model == "" || job.VideoSeconds < 1 {
-		return h.retryVideoSettlement(ctx, claimed)
+		return h.retryVideoSettlement(ctx, claimed, errors.New("invalid durable settlement payload"))
 	}
 	record, err := h.videos.GetVideoRecord(ctx, claimed.OwnerKey, claimed.ResourceID)
 	if err != nil {
-		return h.retryVideoSettlement(ctx, claimed)
+		return h.retryVideoSettlement(ctx, claimed, err)
 	}
 	runtime, ok := h.provider.(provider.VideoProvider)
 	if !ok {
-		return h.retryVideoSettlement(ctx, claimed)
+		return h.retryVideoSettlement(ctx, claimed, errors.New("video provider is unavailable"))
 	}
 	video, err := runtime.RetrieveVideo(ctx, record.Binding, record.Video.ID)
 	if err != nil {
-		return h.retryVideoSettlement(ctx, claimed)
+		return h.retryVideoSettlement(ctx, claimed, err)
 	}
 	video = mergeVideoSnapshot(record.Video, video)
 	if video.Status == "queued" || video.Status == "in_progress" {
 		if _, err := h.videos.UpdateVideoRecord(ctx, claimed.OwnerKey, video); err != nil {
-			return h.retryVideoSettlement(ctx, claimed)
+			return h.retryVideoSettlement(ctx, claimed, err)
 		}
-		return h.retryVideoSettlement(ctx, claimed)
+		return h.retryVideoSettlement(ctx, claimed, nil)
 	}
 	request := job.requestContext()
 	switch video.Status {
@@ -495,17 +495,17 @@ func (h Handler) processVideoSettlement(ctx context.Context, claimed asyncstate.
 		request.Metadata["gateway.video_usage_exact"] = "true"
 		request.VideoProviderCostUSDTicks = video.ProviderCostUSDTicks
 		if err := h.resourceBillingPipeline().RunBillingLifecycle(ctx, &request, "commit", nil); err != nil {
-			return h.retryVideoSettlement(ctx, claimed)
+			return h.retryVideoSettlement(ctx, claimed, err)
 		}
 	case "failed", "cancelled", "expired":
 		if err := h.resourceBillingPipeline().RunBillingLifecycle(ctx, &request, "cancel", errors.New("video generation "+video.Status)); err != nil {
-			return h.retryVideoSettlement(ctx, claimed)
+			return h.retryVideoSettlement(ctx, claimed, err)
 		}
 	default:
-		return h.retryVideoSettlement(ctx, claimed)
+		return h.retryVideoSettlement(ctx, claimed, fmt.Errorf("unsupported video status %q", video.Status))
 	}
 	if _, err := h.videos.UpdateVideoRecord(ctx, claimed.OwnerKey, video); err != nil {
-		return h.retryVideoSettlement(ctx, claimed)
+		return h.retryVideoSettlement(ctx, claimed, err)
 	}
 	return h.videoJobs.CompleteAsyncJob(ctx, claimed.Kind, claimed.ResourceID, claimed.LeaseGeneration)
 }
@@ -540,8 +540,9 @@ func (h Handler) videoSettlementPending(ctx context.Context, owner, id string) (
 	return h.videoJobs.HasAsyncJob(ctx, videoSettlementJobKind, id, owner)
 }
 
-func (h Handler) retryVideoSettlement(ctx context.Context, job asyncstate.Job) error {
-	return h.videoJobs.RetryAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration, videoSettlementRetry(job.Attempts))
+func (h Handler) retryVideoSettlement(ctx context.Context, job asyncstate.Job, cause error) error {
+	retryErr := h.videoJobs.RetryAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration, videoSettlementRetry(job.Attempts))
+	return errors.Join(cause, retryErr)
 }
 
 func videoSettlementRetry(attempt int) time.Duration {
