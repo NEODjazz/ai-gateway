@@ -46,7 +46,8 @@ type VectorStoreConfig struct {
 }
 
 type AssistantConfig struct {
-	OwnerQuota int
+	OwnerQuota       int
+	ThreadOwnerQuota int
 }
 
 type A2ATaskConfig struct {
@@ -192,6 +193,7 @@ func Load() Config {
 	vectorStoreOwnerQuota := envInt("VECTOR_STORE_OWNER_QUOTA", 1000)
 	vectorStoreFileQuota := envInt("VECTOR_STORE_FILE_QUOTA", 10000)
 	assistantOwnerQuota := envInt("ASSISTANT_OWNER_QUOTA", 1000)
+	assistantThreadOwnerQuota := envInt("ASSISTANT_THREAD_OWNER_QUOTA", 10000)
 	a2aTaskOwnerQuota := envInt("A2A_TASK_OWNER_QUOTA", 1000)
 	a2aTaskTTLSeconds := envInt("A2A_TASK_TTL_SECONDS", 2_592_000)
 	a2aSubscriptionLimit := envInt("A2A_SUBSCRIPTION_LIMIT", 256)
@@ -235,6 +237,9 @@ func Load() Config {
 	}
 	if assistantOwnerQuota < 1 || assistantOwnerQuota > 100000 {
 		assistantErr = errors.New("assistant owner quota must be between 1 and 100000")
+	}
+	if assistantThreadOwnerQuota < 1 || assistantThreadOwnerQuota > 1000000 {
+		assistantErr = errors.Join(assistantErr, errors.New("assistant thread owner quota must be between 1 and 1000000"))
 	}
 	if a2aTaskOwnerQuota < 1 || a2aTaskOwnerQuota > 100000 {
 		a2aTaskErr = errors.New("A2A task owner quota must be between 1 and 100000")
@@ -308,7 +313,7 @@ func Load() Config {
 		},
 		Files:        FileConfig{MaxBytes: fileMaxBytes, OwnerQuotaBytes: fileOwnerQuotaBytes},
 		VectorStores: VectorStoreConfig{OwnerQuota: vectorStoreOwnerQuota, FileQuota: vectorStoreFileQuota},
-		Assistants:   AssistantConfig{OwnerQuota: assistantOwnerQuota},
+		Assistants:   AssistantConfig{OwnerQuota: assistantOwnerQuota, ThreadOwnerQuota: assistantThreadOwnerQuota},
 		A2ATasks: A2ATaskConfig{
 			OwnerQuota: a2aTaskOwnerQuota, TTL: time.Duration(a2aTaskTTLSeconds) * time.Second,
 			SubscriptionLimit: a2aSubscriptionLimit, SubscriptionDuration: time.Duration(a2aSubscriptionDurationSeconds) * time.Second,

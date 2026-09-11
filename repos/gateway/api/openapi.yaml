@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.242
+  version: 0.1.243
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -108,6 +108,57 @@ paths:
           description: Assistant deletion result
           content: {application/json: {schema: {$ref: '#/components/schemas/AssistantDeletion'}}}
         '404': {description: Assistant is absent or belongs to another owner}
+  /v1/threads:
+    post:
+      operationId: createAssistantThread
+      tags: [Assistants]
+      summary: Create an owner-isolated assistant thread
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AssistantThreadCreateRequest'}}}
+      responses:
+        '200':
+          description: Created thread
+          content: {application/json: {schema: {$ref: '#/components/schemas/AssistantThread'}}}
+        '400': {description: Invalid thread or unowned tool resource}
+        '401': {description: Invalid gateway credential}
+        '429': {description: Thread owner quota exceeded}
+        '503': {description: Durable assistant thread storage unavailable}
+  /v1/threads/{thread_id}:
+    parameters:
+      - {name: thread_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+    get:
+      operationId: getAssistantThread
+      tags: [Assistants]
+      summary: Retrieve an owned assistant thread
+      responses:
+        '200':
+          description: Assistant thread
+          content: {application/json: {schema: {$ref: '#/components/schemas/AssistantThread'}}}
+        '404': {description: Thread is absent or belongs to another owner}
+    post:
+      operationId: updateAssistantThread
+      tags: [Assistants]
+      summary: Update an owned assistant thread
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AssistantThreadUpdateRequest'}}}
+      responses:
+        '200':
+          description: Updated thread
+          content: {application/json: {schema: {$ref: '#/components/schemas/AssistantThread'}}}
+        '400': {description: Invalid update or unowned tool resource}
+        '404': {description: Thread is absent or belongs to another owner}
+        '409': {description: Thread was modified concurrently}
+    delete:
+      operationId: deleteAssistantThread
+      tags: [Assistants]
+      summary: Delete an owned assistant thread and its messages
+      responses:
+        '200':
+          description: Thread deletion result
+          content: {application/json: {schema: {$ref: '#/components/schemas/AssistantThreadDeletion'}}}
+        '404': {description: Thread is absent or belongs to another owner}
   /v1/realtime:
     get:
       operationId: openRealtimeSession
@@ -3899,6 +3950,38 @@ components:
       properties:
         id: {type: string}
         object: {type: string, const: assistant.deleted}
+        deleted: {type: boolean, const: true}
+    AssistantThreadDefinition:
+      type: object
+      properties:
+        tool_resources: {type: object, additionalProperties: true}
+        metadata: {type: object, maxProperties: 16, additionalProperties: {type: string, maxLength: 512}}
+    AssistantThreadCreateRequest:
+      allOf:
+        - {$ref: '#/components/schemas/AssistantThreadDefinition'}
+      unevaluatedProperties: false
+    AssistantThreadUpdateRequest:
+      allOf:
+        - {$ref: '#/components/schemas/AssistantThreadDefinition'}
+        - type: object
+          minProperties: 1
+      unevaluatedProperties: false
+    AssistantThread:
+      allOf:
+        - {$ref: '#/components/schemas/AssistantThreadDefinition'}
+        - type: object
+          required: [id, object, created_at, tool_resources, metadata]
+          properties:
+            id: {type: string}
+            object: {type: string, const: thread}
+            created_at: {type: integer}
+    AssistantThreadDeletion:
+      type: object
+      additionalProperties: false
+      required: [id, object, deleted]
+      properties:
+        id: {type: string}
+        object: {type: string, const: thread.deleted}
         deleted: {type: boolean, const: true}
     A2APart:
       type: object

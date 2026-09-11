@@ -17,7 +17,10 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
-type AssistantRuntimeConfig struct{ OwnerQuota int }
+type AssistantRuntimeConfig struct {
+	OwnerQuota       int
+	ThreadOwnerQuota int
+}
 
 type assistantSnapshot struct {
 	Model          string            `json:"model"`
@@ -107,6 +110,9 @@ type assistantUpdateRequest struct {
 
 func (h Handler) WithAssistantStore(store assistantstate.Store, config AssistantRuntimeConfig) Handler {
 	h.assistants = store
+	if threads, ok := store.(assistantstate.ThreadStore); ok {
+		h.assistantThreads = threads
+	}
 	h.assistantConfig = config
 	return h
 }
