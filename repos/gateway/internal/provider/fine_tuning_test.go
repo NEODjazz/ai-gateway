@@ -85,7 +85,9 @@ func TestOpenAICompatibleFineTuningLifecycle(t *testing.T) {
 
 func TestFineTuningRouterSelectsCapableDeploymentAndPinsLifecycle(t *testing.T) {
 	job := `{"id":"ftjob_route","object":"fine_tuning.job","created_at":1,"finished_at":null,"fine_tuned_model":null,"model":"upstream-model","organization_id":"org","result_files":[],"status":"queued","trained_tokens":null,"training_file":"file_train","validation_file":null,"error":null}`
+	providerCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerCalls++
 		if r.URL.Path != "/v1/fine_tuning/jobs" && r.URL.Path != "/v1/fine_tuning/jobs/ftjob_route" {
 			http.NotFound(w, r)
 			return
@@ -98,8 +100,12 @@ func TestFineTuningRouterSelectsCapableDeploymentAndPinsLifecycle(t *testing.T) 
 	if !ok {
 		t.Fatal("router does not expose fine-tuning")
 	}
-	created, binding, err := fineTuning.CreateFineTuningJob(t.Context(), modules.RequestContext{}, openai.FineTuningCreateRequest{Model: "public-model", TrainingFile: "file_train"})
-	if err != nil || created.Model != "public-model" || binding.Endpoint != "training" || binding.Model != "public-model" || len(binding.Deployment) != 64 {
+	admitted := false
+	created, binding, err := fineTuning.CreateFineTuningJob(t.Context(), modules.RequestContext{}, openai.FineTuningCreateRequest{Model: "public-model", TrainingFile: "file_train"}, func(_ context.Context, request *modules.RequestContext) error {
+		admitted = request.Request.Model == "public-model" && request.Metadata["provider.endpoint.name"] == "training" && request.Metadata["gateway.api_type"] == "fine_tuning"
+		return nil
+	})
+	if err != nil || !admitted || created.Model != "public-model" || binding.Endpoint != "training" || binding.Model != "public-model" || len(binding.Deployment) != 64 {
 		t.Fatalf("created=%+v binding=%+v err=%v", created, binding, err)
 	}
 	retrieved, err := fineTuning.RetrieveFineTuningJob(t.Context(), binding, created.ID)
@@ -109,6 +115,11 @@ func TestFineTuningRouterSelectsCapableDeploymentAndPinsLifecycle(t *testing.T) 
 	binding.Deployment = strings.Repeat("0", 64)
 	if _, err := fineTuning.RetrieveFineTuningJob(t.Context(), binding, created.ID); !errors.Is(err, ErrFineTuningDeploymentChanged) {
 		t.Fatalf("changed deployment error=%v", err)
+	}
+	beforeRejected := providerCalls
+	admissionErr := errors.New("budget rejected")
+	if _, _, err := fineTuning.CreateFineTuningJob(t.Context(), modules.RequestContext{}, openai.FineTuningCreateRequest{Model: "public-model", TrainingFile: "file_train"}, func(context.Context, *modules.RequestContext) error { return admissionErr }); !errors.Is(err, admissionErr) || providerCalls != beforeRejected {
+		t.Fatalf("admission err=%v provider_calls=%d want=%d", err, providerCalls, beforeRejected)
 	}
 }
 

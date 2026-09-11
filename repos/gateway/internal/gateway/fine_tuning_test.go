@@ -23,6 +23,35 @@ type memoryFineTuningStore struct {
 	createErr error
 }
 
+type fineTuningBillingModule struct {
+	phases         []string
+	trainingTokens []int
+	apiTypes       []string
+	reserveErr     error
+	commitErr      error
+}
+
+func (*fineTuningBillingModule) Name() string   { return "billing" }
+func (*fineTuningBillingModule) Required() bool { return true }
+func (m *fineTuningBillingModule) Handle(_ context.Context, req *modules.RequestContext) error {
+	m.record("reserve", req)
+	return m.reserveErr
+}
+func (*fineTuningBillingModule) PostResponseEnabled() bool { return true }
+func (m *fineTuningBillingModule) HandlePostResponse(_ context.Context, req *modules.RequestContext) error {
+	m.record("commit", req)
+	return m.commitErr
+}
+func (m *fineTuningBillingModule) HandleFailure(_ context.Context, req *modules.RequestContext, _ error) error {
+	m.record("cancel", req)
+	return nil
+}
+func (m *fineTuningBillingModule) record(phase string, req *modules.RequestContext) {
+	m.phases = append(m.phases, phase)
+	m.trainingTokens = append(m.trainingTokens, req.TrainingTokens)
+	m.apiTypes = append(m.apiTypes, req.Metadata["gateway.api_type"])
+}
+
 func (s *memoryFineTuningStore) CreateFineTuningRecord(_ context.Context, record finetunestate.Record, _ int) (finetunestate.Record, error) {
 	if s.createErr != nil {
 		return finetunestate.Record{}, s.createErr
@@ -99,8 +128,15 @@ func (p *gatewayFineTuningProvider) record(action string, binding provider.FineT
 	p.lastBinding = binding
 }
 
-func (p *gatewayFineTuningProvider) CreateFineTuningJob(_ context.Context, _ modules.RequestContext, input openai.FineTuningCreateRequest) (openai.FineTuningJob, provider.FineTuningBinding, error) {
+func (p *gatewayFineTuningProvider) CreateFineTuningJob(ctx context.Context, identity modules.RequestContext, input openai.FineTuningCreateRequest, admit func(context.Context, *modules.RequestContext) error) (openai.FineTuningJob, provider.FineTuningBinding, error) {
 	binding := provider.FineTuningBinding{Endpoint: "primary", Model: input.Model, Deployment: "deployment-hash"}
+	identity.Request.Model = input.Model
+	identity.Metadata["gateway.api_type"] = "fine_tuning"
+	if admit != nil {
+		if err := admit(ctx, &identity); err != nil {
+			return openai.FineTuningJob{}, provider.FineTuningBinding{}, err
+		}
+	}
 	p.record("create", binding)
 	job := p.job("validating_files")
 	job.Model, job.TrainingFile = input.Model, input.TrainingFile
@@ -236,23 +272,93 @@ func TestFineTuningCancelsUpstreamJobWhenPersistenceFails(t *testing.T) {
 	}
 }
 
-func TestFineTuningCreateFailsClosedWhenBillingIsConfigured(t *testing.T) {
+func TestFineTuningCreateUsesTrainingTokenBillingLifecycle(t *testing.T) {
 	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
-	files := &memoryFileStore{files: map[string]filestate.File{"file_train": {ID: "file_train", OwnerKey: owner, Purpose: "fine-tune"}}}
+	files := &memoryFileStore{files: map[string]filestate.File{"file_train": {ID: "file_train", OwnerKey: owner, Purpose: "fine-tune", Content: []byte(`{"messages":[{"role":"user","content":"train me"}]}`)}}}
 	runtime := &gatewayFineTuningProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
 	store := &memoryFineTuningStore{records: map[string]finetunestate.Record{}}
-	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}, &lifecycleBillingModule{}}), runtime).
+	billing := &fineTuningBillingModule{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}, billing}), runtime).
 		WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 4 << 20}).
 		WithFineTuningStore(store))
-	response := fineTuningRequest(t, handler, http.MethodPost, "/v1/fine_tuning/jobs", `{"model":"model-a","training_file":"file_train"}`)
-	if response.Code != http.StatusNotImplemented || !strings.Contains(response.Body.String(), "fine_tuning_billing_unsupported") {
+	response := fineTuningRequest(t, handler, http.MethodPost, "/v1/fine_tuning/jobs", `{"model":"model-a","training_file":"file_train","method":{"type":"supervised","supervised":{"hyperparameters":{"n_epochs":2}}}}`)
+	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
-	if len(runtime.actions) != 0 || len(store.records) != 0 {
+	if len(runtime.actions) != 1 || len(store.records) != 1 || len(billing.phases) != 2 || billing.phases[0] != "reserve" || billing.phases[1] != "commit" || billing.trainingTokens[0] <= 1 || billing.trainingTokens[0] != billing.trainingTokens[1] || billing.apiTypes[0] != "fine_tuning" {
 		t.Fatalf("provider actions=%v records=%v", runtime.actions, store.records)
 	}
+}
+
+func TestFineTuningTrainingTokenEstimate(t *testing.T) {
+	content := []byte(`{"messages":[{"role":"user","content":"train me"}]}`)
+	oneEpoch := openai.EstimateContextTokens(string(content))
+	tests := []struct {
+		name   string
+		method string
+		want   int
+		ok     bool
+	}{
+		{name: "default", want: oneEpoch, ok: true},
+		{name: "auto", method: `{"supervised":{"hyperparameters":{"n_epochs":"auto"}}}`, want: oneEpoch, ok: true},
+		{name: "explicit", method: `{"supervised":{"hyperparameters":{"n_epochs":3}}}`, want: oneEpoch * 3, ok: true},
+		{name: "zero", method: `{"supervised":{"hyperparameters":{"n_epochs":0}}}`},
+		{name: "too large", method: `{"supervised":{"hyperparameters":{"n_epochs":51}}}`},
+		{name: "fractional", method: `{"supervised":{"hyperparameters":{"n_epochs":1.5}}}`},
+		{name: "malformed", method: `{`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := fineTuningTrainingTokenEstimate(content, json.RawMessage(test.method))
+			if (err == nil) != test.ok || got != test.want {
+				t.Fatalf("estimate=%d err=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestFineTuningBillingFailuresDoNotLeaveActiveProviderJobs(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	files := &memoryFileStore{files: map[string]filestate.File{"file_train": {ID: "file_train", OwnerKey: owner, Purpose: "fine-tune", Content: []byte(`{"messages":[]}`)}}}
+
+	t.Run("reserve", func(t *testing.T) {
+		runtime := &gatewayFineTuningProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+		billing := &fineTuningBillingModule{reserveErr: errors.New("billing unavailable")}
+		handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}, billing}), runtime).
+			WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 4 << 20}).
+			WithFineTuningStore(&memoryFineTuningStore{records: map[string]finetunestate.Record{}}))
+		response := fineTuningRequest(t, handler, http.MethodPost, "/v1/fine_tuning/jobs", `{"model":"model-a","training_file":"file_train"}`)
+		if response.Code != http.StatusServiceUnavailable || len(runtime.actions) != 0 || len(billing.phases) != 1 || billing.phases[0] != "reserve" {
+			t.Fatalf("status=%d actions=%v phases=%v body=%s", response.Code, runtime.actions, billing.phases, response.Body.String())
+		}
+	})
+
+	t.Run("budget", func(t *testing.T) {
+		runtime := &gatewayFineTuningProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+		billing := &fineTuningBillingModule{reserveErr: modules.ErrBudgetExceeded}
+		handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}, billing}), runtime).
+			WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 4 << 20}).
+			WithFineTuningStore(&memoryFineTuningStore{records: map[string]finetunestate.Record{}}))
+		response := fineTuningRequest(t, handler, http.MethodPost, "/v1/fine_tuning/jobs", `{"model":"model-a","training_file":"file_train"}`)
+		if response.Code != http.StatusTooManyRequests || len(runtime.actions) != 0 {
+			t.Fatalf("status=%d actions=%v body=%s", response.Code, runtime.actions, response.Body.String())
+		}
+	})
+
+	t.Run("commit", func(t *testing.T) {
+		runtime := &gatewayFineTuningProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+		billing := &fineTuningBillingModule{commitErr: errors.New("billing unavailable")}
+		store := &memoryFineTuningStore{records: map[string]finetunestate.Record{}}
+		handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}, billing}), runtime).
+			WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 4 << 20}).
+			WithFineTuningStore(store))
+		response := fineTuningRequest(t, handler, http.MethodPost, "/v1/fine_tuning/jobs", `{"model":"model-a","training_file":"file_train"}`)
+		if response.Code != http.StatusServiceUnavailable || len(runtime.actions) != 2 || runtime.actions[0] != "create" || runtime.actions[1] != "cancel" || len(billing.phases) != 3 || billing.phases[2] != "cancel" || store.records["ftjob_1"].Job.Status != "cancelled" {
+			t.Fatalf("status=%d actions=%v phases=%v record=%+v body=%s", response.Code, runtime.actions, billing.phases, store.records["ftjob_1"], response.Body.String())
+		}
+	})
 }
 
 func TestFineTuningRejectsUnknownJSONAndUnsupportedQuery(t *testing.T) {

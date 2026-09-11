@@ -197,11 +197,22 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.APIType = "mcp_tools_list"
 	case "mcp_tools_call":
 		request.APIType = "mcp_tools_call"
+	case "fine_tuning":
+		request.APIType = "fine_tuning"
 	}
-	if request.OutputTokens == 0 && req.CompletionRequest == nil {
+	if request.APIType == "fine_tuning" {
+		request.InputTokens = 0
+		request.PromptTokensEstimated = 0
+		request.OutputTokens = 0
+		request.UsageEstimated = true
+	} else if request.OutputTokens == 0 && req.CompletionRequest == nil {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
 	}
-	request.TotalTokens = openai.ReserveTokens(request.InputTokens, request.OutputTokens)
+	if request.APIType == "fine_tuning" {
+		request.TotalTokens = 0
+	} else {
+		request.TotalTokens = openai.ReserveTokens(request.InputTokens, request.OutputTokens)
+	}
 	if req.Request.WebSearchOptions != nil {
 		request.SearchRequests = openai.WebSearchMaxUses
 		request.SearchRequestsEstimated = true
@@ -436,7 +447,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.UsageEstimated = false
 	}
 	providerReportedUsage := (req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil) || (req.AudioTranscriptionResponse != nil && req.AudioTranscriptionResponse.Usage != nil)
-	if request.TotalTokens == 0 && request.CacheStatus != "hit" && !providerReportedUsage {
+	if request.TotalTokens == 0 && request.APIType != "fine_tuning" && request.CacheStatus != "hit" && !providerReportedUsage {
 		if req.CompletionRequest != nil {
 			request.InputTokens = openai.CompletionInputTokens(*req.CompletionRequest)
 			request.TotalTokens = openai.CompletionReserveTokens(*req.CompletionRequest)

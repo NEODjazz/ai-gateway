@@ -230,6 +230,20 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingUsesOnlyTrainingTokensForFineTuning(t *testing.T) {
+	req := sensitiveContext()
+	req.Request.Model = "base-model"
+	req.TrainingTokens = 2500
+	if req.Metadata == nil {
+		req.Metadata = map[string]string{}
+	}
+	req.Metadata["gateway.api_type"] = "fine_tuning"
+	request := billingRequest(&req)
+	if request.APIType != "fine_tuning" || request.InputTokens != 0 || request.OutputTokens != 0 || request.TotalTokens != 0 || request.TrainingTokens != 2500 || !request.UsageEstimated {
+		t.Fatalf("request=%+v", request)
+	}
+}
+
 func TestRemoteBillingSettlesAudioSpeechWithExactCharacters(t *testing.T) {
 	request := openai.AudioSpeechRequest{Provider: "speech", Model: "tts", Input: "Привет 👋", Voice: "alloy"}
 	req := RequestContext{

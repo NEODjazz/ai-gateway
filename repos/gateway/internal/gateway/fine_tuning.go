@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/finetunestate"
+	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 )
@@ -38,27 +40,47 @@ func (h Handler) CreateFineTuningJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "fine_tuning_unavailable", "fine-tuning storage is unavailable")
 		return
 	}
-	if h.pipeline.HasModule("billing") {
-		writeError(w, http.StatusNotImplemented, "fine_tuning_billing_unsupported", "fine-tuning creation requires training-token billing support")
-		return
-	}
 	if !h.authorizeBatchModel(w, identity, input.Model) {
 		return
 	}
 	owner := fileOwnerKey(identity)
-	if !h.validateFineTuningFile(w, r, owner, input.TrainingFile) {
+	trainingFile, ok := h.fineTuningFile(w, r, owner, input.TrainingFile, true)
+	if !ok {
 		return
 	}
-	if input.ValidationFile != "" && !h.validateFineTuningFile(w, r, owner, input.ValidationFile) {
-		return
+	if input.ValidationFile != "" {
+		if _, ok := h.fineTuningFile(w, r, owner, input.ValidationFile, false); !ok {
+			return
+		}
 	}
 	runtime, ok := h.provider.(provider.FineTuningProvider)
 	if !ok {
 		writeError(w, http.StatusNotImplemented, "unsupported_operation", "fine-tuning is not supported")
 		return
 	}
-	job, binding, err := runtime.CreateFineTuningJob(r.Context(), identity, input)
+	trainingTokens, err := fineTuningTrainingTokenEstimate(trainingFile.Content, input.Method)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	var billingRequest modules.RequestContext
+	billingReserved := false
+	billingErr := error(nil)
+	job, binding, err := runtime.CreateFineTuningJob(r.Context(), identity, input, func(ctx context.Context, request *modules.RequestContext) error {
+		billingRequest = *request
+		billingRequest.TrainingTokens = trainingTokens
+		billingErr = h.pipeline.RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
+		billingReserved = billingErr == nil && h.pipeline.HasModule("billing")
+		return billingErr
+	})
+	if err != nil {
+		if billingReserved {
+			_ = h.pipeline.RunBillingLifecycle(r.Context(), &billingRequest, "cancel", err)
+		}
+		if billingErr != nil {
+			writeFineTuningBillingFailure(w, billingErr)
+			return
+		}
 		writeProviderFailure(w, err)
 		return
 	}
@@ -67,8 +89,24 @@ func (h Handler) CreateFineTuningJob(w http.ResponseWriter, r *http.Request) {
 		compensation, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 		_, _ = runtime.CancelFineTuningJob(compensation, binding, job.ID)
 		cancel()
+		if billingReserved {
+			_ = h.pipeline.RunBillingLifecycle(r.Context(), &billingRequest, "cancel", err)
+		}
 		writeFineTuningStoreError(w, err)
 		return
+	}
+	if billingReserved {
+		if err = h.pipeline.RunBillingLifecycle(r.Context(), &billingRequest, "commit", nil); err != nil {
+			compensation, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+			cancelled, cancelErr := runtime.CancelFineTuningJob(compensation, binding, job.ID)
+			cancel()
+			if cancelErr == nil {
+				_, _ = h.fineTuning.UpdateFineTuningRecord(r.Context(), owner, cancelled)
+			}
+			_ = h.pipeline.RunBillingLifecycle(r.Context(), &billingRequest, "cancel", err)
+			writeFineTuningBillingFailure(w, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, created.Job)
 }
@@ -93,17 +131,51 @@ func validateFineTuningCreate(w http.ResponseWriter, input openai.FineTuningCrea
 	}
 	return true
 }
-func (h Handler) validateFineTuningFile(w http.ResponseWriter, r *http.Request, owner, id string) bool {
-	file, err := h.files.Get(r.Context(), owner, id, false)
+func (h Handler) fineTuningFile(w http.ResponseWriter, r *http.Request, owner, id string, includeContent bool) (filestate.File, bool) {
+	file, err := h.files.Get(r.Context(), owner, id, includeContent)
 	if err != nil {
 		writeFineTuningStoreError(w, err)
-		return false
+		return filestate.File{}, false
 	}
 	if file.Purpose != "fine-tune" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "training and validation files must have purpose=fine-tune")
-		return false
+		return filestate.File{}, false
 	}
-	return true
+	return file, true
+}
+
+func fineTuningTrainingTokenEstimate(content []byte, method json.RawMessage) (int, error) {
+	tokens := openai.EstimateContextTokens(string(content))
+	epochs := 1
+	if len(method) > 0 {
+		var value struct {
+			Supervised struct {
+				Hyperparameters struct {
+					NEpochs json.RawMessage `json:"n_epochs"`
+				} `json:"hyperparameters"`
+			} `json:"supervised"`
+		}
+		if json.Unmarshal(method, &value) != nil {
+			return 0, errors.New("method must be valid JSON")
+		}
+		if raw := value.Supervised.Hyperparameters.NEpochs; len(raw) > 0 && string(raw) != `"auto"` {
+			if json.Unmarshal(raw, &epochs) != nil || epochs < 1 || epochs > 50 {
+				return 0, errors.New("n_epochs must be auto or an integer between 1 and 50")
+			}
+		}
+	}
+	if tokens > 1_000_000_000/epochs {
+		return 0, errors.New("training data token estimate exceeds the supported billing range")
+	}
+	return tokens * epochs, nil
+}
+
+func writeFineTuningBillingFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, modules.ErrBudgetExceeded) {
+		writeError(w, http.StatusTooManyRequests, "budget_exceeded", "budget exceeded")
+		return
+	}
+	writeError(w, http.StatusServiceUnavailable, "billing_unavailable", "billing is unavailable")
 }
 
 func (h Handler) ListFineTuningJobs(w http.ResponseWriter, r *http.Request) {

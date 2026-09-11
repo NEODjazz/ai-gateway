@@ -45,7 +45,7 @@ type FineTuningBinding struct {
 }
 
 type FineTuningProvider interface {
-	CreateFineTuningJob(context.Context, modules.RequestContext, openai.FineTuningCreateRequest) (openai.FineTuningJob, FineTuningBinding, error)
+	CreateFineTuningJob(context.Context, modules.RequestContext, openai.FineTuningCreateRequest, func(context.Context, *modules.RequestContext) error) (openai.FineTuningJob, FineTuningBinding, error)
 	RetrieveFineTuningJob(context.Context, FineTuningBinding, string) (openai.FineTuningJob, error)
 	CancelFineTuningJob(context.Context, FineTuningBinding, string) (openai.FineTuningJob, error)
 	PauseFineTuningJob(context.Context, FineTuningBinding, string) (openai.FineTuningJob, error)

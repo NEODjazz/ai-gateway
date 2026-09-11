@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.236
+  version: 0.1.237
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -705,7 +705,7 @@ paths:
       operationId: createFineTuningJob
       tags: [Fine-tuning]
       summary: Create a fine-tuning job from owner-scoped files
-      description: Validates model access and owner-scoped training and validation files with purpose=fine-tune before selecting a capable deployment. The deployment binding and latest job snapshot are stored durably so lifecycle calls cannot move to a different provider deployment. If persistence fails after provider acceptance, the gateway makes a bounded compensating cancellation attempt. Creation fails closed when a billing module is configured until training-token reserve and settlement are available; existing lifecycle and cleanup operations remain accessible.
+      description: Validates model access and owner-scoped training and validation files with purpose=fine-tune before selecting a capable deployment. Before provider submission, the gateway reserves budget using an estimated training-token count derived from the training file and explicit supervised n_epochs. The estimate is settled only after the deployment binding and latest job snapshot are stored durably. Provider creation is cancelled when persistence or billing settlement fails.
       security: [{bearerAuth: []}]
       requestBody:
         required: true

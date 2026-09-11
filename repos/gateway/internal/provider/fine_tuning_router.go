@@ -11,7 +11,7 @@ import (
 
 var ErrFineTuningDeploymentChanged = errors.New("fine-tuning deployment changed")
 
-func (r Router) CreateFineTuningJob(ctx context.Context, _ modules.RequestContext, input openai.FineTuningCreateRequest) (openai.FineTuningJob, FineTuningBinding, error) {
+func (r Router) CreateFineTuningJob(ctx context.Context, identity modules.RequestContext, input openai.FineTuningCreateRequest, admit func(context.Context, *modules.RequestContext) error) (openai.FineTuningJob, FineTuningBinding, error) {
 	candidates := r.candidates(ctx, openai.ChatCompletionRequest{Model: input.Model}, "fine_tuning")
 	for _, endpoint := range candidates {
 		client, ok := endpoint.Provider.(FineTuningClient)
@@ -25,6 +25,16 @@ func (r Router) CreateFineTuningJob(ctx context.Context, _ modules.RequestContex
 		if err = r.health.permit(ctx, endpoint); err != nil {
 			release()
 			continue
+		}
+		attempt := providerAttemptContext(identity, endpoint)
+		attempt.Request.Model = input.Model
+		attempt.Metadata["gateway.api_type"] = "fine_tuning"
+		r.applyCatalogPricing(ctx, &attempt, endpoint, input.Model)
+		if admit != nil {
+			if err := admit(ctx, &attempt); err != nil {
+				release()
+				return openai.FineTuningJob{}, FineTuningBinding{}, err
+			}
 		}
 		request := input
 		if alias, found := endpoint.ModelAliases[input.Model]; found {
