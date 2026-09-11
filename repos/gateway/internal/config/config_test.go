@@ -135,6 +135,9 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("VECTOR_STORE_FILE_QUOTA", "250")
 	t.Setenv("A2A_TASK_OWNER_QUOTA", "75")
 	t.Setenv("A2A_TASK_TTL_SECONDS", "3600")
+	t.Setenv("A2A_SUBSCRIPTION_LIMIT", "12")
+	t.Setenv("A2A_SUBSCRIPTION_DURATION_SECONDS", "45")
+	t.Setenv("A2A_SUBSCRIPTION_POLL_MILLISECONDS", "250")
 	t.Setenv("PROVIDERS_JSON", `[{"name":"group-a","type":"demo","model_aliases":{"fast":"upstream-fast"},"weight":3,"capabilities":["chat"],"max_parallel_requests":4,"queue_capacity":8,"queue_timeout_ms":250,"rate_limit_rpm":120,"rate_limit_tpm":64000,"shadow":true,"mirror_percentage":12.5,"mirror_timeout_ms":900}]`)
 	cfg := Load()
 	if cfg.Cache.TTLSeconds != 120 || cfg.Cache.MaxBytes != 2048 || !cfg.Provider.GuardrailPolicies["strict"].DLP || !cfg.Provider.GuardrailPolicies["strict"].AV {
@@ -149,7 +152,7 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	if cfg.VectorStores.OwnerQuota != 25 || cfg.VectorStores.FileQuota != 250 {
 		t.Fatalf("unexpected vector store config: %+v", cfg.VectorStores)
 	}
-	if cfg.A2ATasks.OwnerQuota != 75 || cfg.A2ATasks.TTL != time.Hour {
+	if cfg.A2ATasks.OwnerQuota != 75 || cfg.A2ATasks.TTL != time.Hour || cfg.A2ATasks.SubscriptionLimit != 12 || cfg.A2ATasks.SubscriptionDuration != 45*time.Second || cfg.A2ATasks.SubscriptionPoll != 250*time.Millisecond {
 		t.Fatalf("unexpected A2A task config: %+v", cfg.A2ATasks)
 	}
 	if cfg.Redis.Addr != "redis:6379" || cfg.Redis.DB != 2 || cfg.Redis.Prefix != "tenant-gateway" {
@@ -207,6 +210,18 @@ func TestLoadRejectsUnsafeA2ATaskConfiguration(t *testing.T) {
 		t.Setenv("A2A_TASK_TTL_SECONDS", test.ttl)
 		if cfg := Load(); cfg.InitErr == nil {
 			t.Fatalf("unsafe A2A task config accepted: quota=%s ttl=%s", test.quota, test.ttl)
+		}
+	}
+	for _, test := range []struct{ limit, duration, poll string }{
+		{"0", "300", "1000"}, {"10001", "300", "1000"}, {"1", "0", "1000"}, {"1", "3601", "1000"}, {"1", "300", "99"}, {"1", "300", "10001"},
+	} {
+		t.Setenv("A2A_TASK_OWNER_QUOTA", "1")
+		t.Setenv("A2A_TASK_TTL_SECONDS", "60")
+		t.Setenv("A2A_SUBSCRIPTION_LIMIT", test.limit)
+		t.Setenv("A2A_SUBSCRIPTION_DURATION_SECONDS", test.duration)
+		t.Setenv("A2A_SUBSCRIPTION_POLL_MILLISECONDS", test.poll)
+		if cfg := Load(); cfg.InitErr == nil {
+			t.Fatalf("unsafe A2A subscription config accepted: %+v", test)
 		}
 	}
 }

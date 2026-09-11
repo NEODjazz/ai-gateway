@@ -57,6 +57,12 @@ gateway:
     ownerQuota: 1000
     # Completed task retention period.
     ttlSeconds: 2592000
+    # Global bound for concurrent task subscription streams per gateway replica.
+    subscriptionLimit: 256
+    # Streams close after this period and can be resumed while the task remains active.
+    subscriptionDurationSeconds: 300
+    # Durable task status refresh interval for active streams.
+    subscriptionPollMilliseconds: 1000
   exactCache:
     # Disabled by default; bundled cache is process-local and tenant-scoped.
     ttlSeconds: 0

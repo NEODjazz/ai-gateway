@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,6 +19,7 @@ import (
 const a2aProtocolVersion = "1.0"
 
 var a2aInputModes = []string{"text/plain", "application/json", "image/jpeg", "image/png", "image/gif", "image/webp"}
+var errA2ATaskStatusUnavailable = errors.New("A2A task status is temporarily unavailable")
 
 type a2aPart struct {
 	Text      *string         `json:"text,omitempty"`
@@ -61,8 +63,11 @@ type a2aRequest struct {
 }
 
 type A2ATaskRuntimeConfig struct {
-	OwnerQuota int
-	TTL        time.Duration
+	OwnerQuota           int
+	TTL                  time.Duration
+	SubscriptionLimit    int
+	SubscriptionDuration time.Duration
+	SubscriptionPoll     time.Duration
 }
 
 type a2aTaskStatus struct {
@@ -90,8 +95,18 @@ type a2aStoredTask struct {
 }
 
 func (h Handler) WithA2ATaskStore(store a2astate.Store, config A2ATaskRuntimeConfig) Handler {
+	if config.SubscriptionLimit <= 0 {
+		config.SubscriptionLimit = 256
+	}
+	if config.SubscriptionDuration <= 0 {
+		config.SubscriptionDuration = 5 * time.Minute
+	}
+	if config.SubscriptionPoll <= 0 {
+		config.SubscriptionPoll = time.Second
+	}
 	h.a2aTasks = store
 	h.a2aTaskConfig = config
+	h.a2aSubscriptions = make(chan struct{}, config.SubscriptionLimit)
 	return h
 }
 
@@ -181,7 +196,7 @@ func (h Handler) A2AJSONRPC(w http.ResponseWriter, r *http.Request) {
 		h.writeA2AError(w, request.ID, http.StatusNotFound, -32601, "Method not found")
 		return
 	}
-	if request.Method != "SendMessage" && request.Method != "SendStreamingMessage" && request.Method != "GetTask" && request.Method != "ListTasks" && request.Method != "CancelTask" && request.Method != "GetExtendedAgentCard" {
+	if request.Method != "SendMessage" && request.Method != "SendStreamingMessage" && request.Method != "SubscribeToTask" && request.Method != "GetTask" && request.Method != "ListTasks" && request.Method != "CancelTask" && request.Method != "GetExtendedAgentCard" {
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32601, "Method not found")
 		return
 	}
@@ -194,6 +209,8 @@ func (h Handler) A2AJSONRPC(w http.ResponseWriter, r *http.Request) {
 		h.sendA2AMessage(w, r, request, profile, false)
 	case "SendStreamingMessage":
 		h.sendA2AMessage(w, r, request, profile, true)
+	case "SubscribeToTask":
+		h.subscribeToA2ATask(w, r, request, profile)
 	case "GetTask":
 		h.getA2ATask(w, r, request, profile)
 	case "ListTasks":
@@ -560,57 +577,63 @@ func (h Handler) getA2ATask(w http.ResponseWriter, r *http.Request, request a2aR
 		return
 	}
 	if backgroundResponseID != "" && a2aTaskPending(decoded.Status.State) {
-		resourceProvider := h.provider.(provider.ResponseResourceProvider)
-		responseModel, resolveErr := resourceProvider.ResolveResponseResource(r.Context(), reqCtx, backgroundResponseID)
-		if resolveErr != nil || responseModel != task.Model {
-			h.writeA2AError(w, request.ID, http.StatusBadGateway, -32603, "Task status is temporarily unavailable")
-			return
-		}
-		response, retrieveErr := resourceProvider.RetrieveResponse(r.Context(), reqCtx, backgroundResponseID)
-		if retrieveErr != nil {
-			h.writeA2AError(w, request.ID, http.StatusBadGateway, -32603, "Task status is temporarily unavailable")
-			return
-		}
-		if response.Status != "queued" && response.Status != "in_progress" {
-			settlements, supported := h.provider.(provider.BackgroundResponseSettlementProvider)
-			settled := false
-			if supported {
-				settled, err = settlements.BackgroundResponseSettled(r.Context(), reqCtx, backgroundResponseID)
-			}
-			if !supported || err != nil {
+		_, decoded, err = h.reconcileA2ABackgroundTask(r.Context(), reqCtx, task, decoded, backgroundResponseID)
+		if err != nil {
+			if errors.Is(err, errA2ATaskStatusUnavailable) {
 				h.writeA2AError(w, request.ID, http.StatusBadGateway, -32603, "Task status is temporarily unavailable")
-				return
+			} else {
+				h.writeA2ATaskStoreError(w, request.ID, err)
 			}
-			if !settled {
-				trimA2AHistory(&decoded, request.Params.HistoryLength)
-				writeJSON(w, http.StatusOK, a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: decoded})
-				return
-			}
-		}
-		updated := materializeA2ABackgroundTask(decoded, response)
-		if updated.Status.State != decoded.Status.State || a2aTaskTerminal(updated.Status.State) {
-			persistedResponseID := backgroundResponseID
-			if a2aTaskTerminal(updated.Status.State) {
-				persistedResponseID = ""
-			}
-			payload, encodeErr := encodeA2AStoredTask(updated, persistedResponseID)
-			if encodeErr != nil {
-				h.writeA2ATaskStoreError(w, request.ID, encodeErr)
-				return
-			}
-			_, updateErr := h.a2aTasks.UpdateA2ATask(r.Context(), a2astate.Task{
-				ID: task.ID, OwnerKey: task.OwnerKey, AgentID: task.AgentID, Model: task.Model, ContextID: task.ContextID,
-				State: updated.Status.State, Payload: payload,
-			}, task.UpdatedAt, h.a2aTaskConfig.TTL)
-			if updateErr != nil {
-				h.writeA2ATaskStoreError(w, request.ID, updateErr)
-				return
-			}
-			decoded = updated
+			return
 		}
 	}
 	trimA2AHistory(&decoded, request.Params.HistoryLength)
 	writeJSON(w, http.StatusOK, a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: decoded})
+}
+
+func (h Handler) reconcileA2ABackgroundTask(ctx context.Context, reqCtx modules.RequestContext, stored a2astate.Task, task a2aTask, responseID string) (a2astate.Task, a2aTask, error) {
+	resourceProvider, supported := h.provider.(provider.ResponseResourceProvider)
+	if !supported {
+		return stored, task, errA2ATaskStatusUnavailable
+	}
+	responseModel, err := resourceProvider.ResolveResponseResource(ctx, reqCtx, responseID)
+	if err != nil || responseModel != stored.Model {
+		return stored, task, errA2ATaskStatusUnavailable
+	}
+	response, err := resourceProvider.RetrieveResponse(ctx, reqCtx, responseID)
+	if err != nil {
+		return stored, task, errA2ATaskStatusUnavailable
+	}
+	if response.Status != "queued" && response.Status != "in_progress" {
+		settlements, ok := h.provider.(provider.BackgroundResponseSettlementProvider)
+		if !ok {
+			return stored, task, errA2ATaskStatusUnavailable
+		}
+		settled, settlementErr := settlements.BackgroundResponseSettled(ctx, reqCtx, responseID)
+		if settlementErr != nil {
+			return stored, task, errA2ATaskStatusUnavailable
+		}
+		if !settled {
+			return stored, task, nil
+		}
+	}
+	updated := materializeA2ABackgroundTask(task, response)
+	if updated.Status.State == task.Status.State && !a2aTaskTerminal(updated.Status.State) {
+		return stored, task, nil
+	}
+	persistedResponseID := responseID
+	if a2aTaskTerminal(updated.Status.State) {
+		persistedResponseID = ""
+	}
+	payload, err := encodeA2AStoredTask(updated, persistedResponseID)
+	if err != nil {
+		return stored, task, err
+	}
+	saved, err := h.a2aTasks.UpdateA2ATask(ctx, a2astate.Task{
+		ID: stored.ID, OwnerKey: stored.OwnerKey, AgentID: stored.AgentID, Model: stored.Model, ContextID: stored.ContextID,
+		State: updated.Status.State, Payload: payload,
+	}, stored.UpdatedAt, h.a2aTaskConfig.TTL)
+	return saved, updated, err
 }
 
 func (h Handler) listA2ATasks(w http.ResponseWriter, r *http.Request, request a2aRequest, profile AgentProfile) {
@@ -886,7 +909,11 @@ func a2aTaskPending(state string) bool {
 }
 
 func a2aTaskTerminal(state string) bool {
-	return state == "TASK_STATE_COMPLETED" || state == "TASK_STATE_FAILED" || state == "TASK_STATE_CANCELED"
+	return state == "TASK_STATE_COMPLETED" || state == "TASK_STATE_FAILED" || state == "TASK_STATE_CANCELED" || state == "TASK_STATE_REJECTED"
+}
+
+func a2aTaskStreamEnded(state string) bool {
+	return a2aTaskTerminal(state) || state == "TASK_STATE_INPUT_REQUIRED" || state == "TASK_STATE_AUTH_REQUIRED"
 }
 
 func materializeA2ABackgroundTask(task a2aTask, response openai.ResponseResponse) a2aTask {

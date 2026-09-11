@@ -45,8 +45,11 @@ type VectorStoreConfig struct {
 }
 
 type A2ATaskConfig struct {
-	OwnerQuota int
-	TTL        time.Duration
+	OwnerQuota           int
+	TTL                  time.Duration
+	SubscriptionLimit    int
+	SubscriptionDuration time.Duration
+	SubscriptionPoll     time.Duration
 }
 
 type GuardrailMonitorConfig struct {
@@ -185,6 +188,9 @@ func Load() Config {
 	vectorStoreFileQuota := envInt("VECTOR_STORE_FILE_QUOTA", 10000)
 	a2aTaskOwnerQuota := envInt("A2A_TASK_OWNER_QUOTA", 1000)
 	a2aTaskTTLSeconds := envInt("A2A_TASK_TTL_SECONDS", 2_592_000)
+	a2aSubscriptionLimit := envInt("A2A_SUBSCRIPTION_LIMIT", 256)
+	a2aSubscriptionDurationSeconds := envInt("A2A_SUBSCRIPTION_DURATION_SECONDS", 300)
+	a2aSubscriptionPollMilliseconds := envInt("A2A_SUBSCRIPTION_POLL_MILLISECONDS", 1000)
 	var semanticErr error
 	var guardrailMonitorErr error
 	var fileErr error
@@ -225,6 +231,15 @@ func Load() Config {
 	}
 	if a2aTaskTTLSeconds < 60 || a2aTaskTTLSeconds > 31_536_000 {
 		a2aTaskErr = errors.Join(a2aTaskErr, errors.New("A2A task ttl must be between 60 and 31536000 seconds"))
+	}
+	if a2aSubscriptionLimit < 1 || a2aSubscriptionLimit > 10000 {
+		a2aTaskErr = errors.Join(a2aTaskErr, errors.New("A2A subscription limit must be between 1 and 10000"))
+	}
+	if a2aSubscriptionDurationSeconds < 1 || a2aSubscriptionDurationSeconds > 3600 {
+		a2aTaskErr = errors.Join(a2aTaskErr, errors.New("A2A subscription duration must be between 1 and 3600 seconds"))
+	}
+	if a2aSubscriptionPollMilliseconds < 100 || a2aSubscriptionPollMilliseconds > 10000 {
+		a2aTaskErr = errors.Join(a2aTaskErr, errors.New("A2A subscription poll interval must be between 100 and 10000 milliseconds"))
 	}
 	return Config{
 		HTTP: HTTPConfig{
@@ -283,8 +298,12 @@ func Load() Config {
 		},
 		Files:        FileConfig{MaxBytes: fileMaxBytes, OwnerQuotaBytes: fileOwnerQuotaBytes},
 		VectorStores: VectorStoreConfig{OwnerQuota: vectorStoreOwnerQuota, FileQuota: vectorStoreFileQuota},
-		A2ATasks:     A2ATaskConfig{OwnerQuota: a2aTaskOwnerQuota, TTL: time.Duration(a2aTaskTTLSeconds) * time.Second},
-		InitErr:      errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr, vectorStoreErr, a2aTaskErr),
+		A2ATasks: A2ATaskConfig{
+			OwnerQuota: a2aTaskOwnerQuota, TTL: time.Duration(a2aTaskTTLSeconds) * time.Second,
+			SubscriptionLimit: a2aSubscriptionLimit, SubscriptionDuration: time.Duration(a2aSubscriptionDurationSeconds) * time.Second,
+			SubscriptionPoll: time.Duration(a2aSubscriptionPollMilliseconds) * time.Millisecond,
+		},
+		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr, vectorStoreErr, a2aTaskErr),
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
 				Required: envBool("AUTH_REQUIRED", true),

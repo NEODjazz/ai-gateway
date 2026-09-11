@@ -197,7 +197,7 @@ func a2aTestHandlerWithTasks(t *testing.T, tasks a2astate.Store) (http.Handler, 
 	billing := &lifecycleBillingModule{}
 	handler := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"test-model"}}, billing}), llm).WithAgentRegistry(registry)
 	if tasks != nil {
-		handler = handler.WithA2ATaskStore(tasks, A2ATaskRuntimeConfig{OwnerQuota: 10, TTL: time.Hour})
+		handler = handler.WithA2ATaskStore(tasks, A2ATaskRuntimeConfig{OwnerQuota: 10, TTL: time.Hour, SubscriptionLimit: 2, SubscriptionDuration: time.Second, SubscriptionPoll: time.Millisecond})
 	}
 	return Routes(handler), llm, billing
 }
@@ -432,6 +432,40 @@ func TestA2AStreamingDoesNotPublishSuccessBeforeSettlement(t *testing.T) {
 		if err != nil || decoded.Status.State != "TASK_STATE_FAILED" {
 			t.Fatalf("stored=%+v err=%v", decoded, err)
 		}
+	}
+}
+
+func TestA2ASubscribeToTaskStreamsPostSettlementLifecycle(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	router, llm, billing := a2aTestHandlerWithTasks(t, store)
+	llm.response = openai.ResponseResponse{ID: "resp_subscribe", Model: "test-model", Status: "queued"}
+	call := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+		request.Header.Set("A2A-Version", "1.0")
+		request.Header.Set("Authorization", "Bearer key")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	created := call(`{"jsonrpc":"2.0","id":"send","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"m","role":"ROLE_USER","parts":[{"text":"hello"}]},"configuration":{"returnImmediately":true}}}`)
+	var sent struct {
+		Result struct {
+			Task a2aTask `json:"task"`
+		} `json:"result"`
+	}
+	if created.Code != http.StatusOK || json.Unmarshal(created.Body.Bytes(), &sent) != nil {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+	}
+	llm.retrieved = openai.ResponseResponse{ID: "resp_subscribe", Model: "test-model", Status: "completed", OutputText: "done"}
+	llm.backgroundSettled = true
+	stream := call(`{"jsonrpc":"2.0","id":"subscribe","method":"SubscribeToTask","params":{"tenant":"research","id":"` + sent.Result.Task.ID + `"}}`)
+	wire := stream.Body.String()
+	if stream.Code != http.StatusOK || stream.Header().Get("Content-Type") != "text/event-stream" || strings.Contains(wire, "[DONE]") || strings.Contains(wire, "event:") {
+		t.Fatalf("status=%d headers=%v body=%s", stream.Code, stream.Header(), wire)
+	}
+	firstTask, artifact, status := strings.Index(wire, `"task":`), strings.Index(wire, `"artifactUpdate":`), strings.Index(wire, `"statusUpdate":`)
+	if firstTask < 0 || artifact <= firstTask || status <= artifact || !strings.Contains(wire, `"state":"TASK_STATE_COMPLETED"`) || billing.calls != 1 {
+		t.Fatalf("unordered subscription billing=%d body=%s", billing.calls, wire)
 	}
 }
 

@@ -41,6 +41,7 @@ type Handler struct {
 	agents            *AgentRegistry
 	a2aTasks          a2astate.Store
 	a2aTaskConfig     A2ATaskRuntimeConfig
+	a2aSubscriptions  chan struct{}
 	mcp               *MCPRegistry
 	mcpRuntime        MCPRuntimeFactory
 	mcpCalls          mcpstate.Store

@@ -55,6 +55,10 @@ authentication, model authorization and RPM admission.
 With durable task storage, `SendStreamingMessage` emits an ordered SSE
 lifecycle: the Task first, bounded artifact deltas, and a terminal status only
 after provider post-processing and billing settlement succeed.
+`SubscribeToTask` resumes an active durable task as a bounded SSE stream.
+Concurrent subscriptions, stream duration and polling frequency are limited by
+`A2A_SUBSCRIPTION_LIMIT`, `A2A_SUBSCRIPTION_DURATION_SECONDS` and
+`A2A_SUBSCRIPTION_POLL_MILLISECONDS`.
 
 Gateway-level module:
 

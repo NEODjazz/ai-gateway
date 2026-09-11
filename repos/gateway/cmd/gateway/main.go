@@ -143,7 +143,10 @@ func main() {
 	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithGuardrailMonitor(guardrailMonitor).WithCacheDiagnostics(gateway.CacheRuntimeConfig{ExactTTLSeconds: cfg.Cache.TTLSeconds, ExactMaxBytes: cfg.Cache.MaxBytes, SemanticTTLSeconds: cfg.Cache.Semantic.TTLSeconds, SemanticMaxEntries: cfg.Cache.Semantic.MaxEntries, SemanticMaxBytes: cfg.Cache.Semantic.MaxBytes}).WithLoggingRegistry(loggingRegistry).WithAgentRegistry(agentRegistry).WithMCPRegistry(mcpRegistry).WithAccessRegistry(accessRegistry).WithAdminState(adminState)
 	if providerControlStore != nil {
 		handler = handler.WithMCPCallStore(providerControlStore).
-			WithA2ATaskStore(providerControlStore, gateway.A2ATaskRuntimeConfig{OwnerQuota: cfg.A2ATasks.OwnerQuota, TTL: cfg.A2ATasks.TTL}).
+			WithA2ATaskStore(providerControlStore, gateway.A2ATaskRuntimeConfig{
+				OwnerQuota: cfg.A2ATasks.OwnerQuota, TTL: cfg.A2ATasks.TTL, SubscriptionLimit: cfg.A2ATasks.SubscriptionLimit,
+				SubscriptionDuration: cfg.A2ATasks.SubscriptionDuration, SubscriptionPoll: cfg.A2ATasks.SubscriptionPoll,
+			}).
 			WithFileStore(providerControlStore, gateway.FileRuntimeConfig{MaxBytes: cfg.Files.MaxBytes, OwnerQuotaBytes: cfg.Files.OwnerQuotaBytes}).
 			WithSkillStore(providerControlStore).
 			WithVectorStore(providerControlStore, gateway.VectorStoreRuntimeConfig{OwnerQuota: cfg.VectorStores.OwnerQuota, FileQuota: cfg.VectorStores.FileQuota})
