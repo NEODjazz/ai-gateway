@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -133,6 +134,7 @@ type assistantRunProvider struct {
 	settleCalls         int
 	lastRetrievedStatus string
 	lastSettledValue    bool
+	responseCalls       int
 }
 
 func (*assistantRunProvider) ChatCompletions(context.Context, modules.RequestContext) (openai.ChatCompletionResponse, error) {
@@ -142,6 +144,7 @@ func (*assistantRunProvider) StreamChatCompletions(context.Context, modules.Requ
 	return openai.ChatCompletionResponse{}, false, nil
 }
 func (p *assistantRunProvider) Responses(_ context.Context, request modules.RequestContext) (openai.ResponseResponse, error) {
+	p.responseCalls++
 	p.request = request
 	return p.created, nil
 }
@@ -236,6 +239,54 @@ func TestAssistantRunActiveConflictCancellationAndOwnerIsolation(t *testing.T) {
 	cancelled := assistantRequest(t, handler, http.MethodPost, "/v1/threads/"+threadID+"/runs/"+runID+"/cancel", `{}`)
 	if cancelled.Code != http.StatusOK || !strings.Contains(cancelled.Body.String(), `"status":"cancelled"`) || provider.cancelCalls != 1 {
 		t.Fatalf("cancel status=%d calls=%d body=%s", cancelled.Code, provider.cancelCalls, cancelled.Body.String())
+	}
+}
+
+func TestAssistantRunRequiresAllToolOutputsAndContinuesDurably(t *testing.T) {
+	provider := &assistantRunProvider{created: openai.ResponseResponse{
+		ID: "resp_tools", Model: "model-a", Status: "completed",
+		Output: []openai.ResponseOutputItem{
+			{Type: "function_call", CallID: "call_weather", Name: "lookup", Arguments: `{"city":"Paris"}`},
+			{Type: "function_call", CallID: "call_time", Name: "lookup", Arguments: `{"zone":"UTC"}`},
+		},
+	}}
+	_, handler := newAssistantRunTestHandler(t, "user", provider)
+	assistantID := responseString(t, assistantRequest(t, handler, http.MethodPost, "/v1/assistants", `{"model":"model-a","tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`), "id")
+	threadID := responseString(t, assistantRequest(t, handler, http.MethodPost, "/v1/threads", `{"messages":[{"role":"user","content":"question"}]}`), "id")
+	created := assistantRequest(t, handler, http.MethodPost, "/v1/threads/"+threadID+"/runs", `{"assistant_id":"`+assistantID+`"}`)
+	runID := responseString(t, created, "id")
+	if !strings.Contains(created.Body.String(), `"status":"requires_action"`) || !strings.Contains(created.Body.String(), `"call_weather"`) {
+		t.Fatalf("required action body=%s", created.Body.String())
+	}
+	missing := assistantRequest(t, handler, http.MethodPost, "/v1/threads/"+threadID+"/runs/"+runID+"/submit_tool_outputs", `{"tool_outputs":[{"tool_call_id":"call_weather","output":"sunny"}]}`)
+	if missing.Code != http.StatusBadRequest || provider.responseCalls != 1 {
+		t.Fatalf("missing output status=%d calls=%d body=%s", missing.Code, provider.responseCalls, missing.Body.String())
+	}
+	provider.created = openai.ResponseResponse{ID: "resp_continue", Model: "model-a", Status: "queued"}
+	continued := assistantRequest(t, handler, http.MethodPost, "/v1/threads/"+threadID+"/runs/"+runID+"/submit_tool_outputs", `{"tool_outputs":[{"tool_call_id":"call_time","output":"12:00"},{"tool_call_id":"call_weather","output":"sunny"}]}`)
+	if continued.Code != http.StatusOK || !strings.Contains(continued.Body.String(), `"status":"queued"`) || !strings.Contains(continued.Body.String(), `"required_action":null`) {
+		t.Fatalf("continued status=%d body=%s", continued.Code, continued.Body.String())
+	}
+	if provider.responseCalls != 2 || provider.request.ResponseRequest.PreviousResponse != "resp_tools" {
+		t.Fatalf("continuation calls=%d request=%+v", provider.responseCalls, provider.request.ResponseRequest)
+	}
+	outputs, ok := provider.request.ResponseRequest.Input.([]any)
+	if !ok || len(outputs) != 2 {
+		t.Fatalf("outputs=%#v", provider.request.ResponseRequest.Input)
+	}
+}
+
+func TestAssistantRunRejectsMalformedProviderToolCalls(t *testing.T) {
+	response := openai.ResponseResponse{Output: []openai.ResponseOutputItem{{Type: "function_call", CallID: "bad/id", Name: "lookup", Arguments: `{}`}}}
+	if action, err := assistantRunAction(response); !errors.Is(err, errAssistantRunProviderPayload) || action != nil {
+		t.Fatalf("action=%+v err=%v", action, err)
+	}
+	response.Output = []openai.ResponseOutputItem{
+		{Type: "function_call", CallID: "call_a", Name: "lookup", Arguments: `{}`},
+		{Type: "function_call", CallID: "call_a", Name: "lookup", Arguments: `{}`},
+	}
+	if _, err := assistantRunAction(response); !errors.Is(err, errAssistantRunProviderPayload) {
+		t.Fatalf("duplicate call err=%v", err)
 	}
 }
 

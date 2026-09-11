@@ -15,6 +15,8 @@ import (
 
 const maxAssistantRunMessages = 1000
 
+var errAssistantRunProviderPayload = errors.New("invalid assistant run provider payload")
+
 type assistantRunCreateRequest struct {
 	AssistantID            string                  `json:"assistant_id"`
 	Model                  string                  `json:"model,omitempty"`
@@ -34,6 +36,36 @@ type assistantRunSnapshot struct {
 	ResponseID        string                            `json:"response_id"`
 	LastError         *openai.ResponseError             `json:"last_error"`
 	IncompleteDetails *openai.ResponseIncompleteDetails `json:"incomplete_details"`
+	RequiredAction    *assistantRunRequiredAction       `json:"required_action"`
+}
+
+type assistantRunRequiredAction struct {
+	Type              string                        `json:"type"`
+	SubmitToolOutputs assistantRunSubmitToolOutputs `json:"submit_tool_outputs"`
+}
+
+type assistantRunSubmitToolOutputs struct {
+	ToolCalls []assistantRunToolCall `json:"tool_calls"`
+}
+
+type assistantRunToolCall struct {
+	ID       string                   `json:"id"`
+	Type     string                   `json:"type"`
+	Function assistantRunToolFunction `json:"function"`
+}
+
+type assistantRunToolFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type assistantRunToolOutputRequest struct {
+	ToolOutputs []assistantRunToolOutput `json:"tool_outputs"`
+}
+
+type assistantRunToolOutput struct {
+	ToolCallID string `json:"tool_call_id"`
+	Output     string `json:"output"`
 }
 
 func (h Handler) CreateAssistantRun(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +159,16 @@ func (h Handler) CreateAssistantRun(w http.ResponseWriter, r *http.Request) {
 			AssistantID: input.AssistantID, Model: model, Instructions: instructions, Metadata: metadata,
 			ResponseID: response.ID, LastError: response.Error, IncompleteDetails: response.IncompleteDetails,
 		}
+		targetStatus := assistantRunResponseStatus(response.Status)
+		action, actionErr := assistantRunAction(response)
+		if actionErr != nil {
+			snapshot.LastError = &openai.ResponseError{Code: "invalid_provider_payload", Message: "provider returned invalid function calls"}
+			targetStatus = "failed"
+		}
+		if action != nil {
+			snapshot.RequiredAction = action
+			targetStatus = "requires_action"
+		}
 		payload, marshalErr := json.Marshal(snapshot)
 		if marshalErr != nil || len(payload) > assistantstate.MaxRunSnapshotBytes {
 			storageErr = assistantstate.ErrInvalid
@@ -137,9 +179,8 @@ func (h Handler) CreateAssistantRun(w http.ResponseWriter, r *http.Request) {
 			RetainUntil: time.Now().Add(h.assistantConfig.RunRetention),
 		}, h.assistantConfig.RunOwnerQuota)
 		if createErr == nil {
-			status := assistantRunResponseStatus(response.Status)
-			if status != "queued" {
-				record, createErr = h.transitionAssistantRun(r, record, status)
+			if targetStatus != "queued" {
+				record, createErr = h.transitionAssistantRun(r, record, targetStatus)
 			}
 		}
 		storageErr = createErr
@@ -278,6 +319,113 @@ func (h Handler) CancelAssistantRun(w http.ResponseWriter, r *http.Request) {
 	h.writeAssistantRun(w, record)
 }
 
+func (h Handler) SubmitAssistantRunToolOutputs(w http.ResponseWriter, r *http.Request) {
+	identity, threadID, runID, ok := h.assistantRunResource(w, r)
+	if !ok {
+		return
+	}
+	var input assistantRunToolOutputRequest
+	if !decodeInferenceRequest(w, r, &input) {
+		return
+	}
+	if len(input.ToolOutputs) < 1 || len(input.ToolOutputs) > 128 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "tool_outputs must contain between 1 and 128 items")
+		return
+	}
+	owner := fileOwnerKey(identity)
+	record, err := h.assistantRuns.GetRun(r.Context(), owner, threadID, runID)
+	if err != nil {
+		writeAssistantRunError(w, err)
+		return
+	}
+	snapshot, err := decodeAssistantRun(record)
+	if err != nil {
+		writeAssistantRunError(w, err)
+		return
+	}
+	if record.Status != "requires_action" || snapshot.RequiredAction == nil {
+		writeError(w, http.StatusConflict, "run_conflict", "run is not waiting for tool outputs")
+		return
+	}
+	expected := make(map[string]bool, len(snapshot.RequiredAction.SubmitToolOutputs.ToolCalls))
+	toolNames := make([]string, 0, len(snapshot.RequiredAction.SubmitToolOutputs.ToolCalls))
+	for _, call := range snapshot.RequiredAction.SubmitToolOutputs.ToolCalls {
+		expected[call.ID] = true
+		toolNames = append(toolNames, call.Function.Name)
+	}
+	if !h.authorizeTools(w, identity, toolNames, true) {
+		return
+	}
+	seen := make(map[string]bool, len(input.ToolOutputs))
+	responseInput := make([]any, 0, len(input.ToolOutputs))
+	for _, output := range input.ToolOutputs {
+		if !validFileToken(output.ToolCallID, 128) || !expected[output.ToolCallID] || seen[output.ToolCallID] || len(output.Output) > 1<<20 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "tool outputs do not match the pending calls")
+			return
+		}
+		seen[output.ToolCallID] = true
+		responseInput = append(responseInput, map[string]any{"type": "function_call_output", "call_id": output.ToolCallID, "output": output.Output})
+	}
+	if len(seen) != len(expected) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "all pending tool outputs are required")
+		return
+	}
+	store := true
+	request := openai.ResponseRequest{Model: snapshot.Model, PreviousResponse: snapshot.ResponseID, Input: responseInput, Store: &store, Background: true}
+	capture := newA2AResponseCapture()
+	var storageErr error
+	h.serveResponsesAs(capture, r, request, "assistants", func(response openai.ResponseResponse, reqCtx modules.RequestContext) any {
+		if fileOwnerKey(reqCtx) != owner {
+			storageErr = assistantstate.ErrNotFound
+			return map[string]any{}
+		}
+		snapshot.ResponseID = response.ID
+		snapshot.LastError, snapshot.IncompleteDetails = response.Error, response.IncompleteDetails
+		var actionErr error
+		snapshot.RequiredAction, actionErr = assistantRunAction(response)
+		if actionErr != nil {
+			snapshot.LastError = &openai.ResponseError{Code: "invalid_provider_payload", Message: "provider returned invalid function calls"}
+			snapshot.RequiredAction = nil
+		}
+		record.Snapshot, _ = json.Marshal(snapshot)
+		target := "queued"
+		if actionErr != nil {
+			target = "failed"
+		} else if snapshot.RequiredAction != nil {
+			target = "requires_action"
+		} else if response.Status != "queued" {
+			target = assistantRunResponseStatus(response.Status)
+		}
+		source := record.Status
+		record.Status = "queued"
+		record, storageErr = h.assistantRuns.TransitionRun(r.Context(), record, source, record.Revision)
+		if storageErr == nil && target != "queued" {
+			record, storageErr = h.transitionAssistantRun(r, record, target)
+		}
+		if storageErr != nil {
+			if canceler, supported := h.provider.(provider.ResponseCancellationProvider); supported && response.ID != "" {
+				_, _ = canceler.CancelResponse(r.Context(), reqCtx, response.ID)
+			}
+			return map[string]any{}
+		}
+		value, publicErr := publicAssistantRun(record)
+		storageErr = publicErr
+		return value
+	}, nil, nil, false)
+	if storageErr != nil {
+		copyResponseHeaders(w, capture.header)
+		writeAssistantRunError(w, storageErr)
+		return
+	}
+	copyResponseHeaders(w, capture.header)
+	status := capture.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(capture.body.Bytes())
+}
+
 func (h Handler) reconcileAssistantRun(r *http.Request, identity modules.RequestContext, record assistantstate.RunRecord) (assistantstate.RunRecord, error) {
 	snapshot, err := decodeAssistantRun(record)
 	if err != nil {
@@ -296,10 +444,19 @@ func (h Handler) reconcileAssistantRun(r *http.Request, identity modules.Request
 		return record, nil
 	}
 	status := assistantRunResponseStatus(response.Status)
+	action, actionErr := assistantRunAction(response)
+	if actionErr != nil {
+		action = nil
+		status = "failed"
+		response.Error = &openai.ResponseError{Code: "invalid_provider_payload", Message: "provider returned invalid function calls"}
+	}
+	if action != nil {
+		status = "requires_action"
+	}
 	if status == "queued" && record.Status == "queued" || status == "in_progress" && record.Status == "in_progress" {
 		return record, nil
 	}
-	if !assistantstate.ActiveRunStatus(status) {
+	if response.Status != "queued" && response.Status != "in_progress" {
 		settlements, supported := h.provider.(provider.BackgroundResponseSettlementProvider)
 		if !supported {
 			return record, nil
@@ -310,12 +467,13 @@ func (h Handler) reconcileAssistantRun(r *http.Request, identity modules.Request
 		}
 	}
 	snapshot.LastError, snapshot.IncompleteDetails = response.Error, response.IncompleteDetails
+	snapshot.RequiredAction = action
 	record.Snapshot, _ = json.Marshal(snapshot)
 	return h.transitionAssistantRun(r, record, status)
 }
 
 func (h Handler) transitionAssistantRun(r *http.Request, record assistantstate.RunRecord, target string) (assistantstate.RunRecord, error) {
-	if record.Status == "queued" && (target == "completed" || target == "incomplete") {
+	if record.Status == "queued" && (target == "completed" || target == "incomplete" || target == "requires_action") {
 		source := record.Status
 		record.Status = "in_progress"
 		var err error
@@ -416,6 +574,25 @@ func assistantRunResponseStatus(status string) string {
 	}
 }
 
+func assistantRunAction(response openai.ResponseResponse) (*assistantRunRequiredAction, error) {
+	calls := make([]assistantRunToolCall, 0)
+	seen := make(map[string]bool)
+	for _, item := range response.Output {
+		if item.Type != "function_call" {
+			continue
+		}
+		if !validFileToken(item.CallID, 128) || seen[item.CallID] || !validFileToken(item.Name, 64) || len(item.Arguments) > 1<<20 || !json.Valid([]byte(item.Arguments)) || len(calls) >= 128 {
+			return nil, errAssistantRunProviderPayload
+		}
+		seen[item.CallID] = true
+		calls = append(calls, assistantRunToolCall{ID: item.CallID, Type: "function", Function: assistantRunToolFunction{Name: item.Name, Arguments: item.Arguments}})
+	}
+	if len(calls) == 0 {
+		return nil, nil
+	}
+	return &assistantRunRequiredAction{Type: "submit_tool_outputs", SubmitToolOutputs: assistantRunSubmitToolOutputs{ToolCalls: calls}}, nil
+}
+
 func (h Handler) assistantRunCollection(w http.ResponseWriter, r *http.Request) (modules.RequestContext, string, bool) {
 	identity, ok := h.assistantThreadIdentity(w, r)
 	if !ok || !h.assistantRunStorageAvailable(w) {
@@ -483,10 +660,27 @@ func assistantRunPageOptions(w http.ResponseWriter, r *http.Request) (assistants
 
 func decodeAssistantRun(record assistantstate.RunRecord) (assistantRunSnapshot, error) {
 	var snapshot assistantRunSnapshot
-	if json.Unmarshal(record.Snapshot, &snapshot) != nil || snapshot.AssistantID == "" || snapshot.Model == "" || snapshot.ResponseID == "" {
+	if json.Unmarshal(record.Snapshot, &snapshot) != nil || snapshot.AssistantID == "" || snapshot.Model == "" || snapshot.ResponseID == "" || !validAssistantRunAction(snapshot.RequiredAction) {
 		return assistantRunSnapshot{}, assistantstate.ErrUnavailable
 	}
 	return snapshot, nil
+}
+
+func validAssistantRunAction(action *assistantRunRequiredAction) bool {
+	if action == nil {
+		return true
+	}
+	if action.Type != "submit_tool_outputs" || len(action.SubmitToolOutputs.ToolCalls) < 1 || len(action.SubmitToolOutputs.ToolCalls) > 128 {
+		return false
+	}
+	seen := make(map[string]bool, len(action.SubmitToolOutputs.ToolCalls))
+	for _, call := range action.SubmitToolOutputs.ToolCalls {
+		if call.Type != "function" || !validFileToken(call.ID, 128) || seen[call.ID] || !validFileToken(call.Function.Name, 64) || len(call.Function.Arguments) > 1<<20 || !json.Valid([]byte(call.Function.Arguments)) {
+			return false
+		}
+		seen[call.ID] = true
+	}
+	return true
 }
 
 func publicAssistantRun(record assistantstate.RunRecord) (map[string]any, error) {
@@ -499,6 +693,7 @@ func publicAssistantRun(record assistantstate.RunRecord) (map[string]any, error)
 		"assistant_id": snapshot.AssistantID, "status": record.Status, "model": snapshot.Model,
 		"instructions": snapshot.Instructions, "metadata": snapshot.Metadata, "response_id": snapshot.ResponseID,
 		"last_error": snapshot.LastError, "incomplete_details": snapshot.IncompleteDetails,
+		"required_action": snapshot.RequiredAction,
 	}
 	return result, nil
 }

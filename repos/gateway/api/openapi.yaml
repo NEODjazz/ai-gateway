@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.246
+  version: 0.1.247
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -284,6 +284,25 @@ paths:
         '404': {description: Thread or run is absent for this owner}
         '409': {description: Run cannot be cancelled in its current state}
         '501': {description: Selected deployment does not support cancellation}
+  /v1/threads/{thread_id}/runs/{run_id}/submit_tool_outputs:
+    parameters:
+      - {name: thread_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+      - {name: run_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+    post:
+      operationId: submitAssistantRunToolOutputs
+      tags: [Assistants]
+      summary: Continue an owned run with all pending function outputs
+      description: Validates an exact, duplicate-free set of pending call IDs and starts the continuation through the normal durable background routing, policy and billing pipeline.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AssistantRunToolOutputsRequest'}}}
+      responses:
+        '200': {description: Continued run, content: {application/json: {schema: {$ref: '#/components/schemas/AssistantRun'}}}}
+        '400': {description: 'Missing, duplicate, unknown, or oversized tool output'}
+        '404': {description: Thread or run is absent for this owner}
+        '409': {description: Run is not waiting for tool outputs or changed concurrently}
+        '429': {description: 'TPM, RPM, deployment quota, provider quota, or budget exceeded'}
+        '503': {description: Durable background job storage unavailable}
   /v1/realtime:
     get:
       operationId: openRealtimeSession
@@ -4229,7 +4248,7 @@ components:
     AssistantRun:
       type: object
       additionalProperties: false
-      required: [id, object, created_at, thread_id, assistant_id, status, model, instructions, metadata, response_id, last_error, incomplete_details]
+      required: [id, object, created_at, thread_id, assistant_id, status, model, instructions, metadata, response_id, last_error, incomplete_details, required_action]
       properties:
         id: {type: string}
         object: {type: string, const: thread.run}
@@ -4243,6 +4262,55 @@ components:
         response_id: {type: string, description: Durable provider-response lifecycle identifier managed by the gateway.}
         last_error: {type: [object, 'null'], additionalProperties: true}
         incomplete_details: {type: [object, 'null'], additionalProperties: true}
+        required_action:
+          oneOf:
+            - {type: 'null'}
+            - {$ref: '#/components/schemas/AssistantRunRequiredAction'}
+    AssistantRunRequiredAction:
+      type: object
+      additionalProperties: false
+      required: [type, submit_tool_outputs]
+      properties:
+        type: {type: string, const: submit_tool_outputs}
+        submit_tool_outputs:
+          type: object
+          additionalProperties: false
+          required: [tool_calls]
+          properties:
+            tool_calls:
+              type: array
+              minItems: 1
+              maxItems: 128
+              items:
+                type: object
+                additionalProperties: false
+                required: [id, type, function]
+                properties:
+                  id: {type: string, minLength: 1, maxLength: 128}
+                  type: {type: string, const: function}
+                  function:
+                    type: object
+                    additionalProperties: false
+                    required: [name, arguments]
+                    properties:
+                      name: {type: string, minLength: 1, maxLength: 64}
+                      arguments: {type: string, maxLength: 1048576}
+    AssistantRunToolOutputsRequest:
+      type: object
+      additionalProperties: false
+      required: [tool_outputs]
+      properties:
+        tool_outputs:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items:
+            type: object
+            additionalProperties: false
+            required: [tool_call_id, output]
+            properties:
+              tool_call_id: {type: string, minLength: 1, maxLength: 128}
+              output: {type: string, maxLength: 1048576}
     AssistantRunList:
       type: object
       additionalProperties: false
