@@ -90,6 +90,7 @@ func run() error {
 			CacheWriteInputTokens:   request.CacheWriteInputTokens,
 			SearchRequests:          request.SearchRequests,
 			SearchRequestsEstimated: request.SearchRequestsEstimated,
+			ProviderCostUSDTicks:    request.ProviderCostUSDTicks,
 			PostResponse:            request.Phase == "commit",
 			BillingPhase:            request.Phase,
 			APIType:                 request.APIType,
@@ -224,6 +225,7 @@ type usageRequest struct {
 	CacheWriteInputTokens   int      `json:"cache_write_input_tokens"`
 	SearchRequests          int      `json:"search_requests"`
 	SearchRequestsEstimated bool     `json:"search_requests_estimated"`
+	ProviderCostUSDTicks    *int64   `json:"provider_cost_usd_ticks,omitempty"`
 	CatalogVersion          string   `json:"catalog_version,omitempty"`
 	PricingKey              string   `json:"pricing_key,omitempty"`
 	InputCostPer1M          string   `json:"input_cost_per_1m,omitempty"`

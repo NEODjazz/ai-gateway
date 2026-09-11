@@ -25,6 +25,7 @@ type RequestContext struct {
 	CacheWriteInputTokens   int                            `json:"cache_write_input_tokens,omitempty"`
 	SearchRequests          int                            `json:"search_requests,omitempty"`
 	SearchRequestsEstimated bool                           `json:"search_requests_estimated,omitempty"`
+	ProviderCostUSDTicks    *int64                         `json:"provider_cost_usd_ticks,omitempty"`
 	PostResponse            bool                           `json:"post_response,omitempty"`
 	BillingPhase            string                         `json:"billing_phase,omitempty"`
 	APIType                 string                         `json:"api_type,omitempty"`
@@ -86,6 +87,8 @@ type BillingEvent struct {
 	CacheWriteInputTokens   int      `json:"cache_write_input_tokens"`
 	SearchRequests          int      `json:"search_requests"`
 	SearchRequestsEstimated bool     `json:"search_requests_estimated"`
+	ProviderCostUSDTicks    int64    `json:"provider_cost_usd_ticks,omitempty"`
+	ProviderCostReported    bool     `json:"provider_cost_reported,omitempty"`
 	Cost                    float64  `json:"cost"`
 	Currency                string   `json:"currency,omitempty"`
 	CatalogVersion          string   `json:"catalog_version,omitempty"`

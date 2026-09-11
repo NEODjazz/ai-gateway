@@ -158,6 +158,28 @@ func TestBillingPersistsBoundedFailureClassWithoutRawProviderError(t *testing.T)
 	}
 }
 
+func TestBillingUsesValidatedProviderReportedUSDCostOnCommit(t *testing.T) {
+	ticks := int64(37_756_001)
+	module := NewBillingModuleWithSettings(true, Settings{Pricing: PricingConfig{Currency: "USD"}, ModelCatalogJSON: `{"version":"v1","models":[{"provider":"xai","model":"grok","input_cost_per_1m":100,"currency":"USD"}]}`})
+	req := RequestContext{BillingPhase: "commit", ProviderCostUSDTicks: &ticks, Request: openai.ChatCompletionRequest{Provider: "xai", Model: "grok"}, Usage: &openai.Usage{PromptTokens: 1000, TotalTokens: 1000}, Metadata: map[string]string{"provider.endpoint.type": "xai"}}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.BillingEvent == nil || !req.BillingEvent.ProviderCostReported || req.BillingEvent.ProviderCostUSDTicks != ticks || math.Abs(req.BillingEvent.Cost-0.0037756001) > 1e-15 {
+		t.Fatalf("event=%+v", req.BillingEvent)
+	}
+	negative := int64(-1)
+	req.ProviderCostUSDTicks = &negative
+	if err := module.Handle(context.Background(), &req); err == nil {
+		t.Fatal("negative provider cost accepted")
+	}
+	req.ProviderCostUSDTicks = &ticks
+	req.Metadata["provider.endpoint.type"] = "openai-compatible"
+	if err := module.Handle(context.Background(), &req); err == nil {
+		t.Fatal("untrusted provider cost accepted")
+	}
+}
+
 func TestBillingCollectsResponsesEvent(t *testing.T) {
 	module := NewBillingModuleWithPricing(true, PricingConfig{
 		InputPricePer1K:  0.01,

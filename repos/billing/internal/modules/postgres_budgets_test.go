@@ -279,6 +279,27 @@ func TestPostgresBudgetReservationsAreAtomicAndLifecycleAware(t *testing.T) {
 	if pricingCommit.CatalogVersion != "v1" || pricingCommit.PricingKey != "provider/model@v1" || pricingCommit.TrainingCostPer1M != 5 || pricingCommit.SearchCostPer1K != 10 || pricingCommit.CharacterCostPer1M != 15 || pricingCommit.PageCostPer1K != 100 || pricingCommit.AudioCostPerMinute != 0.12 || pricingCommit.VideoCostPerSecond != 0.25 || math.Abs(pricingCommit.Cost-expectedPinnedCost) > 1e-12 {
 		t.Fatalf("commit did not use reserved pricing snapshot: %+v", pricingCommit)
 	}
+
+	exactRequest := "exact-cost-" + suffix
+	exactReserve := budgetTestEvent(exactRequest, "exact-team-"+suffix, 1)
+	exactReserve.CatalogVersion, exactReserve.PricingKey = "v1", "xai/model"
+	if err := checker.Apply(ctx, exactReserve); err != nil {
+		t.Fatal(err)
+	}
+	exactCommit := budgetTestEvent(exactRequest, "exact-team-"+suffix, 1)
+	exactCommit.Phase = "commit"
+	exactCommit.ProviderCostReported = true
+	exactCommit.ProviderCostUSDTicks = 37_756_001
+	if err := checker.Apply(ctx, exactCommit); err != nil {
+		t.Fatal(err)
+	}
+	var persisted string
+	if err := pool.QueryRow(ctx, `SELECT actual_cost::text FROM billing_budget_reservations WHERE request_id=$1`, exactRequest).Scan(&persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted != "0.0037756001" {
+		t.Fatalf("exact provider cost lost precision: %s", persisted)
+	}
 }
 
 func TestPostgresBudgetReservationExpires(t *testing.T) {
@@ -389,7 +410,7 @@ func TestPostgresBudgetManagementLifecycleAndSummary(t *testing.T) {
 
 func applyBudgetTestMigration(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	for _, name := range []string{"004_budgets.sql", "005_pricing_snapshots.sql", "006_management_audit.sql", "007_tag_budgets.sql", "008_organization_budgets.sql", "010_billing_server_tools.sql", "011_billing_characters.sql", "012_billing_pages.sql", "013_billing_audio_duration.sql", "014_billing_training_tokens.sql", "015_billing_video_duration.sql"} {
+	for _, name := range []string{"004_budgets.sql", "005_pricing_snapshots.sql", "006_management_audit.sql", "007_tag_budgets.sql", "008_organization_budgets.sql", "010_billing_server_tools.sql", "011_billing_characters.sql", "012_billing_pages.sql", "013_billing_audio_duration.sql", "014_billing_training_tokens.sql", "015_billing_video_duration.sql", "016_provider_cost_precision.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
 			t.Fatal(err)

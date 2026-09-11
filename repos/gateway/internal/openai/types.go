@@ -393,6 +393,7 @@ type Usage struct {
 	// SearchRequests is internal provider usage used for billing. It is not part
 	// of the OpenAI-compatible response payload.
 	SearchRequests          int                     `json:"-"`
+	ProviderCostUSDTicks    *int64                  `json:"-"`
 	PromptTokens            int                     `json:"prompt_tokens"`
 	CompletionTokens        int                     `json:"completion_tokens"`
 	TotalTokens             int                     `json:"total_tokens"`
@@ -408,6 +409,7 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 		PromptTokensDetails     *PromptTokenDetails     `json:"prompt_tokens_details"`
 		CompletionTokensDetails *CompletionTokenDetails `json:"completion_tokens_details"`
 		PromptCacheHitTokens    *int                    `json:"prompt_cache_hit_tokens"`
+		ProviderCostUSDTicks    *int64                  `json:"cost_in_usd_ticks"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
@@ -417,6 +419,7 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 	u.TotalTokens = wire.TotalTokens
 	u.PromptTokensDetails = wire.PromptTokensDetails
 	u.CompletionTokensDetails = wire.CompletionTokensDetails
+	u.ProviderCostUSDTicks = wire.ProviderCostUSDTicks
 	if wire.PromptCacheHitTokens != nil {
 		if u.PromptTokensDetails == nil {
 			u.PromptTokensDetails = &PromptTokenDetails{}
@@ -726,11 +729,26 @@ type ResponseOutputContent struct {
 }
 
 type ResponseUsage struct {
-	OutputTokensDetails *CompletionTokenDetails `json:"output_tokens_details,omitempty"`
-	InputTokens         int                     `json:"input_tokens,omitempty"`
-	OutputTokens        int                     `json:"output_tokens,omitempty"`
-	TotalTokens         int                     `json:"total_tokens,omitempty"`
-	InputTokensDetails  *InputTokenDetails      `json:"input_tokens_details,omitempty"`
+	ProviderCostUSDTicks *int64                  `json:"-"`
+	OutputTokensDetails  *CompletionTokenDetails `json:"output_tokens_details,omitempty"`
+	InputTokens          int                     `json:"input_tokens,omitempty"`
+	OutputTokens         int                     `json:"output_tokens,omitempty"`
+	TotalTokens          int                     `json:"total_tokens,omitempty"`
+	InputTokensDetails   *InputTokenDetails      `json:"input_tokens_details,omitempty"`
+}
+
+func (u *ResponseUsage) UnmarshalJSON(data []byte) error {
+	type responseUsage ResponseUsage
+	var wire struct {
+		responseUsage
+		ProviderCostUSDTicks *int64 `json:"cost_in_usd_ticks"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*u = ResponseUsage(wire.responseUsage)
+	u.ProviderCostUSDTicks = wire.ProviderCostUSDTicks
+	return nil
 }
 
 type InputTokenDetails struct {

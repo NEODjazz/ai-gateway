@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -255,7 +256,22 @@ type ImageData struct {
 }
 
 type ImageUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	ProviderCostUSDTicks *int64 `json:"-"`
+	InputTokens          int    `json:"input_tokens"`
+	OutputTokens         int    `json:"output_tokens"`
+	TotalTokens          int    `json:"total_tokens"`
+}
+
+func (u *ImageUsage) UnmarshalJSON(data []byte) error {
+	type imageUsage ImageUsage
+	var wire struct {
+		imageUsage
+		ProviderCostUSDTicks *int64 `json:"cost_in_usd_ticks"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*u = ImageUsage(wire.imageUsage)
+	u.ProviderCostUSDTicks = wire.ProviderCostUSDTicks
+	return nil
 }

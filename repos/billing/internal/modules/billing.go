@@ -157,6 +157,12 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	if req.TrainingTokens < 0 || req.TrainingTokens > maxBillableTrainingTokens {
 		return errors.New("training_tokens is outside the supported range")
 	}
+	if req.ProviderCostUSDTicks != nil && *req.ProviderCostUSDTicks < 0 {
+		return errors.New("provider_cost_usd_ticks is outside the supported range")
+	}
+	if req.ProviderCostUSDTicks != nil && metadata(req, "provider.endpoint.type") != "xai" {
+		return errors.New("provider-reported cost is not supported for this provider type")
+	}
 	phase := req.BillingPhase
 	if phase == "" {
 		if req.PostResponse || req.Response != nil || req.ResponsesResponse != nil {
@@ -186,6 +192,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	if phase == "cancel" {
 		usageEstimated = false
 	}
+	req.BillingPhase = phase
 
 	req.Usage = &openai.Usage{
 		SearchRequests:   req.SearchRequests,
@@ -264,6 +271,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 		}
 		if phase == "cancel" {
 			event.InputTokens, event.OutputTokens, event.TotalTokens, event.TrainingTokens, event.InputCharacters, event.InputPages, event.InputAudioMilliseconds, event.VideoSeconds, event.ToolRequests, event.SearchRequests, event.Cost = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+			event.ProviderCostUSDTicks, event.ProviderCostReported = 0, false
 		}
 		created, err := m.durable.Enqueue(ctx, event)
 		if err != nil {
@@ -300,6 +308,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 		event.VideoSeconds = 0
 		event.ToolRequests = 0
 		event.Cost = 0
+		event.ProviderCostUSDTicks, event.ProviderCostReported = 0, false
 	}
 	if err := m.writer.WriteUsageEvent(ctx, event); err != nil {
 		m.lifecycle.Release(key)
@@ -337,6 +346,20 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 	pricingErr := err
 	if pricingErr != nil {
 		pricing = PricingSnapshot{Currency: m.pricing.Currency}
+	}
+	cost := pricingCost(inputTokens, outputTokens, trainingTokens, inputCharacters, inputPages, inputAudioMilliseconds, videoSeconds, req.SearchRequests, pricing)
+	providerCostTicks := int64(0)
+	providerCostReported := false
+	if req.ProviderCostUSDTicks != nil {
+		if req.BillingPhase != "commit" {
+			return BillingEvent{}, errors.New("provider-reported cost is only valid during commit")
+		}
+		if pricing.Currency != "USD" {
+			return BillingEvent{}, errors.New("provider-reported USD cost requires USD catalog pricing")
+		}
+		providerCostTicks = *req.ProviderCostUSDTicks
+		providerCostReported = true
+		cost = float64(providerCostTicks) / 10_000_000_000
 	}
 	// Raw upstream error strings may contain request fragments or provider
 	// internals. Persist only the bounded failure class used by operators.
@@ -381,7 +404,9 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		CacheWriteInputTokens:   cacheWriteInputTokens(req),
 		SearchRequests:          req.SearchRequests,
 		SearchRequestsEstimated: req.SearchRequestsEstimated,
-		Cost:                    pricingCost(inputTokens, outputTokens, trainingTokens, inputCharacters, inputPages, inputAudioMilliseconds, videoSeconds, req.SearchRequests, pricing),
+		Cost:                    cost,
+		ProviderCostUSDTicks:    providerCostTicks,
+		ProviderCostReported:    providerCostReported,
 		Currency:                pricing.Currency,
 		CatalogVersion:          pricing.CatalogVersion,
 		PricingKey:              pricing.PricingKey,
@@ -621,6 +646,7 @@ func (m BillingModule) handleDurableBudget(ctx context.Context, req *RequestCont
 	} else {
 		if event.Phase == "cancel" {
 			event.InputTokens, event.OutputTokens, event.TotalTokens, event.TrainingTokens, event.InputCharacters, event.InputPages, event.InputAudioMilliseconds, event.VideoSeconds, event.ToolRequests, event.SearchRequests, event.Cost = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+			event.ProviderCostUSDTicks, event.ProviderCostReported = 0, false
 		}
 		created, err = repository.enqueueTx(ctx, tx, *event)
 		if err != nil {

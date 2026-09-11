@@ -51,6 +51,7 @@ type UsageRequest struct {
 	CacheWriteInputTokens   int      `json:"cache_write_input_tokens"`
 	SearchRequests          int      `json:"search_requests"`
 	SearchRequestsEstimated bool     `json:"search_requests_estimated"`
+	ProviderCostUSDTicks    *int64   `json:"provider_cost_usd_ticks,omitempty"`
 	CatalogVersion          string   `json:"catalog_version,omitempty"`
 	PricingKey              string   `json:"pricing_key,omitempty"`
 	InputCostPer1M          string   `json:"input_cost_per_1m,omitempty"`
@@ -346,6 +347,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.UpstreamModel = req.Response.Model
 		request.UsageEstimated = request.TotalTokens == 0
 		request.SearchRequests = req.Response.Usage.SearchRequests
+		request.ProviderCostUSDTicks = trustedProviderCost(req, req.Response.Usage.ProviderCostUSDTicks)
 		request.SearchRequestsEstimated = false
 		if details := req.Response.Usage.PromptTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
@@ -358,6 +360,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = req.CompletionResponse.Usage.CompletionTokens
 		request.TotalTokens = req.CompletionResponse.Usage.TotalTokens
 		request.UpstreamModel = req.CompletionResponse.Model
+		request.ProviderCostUSDTicks = trustedProviderCost(req, req.CompletionResponse.Usage.ProviderCostUSDTicks)
 		request.UsageEstimated = request.TotalTokens == 0
 		if details := req.CompletionResponse.Usage.PromptTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
@@ -370,6 +373,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = req.ResponsesResponse.Usage.OutputTokens
 		request.TotalTokens = req.ResponsesResponse.Usage.TotalTokens
 		request.UpstreamModel = req.ResponsesResponse.Model
+		request.ProviderCostUSDTicks = trustedProviderCost(req, req.ResponsesResponse.Usage.ProviderCostUSDTicks)
 		request.UsageEstimated = request.TotalTokens == 0
 		if details := req.ResponsesResponse.Usage.InputTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
@@ -383,6 +387,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.TotalTokens = req.CompactedResponse.Usage.TotalTokens
 		request.UpstreamModel = request.Model
 		request.UsageEstimated = request.TotalTokens == 0
+		request.ProviderCostUSDTicks = trustedProviderCost(req, req.CompactedResponse.Usage.ProviderCostUSDTicks)
 		if details := req.CompactedResponse.Usage.InputTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
 			request.CacheWriteInputTokens = nonNegative(firstNonZero(details.CacheWriteTokens, details.CacheCreationTokens))
@@ -422,6 +427,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 	if req.ImageGenerationResponse != nil {
 		request.Phase = "commit"
 		if usage := req.ImageGenerationResponse.Usage; usage != nil {
+			request.ProviderCostUSDTicks = trustedProviderCost(req, usage.ProviderCostUSDTicks)
 			request.InputTokens = usage.InputTokens
 			request.OutputTokens = usage.OutputTokens
 			request.TotalTokens = usage.TotalTokens
@@ -480,6 +486,13 @@ func billingRequest(req *RequestContext) UsageRequest {
 		}
 	}
 	return request
+}
+
+func trustedProviderCost(req *RequestContext, ticks *int64) *int64 {
+	if metadataValue(req.Metadata, "provider.endpoint.type") != "xai" {
+		return nil
+	}
+	return ticks
 }
 
 func nonNegative(value int) int {

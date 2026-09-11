@@ -73,7 +73,7 @@ func (c *PostgresBudgetPolicyChecker) Ready(ctx context.Context) error {
 	if err := c.pool.Ping(ctx); err != nil {
 		return errors.New("billing policy postgres is unavailable")
 	}
-	var policies, reservations, pricingSnapshots, tagSnapshots, organizationSnapshots, serverToolSnapshots, characterSnapshots, pageSnapshots, audioSnapshots, videoSnapshots, trainingSnapshots bool
+	var policies, reservations, pricingSnapshots, tagSnapshots, organizationSnapshots, serverToolSnapshots, characterSnapshots, pageSnapshots, audioSnapshots, videoSnapshots, trainingSnapshots, providerCostPrecision bool
 	if err := c.pool.QueryRow(ctx, `
 		SELECT to_regclass('public.billing_budget_policies') IS NOT NULL,
 		       to_regclass('public.billing_budget_reservations') IS NOT NULL,
@@ -103,7 +103,10 @@ func (c *PostgresBudgetPolicyChecker) Ready(ctx context.Context) error {
 		                 AND column_name='video_cost_per_second'),
 		       EXISTS (SELECT 1 FROM information_schema.columns
 		               WHERE table_schema='public' AND table_name='billing_budget_reservations'
-		                 AND column_name='training_cost_per_1m')`).Scan(&policies, &reservations, &pricingSnapshots, &tagSnapshots, &organizationSnapshots, &serverToolSnapshots, &characterSnapshots, &pageSnapshots, &audioSnapshots, &videoSnapshots, &trainingSnapshots); err != nil || !policies || !reservations || !pricingSnapshots || !tagSnapshots || !organizationSnapshots || !serverToolSnapshots || !characterSnapshots || !pageSnapshots || !audioSnapshots || !videoSnapshots || !trainingSnapshots {
+		                 AND column_name='training_cost_per_1m'),
+		       EXISTS (SELECT 1 FROM information_schema.columns
+		               WHERE table_schema='public' AND table_name='billing_budget_reservations'
+		                 AND column_name='actual_cost' AND numeric_scale >= 10)`).Scan(&policies, &reservations, &pricingSnapshots, &tagSnapshots, &organizationSnapshots, &serverToolSnapshots, &characterSnapshots, &pageSnapshots, &audioSnapshots, &videoSnapshots, &trainingSnapshots, &providerCostPrecision); err != nil || !policies || !reservations || !pricingSnapshots || !tagSnapshots || !organizationSnapshots || !serverToolSnapshots || !characterSnapshots || !pageSnapshots || !audioSnapshots || !videoSnapshots || !trainingSnapshots || !providerCostPrecision {
 		return errors.New("billing budget migration is not applied")
 	}
 	return nil
@@ -346,6 +349,9 @@ func applyReservationPricing(event *BillingEvent, reservation budgetReservation)
 	event.Cost = pricingCost(event.InputTokens, event.OutputTokens, event.TrainingTokens, event.InputCharacters, event.InputPages, event.InputAudioMilliseconds, event.VideoSeconds, event.SearchRequests, PricingSnapshot{
 		InputCostPer1M: reservation.InputCostPer1M, OutputCostPer1M: reservation.OutputCostPer1M, TrainingCostPer1M: reservation.TrainingCostPer1M, SearchCostPer1K: reservation.SearchCostPer1K, CharacterCostPer1M: reservation.CharacterCostPer1M, PageCostPer1K: reservation.PageCostPer1K, AudioCostPerMinute: reservation.AudioCostPerMinute, VideoCostPerSecond: reservation.VideoCostPerSecond,
 	})
+	if event.Phase == "commit" && event.ProviderCostReported {
+		event.Cost = float64(event.ProviderCostUSDTicks) / 10_000_000_000
+	}
 }
 
 func budgetUsage(ctx context.Context, tx pgx.Tx, policy budgetPolicy, event BillingEvent, now time.Time) (float64, int64, error) {

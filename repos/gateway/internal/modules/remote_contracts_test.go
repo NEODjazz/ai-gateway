@@ -232,6 +232,23 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingAcceptsExactCostOnlyFromXAI(t *testing.T) {
+	ticks := int64(37_756_000)
+	req := sensitiveContext()
+	if req.Metadata == nil {
+		req.Metadata = map[string]string{}
+	}
+	req.Metadata["provider.endpoint.type"] = "xai"
+	req.Response = &openai.ChatCompletionResponse{Usage: openai.Usage{PromptTokens: 1, TotalTokens: 1, ProviderCostUSDTicks: &ticks}}
+	if got := billingRequest(&req).ProviderCostUSDTicks; got == nil || *got != ticks {
+		t.Fatalf("trusted ticks=%v", got)
+	}
+	req.Metadata["provider.endpoint.type"] = "openai-compatible"
+	if got := billingRequest(&req).ProviderCostUSDTicks; got != nil {
+		t.Fatalf("untrusted provider cost was forwarded: %d", *got)
+	}
+}
+
 func TestRemoteBillingUsesOnlyTrainingTokensForFineTuning(t *testing.T) {
 	req := sensitiveContext()
 	req.Request.Model = "base-model"
