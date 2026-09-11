@@ -167,6 +167,22 @@ func (h Handler) GetVideo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	video = mergeVideoSnapshot(record.Video, video)
+	if videoTerminal(video.Status) {
+		pending, err := h.videoSettlementPending(r.Context(), owner, video.ID)
+		if err != nil {
+			writeVideoStoreError(w, err)
+			return
+		}
+		if pending {
+			visible := record.Video
+			if videoTerminal(visible.Status) {
+				visible.Status = "in_progress"
+				visible.Progress = min(video.Progress, 99)
+			}
+			writeJSON(w, http.StatusOK, visible)
+			return
+		}
+	}
 	updated, err := h.videos.UpdateVideoRecord(r.Context(), owner, video)
 	if err != nil {
 		writeVideoStoreError(w, err)
@@ -225,6 +241,15 @@ func (h Handler) GetVideoContent(w http.ResponseWriter, r *http.Request) {
 	}
 	record, ok := h.videoRecord(w, r, owner)
 	if !ok {
+		return
+	}
+	pending, err := h.videoSettlementPending(r.Context(), owner, record.Video.ID)
+	if err != nil {
+		writeVideoStoreError(w, err)
+		return
+	}
+	if pending {
+		writeError(w, http.StatusConflict, "video_settlement_pending", "video billing settlement is pending")
 		return
 	}
 	content, err := runtime.DownloadVideoContent(r.Context(), record.Binding, record.Video.ID, q.Get("variant"))
@@ -502,6 +527,17 @@ func mergeVideoSnapshot(previous, current openai.Video) openai.Video {
 		current.Object = "video"
 	}
 	return current
+}
+
+func videoTerminal(status string) bool {
+	return status == "completed" || status == "failed" || status == "cancelled" || status == "expired"
+}
+
+func (h Handler) videoSettlementPending(ctx context.Context, owner, id string) (bool, error) {
+	if h.videoJobs == nil {
+		return false, nil
+	}
+	return h.videoJobs.HasAsyncJob(ctx, videoSettlementJobKind, id, owner)
 }
 
 func (h Handler) retryVideoSettlement(ctx context.Context, job asyncstate.Job) error {

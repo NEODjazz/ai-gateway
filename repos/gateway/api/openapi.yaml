@@ -1113,6 +1113,7 @@ paths:
       operationId: retrieveVideo
       tags: [Inference]
       summary: Refresh an owned video job through its pinned deployment
+      description: A provider-terminal result remains represented by the last non-terminal gateway snapshot until durable billing settlement completes.
       security: [{bearerAuth: []}]
       responses:
         '200': {description: Current video job, content: {application/json: {schema: {$ref: '#/components/schemas/Video'}}}}
@@ -1131,6 +1132,7 @@ paths:
       operationId: downloadVideoContent
       tags: [Inference]
       summary: Stream content for an owned video through its pinned deployment
+      description: Content is available only after the durable billing settlement job has completed.
       security: [{bearerAuth: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}

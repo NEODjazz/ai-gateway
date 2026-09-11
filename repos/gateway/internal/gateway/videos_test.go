@@ -382,6 +382,28 @@ func TestVideoDeleteWaitsForDurableSettlement(t *testing.T) {
 	}
 }
 
+func TestVideoTerminalStateAndContentWaitForBillingSettlement(t *testing.T) {
+	store := &memoryVideoStore{records: map[string]videostate.Record{}}
+	runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+	billing := &videoBillingModule{}
+	gateway := videoTestGateway(store, runtime, billing)
+	router := Routes(gateway)
+	created := videoRequest(t, router, http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat"}`)
+	before := videoRequest(t, router, http.MethodGet, "/v1/videos/video_1", "")
+	contentBefore := videoRequest(t, router, http.MethodGet, "/v1/videos/video_1/content", "")
+	if created.Code != http.StatusOK || before.Code != http.StatusOK || !strings.Contains(before.Body.String(), `"status":"queued"`) || contentBefore.Code != http.StatusConflict || !strings.Contains(contentBefore.Body.String(), "video_settlement_pending") || strings.Join(billing.phases, ",") != "reserve" {
+		t.Fatalf("created=%d before=%d/%s content=%d/%s phases=%v", created.Code, before.Code, before.Body.String(), contentBefore.Code, contentBefore.Body.String(), billing.phases)
+	}
+	if processed, err := gateway.ProcessVideoSettlements(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	after := videoRequest(t, router, http.MethodGet, "/v1/videos/video_1", "")
+	contentAfter := videoRequest(t, router, http.MethodGet, "/v1/videos/video_1/content", "")
+	if after.Code != http.StatusOK || !strings.Contains(after.Body.String(), `"status":"completed"`) || contentAfter.Code != http.StatusOK || contentAfter.Body.String() != "video" || strings.Join(billing.phases, ",") != "reserve,commit" {
+		t.Fatalf("after=%d/%s content=%d/%s phases=%v", after.Code, after.Body.String(), contentAfter.Code, contentAfter.Body.String(), billing.phases)
+	}
+}
+
 func TestVideoBillingFailuresCompensateProviderAndOwnership(t *testing.T) {
 	t.Run("reserve", func(t *testing.T) {
 		runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
