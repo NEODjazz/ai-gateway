@@ -91,7 +91,7 @@ func TestBedrockConverseStreamUsesAuthorizationStreamingAndBilling(t *testing.T)
 		writeEvent("contentBlockDelta", map[string]any{"contentBlockIndex": 0, "delta": map[string]any{"text": "stream"}})
 		writeEvent("contentBlockStop", map[string]any{"contentBlockIndex": 0})
 		writeEvent("messageStop", map[string]any{"stopReason": "end_turn"})
-		writeEvent("metadata", map[string]any{"usage": map[string]any{"inputTokens": 4, "outputTokens": 2, "totalTokens": 6}, "metrics": map[string]any{"latencyMs": 1}})
+		writeEvent("metadata", map[string]any{"usage": map[string]any{"inputTokens": 4, "cacheReadInputTokens": 3, "cacheWriteInputTokens": 2, "outputTokens": 2, "totalTokens": 11}, "metrics": map[string]any{"latencyMs": 1}})
 	}))
 	defer upstream.Close()
 
@@ -126,7 +126,8 @@ func TestBedrockConverseStreamUsesAuthorizationStreamingAndBilling(t *testing.T)
 	}
 	metadata := messages[len(messages)-1].payload
 	usage, _ := metadata["usage"].(map[string]any)
-	if usage["totalTokens"] != float64(6) || upstreamCalls != 1 || billing.calls != 1 || billing.usage.TotalTokens != 6 {
+	details := billing.usage.PromptTokensDetails
+	if usage["inputTokens"] != float64(4) || usage["cacheReadInputTokens"] != float64(3) || usage["cacheWriteInputTokens"] != float64(2) || usage["totalTokens"] != float64(11) || upstreamCalls != 1 || billing.calls != 1 || billing.usage.PromptTokens != 9 || billing.usage.TotalTokens != 11 || details == nil || details.CachedTokens != 3 || details.CacheWriteTokens != 2 {
 		t.Fatalf("metadata=%+v upstream=%d billing=%+v", metadata, upstreamCalls, billing)
 	}
 }

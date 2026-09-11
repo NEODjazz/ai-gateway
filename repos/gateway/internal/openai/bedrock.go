@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"math"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -650,17 +651,28 @@ type BedrockConverseOutput struct {
 }
 
 type BedrockUsage struct {
-	InputTokens  int `json:"inputTokens"`
-	OutputTokens int `json:"outputTokens"`
-	TotalTokens  int `json:"totalTokens"`
+	InputTokens           int `json:"inputTokens"`
+	OutputTokens          int `json:"outputTokens"`
+	TotalTokens           int `json:"totalTokens"`
+	CacheReadInputTokens  int `json:"cacheReadInputTokens,omitempty"`
+	CacheWriteInputTokens int `json:"cacheWriteInputTokens,omitempty"`
 }
 
 func BedrockFromChat(response ChatCompletionResponse) (BedrockConverseResponse, error) {
-	result := BedrockConverseResponse{Usage: BedrockUsage{InputTokens: response.Usage.PromptTokens, OutputTokens: response.Usage.CompletionTokens, TotalTokens: response.Usage.TotalTokens}}
-	result.Output.Message.Role = "assistant"
-	if response.Usage.PromptTokens < 0 || response.Usage.CompletionTokens < 0 || response.Usage.TotalTokens != response.Usage.PromptTokens+response.Usage.CompletionTokens {
-		return result, errors.New("invalid chat usage for Converse response")
+	cacheRead, cacheWrite := 0, 0
+	if details := response.Usage.PromptTokensDetails; details != nil {
+		cacheRead = details.CachedTokens
+		cacheWrite = details.CacheWriteTokens
+		if cacheWrite == 0 {
+			cacheWrite = details.CacheCreationTokens
+		}
 	}
+	if response.Usage.PromptTokens < 0 || response.Usage.CompletionTokens < 0 || cacheRead < 0 || cacheWrite < 0 || cacheRead > response.Usage.PromptTokens || cacheWrite > response.Usage.PromptTokens-cacheRead || response.Usage.PromptTokens > math.MaxInt-response.Usage.CompletionTokens || response.Usage.TotalTokens != response.Usage.PromptTokens+response.Usage.CompletionTokens {
+		return BedrockConverseResponse{}, errors.New("invalid chat usage for Converse response")
+	}
+	inputTokens := response.Usage.PromptTokens - cacheRead - cacheWrite
+	result := BedrockConverseResponse{Usage: BedrockUsage{InputTokens: inputTokens, OutputTokens: response.Usage.CompletionTokens, TotalTokens: response.Usage.TotalTokens, CacheReadInputTokens: cacheRead, CacheWriteInputTokens: cacheWrite}}
+	result.Output.Message.Role = "assistant"
 	if len(response.Choices) != 1 || response.Choices[0].Message.Role != "assistant" {
 		return result, errors.New("chat response cannot be represented as Converse")
 	}

@@ -284,6 +284,32 @@ func TestBedrockConverseResponsePreservesToolsAndUsage(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseResponsePreservesPromptCacheUsage(t *testing.T) {
+	response, err := BedrockFromChat(ChatCompletionResponse{
+		Choices: []Choice{{FinishReason: "stop", Message: Message{Role: "assistant", Content: "cached"}}},
+		Usage: Usage{
+			PromptTokens: 20, CompletionTokens: 2, TotalTokens: 22,
+			PromptTokensDetails: &PromptTokenDetails{CachedTokens: 6, CacheWriteTokens: 10},
+		},
+	})
+	if err != nil || response.Usage.InputTokens != 4 || response.Usage.CacheReadInputTokens != 6 || response.Usage.CacheWriteInputTokens != 10 || response.Usage.OutputTokens != 2 || response.Usage.TotalTokens != 22 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestBedrockConverseResponseRejectsCacheUsageAbovePromptTotal(t *testing.T) {
+	_, err := BedrockFromChat(ChatCompletionResponse{
+		Choices: []Choice{{FinishReason: "stop", Message: Message{Role: "assistant", Content: "cached"}}},
+		Usage: Usage{
+			PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7,
+			PromptTokensDetails: &PromptTokenDetails{CachedTokens: 4, CacheWriteTokens: 2},
+		},
+	})
+	if err == nil {
+		t.Fatal("cache usage above prompt total accepted")
+	}
+}
+
 func TestBedrockConverseResponseRejectsUnknownFinishReason(t *testing.T) {
 	_, err := BedrockFromChat(ChatCompletionResponse{Choices: []Choice{{FinishReason: "unknown", Message: Message{Role: "assistant", Content: "hello"}}}})
 	if err == nil {

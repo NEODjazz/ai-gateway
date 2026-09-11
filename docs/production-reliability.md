@@ -61,6 +61,9 @@ message and 64 MiB per-stream limits. Prelude CRC, message CRC, header framing,
 event order, content unions, tool identifiers and final provider usage are
 validated before settlement. Provider exceptions retain retryable rate-limit and
 availability classes; retries and fallback stop once an output delta is exposed.
+Provider-reported cache-read and cache-write input tokens are included in prompt
+and total usage before quota settlement and billing, while the native Converse
+response preserves the provider's split counters.
 
 Chat cache identity also includes validated provider-native message blocks, their
 reserved input size, Bedrock service tier, latency selection and requested

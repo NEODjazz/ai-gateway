@@ -418,11 +418,7 @@ func (s *bedrockStreamState) handle(write ChatCompletionStreamWriter) func(map[s
 				return errors.New("invalid Bedrock stream metadata order")
 			}
 			var event struct {
-				Usage *struct {
-					InputTokens  int `json:"inputTokens"`
-					OutputTokens int `json:"outputTokens"`
-					TotalTokens  int `json:"totalTokens"`
-				} `json:"usage"`
+				Usage *bedrockUsage   `json:"usage"`
 				Trace json.RawMessage `json:"trace"`
 			}
 			if json.Unmarshal(payload, &event) != nil || event.Usage == nil {

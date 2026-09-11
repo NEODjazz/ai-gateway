@@ -209,11 +209,15 @@ type bedrockResponse struct {
 	StopReason                    string          `json:"stopReason"`
 	AdditionalModelResponseFields json.RawMessage `json:"additionalModelResponseFields,omitempty"`
 	Trace                         json.RawMessage `json:"trace,omitempty"`
-	Usage                         *struct {
-		InputTokens  int `json:"inputTokens"`
-		OutputTokens int `json:"outputTokens"`
-		TotalTokens  int `json:"totalTokens"`
-	} `json:"usage"`
+	Usage                         *bedrockUsage   `json:"usage"`
+}
+
+type bedrockUsage struct {
+	InputTokens           int `json:"inputTokens"`
+	OutputTokens          int `json:"outputTokens"`
+	TotalTokens           int `json:"totalTokens"`
+	CacheReadInputTokens  int `json:"cacheReadInputTokens,omitempty"`
+	CacheWriteInputTokens int `json:"cacheWriteInputTokens,omitempty"`
 }
 
 func NewBedrock(baseURL, apiKey string) Bedrock {
@@ -790,10 +794,19 @@ func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletio
 		return result, errors.New("Bedrock response is missing usage")
 	}
 	usage := response.Usage
-	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.InputTokens > math.MaxInt-usage.OutputTokens || usage.TotalTokens != usage.InputTokens+usage.OutputTokens {
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.CacheReadInputTokens < 0 || usage.CacheWriteInputTokens < 0 || usage.InputTokens > math.MaxInt-usage.CacheReadInputTokens || usage.InputTokens+usage.CacheReadInputTokens > math.MaxInt-usage.CacheWriteInputTokens || usage.InputTokens+usage.CacheReadInputTokens+usage.CacheWriteInputTokens > math.MaxInt-usage.OutputTokens {
 		return result, errors.New("invalid Bedrock usage")
 	}
-	result.Usage = openai.Usage{PromptTokens: usage.InputTokens, CompletionTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens}
+	promptTokens := usage.InputTokens + usage.CacheReadInputTokens + usage.CacheWriteInputTokens
+	if usage.TotalTokens != promptTokens+usage.OutputTokens {
+		return result, errors.New("invalid Bedrock usage")
+	}
+	result.Usage = openai.Usage{
+		PromptTokens: promptTokens, CompletionTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens,
+	}
+	if usage.CacheReadInputTokens != 0 || usage.CacheWriteInputTokens != 0 {
+		result.Usage.PromptTokensDetails = &openai.PromptTokenDetails{CachedTokens: usage.CacheReadInputTokens, CacheWriteTokens: usage.CacheWriteInputTokens}
+	}
 	message := openai.Message{Role: "assistant"}
 	if len(response.Output.Message.Content) == 0 || len(response.Output.Message.Content) > 128 {
 		return result, errors.New("invalid Bedrock output content length")

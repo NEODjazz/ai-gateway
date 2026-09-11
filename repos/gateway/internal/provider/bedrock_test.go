@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -150,11 +151,7 @@ func TestBedrockConversePreservesReasoningHistoryAndResponse(t *testing.T) {
 	var upstream bedrockResponse
 	upstream.Output.Message = bedrockMessage{Role: "assistant", Content: converted.Messages[1].Content}
 	upstream.StopReason = "end_turn"
-	upstream.Usage = &struct {
-		InputTokens  int `json:"inputTokens"`
-		OutputTokens int `json:"outputTokens"`
-		TotalTokens  int `json:"totalTokens"`
-	}{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}
+	upstream.Usage = &bedrockUsage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}
 	response, err := bedrockToChat(upstream, "model")
 	if err != nil || len(response.Choices[0].Message.Reasoning) != 2 || *response.Choices[0].Message.Reasoning[0].Index != 0 || response.Choices[0].Message.Reasoning[1].Data != "b3BhcXVl" {
 		t.Fatalf("response=%+v err=%v", response, err)
@@ -510,13 +507,30 @@ func TestBedrockRejectsUnrepresentableParametersBeforeHTTP(t *testing.T) {
 func TestBedrockRejectsInconsistentUsage(t *testing.T) {
 	response := bedrockResponse{StopReason: "end_turn"}
 	response.Output.Message.Content = []bedrockContentBlock{{Text: "hello"}}
-	response.Usage = &struct {
-		InputTokens  int `json:"inputTokens"`
-		OutputTokens int `json:"outputTokens"`
-		TotalTokens  int `json:"totalTokens"`
-	}{InputTokens: 2, OutputTokens: 3, TotalTokens: 4}
+	response.Usage = &bedrockUsage{InputTokens: 2, OutputTokens: 3, TotalTokens: 4}
 	if _, err := bedrockToChat(response, "model"); err == nil {
 		t.Fatal("inconsistent usage accepted")
+	}
+}
+
+func TestBedrockRejectsOverflowingCacheUsage(t *testing.T) {
+	response := bedrockResponse{StopReason: "end_turn"}
+	response.Output.Message.Content = []bedrockContentBlock{{Text: "hello"}}
+	response.Usage = &bedrockUsage{InputTokens: math.MaxInt, CacheReadInputTokens: 1, TotalTokens: math.MaxInt}
+	if _, err := bedrockToChat(response, "model"); err == nil {
+		t.Fatal("overflowing cache usage accepted")
+	}
+}
+
+func TestBedrockConversePreservesPromptCacheUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","usage":{"inputTokens":4,"cacheReadInputTokens":6,"cacheWriteInputTokens":10,"outputTokens":2,"totalTokens":22}}`)
+	}))
+	defer server.Close()
+	response, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+	details := response.Usage.PromptTokensDetails
+	if err != nil || response.Usage.PromptTokens != 20 || response.Usage.TotalTokens != 22 || details == nil || details.CachedTokens != 6 || details.CacheWriteTokens != 10 {
+		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }
 
@@ -525,11 +539,7 @@ func TestBedrockRejectsUnsupportedOutputImage(t *testing.T) {
 	image := bedrockImage{Format: "png"}
 	image.Source.Bytes = "data"
 	response.Output.Message.Content = []bedrockContentBlock{{Image: &image}}
-	response.Usage = &struct {
-		InputTokens  int `json:"inputTokens"`
-		OutputTokens int `json:"outputTokens"`
-		TotalTokens  int `json:"totalTokens"`
-	}{InputTokens: 2, OutputTokens: 1, TotalTokens: 3}
+	response.Usage = &bedrockUsage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3}
 	if _, err := bedrockToChat(response, "model"); err == nil {
 		t.Fatal("unsupported output image was silently discarded")
 	}
@@ -566,11 +576,7 @@ func TestBedrockConversePreservesCitations(t *testing.T) {
 
 func TestBedrockRejectsMalformedCitationLocations(t *testing.T) {
 	zero, one := 0, 1
-	validUsage := &struct {
-		InputTokens  int `json:"inputTokens"`
-		OutputTokens int `json:"outputTokens"`
-		TotalTokens  int `json:"totalTokens"`
-	}{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}
+	validUsage := &bedrockUsage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}
 	for name, location := range map[string]bedrockCitationLocation{
 		"missing": {},
 		"union": {
@@ -624,11 +630,7 @@ func TestBedrockMapsDocumentedStopReasons(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			response := bedrockResponse{StopReason: reason}
 			response.Output.Message.Content = []bedrockContentBlock{{Text: "partial"}}
-			response.Usage = &struct {
-				InputTokens  int `json:"inputTokens"`
-				OutputTokens int `json:"outputTokens"`
-				TotalTokens  int `json:"totalTokens"`
-			}{InputTokens: 2, OutputTokens: 1, TotalTokens: 3}
+			response.Usage = &bedrockUsage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3}
 			chat, err := bedrockToChat(response, "model")
 			if err != nil || chat.Choices[0].FinishReason != expectedFinish || len(chat.Choices[0].Message.NativeContent) != 1 {
 				t.Fatalf("chat=%+v err=%v", chat, err)
@@ -646,11 +648,7 @@ func TestBedrockPreservesMalformedOutputStopReasonsAndUsage(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			response := bedrockResponse{StopReason: reason}
 			response.Output.Message.Content = []bedrockContentBlock{{Text: "partial"}}
-			response.Usage = &struct {
-				InputTokens  int `json:"inputTokens"`
-				OutputTokens int `json:"outputTokens"`
-				TotalTokens  int `json:"totalTokens"`
-			}{InputTokens: 2, OutputTokens: 1, TotalTokens: 3}
+			response.Usage = &bedrockUsage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3}
 			chat, err := bedrockToChat(response, "model")
 			if err != nil || chat.Usage.TotalTokens != 3 || chat.Choices[0].FinishReason != "error" {
 				t.Fatalf("chat=%+v err=%v", chat, err)
