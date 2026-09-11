@@ -35,6 +35,7 @@ type File struct {
 	OwnerKey      string
 	Status        string
 	Bytes         int64
+	Attributes    map[string]string
 	CreatedAt     time.Time
 }
 
@@ -50,7 +51,7 @@ type Store interface {
 	GetVectorStore(context.Context, string, string) (VectorStore, error)
 	UpdateVectorStore(context.Context, string, string, Update) (VectorStore, error)
 	DeleteVectorStore(context.Context, string, string) error
-	AttachVectorStoreFile(context.Context, string, string, string, int, int64) (File, error)
+	AttachVectorStoreFile(context.Context, string, string, string, map[string]string, int, int64) (File, error)
 	ListVectorStoreFiles(context.Context, string, string, int, string) ([]File, string, error)
 	GetVectorStoreFile(context.Context, string, string, string) (File, error)
 	DeleteVectorStoreFile(context.Context, string, string, string) error

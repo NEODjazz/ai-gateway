@@ -162,11 +162,18 @@ func (s *PostgresStore) DeleteVectorStore(ctx context.Context, owner, id string)
 	return nil
 }
 
-func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vectorStoreID, fileID string, quota int, byteQuota int64) (vectorstate.File, error) {
+func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vectorStoreID, fileID string, attributes map[string]string, quota int, byteQuota int64) (vectorstate.File, error) {
 	if s == nil || s.pool == nil {
 		return vectorstate.File{}, vectorstate.ErrUnavailable
 	}
 	if owner == "" || vectorStoreID == "" || fileID == "" || quota < 1 || byteQuota < 1 {
+		return vectorstate.File{}, vectorstate.ErrInvalid
+	}
+	if attributes == nil {
+		attributes = map[string]string{}
+	}
+	encodedAttributes, err := json.Marshal(attributes)
+	if err != nil {
 		return vectorstate.File{}, vectorstate.ErrInvalid
 	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -207,7 +214,7 @@ func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vector
 	if usedBytes < 0 || bytes < 0 || usedBytes > byteQuota || bytes > byteQuota-usedBytes {
 		return vectorstate.File{}, vectorstate.ErrByteQuotaExceeded
 	}
-	command, err := tx.Exec(ctx, `INSERT INTO gateway_vector_store_files (vector_store_id,file_id,owner_key) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, vectorStoreID, fileID, owner)
+	command, err := tx.Exec(ctx, `INSERT INTO gateway_vector_store_files (vector_store_id,file_id,owner_key,attributes) VALUES ($1,$2,$3,$4::jsonb) ON CONFLICT DO NOTHING`, vectorStoreID, fileID, owner, string(encodedAttributes))
 	if err != nil {
 		return vectorstate.File{}, err
 	}
@@ -251,7 +258,7 @@ func (s *PostgresStore) ListVectorStoreFiles(ctx context.Context, owner, vectorS
 		}
 		cursorTime = &createdAt
 	}
-	rows, err := s.pool.Query(ctx, `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3::timestamptz IS NULL OR (a.created_at,a.file_id)<($3::timestamptz,$4)) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $5`, owner, vectorStoreID, cursorTime, cursorID, limit+1)
+	rows, err := s.pool.Query(ctx, `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3::timestamptz IS NULL OR (a.created_at,a.file_id)<($3::timestamptz,$4)) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $5`, owner, vectorStoreID, cursorTime, cursorID, limit+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -307,7 +314,7 @@ type vectorStoreFileQuerier interface {
 }
 
 func getVectorStoreFile(ctx context.Context, query vectorStoreFileQuerier, owner, vectorStoreID, fileID string) (vectorstate.File, error) {
-	file, err := scanVectorStoreFile(query.QueryRow(ctx, `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND a.file_id=$3`, owner, vectorStoreID, fileID))
+	file, err := scanVectorStoreFile(query.QueryRow(ctx, `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND a.file_id=$3`, owner, vectorStoreID, fileID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return vectorstate.File{}, vectorstate.ErrFileNotFound
 	}
@@ -318,7 +325,11 @@ type vectorStoreFileScanner interface{ Scan(...any) error }
 
 func scanVectorStoreFile(row vectorStoreFileScanner) (vectorstate.File, error) {
 	var file vectorstate.File
-	err := row.Scan(&file.VectorStoreID, &file.FileID, &file.OwnerKey, &file.Status, &file.Bytes, &file.CreatedAt)
+	var attributes []byte
+	err := row.Scan(&file.VectorStoreID, &file.FileID, &file.OwnerKey, &file.Status, &file.Bytes, &attributes, &file.CreatedAt)
+	if err == nil {
+		err = json.Unmarshal(attributes, &file.Attributes)
+	}
 	return file, err
 }
 

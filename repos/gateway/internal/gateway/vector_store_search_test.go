@@ -70,13 +70,12 @@ func TestVectorStoreSearchUsesOwnedTextPolicyAndEmbeddingBilling(t *testing.T) {
 	vectors := &memoryVectorStore{
 		stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: owner, Name: "docs", Status: "completed"}},
 		files: map[string]vectorstate.File{
-			"vs_owned/file_alpha": {VectorStoreID: "vs_owned", FileID: "file_alpha", OwnerKey: owner, Status: "completed", Bytes: 10, CreatedAt: time.Unix(2, 0)},
-			"vs_owned/file_beta":  {VectorStoreID: "vs_owned", FileID: "file_beta", OwnerKey: owner, Status: "completed", Bytes: 9, CreatedAt: time.Unix(1, 0)},
+			"vs_owned/file_alpha": {VectorStoreID: "vs_owned", FileID: "file_alpha", OwnerKey: owner, Status: "completed", Bytes: 10, Attributes: map[string]string{"region": "eu"}, CreatedAt: time.Unix(2, 0)},
+			"vs_owned/file_beta":  {VectorStoreID: "vs_owned", FileID: "file_beta", OwnerKey: owner, Status: "completed", Bytes: 9, Attributes: map[string]string{"region": "us"}, CreatedAt: time.Unix(1, 0)},
 		},
 	}
 	files := &memoryFileStore{files: map[string]filestate.File{
 		"file_alpha": {ID: "file_alpha", OwnerKey: owner, Filename: "alpha.md", Purpose: "assistants", ContentType: "text/markdown", Bytes: 10, Content: []byte("alpha text")},
-		"file_beta":  {ID: "file_beta", OwnerKey: owner, Filename: "beta.txt", Purpose: "assistants", ContentType: "text/plain; charset=utf-8", Bytes: 9, Content: []byte("beta text")},
 	}}
 	auth := &vectorSearchAuthModule{}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,10 +84,10 @@ func TestVectorStoreSearchUsesOwnedTextPolicyAndEmbeddingBilling(t *testing.T) {
 			t.Fatalf("invalid upstream request: path=%s auth=%q", r.URL.Path, r.Header.Get("Authorization"))
 		}
 		inputs := request.Input.([]any)
-		if request.Model != "embed-upstream" || len(inputs) != 3 || inputs[0] != "alpha" {
+		if request.Model != "embed-upstream" || len(inputs) != 2 || inputs[0] != "alpha" || inputs[1] != "alpha text" {
 			t.Fatalf("upstream request=%+v", request)
 		}
-		_, _ = fmt.Fprint(w, `{"object":"list","model":"embed-upstream","data":[{"object":"embedding","index":0,"embedding":[1,0]},{"object":"embedding","index":1,"embedding":[0,1]},{"object":"embedding","index":2,"embedding":[1,0]}],"usage":{"prompt_tokens":7,"total_tokens":7}}`)
+		_, _ = fmt.Fprint(w, `{"object":"list","model":"embed-upstream","data":[{"object":"embedding","index":0,"embedding":[1,0]},{"object":"embedding","index":1,"embedding":[1,0]}],"usage":{"prompt_tokens":5,"total_tokens":5}}`)
 	}))
 	defer upstream.Close()
 	usage := &embeddingUsageRecorder{}
@@ -100,11 +99,11 @@ func TestVectorStoreSearchUsesOwnedTextPolicyAndEmbeddingBilling(t *testing.T) {
 		WithFileStore(files, FileRuntimeConfig{MaxBytes: 1024, OwnerQuotaBytes: 4096}).
 		WithVectorStore(vectors, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10, ByteQuota: 4096})
 
-	request := httptest.NewRequest(http.MethodPost, "/v1/vector_stores/vs_owned/search", strings.NewReader(`{"query":"alpha","model":"embed-model","max_num_results":1}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/vector_stores/vs_owned/search", strings.NewReader(`{"query":"alpha","model":"embed-model","max_num_results":1,"filters":{"region":"eu"}}`))
 	request.Header.Set("Authorization", "Bearer key")
 	response := httptest.NewRecorder()
 	Routes(handler).ServeHTTP(response, request)
-	if response.Code != http.StatusOK || auth.calls != 1 || requestPolicy.calls != 1 || requestPolicy.inputs != 3 || policy.calls != 1 || policy.inputs != 3 || rates.tokens <= openai.EmbeddingInputTokenCount("alpha") || usage.pre != 1 || usage.post != 1 || usage.usage.TotalTokens != 7 {
+	if response.Code != http.StatusOK || auth.calls != 1 || requestPolicy.calls != 1 || requestPolicy.inputs != 2 || policy.calls != 1 || policy.inputs != 2 || rates.tokens <= openai.EmbeddingInputTokenCount("alpha") || usage.pre != 1 || usage.post != 1 || usage.usage.TotalTokens != 5 {
 		t.Fatalf("status=%d auth=%d request_policy=%+v provider_policy=%+v rate_tokens=%d billing=%+v body=%s", response.Code, auth.calls, requestPolicy, policy, rates.tokens, usage, response.Body.String())
 	}
 	var body struct {
@@ -116,7 +115,7 @@ func TestVectorStoreSearchUsesOwnedTextPolicyAndEmbeddingBilling(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Object != "vector_store.search_results.page" || len(body.SearchQuery) != 1 || body.SearchQuery[0] != "alpha" || body.HasMore || len(body.Data) != 1 || body.Data[0].FileID != "file_alpha" || body.Data[0].Content[0].Text != "alpha text" {
+	if body.Object != "vector_store.search_results.page" || len(body.SearchQuery) != 1 || body.SearchQuery[0] != "alpha" || body.HasMore || len(body.Data) != 1 || body.Data[0].FileID != "file_alpha" || body.Data[0].Attributes["region"] != "eu" || body.Data[0].Content[0].Text != "alpha text" {
 		t.Fatalf("response=%+v", body)
 	}
 }
@@ -168,6 +167,24 @@ func TestVectorSearchRankingRejectsMalformedVectors(t *testing.T) {
 	} {
 		if _, ok := rankVectorSearchResults(response, chunks, 1); ok {
 			t.Fatalf("accepted malformed response=%+v", response)
+		}
+	}
+}
+
+func TestVectorSearchFiltersRequireEveryExactAttribute(t *testing.T) {
+	attributes := map[string]string{"region": "eu", "category": "docs"}
+	for _, test := range []struct {
+		filters map[string]string
+		match   bool
+	}{
+		{nil, true},
+		{map[string]string{"region": "eu"}, true},
+		{map[string]string{"region": "eu", "category": "docs"}, true},
+		{map[string]string{"region": "EU"}, false},
+		{map[string]string{"missing": "value"}, false},
+	} {
+		if got := matchesVectorSearchFilters(attributes, test.filters); got != test.match {
+			t.Fatalf("filters=%v match=%t want=%t", test.filters, got, test.match)
 		}
 	}
 }

@@ -5,11 +5,13 @@ import (
 	"net/http"
 	"strconv"
 
+	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/vectorstate"
 )
 
 type attachVectorStoreFileRequest struct {
-	FileID string `json:"file_id"`
+	FileID     string            `json:"file_id"`
+	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
 func (h Handler) AttachVectorStoreFile(w http.ResponseWriter, r *http.Request) {
@@ -25,7 +27,11 @@ func (h Handler) AttachVectorStoreFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "file_id is invalid")
 		return
 	}
-	file, err := h.vectorStores.AttachVectorStoreFile(r.Context(), fileOwnerKey(req), r.PathValue("id"), input.FileID, h.vectorStoreConfig.FileQuota, h.vectorStoreConfig.ByteQuota)
+	if message := openai.ValidateMetadata(input.Attributes); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
+	file, err := h.vectorStores.AttachVectorStoreFile(r.Context(), fileOwnerKey(req), r.PathValue("id"), input.FileID, normalizedMetadata(input.Attributes), h.vectorStoreConfig.FileQuota, h.vectorStoreConfig.ByteQuota)
 	if err != nil {
 		writeVectorStoreFileError(w, err)
 		return
@@ -136,7 +142,7 @@ func publicVectorStoreFile(file vectorstate.File) map[string]any {
 	return map[string]any{
 		"id": file.FileID, "object": "vector_store.file", "usage_bytes": file.Bytes,
 		"created_at": file.CreatedAt.Unix(), "vector_store_id": file.VectorStoreID,
-		"status": file.Status, "last_error": nil, "attributes": map[string]string{},
+		"status": file.Status, "last_error": nil, "attributes": normalizedMetadata(file.Attributes),
 	}
 }
 

@@ -24,17 +24,19 @@ const (
 )
 
 type vectorStoreSearchRequest struct {
-	Query         string `json:"query"`
-	Model         string `json:"model"`
-	Provider      string `json:"provider,omitempty"`
-	MaxNumResults int    `json:"max_num_results,omitempty"`
+	Query         string            `json:"query"`
+	Model         string            `json:"model"`
+	Provider      string            `json:"provider,omitempty"`
+	MaxNumResults int               `json:"max_num_results,omitempty"`
+	Filters       map[string]string `json:"filters,omitempty"`
 }
 
 type vectorSearchChunk struct {
-	fileID   string
-	filename string
-	text     string
-	index    int
+	fileID     string
+	filename   string
+	attributes map[string]string
+	text       string
+	index      int
 }
 
 type vectorSearchResult struct {
@@ -80,6 +82,10 @@ func (h Handler) SearchVectorStore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "max_num_results must be between 1 and 50")
 		return
 	}
+	if message := openai.ValidateMetadata(input.Filters); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
 	if h.vectorStores == nil || h.files == nil {
 		writeError(w, http.StatusServiceUnavailable, "vector_store_search_unavailable", "vector store search is unavailable")
 		return
@@ -105,7 +111,7 @@ func (h Handler) SearchVectorStore(w http.ResponseWriter, r *http.Request) {
 		writeVectorStoreError(w, err)
 		return
 	}
-	chunks, err := h.loadVectorSearchChunks(r, owner, storeID)
+	chunks, err := h.loadVectorSearchChunks(r, owner, storeID, input.Filters)
 	if err != nil {
 		writeVectorSearchError(w, err)
 		return
@@ -150,7 +156,7 @@ func (h Handler) SearchVectorStore(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h Handler) loadVectorSearchChunks(r *http.Request, owner, storeID string) ([]vectorSearchChunk, error) {
+func (h Handler) loadVectorSearchChunks(r *http.Request, owner, storeID string, filters map[string]string) ([]vectorSearchChunk, error) {
 	files, next, err := h.vectorStores.ListVectorStoreFiles(r.Context(), owner, storeID, maxVectorSearchFiles, "")
 	if err != nil {
 		return nil, err
@@ -161,6 +167,9 @@ func (h Handler) loadVectorSearchChunks(r *http.Request, owner, storeID string) 
 	chunks := make([]vectorSearchChunk, 0, len(files))
 	totalBytes := int64(0)
 	for _, attached := range files {
+		if !matchesVectorSearchFilters(attached.Attributes, filters) {
+			continue
+		}
 		file, getErr := h.files.Get(r.Context(), owner, attached.FileID, true)
 		if getErr != nil {
 			return nil, getErr
@@ -174,13 +183,22 @@ func (h Handler) loadVectorSearchChunks(r *http.Request, owner, storeID string) 
 			if len(chunks) >= maxVectorSearchChunks {
 				return nil, errVectorSearchTooLarge
 			}
-			chunks = append(chunks, vectorSearchChunk{fileID: file.ID, filename: file.Filename, text: text, index: len(chunks)})
+			chunks = append(chunks, vectorSearchChunk{fileID: file.ID, filename: file.Filename, attributes: normalizedMetadata(attached.Attributes), text: text, index: len(chunks)})
 		}
 	}
 	if len(chunks) == 0 {
 		return nil, errVectorSearchEmpty
 	}
 	return chunks, nil
+}
+
+func matchesVectorSearchFilters(attributes, filters map[string]string) bool {
+	for key, value := range filters {
+		if attributes[key] != value {
+			return false
+		}
+	}
+	return true
 }
 
 var (
@@ -229,7 +247,7 @@ func rankVectorSearchResults(response openai.EmbeddingResponse, chunks []vectorS
 		if !valid {
 			return nil, false
 		}
-		results[index] = vectorSearchResult{FileID: chunk.fileID, Filename: chunk.filename, Score: score, Attributes: map[string]string{}, Content: []vectorSearchText{{Type: "text", Text: chunk.text}}, chunkIndex: chunk.index}
+		results[index] = vectorSearchResult{FileID: chunk.fileID, Filename: chunk.filename, Score: score, Attributes: chunk.attributes, Content: []vectorSearchText{{Type: "text", Text: chunk.text}}, chunkIndex: chunk.index}
 	}
 	sort.SliceStable(results, func(i, j int) bool { return results[i].Score > results[j].Score })
 	if len(results) > limit {

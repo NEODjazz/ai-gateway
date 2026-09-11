@@ -230,6 +230,7 @@ data:
         file_id TEXT NOT NULL REFERENCES gateway_files(id) ON DELETE CASCADE,
         owner_key TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('completed')),
+        attributes JSONB NOT NULL DEFAULT '{}'::jsonb CONSTRAINT gateway_vector_store_files_attributes_object CHECK (jsonb_typeof(attributes) = 'object'),
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         PRIMARY KEY (vector_store_id, file_id),
         CHECK (length(vector_store_id) BETWEEN 1 AND 128),
@@ -238,6 +239,21 @@ data:
     );
     CREATE INDEX IF NOT EXISTS gateway_vector_store_files_owner_created_idx
         ON gateway_vector_store_files (owner_key, vector_store_id, created_at DESC, file_id DESC);
+  030_gateway_vector_store_file_attributes.sql: |
+    ALTER TABLE gateway_vector_store_files
+        ADD COLUMN IF NOT EXISTS attributes JSONB NOT NULL DEFAULT '{}'::jsonb;
+    DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = 'gateway_vector_store_files'::regclass
+              AND conname = 'gateway_vector_store_files_attributes_object'
+        ) THEN
+            ALTER TABLE gateway_vector_store_files
+                ADD CONSTRAINT gateway_vector_store_files_attributes_object
+                CHECK (jsonb_typeof(attributes) = 'object');
+        END IF;
+    END $$;
   018_gateway_vector_stores.sql: |
     CREATE TABLE IF NOT EXISTS gateway_vector_stores (
         id TEXT PRIMARY KEY,
