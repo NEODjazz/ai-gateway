@@ -23,6 +23,7 @@ type RequestContext struct {
 	InputPages                 int                                `json:"input_pages,omitempty"`
 	InputAudioMilliseconds     int                                `json:"input_audio_milliseconds,omitempty"`
 	ToolRequests               int                                `json:"tool_requests,omitempty"`
+	TrainingTokens             int                                `json:"training_tokens,omitempty"`
 	TeamID                     string                             `json:"team_id,omitempty"`
 	OrganizationID             string                             `json:"organization_id,omitempty"`
 	Tags                       []string                           `json:"tags,omitempty"`

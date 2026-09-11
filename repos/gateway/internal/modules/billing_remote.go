@@ -42,6 +42,7 @@ type UsageRequest struct {
 	InputPages              int      `json:"input_pages"`
 	InputAudioMilliseconds  int      `json:"input_audio_milliseconds"`
 	ToolRequests            int      `json:"tool_requests"`
+	TrainingTokens          int      `json:"training_tokens"`
 	InputTokens             int      `json:"input_tokens"`
 	OutputTokens            int      `json:"output_tokens"`
 	TotalTokens             int      `json:"total_tokens"`
@@ -53,6 +54,7 @@ type UsageRequest struct {
 	PricingKey              string   `json:"pricing_key,omitempty"`
 	InputCostPer1M          string   `json:"input_cost_per_1m,omitempty"`
 	OutputCostPer1M         string   `json:"output_cost_per_1m,omitempty"`
+	TrainingCostPer1M       string   `json:"training_cost_per_1m,omitempty"`
 	SearchCostPer1K         string   `json:"search_cost_per_1k,omitempty"`
 	CharacterCostPer1M      string   `json:"character_cost_per_1m,omitempty"`
 	PageCostPer1K           string   `json:"page_cost_per_1k,omitempty"`
@@ -156,10 +158,12 @@ func billingRequest(req *RequestContext) UsageRequest {
 		InputPages:             req.InputPages,
 		InputAudioMilliseconds: req.InputAudioMilliseconds,
 		ToolRequests:           req.ToolRequests,
+		TrainingTokens:         req.TrainingTokens,
 		CatalogVersion:         metadataValue(req.Metadata, "model_catalog.version"),
 		PricingKey:             metadataValue(req.Metadata, "model_catalog.pricing_key"),
 		InputCostPer1M:         metadataValue(req.Metadata, "model_catalog.input_cost_per_1m"),
 		OutputCostPer1M:        metadataValue(req.Metadata, "model_catalog.output_cost_per_1m"),
+		TrainingCostPer1M:      metadataValue(req.Metadata, "model_catalog.training_cost_per_1m"),
 		SearchCostPer1K:        metadataValue(req.Metadata, "model_catalog.search_cost_per_1k"),
 		CharacterCostPer1M:     metadataValue(req.Metadata, "model_catalog.character_cost_per_1m"),
 		PageCostPer1K:          metadataValue(req.Metadata, "model_catalog.page_cost_per_1k"),

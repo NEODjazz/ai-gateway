@@ -19,6 +19,7 @@ type RequestContext struct {
 	InputPages              int                            `json:"input_pages,omitempty"`
 	InputAudioMilliseconds  int                            `json:"input_audio_milliseconds,omitempty"`
 	ToolRequests            int                            `json:"tool_requests,omitempty"`
+	TrainingTokens          int                            `json:"training_tokens,omitempty"`
 	CacheReadInputTokens    int                            `json:"cache_read_input_tokens,omitempty"`
 	CacheWriteInputTokens   int                            `json:"cache_write_input_tokens,omitempty"`
 	SearchRequests          int                            `json:"search_requests,omitempty"`
@@ -75,6 +76,7 @@ type BillingEvent struct {
 	InputPages              int      `json:"input_pages"`
 	InputAudioMilliseconds  int      `json:"input_audio_milliseconds"`
 	ToolRequests            int      `json:"tool_requests"`
+	TrainingTokens          int      `json:"training_tokens"`
 	InputTokens             int      `json:"input_tokens"`
 	OutputTokens            int      `json:"output_tokens"`
 	TotalTokens             int      `json:"total_tokens"`
@@ -88,6 +90,7 @@ type BillingEvent struct {
 	PricingKey              string   `json:"pricing_key,omitempty"`
 	InputCostPer1M          float64  `json:"input_cost_per_1m,omitempty"`
 	OutputCostPer1M         float64  `json:"output_cost_per_1m,omitempty"`
+	TrainingCostPer1M       float64  `json:"training_cost_per_1m,omitempty"`
 	SearchCostPer1K         float64  `json:"search_cost_per_1k,omitempty"`
 	CharacterCostPer1M      float64  `json:"character_cost_per_1m,omitempty"`
 	PageCostPer1K           float64  `json:"page_cost_per_1k,omitempty"`

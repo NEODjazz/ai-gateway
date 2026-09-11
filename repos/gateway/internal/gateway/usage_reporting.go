@@ -20,6 +20,7 @@ type UsageAggregate struct {
 	Errors                 uint64  `json:"errors"`
 	InputTokens            uint64  `json:"input_tokens"`
 	OutputTokens           uint64  `json:"output_tokens"`
+	TrainingTokens         uint64  `json:"training_tokens"`
 	TotalTokens            uint64  `json:"total_tokens"`
 	InputCharacters        uint64  `json:"input_characters"`
 	InputPages             uint64  `json:"input_pages"`

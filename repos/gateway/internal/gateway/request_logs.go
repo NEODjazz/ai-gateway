@@ -65,6 +65,7 @@ type RequestLog struct {
 	CacheKind               string   `json:"cache_kind,omitempty"`
 	InputTokens             uint32   `json:"input_tokens"`
 	OutputTokens            uint32   `json:"output_tokens"`
+	TrainingTokens          uint64   `json:"training_tokens"`
 	TotalTokens             uint32   `json:"total_tokens"`
 	InputCharacters         uint32   `json:"input_characters"`
 	InputPages              uint32   `json:"input_pages"`
@@ -100,6 +101,7 @@ type RequestLogGroup struct {
 	Models                 []string `json:"models"`
 	Providers              []string `json:"providers"`
 	TotalTokens            uint64   `json:"total_tokens"`
+	TrainingTokens         uint64   `json:"training_tokens"`
 	InputCharacters        uint64   `json:"input_characters"`
 	InputPages             uint64   `json:"input_pages"`
 	InputAudioMilliseconds uint64   `json:"input_audio_milliseconds"`

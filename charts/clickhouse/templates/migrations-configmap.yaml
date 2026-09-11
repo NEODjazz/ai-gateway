@@ -5,6 +5,12 @@ metadata:
   labels:
     {{- include "clickhouse.labels" . | nindent 4 }}
 data:
+  014_usage_training_tokens.sql: |
+    ALTER TABLE ai_gateway.usage_events
+        ADD COLUMN IF NOT EXISTS training_tokens UInt64 AFTER total_tokens;
+
+    ALTER TABLE ai_gateway.usage_events
+        ADD COLUMN IF NOT EXISTS training_cost_per_1m Float64 AFTER output_cost_per_1m;
   001_usage_events.sql: |
     CREATE DATABASE IF NOT EXISTS ai_gateway;
 

@@ -30,12 +30,12 @@ func TestCatalogLookupPrecedenceAndValidation(t *testing.T) {
 }
 
 func TestCatalogLookupSupportsManagedProviderIdentity(t *testing.T) {
-	catalog, err := Parse(`{"version":"v1","models":[{"provider":"azure-open-ai","model":"gpt-5.6-luna","input_cost_per_1m":0.2,"currency":"USD"}]}`)
+	catalog, err := Parse(`{"version":"v1","models":[{"provider":"azure-open-ai","model":"gpt-5.6-luna","input_cost_per_1m":0.2,"training_cost_per_1m":3.5,"currency":"USD"}]}`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	entry, found := catalog.FindForProviders([]string{"luna-deployment", "azure-open-ai", "openai-compatible"}, "gpt-5.6-luna")
-	if !found || entry.Provider != "azure-open-ai" || entry.InputCostPer1M != 0.2 {
+	if !found || entry.Provider != "azure-open-ai" || entry.InputCostPer1M != 0.2 || entry.TrainingCostPer1M != 3.5 {
 		t.Fatalf("managed provider entry was not resolved: %+v found=%v", entry, found)
 	}
 }
@@ -45,6 +45,7 @@ func TestCatalogRejectsInvalidOrDuplicateEntries(t *testing.T) {
 		`{"models":[{"provider":"p","model":"m"}]}`,
 		`{"version":"v1","unknown_model_policy":"free"}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m","input_cost_per_1m":-1}]}`,
+		`{"version":"v1","models":[{"provider":"p","model":"m","training_cost_per_1m":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m","search_cost_per_1k":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m","character_cost_per_1m":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m","page_cost_per_1k":-1}]}`,

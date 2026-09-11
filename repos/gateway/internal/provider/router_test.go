@@ -1720,7 +1720,7 @@ type webFetchModelProvider struct{ modelCaptureProvider }
 func (*webFetchModelProvider) SupportsWebFetch() bool { return true }
 
 func TestRuntimeCatalogPricingSnapshotIsAttachedToProviderAttempt(t *testing.T) {
-	catalog, err := modelcatalog.Parse(`{"version":"runtime-v2","models":[{"provider":"endpoint-a","model":"upstream","input_cost_per_1m":1.5,"output_cost_per_1m":3,"search_cost_per_1k":10,"currency":"USD"}]}`)
+	catalog, err := modelcatalog.Parse(`{"version":"runtime-v2","models":[{"provider":"endpoint-a","model":"upstream","input_cost_per_1m":1.5,"output_cost_per_1m":3,"training_cost_per_1m":5,"search_cost_per_1k":10,"currency":"USD"}]}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1728,7 +1728,7 @@ func TestRuntimeCatalogPricingSnapshotIsAttachedToProviderAttempt(t *testing.T) 
 	router := Router{catalog: modelcatalog.NewRegistry(catalog, nil, time.Second)}
 	req := providerAttemptContext(modules.RequestContext{}, endpoint)
 	router.applyCatalogPricing(context.Background(), &req, endpoint, "alias")
-	if req.Metadata["model_catalog.version"] != "runtime-v2" || req.Metadata["model_catalog.pricing_key"] != "endpoint-a/upstream" || req.Metadata["model_catalog.input_cost_per_1m"] != "1.5" || req.Metadata["model_catalog.search_cost_per_1k"] != "10" {
+	if req.Metadata["model_catalog.version"] != "runtime-v2" || req.Metadata["model_catalog.pricing_key"] != "endpoint-a/upstream" || req.Metadata["model_catalog.input_cost_per_1m"] != "1.5" || req.Metadata["model_catalog.training_cost_per_1m"] != "5" || req.Metadata["model_catalog.search_cost_per_1k"] != "10" {
 		t.Fatalf("metadata=%v", req.Metadata)
 	}
 }

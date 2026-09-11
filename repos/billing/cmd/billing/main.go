@@ -84,6 +84,7 @@ func run() error {
 			InputPages:              request.InputPages,
 			InputAudioMilliseconds:  request.InputAudioMilliseconds,
 			ToolRequests:            request.ToolRequests,
+			TrainingTokens:          request.TrainingTokens,
 			CacheReadInputTokens:    request.CacheReadInputTokens,
 			CacheWriteInputTokens:   request.CacheWriteInputTokens,
 			SearchRequests:          request.SearchRequests,
@@ -119,6 +120,7 @@ func run() error {
 				"model_catalog.pricing_key":           request.PricingKey,
 				"model_catalog.input_cost_per_1m":     request.InputCostPer1M,
 				"model_catalog.output_cost_per_1m":    request.OutputCostPer1M,
+				"model_catalog.training_cost_per_1m":  request.TrainingCostPer1M,
 				"model_catalog.search_cost_per_1k":    request.SearchCostPer1K,
 				"model_catalog.character_cost_per_1m": request.CharacterCostPer1M,
 				"model_catalog.page_cost_per_1k":      request.PageCostPer1K,
@@ -211,6 +213,7 @@ type usageRequest struct {
 	InputPages              int      `json:"input_pages"`
 	InputAudioMilliseconds  int      `json:"input_audio_milliseconds"`
 	ToolRequests            int      `json:"tool_requests"`
+	TrainingTokens          int      `json:"training_tokens"`
 	InputTokens             int      `json:"input_tokens"`
 	OutputTokens            int      `json:"output_tokens"`
 	TotalTokens             int      `json:"total_tokens"`
@@ -222,6 +225,7 @@ type usageRequest struct {
 	PricingKey              string   `json:"pricing_key,omitempty"`
 	InputCostPer1M          string   `json:"input_cost_per_1m,omitempty"`
 	OutputCostPer1M         string   `json:"output_cost_per_1m,omitempty"`
+	TrainingCostPer1M       string   `json:"training_cost_per_1m,omitempty"`
 	SearchCostPer1K         string   `json:"search_cost_per_1k,omitempty"`
 	CharacterCostPer1M      string   `json:"character_cost_per_1m,omitempty"`
 	PageCostPer1K           string   `json:"page_cost_per_1k,omitempty"`

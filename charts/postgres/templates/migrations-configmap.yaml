@@ -5,6 +5,9 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  014_billing_training_tokens.sql: |
+    ALTER TABLE billing_budget_reservations
+        ADD COLUMN IF NOT EXISTS training_cost_per_1m NUMERIC(18, 8) NOT NULL DEFAULT 0;
   025_gateway_fine_tuning_jobs.sql: |
     CREATE TABLE IF NOT EXISTS gateway_fine_tuning_jobs (
         job_id TEXT PRIMARY KEY,

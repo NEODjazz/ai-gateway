@@ -10,6 +10,7 @@
       "max_output_tokens": 16384,
       "input_cost_per_1m": 1.25,
       "output_cost_per_1m": 10.0,
+      "training_cost_per_1m": 25.0,
       "search_cost_per_1k": 10.0,
       "character_cost_per_1m": 0,
       "page_cost_per_1k": 0,
@@ -24,6 +25,7 @@
       "max_output_tokens": 4096,
       "input_cost_per_1m": 0,
       "output_cost_per_1m": 0,
+      "training_cost_per_1m": 0,
       "currency": "USD"
     }
   ]

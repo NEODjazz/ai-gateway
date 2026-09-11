@@ -54,6 +54,7 @@ func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 		Timestamp:              "2026-06-25T10:30:00Z",
 		InputTokens:            10,
 		OutputTokens:           5,
+		TrainingTokens:         1000,
 		TotalTokens:            15,
 		InputCharacters:        4096,
 		InputPages:             4,
@@ -66,6 +67,7 @@ func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 		PageCostPer1K:          100,
 		InputCostPer1M:         1,
 		OutputCostPer1M:        2,
+		TrainingCostPer1M:      5,
 		SearchRequests:         2,
 		SearchCostPer1K:        10,
 		CharacterCostPer1M:     15,
@@ -83,7 +85,7 @@ func TestClickHouseUsageEventWriterWritesJSONEachRow(t *testing.T) {
 	if receivedEvent.Timestamp != "2026-06-25T10:30:00Z" {
 		t.Fatalf("unexpected timestamp: %+v", receivedEvent)
 	}
-	if receivedEvent.TeamID != "team-1" || len(receivedEvent.Tags) != 2 || receivedEvent.Tags[0] != "production" || receivedEvent.CacheReadInputTokens != 7 || receivedEvent.CacheWriteInputTokens != 3 || receivedEvent.CatalogVersion != "catalog-v1" || receivedEvent.PricingKey != "ollama/test-model" || receivedEvent.SearchRequests != 2 || receivedEvent.SearchCostPer1K != 10 || receivedEvent.InputCharacters != 4096 || receivedEvent.CharacterCostPer1M != 15 || receivedEvent.InputPages != 4 || receivedEvent.PageCostPer1K != 100 || receivedEvent.InputAudioMilliseconds != 90000 || receivedEvent.ToolRequests != 3 || receivedEvent.AudioCostPerMinute != 0.12 {
+	if receivedEvent.TeamID != "team-1" || len(receivedEvent.Tags) != 2 || receivedEvent.Tags[0] != "production" || receivedEvent.CacheReadInputTokens != 7 || receivedEvent.CacheWriteInputTokens != 3 || receivedEvent.CatalogVersion != "catalog-v1" || receivedEvent.PricingKey != "ollama/test-model" || receivedEvent.TrainingTokens != 1000 || receivedEvent.TrainingCostPer1M != 5 || receivedEvent.SearchRequests != 2 || receivedEvent.SearchCostPer1K != 10 || receivedEvent.InputCharacters != 4096 || receivedEvent.CharacterCostPer1M != 15 || receivedEvent.InputPages != 4 || receivedEvent.PageCostPer1K != 100 || receivedEvent.InputAudioMilliseconds != 90000 || receivedEvent.ToolRequests != 3 || receivedEvent.AudioCostPerMinute != 0.12 {
 		t.Fatalf("pricing audit fields were not serialized: %+v", receivedEvent)
 	}
 }
