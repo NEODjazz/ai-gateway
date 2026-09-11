@@ -3,6 +3,7 @@ package gateway
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
@@ -36,7 +37,7 @@ func (h Handler) serveNativeInteraction(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
-	if request.Background || request.PreviousInteractionID != "" || request.Store != nil && *request.Store {
+	if request.Background || request.PreviousInteractionID != "" {
 		writeError(w, http.StatusBadRequest, "unsupported_operation", "native interaction persistence requires lifecycle support")
 		return
 	}
@@ -160,17 +161,80 @@ func (h Handler) serveNativeInteraction(w http.ResponseWriter, r *http.Request, 
 }
 
 func (h Handler) GetInteraction(w http.ResponseWriter, r *http.Request) {
-	h.getResponseAs(w, r, func(response openai.ResponseResponse) any {
-		return openai.InteractionFromResponse(response)
-	})
+	resource, ok := h.provider.(provider.InteractionResourceProvider)
+	if !ok {
+		h.getResponseAs(w, r, func(response openai.ResponseResponse) any { return openai.InteractionFromResponse(response) })
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	reqCtx, ok := h.authorizeInteractionResource(w, r, resource, id)
+	if !ok {
+		return
+	}
+	response, err := resource.RetrieveInteraction(r.Context(), reqCtx, id)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) CancelInteraction(w http.ResponseWriter, r *http.Request) {
-	h.cancelResponseAs(w, r, func(response openai.ResponseResponse) any {
-		return openai.InteractionFromResponse(response)
-	})
+	resource, ok := h.provider.(provider.InteractionResourceProvider)
+	if !ok {
+		h.cancelResponseAs(w, r, func(response openai.ResponseResponse) any { return openai.InteractionFromResponse(response) })
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	reqCtx, ok := h.authorizeInteractionResource(w, r, resource, id)
+	if !ok {
+		return
+	}
+	response, err := resource.CancelInteraction(r.Context(), reqCtx, id)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) DeleteInteraction(w http.ResponseWriter, r *http.Request) {
-	h.deleteResponseAs(w, r, true)
+	resource, ok := h.provider.(provider.InteractionResourceProvider)
+	if !ok {
+		h.deleteResponseAs(w, r, true)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	reqCtx, ok := h.authorizeInteractionResource(w, r, resource, id)
+	if !ok {
+		return
+	}
+	if err := resource.DeleteInteraction(r.Context(), reqCtx, id); err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h Handler) authorizeInteractionResource(w http.ResponseWriter, r *http.Request, resource provider.InteractionResourceProvider, id string) (modules.RequestContext, bool) {
+	reqCtx := modules.RequestContext{APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w)}
+	if err := h.pipeline.RunAuthentication(r.Context(), &reqCtx); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
+			return modules.RequestContext{}, false
+		}
+		writeError(w, http.StatusBadGateway, "module_failed", "authentication failed")
+		return modules.RequestContext{}, false
+	}
+	reqCtx.APIKey = ""
+	model, err := resource.ResolveInteractionResource(r.Context(), reqCtx, id)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return modules.RequestContext{}, false
+	}
+	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, model, 0) {
+		return modules.RequestContext{}, false
+	}
+	reqCtx.Request.Model = model
+	return reqCtx, true
 }

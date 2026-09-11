@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
@@ -22,6 +24,49 @@ type interactionRequestProvider struct {
 }
 
 type bufferedInteractionProvider struct{ chatProvider }
+
+type interactionOwnershipStore struct {
+	mu   sync.Mutex
+	data map[string][]byte
+}
+
+func (s *interactionOwnershipStore) Get(_ context.Context, key string) ([]byte, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, found := s.data[key]
+	return append([]byte(nil), value...), found, nil
+}
+
+func (s *interactionOwnershipStore) Set(_ context.Context, key string, value []byte, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data[key] = append([]byte(nil), value...)
+	return nil
+}
+
+func (s *interactionOwnershipStore) SetIfAbsentOrEqual(ctx context.Context, key string, value []byte, ttl time.Duration) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, found := s.data[key]; found {
+		return string(existing) == string(value), nil
+	}
+	s.data[key] = append([]byte(nil), value...)
+	return true, nil
+}
+
+func (s *interactionOwnershipStore) DeleteIfEqual(_ context.Context, key string, value []byte) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existing, found := s.data[key]
+	if !found {
+		return true, nil
+	}
+	if string(existing) != string(value) {
+		return false, nil
+	}
+	delete(s.data, key)
+	return true, nil
+}
 
 func (*bufferedInteractionProvider) Responses(_ context.Context, request modules.RequestContext) (openai.ResponseResponse, error) {
 	return openai.ResponseResponse{
@@ -104,7 +149,6 @@ func TestInteractionsUsesNativeGeminiRoutingAndBilling(t *testing.T) {
 		t.Fatalf("status=%d calls=%d totals=%v body=%s", response.Code, calls.Load(), recorder.totals, response.Body.String())
 	}
 	for _, unsupported := range []string{
-		`{"provider":"gemini-deployment","model":"public","input":"hello","store":true}`,
 		`{"provider":"gemini-deployment","model":"public","input":"hello","previous_interaction_id":"interaction_previous"}`,
 	} {
 		response := httptest.NewRecorder()
@@ -147,6 +191,55 @@ func TestInteractionsStreamsNativeGeminiAndSettlesBeforeCompletion(t *testing.T)
 	}
 	if response.Code != http.StatusOK || len(recorder.totals) != 1 || recorder.totals[0] != 6 {
 		t.Fatalf("status=%d totals=%v body=%s", response.Code, recorder.totals, body)
+	}
+}
+
+func TestNativeInteractionHTTPStoredLifecycleSkipsRepeatBilling(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/interactions":
+			_, _ = fmt.Fprint(w, `{"id":"interaction_owned","object":"interaction","model":"upstream","status":"completed","usage":{"total_input_tokens":1,"total_output_tokens":1,"total_tokens":2}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1beta/interactions/interaction_owned":
+			_, _ = fmt.Fprint(w, `{"id":"interaction_owned","object":"interaction","model":"upstream","status":"completed","usage":{"total_tokens":2}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/interactions/interaction_owned:cancel":
+			_, _ = fmt.Fprint(w, `{"id":"interaction_owned","status":"cancelled"}`)
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1beta/interactions/interaction_owned":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	recorder := &statelessUsageRecorder{}
+	sessions := &interactionOwnershipStore{data: map[string][]byte{}}
+	router := provider.New(provider.Config{
+		Endpoints:            []config.ProviderEndpointConfig{{Name: "gemini", Type: "gemini", BaseURL: upstream.URL, APIKey: "secret", Models: []string{"public"}, ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"interactions"}}},
+		Modules:              modules.NewPipeline([]modules.Module{recorder}),
+		SessionStore:         sessions,
+		ResponseOwnershipTTL: time.Hour,
+	})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"public"}}}), router))
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(method, path, strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer gateway-test-key")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	if response := call(http.MethodPost, "/v1/interactions", `{"provider":"gemini","model":"public","input":"hello","store":true,"generation_config":{"max_output_tokens":8}}`); response.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := call(http.MethodGet, "/v1/interactions/interaction_owned", ""); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"model":"public"`) {
+		t.Fatalf("retrieve status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := call(http.MethodPost, "/v1/interactions/interaction_owned/cancel", ""); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"cancelled"`) {
+		t.Fatalf("cancel status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := call(http.MethodDelete, "/v1/interactions/interaction_owned", ""); response.Code != http.StatusNoContent {
+		t.Fatalf("delete status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(recorder.totals) != 1 || recorder.totals[0] != 2 {
+		t.Fatalf("lifecycle produced billing events: %v", recorder.totals)
 	}
 }
 

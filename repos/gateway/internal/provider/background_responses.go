@@ -133,7 +133,7 @@ func (r Router) compensateBackgroundResponse(ctx context.Context, req modules.Re
 			return client.CancelResponse(callCtx, responseID)
 		})
 	}
-	binding := responseOwnership{Endpoint: endpoint.Name, Model: model, Deployment: responseDeploymentIdentity(endpoint)}
+	binding := responseOwnership{Endpoint: endpoint.Name, Model: model, Deployment: responseDeploymentIdentity(endpoint), Resource: "response"}
 	_ = r.ownership.remove(ctx, req, responseID, binding)
 }
 

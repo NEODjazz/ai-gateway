@@ -27,6 +27,7 @@ type responseOwnership struct {
 	Endpoint   string `json:"endpoint"`
 	Model      string `json:"model"`
 	Deployment string `json:"deployment"`
+	Resource   string `json:"resource,omitempty"`
 }
 
 type responseOwnershipStore struct {
@@ -73,6 +74,7 @@ func (r Router) persistResponseOwnership(ctx context.Context, req modules.Reques
 		Endpoint:   endpoint.Name,
 		Model:      model,
 		Deployment: responseDeploymentIdentity(endpoint),
+		Resource:   "response",
 	}
 	if err := r.ownership.put(ctx, req, responseID, binding); err != nil {
 		if errors.Is(err, ErrResponseOwnershipConflict) {
@@ -194,7 +196,7 @@ func (r Router) responseResource(ctx context.Context, req modules.RequestContext
 		if endpoint.Name != binding.Endpoint {
 			continue
 		}
-		if responseDeploymentIdentity(endpoint) != binding.Deployment || !endpoint.supportsModel(binding.Model) || !endpoint.supportsCapabilities("responses") {
+		if binding.Resource != "" && binding.Resource != "response" || responseDeploymentIdentity(endpoint) != binding.Deployment || !endpoint.supportsModel(binding.Model) || !endpoint.supportsCapabilities("responses") {
 			return responseOwnership{}, Endpoint{}, ErrResponseDeploymentChanged
 		}
 		return binding, endpoint, nil

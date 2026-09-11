@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -14,14 +15,14 @@ import (
 )
 
 func (g Gemini) Interactions(ctx context.Context, request openai.InteractionRequest) (openai.InteractionResponse, error) {
-	if _, message := request.NativeResponseRequest(); message != "" || request.Stream || request.Background || request.PreviousInteractionID != "" || request.Store != nil && *request.Store {
+	if _, message := request.NativeResponseRequest(); message != "" || request.Stream || request.Background || request.PreviousInteractionID != "" {
 		return openai.InteractionResponse{}, geminiInvalid("interactions")
 	}
 	return g.doInteraction(ctx, request, false, nil)
 }
 
 func (g Gemini) StreamInteractions(ctx context.Context, request openai.InteractionRequest, write ResponseStreamWriter) (openai.InteractionResponse, error) {
-	if _, message := request.NativeResponseRequest(); message != "" || !request.Stream || request.Background || request.PreviousInteractionID != "" || request.Store != nil && *request.Store || write == nil {
+	if _, message := request.NativeResponseRequest(); message != "" || !request.Stream || request.Background || request.PreviousInteractionID != "" || write == nil {
 		return openai.InteractionResponse{}, geminiInvalid("interactions stream")
 	}
 	return g.doInteraction(ctx, request, true, write)
@@ -78,14 +79,96 @@ func (g Gemini) doInteraction(ctx context.Context, request openai.InteractionReq
 		}
 		return readGeminiInteractionStream(response.Body, write)
 	}
+	return decodeGeminiInteraction(response.Body)
+}
+
+func (g Gemini) RetrieveInteraction(ctx context.Context, id string) (openai.InteractionResponse, error) {
+	response, err := g.interactionResourceRequest(ctx, http.MethodGet, id, "")
+	if err != nil {
+		return openai.InteractionResponse{}, err
+	}
+	defer response.Body.Close()
+	result, err := decodeGeminiInteraction(response.Body)
+	if err == nil && result.ID != id {
+		err = errors.New("Gemini returned a different interaction ID")
+	}
+	return result, err
+}
+
+func (g Gemini) CancelInteraction(ctx context.Context, id string) (openai.InteractionResponse, error) {
+	response, err := g.interactionResourceRequest(ctx, http.MethodPost, id, ":cancel")
+	if err != nil {
+		return openai.InteractionResponse{}, err
+	}
+	defer response.Body.Close()
+	var result struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := decodeBoundedJSON(response.Body, &result, maxResponseJSONBytes, "Gemini interaction cancellation"); err != nil {
+		return openai.InteractionResponse{}, err
+	}
+	if result.ID != id || strings.TrimSpace(result.Status) == "" {
+		return openai.InteractionResponse{}, errors.New("invalid Gemini interaction cancellation response")
+	}
+	return openai.InteractionResponse{ID: result.ID, Object: "interaction", Status: result.Status}, nil
+}
+
+func (g Gemini) DeleteInteraction(ctx context.Context, id string) error {
+	response, err := g.interactionResourceRequest(ctx, http.MethodDelete, id, "")
+	if err != nil {
+		return err
+	}
+	return response.Body.Close()
+}
+
+func (g Gemini) interactionResourceRequest(ctx context.Context, method, id, suffix string) (*http.Response, error) {
+	if !validResponseResourceID(id) {
+		return nil, &Error{Class: FailureClientRequest, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "interaction_id", Err: errors.New("invalid interaction ID")}
+	}
+	request, err := http.NewRequestWithContext(ctx, method, geminiBaseURL(g.baseURL)+"/interactions/"+url.PathEscape(id)+suffix, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Api-Revision", "2026-05-20")
+	if err := g.authorize(request); err != nil {
+		return nil, err
+	}
+	response, err := g.client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		defer response.Body.Close()
+		return nil, responseStatusError("gemini", response)
+	}
+	return response, nil
+}
+
+func decodeGeminiInteraction(body io.Reader) (openai.InteractionResponse, error) {
 	var result openai.InteractionResponse
-	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+	if err := decodeBoundedJSON(body, &result, maxResponseJSONBytes, "Gemini interaction"); err != nil {
 		return openai.InteractionResponse{}, err
 	}
 	if strings.TrimSpace(result.ID) == "" || strings.TrimSpace(result.Status) == "" {
 		return openai.InteractionResponse{}, errors.New("invalid Gemini interaction response")
 	}
 	return result, nil
+}
+
+func decodeBoundedJSON(body io.Reader, target any, limit int64, label string) error {
+	payload, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return err
+	}
+	if int64(len(payload)) > limit {
+		return fmt.Errorf("%s response exceeds %d bytes", label, limit)
+	}
+	if err := json.Unmarshal(payload, target); err != nil {
+		return err
+	}
+	return nil
 }
 
 func readGeminiInteractionStream(body io.Reader, write ResponseStreamWriter) (openai.InteractionResponse, error) {

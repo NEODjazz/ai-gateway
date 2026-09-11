@@ -55,6 +55,19 @@ type StreamingInteractionClient interface {
 	StreamInteractions(context.Context, openai.InteractionRequest, ResponseStreamWriter) (openai.InteractionResponse, error)
 }
 
+type InteractionResourceProvider interface {
+	ResolveInteractionResource(context.Context, modules.RequestContext, string) (string, error)
+	RetrieveInteraction(context.Context, modules.RequestContext, string) (openai.InteractionResponse, error)
+	CancelInteraction(context.Context, modules.RequestContext, string) (openai.InteractionResponse, error)
+	DeleteInteraction(context.Context, modules.RequestContext, string) error
+}
+
+type InteractionResourceClient interface {
+	RetrieveInteraction(context.Context, string) (openai.InteractionResponse, error)
+	CancelInteraction(context.Context, string) (openai.InteractionResponse, error)
+	DeleteInteraction(context.Context, string) error
+}
+
 type FineTuningBinding struct {
 	Endpoint   string `json:"endpoint"`
 	Model      string `json:"model"`

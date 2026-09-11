@@ -2,12 +2,17 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
 
@@ -35,6 +40,63 @@ func TestGeminiInteractionsUsesNativeContract(t *testing.T) {
 	})
 	if err != nil || response.ID != "interaction_1" || response.Usage.TotalTokens != 5 || len(response.Steps) != 1 || response.Steps[0].Content[0].Text != "hello" {
 		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGeminiStoredInteractionLifecycleUsesOwnerBinding(t *testing.T) {
+	var creates, retrieves, cancels, deletes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/interactions":
+			creates.Add(1)
+			_, _ = fmt.Fprint(w, `{"id":"interaction_owned","object":"interaction","model":"upstream","status":"completed","usage":{"total_tokens":1}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1beta/interactions/interaction_owned":
+			retrieves.Add(1)
+			_, _ = fmt.Fprint(w, `{"id":"interaction_owned","object":"interaction","model":"upstream","status":"completed","usage":{"total_tokens":1}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/interactions/interaction_owned:cancel":
+			cancels.Add(1)
+			_, _ = fmt.Fprint(w, `{"id":"interaction_owned","status":"cancelled"}`)
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1beta/interactions/interaction_owned":
+			deletes.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	backend := &ownershipTestStore{data: map[string][]byte{}}
+	runtime := New(Config{
+		Endpoints:            []config.ProviderEndpointConfig{{Name: "gemini", Type: "gemini", BaseURL: server.URL, APIKey: "secret", Models: []string{"public"}, ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"interactions"}}},
+		Modules:              modules.NewPipeline(nil),
+		SessionStore:         backend,
+		ResponseOwnershipTTL: time.Hour,
+	}).(*Router)
+	store := true
+	shared := openai.ResponseRequest{Model: "public", Input: "hello", Store: &store}
+	owner := modules.RequestContext{CredentialID: "owner", ResponseRequest: &shared, Request: openai.ChatCompletionRequest{Model: "public"}}
+	created, err := runtime.Interactions(t.Context(), owner, openai.InteractionRequest{Model: "public", Input: "hello", Store: &store})
+	if err != nil || created.ID != "interaction_owned" || creates.Load() != 1 {
+		t.Fatalf("created=%+v creates=%d err=%v", created, creates.Load(), err)
+	}
+	other := owner
+	other.CredentialID = "other"
+	if _, err := runtime.RetrieveInteraction(t.Context(), other, created.ID); !errors.Is(err, ErrResponseNotFound) || retrieves.Load() != 0 {
+		t.Fatalf("cross-owner retrieve err=%v calls=%d", err, retrieves.Load())
+	}
+	if got, err := runtime.RetrieveInteraction(t.Context(), owner, created.ID); err != nil || got.ID != created.ID {
+		t.Fatalf("retrieve=%+v err=%v", got, err)
+	}
+	if got, err := runtime.CancelInteraction(t.Context(), owner, created.ID); err != nil || got.Status != "cancelled" || got.Model != "public" {
+		t.Fatalf("cancel=%+v err=%v", got, err)
+	}
+	if err := runtime.DeleteInteraction(t.Context(), owner, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.RetrieveInteraction(t.Context(), owner, created.ID); !errors.Is(err, ErrResponseNotFound) {
+		t.Fatalf("deleted binding remained: %v", err)
+	}
+	if retrieves.Load() != 1 || cancels.Load() != 1 || deletes.Load() != 1 {
+		t.Fatalf("lifecycle calls retrieve=%d cancel=%d delete=%d", retrieves.Load(), cancels.Load(), deletes.Load())
 	}
 }
 

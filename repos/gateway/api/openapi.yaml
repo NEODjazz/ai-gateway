@@ -2077,7 +2077,7 @@ paths:
       operationId: createInteraction
       tags: [Inference]
       summary: Create a model interaction
-      description: Uses a native model interaction adapter when the selected deployment declares the interactions capability; otherwise converts the request to the Responses execution pipeline. The native Gemini path supports synchronous and incremental SSE model interactions, string or step-array input, system instructions, function tools, structured response formats, and bounded generation settings including seed, stop sequences, and thinking level. It applies gateway authorization, tool ACLs, quotas, policy modules, retries, health tracking, usage accounting, and billing; the terminal completion event is released after post-processing succeeds. Native background execution, stored continuity, and agents are rejected until their lifecycle semantics are supported. The Responses bridge retains its synchronous, incremental SSE, durable background, continuity, and storage behavior.
+      description: Uses a native model interaction adapter when the selected deployment declares the interactions capability; otherwise converts the request to the Responses execution pipeline. The native Gemini path supports synchronous and incremental SSE model interactions, optional durable ownership for store=true, retrieve/cancel/delete lifecycle calls, string or step-array input, system instructions, function tools, structured response formats, and bounded generation settings including seed, stop sequences, and thinking level. It applies gateway authorization, tool ACLs, quotas, policy modules, retries, health tracking, usage accounting, and billing; the terminal completion event and stored ownership binding are released only after post-processing succeeds. Native background execution, continuity through previous_interaction_id, and agents remain unsupported. The Responses bridge retains its synchronous, incremental SSE, durable background, continuity, and storage behavior.
       requestBody:
         required: true
         content:
@@ -7404,8 +7404,8 @@ components:
           type: array
           items: {$ref: '#/components/schemas/FunctionResponseTool'}
         response_format: {}
-        previous_interaction_id: {type: string}
-        store: {type: boolean}
+        previous_interaction_id: {type: string, description: Supported by the Responses bridge and currently rejected by the native adapter.}
+        store: {type: boolean, description: Persists an owner-isolated resource when supported by the selected execution path.}
         stream: {type: boolean, default: false, description: Streams named interaction and step SSE events. Cannot be combined with background=true.}
         background: {type: boolean, default: false, description: Runs durably when true; store defaults to true and an explicit false is rejected.}
         generation_config: {$ref: '#/components/schemas/InteractionGenerationConfig'}
