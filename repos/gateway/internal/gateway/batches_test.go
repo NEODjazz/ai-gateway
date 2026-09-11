@@ -374,3 +374,22 @@ func TestBatchWorkerExpiresJobsBeforeProviderExecution(t *testing.T) {
 		t.Fatalf("batch=%+v jobs=%d executions=%v", expired, len(store.jobs), provider.executions)
 	}
 }
+
+func TestBatchWorkerReportsCauseAfterSchedulingRetry(t *testing.T) {
+	store := newMemoryBatchStore()
+	store.jobs["invalid"] = asyncstate.Job{
+		Kind: batchJobKind, ResourceID: "invalid", OwnerKey: "owner", EndpointID: "gateway", ExecutionID: "exec", Payload: []byte(`{`),
+	}
+	h := NewHandler(modules.NewPipeline(nil), &batchProvider{}).WithBatchStore(store, store)
+
+	processed, err := h.ProcessBatchItems(t.Context())
+	if processed != 1 || err == nil || !strings.Contains(err.Error(), "invalid batch job payload") {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	store.mu.Lock()
+	retried, retained := store.jobs["invalid"]
+	store.mu.Unlock()
+	if !retained || retried.Attempts != 1 || retried.LeaseGeneration != 0 {
+		t.Fatalf("retry was not retained: %+v retained=%t", retried, retained)
+	}
+}

@@ -481,28 +481,28 @@ func (h Handler) ProcessBatchItems(ctx context.Context) (int, error) {
 func (h Handler) processBatchItem(ctx context.Context, job asyncstate.Job) error {
 	var payload batchJob
 	if json.Unmarshal(job.Payload, &payload) != nil || payload.Ordinal < 0 {
-		return h.retryBatchJob(ctx, job)
+		return h.retryBatchJob(ctx, job, errors.New("invalid batch job payload"))
 	}
 	resource := strings.SplitN(job.ResourceID, ":", 2)
 	if len(resource) != 2 {
-		return h.retryBatchJob(ctx, job)
+		return h.retryBatchJob(ctx, job, errors.New("invalid batch job resource ID"))
 	}
 	batch, err := h.batches.GetBatch(ctx, job.OwnerKey, resource[0])
 	if err != nil {
-		return h.retryBatchJob(ctx, job)
+		return h.retryBatchJob(ctx, job, err)
 	}
 	if batch.Status == "cancelled" || batch.Status == "completed" || batch.Status == "failed" || batch.Status == "expired" {
 		return h.batchJobs.CompleteAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration)
 	}
 	if !time.Now().Before(batch.ExpiresAt) {
 		if _, err := h.batches.ExpireBatch(ctx, job.OwnerKey, batch.ID); err != nil && !errors.Is(err, batchstate.ErrConflict) {
-			return h.retryBatchJob(ctx, job)
+			return h.retryBatchJob(ctx, job, err)
 		}
 		return h.batchJobs.CompleteAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration)
 	}
 	item, err := h.batches.GetBatchItem(ctx, job.OwnerKey, batch.ID, payload.Ordinal)
 	if err != nil {
-		return h.retryBatchJob(ctx, job)
+		return h.retryBatchJob(ctx, job, err)
 	}
 	if item.State == "pending" {
 		batch, err = h.batches.StartBatch(ctx, job.OwnerKey, batch.ID)
@@ -510,28 +510,28 @@ func (h Handler) processBatchItem(ctx context.Context, job asyncstate.Job) error
 			if errors.Is(err, batchstate.ErrConflict) {
 				return h.batchJobs.CompleteAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration)
 			}
-			return h.retryBatchJob(ctx, job)
+			return h.retryBatchJob(ctx, job, err)
 		}
 		itemCtx, cancel := context.WithTimeout(ctx, batchItemTimeout)
 		result, failed, retry := h.executeBatchItem(itemCtx, batch, item)
 		cancel()
 		if retry {
-			return h.retryBatchJob(ctx, job)
+			return h.retryBatchJob(ctx, job, errBatchRateLimited)
 		}
 		item.Result = result
 		batch, err = h.batches.FinishBatchItem(ctx, item, failed)
 		if err != nil {
-			return h.retryBatchJob(ctx, job)
+			return h.retryBatchJob(ctx, job, err)
 		}
 	} else {
 		batch, err = h.batches.GetBatch(ctx, job.OwnerKey, batch.ID)
 		if err != nil {
-			return h.retryBatchJob(ctx, job)
+			return h.retryBatchJob(ctx, job, err)
 		}
 	}
 	if batch.Status == "finalizing" {
 		if _, err = h.finalizeBatch(ctx, batch); err != nil {
-			return h.retryBatchJob(ctx, job)
+			return h.retryBatchJob(ctx, job, err)
 		}
 	}
 	return h.batchJobs.CompleteAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration)
@@ -658,8 +658,9 @@ func batchErrorResult(item batchstate.Item, code, message string) []byte {
 	payload, _ := json.Marshal(openai.BatchOutputLine{ID: "batch_req_" + item.ExecutionID, CustomID: item.CustomID, Error: &openai.BatchOutputLineError{Code: code, Message: message}})
 	return payload
 }
-func (h Handler) retryBatchJob(ctx context.Context, job asyncstate.Job) error {
-	return h.batchJobs.RetryAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration, backgroundRetry(job.Attempts))
+func (h Handler) retryBatchJob(ctx context.Context, job asyncstate.Job, cause error) error {
+	retryErr := h.batchJobs.RetryAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration, backgroundRetry(job.Attempts))
+	return errors.Join(cause, retryErr)
 }
 func backgroundRetry(attempt int) time.Duration {
 	if attempt < 1 {
