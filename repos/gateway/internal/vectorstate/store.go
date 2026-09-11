@@ -45,6 +45,19 @@ type Update struct {
 	ExpiresAfter *int
 }
 
+type FileListOptions struct {
+	Limit  int
+	After  string
+	Before string
+	Order  string
+	Status string
+}
+
+func (options FileListOptions) Valid() bool {
+	validStatus := options.Status == "" || options.Status == "in_progress" || options.Status == "completed" || options.Status == "failed" || options.Status == "cancelled"
+	return options.Limit >= 1 && options.Limit <= 100 && (options.After == "" || options.Before == "") && (options.Order == "asc" || options.Order == "desc") && validStatus
+}
+
 type Store interface {
 	CreateVectorStore(context.Context, VectorStore, int) (VectorStore, error)
 	ListVectorStores(context.Context, string, int, string) ([]VectorStore, string, error)
@@ -52,7 +65,7 @@ type Store interface {
 	UpdateVectorStore(context.Context, string, string, Update) (VectorStore, error)
 	DeleteVectorStore(context.Context, string, string) error
 	AttachVectorStoreFile(context.Context, string, string, string, map[string]any, int, int64) (File, error)
-	ListVectorStoreFiles(context.Context, string, string, int, string) ([]File, string, error)
+	ListVectorStoreFiles(context.Context, string, string, FileListOptions) ([]File, string, error)
 	GetVectorStoreFile(context.Context, string, string, string) (File, error)
 	UpdateVectorStoreFile(context.Context, string, string, string, map[string]any) (File, error)
 	DeleteVectorStoreFile(context.Context, string, string, string) error

@@ -159,7 +159,7 @@ func (h Handler) SearchVectorStore(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) loadVectorSearchChunks(r *http.Request, owner, storeID string, filter vectorSearchFilter) ([]vectorSearchChunk, error) {
-	files, next, err := h.vectorStores.ListVectorStoreFiles(r.Context(), owner, storeID, maxVectorSearchFiles, "")
+	files, next, err := h.vectorStores.ListVectorStoreFiles(r.Context(), owner, storeID, vectorstate.FileListOptions{Limit: maxVectorSearchFiles, Order: "desc"})
 	if err != nil {
 		return nil, err
 	}

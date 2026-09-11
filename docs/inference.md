@@ -1732,6 +1732,10 @@ values to 512 characters.
 Expired source files do not consume either limit.
 `POST /v1/vector_stores/{id}/files/{file_id}` atomically replaces the complete
 attribute map for an owned attachment; an empty object clears it.
+The attachment list accepts one of `after` or `before`, a limit from 1 to 100,
+`order=asc|desc`, and `filter=in_progress|completed|failed|cancelled`. Cursor
+lookup, status filtering, and ordering run in PostgreSQL using `created_at` plus
+the file ID as a stable tie-breaker.
 
 `GET /v1/vector_stores/{id}/files/{file_id}/content` verifies the owner-scoped
 attachment before reading the source file. It returns at most 100 Unicode-safe

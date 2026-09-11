@@ -118,13 +118,28 @@ func TestPostgresVectorStoreFileLifecycleIsolationAndQuotaIntegration(t *testing
 	if _, err = store.GetVectorStoreFile(ctx, owner+"/other", "vs_files", "file_vector_a"); !errors.Is(err, vectorstate.ErrFileNotFound) {
 		t.Fatalf("cross-owner error=%v", err)
 	}
-	first, after, err := store.ListVectorStoreFiles(ctx, owner, "vs_files", 1, "")
+	first, after, err := store.ListVectorStoreFiles(ctx, owner, "vs_files", vectorstate.FileListOptions{Limit: 1, Order: "desc"})
 	if err != nil || len(first) != 1 || after == "" || first[0].Attributes["region"] != "eu" {
 		t.Fatalf("first=%+v after=%q err=%v", first, after, err)
 	}
-	second, next, err := store.ListVectorStoreFiles(ctx, owner, "vs_files", 1, after)
+	second, next, err := store.ListVectorStoreFiles(ctx, owner, "vs_files", vectorstate.FileListOptions{Limit: 1, After: after, Order: "desc"})
 	if err != nil || len(second) != 1 || next != "" || second[0].FileID == first[0].FileID || second[0].Attributes["region"] != "eu" {
 		t.Fatalf("second=%+v next=%q err=%v", second, next, err)
+	}
+	previous, more, err := store.ListVectorStoreFiles(ctx, owner, "vs_files", vectorstate.FileListOptions{Limit: 1, Before: second[0].FileID, Order: "desc", Status: "completed"})
+	if err != nil || len(previous) != 1 || more != "" || previous[0].FileID != first[0].FileID {
+		t.Fatalf("previous=%+v more=%q err=%v", previous, more, err)
+	}
+	ascending, _, err := store.ListVectorStoreFiles(ctx, owner, "vs_files", vectorstate.FileListOptions{Limit: 1, Order: "asc"})
+	if err != nil || len(ascending) != 1 || ascending[0].FileID != second[0].FileID {
+		t.Fatalf("ascending=%+v err=%v", ascending, err)
+	}
+	failed, _, err := store.ListVectorStoreFiles(ctx, owner, "vs_files", vectorstate.FileListOptions{Limit: 20, Order: "desc", Status: "failed"})
+	if err != nil || len(failed) != 0 {
+		t.Fatalf("failed=%+v err=%v", failed, err)
+	}
+	if _, _, err = store.ListVectorStoreFiles(ctx, owner, "vs_files", vectorstate.FileListOptions{Limit: 20, After: first[0].FileID, Before: second[0].FileID, Order: "desc"}); !errors.Is(err, vectorstate.ErrInvalid) {
+		t.Fatalf("combined cursors error=%v", err)
 	}
 	gotFile, err := store.GetVectorStoreFile(ctx, owner, "vs_files", "file_vector_a")
 	if err != nil || gotFile.Attributes["region"] != "eu" {

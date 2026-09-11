@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"ai-gateway-gateway/internal/vectorstate"
@@ -238,11 +239,11 @@ func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vector
 	return file, nil
 }
 
-func (s *PostgresStore) ListVectorStoreFiles(ctx context.Context, owner, vectorStoreID string, limit int, after string) ([]vectorstate.File, string, error) {
+func (s *PostgresStore) ListVectorStoreFiles(ctx context.Context, owner, vectorStoreID string, options vectorstate.FileListOptions) ([]vectorstate.File, string, error) {
 	if s == nil || s.pool == nil {
 		return nil, "", vectorstate.ErrUnavailable
 	}
-	if owner == "" || vectorStoreID == "" || limit < 1 || limit > 100 {
+	if owner == "" || vectorStoreID == "" || !options.Valid() {
 		return nil, "", vectorstate.ErrInvalid
 	}
 	if _, err := s.GetVectorStore(ctx, owner, vectorStoreID); err != nil {
@@ -250,9 +251,13 @@ func (s *PostgresStore) ListVectorStoreFiles(ctx context.Context, owner, vectorS
 	}
 	var cursorTime *time.Time
 	var cursorID string
-	if after != "" {
+	cursor := options.After
+	if options.Before != "" {
+		cursor = options.Before
+	}
+	if cursor != "" {
 		var createdAt time.Time
-		err := s.pool.QueryRow(ctx, `SELECT a.created_at,a.file_id FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND a.file_id=$3`, owner, vectorStoreID, after).Scan(&createdAt, &cursorID)
+		err := s.pool.QueryRow(ctx, `SELECT a.created_at,a.file_id FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND a.file_id=$3 AND ($4='' OR a.status=$4)`, owner, vectorStoreID, cursor, options.Status).Scan(&createdAt, &cursorID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, "", vectorstate.ErrFileNotFound
 		}
@@ -261,12 +266,22 @@ func (s *PostgresStore) ListVectorStoreFiles(ctx context.Context, owner, vectorS
 		}
 		cursorTime = &createdAt
 	}
-	rows, err := s.pool.Query(ctx, `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3::timestamptz IS NULL OR (a.created_at,a.file_id)<($3::timestamptz,$4)) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $5`, owner, vectorStoreID, cursorTime, cursorID, limit+1)
+	query := `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3='' OR a.status=$3) AND ($4::timestamptz IS NULL OR (a.created_at,a.file_id)<($4::timestamptz,$5)) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $6`
+	if options.Order == "asc" {
+		query = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3='' OR a.status=$3) AND ($4::timestamptz IS NULL OR (a.created_at,a.file_id)>($4::timestamptz,$5)) ORDER BY a.created_at ASC,a.file_id ASC LIMIT $6`
+	}
+	if options.Before != "" && options.Order == "desc" {
+		query = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3='' OR a.status=$3) AND (a.created_at,a.file_id)>($4::timestamptz,$5) ORDER BY a.created_at ASC,a.file_id ASC LIMIT $6`
+	}
+	if options.Before != "" && options.Order == "asc" {
+		query = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3='' OR a.status=$3) AND (a.created_at,a.file_id)<($4::timestamptz,$5) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $6`
+	}
+	rows, err := s.pool.Query(ctx, query, owner, vectorStoreID, options.Status, cursorTime, cursorID, options.Limit+1)
 	if err != nil {
 		return nil, "", err
 	}
 	defer rows.Close()
-	files := make([]vectorstate.File, 0, limit+1)
+	files := make([]vectorstate.File, 0, options.Limit+1)
 	for rows.Next() {
 		file, scanErr := scanVectorStoreFile(rows)
 		if scanErr != nil {
@@ -278,9 +293,12 @@ func (s *PostgresStore) ListVectorStoreFiles(ctx context.Context, owner, vectorS
 		return nil, "", err
 	}
 	next := ""
-	if len(files) > limit {
-		next = files[limit-1].FileID
-		files = files[:limit]
+	if len(files) > options.Limit {
+		next = files[options.Limit-1].FileID
+		files = files[:options.Limit]
+	}
+	if options.Before != "" {
+		slices.Reverse(files)
 	}
 	return files, next, nil
 }

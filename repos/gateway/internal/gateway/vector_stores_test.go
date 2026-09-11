@@ -56,37 +56,67 @@ func (s *memoryVectorStore) AttachVectorStoreFile(_ context.Context, owner, stor
 	return file, nil
 }
 
-func (s *memoryVectorStore) ListVectorStoreFiles(_ context.Context, owner, storeID string, limit int, after string) ([]vectorstate.File, string, error) {
+func (s *memoryVectorStore) ListVectorStoreFiles(_ context.Context, owner, storeID string, options vectorstate.FileListOptions) ([]vectorstate.File, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !options.Valid() {
+		return nil, "", vectorstate.ErrInvalid
+	}
 	store, ok := s.stores[storeID]
 	if !ok || store.OwnerKey != owner {
 		return nil, "", vectorstate.ErrNotFound
 	}
 	files := make([]vectorstate.File, 0)
 	for _, file := range s.files {
-		if file.OwnerKey == owner && file.VectorStoreID == storeID {
+		if file.OwnerKey == owner && file.VectorStoreID == storeID && (options.Status == "" || file.Status == options.Status) {
 			files = append(files, file)
 		}
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].FileID > files[j].FileID })
-	start := 0
-	if after != "" {
-		start = -1
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].CreatedAt.Equal(files[j].CreatedAt) {
+			if options.Order == "asc" {
+				return files[i].FileID < files[j].FileID
+			}
+			return files[i].FileID > files[j].FileID
+		}
+		if options.Order == "asc" {
+			return files[i].CreatedAt.Before(files[j].CreatedAt)
+		}
+		return files[i].CreatedAt.After(files[j].CreatedAt)
+	})
+	cursor := options.After
+	if options.Before != "" {
+		cursor = options.Before
+	}
+	if cursor != "" {
+		position := -1
 		for index := range files {
-			if files[index].FileID == after {
-				start = index + 1
+			if files[index].FileID == cursor {
+				position = index
+				break
 			}
 		}
-		if start < 0 {
+		if position < 0 {
 			return nil, "", vectorstate.ErrFileNotFound
 		}
+		if options.Before != "" {
+			files = files[:position]
+			if len(files) > options.Limit+1 {
+				files = files[len(files)-(options.Limit+1):]
+			}
+		} else {
+			files = files[position+1:]
+		}
 	}
-	files = files[start:]
 	next := ""
-	if len(files) > limit {
-		next = files[limit-1].FileID
-		files = files[:limit]
+	if len(files) > options.Limit {
+		if options.Before != "" {
+			next = files[1].FileID
+			files = files[1:]
+		} else {
+			next = files[options.Limit-1].FileID
+			files = files[:options.Limit]
+		}
 	}
 	return files, next, nil
 }
@@ -310,6 +340,22 @@ func TestVectorStoreFileHTTPLifecyclePaginationAndIsolation(t *testing.T) {
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"has_more":true`) || !strings.Contains(listed.Body.String(), `"file_two"`) {
 		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
 	}
+	ascending := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files?limit=1&order=asc", "")
+	if ascending.Code != http.StatusOK || !strings.Contains(ascending.Body.String(), `"file_one"`) || !strings.Contains(ascending.Body.String(), `"has_more":true`) {
+		t.Fatalf("ascending status=%d body=%s", ascending.Code, ascending.Body.String())
+	}
+	after := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files?limit=1&after=file_two&order=desc", "")
+	if after.Code != http.StatusOK || !strings.Contains(after.Body.String(), `"file_one"`) || !strings.Contains(after.Body.String(), `"has_more":false`) {
+		t.Fatalf("after status=%d body=%s", after.Code, after.Body.String())
+	}
+	before := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files?limit=1&before=file_one&order=desc", "")
+	if before.Code != http.StatusOK || !strings.Contains(before.Body.String(), `"file_two"`) || !strings.Contains(before.Body.String(), `"has_more":false`) {
+		t.Fatalf("before status=%d body=%s", before.Code, before.Body.String())
+	}
+	failed := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files?filter=failed", "")
+	if failed.Code != http.StatusOK || !strings.Contains(failed.Body.String(), `"data":[]`) {
+		t.Fatalf("failed filter status=%d body=%s", failed.Code, failed.Body.String())
+	}
 	got := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_one", "")
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"usage_bytes":11`) || !strings.Contains(got.Body.String(), `"priority":2`) || !strings.Contains(got.Body.String(), `"active":true`) {
 		t.Fatalf("get status=%d body=%s", got.Code, got.Body.String())
@@ -402,6 +448,18 @@ func TestVectorStoreFilesRejectInvalidMissingDuplicateAndQuota(t *testing.T) {
 	}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}}), modelsProvider{}).
 		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 1, ByteQuota: 100}))
+	for _, path := range []string{
+		"/v1/vector_stores/vs_owned/files?after=file_one&before=file_two",
+		"/v1/vector_stores/vs_owned/files?before=bad%2Fid",
+		"/v1/vector_stores/vs_owned/files?order=newest",
+		"/v1/vector_stores/vs_owned/files?filter=unknown",
+		"/v1/vector_stores/vs_owned/files?order=asc&order=desc",
+	} {
+		response := callVectorStore(handler, http.MethodGet, path, "")
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("path=%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
 	for _, test := range []struct {
 		path, body string
 		code       int

@@ -58,7 +58,7 @@ func (h Handler) ListVectorStoreFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	query := r.URL.Query()
 	for key, values := range query {
-		if (key != "after" && key != "limit") || len(values) != 1 {
+		if (key != "after" && key != "before" && key != "filter" && key != "limit" && key != "order") || len(values) != 1 {
 			writeError(w, http.StatusBadRequest, "invalid_request", "unsupported or repeated query parameter "+key)
 			return
 		}
@@ -77,7 +77,30 @@ func (h Handler) ListVectorStoreFiles(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "after is invalid")
 		return
 	}
-	files, next, err := h.vectorStores.ListVectorStoreFiles(r.Context(), fileOwnerKey(req), r.PathValue("id"), limit, after)
+	before := query.Get("before")
+	if before != "" && !validFileToken(before, 128) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "before is invalid")
+		return
+	}
+	if after != "" && before != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "after and before cannot be combined")
+		return
+	}
+	order := query.Get("order")
+	if order == "" {
+		order = "desc"
+	}
+	if order != "asc" && order != "desc" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "order must be asc or desc")
+		return
+	}
+	status := query.Get("filter")
+	if status != "" && status != "in_progress" && status != "completed" && status != "failed" && status != "cancelled" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "filter must be in_progress, completed, failed, or cancelled")
+		return
+	}
+	options := vectorstate.FileListOptions{Limit: limit, After: after, Before: before, Order: order, Status: status}
+	files, next, err := h.vectorStores.ListVectorStoreFiles(r.Context(), fileOwnerKey(req), r.PathValue("id"), options)
 	if err != nil {
 		writeVectorStoreFileError(w, err)
 		return
