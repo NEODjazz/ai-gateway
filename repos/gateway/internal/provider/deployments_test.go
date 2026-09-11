@@ -110,6 +110,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "gemini", capability: "responses"},
 		{providerType: "openai", capability: "interactions"},
 		{providerType: "gemini", capability: "moderation"},
+		{providerType: "gemini", capability: "fine_tuning"},
 		{providerType: "mistral", capability: "image_generation"},
 		{providerType: "mistral", capability: "search"},
 		{providerType: "anthropic", capability: "embeddings"},
@@ -243,7 +244,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}},
 		{providerType: "mistral", capabilities: []string{"chat", "audio_transcription", "audio_speech", "tools", "structured_output", "vision", "assistant_prefill"}},
 		{providerType: "xai", capabilities: []string{"chat", "video", "video_remix", "video_extension"}},
-		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "background_responses", "audio_translation", "tools", "structured_output", "mcp", "vision", "web_search", "audio", "file_input"}},
+		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "background_responses", "audio_translation", "fine_tuning", "tools", "structured_output", "mcp", "vision", "web_search", "audio", "file_input"}},
 	}
 	for _, test := range tests {
 		t.Run(test.providerType, func(t *testing.T) {
@@ -271,6 +272,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 		if !slices.Contains(byType["openai-compatible"], operation) {
 			t.Fatalf("openai-compatible missing %s: %v", operation, byType["openai-compatible"])
 		}
+	}
+	if !slices.Contains(byType["openai"], "fine_tuning") || !slices.Contains(byType["openai-compatible"], "fine_tuning") || slices.Contains(byType["gemini"], "fine_tuning") {
+		t.Fatalf("fine-tuning profiles are incorrect: openai=%v compatible=%v gemini=%v", byType["openai"], byType["openai-compatible"], byType["gemini"])
 	}
 	if slices.Contains(byType["anthropic"], "embeddings") || !slices.Contains(byType["anthropic"], "responses") {
 		t.Fatalf("anthropic operations=%v", byType["anthropic"])

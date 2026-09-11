@@ -500,6 +500,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	case "skills":
 		_, ok := endpoint.Provider.(SkillClient)
 		return ok
+	case "fine_tuning":
+		_, ok := endpoint.Provider.(FineTuningClient)
+		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible")
 	case "video":
 		_, ok := endpoint.Provider.(VideoClient)
 		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible" || endpoint.Type == "xai")
