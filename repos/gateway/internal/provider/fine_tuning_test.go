@@ -2,12 +2,15 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
 
@@ -71,6 +74,35 @@ func TestOpenAICompatibleFineTuningLifecycle(t *testing.T) {
 	checkpoints, err := client.ListFineTuningCheckpoints(context.Background(), "ftjob_123", FineTuningListOptions{})
 	if err != nil || len(checkpoints.Data) != 1 || checkpoints.Data[0].StepNumber != 1 {
 		t.Fatalf("checkpoints=%+v err=%v", checkpoints, err)
+	}
+}
+
+func TestFineTuningRouterSelectsCapableDeploymentAndPinsLifecycle(t *testing.T) {
+	job := `{"id":"ftjob_route","object":"fine_tuning.job","created_at":1,"finished_at":null,"fine_tuned_model":null,"model":"upstream-model","organization_id":"org","result_files":[],"status":"queued","trained_tokens":null,"training_file":"file_train","validation_file":null,"error":null}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/fine_tuning/jobs" && r.URL.Path != "/v1/fine_tuning/jobs/ftjob_route" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(job))
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "training", Type: "openai", BaseURL: server.URL + "/v1", Models: []string{"public-model"}, ModelAliases: map[string]string{"public-model": "upstream-model"}, Capabilities: []string{"fine_tuning"}}}})
+	fineTuning, ok := router.(FineTuningProvider)
+	if !ok {
+		t.Fatal("router does not expose fine-tuning")
+	}
+	created, binding, err := fineTuning.CreateFineTuningJob(t.Context(), modules.RequestContext{}, openai.FineTuningCreateRequest{Model: "public-model", TrainingFile: "file_train"})
+	if err != nil || created.Model != "public-model" || binding.Endpoint != "training" || binding.Model != "public-model" || len(binding.Deployment) != 64 {
+		t.Fatalf("created=%+v binding=%+v err=%v", created, binding, err)
+	}
+	retrieved, err := fineTuning.RetrieveFineTuningJob(t.Context(), binding, created.ID)
+	if err != nil || retrieved.ID != created.ID {
+		t.Fatalf("retrieved=%+v err=%v", retrieved, err)
+	}
+	binding.Deployment = strings.Repeat("0", 64)
+	if _, err := fineTuning.RetrieveFineTuningJob(t.Context(), binding, created.ID); !errors.Is(err, ErrFineTuningDeploymentChanged) {
+		t.Fatalf("changed deployment error=%v", err)
 	}
 }
 
