@@ -118,7 +118,7 @@ func (b Bedrock) streamInvokeAnthropic(ctx context.Context, request openai.ChatC
 	payload, err := json.Marshal(bedrockAnthropicInvokeRequest{
 		AnthropicVersion: "bedrock-2023-05-31", StopSequences: native.StopSequences,
 		System: native.System, Messages: native.Messages, Tools: native.Tools, ToolChoice: native.ToolChoice,
-		MaxTokens: native.MaxTokens, Temperature: native.Temperature, TopP: native.TopP,
+		OutputConfig: native.OutputConfig, MaxTokens: native.MaxTokens, Temperature: native.Temperature, TopP: native.TopP,
 	})
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err

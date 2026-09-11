@@ -111,6 +111,29 @@ func TestBedrockInvokeRejectsConverseOnlyControlsBeforeHTTP(t *testing.T) {
 	}
 }
 
+func TestBedrockInvokeForwardsStructuredOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			OutputConfig *anthropicOutputConfig `json:"output_config"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.OutputConfig == nil || body.OutputConfig.Format == nil || body.OutputConfig.Format.Type != "json_schema" || body.OutputConfig.Format.Schema == nil {
+			t.Fatalf("request=%+v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"msg_1","type":"message","role":"assistant","model":"model","content":[{"type":"text","text":"{\"answer\":\"ok\"}"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`)
+	}))
+	defer server.Close()
+	strict := true
+	maxTokens := 8
+	request := openai.ChatCompletionRequest{
+		Model: "model", BedrockInvoke: true, MaxTokens: &maxTokens, Messages: []openai.Message{{Role: "user", Content: "answer"}},
+		ResponseFormat: &openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "answer", Strict: &strict, Schema: map[string]any{"type": "object"}}},
+	}
+	response, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request)
+	if err != nil || openai.ContentText(response.Choices[0].Message.Content) != `{"answer":"ok"}` || response.Usage.TotalTokens != 5 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
 func TestBedrockConversePreservesReasoningHistoryAndResponse(t *testing.T) {
 	first, third := 0, 2
 	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{

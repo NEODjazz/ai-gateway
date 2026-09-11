@@ -40,3 +40,19 @@ func TestBedrockInvokeRequiresExplicitDeploymentCapability(t *testing.T) {
 		t.Fatal("declared bedrock_invoke capability rejected")
 	}
 }
+
+func TestBedrockInvokeStructuredOutputRequiresBothCapabilities(t *testing.T) {
+	request := openai.ChatCompletionRequest{BedrockInvoke: true, ResponseFormat: &openai.ResponseFormat{Type: "json_schema"}}
+	required := requiredChatCapabilities(request, false)
+	if got := strings.Join(required, ","); got != "chat,bedrock_invoke,structured_output" {
+		t.Fatalf("required capabilities=%q", got)
+	}
+	endpoint := Endpoint{Capabilities: []string{"chat", "bedrock_invoke"}}
+	if endpoint.supportsCapabilities(required...) {
+		t.Fatal("InvokeModel deployment without structured_output capability accepted")
+	}
+	endpoint.Capabilities = append(endpoint.Capabilities, "structured_output")
+	if !endpoint.supportsCapabilities(required...) {
+		t.Fatal("InvokeModel deployment with both feature capabilities rejected")
+	}
+}

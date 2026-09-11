@@ -10,25 +10,34 @@ import (
 )
 
 type bedrockInvokeRequest struct {
-	AnthropicVersion string              `json:"anthropic_version"`
-	MaxTokens        int                 `json:"max_tokens"`
-	Messages         []messagesInput     `json:"messages"`
-	System           json.RawMessage     `json:"system,omitempty"`
-	Tools            []messagesTool      `json:"tools,omitempty"`
-	ToolChoice       *messagesToolChoice `json:"tool_choice,omitempty"`
-	Temperature      *float64            `json:"temperature,omitempty"`
-	TopP             *float64            `json:"top_p,omitempty"`
-	StopSequences    []string            `json:"stop_sequences,omitempty"`
+	AnthropicVersion string                     `json:"anthropic_version"`
+	MaxTokens        int                        `json:"max_tokens"`
+	Messages         []messagesInput            `json:"messages"`
+	System           json.RawMessage            `json:"system,omitempty"`
+	Tools            []messagesTool             `json:"tools,omitempty"`
+	ToolChoice       *messagesToolChoice        `json:"tool_choice,omitempty"`
+	OutputConfig     *bedrockInvokeOutputConfig `json:"output_config,omitempty"`
+	Temperature      *float64                   `json:"temperature,omitempty"`
+	TopP             *float64                   `json:"top_p,omitempty"`
+	StopSequences    []string                   `json:"stop_sequences,omitempty"`
+}
+
+type bedrockInvokeOutputConfig struct {
+	Format *messagesJSONOutputFormat `json:"format"`
 }
 
 func (request bedrockInvokeRequest) chat(model, provider string) (openai.ChatCompletionRequest, error) {
 	if request.AnthropicVersion != "bedrock-2023-05-31" {
 		return openai.ChatCompletionRequest{}, errors.New("anthropic_version must be bedrock-2023-05-31")
 	}
+	var outputConfig *messagesOutputConfig
+	if request.OutputConfig != nil {
+		outputConfig = &messagesOutputConfig{Format: request.OutputConfig.Format}
+	}
 	messages := messagesRequest{
 		Model: model, MaxTokens: request.MaxTokens, Messages: request.Messages, System: request.System,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, Temperature: request.Temperature,
-		TopP: request.TopP, StopSequences: request.StopSequences,
+		TopP: request.TopP, StopSequences: request.StopSequences, OutputConfig: outputConfig,
 	}
 	chat, err := messages.chat()
 	if err != nil {

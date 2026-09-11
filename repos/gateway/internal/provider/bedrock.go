@@ -257,7 +257,7 @@ func (b Bedrock) ValidateChatParameters(request openai.ChatCompletionRequest) er
 }
 
 func validateBedrockInvokeParameters(request openai.ChatCompletionRequest) error {
-	if request.ResponseFormat != nil || request.Metadata != nil || request.ServiceTier != "" || request.ReasoningEffort != "" || len(request.BedrockAdditionalModelRequestFields) != 0 || len(request.BedrockAdditionalModelResponseFieldPaths) != 0 || request.BedrockGuardrailConfig != nil || len(request.BedrockRequestMetadata) != 0 || request.BedrockPerformanceLatency != "" || request.BedrockServiceTier != "" {
+	if request.Metadata != nil || request.ServiceTier != "" || request.ReasoningEffort != "" || len(request.BedrockAdditionalModelRequestFields) != 0 || len(request.BedrockAdditionalModelResponseFieldPaths) != 0 || request.BedrockGuardrailConfig != nil || len(request.BedrockRequestMetadata) != 0 || request.BedrockPerformanceLatency != "" || request.BedrockServiceTier != "" {
 		return bedrockInvalid("invoke_model_parameters")
 	}
 	return nil
@@ -646,15 +646,16 @@ func (b Bedrock) ChatCompletions(ctx context.Context, request openai.ChatComplet
 }
 
 type bedrockAnthropicInvokeRequest struct {
-	AnthropicVersion string             `json:"anthropic_version"`
-	StopSequences    []string           `json:"stop_sequences,omitempty"`
-	System           any                `json:"system,omitempty"`
-	Messages         []anthropicMessage `json:"messages"`
-	Tools            []anthropicTool    `json:"tools,omitempty"`
-	ToolChoice       map[string]any     `json:"tool_choice,omitempty"`
-	MaxTokens        int                `json:"max_tokens"`
-	Temperature      *float64           `json:"temperature,omitempty"`
-	TopP             *float64           `json:"top_p,omitempty"`
+	AnthropicVersion string                 `json:"anthropic_version"`
+	StopSequences    []string               `json:"stop_sequences,omitempty"`
+	System           any                    `json:"system,omitempty"`
+	Messages         []anthropicMessage     `json:"messages"`
+	Tools            []anthropicTool        `json:"tools,omitempty"`
+	ToolChoice       map[string]any         `json:"tool_choice,omitempty"`
+	OutputConfig     *anthropicOutputConfig `json:"output_config,omitempty"`
+	MaxTokens        int                    `json:"max_tokens"`
+	Temperature      *float64               `json:"temperature,omitempty"`
+	TopP             *float64               `json:"top_p,omitempty"`
 }
 
 func (b Bedrock) invokeAnthropic(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
@@ -665,7 +666,7 @@ func (b Bedrock) invokeAnthropic(ctx context.Context, request openai.ChatComplet
 	payload, err := json.Marshal(bedrockAnthropicInvokeRequest{
 		AnthropicVersion: "bedrock-2023-05-31", StopSequences: native.StopSequences,
 		System: native.System, Messages: native.Messages, Tools: native.Tools, ToolChoice: native.ToolChoice,
-		MaxTokens: native.MaxTokens, Temperature: native.Temperature, TopP: native.TopP,
+		OutputConfig: native.OutputConfig, MaxTokens: native.MaxTokens, Temperature: native.Temperature, TopP: native.TopP,
 	})
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err

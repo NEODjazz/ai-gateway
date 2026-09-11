@@ -75,6 +75,7 @@ func TestBedrockInvokeRejectsInvalidContractBeforeExecution(t *testing.T) {
 	for _, body := range []string{
 		`{"anthropic_version":"2023-06-01","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`,
 		`{"anthropic_version":"bedrock-2023-05-31","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":true}`,
+		`{"anthropic_version":"bedrock-2023-05-31","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"output_config":{"effort":"high"}}`,
 	} {
 		upstream := &chatProvider{}
 		response := httptest.NewRecorder()
@@ -82,6 +83,17 @@ func TestBedrockInvokeRejectsInvalidContractBeforeExecution(t *testing.T) {
 		if response.Code != http.StatusBadRequest || upstream.request.Request.Model != "" {
 			t.Fatalf("status=%d request=%+v body=%s", response.Code, upstream.request.Request, response.Body.String())
 		}
+	}
+}
+
+func TestBedrockInvokeAcceptsStructuredOutput(t *testing.T) {
+	upstream := &chatProvider{}
+	response := httptest.NewRecorder()
+	body := `{"anthropic_version":"bedrock-2023-05-31","max_tokens":32,"messages":[{"role":"user","content":"answer"}],"output_config":{"format":{"type":"json_schema","schema":{"type":"object","required":["answer"],"properties":{"answer":{"type":"string"}}}}}}`
+	Routes(NewHandler(modules.NewPipeline(nil), upstream)).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/model/invoke", strings.NewReader(body)))
+	format := upstream.request.Request.ResponseFormat
+	if response.Code != http.StatusOK || format == nil || format.Type != "json_schema" || format.JSONSchema == nil || format.JSONSchema.Schema == nil {
+		t.Fatalf("status=%d body=%s request=%+v", response.Code, response.Body.String(), upstream.request.Request)
 	}
 }
 
