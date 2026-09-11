@@ -214,3 +214,39 @@ func TestRealtimeRouterRequiresCapabilityPinsAdmissionAndAppliesAlias(t *testing
 		t.Fatal(err)
 	}
 }
+
+func TestRealtimeRouterAppliesDeploymentQuotaPerResponse(t *testing.T) {
+	upstream := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
+		var event string
+		_ = websocket.Message.Receive(connection, &event)
+	}))
+	t.Cleanup(upstream.Close)
+	router := New(Config{
+		Endpoints: []config.ProviderEndpointConfig{{
+			Name: "realtime", Type: "openai", BaseURL: upstream.URL, Models: []string{"model"},
+			Capabilities: []string{"realtime"}, RateLimitTPM: 10,
+		}},
+		DeploymentQuotaStore: NewMemoryDeploymentQuotaStore(),
+	})
+	runtime := router.(RealtimeProvider)
+	connection, _, err := runtime.OpenRealtime(t.Context(), modules.RequestContext{RequestID: "execution"}, "model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	reserver, ok := connection.(RealtimeTokenReserver)
+	if !ok {
+		t.Fatal("routed realtime connection does not expose token reservation")
+	}
+	if err := reserver.ReserveRealtimeTokens(t.Context(), 10); err != nil {
+		t.Fatalf("session open consumed deployment quota before a response: %v", err)
+	}
+	if err := reserver.ReserveRealtimeTokens(t.Context(), 1); err == nil {
+		t.Fatal("deployment TPM did not reject the second response")
+	} else {
+		var quotaErr *DeploymentQuotaError
+		if !errors.As(err, &quotaErr) {
+			t.Fatalf("expected deployment quota error, got %v", err)
+		}
+	}
+}

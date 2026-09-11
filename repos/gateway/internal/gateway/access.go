@@ -276,6 +276,13 @@ func estimateAudioSpeechTokens(request openai.AudioSpeechRequest) int {
 }
 
 func (h Handler) authorizeAccess(w http.ResponseWriter, ctx context.Context, req modules.RequestContext, model string, tokens int) bool {
+	if !h.authorizeModel(w, req, model) {
+		return false
+	}
+	return h.authorizeRateLimit(w, ctx, req, tokens)
+}
+
+func (h Handler) authorizeModel(w http.ResponseWriter, req modules.RequestContext, model string) bool {
 	if !modelAllowed(model, req.AllowedModels) {
 		writeError(w, 403, "model_not_allowed", "credential is not allowed to use model "+strconv.Quote(model))
 		return false
@@ -290,15 +297,11 @@ func (h Handler) authorizeAccess(w http.ResponseWriter, ctx context.Context, req
 			return false
 		}
 	}
-	return h.authorizeRateLimit(w, ctx, req, tokens)
+	return true
 }
 
 func (h Handler) authorizeRateLimit(w http.ResponseWriter, ctx context.Context, req modules.RequestContext, tokens int) bool {
-	key := req.CredentialID
-	if req.TeamID != "" {
-		key = "team:" + req.TeamID + ":credential:" + req.CredentialID
-	}
-	allowed, retryAfter, err := h.rateLimits.Allow(ctx, key, RateLimit{Requests: req.RateLimitRPM, Tokens: req.RateLimitTPM}, tokens)
+	allowed, retryAfter, err := h.checkRateLimit(ctx, req, tokens)
 	if err != nil {
 		writeError(w, 503, "rate_limit_unavailable", err.Error())
 		return false
@@ -313,6 +316,14 @@ func (h Handler) authorizeRateLimit(w http.ResponseWriter, ctx context.Context, 
 		return false
 	}
 	return true
+}
+
+func (h Handler) checkRateLimit(ctx context.Context, req modules.RequestContext, tokens int) (bool, time.Duration, error) {
+	key := req.CredentialID
+	if req.TeamID != "" {
+		key = "team:" + req.TeamID + ":credential:" + req.CredentialID
+	}
+	return h.rateLimits.Allow(ctx, key, RateLimit{Requests: req.RateLimitRPM, Tokens: req.RateLimitTPM}, tokens)
 }
 
 func (h Handler) prepareAccessGroups(w http.ResponseWriter, req *modules.RequestContext) bool {

@@ -143,12 +143,19 @@ func (r Router) acquireEndpoint(ctx context.Context, endpoint Endpoint, tokens i
 	if err != nil {
 		return nil, err
 	}
+	if err := r.reserveEndpointQuota(ctx, endpoint, tokens); err != nil {
+		release()
+		return nil, err
+	}
+	return release, nil
+}
+
+func (r Router) reserveEndpointQuota(ctx context.Context, endpoint Endpoint, tokens int) error {
 	if endpoint.RateLimitRPM <= 0 && endpoint.RateLimitTPM <= 0 && endpoint.ProviderRateLimitRPM <= 0 && endpoint.ProviderRateLimitTPM <= 0 {
-		return release, nil
+		return nil
 	}
 	if r.deploymentQuotas == nil {
-		release()
-		return nil, errors.New("deployment quota store unavailable")
+		return errors.New("deployment quota store unavailable")
 	}
 	keys := make([]string, 0, 2)
 	requestLimits := make([]int, 0, 2)
@@ -168,15 +175,13 @@ func (r Router) acquireEndpoint(ctx context.Context, endpoint Endpoint, tokens i
 	}
 	allowed, rejected, retryAfter, err := r.deploymentQuotas.AllowMany(ctx, keys, requestLimits, tokenLimits, tokens, time.Minute)
 	if err != nil {
-		release()
-		return nil, &Error{Class: FailureUnavailable, Provider: endpoint.Name, StatusCode: 503, UpstreamCode: "deployment_quota_unavailable", Err: errors.Join(errors.New("deployment quota store unavailable"), err)}
+		return &Error{Class: FailureUnavailable, Provider: endpoint.Name, StatusCode: 503, UpstreamCode: "deployment_quota_unavailable", Err: errors.Join(errors.New("deployment quota store unavailable"), err)}
 	}
 	if !allowed {
-		release()
 		if rejected >= 0 && rejected < len(scopes) && scopes[rejected] == "provider" {
-			return nil, &ProviderQuotaError{Provider: endpoint.ProviderID, RetryAfter: retryAfter}
+			return &ProviderQuotaError{Provider: endpoint.ProviderID, RetryAfter: retryAfter}
 		}
-		return nil, &DeploymentQuotaError{Deployment: endpoint.Name, RetryAfter: retryAfter}
+		return &DeploymentQuotaError{Deployment: endpoint.Name, RetryAfter: retryAfter}
 	}
-	return release, nil
+	return nil
 }

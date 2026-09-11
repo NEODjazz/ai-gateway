@@ -226,6 +226,22 @@ func TestBillingPreservesExplicitEmbeddingsAPIType(t *testing.T) {
 	}
 }
 
+func TestBillingPreservesExactZeroRealtimeUsage(t *testing.T) {
+	module := NewBillingModuleWithPricing(true, PricingConfig{})
+	req := RequestContext{
+		RequestID: "realtime-zero", APIType: "realtime", BillingPhase: "commit",
+		Request:  openai.ChatCompletionRequest{Provider: "openai", Model: "realtime-model"},
+		Usage:    &openai.Usage{},
+		Metadata: map[string]string{"usage.estimated": "false"},
+	}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.BillingEvent == nil || req.BillingEvent.APIType != "realtime" || req.BillingEvent.InputTokens != 0 || req.BillingEvent.OutputTokens != 0 || req.BillingEvent.TotalTokens != 0 || req.BillingEvent.UsageEstimated {
+		t.Fatalf("exact zero usage was replaced: %+v", req.BillingEvent)
+	}
+}
+
 func TestBillingPreservesNativeChatSurfaceAPIType(t *testing.T) {
 	for _, apiType := range []string{"messages", "generate_content"} {
 		t.Run(apiType, func(t *testing.T) {

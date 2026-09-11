@@ -24,7 +24,7 @@ func (r Router) OpenRealtime(ctx context.Context, identity modules.RequestContex
 		if !ok {
 			continue
 		}
-		release, err := r.acquireEndpoint(ctx, endpoint, 0)
+		release, err := endpoint.Admission.acquire(ctx, endpoint.Name)
 		if err != nil {
 			lastErr = err
 			progress.fail(err)
@@ -52,6 +52,9 @@ func (r Router) OpenRealtime(ctx context.Context, identity modules.RequestContex
 		r.health.success(ctx, endpoint)
 		return &routedRealtimeConnection{
 			RealtimeConnection: connection,
+			reserve: func(reserveCtx context.Context, tokens int) error {
+				return r.reserveEndpointQuota(reserveCtx, endpoint, tokens)
+			},
 			finish: func(sessionErr error) {
 				finish(sessionErr)
 				release()
@@ -69,8 +72,13 @@ func (r Router) OpenRealtime(ctx context.Context, identity modules.RequestContex
 
 type routedRealtimeConnection struct {
 	RealtimeConnection
-	once   sync.Once
-	finish func(error)
+	once    sync.Once
+	finish  func(error)
+	reserve func(context.Context, int) error
+}
+
+func (c *routedRealtimeConnection) ReserveRealtimeTokens(ctx context.Context, tokens int) error {
+	return c.reserve(ctx, tokens)
 }
 
 func (c *routedRealtimeConnection) Receive() ([]byte, error) {

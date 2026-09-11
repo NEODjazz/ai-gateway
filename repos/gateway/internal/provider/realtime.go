@@ -28,6 +28,10 @@ type RealtimeClient interface {
 	OpenRealtime(context.Context, string) (RealtimeConnection, error)
 }
 
+type RealtimeTokenReserver interface {
+	ReserveRealtimeTokens(context.Context, int) error
+}
+
 type websocketRealtimeConnection struct {
 	conn *websocket.Conn
 }

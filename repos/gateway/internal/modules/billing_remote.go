@@ -206,6 +206,15 @@ func billingRequest(req *RequestContext) UsageRequest {
 	case "video":
 		request.APIType = "video"
 		request.UsageEstimated = metadataValue(req.Metadata, "gateway.video_usage_exact") != "true"
+	case "realtime":
+		request.APIType = "realtime"
+	}
+	if request.APIType == "realtime" && req.Usage != nil {
+		request.InputTokens = req.Usage.PromptTokens
+		request.PromptTokensEstimated = req.Usage.PromptTokens
+		request.OutputTokens = req.Usage.CompletionTokens
+		request.TotalTokens = req.Usage.TotalTokens
+		request.UsageEstimated = metadataValue(req.Metadata, "gateway.realtime_usage_exact") != "true"
 	}
 	if request.APIType == "fine_tuning" || request.APIType == "video" {
 		request.InputTokens = 0
@@ -214,11 +223,15 @@ func billingRequest(req *RequestContext) UsageRequest {
 		if request.APIType == "fine_tuning" {
 			request.UsageEstimated = true
 		}
+	} else if request.APIType == "realtime" && req.Usage != nil {
+		// Realtime supplies an explicit reserve or provider-reported usage.
 	} else if request.OutputTokens == 0 && req.CompletionRequest == nil {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
 	}
 	if request.APIType == "fine_tuning" || request.APIType == "video" {
 		request.TotalTokens = 0
+	} else if request.APIType == "realtime" && req.Usage != nil {
+		// Preserve exact zero usage and the explicit per-response reserve.
 	} else {
 		request.TotalTokens = openai.ReserveTokens(request.InputTokens, request.OutputTokens)
 	}
@@ -456,7 +469,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.UsageEstimated = false
 	}
 	providerReportedUsage := (req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil) || (req.AudioTranscriptionResponse != nil && req.AudioTranscriptionResponse.Usage != nil)
-	if request.TotalTokens == 0 && request.APIType != "fine_tuning" && request.APIType != "video" && request.CacheStatus != "hit" && !providerReportedUsage {
+	if request.TotalTokens == 0 && request.APIType != "fine_tuning" && request.APIType != "video" && !(request.APIType == "realtime" && metadataValue(req.Metadata, "gateway.realtime_usage_exact") == "true") && request.CacheStatus != "hit" && !providerReportedUsage {
 		if req.CompletionRequest != nil {
 			request.InputTokens = openai.CompletionInputTokens(*req.CompletionRequest)
 			request.TotalTokens = openai.CompletionReserveTokens(*req.CompletionRequest)

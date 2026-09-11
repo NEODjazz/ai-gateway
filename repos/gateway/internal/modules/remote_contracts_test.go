@@ -264,6 +264,31 @@ func TestRemoteBillingUsesOnlyDurationForVideo(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingUsesRealtimeReserveAndExactUsage(t *testing.T) {
+	req := sensitiveContext()
+	req.Request.Model = "realtime-model"
+	req.Usage = &openai.Usage{PromptTokens: 31, CompletionTokens: 42, TotalTokens: 73}
+	if req.Metadata == nil {
+		req.Metadata = map[string]string{}
+	}
+	req.Metadata["gateway.api_type"] = "realtime"
+	reserve := billingRequest(&req)
+	if reserve.APIType != "realtime" || reserve.InputTokens != 31 || reserve.OutputTokens != 42 || reserve.TotalTokens != 73 || !reserve.UsageEstimated {
+		t.Fatalf("reserve=%+v", reserve)
+	}
+	req.Usage = &openai.Usage{PromptTokens: 9, CompletionTokens: 4, TotalTokens: 13}
+	req.Metadata["gateway.realtime_usage_exact"] = "true"
+	commit := billingRequest(&req)
+	if commit.APIType != "realtime" || commit.InputTokens != 9 || commit.OutputTokens != 4 || commit.TotalTokens != 13 || commit.UsageEstimated {
+		t.Fatalf("commit=%+v", commit)
+	}
+	req.Usage = &openai.Usage{}
+	zero := billingRequest(&req)
+	if zero.TotalTokens != 0 || zero.UsageEstimated {
+		t.Fatalf("exact zero usage was replaced: %+v", zero)
+	}
+}
+
 func TestRemoteBillingSettlesAudioSpeechWithExactCharacters(t *testing.T) {
 	request := openai.AudioSpeechRequest{Provider: "speech", Model: "tts", Input: "Привет 👋", Voice: "alloy"}
 	req := RequestContext{

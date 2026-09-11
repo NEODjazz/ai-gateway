@@ -524,7 +524,7 @@ func usageTokens(req *RequestContext, fallbackPromptTokens int) (int, int, int, 
 	if metadata(req, "provider.cache.status") == "hit" {
 		return 0, 0, 0, false
 	}
-	if req.Usage != nil && req.Usage.TotalTokens > 0 {
+	if req.Usage != nil && (req.Usage.TotalTokens > 0 || req.APIType == "realtime" && !metadataBool(req, "usage.estimated")) {
 		return req.Usage.PromptTokens, req.Usage.CompletionTokens, req.Usage.TotalTokens, metadataBool(req, "usage.estimated")
 	}
 	if req.Response != nil && req.Response.Usage.TotalTokens > 0 {
