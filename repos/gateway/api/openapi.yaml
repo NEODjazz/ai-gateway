@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.268
+  version: 0.1.269
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1377,7 +1377,7 @@ paths:
       operationId: attachVectorStoreFile
       tags: [Vector stores]
       summary: Attach an owned file to an owned vector store
-      description: Atomically verifies file and vector-store ownership in PostgreSQL, enforces the configured per-store file-count and byte quotas, and refreshes last-active expiry.
+      description: Atomically verifies file and vector-store ownership in PostgreSQL, enforces the configured per-store file-count and byte quotas, and refreshes last-active expiry. Auto chunking is explicit; valid static token-based chunking fails with a capability error before storage.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -5086,10 +5086,12 @@ components:
               - {type: number}
               - {type: boolean}
           maxProperties: 16
+        chunking_strategy:
+          $ref: '#/components/schemas/VectorStoreChunkingStrategy'
     VectorStoreFile:
       type: object
       additionalProperties: false
-      required: [id, object, usage_bytes, created_at, vector_store_id, status, last_error, attributes]
+      required: [id, object, usage_bytes, created_at, vector_store_id, status, last_error, attributes, chunking_strategy]
       properties:
         id: {type: string, minLength: 1, maxLength: 128}
         object: {type: string, const: vector_store.file}
@@ -5107,6 +5109,31 @@ components:
               - {type: number}
               - {type: boolean}
           maxProperties: 16
+        chunking_strategy:
+          $ref: '#/components/schemas/VectorStoreAutoChunkingStrategy'
+    VectorStoreChunkingStrategy:
+      oneOf:
+        - $ref: '#/components/schemas/VectorStoreAutoChunkingStrategy'
+        - $ref: '#/components/schemas/VectorStoreStaticChunkingStrategy'
+    VectorStoreAutoChunkingStrategy:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: {type: string, const: auto}
+    VectorStoreStaticChunkingStrategy:
+      type: object
+      additionalProperties: false
+      required: [type, static]
+      properties:
+        type: {type: string, const: static}
+        static:
+          type: object
+          additionalProperties: false
+          required: [max_chunk_size_tokens, chunk_overlap_tokens]
+          properties:
+            max_chunk_size_tokens: {type: integer, minimum: 100, maximum: 4096}
+            chunk_overlap_tokens: {type: integer, minimum: 0, maximum: 2048}
     VectorStoreFileUpdateRequest:
       type: object
       additionalProperties: false

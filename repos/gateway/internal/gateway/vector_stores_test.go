@@ -326,13 +326,13 @@ func TestVectorStoreFileHTTPLifecyclePaginationAndIsolation(t *testing.T) {
 	for _, fileID := range []string{"file_one", "file_two"} {
 		body := `{"file_id":"` + fileID + `"}`
 		if fileID == "file_one" {
-			body = `{"file_id":"file_one","attributes":{"region":"eu","priority":2,"active":true}}`
+			body = `{"file_id":"file_one","attributes":{"region":"eu","priority":2,"active":true},"chunking_strategy":{"type":"auto"}}`
 		}
 		response := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files", body)
 		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"object":"vector_store.file"`) || !strings.Contains(response.Body.String(), fileID) {
 			t.Fatalf("attach %s status=%d body=%s", fileID, response.Code, response.Body.String())
 		}
-		if fileID == "file_one" && (!strings.Contains(response.Body.String(), `"priority":2`) || !strings.Contains(response.Body.String(), `"active":true`)) {
+		if fileID == "file_one" && (!strings.Contains(response.Body.String(), `"priority":2`) || !strings.Contains(response.Body.String(), `"active":true`) || !strings.Contains(response.Body.String(), `"chunking_strategy":{"type":"auto"}`)) {
 			t.Fatalf("attach attributes body=%s", response.Body.String())
 		}
 	}
@@ -468,6 +468,11 @@ func TestVectorStoreFilesRejectInvalidMissingDuplicateAndQuota(t *testing.T) {
 		{"/v1/vector_stores/vs_owned/files", `{"file_id":"missing"}`, http.StatusNotFound},
 		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","attributes":{"too_long":"` + strings.Repeat("x", 513) + `"}}`, http.StatusBadRequest},
 		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","attributes":{"nested":{"bad":true}}}`, http.StatusBadRequest},
+		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","chunking_strategy":{"type":"auto","static":{"max_chunk_size_tokens":800,"chunk_overlap_tokens":400}}}`, http.StatusBadRequest},
+		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","chunking_strategy":{"type":"static","static":{"max_chunk_size_tokens":99,"chunk_overlap_tokens":0}}}`, http.StatusBadRequest},
+		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","chunking_strategy":{"type":"static","static":{"max_chunk_size_tokens":800,"chunk_overlap_tokens":401}}}`, http.StatusBadRequest},
+		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","chunking_strategy":{"type":"static","static":{"max_chunk_size_tokens":800,"chunk_overlap_tokens":400}}}`, http.StatusUnprocessableEntity},
+		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","chunking_strategy":{"type":"unknown"}}`, http.StatusBadRequest},
 		{"/v1/vector_stores/missing/files", `{"file_id":"file_one"}`, http.StatusNotFound},
 		{"/v1/vector_stores/vs_owned/files?extra=1", `{"file_id":"file_one"}`, http.StatusBadRequest},
 		{"/v1/vector_stores/vs_owned/files/file_one", `{}`, http.StatusBadRequest},
@@ -476,6 +481,9 @@ func TestVectorStoreFilesRejectInvalidMissingDuplicateAndQuota(t *testing.T) {
 		response := callVectorStore(handler, http.MethodPost, test.path, test.body)
 		if response.Code != test.code {
 			t.Fatalf("path=%s status=%d body=%s", test.path, response.Code, response.Body.String())
+		}
+		if test.code == http.StatusUnprocessableEntity && !strings.Contains(response.Body.String(), `"code":"vector_store_chunking_unsupported"`) {
+			t.Fatalf("path=%s missing capability error body=%s", test.path, response.Body.String())
 		}
 	}
 	if response := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files", `{"file_id":"file_one"}`); response.Code != http.StatusOK {

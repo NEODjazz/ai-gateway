@@ -11,8 +11,9 @@ import (
 )
 
 type attachVectorStoreFileRequest struct {
-	FileID     string         `json:"file_id"`
-	Attributes map[string]any `json:"attributes,omitempty"`
+	FileID           string                       `json:"file_id"`
+	Attributes       map[string]any               `json:"attributes,omitempty"`
+	ChunkingStrategy *vectorStoreChunkingStrategy `json:"chunking_strategy,omitempty"`
 }
 
 type updateVectorStoreFileRequest struct {
@@ -41,6 +42,9 @@ func (h Handler) AttachVectorStoreFile(w http.ResponseWriter, r *http.Request) {
 	}
 	if message := vectorstate.ValidateAttributes(input.Attributes); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
+	if !validateVectorStoreChunkingStrategy(w, input.ChunkingStrategy) {
 		return
 	}
 	file, err := h.vectorStores.AttachVectorStoreFile(r.Context(), fileOwnerKey(req), r.PathValue("id"), input.FileID, normalizedVectorStoreAttributes(input.Attributes), h.vectorStoreConfig.FileQuota, h.vectorStoreConfig.ByteQuota)
@@ -262,6 +266,7 @@ func publicVectorStoreFile(file vectorstate.File) map[string]any {
 		"id": file.FileID, "object": "vector_store.file", "usage_bytes": file.Bytes,
 		"created_at": file.CreatedAt.Unix(), "vector_store_id": file.VectorStoreID,
 		"status": file.Status, "last_error": nil, "attributes": normalizedVectorStoreAttributes(file.Attributes),
+		"chunking_strategy": publicVectorStoreChunkingStrategy(),
 	}
 }
 
