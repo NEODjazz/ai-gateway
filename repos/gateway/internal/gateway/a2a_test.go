@@ -20,8 +20,9 @@ import (
 type a2aTestProvider struct{ request modules.RequestContext }
 
 type a2aMemoryTaskStore struct {
-	mu    sync.Mutex
-	tasks map[string]a2astate.Task
+	mu        sync.Mutex
+	tasks     map[string]a2astate.Task
+	updateErr error
 }
 
 func (s *a2aMemoryTaskStore) CreateA2ATask(_ context.Context, task a2astate.Task, quota int, ttl time.Duration) (a2astate.Task, error) {
@@ -49,6 +50,27 @@ func (s *a2aMemoryTaskStore) GetA2ATask(_ context.Context, owner, agent, id stri
 		return a2astate.Task{}, a2astate.ErrNotFound
 	}
 	task.Payload = append([]byte(nil), task.Payload...)
+	return task, nil
+}
+
+func (s *a2aMemoryTaskStore) UpdateA2ATask(_ context.Context, task a2astate.Task, expected time.Time, ttl time.Duration) (a2astate.Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, found := s.tasks[task.ID]
+	if !found || current.OwnerKey != task.OwnerKey || current.AgentID != task.AgentID {
+		return a2astate.Task{}, a2astate.ErrNotFound
+	}
+	if !current.UpdatedAt.Equal(expected) {
+		return a2astate.Task{}, a2astate.ErrConflict
+	}
+	if s.updateErr != nil {
+		return a2astate.Task{}, s.updateErr
+	}
+	task.CreatedAt = current.CreatedAt
+	task.UpdatedAt = current.UpdatedAt.Add(time.Nanosecond)
+	task.ExpiresAt = task.UpdatedAt.Add(ttl)
+	task.Payload = append([]byte(nil), task.Payload...)
+	s.tasks[task.ID] = task
 	return task, nil
 }
 
@@ -167,6 +189,7 @@ func TestA2ARejectsUnsupportedProtocolFeatures(t *testing.T) {
 		{"task", "1.0", `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"tenant":"research","message":{"messageId":"m","taskId":"t","role":"ROLE_USER","parts":[{"text":"hello"}]}}}`, `"code":-32004`},
 		{"binary", "1.0", `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"tenant":"research","message":{"messageId":"m","role":"ROLE_USER","parts":[{"raw":"AA==","mediaType":"application/octet-stream"}]}}}`, `"code":-32005`},
 		{"push", "1.0", `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"tenant":"research","message":{"messageId":"m","role":"ROLE_USER","parts":[{"text":"hello"}]},"configuration":{"pushNotificationConfig":{}}}}`, `"code":-32003`},
+		{"unknown", "1.0", `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"tenant":"research","message":{"messageId":"m","role":"ROLE_USER","parts":[{"text":"hello","unknown":true}]}}}`, `"code":-32700`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -247,5 +270,134 @@ func TestA2ACompletedTaskLifecycleUsesDurableOwnerScope(t *testing.T) {
 	router.ServeHTTP(response, get)
 	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "Task access is not allowed") {
 		t.Fatalf("model authorization status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestA2ATaskContinuationPreservesHistoryAndBilling(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	router, llm, billing := a2aTestHandlerWithTasks(t, store)
+	call := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+		request.Header.Set("A2A-Version", "1.0")
+		request.Header.Set("Authorization", "Bearer key")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	created := call(`{"jsonrpc":"2.0","id":"create","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"first","role":"ROLE_USER","parts":[{"text":"one"}]}}}`)
+	var envelope struct {
+		Result struct {
+			Task a2aTask `json:"task"`
+		} `json:"result"`
+	}
+	if created.Code != http.StatusOK || json.Unmarshal(created.Body.Bytes(), &envelope) != nil {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+	}
+	task := envelope.Result.Task
+	continued := call(`{"jsonrpc":"2.0","id":"continue","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"second","taskId":"` + task.ID + `","contextId":"` + task.ContextID + `","role":"ROLE_USER","parts":[{"text":"two"}]}}}`)
+	if continued.Code != http.StatusOK || json.Unmarshal(continued.Body.Bytes(), &envelope) != nil {
+		t.Fatalf("continue status=%d body=%s", continued.Code, continued.Body.String())
+	}
+	continuedTask := envelope.Result.Task
+	if continuedTask.ID != task.ID || continuedTask.ContextID != task.ContextID || len(continuedTask.History) != 4 || len(continuedTask.Artifacts) != 2 || billing.calls != 2 {
+		t.Fatalf("task=%+v billing=%d", continuedTask, billing.calls)
+	}
+	input, ok := llm.request.ResponseRequest.Input.([]any)
+	if !ok || len(input) != 3 || input[0].(map[string]any)["role"] != "user" || input[1].(map[string]any)["role"] != "assistant" || input[2].(map[string]any)["role"] != "user" {
+		t.Fatalf("continuation input=%#v", llm.request.ResponseRequest.Input)
+	}
+	if input[0].(map[string]any)["content"].([]any)[0].(map[string]any)["type"] != "input_text" || input[1].(map[string]any)["content"].([]any)[0].(map[string]any)["type"] != "output_text" {
+		t.Fatalf("continuation content=%#v", input)
+	}
+	duplicate := call(`{"jsonrpc":"2.0","id":"duplicate","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"second","taskId":"` + task.ID + `","role":"ROLE_USER","parts":[{"text":"again"}]}}}`)
+	if duplicate.Code != http.StatusConflict || billing.calls != 2 {
+		t.Fatalf("duplicate status=%d billing=%d body=%s", duplicate.Code, billing.calls, duplicate.Body.String())
+	}
+	mismatch := call(`{"jsonrpc":"2.0","id":"mismatch","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"third","taskId":"` + task.ID + `","contextId":"other","role":"ROLE_USER","parts":[{"text":"again"}]}}}`)
+	if mismatch.Code != http.StatusConflict || billing.calls != 2 {
+		t.Fatalf("mismatch status=%d billing=%d body=%s", mismatch.Code, billing.calls, mismatch.Body.String())
+	}
+}
+
+func TestDecodeA2ATaskRejectsUnsafeStoredHistory(t *testing.T) {
+	valid := `{"id":"task","contextId":"context","status":{"state":"TASK_STATE_COMPLETED","timestamp":"2026-09-11T00:00:00Z"},"artifacts":[{"artifactId":"artifact","parts":[{"text":"ok"}]}],"history":[{"messageId":"user","contextId":"context","taskId":"task","role":"ROLE_USER","parts":[{"text":"hi"}]},{"messageId":"agent","contextId":"context","taskId":"task","role":"ROLE_AGENT","parts":[{"text":"ok"}]}]}`
+	if _, err := decodeA2ATask([]byte(valid)); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []string{
+		strings.Replace(valid, `"role":"ROLE_USER"`, `"role":"ROLE_SYSTEM"`, 1),
+		strings.Replace(valid, `"taskId":"task"`, `"taskId":"other"`, 1),
+		strings.Replace(valid, `{"text":"hi"}`, `{"url":"https://example.test"}`, 1),
+		strings.Replace(valid, `"timestamp":"2026-09-11T00:00:00Z"`, `"timestamp":"invalid"`, 1),
+	} {
+		if _, err := decodeA2ATask([]byte(invalid)); err == nil {
+			t.Fatalf("accepted invalid task: %s", invalid)
+		}
+	}
+}
+
+func TestA2ATaskContinuationReportsOptimisticConflict(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	router, _, billing := a2aTestHandlerWithTasks(t, store)
+	call := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+		request.Header.Set("A2A-Version", "1.0")
+		request.Header.Set("Authorization", "Bearer key")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	created := call(`{"jsonrpc":"2.0","id":"create","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"first","role":"ROLE_USER","parts":[{"text":"one"}]}}}`)
+	var envelope struct {
+		Result struct {
+			Task a2aTask `json:"task"`
+		} `json:"result"`
+	}
+	if created.Code != http.StatusOK || json.Unmarshal(created.Body.Bytes(), &envelope) != nil {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+	}
+	store.mu.Lock()
+	store.updateErr = a2astate.ErrConflict
+	store.mu.Unlock()
+	response := call(`{"jsonrpc":"2.0","id":"continue","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"second","taskId":"` + envelope.Result.Task.ID + `","role":"ROLE_USER","parts":[{"text":"two"}]}}}`)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "Task changed concurrently") || billing.calls != 2 {
+		t.Fatalf("status=%d billing=%d body=%s", response.Code, billing.calls, response.Body.String())
+	}
+}
+
+func TestA2ATaskContinuationRejectsNonCompletedTaskBeforeBilling(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	router, _, billing := a2aTestHandlerWithTasks(t, store)
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"create","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"first","role":"ROLE_USER","parts":[{"text":"one"}]}}}`))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	var envelope struct {
+		Result struct {
+			Task a2aTask `json:"task"`
+		} `json:"result"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &envelope) != nil {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	store.mu.Lock()
+	stored := store.tasks[envelope.Result.Task.ID]
+	stored.State = "TASK_STATE_FAILED"
+	var task a2aTask
+	if json.Unmarshal(stored.Payload, &task) != nil {
+		t.Fatal("decode stored task")
+	}
+	task.Status.State = stored.State
+	stored.Payload, _ = json.Marshal(task)
+	store.tasks[stored.ID] = stored
+	store.mu.Unlock()
+	request = httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"continue","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"second","taskId":"`+stored.ID+`","role":"ROLE_USER","parts":[{"text":"two"}]}}}`))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || billing.calls != 1 {
+		t.Fatalf("status=%d billing=%d body=%s", response.Code, billing.calls, response.Body.String())
 	}
 }

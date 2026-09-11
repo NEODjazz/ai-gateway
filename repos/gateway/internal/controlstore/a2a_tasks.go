@@ -67,6 +67,30 @@ func (s *PostgresStore) GetA2ATask(ctx context.Context, owner, agent, id string)
 	return getA2ATask(ctx, s.pool, owner, agent, id)
 }
 
+func (s *PostgresStore) UpdateA2ATask(ctx context.Context, task a2astate.Task, expectedUpdatedAt time.Time, ttl time.Duration) (a2astate.Task, error) {
+	if s == nil || s.pool == nil {
+		return a2astate.Task{}, a2astate.ErrUnavailable
+	}
+	if !validA2ATask(task) || expectedUpdatedAt.IsZero() || ttl < time.Second || ttl > 365*24*time.Hour {
+		return a2astate.Task{}, a2astate.ErrInvalid
+	}
+	updated, err := scanA2ATask(s.pool.QueryRow(ctx, `UPDATE gateway_a2a_tasks SET state=$5,payload=$6,
+		updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond'),expires_at=GREATEST(expires_at,clock_timestamp()+make_interval(secs=>$8))
+		WHERE id=$1 AND owner_key=$2 AND agent_id=$3 AND model=$4 AND context_id=$7 AND updated_at=$9 AND expires_at>now()
+		RETURNING id,owner_key,agent_id,model,context_id,state,payload,created_at,updated_at,expires_at`,
+		task.ID, task.OwnerKey, task.AgentID, task.Model, task.State, task.Payload, task.ContextID, int64(ttl/time.Second), expectedUpdatedAt))
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return updated, err
+	}
+	if _, getErr := getA2ATask(ctx, s.pool, task.OwnerKey, task.AgentID, task.ID); getErr == nil {
+		return a2astate.Task{}, a2astate.ErrConflict
+	} else if errors.Is(getErr, a2astate.ErrNotFound) {
+		return a2astate.Task{}, a2astate.ErrNotFound
+	} else {
+		return a2astate.Task{}, getErr
+	}
+}
+
 func (s *PostgresStore) ListA2ATasks(ctx context.Context, owner, agent string, options a2astate.ListOptions) ([]a2astate.Task, string, int, error) {
 	if s == nil || s.pool == nil {
 		return nil, "", 0, a2astate.ErrUnavailable

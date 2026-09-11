@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.212
+  version: 0.1.213
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -43,7 +43,7 @@ paths:
       operationId: getA2AAgentCard
       tags: [A2A]
       summary: Discover one enabled executable agent profile
-      description: Returns an A2A 1.0 Agent Card for direct discovery. The card advertises synchronous text-only JSON-RPC execution and bearer authentication; streaming, task lifecycle, push notifications and extended cards are not advertised.
+      description: Returns an A2A 1.0 Agent Card for direct discovery. The card advertises synchronous text-only JSON-RPC execution and bearer authentication; streaming, push notifications and extended cards are not advertised.
       security: []
       parameters:
         - {name: agent, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
@@ -58,8 +58,8 @@ paths:
     post:
       operationId: callA2AAgent
       tags: [A2A]
-      summary: Send a synchronous text message to an agent profile
-      description: Implements the A2A 1.0 JSON-RPC SendMessage operation with a direct Message result. The request passes through the same authentication, model authorization, rate limit, guardrail, routing and billing pipeline as Responses. Task continuation, streaming, binary/data parts and push notifications return explicit protocol errors.
+      summary: Execute synchronous A2A messages and task lifecycle operations
+      description: Implements A2A 1.0 SendMessage, GetTask, ListTasks and CancelTask. New messages pass through the same authentication, model authorization, rate limit, guardrail, routing and billing pipeline as Responses. When durable task storage is configured, SendMessage creates or continues an owner-scoped completed task using optimistic concurrency. Streaming, binary/data parts and push notifications return explicit protocol errors.
       security: [{bearerAuth: []}]
       parameters:
         - {name: agent, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
@@ -71,7 +71,7 @@ paths:
             schema: {$ref: '#/components/schemas/A2AJSONRPCRequest'}
       responses:
         '200':
-          description: A2A direct Message result
+          description: A2A Message, Task or task-list result
           headers:
             X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
           content:
@@ -3440,40 +3440,47 @@ components:
   schemas:
     A2APart:
       type: object
-      additionalProperties: true
+      additionalProperties: false
       description: A2A 1.0 member-discriminated part. This endpoint currently accepts text only.
       properties:
         text: {type: string}
         mediaType: {type: string}
     A2AMessage:
       type: object
-      additionalProperties: true
+      additionalProperties: false
       required: [messageId, role, parts]
       properties:
-        messageId: {type: string, minLength: 1, maxLength: 1024}
-        contextId: {type: string, maxLength: 1024}
-        taskId: {type: string, maxLength: 1024, description: Rejected because task continuation is not implemented}
+        messageId: {type: string, minLength: 1, maxLength: 128}
+        contextId: {type: string, maxLength: 128}
+        taskId: {type: string, maxLength: 128, description: Existing durable task to continue}
         role: {type: string, enum: [ROLE_USER, ROLE_AGENT]}
         parts: {type: array, minItems: 1, maxItems: 1024, items: {$ref: '#/components/schemas/A2APart'}}
         metadata: {type: object, additionalProperties: true}
     A2AJSONRPCRequest:
       type: object
-      additionalProperties: true
+      additionalProperties: false
       required: [jsonrpc, id, method, params]
       properties:
         jsonrpc: {type: string, const: '2.0'}
         id: {oneOf: [{type: string}, {type: number}]}
-        method: {type: string, const: SendMessage}
+        method: {type: string, enum: [SendMessage, GetTask, ListTasks, CancelTask]}
         params:
           type: object
-          additionalProperties: true
-          required: [tenant, message]
+          additionalProperties: false
           properties:
             tenant: {type: string, description: Must equal the selected agent profile ID}
+            id: {type: string, minLength: 1, maxLength: 128, description: Task ID for GetTask or CancelTask}
+            contextId: {type: string, maxLength: 128}
+            status: {type: string, enum: [TASK_STATE_UNSPECIFIED, TASK_STATE_SUBMITTED, TASK_STATE_WORKING, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_CANCELED, TASK_STATE_INPUT_REQUIRED, TASK_STATE_REJECTED, TASK_STATE_AUTH_REQUIRED]}
+            pageSize: {type: integer, minimum: 1, maximum: 100, default: 50}
+            pageToken: {type: string, maxLength: 128}
+            historyLength: {type: integer, minimum: 0, maximum: 100}
+            includeArtifacts: {type: boolean, default: false}
+            statusTimestampAfter: {type: string, format: date-time}
             message: {$ref: '#/components/schemas/A2AMessage'}
             configuration:
               type: object
-              additionalProperties: true
+              additionalProperties: false
               properties:
                 acceptedOutputModes: {type: array, items: {type: string, const: text/plain}}
                 returnImmediately: {type: boolean}
@@ -3485,10 +3492,24 @@ components:
         jsonrpc: {type: string, const: '2.0'}
         id: {oneOf: [{type: string}, {type: number}, {type: "null"}]}
         result:
-          type: object
-          additionalProperties: false
-          required: [message]
-          properties: {message: {$ref: '#/components/schemas/A2AMessage'}}
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [message]
+              properties: {message: {$ref: '#/components/schemas/A2AMessage'}}
+            - type: object
+              additionalProperties: false
+              required: [task]
+              properties: {task: {$ref: '#/components/schemas/A2ATask'}}
+            - {$ref: '#/components/schemas/A2ATask'}
+            - type: object
+              additionalProperties: false
+              required: [tasks, pageSize, totalSize]
+              properties:
+                tasks: {type: array, items: {$ref: '#/components/schemas/A2ATask'}}
+                nextPageToken: {type: string}
+                pageSize: {type: integer}
+                totalSize: {type: integer}
         error:
           type: object
           additionalProperties: false
@@ -3496,6 +3517,30 @@ components:
           properties:
             code: {type: integer}
             message: {type: string}
+    A2ATask:
+      type: object
+      additionalProperties: false
+      required: [id, contextId, status]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 128}
+        contextId: {type: string, minLength: 1, maxLength: 128}
+        status:
+          type: object
+          additionalProperties: false
+          required: [state]
+          properties:
+            state: {type: string, enum: [TASK_STATE_UNSPECIFIED, TASK_STATE_SUBMITTED, TASK_STATE_WORKING, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_CANCELED, TASK_STATE_INPUT_REQUIRED, TASK_STATE_REJECTED, TASK_STATE_AUTH_REQUIRED]}
+            timestamp: {type: string, format: date-time}
+        artifacts:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [artifactId, parts]
+            properties:
+              artifactId: {type: string, minLength: 1, maxLength: 128}
+              parts: {type: array, minItems: 1, maxItems: 1024, items: {$ref: '#/components/schemas/A2APart'}}
+        history: {type: array, items: {$ref: '#/components/schemas/A2AMessage'}}
     A2AAgentCard:
       type: object
       additionalProperties: true

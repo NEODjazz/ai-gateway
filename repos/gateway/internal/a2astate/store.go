@@ -38,6 +38,7 @@ type ListOptions struct {
 
 type Store interface {
 	CreateA2ATask(context.Context, Task, int, time.Duration) (Task, error)
+	UpdateA2ATask(context.Context, Task, time.Time, time.Duration) (Task, error)
 	GetA2ATask(context.Context, string, string, string) (Task, error)
 	ListA2ATasks(context.Context, string, string, ListOptions) ([]Task, string, int, error)
 }

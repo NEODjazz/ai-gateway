@@ -27,6 +27,14 @@ func TestPostgresA2ATaskLifecycleAndIsolationIntegration(t *testing.T) {
 	if err != nil || json.Unmarshal(loaded.Payload, &payload) != nil || payload["id"] != task.ID {
 		t.Fatalf("loaded=%+v err=%v", loaded, err)
 	}
+	task.Payload = []byte(`{"id":"task_a","updated":"true"}`)
+	updated, err := store.UpdateA2ATask(ctx, task, created.UpdatedAt, 2*time.Hour)
+	if err != nil || !updated.UpdatedAt.After(created.UpdatedAt) || updated.ExpiresAt.Before(created.ExpiresAt) {
+		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+	if _, err = store.UpdateA2ATask(ctx, task, created.UpdatedAt, time.Hour); !errors.Is(err, a2astate.ErrConflict) {
+		t.Fatalf("stale update error=%v", err)
+	}
 	for _, key := range [][2]string{{"owner-b", task.AgentID}, {task.OwnerKey, "agent-b"}} {
 		if _, err := store.GetA2ATask(ctx, key[0], key[1], task.ID); !errors.Is(err, a2astate.ErrNotFound) {
 			t.Fatalf("cross-scope get error=%v", err)
@@ -44,6 +52,46 @@ func TestPostgresA2ATaskLifecycleAndIsolationIntegration(t *testing.T) {
 	task.ID = "task_after_expiry"
 	if _, err := store.CreateA2ATask(ctx, task, 1, time.Hour); err != nil {
 		t.Fatalf("expired task did not release quota: %v", err)
+	}
+}
+
+func TestPostgresA2ATaskUpdateIsAtomicIntegration(t *testing.T) {
+	store := prepareA2ATaskStore(t)
+	task := a2astate.Task{ID: "task_update", OwnerKey: "owner-update", AgentID: "agent", Model: "model", ContextID: "context", State: "TASK_STATE_COMPLETED", Payload: []byte(`{"version":0}`)}
+	created, err := store.CreateA2ATask(t.Context(), task, 10, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var workers sync.WaitGroup
+	for version := 1; version <= 2; version++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			candidate := task
+			candidate.Payload = []byte(`{"version":` + string(rune('0'+version)) + `}`)
+			_, updateErr := store.UpdateA2ATask(context.Background(), candidate, created.UpdatedAt, time.Hour)
+			results <- updateErr
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	var succeeded, conflicted int
+	for updateErr := range results {
+		switch {
+		case updateErr == nil:
+			succeeded++
+		case errors.Is(updateErr, a2astate.ErrConflict):
+			conflicted++
+		default:
+			t.Fatalf("update error=%v", updateErr)
+		}
+	}
+	if succeeded != 1 || conflicted != 1 {
+		t.Fatalf("succeeded=%d conflicted=%d", succeeded, conflicted)
 	}
 }
 

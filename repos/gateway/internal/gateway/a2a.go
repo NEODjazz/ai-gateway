@@ -147,6 +147,7 @@ func (h Handler) A2AJSONRPC(w http.ResponseWriter, r *http.Request) {
 	}
 	var request a2aRequest
 	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
 	if decoder.Decode(&request) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		h.writeA2AError(w, nil, http.StatusBadRequest, -32700, "Invalid JSON payload")
 		return
@@ -192,8 +193,9 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32602, "Invalid parameters")
 		return
 	}
-	if request.Params.Message.TaskID != "" {
-		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32004, "This operation is not supported")
+	continuation := request.Params.Message.TaskID != ""
+	if continuation && !validFileToken(request.Params.Message.TaskID, 128) {
+		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32602, "Invalid parameters")
 		return
 	}
 	if request.Params.Configuration.ReturnImmediately != nil && *request.Params.Configuration.ReturnImmediately {
@@ -214,6 +216,44 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 			return
 		}
 	}
+	var stored a2astate.Task
+	var existing a2aTask
+	if continuation {
+		if h.a2aTasks == nil || h.a2aTaskConfig.OwnerQuota < 1 || h.a2aTaskConfig.TTL <= 0 {
+			h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Task continuation is not supported")
+			return
+		}
+		identity, ok := h.authenticateA2AContinuation(w, r, request.ID)
+		if !ok {
+			return
+		}
+		var err error
+		stored, err = h.a2aTasks.GetA2ATask(r.Context(), fileOwnerKey(identity), profile.ID, request.Params.Message.TaskID)
+		if err != nil {
+			h.writeA2ATaskStoreError(w, request.ID, err)
+			return
+		}
+		if !h.authorizeA2ATaskModel(w, request.ID, identity, stored.Model) {
+			return
+		}
+		existing, err = decodeA2ATask(stored.Payload)
+		if err != nil || existing.ID != stored.ID || existing.ContextID != stored.ContextID || existing.Status.State != stored.State {
+			if err == nil {
+				err = a2astate.ErrInvalid
+			}
+			h.writeA2ATaskStoreError(w, request.ID, err)
+			return
+		}
+		if existing.Status.State != "TASK_STATE_COMPLETED" {
+			h.writeA2AError(w, request.ID, http.StatusConflict, -32602, "Task cannot be continued in its current state")
+			return
+		}
+		if request.Params.Message.ContextID != "" && request.Params.Message.ContextID != existing.ContextID || a2aHistoryContainsMessage(existing.History, request.Params.Message.MessageID) {
+			h.writeA2AError(w, request.ID, http.StatusConflict, -32602, "Task continuation conflicts with stored history")
+			return
+		}
+		request.Params.Message.ContextID = existing.ContextID
+	}
 	content := make([]any, 0, len(request.Params.Message.Parts))
 	for _, part := range request.Params.Message.Parts {
 		if part.Text == nil || part.Raw != nil || part.URL != nil || len(part.Data) != 0 || (part.MediaType != "" && part.MediaType != "text/plain") || part.Filename != "" {
@@ -224,11 +264,17 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 	}
 
 	capture := newA2AResponseCapture()
-	responseRequest := openai.ResponseRequest{Model: profile.Model, Input: []any{map[string]any{"role": "user", "content": content}}}
+	model := profile.Model
+	input := []any{map[string]any{"role": "user", "content": content}}
+	if continuation {
+		model = stored.Model
+		input = a2aResponseInput(existing.History, content)
+	}
+	responseRequest := openai.ResponseRequest{Model: model, Input: input}
 	var storageErr error
 	h.serveResponsesAs(capture, r, responseRequest, "a2a", func(response openai.ResponseResponse, reqCtx modules.RequestContext) any {
 		messageID := response.ID
-		if messageID == "" {
+		if messageID == "" || len(messageID) > 128 || continuation && a2aHistoryContainsMessage(existing.History, messageID) {
 			messageID = newA2AID("msg")
 		}
 		contextID := request.Params.Message.ContextID
@@ -239,22 +285,32 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		if h.a2aTasks == nil {
 			return a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: map[string]any{"message": agentMessage}}
 		}
-		taskID := newA2AID("task")
+		taskID := request.Params.Message.TaskID
+		if taskID == "" {
+			taskID = newA2AID("task")
+		}
 		request.Params.Message.ContextID = contextID
 		request.Params.Message.TaskID = taskID
 		agentMessage.TaskID = taskID
 		now := time.Now().UTC()
-		task := a2aTask{
-			ID: taskID, ContextID: contextID,
-			Status:    a2aTaskStatus{State: "TASK_STATE_COMPLETED", Timestamp: now.Format(time.RFC3339Nano)},
-			Artifacts: []a2aArtifact{{ArtifactID: newA2AID("artifact"), Parts: agentMessage.Parts}},
-			History:   []a2aMessage{request.Params.Message, agentMessage},
+		task := a2aTask{ID: taskID, ContextID: contextID, Status: a2aTaskStatus{State: "TASK_STATE_COMPLETED", Timestamp: now.Format(time.RFC3339Nano)}}
+		if continuation {
+			task.Artifacts = append(append([]a2aArtifact(nil), existing.Artifacts...), a2aArtifact{ArtifactID: newA2AID("artifact"), Parts: agentMessage.Parts})
+			task.History = append(append(append([]a2aMessage(nil), existing.History...), request.Params.Message), agentMessage)
+		} else {
+			task.Artifacts = []a2aArtifact{{ArtifactID: newA2AID("artifact"), Parts: agentMessage.Parts}}
+			task.History = []a2aMessage{request.Params.Message, agentMessage}
 		}
 		payload, err := json.Marshal(task)
 		if err == nil && len(payload) > a2astate.MaxPayloadBytes {
 			err = a2astate.ErrInvalid
 		}
-		if err == nil {
+		if err == nil && continuation {
+			_, err = h.a2aTasks.UpdateA2ATask(r.Context(), a2astate.Task{
+				ID: taskID, OwnerKey: fileOwnerKey(reqCtx), AgentID: profile.ID, Model: stored.Model, ContextID: contextID,
+				State: task.Status.State, Payload: payload,
+			}, stored.UpdatedAt, h.a2aTaskConfig.TTL)
+		} else if err == nil {
 			_, err = h.a2aTasks.CreateA2ATask(r.Context(), a2astate.Task{
 				ID: taskID, OwnerKey: fileOwnerKey(reqCtx), AgentID: profile.ID, Model: profile.Model, ContextID: contextID,
 				State: task.Status.State, Payload: payload,
@@ -273,11 +329,68 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		} else if errors.Is(storageErr, a2astate.ErrInvalid) {
 			status = http.StatusBadGateway
 			message = "Task result is too large"
+		} else if errors.Is(storageErr, a2astate.ErrConflict) {
+			status = http.StatusConflict
+			message = "Task changed concurrently"
+		} else if errors.Is(storageErr, a2astate.ErrNotFound) {
+			status = http.StatusNotFound
+			message = "Task not found"
 		}
 		h.writeA2AError(w, request.ID, status, -32603, message)
 		return
 	}
 	copyA2AResponse(w, capture, request.ID)
+}
+
+func (h Handler) authenticateA2AContinuation(w http.ResponseWriter, r *http.Request, rpcID json.RawMessage) (modules.RequestContext, bool) {
+	req := modules.RequestContext{APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: newExecutionID(), SessionID: sessionID(r), Metadata: map[string]string{"gateway.api_type": "a2a"}}
+	if err := h.pipeline.RunAuthentication(r.Context(), &req); err != nil {
+		status, message := http.StatusBadGateway, "Authentication failed"
+		if errors.Is(err, modules.ErrUnauthorized) {
+			status, message = http.StatusUnauthorized, "Invalid API key"
+		}
+		h.writeA2AError(w, rpcID, status, -32603, message)
+		return modules.RequestContext{}, false
+	}
+	req.APIKey = ""
+	capture := newA2AResponseCapture()
+	if !h.prepareAccessGroups(capture, &req) {
+		copyA2AResponse(w, capture, rpcID)
+		return modules.RequestContext{}, false
+	}
+	return req, true
+}
+
+func a2aHistoryContainsMessage(history []a2aMessage, id string) bool {
+	for _, message := range history {
+		if message.MessageID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func a2aResponseInput(history []a2aMessage, latest []any) []any {
+	input := make([]any, 0, len(history)+1)
+	for _, message := range history {
+		content := make([]any, 0, len(message.Parts))
+		for _, part := range message.Parts {
+			if part.Text == nil {
+				continue
+			}
+			typeName := "input_text"
+			if message.Role == "ROLE_AGENT" {
+				typeName = "output_text"
+			}
+			content = append(content, map[string]any{"type": typeName, "text": *part.Text})
+		}
+		role := "user"
+		if message.Role == "ROLE_AGENT" {
+			role = "assistant"
+		}
+		input = append(input, map[string]any{"role": role, "content": content})
+	}
+	return append(input, map[string]any{"role": "user", "content": latest})
 }
 
 func (h Handler) getA2ATask(w http.ResponseWriter, r *http.Request, request a2aRequest, profile AgentProfile) {
@@ -429,10 +542,42 @@ func (h Handler) writeA2ATaskStoreError(w http.ResponseWriter, id json.RawMessag
 func decodeA2ATask(payload []byte) (a2aTask, error) {
 	var task a2aTask
 	if len(payload) == 0 || len(payload) > a2astate.MaxPayloadBytes || json.Unmarshal(payload, &task) != nil ||
-		!validFileToken(task.ID, 128) || !validFileToken(task.ContextID, 128) || !validA2ATaskState(task.Status.State) {
+		!validFileToken(task.ID, 128) || !validFileToken(task.ContextID, 128) || !validA2ATaskState(task.Status.State) || !validStoredA2ATask(task) {
 		return a2aTask{}, a2astate.ErrInvalid
 	}
 	return task, nil
+}
+
+func validStoredA2ATask(task a2aTask) bool {
+	if task.Status.Timestamp != "" {
+		if _, err := time.Parse(time.RFC3339Nano, task.Status.Timestamp); err != nil {
+			return false
+		}
+	}
+	if len(task.History) < 2 || len(task.Artifacts) < 1 {
+		return false
+	}
+	for _, message := range task.History {
+		if message.MessageID == "" || len(message.MessageID) > 128 || message.ContextID != task.ContextID || message.TaskID != task.ID || (message.Role != "ROLE_USER" && message.Role != "ROLE_AGENT") || len(message.Parts) == 0 || len(message.Parts) > 1024 {
+			return false
+		}
+		for _, part := range message.Parts {
+			if part.Text == nil || part.Raw != nil || part.URL != nil || len(part.Data) != 0 || (part.MediaType != "" && part.MediaType != "text/plain") || part.Filename != "" {
+				return false
+			}
+		}
+	}
+	for _, artifact := range task.Artifacts {
+		if !validFileToken(artifact.ArtifactID, 128) || len(artifact.Parts) == 0 || len(artifact.Parts) > 1024 {
+			return false
+		}
+		for _, part := range artifact.Parts {
+			if part.Text == nil || part.Raw != nil || part.URL != nil || len(part.Data) != 0 || (part.MediaType != "" && part.MediaType != "text/plain") || part.Filename != "" {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func validA2AHistoryLength(length *int) bool {
