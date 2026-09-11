@@ -49,8 +49,9 @@ routing and billing path. With durable task and background-response storage,
 `GetTask` reconciles completion and `CancelTask` cancels pending execution.
 Text and bounded inline JPEG, PNG, GIF and WebP inputs reuse the Responses
 media validation, scan, token reserve and billing path. Streaming, push
-notifications, extended cards and other media parts fail with explicit
-protocol errors.
+notifications and other media parts fail with explicit protocol errors.
+`GetExtendedAgentCard` returns the current card only after bearer
+authentication, model authorization and RPM admission.
 
 Gateway-level module:
 

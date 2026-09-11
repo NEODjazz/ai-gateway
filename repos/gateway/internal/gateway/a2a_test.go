@@ -27,6 +27,21 @@ type a2aTestProvider struct {
 	cancellationCalls int
 }
 
+type a2aCredentialAuth struct{}
+
+func (*a2aCredentialAuth) Name() string   { return "auth" }
+func (*a2aCredentialAuth) Required() bool { return true }
+func (*a2aCredentialAuth) Handle(_ context.Context, req *modules.RequestContext) error {
+	if req.APIKey != "key" {
+		return modules.ErrUnauthorized
+	}
+	req.APIKey = ""
+	req.CredentialID = "credential"
+	req.UserID = "user"
+	req.AllowedModels = []string{"test-model"}
+	return nil
+}
+
 type a2aMemoryTaskStore struct {
 	mu        sync.Mutex
 	tasks     map[string]a2astate.Task
@@ -160,13 +175,46 @@ func TestA2AAgentCardDeclaresOnlyImplementedCapabilities(t *testing.T) {
 	request.Header.Set("X-Forwarded-Proto", "https")
 	router.ServeHTTP(response, request)
 	body := response.Body.String()
-	for _, expected := range []string{`"url":"https://gateway.example/a2a/research"`, `"protocolBinding":"JSONRPC"`, `"protocolVersion":"1.0"`, `"tenant":"research"`, `"streaming":false`, `"pushNotifications":false`, `"httpAuthSecurityScheme"`, `"schemes":{"bearer":{"list":[]}}`, `"image/png"`} {
+	for _, expected := range []string{`"url":"https://gateway.example/a2a/research"`, `"protocolBinding":"JSONRPC"`, `"protocolVersion":"1.0"`, `"tenant":"research"`, `"streaming":false`, `"pushNotifications":false`, `"extendedAgentCard":true`, `"httpAuthSecurityScheme"`, `"schemes":{"bearer":{"list":[]}}`, `"image/png"`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("card missing %s: %s", expected, body)
 		}
 	}
 	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" || strings.Contains(body, "test-model") || strings.Contains(body, "weather") {
 		t.Fatalf("unsafe agent card: status=%d headers=%v body=%s", response.Code, response.Header(), body)
+	}
+}
+
+func TestA2AExtendedAgentCardRequiresAuthenticationAndModelAccess(t *testing.T) {
+	registry := NewAgentRegistry()
+	if _, err := registry.PutToolPolicy("safe", ToolPolicy{Name: "Safe", AllowedTools: []string{"weather"}, MaxToolCalls: 2, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.PutAgentProfile("research", AgentProfile{Name: "Research", Description: "Answers questions", Model: "test-model", ToolPolicyID: "safe", MaxIterations: 3, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	billing := &lifecycleBillingModule{}
+	router := Routes(NewHandler(modules.NewPipeline([]modules.Module{&a2aCredentialAuth{}, billing}), &a2aTestProvider{}).WithAgentRegistry(registry))
+	call := func(token string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "http://gateway.example/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"card","method":"GetExtendedAgentCard","params":{"tenant":"research"}}`))
+		request.Header.Set("A2A-Version", "1.0")
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	unauthorized := call("")
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status=%d body=%s", unauthorized.Code, unauthorized.Body.String())
+	}
+	authorized := call("key")
+	if authorized.Code != http.StatusOK || authorized.Header().Get("Cache-Control") != "private, no-store" || !strings.Contains(authorized.Body.String(), `"extendedAgentCard":true`) || strings.Contains(authorized.Body.String(), "test-model") || strings.Contains(authorized.Body.String(), "weather") {
+		t.Fatalf("authorized status=%d headers=%v body=%s", authorized.Code, authorized.Header(), authorized.Body.String())
+	}
+	if billing.calls != 0 {
+		t.Fatalf("card lookup entered inference billing: %d", billing.calls)
 	}
 }
 

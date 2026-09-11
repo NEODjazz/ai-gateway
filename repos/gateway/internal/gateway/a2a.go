@@ -112,6 +112,12 @@ func (h Handler) A2AAgentCard(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	card := h.a2aAgentCard(r, profile)
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, card)
+}
+
+func (h Handler) a2aAgentCard(r *http.Request, profile AgentProfile) map[string]any {
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
@@ -128,10 +134,10 @@ func (h Handler) A2AAgentCard(w http.ResponseWriter, r *http.Request) {
 	if len(tags) == 0 {
 		tags = []string{"agent"}
 	}
-	card := map[string]any{
+	return map[string]any{
 		"name": profile.Name, "description": description, "version": "1.0.0",
 		"supportedInterfaces": []any{map[string]any{"url": endpoint, "protocolBinding": "JSONRPC", "tenant": profile.ID, "protocolVersion": a2aProtocolVersion}},
-		"capabilities":        map[string]any{"streaming": false, "pushNotifications": false, "extendedAgentCard": false},
+		"capabilities":        map[string]any{"streaming": false, "pushNotifications": false, "extendedAgentCard": true},
 		"securitySchemes": map[string]any{"bearer": map[string]any{"httpAuthSecurityScheme": map[string]any{
 			"description": "Gateway virtual key", "scheme": "Bearer",
 		}}},
@@ -143,8 +149,6 @@ func (h Handler) A2AAgentCard(w http.ResponseWriter, r *http.Request) {
 			"inputModes": a2aInputModes, "outputModes": []string{"text/plain"}, "tags": tags,
 		}},
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, card)
 }
 
 func (h Handler) A2AJSONRPC(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +177,7 @@ func (h Handler) A2AJSONRPC(w http.ResponseWriter, r *http.Request) {
 		h.writeA2AError(w, request.ID, http.StatusNotFound, -32601, "Method not found")
 		return
 	}
-	if request.Method != "SendMessage" && request.Method != "GetTask" && request.Method != "ListTasks" && request.Method != "CancelTask" {
+	if request.Method != "SendMessage" && request.Method != "GetTask" && request.Method != "ListTasks" && request.Method != "CancelTask" && request.Method != "GetExtendedAgentCard" {
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32601, "Method not found")
 		return
 	}
@@ -190,9 +194,26 @@ func (h Handler) A2AJSONRPC(w http.ResponseWriter, r *http.Request) {
 		h.listA2ATasks(w, r, request, profile)
 	case "CancelTask":
 		h.cancelA2ATask(w, r, request, profile)
+	case "GetExtendedAgentCard":
+		h.getA2AExtendedAgentCard(w, r, request, profile)
 	default:
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32601, "Method not found")
 	}
+}
+
+func (h Handler) getA2AExtendedAgentCard(w http.ResponseWriter, r *http.Request, request a2aRequest, profile AgentProfile) {
+	capture := newA2AResponseCapture()
+	reqCtx, ok := h.authorizeOwnedStorageOperation(capture, r, "a2a")
+	if !ok {
+		copyA2AResponse(w, capture, request.ID)
+		return
+	}
+	copyA2AHeaders(w, capture.header)
+	if !h.authorizeA2ATaskModel(w, request.ID, reqCtx, profile.Model) {
+		return
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	writeJSON(w, http.StatusOK, a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: h.a2aAgentCard(r, profile)})
 }
 
 func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request a2aRequest, profile AgentProfile) {
