@@ -358,6 +358,9 @@ func validDeploymentCapabilities(capabilities []string) bool {
 	if seen["background_responses"] && !seen["responses"] {
 		return false
 	}
+	if seen["video_extension"] && !seen["video"] {
+		return false
+	}
 	return !seen["mcp"] || (seen["responses"] && seen["tools"])
 }
 
@@ -365,7 +368,7 @@ func ValidModelCapability(capability string) bool {
 	switch capability {
 	case "chat", "responses", "embeddings", "rerank", "moderation",
 		"image_generation", "image_edit", "image_variation",
-		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "realtime",
+		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_extension", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
 		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke":
 		return true
@@ -494,6 +497,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	case "video":
 		_, ok := endpoint.Provider.(VideoClient)
 		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible" || endpoint.Type == "xai")
+	case "video_extension":
+		_, ok := endpoint.Provider.(VideoExtensionClient)
+		return ok && endpoint.Type == "xai"
 	case "realtime":
 		_, ok := endpoint.Provider.(RealtimeClient)
 		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible")

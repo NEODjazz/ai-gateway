@@ -1160,7 +1160,7 @@ paths:
       operationId: extendVideo
       tags: [Inference]
       summary: Extend an owner-scoped completed video through its pinned deployment
-      description: Reserves the requested extension duration and atomically stores the resulting job with durable billing settlement. The selected native adapter must support video extension.
+      description: Reserves the requested extension duration and atomically stores the resulting job with durable billing settlement. The pinned deployment and any matching model catalog entry must explicitly enable video_extension in addition to video, and the selected native adapter must support the operation.
       security: [{bearerAuth: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
@@ -6303,7 +6303,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, video, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, video, video_extension, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -8417,12 +8417,12 @@ components:
           type: array
           uniqueItems: true
           description: Native operations implemented by the managed adapter. count_tokens is used by the inbound token-count endpoint and is not a deployment capability.
-          items: {type: string, enum: [chat, responses, count_tokens, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, stream]}
+          items: {type: string, enum: [chat, responses, count_tokens, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, video, video_extension, realtime, stream, bedrock_invoke]}
         capabilities:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, video, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, video, video_extension, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

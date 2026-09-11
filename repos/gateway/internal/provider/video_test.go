@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
@@ -112,6 +113,79 @@ func TestVideoRouterPinsSelectedDeployment(t *testing.T) {
 	binding.Deployment = strings.Repeat("0", 64)
 	if _, err := runtime.RetrieveVideo(t.Context(), binding, created.ID); !errors.Is(err, ErrVideoDeploymentChanged) {
 		t.Fatalf("changed deployment error=%v", err)
+	}
+}
+
+func TestVideoRouterRequiresExplicitExtensionCapability(t *testing.T) {
+	var sourceReads, extensions int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/videos/generations":
+			_, _ = io.WriteString(w, `{"request_id":"video_source"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/videos/video_source":
+			sourceReads++
+			_, _ = io.WriteString(w, `{"status":"done","video":{"url":"https://media.example/source.mp4","duration":4},"model":"video-model","usage":{"cost_in_usd_ticks":1},"progress":100}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/videos/extensions":
+			extensions++
+			_, _ = io.WriteString(w, `{"request_id":"video_extended"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	newRuntime := func(capabilities []string) (VideoProvider, VideoExtensionProvider) {
+		router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+			Name: "video-xai", Type: "xai", BaseURL: server.URL + "/v1", Models: []string{"public-video"},
+			ModelAliases: map[string]string{"public-video": "video-model"}, Capabilities: capabilities,
+		}}})
+		return router.(VideoProvider), router.(VideoExtensionProvider)
+	}
+
+	withoutExtension, withoutExtensionAPI := newRuntime([]string{"video"})
+	created, binding, err := withoutExtension.CreateVideo(t.Context(), modules.RequestContext{}, openai.VideoCreateRequest{Model: "public-video", Prompt: "source"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = withoutExtensionAPI.ExtendVideo(t.Context(), modules.RequestContext{}, binding, created.ID, openai.VideoExtendRequest{Prompt: "continue"}, nil); err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("extension without capability error=%v", err)
+	}
+	if sourceReads != 0 || extensions != 0 {
+		t.Fatalf("provider called without capability: source_reads=%d extensions=%d", sourceReads, extensions)
+	}
+
+	catalog, err := modelcatalog.Parse(`{"version":"video-policy","models":[{"provider":"xai","model":"public-video","capabilities":["video"]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogRouter := New(Config{
+		Catalog: catalog,
+		Endpoints: []config.ProviderEndpointConfig{{
+			Name: "video-xai", Type: "xai", BaseURL: server.URL + "/v1", Models: []string{"public-video"},
+			ModelAliases: map[string]string{"public-video": "video-model"}, Capabilities: []string{"video", "video_extension"},
+		}},
+	})
+	catalogVideo := catalogRouter.(VideoProvider)
+	catalogExtension := catalogRouter.(VideoExtensionProvider)
+	created, binding, err = catalogVideo.CreateVideo(t.Context(), modules.RequestContext{}, openai.VideoCreateRequest{Model: "public-video", Prompt: "source"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = catalogExtension.ExtendVideo(t.Context(), modules.RequestContext{}, binding, created.ID, openai.VideoExtendRequest{Prompt: "continue"}, nil); err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("extension without model capability error=%v", err)
+	}
+	if sourceReads != 0 || extensions != 0 {
+		t.Fatalf("provider called without model capability: source_reads=%d extensions=%d", sourceReads, extensions)
+	}
+
+	withExtension, withExtensionAPI := newRuntime([]string{"video", "video_extension"})
+	created, binding, err = withExtension.CreateVideo(t.Context(), modules.RequestContext{}, openai.VideoCreateRequest{Model: "public-video", Prompt: "source"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extended, _, err := withExtensionAPI.ExtendVideo(t.Context(), modules.RequestContext{}, binding, created.ID, openai.VideoExtendRequest{Prompt: "continue"}, nil)
+	if err != nil || extended.ID != "video_extended" || sourceReads != 1 || extensions != 1 {
+		t.Fatalf("extended=%+v source_reads=%d extensions=%d err=%v", extended, sourceReads, extensions, err)
 	}
 }
 

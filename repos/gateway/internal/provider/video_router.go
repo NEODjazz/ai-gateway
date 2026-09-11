@@ -123,6 +123,9 @@ func (r Router) ExtendVideo(ctx context.Context, identity modules.RequestContext
 	if err != nil {
 		return openai.Video{}, VideoBinding{}, err
 	}
+	if !supportsCatalogCapabilities(r.catalog.Current(ctx), endpoint, binding.Model, "video", "video_extension") {
+		return openai.Video{}, VideoBinding{}, videoParameterError("extend", errors.New("video extension is not enabled for the selected deployment"))
+	}
 	client, ok := endpoint.Provider.(VideoExtensionClient)
 	if !ok {
 		return openai.Video{}, VideoBinding{}, videoParameterError("extend", errors.New("video extension is not supported by the selected deployment"))

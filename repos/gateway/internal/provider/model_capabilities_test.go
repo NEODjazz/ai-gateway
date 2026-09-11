@@ -10,7 +10,7 @@ func TestCapabilityContractIsSharedByDeploymentsAndOnboarding(t *testing.T) {
 	capabilities := []string{
 		"chat", "responses", "embeddings", "rerank", "moderation",
 		"image_generation", "image_edit", "image_variation",
-		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "video", "realtime",
+		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "video", "video_extension", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
 		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke",
 	}
@@ -25,6 +25,15 @@ func TestCapabilityContractIsSharedByDeploymentsAndOnboarding(t *testing.T) {
 		if !ValidModelCapability(capability) {
 			t.Fatalf("capability %q is missing from the shared contract", capability)
 		}
+	}
+}
+
+func TestVideoExtensionCapabilityRequiresVideo(t *testing.T) {
+	if validDeploymentCapabilities([]string{"video_extension"}) {
+		t.Fatal("video extension was accepted without video lifecycle capability")
+	}
+	if !validDeploymentCapabilities([]string{"video", "video_extension"}) {
+		t.Fatal("video extension was rejected with its required video capability")
 	}
 }
 
