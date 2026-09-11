@@ -514,7 +514,7 @@ func (h Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	if !decodeInferenceRequest(w, r, &request) {
 		return
 	}
-	h.serveResponsesAs(w, r, request, "", nil, nil)
+	h.serveResponsesAs(w, r, request, "", nil, nil, nil, false)
 }
 
 type responseStreamEvent struct {
@@ -522,9 +522,10 @@ type responseStreamEvent struct {
 	Payload string
 }
 
-type responseStreamTransform func(string, string) ([]responseStreamEvent, error)
+type responseStreamTransform func(string, string, modules.RequestContext) ([]responseStreamEvent, error)
+type responseStreamFinalize func(openai.ResponseResponse, modules.RequestContext) ([]responseStreamEvent, error)
 
-func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, request openai.ResponseRequest, apiType string, transform func(openai.ResponseResponse, modules.RequestContext) any, streamTransform responseStreamTransform) {
+func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, request openai.ResponseRequest, apiType string, transform func(openai.ResponseResponse, modules.RequestContext) any, streamTransform responseStreamTransform, streamFinalize responseStreamFinalize, closeStreamWithoutSentinel bool) {
 	if message := request.Validate(); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
@@ -583,7 +584,7 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 			events := []responseStreamEvent{{Name: event, Payload: payload}}
 			var err error
 			if streamTransform != nil {
-				events, err = streamTransform(event, payload)
+				events, err = streamTransform(event, payload, reqCtx)
 				if err != nil {
 					return err
 				}
@@ -607,14 +608,34 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 			if err != nil {
 				if streamStarted {
 					_ = writeStreamEvent("error", errorStreamPayload(err))
-					writeResponseStreamDone(w, streamTransform != nil)
+					if !closeStreamWithoutSentinel {
+						writeResponseStreamDone(w, streamTransform != nil)
+					}
 					return
 				}
 				writeProviderFailure(w, err)
 				return
 			}
-			_ = response
-			writeResponseStreamDone(w, streamTransform != nil)
+			if streamFinalize != nil {
+				events, finalizeErr := streamFinalize(response, reqCtx)
+				if finalizeErr != nil {
+					_ = writeStreamEvent("error", errorStreamPayload(finalizeErr))
+					return
+				}
+				if len(events) > 0 && !streamStarted {
+					writeStreamHeaders(w)
+					w.WriteHeader(http.StatusOK)
+					streamStarted = true
+				}
+				for _, finalized := range events {
+					if err := writeSSEResponseEvent(w, finalized.Name, finalized.Payload); err != nil {
+						return
+					}
+				}
+			}
+			if !closeStreamWithoutSentinel {
+				writeResponseStreamDone(w, streamTransform != nil)
+			}
 			return
 		} else if err != nil {
 			writeProviderFailure(w, err)
@@ -634,7 +655,7 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 			events := []responseStreamEvent{{Name: event, Payload: payload}}
 			var transformErr error
 			if streamTransform != nil {
-				events, transformErr = streamTransform(event, payload)
+				events, transformErr = streamTransform(event, payload, reqCtx)
 				if transformErr != nil {
 					return transformErr
 				}
@@ -660,7 +681,25 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 			}
 			return
 		}
-		writeResponseStreamDone(w, streamTransform != nil)
+		if streamFinalize != nil {
+			events, finalizeErr := streamFinalize(response, reqCtx)
+			if finalizeErr != nil {
+				return
+			}
+			if len(events) > 0 && !started {
+				writeStreamHeaders(w)
+				w.WriteHeader(http.StatusOK)
+				started = true
+			}
+			for _, finalized := range events {
+				if err := writeSSEResponseEvent(w, finalized.Name, finalized.Payload); err != nil {
+					return
+				}
+			}
+		}
+		if !closeStreamWithoutSentinel {
+			writeResponseStreamDone(w, streamTransform != nil)
+		}
 		return
 	}
 	if transform != nil {

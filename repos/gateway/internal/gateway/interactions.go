@@ -19,7 +19,9 @@ func (h Handler) Interactions(w http.ResponseWriter, r *http.Request) {
 	}
 	h.serveResponsesAs(w, r, responseRequest, "interactions", func(response openai.ResponseResponse, _ modules.RequestContext) any {
 		return openai.InteractionFromResponse(response)
-	}, newInteractionStreamTransformer().Transform)
+	}, func(event, payload string, _ modules.RequestContext) ([]responseStreamEvent, error) {
+		return newInteractionStreamTransformer().Transform(event, payload)
+	}, nil, false)
 }
 
 func (h Handler) GetInteraction(w http.ResponseWriter, r *http.Request) {

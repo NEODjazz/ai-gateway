@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -25,6 +26,10 @@ type a2aTestProvider struct {
 	canceled          openai.ResponseResponse
 	retrieveCalls     int
 	cancellationCalls int
+	stream            bool
+	preStreamFailure  bool
+	streamFailure     bool
+	terminalFailure   bool
 }
 
 type a2aCredentialAuth struct{}
@@ -128,8 +133,33 @@ func (p *a2aTestProvider) Responses(_ context.Context, request modules.RequestCo
 	}
 	return openai.ResponseResponse{ID: "resp_agent", Model: request.ResponseRequest.Model, Status: "completed", OutputText: "hello from agent"}, nil
 }
-func (*a2aTestProvider) StreamResponses(context.Context, modules.RequestContext, provider.ResponseStreamWriter) (openai.ResponseResponse, bool, error) {
-	return openai.ResponseResponse{}, false, nil
+func (p *a2aTestProvider) StreamResponses(_ context.Context, request modules.RequestContext, write provider.ResponseStreamWriter) (openai.ResponseResponse, bool, error) {
+	if !p.stream {
+		return openai.ResponseResponse{}, false, nil
+	}
+	p.request = request
+	if p.preStreamFailure {
+		return openai.ResponseResponse{}, true, errors.New("upstream stream failed")
+	}
+	response := openai.ResponseResponse{ID: "resp_stream", Object: "response", Model: request.ResponseRequest.Model, Status: "completed", OutputText: "hello live"}
+	created, _ := json.Marshal(map[string]any{"type": "response.created", "response": openai.ResponseResponse{ID: response.ID, Object: "response", Model: response.Model, Status: "in_progress"}})
+	delta, _ := json.Marshal(map[string]any{"type": "response.output_text.delta", "delta": "hello live"})
+	completed, _ := json.Marshal(map[string]any{"type": "response.completed", "response": response})
+	for _, event := range []struct {
+		name    string
+		payload []byte
+	}{{"response.created", created}, {"response.output_text.delta", delta}, {"response.completed", completed}} {
+		if err := write(event.name, string(event.payload)); err != nil {
+			return openai.ResponseResponse{}, true, err
+		}
+		if p.streamFailure && event.name == "response.output_text.delta" {
+			return openai.ResponseResponse{}, true, errors.New("upstream stream failed")
+		}
+		if p.terminalFailure && event.name == "response.completed" {
+			return openai.ResponseResponse{}, true, errors.New("post-response settlement failed")
+		}
+	}
+	return response, true, nil
 }
 func (*a2aTestProvider) Models() []openai.Model {
 	return []openai.Model{{ID: "test-model", Object: "model"}}
@@ -284,6 +314,105 @@ func TestA2ASendMessageAcceptsBoundedInlineImages(t *testing.T) {
 	}
 }
 
+func TestA2ASendStreamingMessagePersistsOrderedTaskLifecycle(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	router, llm, billing := a2aTestHandlerWithTasks(t, store)
+	llm.stream = true
+	card := httptest.NewRecorder()
+	router.ServeHTTP(card, httptest.NewRequest(http.MethodGet, "/a2a/research/.well-known/agent-card.json", nil))
+	if card.Code != http.StatusOK || !strings.Contains(card.Body.String(), `"streaming":true`) {
+		t.Fatalf("card status=%d body=%s", card.Code, card.Body.String())
+	}
+	body := `{"jsonrpc":"2.0","id":"rpc-stream","method":"SendStreamingMessage","params":{"tenant":"research","message":{"messageId":"client-stream","role":"ROLE_USER","parts":[{"text":"hello"}]}}}`
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "text/event-stream" || billing.calls != 1 {
+		t.Fatalf("status=%d headers=%v billing=%d body=%s", response.Code, response.Header(), billing.calls, response.Body.String())
+	}
+	wire := response.Body.String()
+	if strings.Contains(wire, "event:") || strings.Contains(wire, "[DONE]") {
+		t.Fatalf("non-conformant SSE framing: %s", wire)
+	}
+	firstTask := strings.Index(wire, `"task":{"id":`)
+	firstArtifact := strings.Index(wire, `"artifactUpdate":`)
+	terminalStatus := strings.LastIndex(wire, `"statusUpdate":`)
+	if firstTask < 0 || firstArtifact <= firstTask || terminalStatus <= firstArtifact || !strings.Contains(wire, `"state":"TASK_STATE_COMPLETED"`) {
+		t.Fatalf("unordered stream: %s", wire)
+	}
+	if strings.Contains(wire, `"index":`) || strings.Contains(wire, `"taskArtifactUpdate":`) || strings.Contains(wire, `"taskStatusUpdate":`) {
+		t.Fatalf("stream uses non-v1 fields: %s", wire)
+	}
+	if llm.request.ResponseRequest == nil || !llm.request.ResponseRequest.Stream || llm.request.Metadata["gateway.api_type"] != "a2a" {
+		t.Fatalf("stream request=%+v", llm.request)
+	}
+	if len(store.tasks) != 1 {
+		t.Fatalf("stored tasks=%d", len(store.tasks))
+	}
+	for _, stored := range store.tasks {
+		decoded, err := decodeA2ATask(stored.Payload)
+		if err != nil || decoded.Status.State != "TASK_STATE_COMPLETED" || len(decoded.History) != 2 || len(decoded.Artifacts) != 1 || decoded.Artifacts[0].ArtifactID == "" {
+			t.Fatalf("stored=%+v err=%v", decoded, err)
+		}
+	}
+}
+
+func TestA2AStreamingFailurePersistsFailedTask(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	router, llm, billing := a2aTestHandlerWithTasks(t, store)
+	llm.stream, llm.streamFailure = true, true
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"rpc-stream","method":"SendStreamingMessage","params":{"tenant":"research","message":{"messageId":"client-stream","role":"ROLE_USER","parts":[{"text":"hello"}]}}}`))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"TASK_STATE_FAILED"`) || billing.calls != 1 {
+		t.Fatalf("status=%d billing=%d body=%s", response.Code, billing.calls, response.Body.String())
+	}
+	for _, stored := range store.tasks {
+		decoded, err := decodeA2ATask(stored.Payload)
+		if err != nil || decoded.Status.State != "TASK_STATE_FAILED" {
+			t.Fatalf("stored=%+v err=%v", decoded, err)
+		}
+	}
+}
+
+func TestA2AStreamingWrapsFailuresBeforeFirstEvent(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	router, llm, billing := a2aTestHandlerWithTasks(t, store)
+	llm.stream, llm.preStreamFailure = true, true
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"rpc-stream","method":"SendStreamingMessage","params":{"tenant":"research","message":{"messageId":"client-stream","role":"ROLE_USER","parts":[{"text":"hello"}]}}}`))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code < 500 || response.Header().Get("Content-Type") != "application/json" || !strings.Contains(response.Body.String(), `"jsonrpc":"2.0"`) || !strings.Contains(response.Body.String(), `"id":"rpc-stream"`) || !strings.Contains(response.Body.String(), `"error":`) || billing.calls != 1 || len(store.tasks) != 0 {
+		t.Fatalf("status=%d headers=%v billing=%d tasks=%d body=%s", response.Code, response.Header(), billing.calls, len(store.tasks), response.Body.String())
+	}
+}
+
+func TestA2AStreamingDoesNotPublishSuccessBeforeSettlement(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	router, llm, _ := a2aTestHandlerWithTasks(t, store)
+	llm.stream, llm.terminalFailure = true, true
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"rpc-stream","method":"SendStreamingMessage","params":{"tenant":"research","message":{"messageId":"client-stream","role":"ROLE_USER","parts":[{"text":"hello"}]}}}`))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if strings.Contains(response.Body.String(), `"state":"TASK_STATE_COMPLETED"`) || !strings.Contains(response.Body.String(), `"state":"TASK_STATE_FAILED"`) {
+		t.Fatalf("premature terminal success: %s", response.Body.String())
+	}
+	for _, stored := range store.tasks {
+		decoded, err := decodeA2ATask(stored.Payload)
+		if err != nil || decoded.Status.State != "TASK_STATE_FAILED" {
+			t.Fatalf("stored=%+v err=%v", decoded, err)
+		}
+	}
+}
+
 func TestA2ARejectsMalformedInlineImageBeforeBilling(t *testing.T) {
 	router, _, billing := a2aTestHandler(t)
 	body := `{"jsonrpc":"2.0","id":"rpc-image","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"client-image","role":"ROLE_USER","parts":[{"raw":"bm90LWEtcG5n","mediaType":"image/png"}]}}}`
@@ -305,6 +434,7 @@ func TestA2ARejectsUnsupportedProtocolFeatures(t *testing.T) {
 		{"version", "0.3", `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{}}`, `"code":-32009`},
 		{"method", "1.0", `{"jsonrpc":"2.0","id":1,"method":"UnknownMethod","params":{}}`, `"code":-32601`},
 		{"task lifecycle", "1.0", `{"jsonrpc":"2.0","id":1,"method":"GetTask","params":{"tenant":"research","id":"task_missing"}}`, `"code":-32004`},
+		{"streaming", "1.0", `{"jsonrpc":"2.0","id":1,"method":"SendStreamingMessage","params":{"tenant":"research","message":{"messageId":"m","role":"ROLE_USER","parts":[{"text":"hello"}]}}}`, `"code":-32004`},
 		{"task", "1.0", `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"tenant":"research","message":{"messageId":"m","taskId":"t","role":"ROLE_USER","parts":[{"text":"hello"}]}}}`, `"code":-32004`},
 		{"binary", "1.0", `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"tenant":"research","message":{"messageId":"m","role":"ROLE_USER","parts":[{"raw":"AA==","mediaType":"application/octet-stream"}]}}}`, `"code":-32005`},
 		{"push", "1.0", `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"tenant":"research","message":{"messageId":"m","role":"ROLE_USER","parts":[{"text":"hello"}]},"configuration":{"pushNotificationConfig":{}}}}`, `"code":-32003`},
@@ -320,6 +450,19 @@ func TestA2ARejectsUnsupportedProtocolFeatures(t *testing.T) {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestA2AStreamingRejectsReturnImmediatelyBeforeBilling(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	router, _, billing := a2aTestHandlerWithTasks(t, store)
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"stream","method":"SendStreamingMessage","params":{"tenant":"research","message":{"messageId":"m","role":"ROLE_USER","parts":[{"text":"hello"}]},"configuration":{"returnImmediately":true}}}`))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":-32602`) || billing.calls != 0 || len(store.tasks) != 0 {
+		t.Fatalf("status=%d billing=%d tasks=%d body=%s", response.Code, billing.calls, len(store.tasks), response.Body.String())
 	}
 }
 

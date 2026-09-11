@@ -86,6 +86,7 @@ type a2aTask struct {
 type a2aStoredTask struct {
 	Task                 a2aTask `json:"task"`
 	BackgroundResponseID string  `json:"backgroundResponseId,omitempty"`
+	Streaming            bool    `json:"streaming,omitempty"`
 }
 
 func (h Handler) WithA2ATaskStore(store a2astate.Store, config A2ATaskRuntimeConfig) Handler {
@@ -137,7 +138,10 @@ func (h Handler) a2aAgentCard(r *http.Request, profile AgentProfile) map[string]
 	return map[string]any{
 		"name": profile.Name, "description": description, "version": "1.0.0",
 		"supportedInterfaces": []any{map[string]any{"url": endpoint, "protocolBinding": "JSONRPC", "tenant": profile.ID, "protocolVersion": a2aProtocolVersion}},
-		"capabilities":        map[string]any{"streaming": false, "pushNotifications": false, "extendedAgentCard": true},
+		"capabilities": map[string]any{
+			"streaming":         h.a2aTasks != nil && h.a2aTaskConfig.OwnerQuota > 0 && h.a2aTaskConfig.TTL > 0,
+			"pushNotifications": false, "extendedAgentCard": true,
+		},
 		"securitySchemes": map[string]any{"bearer": map[string]any{"httpAuthSecurityScheme": map[string]any{
 			"description": "Gateway virtual key", "scheme": "Bearer",
 		}}},
@@ -177,7 +181,7 @@ func (h Handler) A2AJSONRPC(w http.ResponseWriter, r *http.Request) {
 		h.writeA2AError(w, request.ID, http.StatusNotFound, -32601, "Method not found")
 		return
 	}
-	if request.Method != "SendMessage" && request.Method != "GetTask" && request.Method != "ListTasks" && request.Method != "CancelTask" && request.Method != "GetExtendedAgentCard" {
+	if request.Method != "SendMessage" && request.Method != "SendStreamingMessage" && request.Method != "GetTask" && request.Method != "ListTasks" && request.Method != "CancelTask" && request.Method != "GetExtendedAgentCard" {
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32601, "Method not found")
 		return
 	}
@@ -187,7 +191,9 @@ func (h Handler) A2AJSONRPC(w http.ResponseWriter, r *http.Request) {
 	}
 	switch request.Method {
 	case "SendMessage":
-		h.sendA2AMessage(w, r, request, profile)
+		h.sendA2AMessage(w, r, request, profile, false)
+	case "SendStreamingMessage":
+		h.sendA2AMessage(w, r, request, profile, true)
 	case "GetTask":
 		h.getA2ATask(w, r, request, profile)
 	case "ListTasks":
@@ -216,7 +222,7 @@ func (h Handler) getA2AExtendedAgentCard(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusOK, a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: h.a2aAgentCard(r, profile)})
 }
 
-func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request a2aRequest, profile AgentProfile) {
+func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request a2aRequest, profile AgentProfile, stream bool) {
 	if request.Params.Message.MessageID == "" || len(request.Params.Message.MessageID) > 128 || request.Params.Message.Role != "ROLE_USER" || len(request.Params.Message.Parts) == 0 || len(request.Params.Message.Parts) > 1024 ||
 		(request.Params.Message.ContextID != "" && !validFileToken(request.Params.Message.ContextID, 128)) {
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32602, "Invalid parameters")
@@ -228,6 +234,14 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		return
 	}
 	returnImmediately := request.Params.Configuration.ReturnImmediately != nil && *request.Params.Configuration.ReturnImmediately
+	if stream && returnImmediately {
+		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32602, "returnImmediately is not valid for streaming")
+		return
+	}
+	if stream && (h.a2aTasks == nil || h.a2aTaskConfig.OwnerQuota < 1 || h.a2aTaskConfig.TTL <= 0) {
+		h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Streaming is not supported")
+		return
+	}
 	if returnImmediately {
 		if h.a2aTasks == nil || h.a2aTaskConfig.OwnerQuota < 1 || h.a2aTaskConfig.TTL <= 0 {
 			h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Asynchronous task execution is not supported")
@@ -312,6 +326,14 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		input = a2aResponseInput(existing.History, content)
 	}
 	responseRequest := openai.ResponseRequest{Model: model, Input: input}
+	if stream {
+		responseRequest.Stream = true
+		transformer := newA2AStreamTransformer(h, r.Context(), request, profile, stored, existing, continuation)
+		streamWriter := newA2AStreamingResponseWriter(w)
+		h.serveResponsesAs(streamWriter, r, responseRequest, "a2a", nil, transformer.Transform, transformer.Finalize, true)
+		streamWriter.Finish(request.ID)
+		return
+	}
 	if returnImmediately {
 		store := true
 		responseRequest.Store = &store
@@ -391,7 +413,7 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		}
 		storageErr = err
 		return a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: map[string]any{"task": task}}
-	}, nil)
+	}, nil, nil, false)
 	if storageErr != nil {
 		copyA2AHeaders(w, capture.header)
 		status := http.StatusServiceUnavailable
@@ -750,10 +772,24 @@ func decodeA2AStoredTask(payload []byte) (a2aTask, string, error) {
 		return a2aTask{}, "", a2astate.ErrInvalid
 	}
 	pending := a2aTaskPending(task.Status.State)
-	if backgroundResponseID != "" && (!pending || !validLifecycleToken(backgroundResponseID)) || backgroundResponseID == "" && pending {
+	invalidBackground := backgroundResponseID != "" && (!pending || stored.Streaming || !validLifecycleToken(backgroundResponseID))
+	missingExecution := backgroundResponseID == "" && pending && !stored.Streaming
+	invalidStreaming := stored.Streaming && !pending
+	if invalidBackground || missingExecution || invalidStreaming {
 		return a2aTask{}, "", a2astate.ErrInvalid
 	}
 	return task, backgroundResponseID, nil
+}
+
+func encodeA2AStreamingTask(task a2aTask) ([]byte, error) {
+	if !validStoredA2ATask(task) || !a2aTaskPending(task.Status.State) {
+		return nil, a2astate.ErrInvalid
+	}
+	payload, err := json.Marshal(a2aStoredTask{Task: task, Streaming: true})
+	if err != nil || len(payload) > a2astate.MaxPayloadBytes {
+		return nil, a2astate.ErrInvalid
+	}
+	return payload, nil
 }
 
 func encodeA2AStoredTask(task a2aTask, backgroundResponseID string) ([]byte, error) {
@@ -883,6 +919,58 @@ type a2aResponseCapture struct {
 	body   bytes.Buffer
 }
 
+type a2aStreamingResponseWriter struct {
+	target      http.ResponseWriter
+	capture     *a2aResponseCapture
+	passthrough bool
+}
+
+func newA2AStreamingResponseWriter(target http.ResponseWriter) *a2aStreamingResponseWriter {
+	return &a2aStreamingResponseWriter{target: target, capture: newA2AResponseCapture()}
+}
+
+func (w *a2aStreamingResponseWriter) Header() http.Header { return w.capture.Header() }
+
+func (w *a2aStreamingResponseWriter) WriteHeader(status int) {
+	if w.capture.status != 0 {
+		return
+	}
+	w.capture.status = status
+	if status >= 200 && status < 300 {
+		copyA2AHeaders(w.target, w.capture.header)
+		w.target.WriteHeader(status)
+		w.passthrough = true
+	}
+}
+
+func (w *a2aStreamingResponseWriter) Write(payload []byte) (int, error) {
+	if w.capture.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	if w.passthrough {
+		return w.target.Write(payload)
+	}
+	return w.capture.body.Write(payload)
+}
+
+func (w *a2aStreamingResponseWriter) Flush() {
+	if w.passthrough {
+		if flusher, ok := w.target.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}
+}
+
+func (w *a2aStreamingResponseWriter) Finish(id json.RawMessage) {
+	if w.passthrough {
+		return
+	}
+	if w.capture.status == 0 {
+		w.capture.status = http.StatusInternalServerError
+	}
+	copyA2AResponse(w.target, w.capture, id)
+}
+
 func newA2AResponseCapture() *a2aResponseCapture {
 	return &a2aResponseCapture{header: make(http.Header)}
 }
@@ -941,6 +1029,8 @@ func responseOutputText(response openai.ResponseResponse) *string {
 			for _, content := range item.Content {
 				if content.Type == "output_text" && content.Text != "" {
 					parts = append(parts, content.Text)
+				} else if content.Type == "refusal" && content.Refusal != "" {
+					parts = append(parts, content.Refusal)
 				}
 			}
 		}

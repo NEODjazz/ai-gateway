@@ -48,10 +48,13 @@ routing and billing path. With durable task and background-response storage,
 `returnImmediately=true` returns an owner-scoped submitted or working task;
 `GetTask` reconciles completion and `CancelTask` cancels pending execution.
 Text and bounded inline JPEG, PNG, GIF and WebP inputs reuse the Responses
-media validation, scan, token reserve and billing path. Streaming, push
-notifications and other media parts fail with explicit protocol errors.
+media validation, scan, token reserve and billing path. Stream resubscription,
+push notifications and other media parts fail with explicit protocol errors.
 `GetExtendedAgentCard` returns the current card only after bearer
 authentication, model authorization and RPM admission.
+With durable task storage, `SendStreamingMessage` emits an ordered SSE
+lifecycle: the Task first, bounded artifact deltas, and a terminal status only
+after provider post-processing and billing settlement succeed.
 
 Gateway-level module:
 
