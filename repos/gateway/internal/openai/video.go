@@ -19,6 +19,11 @@ type VideoRemixRequest struct {
 	Prompt string `json:"prompt"`
 }
 
+type VideoExtendRequest struct {
+	Prompt  string `json:"prompt"`
+	Seconds string `json:"seconds,omitempty"`
+}
+
 type Video struct {
 	ID                   string          `json:"id"`
 	Object               string          `json:"object"`

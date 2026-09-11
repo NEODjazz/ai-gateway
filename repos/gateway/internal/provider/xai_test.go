@@ -27,6 +27,7 @@ var _ AudioTranscriptionClient = XAI{}
 var _ AudioTranscriptionDurationReserver = XAI{}
 var _ AudioSpeechClient = XAI{}
 var _ VideoClient = XAI{}
+var _ VideoExtensionClient = XAI{}
 var _ responseRetrieveClient = XAI{}
 var _ responseInputItemsClient = XAI{}
 var _ responseDeleteClient = XAI{}
@@ -495,6 +496,16 @@ func TestXAIVideoGenerationRetrievalAndContentContracts(t *testing.T) {
 				t.Fatalf("edit body=%#v", body)
 			}
 			_, _ = io.WriteString(w, `{"request_id":"video_edit_1"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/videos/extensions":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			video, ok := body["video"].(map[string]any)
+			if !ok || body["prompt"] != "continue forward" || body["duration"] != float64(12) || body["model"] != nil || video["url"] != server.URL+"/asset.mp4" {
+				t.Fatalf("extension body=%#v", body)
+			}
+			_, _ = io.WriteString(w, `{"request_id":"video_extension_1"}`)
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -523,6 +534,10 @@ func TestXAIVideoGenerationRetrievalAndContentContracts(t *testing.T) {
 	edited, err := client.RemixVideo(t.Context(), created.ID, openai.VideoRemixRequest{Prompt: "add snow"})
 	if err != nil || edited.ID != "video_edit_1" || edited.Status != "queued" || edited.RemixedFromVideoID == nil || *edited.RemixedFromVideoID != created.ID || edited.Seconds != "8" {
 		t.Fatalf("edited=%+v err=%v", edited, err)
+	}
+	extended, err := client.ExtendVideo(t.Context(), created.ID, openai.VideoExtendRequest{Prompt: "continue forward", Seconds: "12"})
+	if err != nil || extended.ID != "video_extension_1" || extended.Status != "queued" || extended.RemixedFromVideoID == nil || *extended.RemixedFromVideoID != created.ID || extended.Seconds != "12" {
+		t.Fatalf("extended=%+v err=%v", extended, err)
 	}
 	deleted, err := client.DeleteVideo(t.Context(), created.ID)
 	if err != nil || !deleted.Deleted || deleted.ID != created.ID {

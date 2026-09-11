@@ -250,6 +250,14 @@ func (p *gatewayVideoProvider) DownloadVideoContent(_ context.Context, _ provide
 func (p *gatewayVideoProvider) RemixVideo(ctx context.Context, identity modules.RequestContext, binding provider.VideoBinding, _ string, input openai.VideoRemixRequest, admit func(context.Context, *modules.RequestContext) error) (openai.Video, provider.VideoBinding, error) {
 	return p.CreateVideo(ctx, identity, openai.VideoCreateRequest{Model: binding.Model, Prompt: input.Prompt}, admit)
 }
+func (p *gatewayVideoProvider) ExtendVideo(ctx context.Context, identity modules.RequestContext, binding provider.VideoBinding, id string, input openai.VideoExtendRequest, admit func(context.Context, *modules.RequestContext) error) (openai.Video, provider.VideoBinding, error) {
+	video, nextBinding, err := p.CreateVideo(ctx, identity, openai.VideoCreateRequest{Model: binding.Model, Prompt: input.Prompt, Seconds: input.Seconds}, admit)
+	if err == nil {
+		video.RemixedFromVideoID = &id
+		video.Size = ""
+	}
+	return video, nextBinding, err
+}
 
 func videoTestHandler(store videostate.Store, runtime *gatewayVideoProvider, billing modules.Module) http.Handler {
 	return Routes(videoTestGateway(store, runtime, billing))
@@ -410,6 +418,28 @@ func TestVideoRemixUsesSourceDurationForBilling(t *testing.T) {
 		t.Fatalf("processed=%d err=%v", processed, err)
 	}
 	if response.Code != http.StatusOK || strings.Join(billing.phases, ",") != "reserve,commit" || billing.seconds[0] != 12 || billing.seconds[1] != 12 {
+		t.Fatalf("status=%d phases=%v seconds=%v body=%s", response.Code, billing.phases, billing.seconds, response.Body.String())
+	}
+}
+
+func TestVideoExtensionUsesRequestedDurationAndDurableSettlement(t *testing.T) {
+	identity := modules.RequestContext{CredentialID: "credential", UserID: "user"}
+	owner := fileOwnerKey(identity)
+	store := &memoryVideoStore{records: map[string]videostate.Record{
+		videoStoreKey(owner, "video_source"): {
+			OwnerKey: owner,
+			Binding:  provider.VideoBinding{Endpoint: "video", Model: "model-a", Deployment: strings.Repeat("a", 64)},
+			Video:    openai.Video{ID: "video_source", Object: "video", Model: "model-a", Status: "completed", Seconds: "12", Size: "1280x720"},
+		},
+	}}
+	runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+	billing := &videoBillingModule{}
+	gateway := videoTestGateway(store, runtime, billing)
+	response := videoRequest(t, Routes(gateway), http.MethodPost, "/v1/videos/video_source/extend", `{"prompt":"continue forward","seconds":"8"}`)
+	if processed, err := gateway.ProcessVideoSettlements(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	if response.Code != http.StatusOK || strings.Join(billing.phases, ",") != "reserve,commit" || billing.seconds[0] != 8 || billing.seconds[1] != 8 || !strings.Contains(response.Body.String(), `"remixed_from_video_id":"video_source"`) || !strings.Contains(response.Body.String(), `"size":"1280x720"`) {
 		t.Fatalf("status=%d phases=%v seconds=%v body=%s", response.Code, billing.phases, billing.seconds, response.Body.String())
 	}
 }

@@ -118,6 +118,44 @@ func (r Router) RemixVideo(ctx context.Context, identity modules.RequestContext,
 	return video, binding, err
 }
 
+func (r Router) ExtendVideo(ctx context.Context, identity modules.RequestContext, binding VideoBinding, id string, input openai.VideoExtendRequest, admit func(context.Context, *modules.RequestContext) error) (openai.Video, VideoBinding, error) {
+	endpoint, _, err := r.videoClient(binding)
+	if err != nil {
+		return openai.Video{}, VideoBinding{}, err
+	}
+	client, ok := endpoint.Provider.(VideoExtensionClient)
+	if !ok {
+		return openai.Video{}, VideoBinding{}, videoParameterError("extend", errors.New("video extension is not supported by the selected deployment"))
+	}
+	release, err := r.acquireEndpoint(ctx, endpoint, 0)
+	if err != nil {
+		return openai.Video{}, VideoBinding{}, err
+	}
+	defer release()
+	if err = r.health.permit(ctx, endpoint); err != nil {
+		return openai.Video{}, VideoBinding{}, err
+	}
+	attempt := providerAttemptContext(identity, endpoint)
+	attempt.Request.Model = binding.Model
+	attempt.Metadata["gateway.api_type"] = "video"
+	r.applyCatalogPricing(ctx, &attempt, endpoint, binding.Model)
+	if admit != nil {
+		if err = admit(ctx, &attempt); err != nil {
+			return openai.Video{}, VideoBinding{}, err
+		}
+	}
+	providerCtx, finish := r.startProviderCall(ctx, endpoint, "video.extend")
+	video, err := client.ExtendVideo(providerCtx, id, input)
+	finish(err)
+	if err != nil {
+		r.health.failure(ctx, endpoint, err)
+	} else {
+		r.health.success(ctx, endpoint)
+	}
+	video.Model = binding.Model
+	return video, binding, err
+}
+
 func callVideoLifecycle[T any](r Router, ctx context.Context, binding VideoBinding, operation string, call func(context.Context, VideoClient) (T, error)) (T, error) {
 	var zero T
 	endpoint, client, err := r.videoClient(binding)

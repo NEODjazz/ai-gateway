@@ -211,6 +211,49 @@ func (x XAI) RemixVideo(ctx context.Context, id string, request openai.VideoRemi
 	return openai.Video{ID: response.RequestID, Object: "video", Model: source.Model, Status: "queued", Prompt: &prompt, RemixedFromVideoID: &id, Seconds: source.Seconds}, nil
 }
 
+func (x XAI) ExtendVideo(ctx context.Context, id string, request openai.VideoExtendRequest) (openai.Video, error) {
+	if !validResponseResourceID(id) {
+		return openai.Video{}, xaiParameterError("video_id", "invalid video ID")
+	}
+	if len(request.Prompt) == 0 || len(request.Prompt) > 32000 {
+		return openai.Video{}, xaiParameterError("prompt", "prompt must contain between 1 and 32000 bytes")
+	}
+	duration := 4
+	if request.Seconds != "" {
+		var err error
+		duration, err = strconv.Atoi(request.Seconds)
+		if err != nil || duration != 4 && duration != 8 && duration != 12 {
+			return openai.Video{}, xaiParameterError("seconds", "seconds must be 4, 8, or 12")
+		}
+	}
+	source, err := x.RetrieveVideo(ctx, id)
+	if err != nil {
+		return openai.Video{}, err
+	}
+	if source.Status != "completed" || !validXAIMediaURL(source.ContentURL) {
+		return openai.Video{}, errors.New("xAI source video is not ready")
+	}
+	body := struct {
+		Prompt   string `json:"prompt"`
+		Duration int    `json:"duration"`
+		Video    struct {
+			URL string `json:"url"`
+		} `json:"video"`
+	}{Prompt: request.Prompt, Duration: duration}
+	body.Video.URL = source.ContentURL
+	var response struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := x.xaiVideoJSON(ctx, http.MethodPost, "videos/extensions", body, &response); err != nil {
+		return openai.Video{}, err
+	}
+	if !validResponseResourceID(response.RequestID) {
+		return openai.Video{}, errors.New("invalid xAI video extension request ID")
+	}
+	prompt := request.Prompt
+	return openai.Video{ID: response.RequestID, Object: "video", Model: source.Model, Status: "queued", Prompt: &prompt, RemixedFromVideoID: &id, Seconds: strconv.Itoa(duration)}, nil
+}
+
 func (XAI) ListVideos(context.Context, VideoListOptions) (openai.VideoList, error) {
 	return openai.VideoList{}, xaiUnsupportedParameter("list")
 }

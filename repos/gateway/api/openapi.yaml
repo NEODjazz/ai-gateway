@@ -1153,6 +1153,21 @@ paths:
       responses:
         '200': {description: Created remix job, content: {application/json: {schema: {$ref: '#/components/schemas/Video'}}}}
         default: {description: "Authentication, ownership, billing, provider, quota, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/videos/{id}/extend:
+    post:
+      operationId: extendVideo
+      tags: [Inference]
+      summary: Extend an owner-scoped completed video through its pinned deployment
+      description: Reserves the requested extension duration and atomically stores the resulting job with durable billing settlement. The selected native adapter must support video extension.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/VideoExtendRequest'}}}
+      responses:
+        '200': {description: Created video extension job, content: {application/json: {schema: {$ref: '#/components/schemas/Video'}}}}
+        default: {description: "Authentication, ownership, billing, provider capability, quota, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /v1/fine_tuning/jobs:
     post:
       operationId: createFineTuningJob
@@ -4822,6 +4837,13 @@ components:
       required: [prompt]
       properties:
         prompt: {type: string, minLength: 1, maxLength: 32000}
+    VideoExtendRequest:
+      type: object
+      additionalProperties: false
+      required: [prompt]
+      properties:
+        prompt: {type: string, minLength: 1, maxLength: 32000}
+        seconds: {type: string, enum: ['4', '8', '12'], default: '4'}
     Video:
       type: object
       required: [id, object, model, status, progress, created_at, seconds, size]

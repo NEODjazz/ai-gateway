@@ -305,6 +305,74 @@ func (h Handler) RemixVideo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, created.Video)
 }
 
+func (h Handler) ExtendVideo(w http.ResponseWriter, r *http.Request) {
+	if r.URL.RawQuery != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "query parameters are not supported")
+		return
+	}
+	var input openai.VideoExtendRequest
+	if !decodeInferenceRequest(w, r, &input) {
+		return
+	}
+	if len(input.Prompt) < 1 || len(input.Prompt) > 32000 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid extension prompt")
+		return
+	}
+	videoSeconds, err := billableVideoSeconds(input.Seconds, true)
+	if err != nil {
+		writeProviderParameterError(w, http.StatusBadRequest, "invalid_parameter", err.Error(), "seconds")
+		return
+	}
+	owner, runtime, identity, ok := h.videoOwner(w, r)
+	if !ok {
+		return
+	}
+	extension, ok := h.provider.(provider.VideoExtensionProvider)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "unsupported_operation", "video extension is not supported")
+		return
+	}
+	record, ok := h.videoRecord(w, r, owner)
+	if !ok {
+		return
+	}
+	var billingRequest modules.RequestContext
+	billingReserved := false
+	billingErr := error(nil)
+	video, binding, err := extension.ExtendVideo(r.Context(), identity, record.Binding, record.Video.ID, input, func(ctx context.Context, request *modules.RequestContext) error {
+		billingRequest = *request
+		billingRequest.VideoSeconds = videoSeconds
+		billingErr = h.resourceBillingPipeline().RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
+		billingReserved = billingErr == nil && h.resourceBillingPipeline().HasModule("billing")
+		return billingErr
+	})
+	if err != nil {
+		if billingReserved {
+			h.cancelVideoBilling(r.Context(), &billingRequest, err)
+		}
+		if billingErr != nil {
+			writeVideoBillingFailure(w, billingErr)
+			return
+		}
+		writeProviderFailure(w, err)
+		return
+	}
+	video = mergeVideoSnapshot(record.Video, video)
+	video.Seconds = strconv.Itoa(videoSeconds)
+	created, err := h.createVideoRecord(r.Context(), videostate.Record{OwnerKey: owner, Binding: binding, Video: video}, billingRequest, billingReserved)
+	if err != nil {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+		_, _ = runtime.DeleteVideo(ctx, binding, video.ID)
+		cancel()
+		if billingReserved {
+			h.cancelVideoBilling(r.Context(), &billingRequest, err)
+		}
+		writeVideoStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, created.Video)
+}
+
 func videoSettlementMetadata(metadata map[string]string) map[string]string {
 	result := make(map[string]string)
 	for key, value := range metadata {

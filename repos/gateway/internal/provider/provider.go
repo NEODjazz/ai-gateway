@@ -69,6 +69,10 @@ type VideoProvider interface {
 	RemixVideo(context.Context, modules.RequestContext, VideoBinding, string, openai.VideoRemixRequest, func(context.Context, *modules.RequestContext) error) (openai.Video, VideoBinding, error)
 }
 
+type VideoExtensionProvider interface {
+	ExtendVideo(context.Context, modules.RequestContext, VideoBinding, string, openai.VideoExtendRequest, func(context.Context, *modules.RequestContext) error) (openai.Video, VideoBinding, error)
+}
+
 type RealtimeProvider interface {
 	OpenRealtime(context.Context, modules.RequestContext, string) (RealtimeConnection, modules.RequestContext, error)
 }

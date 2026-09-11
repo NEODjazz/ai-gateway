@@ -91,6 +91,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodDelete, "/v1/videos/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteVideo) }},
 	{RouteContract{http.MethodGet, "/v1/videos/{id}/content"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetVideoContent) }},
 	{RouteContract{http.MethodPost, "/v1/videos/{id}/remix"}, func(h Handler) http.Handler { return http.HandlerFunc(h.RemixVideo) }},
+	{RouteContract{http.MethodPost, "/v1/videos/{id}/extend"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ExtendVideo) }},
 	{RouteContract{http.MethodGet, "/v1/fine_tuning/jobs"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListFineTuningJobs) }},
 	{RouteContract{http.MethodGet, "/v1/fine_tuning/jobs/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetFineTuningJob) }},
 	{RouteContract{http.MethodPost, "/v1/fine_tuning/jobs/{id}/cancel"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CancelFineTuningJob) }},

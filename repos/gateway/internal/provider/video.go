@@ -38,6 +38,10 @@ type VideoClient interface {
 	RemixVideo(context.Context, string, openai.VideoRemixRequest) (openai.Video, error)
 }
 
+type VideoExtensionClient interface {
+	ExtendVideo(context.Context, string, openai.VideoExtendRequest) (openai.Video, error)
+}
+
 func (p OpenAICompatible) CreateVideo(ctx context.Context, input openai.VideoCreateRequest) (openai.Video, error) {
 	var result openai.Video
 	if param, err := validateVideoCreateRequest(input); err != nil {
