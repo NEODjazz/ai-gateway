@@ -123,6 +123,16 @@ func (h Handler) CreateAssistantRun(w http.ResponseWriter, r *http.Request) {
 		writeAssistantRunError(w, assistantstate.ErrUnavailable)
 		return
 	}
+	thread, err := h.assistantThreads.GetThread(r.Context(), owner, threadID)
+	if err != nil {
+		writeAssistantRunError(w, err)
+		return
+	}
+	var threadDefinition assistantThreadSnapshot
+	if json.Unmarshal(thread.Snapshot, &threadDefinition) != nil {
+		writeAssistantRunError(w, assistantstate.ErrUnavailable)
+		return
+	}
 	model := definition.Model
 	if input.Model != "" {
 		model = input.Model
@@ -143,7 +153,14 @@ func (h Handler) CreateAssistantRun(w http.ResponseWriter, r *http.Request) {
 		}
 		instructions += input.AdditionalInstructions
 	}
-	tools, ok := assistantRunTools(w, definition.Tools)
+	if !h.authorizeAssistantResources(w, r.Context(), identity, definition) || !h.authorizeAssistantThreadResources(w, r, identity, threadDefinition) {
+		return
+	}
+	resources, ok := mergeAssistantRunResources(w, definition.ToolResources, threadDefinition.ToolResources)
+	if !ok {
+		return
+	}
+	tools, ok := assistantRunTools(w, definition.Tools, resources)
 	if !ok || !h.authorizeModel(w, identity, model) {
 		return
 	}
@@ -692,14 +709,90 @@ func (h Handler) assistantRunInput(r *http.Request, owner, threadID string) ([]a
 	return nil, assistantstate.ErrQuotaExceeded
 }
 
-func assistantRunTools(w http.ResponseWriter, tools []assistantTool) ([]openai.ResponseTool, bool) {
+type assistantRunResources struct {
+	CodeInterpreter *struct {
+		FileIDs []string `json:"file_ids"`
+	} `json:"code_interpreter,omitempty"`
+	FileSearch *struct {
+		VectorStoreIDs []string `json:"vector_store_ids"`
+	} `json:"file_search,omitempty"`
+}
+
+func mergeAssistantRunResources(w http.ResponseWriter, rawValues ...json.RawMessage) (assistantRunResources, bool) {
+	var merged assistantRunResources
+	fileIDs, vectorIDs := make([]string, 0), make([]string, 0)
+	seenFiles, seenVectors := map[string]bool{}, map[string]bool{}
+	for _, raw := range rawValues {
+		if len(raw) == 0 || string(raw) == "null" {
+			continue
+		}
+		var resources assistantRunResources
+		if decodeStrictJSON(raw, &resources) != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "assistant tool_resources are invalid")
+			return assistantRunResources{}, false
+		}
+		if resources.CodeInterpreter != nil {
+			for _, id := range resources.CodeInterpreter.FileIDs {
+				if !seenFiles[id] {
+					seenFiles[id] = true
+					fileIDs = append(fileIDs, id)
+				}
+			}
+		}
+		if resources.FileSearch != nil {
+			vectorIDs = vectorIDs[:0]
+			clear(seenVectors)
+			for _, id := range resources.FileSearch.VectorStoreIDs {
+				if !seenVectors[id] {
+					seenVectors[id] = true
+					vectorIDs = append(vectorIDs, id)
+				}
+			}
+		}
+	}
+	if len(fileIDs) > 20 || len(vectorIDs) > 1 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "combined assistant tool_resources exceed provider limits")
+		return assistantRunResources{}, false
+	}
+	if len(fileIDs) != 0 {
+		merged.CodeInterpreter = &struct {
+			FileIDs []string `json:"file_ids"`
+		}{FileIDs: fileIDs}
+	}
+	if len(vectorIDs) != 0 {
+		merged.FileSearch = &struct {
+			VectorStoreIDs []string `json:"vector_store_ids"`
+		}{VectorStoreIDs: vectorIDs}
+	}
+	return merged, true
+}
+
+func assistantRunTools(w http.ResponseWriter, tools []assistantTool, resources assistantRunResources) ([]openai.ResponseTool, bool) {
 	result := make([]openai.ResponseTool, 0, len(tools))
 	for _, tool := range tools {
-		if tool.Type != "function" || tool.Function == nil {
+		switch tool.Type {
+		case "function":
+			if tool.Function == nil {
+				writeError(w, http.StatusBadRequest, "invalid_request", "assistant function tool is invalid")
+				return nil, false
+			}
+			result = append(result, openai.ResponseTool{Type: "function", Name: tool.Function.Name, Description: tool.Function.Description, Parameters: tool.Function.Parameters, Strict: tool.Function.Strict})
+		case "code_interpreter":
+			container := map[string]any{"type": "auto"}
+			if resources.CodeInterpreter != nil && len(resources.CodeInterpreter.FileIDs) != 0 {
+				container["file_ids"] = resources.CodeInterpreter.FileIDs
+			}
+			result = append(result, openai.ResponseTool{Type: "code_interpreter", Container: container})
+		case "file_search":
+			if resources.FileSearch == nil || len(resources.FileSearch.VectorStoreIDs) == 0 {
+				writeError(w, http.StatusBadRequest, "invalid_request", "file_search requires at least one owned vector store")
+				return nil, false
+			}
+			result = append(result, openai.ResponseTool{Type: "file_search", VectorStoreIDs: resources.FileSearch.VectorStoreIDs})
+		default:
 			writeError(w, http.StatusBadRequest, "unsupported_operation", "assistant run tool type "+tool.Type+" is not supported")
 			return nil, false
 		}
-		result = append(result, openai.ResponseTool{Type: "function", Name: tool.Function.Name, Description: tool.Function.Description, Parameters: tool.Function.Parameters, Strict: tool.Function.Strict})
 	}
 	return result, true
 }

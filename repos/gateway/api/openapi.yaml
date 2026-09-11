@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.248
+  version: 0.1.249
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -234,7 +234,7 @@ paths:
       operationId: createAssistantRun
       tags: [Assistants]
       summary: Start a durable background run for an owned thread
-      description: Executes the complete bounded thread history through the normal routing, policy and billing pipeline. Function tools are supported; built-in assistant tools are rejected explicitly until their execution lifecycle is available. One active run is allowed per thread.
+      description: Executes the complete bounded thread history through the normal routing, policy and billing pipeline. Function tools support durable output continuation. Code interpreter and file search are forwarded for provider-side execution with currently owned assistant and thread resources. One active run is allowed per thread.
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/AssistantRunCreateRequest'}}}

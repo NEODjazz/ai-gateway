@@ -643,6 +643,8 @@ type ResponseTool struct {
 	AllowedTools      []string          `json:"allowed_tools,omitempty"`
 	RequireApproval   any               `json:"require_approval,omitempty"`
 	Headers           map[string]string `json:"headers,omitempty"`
+	VectorStoreIDs    []string          `json:"vector_store_ids,omitempty"`
+	Container         any               `json:"container,omitempty"`
 }
 
 type ResponseResponse struct {

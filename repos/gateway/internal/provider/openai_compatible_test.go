@@ -644,6 +644,8 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 		Tools: []openai.ResponseTool{
 			{Type: "function", Name: "weather", Parameters: map[string]any{"type": "object"}},
 			{Type: "mcp", ServerLabel: "weather-prod", ServerURL: "https://mcp.example.test", AllowedTools: []string{"forecast"}, RequireApproval: "never", Headers: map[string]string{"X-MCP-Key": "scoped"}},
+			{Type: "code_interpreter", Container: map[string]any{"type": "auto", "file_ids": []string{"file_owned"}}},
+			{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}},
 		},
 		ToolChoice: "auto", Text: map[string]any{"format": map[string]any{"type": "json_object"}, "verbosity": "high"},
 	}, func(event string, payload string) error {
@@ -658,7 +660,9 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 		t.Fatal("expected responses upstream stream to be enabled")
 	}
 	textConfig, _ := upstreamRequest.Text.(map[string]any)
-	if upstreamRequest.PreviousResponse != "resp-previous" || upstreamRequest.SafetyIdentifier != "provider-user" || upstreamRequest.PromptCacheKey != "tenant-thread" || len(upstreamRequest.Tools) != 2 || upstreamRequest.Tools[0].Name != "weather" || upstreamRequest.Tools[1].ServerLabel != "weather-prod" || upstreamRequest.Tools[1].Headers["X-MCP-Key"] != "scoped" || textConfig["verbosity"] != "high" {
+	container, _ := upstreamRequest.Tools[2].Container.(map[string]any)
+	fileIDs, _ := container["file_ids"].([]any)
+	if upstreamRequest.PreviousResponse != "resp-previous" || upstreamRequest.SafetyIdentifier != "provider-user" || upstreamRequest.PromptCacheKey != "tenant-thread" || len(upstreamRequest.Tools) != 4 || upstreamRequest.Tools[0].Name != "weather" || upstreamRequest.Tools[1].ServerLabel != "weather-prod" || upstreamRequest.Tools[1].Headers["X-MCP-Key"] != "scoped" || len(fileIDs) != 1 || fileIDs[0] != "file_owned" || len(upstreamRequest.Tools[3].VectorStoreIDs) != 1 || upstreamRequest.Tools[3].VectorStoreIDs[0] != "vs_owned" || textConfig["verbosity"] != "high" {
 		t.Fatalf("responses tools/state/format were not forwarded: %+v", upstreamRequest)
 	}
 	if len(payloads) != 4 {

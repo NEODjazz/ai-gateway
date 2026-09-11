@@ -387,6 +387,26 @@ func TestAssistantRunCompletionAtomicallyCreatesMessageAndStep(t *testing.T) {
 	}
 }
 
+func TestAssistantRunToolsMergeOwnedBuiltInResources(t *testing.T) {
+	response := httptest.NewRecorder()
+	resources, ok := mergeAssistantRunResources(response,
+		json.RawMessage(`{"code_interpreter":{"file_ids":["file_a"]},"file_search":{"vector_store_ids":["vs_assistant"]}}`),
+		json.RawMessage(`{"code_interpreter":{"file_ids":["file_a","file_b"]},"file_search":{"vector_store_ids":["vs_thread"]}}`),
+	)
+	if !ok {
+		t.Fatalf("merge status=%d body=%s", response.Code, response.Body.String())
+	}
+	tools, ok := assistantRunTools(response, []assistantTool{{Type: "code_interpreter"}, {Type: "file_search"}}, resources)
+	if !ok || len(tools) != 2 {
+		t.Fatalf("tools=%+v status=%d body=%s", tools, response.Code, response.Body.String())
+	}
+	container, _ := tools[0].Container.(map[string]any)
+	fileIDs, _ := container["file_ids"].([]string)
+	if len(fileIDs) != 2 || tools[1].VectorStoreIDs[0] != "vs_thread" {
+		t.Fatalf("tools=%+v", tools)
+	}
+}
+
 func responseString(t *testing.T, response *httptest.ResponseRecorder, key string) string {
 	t.Helper()
 	if response.Code != http.StatusOK {
