@@ -17,7 +17,11 @@ type assistantThreadSnapshot struct {
 	Metadata      map[string]string `json:"metadata"`
 }
 
-type assistantThreadCreateRequest assistantThreadSnapshot
+type assistantThreadCreateRequest struct {
+	ToolResources json.RawMessage                 `json:"tool_resources,omitempty"`
+	Metadata      map[string]string               `json:"metadata,omitempty"`
+	Messages      []assistantMessageCreateRequest `json:"messages,omitempty"`
+}
 
 type assistantThreadUpdateRequest struct {
 	ToolResources optionalAssistantRaw `json:"tool_resources,omitempty"`
@@ -37,7 +41,7 @@ func (h Handler) CreateAssistantThread(w http.ResponseWriter, r *http.Request) {
 	if !decodeInferenceRequest(w, r, &input) {
 		return
 	}
-	snapshot := assistantThreadSnapshot(input)
+	snapshot := assistantThreadSnapshot{ToolResources: input.ToolResources, Metadata: input.Metadata}
 	normalizeAssistantThreadSnapshot(&snapshot)
 	if !validateAssistantThreadSnapshot(w, snapshot) || !h.authorizeAssistantThreadResources(w, r, identity, snapshot) {
 		return
@@ -52,12 +56,69 @@ func (h Handler) CreateAssistantThread(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "thread definition exceeds its size limit")
 		return
 	}
-	record, err := h.assistantThreads.CreateThread(r.Context(), assistantstate.ThreadRecord{ID: id, OwnerKey: fileOwnerKey(identity), Snapshot: payload}, h.assistantConfig.ThreadOwnerQuota)
+	owner := fileOwnerKey(identity)
+	threadRecord := assistantstate.ThreadRecord{ID: id, OwnerKey: owner, Snapshot: payload}
+	if len(input.Messages) == 0 {
+		record, err := h.assistantThreads.CreateThread(r.Context(), threadRecord, h.assistantConfig.ThreadOwnerQuota)
+		if err != nil {
+			writeAssistantThreadError(w, err)
+			return
+		}
+		h.writeAssistantThread(w, record)
+		return
+	}
+	if len(input.Messages) > 100 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "initial messages exceed the supported limit")
+		return
+	}
+	if !h.assistantMessageStorageAvailable(w) {
+		return
+	}
+	if len(input.Messages) > h.assistantConfig.MessageThreadQuota {
+		writeAssistantMessageError(w, assistantstate.ErrQuotaExceeded)
+		return
+	}
+	messages, ok := h.prepareInitialAssistantMessages(w, r, identity, id, input.Messages)
+	if !ok {
+		return
+	}
+	record, _, err := h.assistantThreads.CreateThreadWithMessages(r.Context(), threadRecord, messages, h.assistantConfig.ThreadOwnerQuota, h.assistantConfig.MessageThreadQuota)
 	if err != nil {
 		writeAssistantThreadError(w, err)
 		return
 	}
 	h.writeAssistantThread(w, record)
+}
+
+func (h Handler) prepareInitialAssistantMessages(w http.ResponseWriter, r *http.Request, identity modules.RequestContext, threadID string, inputs []assistantMessageCreateRequest) ([]assistantstate.MessageRecord, bool) {
+	owner := fileOwnerKey(identity)
+	records := make([]assistantstate.MessageRecord, 0, len(inputs))
+	for _, input := range inputs {
+		content, ok := h.normalizeAssistantMessageContent(w, r, identity, input.Content)
+		if !ok {
+			return nil, false
+		}
+		attachments := input.Attachments
+		if attachments == nil {
+			attachments = []assistantMessageAttachment{}
+		}
+		snapshot := assistantMessageSnapshot{Role: input.Role, Content: content, Attachments: attachments, Metadata: normalizedMetadata(input.Metadata)}
+		if !h.validateAssistantMessage(w, r, identity, snapshot) {
+			return nil, false
+		}
+		payload, err := json.Marshal(snapshot)
+		if err != nil || len(payload) > assistantstate.MaxMessageSnapshotBytes {
+			writeError(w, http.StatusBadRequest, "invalid_request", "initial message exceeds its size limit")
+			return nil, false
+		}
+		id, ok := newAssistantResourceID("msg_")
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "message_id_failed", "message ID generation failed")
+			return nil, false
+		}
+		records = append(records, assistantstate.MessageRecord{ID: id, ThreadID: threadID, OwnerKey: owner, Snapshot: payload})
+	}
+	return records, true
 }
 
 func (h Handler) GetAssistantThread(w http.ResponseWriter, r *http.Request) {

@@ -49,6 +49,49 @@ func (s *memoryAssistantThreadStore) CreateThread(_ context.Context, record assi
 	return record, nil
 }
 
+func (s *memoryAssistantThreadStore) CreateThreadWithMessages(_ context.Context, thread assistantstate.ThreadRecord, messages []assistantstate.MessageRecord, threadQuota, messageQuota int) (assistantstate.ThreadRecord, []assistantstate.MessageRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(messages) > messageQuota {
+		return assistantstate.ThreadRecord{}, nil, assistantstate.ErrQuotaExceeded
+	}
+	count := 0
+	for _, existing := range s.threads {
+		if existing.OwnerKey == thread.OwnerKey {
+			count++
+		}
+	}
+	if count >= threadQuota {
+		return assistantstate.ThreadRecord{}, nil, assistantstate.ErrQuotaExceeded
+	}
+	threadKey := thread.OwnerKey + "/" + thread.ID
+	if _, found := s.threads[threadKey]; found {
+		return assistantstate.ThreadRecord{}, nil, assistantstate.ErrConflict
+	}
+	if s.messages == nil {
+		s.messages = map[string]assistantstate.MessageRecord{}
+	}
+	s.clock++
+	thread.Revision = 1
+	thread.CreatedAt = time.Unix(s.clock, 0).UTC()
+	thread.UpdatedAt = thread.CreatedAt
+	thread.Snapshot = append([]byte(nil), thread.Snapshot...)
+	created := make([]assistantstate.MessageRecord, 0, len(messages))
+	for _, message := range messages {
+		s.clock++
+		message.Revision = 1
+		message.CreatedAt = time.Unix(s.clock, 0).UTC()
+		message.UpdatedAt = message.CreatedAt
+		message.Snapshot = append([]byte(nil), message.Snapshot...)
+		created = append(created, message)
+	}
+	s.threads[threadKey] = thread
+	for _, message := range created {
+		s.messages[message.OwnerKey+"/"+message.ThreadID+"/"+message.ID] = message
+	}
+	return thread, created, nil
+}
+
 func (s *memoryAssistantThreadStore) ListThreads(_ context.Context, owner string, limit int, after string) ([]assistantstate.ThreadRecord, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

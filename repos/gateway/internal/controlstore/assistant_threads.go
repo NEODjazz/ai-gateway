@@ -44,6 +44,62 @@ func (s *PostgresStore) CreateThread(ctx context.Context, record assistantstate.
 	return created, nil
 }
 
+func (s *PostgresStore) CreateThreadWithMessages(ctx context.Context, thread assistantstate.ThreadRecord, messages []assistantstate.MessageRecord, ownerQuota, messageQuota int) (assistantstate.ThreadRecord, []assistantstate.MessageRecord, error) {
+	if s == nil || s.pool == nil {
+		return assistantstate.ThreadRecord{}, nil, assistantstate.ErrUnavailable
+	}
+	if thread.ID == "" || len(thread.ID) > 128 || thread.OwnerKey == "" || len(thread.OwnerKey) > 256 || !validAssistantSnapshot(thread.Snapshot) || ownerQuota < 1 || messageQuota < 1 || len(messages) < 1 || len(messages) > 100 {
+		return assistantstate.ThreadRecord{}, nil, assistantstate.ErrInvalid
+	}
+	if len(messages) > messageQuota {
+		return assistantstate.ThreadRecord{}, nil, assistantstate.ErrQuotaExceeded
+	}
+	seen := make(map[string]bool, len(messages))
+	for _, message := range messages {
+		if message.ID == "" || len(message.ID) > 128 || message.ThreadID != thread.ID || message.OwnerKey != thread.OwnerKey || !validAssistantMessageSnapshot(message.Snapshot) || seen[message.ID] {
+			return assistantstate.ThreadRecord{}, nil, assistantstate.ErrInvalid
+		}
+		seen[message.ID] = true
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return assistantstate.ThreadRecord{}, nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, thread.OwnerKey); err != nil {
+		return assistantstate.ThreadRecord{}, nil, err
+	}
+	var count int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM gateway_assistant_threads WHERE owner_key=$1`, thread.OwnerKey).Scan(&count); err != nil {
+		return assistantstate.ThreadRecord{}, nil, err
+	}
+	if count >= ownerQuota {
+		return assistantstate.ThreadRecord{}, nil, assistantstate.ErrQuotaExceeded
+	}
+	createdThread, err := scanAssistantThread(tx.QueryRow(ctx, `INSERT INTO gateway_assistant_threads (id,owner_key,snapshot) VALUES ($1,$2,$3::jsonb) ON CONFLICT DO NOTHING RETURNING id,owner_key,snapshot,revision,created_at,updated_at`, thread.ID, thread.OwnerKey, thread.Snapshot))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return assistantstate.ThreadRecord{}, nil, assistantstate.ErrConflict
+	}
+	if err != nil {
+		return assistantstate.ThreadRecord{}, nil, err
+	}
+	createdMessages := make([]assistantstate.MessageRecord, 0, len(messages))
+	for _, message := range messages {
+		created, createErr := scanAssistantMessage(tx.QueryRow(ctx, `INSERT INTO gateway_assistant_messages (id,thread_id,owner_key,snapshot) VALUES ($1,$2,$3,$4::jsonb) ON CONFLICT DO NOTHING RETURNING id,thread_id,owner_key,snapshot,revision,created_at,updated_at`, message.ID, message.ThreadID, message.OwnerKey, message.Snapshot))
+		if errors.Is(createErr, pgx.ErrNoRows) {
+			return assistantstate.ThreadRecord{}, nil, assistantstate.ErrConflict
+		}
+		if createErr != nil {
+			return assistantstate.ThreadRecord{}, nil, createErr
+		}
+		createdMessages = append(createdMessages, created)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return assistantstate.ThreadRecord{}, nil, err
+	}
+	return createdThread, createdMessages, nil
+}
+
 func (s *PostgresStore) ListThreads(ctx context.Context, owner string, limit int, after string) ([]assistantstate.ThreadRecord, string, error) {
 	if s == nil || s.pool == nil {
 		return nil, "", assistantstate.ErrUnavailable

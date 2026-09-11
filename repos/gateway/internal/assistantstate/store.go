@@ -60,6 +60,7 @@ type MessagePageOptions struct {
 
 type ThreadStore interface {
 	CreateThread(context.Context, ThreadRecord, int) (ThreadRecord, error)
+	CreateThreadWithMessages(context.Context, ThreadRecord, []MessageRecord, int, int) (ThreadRecord, []MessageRecord, error)
 	ListThreads(context.Context, string, int, string) ([]ThreadRecord, string, error)
 	GetThread(context.Context, string, string) (ThreadRecord, error)
 	UpdateThread(context.Context, string, string, []byte, int64) (ThreadRecord, error)

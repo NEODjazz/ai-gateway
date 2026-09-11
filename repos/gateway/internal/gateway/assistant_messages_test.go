@@ -105,3 +105,33 @@ func TestAssistantMessageRejectsInvalidContentResourcesAndPagination(t *testing.
 		t.Fatalf("pagination status=%d body=%s", badPage.Code, badPage.Body.String())
 	}
 }
+
+func TestAssistantThreadCreatesInitialMessagesAtomically(t *testing.T) {
+	store := &memoryAssistantThreadStore{
+		memoryAssistantStore: &memoryAssistantStore{records: map[string]assistantstate.Record{}},
+		threads:              map[string]assistantstate.ThreadRecord{},
+		messages:             map[string]assistantstate.MessageRecord{},
+	}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&assistantAuthModule{user: "user"}}), nil).
+		WithAssistantStore(store, AssistantRuntimeConfig{OwnerQuota: 10, ThreadOwnerQuota: 10, MessageThreadQuota: 2}))
+	created := assistantRequest(t, handler, http.MethodPost, "/v1/threads", `{"metadata":{"source":"initial"},"messages":[{"role":"user","content":"one"},{"role":"assistant","content":"two"}]}`)
+	if created.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+	}
+	var thread map[string]any
+	_ = json.Unmarshal(created.Body.Bytes(), &thread)
+	threadID, _ := thread["id"].(string)
+	listed := assistantRequest(t, handler, http.MethodGet, "/v1/threads/"+threadID+"/messages?order=asc", "")
+	if listed.Code != http.StatusOK || strings.Count(listed.Body.String(), `"object":"thread.message"`) != 2 || strings.Index(listed.Body.String(), `"value":"one"`) > strings.Index(listed.Body.String(), `"value":"two"`) {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+	before := len(store.threads)
+	overQuota := assistantRequest(t, handler, http.MethodPost, "/v1/threads", `{"messages":[{"role":"user","content":"one"},{"role":"user","content":"two"},{"role":"user","content":"three"}]}`)
+	if overQuota.Code != http.StatusTooManyRequests || len(store.threads) != before {
+		t.Fatalf("quota status=%d threads=%d body=%s", overQuota.Code, len(store.threads), overQuota.Body.String())
+	}
+	invalid := assistantRequest(t, handler, http.MethodPost, "/v1/threads", `{"messages":[{"role":"user","content":"valid"},{"role":"system","content":"invalid"}]}`)
+	if invalid.Code != http.StatusBadRequest || len(store.threads) != before {
+		t.Fatalf("invalid status=%d threads=%d body=%s", invalid.Code, len(store.threads), invalid.Body.String())
+	}
+}

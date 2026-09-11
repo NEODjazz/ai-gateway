@@ -128,6 +128,34 @@ func TestPostgresAssistantMessageQuotaIsAtomicIntegration(t *testing.T) {
 	}
 }
 
+func TestPostgresAssistantThreadInitialMessagesAreAtomicIntegration(t *testing.T) {
+	store := prepareAssistantThreadStore(t)
+	thread := assistantstate.ThreadRecord{ID: "thread_initial", OwnerKey: "initial-owner", Snapshot: []byte(`{"metadata":{}}`)}
+	messages := []assistantstate.MessageRecord{
+		{ID: "msg_initial_a", ThreadID: thread.ID, OwnerKey: thread.OwnerKey, Snapshot: []byte(`{"role":"user","content":"one"}`)},
+		{ID: "msg_initial_b", ThreadID: thread.ID, OwnerKey: thread.OwnerKey, Snapshot: []byte(`{"role":"assistant","content":"two"}`)},
+	}
+	createdThread, createdMessages, err := store.CreateThreadWithMessages(t.Context(), thread, messages, 2, 2)
+	if err != nil || createdThread.Revision != 1 || len(createdMessages) != 2 {
+		t.Fatalf("thread=%+v messages=%+v err=%v", createdThread, createdMessages, err)
+	}
+	listed, _, err := store.ListThreadMessages(t.Context(), thread.OwnerKey, thread.ID, assistantstate.MessagePageOptions{Limit: 10, Order: "asc"})
+	if err != nil || len(listed) != 2 || listed[0].ID != messages[0].ID || listed[1].ID != messages[1].ID {
+		t.Fatalf("listed=%+v err=%v", listed, err)
+	}
+	rejectedThread := assistantstate.ThreadRecord{ID: "thread_rejected", OwnerKey: thread.OwnerKey, Snapshot: []byte(`{"metadata":{}}`)}
+	rejectedMessages := []assistantstate.MessageRecord{
+		{ID: "msg_rejected_a", ThreadID: rejectedThread.ID, OwnerKey: rejectedThread.OwnerKey, Snapshot: []byte(`{"role":"user"}`)},
+		{ID: "msg_rejected_b", ThreadID: rejectedThread.ID, OwnerKey: rejectedThread.OwnerKey, Snapshot: []byte(`{"role":"user"}`)},
+	}
+	if _, _, err = store.CreateThreadWithMessages(t.Context(), rejectedThread, rejectedMessages, 2, 1); !errors.Is(err, assistantstate.ErrQuotaExceeded) {
+		t.Fatalf("quota err=%v", err)
+	}
+	if _, err = store.GetThread(t.Context(), rejectedThread.OwnerKey, rejectedThread.ID); !errors.Is(err, assistantstate.ErrNotFound) {
+		t.Fatalf("rejected thread was persisted: %v", err)
+	}
+}
+
 func prepareAssistantThreadStore(t *testing.T) *PostgresStore {
 	t.Helper()
 	dsn := requiredPostgresTestDSN(t)
