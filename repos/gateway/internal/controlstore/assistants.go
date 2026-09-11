@@ -151,7 +151,11 @@ func validAssistantRecord(record assistantstate.Record) bool {
 }
 
 func validAssistantSnapshot(snapshot []byte) bool {
-	if len(snapshot) < 2 || len(snapshot) > assistantstate.MaxSnapshotBytes {
+	return validAssistantJSONSnapshot(snapshot, assistantstate.MaxSnapshotBytes)
+}
+
+func validAssistantJSONSnapshot(snapshot []byte, maximum int) bool {
+	if len(snapshot) < 2 || len(snapshot) > maximum {
 		return false
 	}
 	var object map[string]any

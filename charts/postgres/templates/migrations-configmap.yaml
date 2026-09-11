@@ -5,6 +5,29 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  028_gateway_assistant_threads.sql: |
+    CREATE TABLE IF NOT EXISTS gateway_assistant_threads (
+        id TEXT NOT NULL, owner_key TEXT NOT NULL, snapshot JSONB NOT NULL,
+        revision BIGINT NOT NULL DEFAULT 1, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (length(id) BETWEEN 1 AND 128), CHECK (length(owner_key) BETWEEN 1 AND 256),
+        CHECK (jsonb_typeof(snapshot) = 'object'), CHECK (octet_length(snapshot::text) BETWEEN 2 AND 1048576),
+        CHECK (revision > 0), PRIMARY KEY (owner_key,id)
+    );
+    CREATE INDEX IF NOT EXISTS gateway_assistant_threads_owner_created_idx
+        ON gateway_assistant_threads (owner_key,created_at DESC,id DESC);
+    CREATE TABLE IF NOT EXISTS gateway_assistant_messages (
+        id TEXT NOT NULL, thread_id TEXT NOT NULL, owner_key TEXT NOT NULL, snapshot JSONB NOT NULL,
+        revision BIGINT NOT NULL DEFAULT 1, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (length(id) BETWEEN 1 AND 128), CHECK (length(thread_id) BETWEEN 1 AND 128),
+        CHECK (length(owner_key) BETWEEN 1 AND 256), CHECK (jsonb_typeof(snapshot) = 'object'),
+        CHECK (octet_length(snapshot::text) BETWEEN 2 AND 2097152), CHECK (revision > 0),
+        PRIMARY KEY (owner_key,thread_id,id),
+        FOREIGN KEY (owner_key,thread_id) REFERENCES gateway_assistant_threads(owner_key,id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS gateway_assistant_messages_thread_created_idx
+        ON gateway_assistant_messages (owner_key,thread_id,created_at DESC,id DESC);
   027_gateway_assistants.sql: |
     CREATE TABLE IF NOT EXISTS gateway_assistants (
         id TEXT NOT NULL,
