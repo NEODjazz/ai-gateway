@@ -70,6 +70,12 @@ only validated system, message and tool boundaries, and includes checkpoint TTL
 and placement in exact-cache identity. Native cache points allow the provider's
 default five-minute TTL or an explicit five-minute or one-hour TTL.
 
+A2A plain-text, Markdown and CSV documents are decoded only from strict bounded
+base64 or an authorized bounded HTTPS fetch. Invalid UTF-8 and NUL bytes are
+rejected before inference. Accepted document text enters the shared Responses
+input policy, token reserve and billing path, and remote URLs are replaced with
+validated inline content before task persistence.
+
 Chat cache identity also includes validated provider-native message blocks, their
 reserved input size, Bedrock service tier, latency selection and requested
 additional response-field paths. Semantic

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -473,6 +474,83 @@ func TestA2ASendMessageAcceptsValidatedInlinePDF(t *testing.T) {
 	}
 }
 
+func TestA2ASendMessageAcceptsBoundedInlineTextDocuments(t *testing.T) {
+	router, llm, billing := a2aTestHandler(t)
+	for _, test := range []struct {
+		mediaType string
+		filename  string
+		content   string
+	}{
+		{mediaType: "text/plain", filename: "notes.txt", content: "plain notes"},
+		{mediaType: "text/markdown", filename: "notes.md", content: "# Notes\ncontent"},
+		{mediaType: "text/csv", filename: "rows.csv", content: "name,value\none,1\n"},
+	} {
+		t.Run(test.mediaType, func(t *testing.T) {
+			encoded := base64.StdEncoding.EncodeToString([]byte(test.content))
+			body := `{"jsonrpc":"2.0","id":"document","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"document-` + strings.ReplaceAll(test.mediaType, "/", "-") + `","role":"ROLE_USER","parts":[{"raw":"` + encoded + `","mediaType":"` + test.mediaType + `","filename":"` + test.filename + `"}]}}}`
+			request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+			request.Header.Set("A2A-Version", "1.0")
+			request.Header.Set("Authorization", "Bearer key")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			input := llm.request.ResponseRequest.Input.([]any)
+			part := input[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+			if part["type"] != "input_text" || part["text"] != test.content {
+				t.Fatalf("input=%#v", input)
+			}
+		})
+	}
+	if billing.calls != 3 {
+		t.Fatalf("billing calls=%d", billing.calls)
+	}
+
+	invalid := base64.StdEncoding.EncodeToString([]byte{0xff, 0xfe})
+	body := `{"jsonrpc":"2.0","id":"invalid","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"invalid-document","role":"ROLE_USER","parts":[{"raw":"` + invalid + `","mediaType":"text/plain"}]}}}`
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || billing.calls != 3 {
+		t.Fatalf("status=%d billing=%d body=%s", response.Code, billing.calls, response.Body.String())
+	}
+}
+
+func TestA2ASendMessageFetchesBoundedRemoteTextDocument(t *testing.T) {
+	registry := NewAgentRegistry()
+	if _, err := registry.PutToolPolicy("safe", ToolPolicy{Name: "Safe", AllowedTools: []string{"weather"}, MaxToolCalls: 2, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.PutAgentProfile("research", AgentProfile{Name: "Research", Model: "test-model", ToolPolicyID: "safe", MaxIterations: 3, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	llm := &a2aTestProvider{}
+	billing := &lifecycleBillingModule{}
+	gateway := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"test-model"}}, billing}), llm).WithAgentRegistry(registry)
+	fetches := 0
+	gateway.a2aHTTPClient = a2aHTTPDoerFunc(func(request *http.Request) (*http.Response, error) {
+		fetches++
+		if request.URL.String() != "https://media.example/data.csv" || request.Header.Get("Authorization") != "" || !strings.Contains(request.Header.Get("Accept"), "text/csv") {
+			t.Fatalf("unsafe remote request: url=%s headers=%v", request.URL, request.Header)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/csv"}}, Body: io.NopCloser(strings.NewReader("name,value\none,1\n")), Request: request}, nil
+	})
+	body := `{"jsonrpc":"2.0","id":"remote-document","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"remote-document","role":"ROLE_USER","parts":[{"url":"https://media.example/data.csv","mediaType":"text/csv","filename":"data.csv"}]}}}`
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	Routes(gateway).ServeHTTP(response, request)
+	input := llm.request.ResponseRequest.Input.([]any)
+	part := input[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if response.Code != http.StatusOK || fetches != 1 || billing.calls != 1 || part["type"] != "input_text" || part["text"] != "name,value\none,1\n" {
+		t.Fatalf("status=%d fetches=%d billing=%d input=%#v body=%s", response.Code, fetches, billing.calls, input, response.Body.String())
+	}
+}
+
 func TestA2ASendMessageFetchesValidatedRemoteAudio(t *testing.T) {
 	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
 	registry := NewAgentRegistry()
@@ -584,6 +662,13 @@ func TestA2ARemoteImageValidationAndLimits(t *testing.T) {
 	}
 	if _, err := countA2ARemoteParts(files); err == nil {
 		t.Fatal("accepted too many remote files")
+	}
+	encodedText := base64.StdEncoding.EncodeToString([]byte("document"))
+	for index := range files {
+		files[index] = a2aPart{Raw: &encodedText, MediaType: "text/markdown", Filename: "document.md"}
+	}
+	if _, err := countA2ARemoteParts(files); err == nil {
+		t.Fatal("accepted too many inline text documents")
 	}
 	response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"image/jpeg"}}, Body: io.NopCloser(strings.NewReader("\xff\xd8\xff"))}
 	if _, _, err := readA2ARemoteImage(response, "image/png", openai.MaxTotalImageBytes); err == nil {

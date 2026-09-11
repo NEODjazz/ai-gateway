@@ -24,14 +24,17 @@ type httpDoer interface {
 func countA2ARemoteParts(parts []a2aPart) (int, error) {
 	count, files := 0, 0
 	for _, part := range parts {
+		if (part.Raw != nil || part.URL != nil) && (part.MediaType == "application/pdf" || supportedA2ATextDocumentType(part.MediaType)) {
+			files++
+			if files > openai.MaxResponseFileAttachments {
+				return 0, errors.New("invalid remote media part")
+			}
+		}
 		if part.URL == nil {
 			continue
 		}
 		count++
-		if part.MediaType == "application/pdf" {
-			files++
-		}
-		if count > openai.MaxImageAttachments || files > openai.MaxResponseFileAttachments || part.Text != nil || part.Raw != nil || len(part.Data) != 0 || !validA2AFilename(part.Filename) || !supportedA2ARemoteType(part.MediaType) {
+		if count > openai.MaxImageAttachments || part.Text != nil || part.Raw != nil || len(part.Data) != 0 || !validA2AFilename(part.Filename) || !supportedA2ARemoteType(part.MediaType) {
 			return 0, errors.New("invalid remote media part")
 		}
 		parsed, err := url.Parse(*part.URL)
@@ -56,7 +59,7 @@ func (h Handler) resolveA2ARemoteParts(ctx context.Context, parts []a2aPart) err
 		if err != nil {
 			return errors.New("invalid remote media URL")
 		}
-		request.Header.Set("Accept", "image/jpeg, image/png, image/gif, image/webp, audio/wav, audio/mpeg, application/pdf")
+		request.Header.Set("Accept", "image/jpeg, image/png, image/gif, image/webp, audio/wav, audio/mpeg, application/pdf, text/plain, text/markdown, text/csv")
 		response, err := h.a2aHTTPClient.Do(request)
 		if err != nil {
 			return fmt.Errorf("%w: %v", errA2ARemoteUnavailable, err)
@@ -70,7 +73,7 @@ func (h Handler) resolveA2ARemoteParts(ctx context.Context, parts []a2aPart) err
 			imageTotal += len(data)
 		case strings.HasPrefix(mediaType, "audio/"):
 			audioTotal += len(data)
-		case mediaType == "application/pdf":
+		case mediaType == "application/pdf" || supportedA2ATextDocumentType(mediaType):
 			fileTotal += len(data)
 		}
 		remoteTotal += len(data)
@@ -104,7 +107,7 @@ func readA2ARemoteContent(response *http.Response, requestedType string, imageRe
 	limit, remaining := openai.MaxImageBytes, imageRemaining
 	if strings.HasPrefix(mediaType, "audio/") {
 		limit, remaining = openai.MaxAudioBytes, audioRemaining
-	} else if mediaType == "application/pdf" {
+	} else if mediaType == "application/pdf" || supportedA2ATextDocumentType(mediaType) {
 		limit, remaining = openai.MaxResponseFileBytes, fileRemaining
 	}
 	if remaining < limit {
@@ -136,7 +139,11 @@ func supportedA2AImageType(mediaType string) bool {
 }
 
 func supportedA2ARemoteType(mediaType string) bool {
-	return supportedA2AImageType(mediaType) || mediaType == "audio/wav" || mediaType == "audio/mpeg" || mediaType == "application/pdf"
+	return supportedA2AImageType(mediaType) || mediaType == "audio/wav" || mediaType == "audio/mpeg" || mediaType == "application/pdf" || supportedA2ATextDocumentType(mediaType)
+}
+
+func supportedA2ATextDocumentType(mediaType string) bool {
+	return mediaType == "text/plain" || mediaType == "text/markdown" || mediaType == "text/csv"
 }
 
 func validA2AFilename(filename string) bool {

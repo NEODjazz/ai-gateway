@@ -3,12 +3,14 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"ai-gateway-gateway/internal/a2astate"
 	"ai-gateway-gateway/internal/modules"
@@ -18,7 +20,7 @@ import (
 
 const a2aProtocolVersion = "1.0"
 
-var a2aInputModes = []string{"text/plain", "application/json", "image/jpeg", "image/png", "image/gif", "image/webp", "audio/wav", "audio/mpeg", "application/pdf"}
+var a2aInputModes = []string{"text/plain", "text/markdown", "text/csv", "application/json", "image/jpeg", "image/png", "image/gif", "image/webp", "audio/wav", "audio/mpeg", "application/pdf"}
 var errA2ATaskStatusUnavailable = errors.New("A2A task status is temporarily unavailable")
 
 type a2aPart struct {
@@ -635,6 +637,13 @@ func a2aInputPart(part a2aPart) (map[string]any, bool) {
 			return nil, false
 		}
 		return input, true
+	}
+	if supportedA2ATextDocumentType(part.MediaType) {
+		decoded, err := base64.StdEncoding.Strict().DecodeString(*part.Raw)
+		if err != nil || len(decoded) == 0 || len(decoded) > openai.MaxResponseFileBytes || !utf8.Valid(decoded) || bytes.IndexByte(decoded, 0) >= 0 {
+			return nil, false
+		}
+		return map[string]any{"type": "input_text", "text": string(decoded)}, true
 	}
 	if _, err := openai.ParseDataImageURL(dataURL); err != nil {
 		return nil, false
