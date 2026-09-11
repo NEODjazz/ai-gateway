@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -76,6 +78,113 @@ func TestBedrockConverseStreamConsumesNativeEventStream(t *testing.T) {
 	}
 	if !strings.Contains(payloads[1], `"content":"hello "`) || !strings.Contains(payloads[2], `"content":"stream"`) || !strings.Contains(payloads[3], `"finish_reason":"stop"`) || !strings.Contains(payloads[3], `"total_tokens":6`) {
 		t.Fatalf("payloads=%v", payloads)
+	}
+}
+
+func TestBedrockInvokeStreamConsumesAnthropicChunks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/model/model:1/invoke-with-response-stream" || r.Header.Get("Authorization") != "Bearer key" || r.Header.Get("X-Amzn-Bedrock-Accept") != "application/json" {
+			t.Fatalf("path=%q authorization=%q accept=%q", r.URL.EscapedPath(), r.Header.Get("Authorization"), r.Header.Get("X-Amzn-Bedrock-Accept"))
+		}
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body["anthropic_version"] != "bedrock-2023-05-31" || body["model"] != nil {
+			t.Fatalf("request=%#v", body)
+		}
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"upstream","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"output_tokens":0}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello "}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"stream"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":2}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, event := range events {
+			_, _ = w.Write(bedrockTestEvent(t, "chunk", map[string]any{"bytes": []byte(event)}))
+		}
+	}))
+	defer server.Close()
+	maxTokens := 32
+	request := openai.ChatCompletionRequest{Model: "model:1", BedrockInvoke: true, Stream: true, StreamOptions: &openai.ChatStreamOptions{IncludeUsage: true}, MaxTokens: &maxTokens, Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	var payloads []string
+	response, err := NewBedrock(server.URL, "key").StreamChatCompletions(t.Context(), request, func(payload string) error {
+		payloads = append(payloads, payload)
+		return nil
+	})
+	if err != nil || response.ID != "msg_1" || openai.ContentText(response.Choices[0].Message.Content) != "hello stream" || response.Choices[0].FinishReason != "stop" || response.Usage.TotalTokens != 6 {
+		t.Fatalf("response=%+v payloads=%v err=%v", response, payloads, err)
+	}
+	if len(payloads) != 3 || !strings.Contains(payloads[0], `"content":"hello "`) || !strings.Contains(payloads[1], `"content":"stream"`) || !strings.Contains(payloads[2], `"finish_reason":"stop"`) {
+		t.Fatalf("payloads=%v", payloads)
+	}
+}
+
+func TestBedrockInvokeStreamRejectsMissingUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+		_, _ = w.Write(bedrockTestEvent(t, "chunk", map[string]any{"bytes": []byte(`{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"model","content":[]}}`)}))
+	}))
+	defer server.Close()
+	maxTokens := 1
+	_, err := NewBedrock(server.URL, "key").StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", BedrockInvoke: true, Stream: true, MaxTokens: &maxTokens, Messages: []openai.Message{{Role: "user", Content: "hello"}}}, func(string) error { return nil })
+	if err == nil {
+		t.Fatal("InvokeModel stream without usage accepted")
+	}
+}
+
+func TestBedrockInvokeStreamCancelsUpstreamWhenWriterFails(t *testing.T) {
+	canceled := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+		for _, event := range []string{
+			`{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"model","content":[],"usage":{"input_tokens":1,"output_tokens":0}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}`,
+		} {
+			_, _ = w.Write(bedrockTestEvent(t, "chunk", map[string]any{"bytes": []byte(event)}))
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		}
+		<-r.Context().Done()
+		close(canceled)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	maxTokens := 1
+	_, err := NewBedrock(server.URL, "key").StreamChatCompletions(ctx, openai.ChatCompletionRequest{Model: "model", BedrockInvoke: true, Stream: true, MaxTokens: &maxTokens, Messages: []openai.Message{{Role: "user", Content: "hello"}}}, func(string) error {
+		return errors.New("client writer closed")
+	})
+	if err == nil || !strings.Contains(err.Error(), "client writer closed") {
+		t.Fatalf("error=%v", err)
+	}
+	select {
+	case <-canceled:
+	case <-ctx.Done():
+		t.Fatal("upstream request was not canceled after writer failure")
+	}
+}
+
+func TestBedrockInvokeStreamRejectsOrphanContentDelta(t *testing.T) {
+	state := bedrockInvokeStreamEnvelopeState{}
+	var output bytes.Buffer
+	handle := state.handle(&output)
+	headers := map[string]string{":message-type": "event", ":event-type": "chunk", ":content-type": "application/json"}
+	wrap := func(event string) []byte {
+		encoded, err := json.Marshal(map[string]any{"bytes": []byte(event)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return encoded
+	}
+	if err := handle(headers, wrap(`{"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":1,"output_tokens":0}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	err := handle(headers, wrap(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"orphan"}}`))
+	if err == nil {
+		t.Fatal("orphan content delta accepted")
 	}
 }
 

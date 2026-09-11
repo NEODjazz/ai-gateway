@@ -49,6 +49,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/model/{model}/converse"}, func(h Handler) http.Handler { return http.HandlerFunc(h.BedrockConverse) }},
 	{RouteContract{http.MethodPost, "/model/{model}/converse-stream"}, func(h Handler) http.Handler { return http.HandlerFunc(h.BedrockConverseStream) }},
 	{RouteContract{http.MethodPost, "/model/{model}/invoke"}, func(h Handler) http.Handler { return http.HandlerFunc(h.BedrockInvoke) }},
+	{RouteContract{http.MethodPost, "/model/{model}/invoke-with-response-stream"}, func(h Handler) http.Handler { return http.HandlerFunc(h.BedrockInvokeStream) }},
 	{RouteContract{http.MethodPost, "/v1/chat/completions"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ChatCompletions) }},
 	{RouteContract{http.MethodPost, "/v1/completions"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Completions) }},
 	{RouteContract{http.MethodPost, "/v1/messages"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Messages) }},

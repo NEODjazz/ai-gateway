@@ -63,6 +63,29 @@ func (h Handler) BedrockInvoke(w http.ResponseWriter, r *http.Request) {
 	h.serveChatAs(output, r, chat, "bedrock_invoke")
 }
 
+func (h Handler) BedrockInvokeStream(w http.ResponseWriter, r *http.Request) {
+	output := newBedrockInvokeStreamWriter(w)
+	defer output.finish()
+	model := strings.TrimSpace(r.PathValue("model"))
+	if model == "" || len(model) > 2048 {
+		writeError(output, http.StatusBadRequest, "invalid_request", "model is required")
+		return
+	}
+	var request bedrockInvokeRequest
+	if !decodeInferenceRequest(output, r, &request) {
+		return
+	}
+	chat, err := request.chat(model, strings.TrimSpace(r.URL.Query().Get("provider")))
+	if err != nil {
+		writeError(output, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	chat.Stream = true
+	chat.StreamOptions = &openai.ChatStreamOptions{IncludeUsage: true}
+	output.messages.model = model
+	h.serveChatAs(output, r, chat, "bedrock_invoke_stream")
+}
+
 func (h Handler) BedrockConverse(w http.ResponseWriter, r *http.Request) {
 	model := strings.TrimSpace(r.PathValue("model"))
 	if model == "" || len(model) > 2048 {

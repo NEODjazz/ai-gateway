@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.255
+  version: 0.1.256
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -460,6 +460,43 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MessagesResponse'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/RequestTooLarge'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '451': {$ref: '#/components/responses/ContentRejected'}
+        '502': {$ref: '#/components/responses/ProviderFailed'}
+  /model/{model}/invoke-with-response-stream:
+    post:
+      operationId: bedrockInvokeModelWithResponseStream
+      tags: [Inference]
+      summary: Stream a Bedrock model using the Anthropic Messages dialect
+      description: Accepts the bounded Anthropic Messages request shape for Bedrock and returns checksummed AWS EventStream chunk events containing incremental Anthropic message events. It uses shared authentication, model and function-tool authorization, quota, content policy, routing, retry and exact post-stream billing. Routing requires a streaming Bedrock deployment with explicit chat and bedrock_invoke capabilities. Provider reads, individual frames and the complete stream are bounded, and client cancellation terminates upstream work.
+      parameters:
+        - in: path
+          name: model
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 2048}
+        - in: query
+          name: provider
+          required: false
+          schema: {type: string}
+          description: Optional gateway deployment selector.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BedrockInvokeRequest'}
+      responses:
+        '200':
+          description: Checksummed AWS EventStream chunk events containing base64-encoded Anthropic Messages events
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+          content:
+            application/vnd.amazon.eventstream:
+              schema: {type: string, format: binary}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}

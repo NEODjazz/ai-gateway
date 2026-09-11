@@ -658,7 +658,7 @@ type bedrockAnthropicInvokeRequest struct {
 }
 
 func (b Bedrock) invokeAnthropic(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
-	if err := validateBedrockInvokeParameters(request); err != nil {
+	if err := b.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 	native := anthropicChatRequest(request, false)
@@ -707,7 +707,7 @@ func (b Bedrock) invokeAnthropic(ctx context.Context, request openai.ChatComplet
 		return openai.ChatCompletionResponse{}, errors.New("invalid Bedrock InvokeModel response")
 	}
 	switch decoded.StopReason {
-	case "end_turn", "max_tokens", "stop_sequence", "tool_use":
+	case "end_turn", "max_tokens", "stop_sequence", "tool_use", "refusal":
 	default:
 		return openai.ChatCompletionResponse{}, errors.New("invalid Bedrock InvokeModel stop reason")
 	}

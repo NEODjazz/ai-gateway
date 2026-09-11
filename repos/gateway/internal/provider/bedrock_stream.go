@@ -48,6 +48,9 @@ func (b Bedrock) StreamChatCompletions(ctx context.Context, request openai.ChatC
 	if !request.Stream {
 		return openai.ChatCompletionResponse{}, bedrockInvalid("stream")
 	}
+	if request.BedrockInvoke {
+		return b.streamInvokeAnthropic(ctx, request, write)
+	}
 	body, err := bedrockChatRequest(request)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -105,6 +108,225 @@ func (b Bedrock) StreamChatCompletions(ctx context.Context, request openai.ChatC
 		return openai.ChatCompletionResponse{}, err
 	}
 	return result, nil
+}
+
+func (b Bedrock) streamInvokeAnthropic(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+	if err := b.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	native := anthropicChatRequest(request, false)
+	payload, err := json.Marshal(bedrockAnthropicInvokeRequest{
+		AnthropicVersion: "bedrock-2023-05-31", StopSequences: native.StopSequences,
+		System: native.System, Messages: native.Messages, Tools: native.Tools, ToolChoice: native.ToolChoice,
+		MaxTokens: native.MaxTokens, Temperature: native.Temperature, TopP: native.TopP,
+	})
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	endpoint := b.baseURL + "/model/" + url.PathEscape(request.Model) + "/invoke-with-response-stream"
+	streamContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	httpRequest, err := http.NewRequestWithContext(streamContext, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	httpRequest.Header.Set("X-Amzn-Bedrock-Accept", "application/json")
+	if err := b.authorize(streamContext, httpRequest, payload); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	response, err := b.client.Do(httpRequest)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return openai.ChatCompletionResponse{}, responseStatusError("bedrock", response)
+	}
+	if contentType := response.Header.Get("Content-Type"); !strings.HasPrefix(strings.ToLower(contentType), "application/vnd.amazon.eventstream") {
+		return openai.ChatCompletionResponse{}, errors.New("Bedrock InvokeModel stream has an invalid content type")
+	}
+	reader, writer := io.Pipe()
+	parserResult := make(chan error, 1)
+	go func() {
+		state := bedrockInvokeStreamEnvelopeState{}
+		err := readBedrockEventStream(response.Body, state.handle(writer))
+		if errors.Is(err, io.EOF) {
+			err = nil
+		}
+		if err == nil && !state.complete() {
+			err = errors.New("Bedrock InvokeModel stream ended before completion")
+		}
+		_ = writer.CloseWithError(err)
+		parserResult <- err
+	}()
+	result, streamErr := streamAnthropicChat(reader, request.Model, false, nil, nil, write)
+	_ = reader.Close()
+	cancel()
+	_ = response.Body.Close()
+	parserErr := <-parserResult
+	if streamErr != nil {
+		return openai.ChatCompletionResponse{}, streamErr
+	}
+	if parserErr != nil {
+		return openai.ChatCompletionResponse{}, parserErr
+	}
+	if result.ID == "" || result.Usage.TotalTokens != result.Usage.PromptTokens+result.Usage.CompletionTokens {
+		return openai.ChatCompletionResponse{}, errors.New("invalid Bedrock InvokeModel stream result")
+	}
+	return result, nil
+}
+
+type bedrockInvokeStreamEnvelopeState struct {
+	started, delta, stopped bool
+	blocks                  map[int]string
+}
+
+func (s *bedrockInvokeStreamEnvelopeState) complete() bool {
+	return s.started && s.delta && s.stopped
+}
+
+func (s *bedrockInvokeStreamEnvelopeState) handle(destination io.Writer) func(map[string]string, []byte) error {
+	return func(headers map[string]string, payload []byte) error {
+		if headers[":message-type"] == "exception" {
+			return bedrockInvokeStreamException(headers[":exception-type"])
+		}
+		if headers[":message-type"] != "event" || headers[":event-type"] != "chunk" || headers[":content-type"] != "application/json" {
+			return errors.New("invalid Bedrock InvokeModel event stream headers")
+		}
+		var envelope struct {
+			Bytes []byte `json:"bytes"`
+		}
+		if json.Unmarshal(payload, &envelope) != nil || len(envelope.Bytes) == 0 || len(envelope.Bytes) > maxBedrockEventBytes {
+			return errors.New("invalid Bedrock InvokeModel stream chunk")
+		}
+		var event struct {
+			Type    string          `json:"type"`
+			Index   *int            `json:"index"`
+			Message json.RawMessage `json:"message"`
+			Delta   json.RawMessage `json:"delta"`
+			Usage   json.RawMessage `json:"usage"`
+			Content json.RawMessage `json:"content_block"`
+		}
+		if json.Unmarshal(envelope.Bytes, &event) != nil {
+			return errors.New("invalid Bedrock InvokeModel stream event")
+		}
+		switch event.Type {
+		case "message_start":
+			if s.started || s.delta || s.stopped || len(event.Message) == 0 {
+				return errors.New("invalid Bedrock InvokeModel message start")
+			}
+			var message struct {
+				Usage json.RawMessage `json:"usage"`
+			}
+			if json.Unmarshal(event.Message, &message) != nil || len(message.Usage) == 0 || string(message.Usage) == "null" {
+				return errors.New("Bedrock InvokeModel message start omitted usage")
+			}
+			s.started = true
+			s.blocks = make(map[int]string)
+		case "content_block_start":
+			if !s.started || s.delta || s.stopped {
+				return errors.New("Bedrock InvokeModel content event is out of order")
+			}
+			if event.Index == nil || *event.Index < 0 || *event.Index >= 128 || s.blocks[*event.Index] != "" || len(event.Content) == 0 {
+				return errors.New("invalid Bedrock InvokeModel content block start")
+			}
+			var block anthropicContent
+			if json.Unmarshal(event.Content, &block) != nil {
+				return errors.New("invalid Bedrock InvokeModel content block start")
+			}
+			switch block.Type {
+			case "text", "thinking", "redacted_thinking":
+			case "tool_use":
+				if block.ID == "" || block.Name == "" || block.Input == nil {
+					return errors.New("invalid Bedrock InvokeModel tool block")
+				}
+			default:
+				return errors.New("unsupported Bedrock InvokeModel content block")
+			}
+			s.blocks[*event.Index] = block.Type
+		case "content_block_delta":
+			if !s.started || s.delta || s.stopped || event.Index == nil || s.blocks[*event.Index] == "" || len(event.Delta) == 0 {
+				return errors.New("invalid Bedrock InvokeModel content block delta")
+			}
+			var contentDelta struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(event.Delta, &contentDelta) != nil {
+				return errors.New("invalid Bedrock InvokeModel content block delta")
+			}
+			valid := false
+			switch s.blocks[*event.Index] {
+			case "text":
+				valid = contentDelta.Type == "text_delta" || contentDelta.Type == "citations_delta"
+			case "tool_use":
+				valid = contentDelta.Type == "input_json_delta"
+			case "thinking":
+				valid = contentDelta.Type == "thinking_delta" || contentDelta.Type == "signature_delta"
+			}
+			if !valid {
+				return errors.New("incompatible Bedrock InvokeModel content block delta")
+			}
+		case "content_block_stop":
+			if !s.started || s.delta || s.stopped || event.Index == nil || s.blocks[*event.Index] == "" {
+				return errors.New("invalid Bedrock InvokeModel content block stop")
+			}
+			delete(s.blocks, *event.Index)
+		case "message_delta":
+			if !s.started || s.delta || s.stopped || len(s.blocks) != 0 || len(event.Delta) == 0 || len(event.Usage) == 0 || string(event.Usage) == "null" {
+				return errors.New("invalid Bedrock InvokeModel message delta")
+			}
+			var delta struct {
+				StopReason   string  `json:"stop_reason"`
+				StopSequence *string `json:"stop_sequence"`
+			}
+			if json.Unmarshal(event.Delta, &delta) != nil {
+				return errors.New("invalid Bedrock InvokeModel message delta")
+			}
+			switch delta.StopReason {
+			case "end_turn", "max_tokens", "tool_use", "refusal":
+			case "stop_sequence":
+				if delta.StopSequence == nil {
+					return errors.New("Bedrock InvokeModel omitted matched stop sequence")
+				}
+			default:
+				return errors.New("invalid Bedrock InvokeModel stop reason")
+			}
+			s.delta = true
+		case "message_stop":
+			if !s.started || !s.delta || s.stopped {
+				return errors.New("invalid Bedrock InvokeModel message stop")
+			}
+			s.stopped = true
+		default:
+			return errors.New("unsupported Bedrock InvokeModel stream event")
+		}
+		if _, err := fmt.Fprintf(destination, "event: %s\ndata: %s\n\n", event.Type, envelope.Bytes); err != nil {
+			return err
+		}
+		if event.Type == "message_stop" {
+			return io.EOF
+		}
+		return nil
+	}
+}
+
+func bedrockInvokeStreamException(exceptionType string) error {
+	class, status := FailureUnavailable, http.StatusServiceUnavailable
+	switch exceptionType {
+	case "validationException":
+		class, status = FailureClientRequest, http.StatusBadRequest
+	case "throttlingException":
+		class, status = FailureRateLimit, http.StatusTooManyRequests
+	case "modelStreamErrorException":
+		status = http.StatusFailedDependency
+	case "modelTimeoutException":
+		status = http.StatusRequestTimeout
+	case "internalServerException", "serviceUnavailableException":
+	default:
+		return errors.New("unknown Bedrock InvokeModel stream exception")
+	}
+	return &Error{Class: class, Provider: "bedrock", StatusCode: status, UpstreamCode: exceptionType, Err: fmt.Errorf("Bedrock InvokeModel stream exception: %s", exceptionType)}
 }
 
 func (s *bedrockStreamState) handle(write ChatCompletionStreamWriter) func(map[string]string, []byte) error {

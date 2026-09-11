@@ -1058,6 +1058,8 @@ func anthropicFinishReason(reason string) string {
 		return "length"
 	case "tool_use":
 		return "tool_calls"
+	case "refusal":
+		return "content_filter"
 	default:
 		return "stop"
 	}

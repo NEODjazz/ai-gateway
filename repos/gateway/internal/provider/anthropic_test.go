@@ -13,6 +13,12 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
+func TestAnthropicRefusalMapsToContentFilter(t *testing.T) {
+	if got := anthropicFinishReason("refusal"); got != "content_filter" {
+		t.Fatalf("finish reason=%q", got)
+	}
+}
+
 func TestAnthropicMapsMaxCompletionTokensToMaxTokens(t *testing.T) {
 	limit := 321
 	request := anthropicChatRequest(openai.ChatCompletionRequest{Model: "claude", MaxCompletionTokens: &limit}, false)
