@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -315,6 +316,117 @@ func TestA2ASendMessageAcceptsBoundedInlineImages(t *testing.T) {
 	decoded, err := decodeA2ATask(stored.Payload)
 	if err != nil || decoded.History[0].Parts[1].Raw == nil || *decoded.History[0].Parts[1].Raw != "iVBORw0KGgo=" {
 		t.Fatalf("stored task=%+v err=%v", decoded, err)
+	}
+}
+
+type a2aHTTPDoerFunc func(*http.Request) (*http.Response, error)
+
+func (f a2aHTTPDoerFunc) Do(request *http.Request) (*http.Response, error) { return f(request) }
+
+func a2aStringPointer(value string) *string { return &value }
+
+func TestA2ASendMessageFetchesAuthorizedRemoteImageIntoPolicyPath(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	registry := NewAgentRegistry()
+	if _, err := registry.PutToolPolicy("safe", ToolPolicy{Name: "Safe", AllowedTools: []string{"weather"}, MaxToolCalls: 2, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.PutAgentProfile("research", AgentProfile{Name: "Research", Description: "Answers questions", Model: "test-model", ToolPolicyID: "safe", MaxIterations: 3, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	llm := &a2aTestProvider{}
+	billing := &lifecycleBillingModule{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"test-model"}}, billing}), llm).
+		WithAgentRegistry(registry).
+		WithA2ATaskStore(store, A2ATaskRuntimeConfig{OwnerQuota: 10, TTL: time.Hour})
+	fetches := 0
+	handler.a2aHTTPClient = a2aHTTPDoerFunc(func(request *http.Request) (*http.Response, error) {
+		fetches++
+		if request.URL.String() != "https://media.example/image.png" || request.Header.Get("Authorization") != "" || !strings.Contains(request.Header.Get("Accept"), "image/png") {
+			t.Fatalf("unsafe remote request: url=%s headers=%v", request.URL, request.Header)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"image/png"}},
+			Body:       io.NopCloser(strings.NewReader("\x89PNG\r\n\x1a\n")),
+			Request:    request,
+		}, nil
+	})
+	router := Routes(handler)
+	body := `{"jsonrpc":"2.0","id":"rpc-remote","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"client-remote","role":"ROLE_USER","parts":[{"url":"https://media.example/image.png","mediaType":"image/png","filename":"image.png"}]}}}`
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || fetches != 1 || billing.calls != 1 {
+		t.Fatalf("status=%d fetches=%d billing=%d body=%s", response.Code, fetches, billing.calls, response.Body.String())
+	}
+	input := llm.request.ResponseRequest.Input.([]any)
+	image := input[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if image["image_url"] != "data:image/png;base64,iVBORw0KGgo=" {
+		t.Fatalf("remote image did not enter shared policy path: %#v", input)
+	}
+	var envelope struct {
+		Result struct {
+			Task a2aTask `json:"task"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeA2ATask(store.tasks[envelope.Result.Task.ID].Payload)
+	if err != nil || decoded.History[0].Parts[0].URL != nil || decoded.History[0].Parts[0].Raw == nil {
+		t.Fatalf("remote URL was not replaced before persistence: task=%+v err=%v", decoded, err)
+	}
+}
+
+func TestA2ASendMessageRejectsRemoteImageBeforeNetworkWithoutAuthorization(t *testing.T) {
+	registry := NewAgentRegistry()
+	if _, err := registry.PutToolPolicy("safe", ToolPolicy{Name: "Safe", AllowedTools: []string{"weather"}, MaxToolCalls: 2, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.PutAgentProfile("research", AgentProfile{Name: "Research", Description: "Answers questions", Model: "test-model", ToolPolicyID: "safe", MaxIterations: 3, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{&a2aCredentialAuth{}}), &a2aTestProvider{}).WithAgentRegistry(registry)
+	handler.a2aHTTPClient = a2aHTTPDoerFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("remote URL fetched before authorization")
+		return nil, nil
+	})
+	router := Routes(handler)
+	body := `{"jsonrpc":"2.0","id":"rpc-remote","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"client-remote","role":"ROLE_USER","parts":[{"url":"https://media.example/image.png","mediaType":"image/png"}]}}}`
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+	request.Header.Set("A2A-Version", "1.0")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestA2ARemoteImageValidationAndLimits(t *testing.T) {
+	invalid := []a2aPart{
+		{URL: a2aStringPointer("http://media.example/image.png"), MediaType: "image/png"},
+		{URL: a2aStringPointer("https://user@media.example/image.png"), MediaType: "image/png"},
+		{URL: a2aStringPointer("https://media.example/image.svg"), MediaType: "image/svg+xml"},
+		{URL: a2aStringPointer("https://media.example/image.png"), MediaType: "image/png", Filename: "../image.png"},
+	}
+	for _, part := range invalid {
+		if _, err := countA2ARemoteParts([]a2aPart{part}); err == nil {
+			t.Errorf("accepted invalid remote part: %+v", part)
+		}
+	}
+	parts := make([]a2aPart, openai.MaxImageAttachments+1)
+	for index := range parts {
+		parts[index] = a2aPart{URL: a2aStringPointer("https://media.example/image.png"), MediaType: "image/png"}
+	}
+	if _, err := countA2ARemoteParts(parts); err == nil {
+		t.Fatal("accepted too many remote images")
+	}
+	response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"image/jpeg"}}, Body: io.NopCloser(strings.NewReader("\xff\xd8\xff"))}
+	if _, _, err := readA2ARemoteImage(response, "image/png", openai.MaxTotalImageBytes); err == nil {
+		t.Fatal("accepted mismatched response content type")
 	}
 }
 

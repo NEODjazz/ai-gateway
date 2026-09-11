@@ -277,6 +277,11 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		h.writeA2AError(w, request.ID, http.StatusServiceUnavailable, -32603, "Task storage is unavailable")
 		return
 	}
+	remoteParts, err := countA2ARemoteParts(request.Params.Message.Parts)
+	if err != nil {
+		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32005, "Content type is not supported")
+		return
+	}
 	if len(request.Params.Configuration.PushNotificationConfig) != 0 && string(request.Params.Configuration.PushNotificationConfig) != "null" {
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32003, "Push notifications are not supported")
 		return
@@ -289,15 +294,19 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 	}
 	var stored a2astate.Task
 	var existing a2aTask
+	var identity modules.RequestContext
+	identityReady := false
 	if continuation {
 		if h.a2aTasks == nil || h.a2aTaskConfig.OwnerQuota < 1 || h.a2aTaskConfig.TTL <= 0 {
 			h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Task continuation is not supported")
 			return
 		}
-		identity, ok := h.authenticateA2AContinuation(w, r, request.ID)
+		var ok bool
+		identity, ok = h.authenticateA2AContinuation(w, r, request.ID)
 		if !ok {
 			return
 		}
+		identityReady = true
 		var err error
 		stored, err = h.a2aTasks.GetA2ATask(r.Context(), fileOwnerKey(identity), profile.ID, request.Params.Message.TaskID)
 		if err != nil {
@@ -324,6 +333,26 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 			return
 		}
 		request.Params.Message.ContextID = existing.ContextID
+	}
+	if remoteParts > 0 {
+		if !identityReady {
+			var ok bool
+			identity, ok = h.authenticateA2AContinuation(w, r, request.ID)
+			if !ok {
+				return
+			}
+			if !h.authorizeA2ATaskModel(w, request.ID, identity, profile.Model) {
+				return
+			}
+		}
+		if err := h.resolveA2ARemoteParts(r.Context(), request.Params.Message.Parts); err != nil {
+			status, message := http.StatusBadRequest, "Remote content is invalid"
+			if errors.Is(err, errA2ARemoteUnavailable) {
+				status, message = http.StatusBadGateway, "Remote content is unavailable"
+			}
+			h.writeA2AError(w, request.ID, status, -32005, message)
+			return
+		}
 	}
 	content := make([]any, 0, len(request.Params.Message.Parts))
 	for _, part := range request.Params.Message.Parts {
@@ -541,7 +570,7 @@ func a2aInputPart(part a2aPart) (map[string]any, bool) {
 		}
 		return map[string]any{"type": "input_text", "text": canonical.String()}, true
 	}
-	if part.Text != nil || part.Raw == nil || part.URL != nil || len(part.Data) != 0 || part.Filename != "" {
+	if part.Text != nil || part.Raw == nil || part.URL != nil || len(part.Data) != 0 || !validA2AFilename(part.Filename) {
 		return nil, false
 	}
 	dataURL := "data:" + part.MediaType + ";base64," + *part.Raw

@@ -47,9 +47,10 @@ shared Responses authentication, model authorization, quota, guardrail,
 routing and billing path. With durable task and background-response storage,
 `returnImmediately=true` returns an owner-scoped submitted or working task;
 `GetTask` reconciles completion and `CancelTask` cancels pending execution.
-Text, structured JSON data and bounded inline JPEG, PNG, GIF and WebP inputs reuse the Responses
-media validation, scan, token reserve and billing path. Stream resubscription,
-push notifications and other media parts fail with explicit protocol errors.
+Text, structured JSON data, bounded inline images and HTTPS image references reuse the Responses
+media validation, scan, token reserve and billing path. Remote images are fetched only after
+credential and model authorization, through the public-network transport, and stored as validated
+inline bytes. Push notifications and other media parts fail with explicit protocol errors.
 `GetExtendedAgentCard` returns the current card only after bearer
 authentication, model authorization and RPM admission.
 With durable task storage, `SendStreamingMessage` emits an ordered SSE

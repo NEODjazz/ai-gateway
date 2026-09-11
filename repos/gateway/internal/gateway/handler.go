@@ -20,6 +20,7 @@ import (
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
+	"ai-gateway-gateway/internal/publichttp"
 	"ai-gateway-gateway/internal/skillstate"
 	"ai-gateway-gateway/internal/vectorstate"
 )
@@ -42,6 +43,7 @@ type Handler struct {
 	a2aTasks          a2astate.Store
 	a2aTaskConfig     A2ATaskRuntimeConfig
 	a2aSubscriptions  chan struct{}
+	a2aHTTPClient     httpDoer
 	mcp               *MCPRegistry
 	mcpRuntime        MCPRuntimeFactory
 	mcpCalls          mcpstate.Store
@@ -100,7 +102,7 @@ func NewHandlerWithMetrics(pipeline modules.Pipeline, llmProvider provider.Provi
 	if metrics == nil {
 		metrics = NewMetrics()
 	}
-	return Handler{pipeline: pipeline, provider: llmProvider, rateLimits: rateLimits, metrics: metrics, ready: ready, mcpRuntime: func(endpoint string) (MCPRuntimeClient, error) { return mcpclient.New(endpoint) }}
+	return Handler{pipeline: pipeline, provider: llmProvider, rateLimits: rateLimits, metrics: metrics, ready: ready, a2aHTTPClient: publichttp.NewClient(15 * time.Second), mcpRuntime: func(endpoint string) (MCPRuntimeClient, error) { return mcpclient.New(endpoint) }}
 }
 
 func (h Handler) Health(w http.ResponseWriter, _ *http.Request) {

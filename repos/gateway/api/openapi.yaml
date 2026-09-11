@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.226
+  version: 0.1.227
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -43,7 +43,7 @@ paths:
       operationId: getA2AAgentCard
       tags: [A2A]
       summary: Discover one enabled executable agent profile
-      description: Returns an A2A 1.0 Agent Card for direct discovery. The card advertises text, structured JSON data and bounded inline image inputs, text output, bearer authentication, authenticated extended-card retrieval and streaming when durable task storage is configured; push notifications are not advertised.
+      description: Returns an A2A 1.0 Agent Card for direct discovery. The card advertises text, structured JSON data and bounded inline or HTTPS image inputs, text output, bearer authentication, authenticated extended-card retrieval and streaming when durable task storage is configured; push notifications are not advertised.
       security: []
       parameters:
         - {name: agent, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
@@ -59,7 +59,7 @@ paths:
       operationId: callA2AAgent
       tags: [A2A]
       summary: Execute A2A messages and task lifecycle operations
-      description: Implements A2A 1.0 SendMessage, SendStreamingMessage, SubscribeToTask, GetTask, ListTasks, CancelTask and authenticated GetExtendedAgentCard. New messages pass through the same authentication, model authorization, rate limit, guardrail, routing and billing pipeline as Responses. Text, structured JSON data and bounded inline JPEG, PNG, GIF and WebP parts are accepted. When durable task storage is configured, SendMessage creates or continues an owner-scoped task using optimistic concurrency. Setting returnImmediately=true uses durable background Responses execution; GetTask reconciles pending execution and CancelTask cancels it. Streaming methods emit ordered task, artifact-update and terminal-status SSE lifecycles. Subscriptions have bounded concurrency, duration and polling frequency. Remote URL, other media parts and push notifications return explicit protocol errors.
+      description: Implements A2A 1.0 SendMessage, SendStreamingMessage, SubscribeToTask, GetTask, ListTasks, CancelTask and authenticated GetExtendedAgentCard. New messages pass through the same authentication, model authorization, rate limit, guardrail, routing and billing pipeline as Responses. Text, structured JSON data and bounded inline or HTTPS JPEG, PNG, GIF and WebP parts are accepted. HTTPS images are retrieved only after credential and model authorization, reject redirects and non-public destinations, and are persisted as validated inline bytes. When durable task storage is configured, SendMessage creates or continues an owner-scoped task using optimistic concurrency. Setting returnImmediately=true uses durable background Responses execution; GetTask reconciles pending execution and CancelTask cancels it. Streaming methods emit ordered task, artifact-update and terminal-status SSE lifecycles. Subscriptions have bounded concurrency, duration and polling frequency. Other media parts and push notifications return explicit protocol errors.
       security: [{bearerAuth: []}]
       parameters:
         - {name: agent, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
@@ -3447,11 +3447,14 @@ components:
     A2APart:
       type: object
       additionalProperties: false
-      description: A2A 1.0 member-discriminated part. Supply text, or base64 raw bytes with one advertised image mediaType.
+      description: A2A 1.0 member-discriminated part. Supply text, structured JSON data, or inline/HTTPS image bytes with one advertised image mediaType. Remote images are converted to validated inline bytes before durable storage.
       properties:
         text: {type: string}
         raw: {type: string, contentEncoding: base64}
-        mediaType: {type: string, enum: [text/plain, image/jpeg, image/png, image/gif, image/webp]}
+        url: {type: string, format: uri, maxLength: 2048, pattern: '^https://', description: Public HTTPS image URL without credentials or fragment}
+        data: {description: Structured JSON value accepted with application/json mediaType}
+        mediaType: {type: string, enum: [text/plain, application/json, image/jpeg, image/png, image/gif, image/webp]}
+        filename: {type: string, maxLength: 256, pattern: '^[^/\\\x00]+$'}
     A2AMessage:
       type: object
       additionalProperties: false
