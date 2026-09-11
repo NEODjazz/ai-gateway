@@ -50,7 +50,7 @@ func (r Router) OpenRealtime(ctx context.Context, identity modules.RequestContex
 			continue
 		}
 		r.health.success(ctx, endpoint)
-		return &routedRealtimeConnection{
+		routed := &routedRealtimeConnection{
 			RealtimeConnection: connection,
 			reserve: func(reserveCtx context.Context, tokens int) error {
 				return r.reserveEndpointQuota(reserveCtx, endpoint, tokens)
@@ -62,7 +62,11 @@ func (r Router) OpenRealtime(ctx context.Context, identity modules.RequestContex
 					r.health.failure(context.WithoutCancel(ctx), endpoint, sessionErr)
 				}
 			},
-		}, attempt, nil
+		}
+		if attempt.Metadata["provider.modules.dlp.output_enabled"] == "true" {
+			return newGuardedRealtimeConnection(providerCtx, routed, r.modules, attempt), attempt, nil
+		}
+		return routed, attempt, nil
 	}
 	if lastErr != nil {
 		return nil, modules.RequestContext{}, lastErr

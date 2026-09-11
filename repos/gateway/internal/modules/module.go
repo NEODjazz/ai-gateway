@@ -217,6 +217,26 @@ func (p Pipeline) RunPostResponse(ctx context.Context, req *RequestContext) erro
 	return errors.Join(terminal...)
 }
 
+// RunNamedPostResponse executes one post-response module. Streaming transports
+// use it to apply an output policy before buffered provider bytes are released
+// without repeating unrelated lifecycle modules such as billing.
+func (p Pipeline) RunNamedPostResponse(ctx context.Context, req *RequestContext, name string) error {
+	for _, module := range p.modules {
+		if module.Name() != name {
+			continue
+		}
+		postModule, ok := module.(PostResponseModule)
+		if !ok || !postModule.PostResponseEnabled() {
+			return fmt.Errorf("%s post-response module is unavailable: %w", name, ErrGuardrailUnavailable)
+		}
+		if err := p.run(ctx, req, module, "post", postModule.HandlePostResponse); err != nil {
+			return fmt.Errorf("%s post-response module failed: %w", name, err)
+		}
+		return nil
+	}
+	return fmt.Errorf("%s post-response module is unavailable: %w", name, ErrGuardrailUnavailable)
+}
+
 func (p Pipeline) RunFailure(ctx context.Context, req *RequestContext, cause error) {
 	for _, module := range p.modules {
 		failureModule, ok := module.(FailureModule)

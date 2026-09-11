@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -14,6 +15,42 @@ import (
 	"ai-gateway-gateway/internal/modules"
 	"golang.org/x/net/websocket"
 )
+
+type realtimeGuardrailModule struct {
+	mu       sync.Mutex
+	outputs  []string
+	rejected bool
+}
+
+func (*realtimeGuardrailModule) Name() string                                          { return "dlp" }
+func (*realtimeGuardrailModule) Required() bool                                        { return true }
+func (*realtimeGuardrailModule) Handle(context.Context, *modules.RequestContext) error { return nil }
+func (*realtimeGuardrailModule) PostResponseEnabled() bool                             { return true }
+func (m *realtimeGuardrailModule) HandlePostResponse(_ context.Context, request *modules.RequestContext) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.outputs = append(m.outputs, request.ResponsesResponse.OutputText)
+	if m.rejected {
+		return modules.ErrContentRejected
+	}
+	return nil
+}
+
+type scriptedRealtimeConnection struct {
+	events [][]byte
+	index  int
+}
+
+func (*scriptedRealtimeConnection) Send([]byte) error { return nil }
+func (c *scriptedRealtimeConnection) Receive() ([]byte, error) {
+	if c.index >= len(c.events) {
+		return nil, errors.New("scripted realtime events exhausted")
+	}
+	payload := c.events[c.index]
+	c.index++
+	return payload, nil
+}
+func (*scriptedRealtimeConnection) Close() error { return nil }
 
 func TestOpenAICompatibleRealtimeHandshakeAndRoundTrip(t *testing.T) {
 	serverErr := make(chan error, 1)
@@ -67,6 +104,60 @@ func TestOpenAICompatibleRealtimeHandshakeAndRoundTrip(t *testing.T) {
 	}
 	if err := <-serverErr; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRealtimeOutputGuardrailBuffersCompleteResponseBeforeRelease(t *testing.T) {
+	events := [][]byte{
+		[]byte(`{"type":"response.created","response":{"id":"resp_1"}}`),
+		[]byte(`{"type":"response.output_text.delta","response_id":"resp_1","delta":"secret"}`),
+		[]byte(`{"type":"response.done","response":{"id":"resp_1","object":"realtime.response","output_text":"secret"}}`),
+	}
+	for _, test := range []struct {
+		name     string
+		rejected bool
+	}{
+		{name: "accepted"},
+		{name: "rejected", rejected: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			module := &realtimeGuardrailModule{rejected: test.rejected}
+			scripted := &scriptedRealtimeConnection{events: events}
+			connection := newGuardedRealtimeConnection(t.Context(), scripted, modules.NewPipeline([]modules.Module{module}), modules.RequestContext{RequestID: "session", Metadata: map[string]string{"provider.modules.dlp.output_enabled": "true"}})
+			first, err := connection.Receive()
+			if test.rejected {
+				if !errors.Is(err, modules.ErrContentRejected) || first != nil || scripted.index != len(events) {
+					t.Fatalf("rejected output leaked before complete scan: payload=%s consumed=%d err=%v", first, scripted.index, err)
+				}
+				return
+			}
+			if err != nil || string(first) != string(events[0]) {
+				t.Fatalf("first buffered event=%s err=%v", first, err)
+			}
+			for index := 1; index < len(events); index++ {
+				payload, err := connection.Receive()
+				if err != nil || string(payload) != string(events[index]) {
+					t.Fatalf("buffered event %d=%s err=%v", index, payload, err)
+				}
+			}
+			module.mu.Lock()
+			defer module.mu.Unlock()
+			if len(module.outputs) != 1 || module.outputs[0] != "secret" {
+				t.Fatalf("scanned outputs=%v", module.outputs)
+			}
+		})
+	}
+}
+
+func TestRealtimeOutputGuardrailBoundsBufferedEvents(t *testing.T) {
+	chunk := []byte(`{"type":"response.output_text.delta","delta":"` + strings.Repeat("x", 3<<20) + `"}`)
+	scripted := &scriptedRealtimeConnection{events: [][]byte{
+		[]byte(`{"type":"response.created","response":{"id":"resp_1"}}`), chunk, chunk, chunk,
+	}}
+	module := &realtimeGuardrailModule{}
+	connection := newGuardedRealtimeConnection(t.Context(), scripted, modules.NewPipeline([]modules.Module{module}), modules.RequestContext{Metadata: map[string]string{"provider.modules.dlp.output_enabled": "true"}})
+	if payload, err := connection.Receive(); !errors.Is(err, modules.ErrGuardrailUnavailable) || payload != nil {
+		t.Fatalf("oversized guarded output payload=%d err=%v", len(payload), err)
 	}
 }
 
