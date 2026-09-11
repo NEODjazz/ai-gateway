@@ -49,6 +49,8 @@ type AssistantConfig struct {
 	OwnerQuota         int
 	ThreadOwnerQuota   int
 	MessageThreadQuota int
+	RunOwnerQuota      int
+	RunRetention       time.Duration
 }
 
 type A2ATaskConfig struct {
@@ -196,6 +198,8 @@ func Load() Config {
 	assistantOwnerQuota := envInt("ASSISTANT_OWNER_QUOTA", 1000)
 	assistantThreadOwnerQuota := envInt("ASSISTANT_THREAD_OWNER_QUOTA", 10000)
 	assistantMessageThreadQuota := envInt("ASSISTANT_MESSAGE_THREAD_QUOTA", 100000)
+	assistantRunOwnerQuota := envInt("ASSISTANT_RUN_OWNER_QUOTA", 10000)
+	assistantRunRetentionSeconds := envInt("ASSISTANT_RUN_RETENTION_SECONDS", 2_592_000)
 	a2aTaskOwnerQuota := envInt("A2A_TASK_OWNER_QUOTA", 1000)
 	a2aTaskTTLSeconds := envInt("A2A_TASK_TTL_SECONDS", 2_592_000)
 	a2aSubscriptionLimit := envInt("A2A_SUBSCRIPTION_LIMIT", 256)
@@ -245,6 +249,12 @@ func Load() Config {
 	}
 	if assistantMessageThreadQuota < 1 || assistantMessageThreadQuota > 1000000 {
 		assistantErr = errors.Join(assistantErr, errors.New("assistant message thread quota must be between 1 and 1000000"))
+	}
+	if assistantRunOwnerQuota < 1 || assistantRunOwnerQuota > 100000 {
+		assistantErr = errors.Join(assistantErr, errors.New("assistant run owner quota must be between 1 and 100000"))
+	}
+	if assistantRunRetentionSeconds < 60 || assistantRunRetentionSeconds > 31_536_000 {
+		assistantErr = errors.Join(assistantErr, errors.New("assistant run retention must be between 60 and 31536000 seconds"))
 	}
 	if a2aTaskOwnerQuota < 1 || a2aTaskOwnerQuota > 100000 {
 		a2aTaskErr = errors.New("A2A task owner quota must be between 1 and 100000")
@@ -318,7 +328,11 @@ func Load() Config {
 		},
 		Files:        FileConfig{MaxBytes: fileMaxBytes, OwnerQuotaBytes: fileOwnerQuotaBytes},
 		VectorStores: VectorStoreConfig{OwnerQuota: vectorStoreOwnerQuota, FileQuota: vectorStoreFileQuota},
-		Assistants:   AssistantConfig{OwnerQuota: assistantOwnerQuota, ThreadOwnerQuota: assistantThreadOwnerQuota, MessageThreadQuota: assistantMessageThreadQuota},
+		Assistants: AssistantConfig{
+			OwnerQuota: assistantOwnerQuota, ThreadOwnerQuota: assistantThreadOwnerQuota,
+			MessageThreadQuota: assistantMessageThreadQuota, RunOwnerQuota: assistantRunOwnerQuota,
+			RunRetention: time.Duration(assistantRunRetentionSeconds) * time.Second,
+		},
 		A2ATasks: A2ATaskConfig{
 			OwnerQuota: a2aTaskOwnerQuota, TTL: time.Duration(a2aTaskTTLSeconds) * time.Second,
 			SubscriptionLimit: a2aSubscriptionLimit, SubscriptionDuration: time.Duration(a2aSubscriptionDurationSeconds) * time.Second,

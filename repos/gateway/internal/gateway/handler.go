@@ -49,6 +49,7 @@ type Handler struct {
 	a2aTaskConfig     A2ATaskRuntimeConfig
 	assistants        assistantstate.Store
 	assistantThreads  assistantstate.ThreadStore
+	assistantRuns     assistantstate.RunStore
 	assistantConfig   AssistantRuntimeConfig
 	a2aSubscriptions  chan struct{}
 	a2aHTTPClient     httpDoer

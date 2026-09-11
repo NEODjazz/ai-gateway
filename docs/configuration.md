@@ -167,6 +167,8 @@ secret. Это не клиентские Bearer-токены; auth management и
 | `ASSISTANT_OWNER_QUOTA` | `1000` | Максимальное число assistant definitions для пары credential/user; допустимо от 1 до 100000 |
 | `ASSISTANT_THREAD_OWNER_QUOTA` | `10000` | Максимальное число assistant threads для пары credential/user; допустимо от 1 до 1000000 |
 | `ASSISTANT_MESSAGE_THREAD_QUOTA` | `100000` | Максимальное число сообщений в одном assistant thread; допустимо от 1 до 1000000 |
+| `ASSISTANT_RUN_OWNER_QUOTA` | `10000` | Максимальное число сохраненных assistant runs для пары credential/user; допустимо от 1 до 100000 |
+| `ASSISTANT_RUN_RETENTION_SECONDS` | `2592000` | Retention assistant runs; допустимо от 60 секунд до 365 дней, истекшие записи удаляются при создании следующего run |
 
 Files API возвращает `503`, если `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` не
 настроен. Квота сериализуется отдельно для каждого owner key и поэтому не

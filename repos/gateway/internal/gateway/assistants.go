@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"ai-gateway-gateway/internal/assistantstate"
@@ -21,6 +22,8 @@ type AssistantRuntimeConfig struct {
 	OwnerQuota         int
 	ThreadOwnerQuota   int
 	MessageThreadQuota int
+	RunOwnerQuota      int
+	RunRetention       time.Duration
 }
 
 type assistantSnapshot struct {
@@ -113,6 +116,9 @@ func (h Handler) WithAssistantStore(store assistantstate.Store, config Assistant
 	h.assistants = store
 	if threads, ok := store.(assistantstate.ThreadStore); ok {
 		h.assistantThreads = threads
+	}
+	if runs, ok := store.(assistantstate.RunStore); ok {
+		h.assistantRuns = runs
 	}
 	h.assistantConfig = config
 	return h

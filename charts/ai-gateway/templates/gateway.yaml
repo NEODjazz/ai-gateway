@@ -94,6 +94,10 @@ spec:
               value: {{ .Values.gateway.assistants.threadOwnerQuota | quote }}
             - name: ASSISTANT_MESSAGE_THREAD_QUOTA
               value: {{ .Values.gateway.assistants.messageThreadQuota | quote }}
+            - name: ASSISTANT_RUN_OWNER_QUOTA
+              value: {{ .Values.gateway.assistants.runOwnerQuota | quote }}
+            - name: ASSISTANT_RUN_RETENTION_SECONDS
+              value: {{ .Values.gateway.assistants.runRetentionSeconds | quote }}
             - name: A2A_TASK_OWNER_QUOTA
               value: {{ .Values.gateway.a2aTasks.ownerQuota | quote }}
             - name: A2A_TASK_TTL_SECONDS

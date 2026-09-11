@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.245
+  version: 0.1.246
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -227,6 +227,63 @@ paths:
           description: Message deletion result
           content: {application/json: {schema: {$ref: '#/components/schemas/AssistantMessageDeletion'}}}
         '404': {description: Thread message is absent or belongs to another owner}
+  /v1/threads/{thread_id}/runs:
+    parameters:
+      - {name: thread_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+    post:
+      operationId: createAssistantRun
+      tags: [Assistants]
+      summary: Start a durable background run for an owned thread
+      description: Executes the complete bounded thread history through the normal routing, policy and billing pipeline. Function tools are supported; built-in assistant tools are rejected explicitly until their execution lifecycle is available. One active run is allowed per thread.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AssistantRunCreateRequest'}}}
+      responses:
+        '200': {description: Created run, content: {application/json: {schema: {$ref: '#/components/schemas/AssistantRun'}}}}
+        '400': {description: Invalid run parameters or unsupported assistant tool}
+        '403': {description: Effective model or function tool is not allowed}
+        '404': {description: Thread or assistant is absent for this owner}
+        '409': {description: Thread already has an active run}
+        '429': {description: 'Run quota, TPM, RPM, deployment quota, provider quota, or budget exceeded'}
+        '503': {description: Durable run or background job storage unavailable}
+    get:
+      operationId: listAssistantRuns
+      tags: [Assistants]
+      summary: List durable runs for an owned thread
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
+        - {name: after, in: query, schema: {type: string, maxLength: 128}}
+        - {name: before, in: query, schema: {type: string, maxLength: 128}}
+      responses:
+        '200': {description: Owner-filtered run page, content: {application/json: {schema: {$ref: '#/components/schemas/AssistantRunList'}}}}
+        '400': {description: Invalid or conflicting pagination controls}
+        '404': {description: Thread or pagination boundary is absent for this owner}
+  /v1/threads/{thread_id}/runs/{run_id}:
+    parameters:
+      - {name: thread_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+      - {name: run_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+    get:
+      operationId: getAssistantRun
+      tags: [Assistants]
+      summary: Retrieve and reconcile an owned durable run
+      description: Terminal provider state is exposed only after the durable background billing job has settled.
+      responses:
+        '200': {description: Current run state, content: {application/json: {schema: {$ref: '#/components/schemas/AssistantRun'}}}}
+        '404': {description: Thread or run is absent for this owner}
+  /v1/threads/{thread_id}/runs/{run_id}/cancel:
+    parameters:
+      - {name: thread_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+      - {name: run_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+    post:
+      operationId: cancelAssistantRun
+      tags: [Assistants]
+      summary: Cancel an active owned run
+      responses:
+        '200': {description: Cancelling or cancelled run, content: {application/json: {schema: {$ref: '#/components/schemas/AssistantRun'}}}}
+        '404': {description: Thread or run is absent for this owner}
+        '409': {description: Run cannot be cancelled in its current state}
+        '501': {description: Selected deployment does not support cancellation}
   /v1/realtime:
     get:
       operationId: openRealtimeSession
@@ -4156,6 +4213,46 @@ components:
         id: {type: string}
         object: {type: string, const: thread.message.deleted}
         deleted: {type: boolean, const: true}
+    AssistantRunCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [assistant_id]
+      properties:
+        assistant_id: {type: string, minLength: 1, maxLength: 128}
+        model: {type: string, minLength: 1, maxLength: 512}
+        instructions: {type: [string, 'null'], maxLength: 262144}
+        additional_instructions: {type: string, maxLength: 262144}
+        metadata: {type: object, maxProperties: 16, additionalProperties: {type: string, maxLength: 512}}
+        max_completion_tokens: {type: integer, minimum: 1, maximum: 1000000}
+        temperature: {type: number, minimum: 0, maximum: 2}
+        top_p: {type: number, minimum: 0, maximum: 1}
+    AssistantRun:
+      type: object
+      additionalProperties: false
+      required: [id, object, created_at, thread_id, assistant_id, status, model, instructions, metadata, response_id, last_error, incomplete_details]
+      properties:
+        id: {type: string}
+        object: {type: string, const: thread.run}
+        created_at: {type: integer}
+        thread_id: {type: string}
+        assistant_id: {type: string}
+        status: {type: string, enum: [queued, in_progress, requires_action, cancelling, completed, failed, cancelled, expired, incomplete]}
+        model: {type: string}
+        instructions: {type: string}
+        metadata: {type: object, maxProperties: 16, additionalProperties: {type: string}}
+        response_id: {type: string, description: Durable provider-response lifecycle identifier managed by the gateway.}
+        last_error: {type: [object, 'null'], additionalProperties: true}
+        incomplete_details: {type: [object, 'null'], additionalProperties: true}
+    AssistantRunList:
+      type: object
+      additionalProperties: false
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, items: {$ref: '#/components/schemas/AssistantRun'}}
+        has_more: {type: boolean}
+        first_id: {type: string}
+        last_id: {type: string}
     A2APart:
       type: object
       additionalProperties: false

@@ -59,6 +59,10 @@ gateway:
     threadOwnerQuota: 10000
     # Maximum durable messages per assistant thread.
     messageThreadQuota: 100000
+    # Maximum retained runs per credential-and-user owner.
+    runOwnerQuota: 10000
+    # Retention for terminal runs. Expired rows are evicted during creation.
+    runRetentionSeconds: 2592000
   a2aTasks:
     # Maximum retained tasks per credential-and-user owner.
     ownerQuota: 1000
