@@ -16,6 +16,8 @@ import (
 var _ Client = XAI{}
 var _ StreamingClient = XAI{}
 var _ EmbeddingClient = XAI{}
+var _ ImageGenerationClient = XAI{}
+var _ ImageEditClient = XAI{}
 var _ responseRetrieveClient = XAI{}
 var _ responseInputItemsClient = XAI{}
 var _ responseDeleteClient = XAI{}
@@ -222,6 +224,65 @@ func TestXAIEmbeddingContract(t *testing.T) {
 	response, err := router.Embeddings(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, EmbeddingRequest: &request})
 	if err != nil || !response.UsageReported || response.Usage.TotalTokens != 3 || len(response.Data) != 2 || response.Data[0].EmbeddingBase64 != encodedVector {
 		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestXAIImageGenerationAndEditContracts(t *testing.T) {
+	const ticks = int64(200_000_001)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer xai-key" || r.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("unexpected request: %s %s headers=%v", r.Method, r.URL.Path, r.Header)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		switch r.URL.Path {
+		case "/v1/images/generations":
+			if body["resolution"] != "2k" || body["aspect_ratio"] != "19.5:9" || body["quality"] != "medium" || body["n"] != float64(2) {
+				t.Fatalf("generation body=%#v", body)
+			}
+			_, _ = fmt.Fprintf(w, `{"data":[{"url":"https://images.example/1.jpeg","mime_type":"image/jpeg"},{"url":"https://images.example/2.jpeg","mime_type":"image/jpeg"}],"usage":{"cost_in_usd_ticks":%d}}`, ticks)
+		case "/v1/images/edits":
+			image, ok := body["image"].(map[string]any)
+			if !ok || image["type"] != "image_url" || image["url"] != "data:image/png;base64,iVBORw0KGgpmaXh0dXJl" || body["images"] != nil {
+				t.Fatalf("edit body=%#v", body)
+			}
+			_, _ = fmt.Fprintf(w, `{"data":[{"url":"https://images.example/edit.jpeg","mime_type":"image/jpeg"}],"usage":{"cost_in_usd_ticks":%d}}`, ticks)
+		default:
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client := NewXAI(server.URL+"/v1", "xai-key", false)
+	n := 2
+	generated, err := client.GenerateImage(t.Context(), openai.ImageGenerationRequest{Model: "grok-imagine-image-2.0", Prompt: "draw", N: &n, Quality: "medium", Resolution: "2K", AspectRatio: "19.5:9"})
+	if err != nil || len(generated.Data) != 2 || generated.Usage == nil || generated.Usage.ProviderCostUSDTicks == nil || *generated.Usage.ProviderCostUSDTicks != ticks {
+		t.Fatalf("generated=%+v err=%v", generated, err)
+	}
+	image, err := openai.ParseDataImageURL("data:image/png;base64,iVBORw0KGgpmaXh0dXJl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited, err := client.EditImage(t.Context(), openai.ImageEditRequest{Model: "grok-imagine-image-2.0", Prompt: "edit", Images: []openai.ImageAttachment{image}, Quality: "auto"})
+	if err != nil || len(edited.Data) != 1 || edited.Usage == nil || edited.Usage.ProviderCostUSDTicks == nil || *edited.Usage.ProviderCostUSDTicks != ticks {
+		t.Fatalf("edited=%+v err=%v", edited, err)
+	}
+}
+
+func TestXAIImagesFailClosedBeforeAndAfterHTTP(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = fmt.Fprint(w, `{"data":[{"url":"https://images.example/1.jpeg"}],"usage":{"input_tokens":1,"total_tokens":1}}`)
+	}))
+	defer server.Close()
+	client := NewXAI(server.URL, "key", false)
+	if _, err := client.GenerateImage(t.Context(), openai.ImageGenerationRequest{Model: "image", Prompt: "draw", Quality: "high"}); !xaiFailure(err, "quality", "invalid_request") || calls != 0 {
+		t.Fatalf("unsupported quality err=%v calls=%d", err, calls)
+	}
+	if _, err := client.GenerateImage(t.Context(), openai.ImageGenerationRequest{Model: "image", Prompt: "draw"}); err == nil || calls != 1 {
+		t.Fatalf("missing exact cost err=%v calls=%d", err, calls)
 	}
 }
 

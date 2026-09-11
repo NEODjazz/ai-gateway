@@ -23,7 +23,7 @@ func TestImageGenerationRequestValidation(t *testing.T) {
 			t.Fatalf("invalid request accepted: %+v", request)
 		}
 	}
-	for _, ratio := range []string{"auto", "1:1", "16:9", "9:21", "99:99"} {
+	for _, ratio := range []string{"auto", "1:1", "16:9", "9:21", "19.5:9", "99:99"} {
 		if message := (ImageGenerationRequest{Model: "image", Prompt: "draw", AspectRatio: ratio}).Validate(); message != "" {
 			t.Fatalf("valid aspect ratio %q rejected: %s", ratio, message)
 		}

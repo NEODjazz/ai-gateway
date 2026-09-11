@@ -202,8 +202,8 @@ func validImageAspectRatio(value string) bool {
 	if !found || strings.Contains(height, ":") {
 		return false
 	}
-	w, wErr := strconv.Atoi(width)
-	h, hErr := strconv.Atoi(height)
+	w, wErr := strconv.ParseFloat(width, 64)
+	h, hErr := strconv.ParseFloat(height, 64)
 	return wErr == nil && hErr == nil && w >= 1 && w <= 99 && h >= 1 && h <= 99
 }
 

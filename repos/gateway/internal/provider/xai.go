@@ -2,8 +2,10 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -25,6 +27,93 @@ func (XAI) SupportsTools() bool            { return true }
 func (XAI) SupportsStructuredOutput() bool { return true }
 func (XAI) SupportsVision() bool           { return true }
 func (XAI) SupportsWebSearch() bool        { return true }
+func (XAI) SupportsImageGeneration() bool  { return true }
+func (XAI) SupportsImageEdit() bool        { return true }
+
+func (x XAI) GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
+	if message := request.Validate(); message != "" {
+		return openai.ImageGenerationResponse{}, xaiParameterError("", message)
+	}
+	if request.Quality != "" && request.Quality != "auto" && request.Quality != "low" && request.Quality != "medium" {
+		return openai.ImageGenerationResponse{}, xaiParameterError("quality", "quality must be auto, low, or medium")
+	}
+	if request.Resolution != "" && request.Resolution != "1K" && request.Resolution != "2K" {
+		return openai.ImageGenerationResponse{}, xaiParameterError("resolution", "resolution must be 1K or 2K")
+	}
+	if err := rejectParameters("xai",
+		parameterCheck{"size", request.Size != ""},
+		parameterCheck{"style", request.Style != ""},
+		parameterCheck{"user", request.User != ""},
+		parameterCheck{"background", request.Background != ""},
+		parameterCheck{"output_format", request.OutputFormat != ""},
+		parameterCheck{"output_compression", request.OutputCompression != nil},
+		parameterCheck{"seed", request.Seed != nil},
+	); err != nil {
+		return openai.ImageGenerationResponse{}, err
+	}
+	body, err := json.Marshal(struct {
+		Model          string `json:"model"`
+		Prompt         string `json:"prompt"`
+		N              *int   `json:"n,omitempty"`
+		Quality        string `json:"quality,omitempty"`
+		ResponseFormat string `json:"response_format,omitempty"`
+		Resolution     string `json:"resolution,omitempty"`
+		AspectRatio    string `json:"aspect_ratio,omitempty"`
+	}{request.Model, request.Prompt, request.N, request.Quality, request.ResponseFormat, strings.ToLower(request.Resolution), request.AspectRatio})
+	if err != nil {
+		return openai.ImageGenerationResponse{}, err
+	}
+	return x.compatible.postImageJSON(ctx, "images/generations", body, request, true)
+}
+
+func (x XAI) EditImage(ctx context.Context, request openai.ImageEditRequest) (openai.ImageGenerationResponse, error) {
+	if message := request.Validate(); message != "" {
+		return openai.ImageGenerationResponse{}, xaiParameterError("", message)
+	}
+	if len(request.Images) > 5 {
+		return openai.ImageGenerationResponse{}, xaiParameterError("images", "xAI image edits accept at most five source images")
+	}
+	if request.Quality != "" && request.Quality != "auto" && request.Quality != "low" && request.Quality != "medium" {
+		return openai.ImageGenerationResponse{}, xaiParameterError("quality", "quality must be auto, low, or medium")
+	}
+	if err := rejectParameters("xai",
+		parameterCheck{"mask", request.Mask != nil},
+		parameterCheck{"size", request.Size != ""},
+		parameterCheck{"user", request.User != ""},
+		parameterCheck{"background", request.Background != ""},
+		parameterCheck{"output_format", request.OutputFormat != ""},
+		parameterCheck{"output_compression", request.OutputCompression != nil},
+	); err != nil {
+		return openai.ImageGenerationResponse{}, err
+	}
+	type source struct {
+		Type string `json:"type"`
+		URL  string `json:"url"`
+	}
+	sources := make([]source, len(request.Images))
+	for index, image := range request.Images {
+		sources[index] = source{Type: "image_url", URL: "data:" + image.MediaType + ";base64," + image.Data}
+	}
+	body := struct {
+		Model          string   `json:"model"`
+		Prompt         string   `json:"prompt"`
+		Image          *source  `json:"image,omitempty"`
+		Images         []source `json:"images,omitempty"`
+		N              *int     `json:"n,omitempty"`
+		Quality        string   `json:"quality,omitempty"`
+		ResponseFormat string   `json:"response_format,omitempty"`
+	}{Model: request.Model, Prompt: request.Prompt, N: request.N, Quality: request.Quality, ResponseFormat: request.ResponseFormat}
+	if len(sources) == 1 {
+		body.Image = &sources[0]
+	} else {
+		body.Images = sources
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return openai.ImageGenerationResponse{}, err
+	}
+	return x.compatible.postImageJSON(ctx, "images/edits", payload, request.GenerationRequest(), true)
+}
 
 func (x XAI) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if !validXAIServiceTier(request.ServiceTier) {

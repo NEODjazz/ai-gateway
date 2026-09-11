@@ -42,7 +42,11 @@ func (p OpenAICompatible) GenerateImage(ctx context.Context, request openai.Imag
 	if err != nil {
 		return openai.ImageGenerationResponse{}, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(p.baseURL, "images/generations"), bytes.NewReader(body))
+	return p.postImageJSON(ctx, "images/generations", body, request, false)
+}
+
+func (p OpenAICompatible) postImageJSON(ctx context.Context, path string, body []byte, request openai.ImageGenerationRequest, allowProviderCost bool) (openai.ImageGenerationResponse, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(p.baseURL, path), bytes.NewReader(body))
 	if err != nil {
 		return openai.ImageGenerationResponse{}, err
 	}
@@ -58,10 +62,14 @@ func (p OpenAICompatible) GenerateImage(ctx context.Context, request openai.Imag
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return openai.ImageGenerationResponse{}, responseStatusError(p.providerName(), response)
 	}
-	return decodeImageGenerationResponse(response.Body, request)
+	return decodeImageGenerationResponseWithProviderCost(response.Body, request, allowProviderCost)
 }
 
 func decodeImageGenerationResponse(body io.Reader, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
+	return decodeImageGenerationResponseWithProviderCost(body, request, false)
+}
+
+func decodeImageGenerationResponseWithProviderCost(body io.Reader, request openai.ImageGenerationRequest, allowProviderCost bool) (openai.ImageGenerationResponse, error) {
 	payload, err := io.ReadAll(io.LimitReader(body, maxImageGenerationResponseBytes+1))
 	if err != nil || len(payload) > maxImageGenerationResponseBytes {
 		return openai.ImageGenerationResponse{}, errors.New("image generation response exceeds limit")
@@ -74,7 +82,7 @@ func decodeImageGenerationResponse(body io.Reader, request openai.ImageGeneratio
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return result, errors.New("invalid trailing image response data")
 	}
-	if err := validateImageGenerationResponse(result, request); err != nil {
+	if err := validateImageGenerationResponseCountWithProviderCost(result, request, true, allowProviderCost); err != nil {
 		return openai.ImageGenerationResponse{}, err
 	}
 	return result, nil
@@ -85,6 +93,10 @@ func validateImageGenerationResponse(response openai.ImageGenerationResponse, re
 }
 
 func validateImageGenerationResponseCount(response openai.ImageGenerationResponse, request openai.ImageGenerationRequest, exactCount bool) error {
+	return validateImageGenerationResponseCountWithProviderCost(response, request, exactCount, false)
+}
+
+func validateImageGenerationResponseCountWithProviderCost(response openai.ImageGenerationResponse, request openai.ImageGenerationRequest, exactCount, allowProviderCost bool) error {
 	if response.Created < 0 || !oneOfOrEmptyImageValue(response.Background, "auto", "transparent", "opaque") || !oneOfOrEmptyImageValue(response.OutputFormat, "png", "webp", "jpeg", "svg") || !oneOfOrEmptyImageValue(response.Quality, "auto", "low", "medium", "high", "xhigh", "max") || !oneOfOrEmptyImageValue(response.Size, "auto", "256x256", "512x512", "1024x1024", "1536x1024", "1024x1536", "1792x1024", "1024x1792") {
 		return errors.New("provider returned invalid image metadata")
 	}
@@ -118,7 +130,12 @@ func validateImageGenerationResponseCount(response openai.ImageGenerationRespons
 		}
 	}
 	usage := response.Usage
-	if usage == nil || usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.TotalTokens < 0 || usage.InputTokens > int(^uint(0)>>1)-usage.OutputTokens || usage.TotalTokens != usage.InputTokens+usage.OutputTokens {
+	if usage == nil {
+		return errors.New("provider returned invalid or missing image usage")
+	}
+	validTokens := usage.InputTokens >= 0 && usage.OutputTokens >= 0 && usage.TotalTokens >= 0 && usage.InputTokens <= int(^uint(0)>>1)-usage.OutputTokens && usage.TotalTokens == usage.InputTokens+usage.OutputTokens
+	validProviderCost := usage.ProviderCostUSDTicks != nil && *usage.ProviderCostUSDTicks >= 0
+	if !validTokens || allowProviderCost && !validProviderCost {
 		return errors.New("provider returned invalid or missing image usage")
 	}
 	return nil
