@@ -15,14 +15,14 @@ import (
 )
 
 func (g Gemini) Interactions(ctx context.Context, request openai.InteractionRequest) (openai.InteractionResponse, error) {
-	if _, message := request.NativeResponseRequest(); message != "" || request.Stream || request.Background || request.PreviousInteractionID != "" {
+	if _, message := request.NativeResponseRequest(); message != "" || request.Stream || request.Background {
 		return openai.InteractionResponse{}, geminiInvalid("interactions")
 	}
 	return g.doInteraction(ctx, request, false, nil)
 }
 
 func (g Gemini) StreamInteractions(ctx context.Context, request openai.InteractionRequest, write ResponseStreamWriter) (openai.InteractionResponse, error) {
-	if _, message := request.NativeResponseRequest(); message != "" || !request.Stream || request.Background || request.PreviousInteractionID != "" || write == nil {
+	if _, message := request.NativeResponseRequest(); message != "" || !request.Stream || request.Background || write == nil {
 		return openai.InteractionResponse{}, geminiInvalid("interactions stream")
 	}
 	return g.doInteraction(ctx, request, true, write)

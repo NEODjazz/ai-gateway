@@ -44,10 +44,25 @@ func TestGeminiInteractionsUsesNativeContract(t *testing.T) {
 }
 
 func TestGeminiStoredInteractionLifecycleUsesOwnerBinding(t *testing.T) {
-	var creates, retrieves, cancels, deletes atomic.Int32
+	var creates, continues, retrieves, cancels, deletes atomic.Int32
+	var otherDeploymentCalls atomic.Int32
+	otherDeployment := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		otherDeploymentCalls.Add(1)
+		_, _ = fmt.Fprint(w, `{"id":"wrong_deployment","object":"interaction","model":"upstream","status":"completed","usage":{"total_tokens":1}}`)
+	}))
+	defer otherDeployment.Close()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/interactions":
+			var body struct {
+				Previous string `json:"previous_interaction_id"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.Previous != "" {
+				continues.Add(1)
+				_, _ = fmt.Fprint(w, `{"id":"interaction_next","object":"interaction","model":"upstream","status":"completed","usage":{"total_tokens":1}}`)
+				return
+			}
 			creates.Add(1)
 			_, _ = fmt.Fprint(w, `{"id":"interaction_owned","object":"interaction","model":"upstream","status":"completed","usage":{"total_tokens":1}}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1beta/interactions/interaction_owned":
@@ -66,7 +81,10 @@ func TestGeminiStoredInteractionLifecycleUsesOwnerBinding(t *testing.T) {
 	defer server.Close()
 	backend := &ownershipTestStore{data: map[string][]byte{}}
 	runtime := New(Config{
-		Endpoints:            []config.ProviderEndpointConfig{{Name: "gemini", Type: "gemini", BaseURL: server.URL, APIKey: "secret", Models: []string{"public"}, ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"interactions"}}},
+		Endpoints: []config.ProviderEndpointConfig{
+			{Name: "deployment-b", Type: "gemini", BaseURL: otherDeployment.URL, APIKey: "secret", Models: []string{"public"}, ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"interactions"}},
+			{Name: "deployment-a", Type: "gemini", BaseURL: server.URL, APIKey: "secret", Models: []string{"public"}, ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"interactions"}},
+		},
 		Modules:              modules.NewPipeline(nil),
 		SessionStore:         backend,
 		ResponseOwnershipTTL: time.Hour,
@@ -74,12 +92,25 @@ func TestGeminiStoredInteractionLifecycleUsesOwnerBinding(t *testing.T) {
 	store := true
 	shared := openai.ResponseRequest{Model: "public", Input: "hello", Store: &store}
 	owner := modules.RequestContext{CredentialID: "owner", ResponseRequest: &shared, Request: openai.ChatCompletionRequest{Model: "public"}}
-	created, err := runtime.Interactions(t.Context(), owner, openai.InteractionRequest{Model: "public", Input: "hello", Store: &store})
+	created, err := runtime.Interactions(t.Context(), owner, openai.InteractionRequest{Provider: "deployment-a", Model: "public", Input: "hello", Store: &store})
 	if err != nil || created.ID != "interaction_owned" || creates.Load() != 1 {
 		t.Fatalf("created=%+v creates=%d err=%v", created, creates.Load(), err)
 	}
 	other := owner
 	other.CredentialID = "other"
+	otherContinuation := openai.ResponseRequest{Model: "public", Input: "again", PreviousResponse: created.ID}
+	other.ResponseRequest = &otherContinuation
+	if _, err := runtime.Interactions(t.Context(), other, openai.InteractionRequest{Model: "public", Input: "again", PreviousInteractionID: created.ID}); !errors.Is(err, ErrResponseNotFound) || continues.Load() != 0 {
+		t.Fatalf("cross-owner continuation err=%v calls=%d", err, continues.Load())
+	}
+	continuation := openai.ResponseRequest{Model: "public", Input: "again", PreviousResponse: created.ID}
+	owner.ResponseRequest = &continuation
+	if next, err := runtime.Interactions(t.Context(), owner, openai.InteractionRequest{Model: "public", Input: "again", PreviousInteractionID: created.ID}); err != nil || next.ID != "interaction_next" || continues.Load() != 1 {
+		t.Fatalf("continuation=%+v calls=%d err=%v", next, continues.Load(), err)
+	}
+	if otherDeploymentCalls.Load() != 0 {
+		t.Fatalf("continuation escaped its deployment binding: calls=%d", otherDeploymentCalls.Load())
+	}
 	if _, err := runtime.RetrieveInteraction(t.Context(), other, created.ID); !errors.Is(err, ErrResponseNotFound) || retrieves.Load() != 0 {
 		t.Fatalf("cross-owner retrieve err=%v calls=%d", err, retrieves.Load())
 	}

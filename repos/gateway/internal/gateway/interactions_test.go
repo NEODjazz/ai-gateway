@@ -148,20 +148,6 @@ func TestInteractionsUsesNativeGeminiRoutingAndBilling(t *testing.T) {
 	if response.Code != http.StatusOK || calls.Load() != 1 || !strings.Contains(response.Body.String(), `"id":"interaction_native"`) || !strings.Contains(response.Body.String(), `"text":"native"`) || len(recorder.totals) != 1 || recorder.totals[0] != 6 {
 		t.Fatalf("status=%d calls=%d totals=%v body=%s", response.Code, calls.Load(), recorder.totals, response.Body.String())
 	}
-	for _, unsupported := range []string{
-		`{"provider":"gemini-deployment","model":"public","input":"hello","previous_interaction_id":"interaction_previous"}`,
-	} {
-		response := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(unsupported))
-		request.Header.Set("Authorization", "Bearer gateway-test-key")
-		handler.ServeHTTP(response, request)
-		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"unsupported_operation"`) {
-			t.Fatalf("request=%s status=%d body=%s", unsupported, response.Code, response.Body.String())
-		}
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("unsupported native interaction reached provider: calls=%d", calls.Load())
-	}
 }
 
 func TestInteractionsStreamsNativeGeminiAndSettlesBeforeCompletion(t *testing.T) {
@@ -198,6 +184,16 @@ func TestNativeInteractionHTTPStoredLifecycleSkipsRepeatBilling(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/interactions":
+			var body struct {
+				PreviousInteractionID string `json:"previous_interaction_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode request: %v", err)
+			}
+			if body.PreviousInteractionID == "interaction_owned" {
+				_, _ = fmt.Fprint(w, `{"id":"interaction_next","object":"interaction","model":"upstream","status":"completed","usage":{"total_input_tokens":1,"total_output_tokens":1,"total_tokens":2}}`)
+				return
+			}
 			_, _ = fmt.Fprint(w, `{"id":"interaction_owned","object":"interaction","model":"upstream","status":"completed","usage":{"total_input_tokens":1,"total_output_tokens":1,"total_tokens":2}}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1beta/interactions/interaction_owned":
 			_, _ = fmt.Fprint(w, `{"id":"interaction_owned","object":"interaction","model":"upstream","status":"completed","usage":{"total_tokens":2}}`)
@@ -229,6 +225,9 @@ func TestNativeInteractionHTTPStoredLifecycleSkipsRepeatBilling(t *testing.T) {
 	if response := call(http.MethodPost, "/v1/interactions", `{"provider":"gemini","model":"public","input":"hello","store":true,"generation_config":{"max_output_tokens":8}}`); response.Code != http.StatusOK {
 		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
 	}
+	if response := call(http.MethodPost, "/v1/interactions", `{"provider":"gemini","model":"public","input":"again","previous_interaction_id":"interaction_owned","generation_config":{"max_output_tokens":8}}`); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"interaction_next"`) {
+		t.Fatalf("continue status=%d body=%s", response.Code, response.Body.String())
+	}
 	if response := call(http.MethodGet, "/v1/interactions/interaction_owned", ""); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"model":"public"`) {
 		t.Fatalf("retrieve status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -238,7 +237,7 @@ func TestNativeInteractionHTTPStoredLifecycleSkipsRepeatBilling(t *testing.T) {
 	if response := call(http.MethodDelete, "/v1/interactions/interaction_owned", ""); response.Code != http.StatusNoContent {
 		t.Fatalf("delete status=%d body=%s", response.Code, response.Body.String())
 	}
-	if len(recorder.totals) != 1 || recorder.totals[0] != 2 {
+	if len(recorder.totals) != 2 || recorder.totals[0] != 2 || recorder.totals[1] != 2 {
 		t.Fatalf("lifecycle produced billing events: %v", recorder.totals)
 	}
 }
