@@ -7,8 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modules"
 	"golang.org/x/net/websocket"
 )
 
@@ -153,5 +156,61 @@ func TestOpenAICompatibleRealtimeHonorsDialCancellation(t *testing.T) {
 	cancel()
 	if _, err := NewOpenAICompatible(server.URL, "", false).OpenRealtime(ctx, "model"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
+	}
+}
+
+func TestRealtimeRouterRequiresCapabilityPinsAdmissionAndAppliesAlias(t *testing.T) {
+	var skippedCalls atomic.Int32
+	skipped := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		skippedCalls.Add(1)
+	}))
+	t.Cleanup(skipped.Close)
+	var selectedCalls atomic.Int32
+	var aliasApplied atomic.Bool
+	selected := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
+		selectedCalls.Add(1)
+		aliasApplied.Store(connection.Request().URL.Query().Get("model") == "upstream-model")
+		var event string
+		_ = websocket.Message.Receive(connection, &event)
+	}))
+	t.Cleanup(selected.Close)
+
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{
+		{Name: "missing-capability", Type: "openai", BaseURL: skipped.URL, Models: []string{"public-model"}, Priority: 1, Capabilities: []string{"chat"}},
+		{Name: "realtime", Type: "openai-compatible", BaseURL: selected.URL, Models: []string{"public-model"}, ModelAliases: map[string]string{"public-model": "upstream-model"}, Priority: 2, Capabilities: []string{"realtime"}, MaxParallelRequests: 1},
+	}})
+	runtime, ok := router.(RealtimeProvider)
+	if !ok {
+		t.Fatal("router does not expose realtime sessions")
+	}
+	identity := modules.RequestContext{RequestID: "execution-1", Metadata: map[string]string{"credential.id": "credential-1"}}
+	first, attempt, err := runtime.OpenRealtime(t.Context(), identity, "public-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skippedCalls.Load() != 0 || selectedCalls.Load() != 1 || !aliasApplied.Load() {
+		t.Fatalf("routing skipped=%d selected=%d alias=%v", skippedCalls.Load(), selectedCalls.Load(), aliasApplied.Load())
+	}
+	if attempt.Request.Model != "upstream-model" || attempt.Metadata["provider.endpoint.name"] != "realtime" || attempt.Metadata["gateway.api_type"] != "realtime" {
+		t.Fatalf("attempt=%+v metadata=%v", attempt.Request, attempt.Metadata)
+	}
+	if second, _, err := runtime.OpenRealtime(t.Context(), identity, "public-model"); err == nil {
+		_ = second.Close()
+		t.Fatal("deployment admission limit did not reject a concurrent session")
+	} else {
+		var admissionErr *AdmissionError
+		if !errors.As(err, &admissionErr) {
+			t.Fatalf("expected admission error, got %v", err)
+		}
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	third, _, err := runtime.OpenRealtime(t.Context(), identity, "public-model")
+	if err != nil {
+		t.Fatalf("admission lease was not released: %v", err)
+	}
+	if err := third.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

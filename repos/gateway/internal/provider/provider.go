@@ -69,6 +69,10 @@ type VideoProvider interface {
 	RemixVideo(context.Context, modules.RequestContext, VideoBinding, string, openai.VideoRemixRequest, func(context.Context, *modules.RequestContext) error) (openai.Video, VideoBinding, error)
 }
 
+type RealtimeProvider interface {
+	OpenRealtime(context.Context, modules.RequestContext, string) (RealtimeConnection, modules.RequestContext, error)
+}
+
 type ResponseResourceResolver interface {
 	ResolveResponseResource(ctx context.Context, req modules.RequestContext, id string) (string, error)
 }
@@ -2799,6 +2803,11 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 			return false
 		}
 	}
+	if hasCapability(required, "realtime") {
+		if _, ok := e.Provider.(RealtimeClient); !ok || e.Type != "openai" && e.Type != "openai-compatible" {
+			return false
+		}
+	}
 	if hasCapability(required, "web_fetch") {
 		client, ok := e.Provider.(interface{ SupportsWebFetch() bool })
 		if !ok || !client.SupportsWebFetch() {
@@ -2859,11 +2868,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "video") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses")
+	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "video") || hasCapability(required, "realtime") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "video", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses"} {
+	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "video", "realtime", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

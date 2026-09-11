@@ -253,7 +253,7 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if got := byType["voyage"]; !slices.Equal(got, []string{"embeddings", "rerank"}) {
 		t.Fatalf("voyage operations=%v", got)
 	}
-	for _, operation := range []string{"chat", "responses", "embeddings", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "search", "stream"} {
+	for _, operation := range []string{"chat", "responses", "embeddings", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "search", "realtime", "stream"} {
 		if !slices.Contains(byType["openai-compatible"], operation) {
 			t.Fatalf("openai-compatible missing %s: %v", operation, byType["openai-compatible"])
 		}

@@ -20,6 +20,7 @@ describe("modelCapabilityOptions", () => {
       "search",
       "skills",
       "video",
+      "realtime",
       "stream",
       "tools",
       "structured_output",
