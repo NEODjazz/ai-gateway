@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.263
+  version: 0.1.264
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1431,6 +1431,27 @@ paths:
               schema: {$ref: '#/components/schemas/VectorStoreFile'}
         default:
           description: Authentication, ownership, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    post:
+      operationId: updateVectorStoreFile
+      tags: [Vector stores]
+      summary: Replace attributes for an attached file
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/VectorStoreFileUpdateRequest'}
+      responses:
+        '200':
+          description: Updated attached file
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VectorStoreFile'}
+        default:
+          description: Authentication, ownership, validation, or storage failure
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -5049,6 +5070,16 @@ components:
         vector_store_id: {type: string, minLength: 1, maxLength: 128}
         status: {type: string, const: completed}
         last_error: {type: 'null'}
+        attributes:
+          type: object
+          propertyNames: {maxLength: 64}
+          additionalProperties: {type: string, maxLength: 512}
+          maxProperties: 16
+    VectorStoreFileUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [attributes]
+      properties:
         attributes:
           type: object
           propertyNames: {maxLength: 64}

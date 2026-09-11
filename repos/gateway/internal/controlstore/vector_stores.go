@@ -292,6 +292,45 @@ func (s *PostgresStore) GetVectorStoreFile(ctx context.Context, owner, vectorSto
 	return getVectorStoreFile(ctx, s.pool, owner, vectorStoreID, fileID)
 }
 
+func (s *PostgresStore) UpdateVectorStoreFile(ctx context.Context, owner, vectorStoreID, fileID string, attributes map[string]string) (vectorstate.File, error) {
+	if s == nil || s.pool == nil {
+		return vectorstate.File{}, vectorstate.ErrUnavailable
+	}
+	if owner == "" || vectorStoreID == "" || fileID == "" || attributes == nil {
+		return vectorstate.File{}, vectorstate.ErrInvalid
+	}
+	encodedAttributes, err := json.Marshal(attributes)
+	if err != nil {
+		return vectorstate.File{}, vectorstate.ErrInvalid
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return vectorstate.File{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	command, err := tx.Exec(ctx, `UPDATE gateway_vector_store_files SET attributes=$4::jsonb WHERE owner_key=$1 AND vector_store_id=$2 AND file_id=$3`, owner, vectorStoreID, fileID, string(encodedAttributes))
+	if err != nil {
+		return vectorstate.File{}, err
+	}
+	if command.RowsAffected() != 1 {
+		return vectorstate.File{}, vectorstate.ErrFileNotFound
+	}
+	file, err := getVectorStoreFile(ctx, tx, owner, vectorStoreID, fileID)
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, vectorstate.ErrFileNotFound) {
+		return vectorstate.File{}, vectorstate.ErrFileNotFound
+	}
+	if err != nil {
+		return vectorstate.File{}, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE gateway_vector_stores SET last_active_at=now(),updated_at=now(),expires_at=CASE WHEN expires_after_days>0 THEN now()+make_interval(days=>expires_after_days) ELSE NULL END WHERE owner_key=$1 AND id=$2`, owner, vectorStoreID); err != nil {
+		return vectorstate.File{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return vectorstate.File{}, err
+	}
+	return file, nil
+}
+
 func (s *PostgresStore) DeleteVectorStoreFile(ctx context.Context, owner, vectorStoreID, fileID string) error {
 	if s == nil || s.pool == nil {
 		return vectorstate.ErrUnavailable

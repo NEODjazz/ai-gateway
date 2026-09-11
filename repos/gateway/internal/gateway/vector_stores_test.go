@@ -100,6 +100,19 @@ func (s *memoryVectorStore) GetVectorStoreFile(_ context.Context, owner, storeID
 	return file, nil
 }
 
+func (s *memoryVectorStore) UpdateVectorStoreFile(_ context.Context, owner, storeID, fileID string, attributes map[string]string) (vectorstate.File, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := storeID + "/" + fileID
+	file, ok := s.files[key]
+	if !ok || file.OwnerKey != owner {
+		return vectorstate.File{}, vectorstate.ErrFileNotFound
+	}
+	file.Attributes = normalizedMetadata(attributes)
+	s.files[key] = file
+	return file, nil
+}
+
 func (s *memoryVectorStore) DeleteVectorStoreFile(_ context.Context, owner, storeID, fileID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -296,6 +309,14 @@ func TestVectorStoreFileHTTPLifecyclePaginationAndIsolation(t *testing.T) {
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"usage_bytes":11`) || !strings.Contains(got.Body.String(), `"category":"docs"`) {
 		t.Fatalf("get status=%d body=%s", got.Code, got.Body.String())
 	}
+	updated := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files/file_one", `{"attributes":{"region":"us"}}`)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"region":"us"`) || strings.Contains(updated.Body.String(), `"category":"docs"`) {
+		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body.String())
+	}
+	got = callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_one", "")
+	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"region":"us"`) || strings.Contains(got.Body.String(), `"category":"docs"`) {
+		t.Fatalf("updated get status=%d body=%s", got.Code, got.Body.String())
+	}
 	parent := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned", "")
 	if parent.Code != http.StatusOK || !strings.Contains(parent.Body.String(), `"usage_bytes":33`) || !strings.Contains(parent.Body.String(), `"completed":2`) || !strings.Contains(parent.Body.String(), `"total":2`) {
 		t.Fatalf("parent totals status=%d body=%s", parent.Code, parent.Body.String())
@@ -304,6 +325,9 @@ func TestVectorStoreFileHTTPLifecyclePaginationAndIsolation(t *testing.T) {
 		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 2, ByteQuota: 100}))
 	if response := callVectorStore(other, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_one", ""); response.Code != http.StatusNotFound {
 		t.Fatalf("cross-owner get status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := callVectorStore(other, http.MethodPost, "/v1/vector_stores/vs_owned/files/file_one", `{"attributes":{}}`); response.Code != http.StatusNotFound {
+		t.Fatalf("cross-owner update status=%d body=%s", response.Code, response.Body.String())
 	}
 	deleted := callVectorStore(handler, http.MethodDelete, "/v1/vector_stores/vs_owned/files/file_one", "")
 	if deleted.Code != http.StatusOK || !strings.Contains(deleted.Body.String(), `"deleted":true`) {
@@ -331,6 +355,8 @@ func TestVectorStoreFilesRejectInvalidMissingDuplicateAndQuota(t *testing.T) {
 		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","attributes":{"too_long":"` + strings.Repeat("x", 513) + `"}}`, http.StatusBadRequest},
 		{"/v1/vector_stores/missing/files", `{"file_id":"file_one"}`, http.StatusNotFound},
 		{"/v1/vector_stores/vs_owned/files?extra=1", `{"file_id":"file_one"}`, http.StatusBadRequest},
+		{"/v1/vector_stores/vs_owned/files/file_one", `{}`, http.StatusBadRequest},
+		{"/v1/vector_stores/vs_owned/files/file_one", `{"attributes":null}`, http.StatusBadRequest},
 	} {
 		response := callVectorStore(handler, http.MethodPost, test.path, test.body)
 		if response.Code != test.code {

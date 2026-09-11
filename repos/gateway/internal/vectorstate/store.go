@@ -54,5 +54,6 @@ type Store interface {
 	AttachVectorStoreFile(context.Context, string, string, string, map[string]string, int, int64) (File, error)
 	ListVectorStoreFiles(context.Context, string, string, int, string) ([]File, string, error)
 	GetVectorStoreFile(context.Context, string, string, string) (File, error)
+	UpdateVectorStoreFile(context.Context, string, string, string, map[string]string) (File, error)
 	DeleteVectorStoreFile(context.Context, string, string, string) error
 }

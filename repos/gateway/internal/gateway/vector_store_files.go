@@ -14,6 +14,10 @@ type attachVectorStoreFileRequest struct {
 	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
+type updateVectorStoreFileRequest struct {
+	Attributes *map[string]string `json:"attributes"`
+}
+
 func (h Handler) AttachVectorStoreFile(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.authorizeOwnedStorageOperation(w, r, "vector_store_files")
 	if !ok || !h.vectorStoreFileStorageAvailable(w) || !validateVectorStoreFilePath(w, r, false) {
@@ -84,6 +88,36 @@ func (h Handler) ListVectorStoreFiles(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) GetVectorStoreFile(w http.ResponseWriter, r *http.Request) {
 	h.getVectorStoreFile(w, r, false)
+}
+
+func (h Handler) UpdateVectorStoreFile(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.authorizeOwnedStorageOperation(w, r, "vector_store_files")
+	if !ok || !h.vectorStoreFileStorageAvailable(w) || !validateVectorStoreFilePath(w, r, false) {
+		return
+	}
+	fileID := r.PathValue("file_id")
+	if !validFileToken(fileID, 128) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "file ID is invalid")
+		return
+	}
+	var input updateVectorStoreFileRequest
+	if !decodeInferenceRequest(w, r, &input) {
+		return
+	}
+	if input.Attributes == nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "attributes are required")
+		return
+	}
+	if message := openai.ValidateMetadata(*input.Attributes); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
+	file, err := h.vectorStores.UpdateVectorStoreFile(r.Context(), fileOwnerKey(req), r.PathValue("id"), fileID, normalizedMetadata(*input.Attributes))
+	if err != nil {
+		writeVectorStoreFileError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, publicVectorStoreFile(file))
 }
 
 func (h Handler) DeleteVectorStoreFile(w http.ResponseWriter, r *http.Request) {

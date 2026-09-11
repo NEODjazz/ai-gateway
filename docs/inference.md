@@ -1729,6 +1729,8 @@ overflow-safe aggregate byte limit configured by `VECTOR_STORE_FILE_QUOTA` and
 `VECTOR_STORE_BYTE_QUOTA`. Each attachment can persist up to 16 string
 attributes with keys up to 64 characters and values up to 512 characters.
 Expired source files do not consume either limit.
+`POST /v1/vector_stores/{id}/files/{file_id}` atomically replaces the complete
+attribute map for an owned attachment; an empty object clears it.
 
 `POST /v1/vector_stores/{id}/search` provides bounded semantic retrieval for an
 owned store. It accepts an explicit authorized embedding model and optional

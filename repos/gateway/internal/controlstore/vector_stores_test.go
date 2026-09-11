@@ -127,6 +127,13 @@ func TestPostgresVectorStoreFileLifecycleIsolationAndQuotaIntegration(t *testing
 	if err != nil || gotFile.Attributes["region"] != "eu" {
 		t.Fatalf("got file=%+v err=%v", gotFile, err)
 	}
+	updatedFile, err := store.UpdateVectorStoreFile(ctx, owner, "vs_files", "file_vector_a", map[string]string{"region": "us"})
+	if err != nil || updatedFile.Attributes["region"] != "us" || len(updatedFile.Attributes) != 1 {
+		t.Fatalf("updated file=%+v err=%v", updatedFile, err)
+	}
+	if _, err = store.UpdateVectorStoreFile(ctx, owner+"/other", "vs_files", "file_vector_a", map[string]string{}); !errors.Is(err, vectorstate.ErrFileNotFound) {
+		t.Fatalf("cross-owner update error=%v", err)
+	}
 	vectorStore, err := store.GetVectorStore(ctx, owner, "vs_files")
 	if err != nil || vectorStore.FileCount != 2 || vectorStore.UsageBytes != 2 {
 		t.Fatalf("vector store totals=%+v err=%v", vectorStore, err)
