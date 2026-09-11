@@ -1734,8 +1734,11 @@ attribute map for an owned attachment; an empty object clears it.
 
 `POST /v1/vector_stores/{id}/search` provides bounded semantic retrieval for an
 owned store. It accepts an explicit authorized embedding model and optional
-exact-match attribute filters. Every supplied key and value must match; filtering
-happens on owner-scoped attachment metadata before file content is read. The
+attribute filters. The original string map requires every key and value to match.
+Typed filters support `eq`, `ne`, `in`, `nin`, numeric `gt`, `gte`, `lt`, `lte`,
+and nested `and`/`or`. Trees are limited to four levels, 32 nodes and 16 children
+per compound or membership expression. Filtering happens on owner-scoped
+attachment metadata before file content is read. The
 request accepts a store with at most 20 attachments, then loads matching
 `purpose=assistants` UTF-8 text, Markdown, CSV, or JSON files and at
 most 1 MiB of content, then splits them into at most 100 Unicode-safe chunks.

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
@@ -24,11 +25,11 @@ const (
 )
 
 type vectorStoreSearchRequest struct {
-	Query         string            `json:"query"`
-	Model         string            `json:"model"`
-	Provider      string            `json:"provider,omitempty"`
-	MaxNumResults int               `json:"max_num_results,omitempty"`
-	Filters       map[string]string `json:"filters,omitempty"`
+	Query         string          `json:"query"`
+	Model         string          `json:"model"`
+	Provider      string          `json:"provider,omitempty"`
+	MaxNumResults int             `json:"max_num_results,omitempty"`
+	Filters       json.RawMessage `json:"filters,omitempty"`
 }
 
 type vectorSearchChunk struct {
@@ -82,8 +83,9 @@ func (h Handler) SearchVectorStore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "max_num_results must be between 1 and 50")
 		return
 	}
-	if message := openai.ValidateMetadata(input.Filters); message != "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", message)
+	filter, err := parseVectorSearchFilter(input.Filters)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if h.vectorStores == nil || h.files == nil {
@@ -111,7 +113,7 @@ func (h Handler) SearchVectorStore(w http.ResponseWriter, r *http.Request) {
 		writeVectorStoreError(w, err)
 		return
 	}
-	chunks, err := h.loadVectorSearchChunks(r, owner, storeID, input.Filters)
+	chunks, err := h.loadVectorSearchChunks(r, owner, storeID, filter)
 	if err != nil {
 		writeVectorSearchError(w, err)
 		return
@@ -156,7 +158,7 @@ func (h Handler) SearchVectorStore(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h Handler) loadVectorSearchChunks(r *http.Request, owner, storeID string, filters map[string]string) ([]vectorSearchChunk, error) {
+func (h Handler) loadVectorSearchChunks(r *http.Request, owner, storeID string, filter vectorSearchFilter) ([]vectorSearchChunk, error) {
 	files, next, err := h.vectorStores.ListVectorStoreFiles(r.Context(), owner, storeID, maxVectorSearchFiles, "")
 	if err != nil {
 		return nil, err
@@ -167,7 +169,7 @@ func (h Handler) loadVectorSearchChunks(r *http.Request, owner, storeID string, 
 	chunks := make([]vectorSearchChunk, 0, len(files))
 	totalBytes := int64(0)
 	for _, attached := range files {
-		if !matchesVectorSearchFilters(attached.Attributes, filters) {
+		if filter != nil && !filter.matches(attached.Attributes) {
 			continue
 		}
 		file, getErr := h.files.Get(r.Context(), owner, attached.FileID, true)
@@ -190,15 +192,6 @@ func (h Handler) loadVectorSearchChunks(r *http.Request, owner, storeID string, 
 		return nil, errVectorSearchEmpty
 	}
 	return chunks, nil
-}
-
-func matchesVectorSearchFilters(attributes, filters map[string]string) bool {
-	for key, value := range filters {
-		if attributes[key] != value {
-			return false
-		}
-	}
-	return true
 }
 
 var (

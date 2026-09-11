@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.264
+  version: 0.1.265
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -5113,10 +5113,49 @@ components:
         provider: {type: string}
         max_num_results: {type: integer, minimum: 1, maximum: 50, default: 10}
         filters:
-          type: object
+          $ref: '#/components/schemas/VectorStoreSearchFilters'
+    VectorStoreSearchFilters:
+      anyOf:
+        - type: object
           propertyNames: {maxLength: 64}
           additionalProperties: {type: string, maxLength: 512}
           maxProperties: 16
+        - $ref: '#/components/schemas/VectorStoreSearchComparisonFilter'
+        - $ref: '#/components/schemas/VectorStoreSearchCompoundFilter'
+    VectorStoreSearchComparisonFilter:
+      type: object
+      additionalProperties: false
+      required: [type, key, value]
+      properties:
+        type: {type: string, enum: [eq, ne, in, nin, gt, gte, lt, lte]}
+        key: {type: string, minLength: 1, maxLength: 64}
+        value:
+          oneOf:
+            - {type: string, maxLength: 512}
+            - {type: number}
+            - {type: boolean}
+            - type: array
+              minItems: 1
+              maxItems: 16
+              items:
+                oneOf:
+                  - {type: string, maxLength: 512}
+                  - {type: number}
+                  - {type: boolean}
+    VectorStoreSearchCompoundFilter:
+      type: object
+      additionalProperties: false
+      required: [type, filters]
+      properties:
+        type: {type: string, enum: [and, or]}
+        filters:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/VectorStoreSearchComparisonFilter'
+              - $ref: '#/components/schemas/VectorStoreSearchCompoundFilter'
     VectorStoreSearchContent:
       type: object
       additionalProperties: false

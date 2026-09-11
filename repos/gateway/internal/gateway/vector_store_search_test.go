@@ -171,20 +171,55 @@ func TestVectorSearchRankingRejectsMalformedVectors(t *testing.T) {
 	}
 }
 
-func TestVectorSearchFiltersRequireEveryExactAttribute(t *testing.T) {
+func TestVectorSearchFiltersSupportExactComparisonAndCompounds(t *testing.T) {
 	attributes := map[string]string{"region": "eu", "category": "docs"}
 	for _, test := range []struct {
-		filters map[string]string
-		match   bool
+		raw   string
+		match bool
 	}{
-		{nil, true},
-		{map[string]string{"region": "eu"}, true},
-		{map[string]string{"region": "eu", "category": "docs"}, true},
-		{map[string]string{"region": "EU"}, false},
-		{map[string]string{"missing": "value"}, false},
+		{`{"region":"eu"}`, true},
+		{`{"type":"document","region":"eu"}`, false},
+		{`{"region":"EU"}`, false},
+		{`{"type":"eq","key":"category","value":"docs"}`, true},
+		{`{"type":"ne","key":"region","value":"us"}`, true},
+		{`{"type":"in","key":"region","value":["us","eu"]}`, true},
+		{`{"type":"nin","key":"region","value":["eu","apac"]}`, false},
+		{`{"type":"and","filters":[{"type":"eq","key":"region","value":"eu"},{"type":"or","filters":[{"type":"eq","key":"category","value":"docs"},{"type":"eq","key":"category","value":"other"}]}]}`, true},
 	} {
-		if got := matchesVectorSearchFilters(attributes, test.filters); got != test.match {
-			t.Fatalf("filters=%v match=%t want=%t", test.filters, got, test.match)
+		filter, err := parseVectorSearchFilter(json.RawMessage(test.raw))
+		if err != nil {
+			t.Fatalf("filter=%s err=%v", test.raw, err)
+		}
+		if match := filter.matches(attributes); match != test.match {
+			t.Fatalf("filter=%s match=%t want=%t", test.raw, match, test.match)
+		}
+	}
+	numeric := map[string]string{"score": "10.5", "active": "true"}
+	for _, raw := range []string{
+		`{"type":"gt","key":"score","value":10}`,
+		`{"type":"lte","key":"score","value":10.5}`,
+		`{"type":"eq","key":"active","value":true}`,
+	} {
+		filter, err := parseVectorSearchFilter(json.RawMessage(raw))
+		if err != nil || !filter.matches(numeric) {
+			t.Fatalf("filter=%s did not match: %v", raw, err)
+		}
+	}
+}
+
+func TestVectorSearchFiltersRejectUnboundedOrMalformedTrees(t *testing.T) {
+	invalid := []string{
+		`null`,
+		`{"type":"unknown","key":"x","value":"y"}`,
+		`{"type":"gt","key":"x","value":"not-a-number"}`,
+		`{"type":"in","key":"x","value":[]}`,
+		`{"type":"and","filters":[]}`,
+		`{"type":"eq","key":"x","value":"y","unknown":true}`,
+		`{"type":"and","filters":[{"type":"and","filters":[{"type":"and","filters":[{"type":"and","filters":[{"type":"eq","key":"x","value":"y"}]}]}]}]}`,
+	}
+	for _, raw := range invalid {
+		if _, err := parseVectorSearchFilter(json.RawMessage(raw)); err == nil {
+			t.Fatalf("accepted invalid filter=%s", raw)
 		}
 	}
 }
