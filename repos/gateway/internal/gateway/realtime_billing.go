@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 const maxRealtimePendingResponses = 16
 const maxRealtimeConversationItems = 1024
+const maxRealtimeDLPProjectionBytes = 64 << 10
 
 type realtimeBillingTracker struct {
 	pipeline modules.Pipeline
@@ -66,6 +68,9 @@ func (t *realtimeBillingTracker) ClientEvent(ctx context.Context, payload []byte
 	if err != nil {
 		return err
 	}
+	if err := t.scanClientEvent(ctx, event); err != nil {
+		return err
+	}
 	switch event.Type {
 	case "session.update":
 		t.mu.Lock()
@@ -79,6 +84,34 @@ func (t *realtimeBillingTracker) ClientEvent(ctx context.Context, payload []byte
 		return t.reserveResponse(ctx, event)
 	}
 	return nil
+}
+
+func (t *realtimeBillingTracker) scanClientEvent(ctx context.Context, event realtimeEventEnvelope) error {
+	if t.template.Metadata["provider.modules.dlp.enabled"] != "true" {
+		return nil
+	}
+	var value json.RawMessage
+	switch event.Type {
+	case "session.update":
+		value = event.Session
+	case "conversation.item.create":
+		value = event.Item
+	case "response.create":
+		value = event.Response
+	default:
+		return nil
+	}
+	projection, err := realtimeTextProjection(value)
+	if err != nil {
+		return errors.Join(modules.ErrGuardrailUnavailable, err)
+	}
+	if projection == "" {
+		return nil
+	}
+	request := cloneRealtimeBillingRequest(t.template)
+	request.RequestID = newExecutionID()
+	request.Request.Messages = []openai.Message{{Role: "user", Content: projection}}
+	return t.pipeline.RunNamed(ctx, &request, "dlp")
 }
 
 func (t *realtimeBillingTracker) ProviderEvent(ctx context.Context, payload []byte) error {
@@ -288,6 +321,67 @@ func realtimeRawTokens(value json.RawMessage) int {
 		return 0
 	}
 	return openai.EstimateContextTokens(value)
+}
+
+func realtimeTextProjection(payload json.RawMessage) (string, error) {
+	if len(payload) == 0 || string(payload) == "null" {
+		return "", nil
+	}
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return "", errors.New("invalid realtime policy payload")
+	}
+	var result bytes.Buffer
+	items := 0
+	var appendValue func(any, int, string) error
+	appendValue = func(current any, depth int, key string) error {
+		if depth > 32 || items > 4096 {
+			return errors.New("realtime policy payload is too complex")
+		}
+		items++
+		switch typed := current.(type) {
+		case string:
+			switch key {
+			case "audio", "data", "image", "image_url":
+				return nil
+			}
+			if typed == "" {
+				return nil
+			}
+			if result.Len() > 0 {
+				result.WriteByte('\n')
+			}
+			if len(typed) > maxRealtimeDLPProjectionBytes-result.Len() {
+				return errors.New("realtime text projection exceeds 64 KiB")
+			}
+			result.WriteString(typed)
+		case []any:
+			for _, item := range typed {
+				if err := appendValue(item, depth+1, key); err != nil {
+					return err
+				}
+			}
+		case map[string]any:
+			keys := make([]string, 0, len(typed))
+			for childKey := range typed {
+				keys = append(keys, childKey)
+			}
+			sort.Strings(keys)
+			for _, childKey := range keys {
+				child := typed[childKey]
+				if err := appendValue(child, depth+1, childKey); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := appendValue(value, 0, ""); err != nil {
+		return "", err
+	}
+	return result.String(), nil
 }
 
 func realtimeItemID(item json.RawMessage) string {

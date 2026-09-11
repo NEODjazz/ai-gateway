@@ -34,6 +34,24 @@ type realtimeBillingModule struct {
 	reserveErr error
 }
 
+type realtimeDLPModule struct {
+	mu      sync.Mutex
+	content string
+}
+
+func (*realtimeDLPModule) Name() string              { return "dlp" }
+func (*realtimeDLPModule) Required() bool            { return true }
+func (*realtimeDLPModule) PostResponseEnabled() bool { return true }
+func (m *realtimeDLPModule) Handle(_ context.Context, request *modules.RequestContext) error {
+	m.mu.Lock()
+	m.content, _ = request.Request.Messages[0].Content.(string)
+	m.mu.Unlock()
+	return modules.ErrContentRejected
+}
+func (*realtimeDLPModule) HandlePostResponse(context.Context, *modules.RequestContext) error {
+	return nil
+}
+
 func (*realtimeBillingModule) Name() string              { return "billing" }
 func (*realtimeBillingModule) Required() bool            { return true }
 func (*realtimeBillingModule) PostResponseEnabled() bool { return true }
@@ -299,6 +317,46 @@ func TestRealtimeCredentialTPMRejectsResponseBeforeProvider(t *testing.T) {
 	}
 	if upstreamEvents.Load() != 0 {
 		t.Fatal("credential TPM-rejected response reached the provider")
+	}
+}
+
+func TestRealtimeInputDLPRejectsTextBeforeProvider(t *testing.T) {
+	var upstreamEvents atomic.Int32
+	upstream := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
+		var event string
+		if websocket.Message.Receive(connection, &event) == nil {
+			upstreamEvents.Add(1)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	dlp := &realtimeDLPModule{}
+	router := provider.New(provider.Config{
+		Modules: modules.NewPipeline([]modules.Module{dlp}),
+		Endpoints: []config.ProviderEndpointConfig{{
+			Name: "realtime", Type: "openai", BaseURL: upstream.URL, Models: []string{"model"},
+			Capabilities: []string{"realtime"}, DLPEnabled: true,
+		}},
+	})
+	pipeline := modules.NewPipeline([]modules.Module{realtimeAuthModule{allowedModels: []string{"model"}}, dlp})
+	gateway := httptest.NewServer(Routes(NewHandler(pipeline, router)))
+	t.Cleanup(gateway.Close)
+
+	connection := dialGatewayRealtime(t, gateway.URL, "/v1/realtime?model=model", "gateway-key")
+	if err := websocket.Message.Send(connection, `{"type":"conversation.item.create","item":{"type":"message","content":[{"type":"input_text","text":"secret"},{"type":"input_audio","audio":"not-text"}]}}`); err != nil {
+		t.Fatal(err)
+	}
+	var event string
+	if err := websocket.Message.Receive(connection, &event); err != nil || !strings.Contains(event, `"code":"gateway_error"`) {
+		t.Fatalf("event=%s err=%v", event, err)
+	}
+	dlp.mu.Lock()
+	content := dlp.content
+	dlp.mu.Unlock()
+	if !strings.Contains(content, "secret") || strings.Contains(content, "not-text") {
+		t.Fatalf("DLP projection=%q", content)
+	}
+	if upstreamEvents.Load() != 0 {
+		t.Fatal("DLP-rejected realtime input reached the provider")
 	}
 }
 
