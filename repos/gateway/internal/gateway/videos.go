@@ -296,6 +296,7 @@ func (h Handler) RemixVideo(w http.ResponseWriter, r *http.Request) {
 		writeProviderFailure(w, err)
 		return
 	}
+	video = mergeVideoSnapshot(record.Video, video)
 	record = videostate.Record{OwnerKey: owner, Binding: binding, Video: video}
 	created, err := h.createVideoRecord(r.Context(), record, billingRequest, billingReserved)
 	if err != nil {

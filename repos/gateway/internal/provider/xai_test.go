@@ -485,6 +485,16 @@ func TestXAIVideoGenerationRetrievalAndContentContracts(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "video/mp4")
 			_, _ = io.WriteString(w, "video-bytes")
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/videos/edits":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			video, ok := body["video"].(map[string]any)
+			if !ok || body["prompt"] != "add snow" || body["model"] != nil || video["url"] != server.URL+"/asset.mp4" {
+				t.Fatalf("edit body=%#v", body)
+			}
+			_, _ = io.WriteString(w, `{"request_id":"video_edit_1"}`)
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -509,6 +519,10 @@ func TestXAIVideoGenerationRetrievalAndContentContracts(t *testing.T) {
 	data, err := io.ReadAll(content.Body)
 	if err != nil || string(data) != "video-bytes" || content.ContentType != "video/mp4" {
 		t.Fatalf("content=%q type=%q err=%v", data, content.ContentType, err)
+	}
+	edited, err := client.RemixVideo(t.Context(), created.ID, openai.VideoRemixRequest{Prompt: "add snow"})
+	if err != nil || edited.ID != "video_edit_1" || edited.Status != "queued" || edited.RemixedFromVideoID == nil || *edited.RemixedFromVideoID != created.ID || edited.Seconds != "8" {
+		t.Fatalf("edited=%+v err=%v", edited, err)
 	}
 	deleted, err := client.DeleteVideo(t.Context(), created.ID)
 	if err != nil || !deleted.Deleted || deleted.ID != created.ID {

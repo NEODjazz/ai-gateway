@@ -177,8 +177,38 @@ func (x XAI) DownloadVideoContent(ctx context.Context, id, variant string) (Vide
 	return VideoContent{Body: response.Body, ContentType: contentType, ContentLength: response.ContentLength}, nil
 }
 
-func (x XAI) RemixVideo(context.Context, string, openai.VideoRemixRequest) (openai.Video, error) {
-	return openai.Video{}, xaiUnsupportedParameter("remix")
+func (x XAI) RemixVideo(ctx context.Context, id string, request openai.VideoRemixRequest) (openai.Video, error) {
+	if !validResponseResourceID(id) {
+		return openai.Video{}, xaiParameterError("video_id", "invalid video ID")
+	}
+	if len(request.Prompt) == 0 || len(request.Prompt) > 32000 {
+		return openai.Video{}, xaiParameterError("prompt", "prompt must contain between 1 and 32000 bytes")
+	}
+	source, err := x.RetrieveVideo(ctx, id)
+	if err != nil {
+		return openai.Video{}, err
+	}
+	if source.Status != "completed" || !validXAIMediaURL(source.ContentURL) {
+		return openai.Video{}, errors.New("xAI source video is not ready")
+	}
+	body := struct {
+		Prompt string `json:"prompt"`
+		Video  struct {
+			URL string `json:"url"`
+		} `json:"video"`
+	}{Prompt: request.Prompt}
+	body.Video.URL = source.ContentURL
+	var response struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := x.xaiVideoJSON(ctx, http.MethodPost, "videos/edits", body, &response); err != nil {
+		return openai.Video{}, err
+	}
+	if !validResponseResourceID(response.RequestID) {
+		return openai.Video{}, errors.New("invalid xAI video edit request ID")
+	}
+	prompt := request.Prompt
+	return openai.Video{ID: response.RequestID, Object: "video", Model: source.Model, Status: "queued", Prompt: &prompt, RemixedFromVideoID: &id, Seconds: source.Seconds}, nil
 }
 
 func (XAI) ListVideos(context.Context, VideoListOptions) (openai.VideoList, error) {
