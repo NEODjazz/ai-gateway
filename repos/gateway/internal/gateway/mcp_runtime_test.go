@@ -96,8 +96,9 @@ func runtimeRegistry(t *testing.T, transport string) *MCPRegistry {
 func TestMCPRuntimeListsToolsWithACLRateLimitAndBilling(t *testing.T) {
 	billing := &mcpBillingRecorder{}
 	client := &fakeMCPRuntimeClient{page: mcpclient.ToolPage{Tools: []mcpclient.Tool{{Name: "forecast", InputSchema: json.RawMessage(`{"type":"object"}`)}}, NextCursor: "next"}}
-	pipeline := modules.NewPipeline([]modules.Module{mcpRuntimeAuth{tools: []string{"mcp:weather@https://mcp.example.test/v1"}, rpm: 2}, billing})
-	handler := NewHandler(pipeline, nil).WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPRuntimeFactory(func(endpoint string) (MCPRuntimeClient, error) {
+	auth := modules.NewPipeline([]modules.Module{mcpRuntimeAuth{tools: []string{"mcp:weather@https://mcp.example.test/v1"}, rpm: 2}})
+	providerModules := modules.NewPipeline([]modules.Module{billing})
+	handler := NewHandler(auth, nil).WithResourceBillingPipeline(providerModules).WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPRuntimeFactory(func(endpoint string) (MCPRuntimeClient, error) {
 		if endpoint != "https://mcp.example.test/v1" {
 			t.Fatalf("endpoint=%q", endpoint)
 		}

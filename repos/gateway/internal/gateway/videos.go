@@ -49,13 +49,6 @@ func (h Handler) WithVideoStore(store videostate.Store) Handler {
 	return h
 }
 
-func (h Handler) videoBillingPipeline() modules.Pipeline {
-	if h.resourceBilling.HasModule("billing") {
-		return h.resourceBilling
-	}
-	return h.pipeline
-}
-
 func (h Handler) CreateVideo(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "query parameters are not supported")
@@ -73,7 +66,7 @@ func (h Handler) CreateVideo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "video_unavailable", "video storage is unavailable")
 		return
 	}
-	if h.videoBillingPipeline().HasModule("billing") && h.videoJobs == nil {
+	if h.resourceBillingPipeline().HasModule("billing") && h.videoJobs == nil {
 		writeError(w, http.StatusServiceUnavailable, "video_unavailable", "durable video settlement storage is unavailable")
 		return
 	}
@@ -104,8 +97,8 @@ func (h Handler) CreateVideo(w http.ResponseWriter, r *http.Request) {
 	video, binding, err := runtime.CreateVideo(r.Context(), identity, input, func(ctx context.Context, request *modules.RequestContext) error {
 		billingRequest = *request
 		billingRequest.VideoSeconds = videoSeconds
-		billingErr = h.videoBillingPipeline().RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
-		billingReserved = billingErr == nil && h.videoBillingPipeline().HasModule("billing")
+		billingErr = h.resourceBillingPipeline().RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
+		billingReserved = billingErr == nil && h.resourceBillingPipeline().HasModule("billing")
 		return billingErr
 	})
 	if err != nil {
@@ -281,8 +274,8 @@ func (h Handler) RemixVideo(w http.ResponseWriter, r *http.Request) {
 	video, binding, err := runtime.RemixVideo(r.Context(), identity, record.Binding, record.Video.ID, input, func(ctx context.Context, request *modules.RequestContext) error {
 		billingRequest = *request
 		billingRequest.VideoSeconds = videoSeconds
-		billingErr = h.videoBillingPipeline().RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
-		billingReserved = billingErr == nil && h.videoBillingPipeline().HasModule("billing")
+		billingErr = h.resourceBillingPipeline().RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
+		billingReserved = billingErr == nil && h.resourceBillingPipeline().HasModule("billing")
 		return billingErr
 	})
 	if err != nil {
@@ -408,11 +401,11 @@ func (h Handler) processVideoSettlement(ctx context.Context, claimed asyncstate.
 		}
 		request.Metadata["gateway.video_usage_exact"] = "true"
 		request.VideoProviderCostUSDTicks = video.ProviderCostUSDTicks
-		if err := h.videoBillingPipeline().RunBillingLifecycle(ctx, &request, "commit", nil); err != nil {
+		if err := h.resourceBillingPipeline().RunBillingLifecycle(ctx, &request, "commit", nil); err != nil {
 			return h.retryVideoSettlement(ctx, claimed)
 		}
 	case "failed", "cancelled", "expired":
-		if err := h.videoBillingPipeline().RunBillingLifecycle(ctx, &request, "cancel", errors.New("video generation "+video.Status)); err != nil {
+		if err := h.resourceBillingPipeline().RunBillingLifecycle(ctx, &request, "cancel", errors.New("video generation "+video.Status)); err != nil {
 			return h.retryVideoSettlement(ctx, claimed)
 		}
 	default:
@@ -484,7 +477,7 @@ func billableVideoSeconds(raw string, defaultValue bool) (int, error) {
 func (h Handler) cancelVideoBilling(ctx context.Context, request *modules.RequestContext, cause error) {
 	compensation, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	_ = h.videoBillingPipeline().RunBillingLifecycle(compensation, request, "cancel", cause)
+	_ = h.resourceBillingPipeline().RunBillingLifecycle(compensation, request, "cancel", cause)
 }
 
 func writeVideoBillingFailure(w http.ResponseWriter, err error) {
@@ -504,7 +497,7 @@ func (h Handler) videoOwner(w http.ResponseWriter, r *http.Request) (string, pro
 		writeError(w, http.StatusServiceUnavailable, "video_unavailable", "video storage is unavailable")
 		return "", nil, modules.RequestContext{}, false
 	}
-	if h.videoBillingPipeline().HasModule("billing") && h.videoJobs == nil {
+	if h.resourceBillingPipeline().HasModule("billing") && h.videoJobs == nil {
 		writeError(w, http.StatusServiceUnavailable, "video_unavailable", "durable video settlement storage is unavailable")
 		return "", nil, modules.RequestContext{}, false
 	}

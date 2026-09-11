@@ -69,13 +69,13 @@ func (h Handler) CreateFineTuningJob(w http.ResponseWriter, r *http.Request) {
 	job, binding, err := runtime.CreateFineTuningJob(r.Context(), identity, input, func(ctx context.Context, request *modules.RequestContext) error {
 		billingRequest = *request
 		billingRequest.TrainingTokens = trainingTokens
-		billingErr = h.pipeline.RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
-		billingReserved = billingErr == nil && h.pipeline.HasModule("billing")
+		billingErr = h.resourceBillingPipeline().RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
+		billingReserved = billingErr == nil && h.resourceBillingPipeline().HasModule("billing")
 		return billingErr
 	})
 	if err != nil {
 		if billingReserved {
-			_ = h.pipeline.RunBillingLifecycle(r.Context(), &billingRequest, "cancel", err)
+			_ = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &billingRequest, "cancel", err)
 		}
 		if billingErr != nil {
 			writeFineTuningBillingFailure(w, billingErr)
@@ -90,20 +90,20 @@ func (h Handler) CreateFineTuningJob(w http.ResponseWriter, r *http.Request) {
 		_, _ = runtime.CancelFineTuningJob(compensation, binding, job.ID)
 		cancel()
 		if billingReserved {
-			_ = h.pipeline.RunBillingLifecycle(r.Context(), &billingRequest, "cancel", err)
+			_ = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &billingRequest, "cancel", err)
 		}
 		writeFineTuningStoreError(w, err)
 		return
 	}
 	if billingReserved {
-		if err = h.pipeline.RunBillingLifecycle(r.Context(), &billingRequest, "commit", nil); err != nil {
+		if err = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &billingRequest, "commit", nil); err != nil {
 			compensation, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 			cancelled, cancelErr := runtime.CancelFineTuningJob(compensation, binding, job.ID)
 			cancel()
 			if cancelErr == nil {
 				_, _ = h.fineTuning.UpdateFineTuningRecord(r.Context(), owner, cancelled)
 			}
-			_ = h.pipeline.RunBillingLifecycle(r.Context(), &billingRequest, "cancel", err)
+			_ = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &billingRequest, "cancel", err)
 			writeFineTuningBillingFailure(w, err)
 			return
 		}

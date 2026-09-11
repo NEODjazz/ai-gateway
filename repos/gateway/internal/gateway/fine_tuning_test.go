@@ -278,7 +278,9 @@ func TestFineTuningCreateUsesTrainingTokenBillingLifecycle(t *testing.T) {
 	runtime := &gatewayFineTuningProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
 	store := &memoryFineTuningStore{records: map[string]finetunestate.Record{}}
 	billing := &fineTuningBillingModule{}
-	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}, billing}), runtime).
+	auth := modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}})
+	providerModules := modules.NewPipeline([]modules.Module{billing})
+	handler := Routes(NewHandler(auth, runtime).WithResourceBillingPipeline(providerModules).
 		WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 4 << 20}).
 		WithFineTuningStore(store))
 	response := fineTuningRequest(t, handler, http.MethodPost, "/v1/fine_tuning/jobs", `{"model":"model-a","training_file":"file_train","method":{"type":"supervised","supervised":{"hyperparameters":{"n_epochs":2}}}}`)

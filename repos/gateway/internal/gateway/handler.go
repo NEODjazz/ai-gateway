@@ -94,6 +94,13 @@ func (h Handler) WithResourceBillingPipeline(pipeline modules.Pipeline) Handler 
 	return h
 }
 
+func (h Handler) resourceBillingPipeline() modules.Pipeline {
+	if h.resourceBilling.HasModule("billing") {
+		return h.resourceBilling
+	}
+	return h.pipeline
+}
+
 func (h Handler) WithAdminState(runtime *AdminStateRuntime) Handler {
 	h.adminState = runtime
 	return h

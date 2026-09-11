@@ -67,7 +67,7 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 	if !h.authorizeMCPConnector(w, req, identifier) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
 		return
 	}
-	if err := h.pipeline.RunBillingLifecycle(r.Context(), &req, "reserve", nil); err != nil {
+	if err := h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &req, "reserve", nil); err != nil {
 		writeMCPBillingFailure(w, err)
 		return
 	}
@@ -75,7 +75,7 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		req.Metadata["provider.status"] = "error"
 		req.Metadata["provider.failure_class"] = "configuration"
-		_ = h.pipeline.RunBillingLifecycle(r.Context(), &req, "cancel", err)
+		_ = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &req, "cancel", err)
 		writeError(w, http.StatusServiceUnavailable, "mcp_unavailable", "MCP runtime is unavailable")
 		return
 	}
@@ -83,7 +83,7 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		req.Metadata["provider.status"] = "error"
 		req.Metadata["provider.failure_class"] = "upstream"
-		_ = h.pipeline.RunBillingLifecycle(r.Context(), &req, "cancel", err)
+		_ = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &req, "cancel", err)
 		writeError(w, http.StatusBadGateway, "mcp_server_failed", "MCP server request failed")
 		return
 	}
@@ -95,7 +95,7 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 	}
 	page.Tools = filtered
 	req.Metadata["provider.status"] = "ok"
-	if err := h.pipeline.RunBillingLifecycle(r.Context(), &req, "commit", nil); err != nil {
+	if err := h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &req, "commit", nil); err != nil {
 		writeMCPBillingFailure(w, err)
 		return
 	}
@@ -209,7 +209,7 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
 	}
-	if err := h.pipeline.RunBillingLifecycle(r.Context(), &req, "reserve", nil); err != nil {
+	if err := h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &req, "reserve", nil); err != nil {
 		_ = h.mcpCalls.Release(r.Context(), scope, key, req.RequestID)
 		h.auditOutcome(r.Context(), audit, event, "failed")
 		writeMCPBillingFailure(w, err)
@@ -217,7 +217,7 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 	}
 	client, err := h.mcpRuntime(server.ServerURL)
 	if err != nil {
-		_ = h.pipeline.RunBillingLifecycle(r.Context(), &req, "cancel", err)
+		_ = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &req, "cancel", err)
 		_ = h.mcpCalls.Release(r.Context(), scope, key, req.RequestID)
 		h.auditOutcome(r.Context(), audit, event, "failed")
 		writeError(w, http.StatusServiceUnavailable, "mcp_unavailable", "MCP runtime is unavailable")
@@ -227,7 +227,7 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		req.Metadata["provider.status"] = "error"
 		req.Metadata["provider.failure_class"] = "upstream"
-		_ = h.pipeline.RunBillingLifecycle(r.Context(), &req, "cancel", err)
+		_ = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &req, "cancel", err)
 		payload := mcpErrorPayload("mcp_server_failed", "MCP server request failed")
 		_ = h.mcpCalls.Complete(r.Context(), scope, key, req.RequestID, http.StatusBadGateway, payload)
 		h.auditOutcome(r.Context(), audit, event, "failed")
@@ -235,7 +235,7 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Metadata["provider.status"] = "ok"
-	if err := h.pipeline.RunBillingLifecycle(r.Context(), &req, "commit", nil); err != nil {
+	if err := h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &req, "commit", nil); err != nil {
 		payload := mcpErrorPayload("billing_unavailable", "billing is unavailable")
 		_ = h.mcpCalls.Complete(r.Context(), scope, key, req.RequestID, http.StatusServiceUnavailable, payload)
 		h.auditOutcome(r.Context(), audit, event, "failed")
