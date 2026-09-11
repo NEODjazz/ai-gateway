@@ -20,6 +20,7 @@ func NewXAI(baseURL, apiKey string, stream bool) XAI {
 }
 
 func (XAI) SupportsResponses() bool        { return true }
+func (XAI) SupportsEmbeddings() bool       { return true }
 func (XAI) SupportsTools() bool            { return true }
 func (XAI) SupportsStructuredOutput() bool { return true }
 func (XAI) SupportsVision() bool           { return true }
@@ -130,6 +131,21 @@ func (x XAI) StreamResponses(ctx context.Context, request openai.ResponseRequest
 		return openai.ResponseResponse{}, err
 	}
 	return x.compatible.StreamResponses(ctx, request, write)
+}
+
+func (x XAI) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
+	return rejectParameters("xai",
+		parameterCheck{"metadata", request.Metadata != nil},
+		parameterCheck{"input_type", request.InputType != ""},
+		parameterCheck{"output_dtype", request.OutputDType != ""},
+	)
+}
+
+func (x XAI) Embeddings(ctx context.Context, request openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
+	if err := x.ValidateEmbeddingParameters(request); err != nil {
+		return openai.EmbeddingResponse{}, err
+	}
+	return x.compatible.Embeddings(ctx, request)
 }
 
 func (x XAI) RetrieveResponse(ctx context.Context, id string) (openai.ResponseResponse, error) {

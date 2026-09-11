@@ -8,11 +8,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
 
 var _ Client = XAI{}
 var _ StreamingClient = XAI{}
+var _ EmbeddingClient = XAI{}
 var _ responseRetrieveClient = XAI{}
 var _ responseInputItemsClient = XAI{}
 var _ responseDeleteClient = XAI{}
@@ -188,6 +191,63 @@ func TestXAIResponseResourceLifecycle(t *testing.T) {
 	compacted, err := client.CompactResponse(t.Context(), openai.ResponseCompactRequest{Model: "grok", Input: "history"})
 	if err != nil || compacted.ID != "cmp_1" || compacted.Usage.TotalTokens != 12 {
 		t.Fatalf("compacted=%+v err=%v", compacted, err)
+	}
+}
+
+func TestXAIEmbeddingContract(t *testing.T) {
+	const encodedVector = "AACAPwAAAEA="
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/embeddings" || r.Header.Get("Authorization") != "Bearer xai-key" {
+			t.Fatalf("unexpected request: %s %s auth=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		input, ok := body["input"].([]any)
+		if !ok || len(input) != 2 || body["model"] != "v1" || body["encoding_format"] != "base64" || body["dimensions"] != float64(2) || body["user"] != "user-1" {
+			t.Fatalf("embedding request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"object":"list","model":"v1","data":[{"object":"embedding","index":0,"embedding":"`+encodedVector+`"},{"object":"embedding","index":1,"embedding":"`+encodedVector+`"}],"usage":{"prompt_tokens":3,"total_tokens":3}}`)
+	}))
+	defer server.Close()
+	dimensions := 2
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "xai-native", Type: "xai", BaseURL: server.URL + "/v1", APIKey: "xai-key",
+		Models: []string{"embed-public"}, ModelAliases: map[string]string{"embed-public": "v1"}, Capabilities: []string{"embeddings"},
+	}}}).(*Router)
+	request := openai.EmbeddingRequest{
+		Model: "embed-public", Input: []any{[]any{11.0, 12.0}, []any{13.0}}, EncodingFormat: "base64", Dimensions: &dimensions, User: "user-1",
+	}
+	response, err := router.Embeddings(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, EmbeddingRequest: &request})
+	if err != nil || !response.UsageReported || response.Usage.TotalTokens != 3 || len(response.Data) != 2 || response.Data[0].EmbeddingBase64 != encodedVector {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestXAIRejectsUnsupportedEmbeddingParametersBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewXAI(server.URL, "key", false)
+	tests := []struct {
+		name    string
+		request openai.EmbeddingRequest
+		param   string
+	}{
+		{name: "metadata", request: openai.EmbeddingRequest{Metadata: map[string]string{"tenant": "one"}}, param: "metadata"},
+		{name: "input type", request: openai.EmbeddingRequest{InputType: "query"}, param: "input_type"},
+		{name: "output dtype", request: openai.EmbeddingRequest{OutputDType: "int8"}, param: "output_dtype"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.request.Model = "v1"
+			test.request.Input = "hello"
+			_, err := client.Embeddings(t.Context(), test.request)
+			if !xaiFailure(err, test.param, "unsupported_parameter") || called {
+				t.Fatalf("err=%v called=%v", err, called)
+			}
+		})
 	}
 }
 
