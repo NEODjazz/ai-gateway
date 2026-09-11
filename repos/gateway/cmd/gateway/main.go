@@ -148,6 +148,7 @@ func main() {
 				SubscriptionDuration: cfg.A2ATasks.SubscriptionDuration, SubscriptionPoll: cfg.A2ATasks.SubscriptionPoll,
 			}).
 			WithFileStore(providerControlStore, gateway.FileRuntimeConfig{MaxBytes: cfg.Files.MaxBytes, OwnerQuotaBytes: cfg.Files.OwnerQuotaBytes}).
+			WithBatchStore(providerControlStore, providerControlStore).
 			WithSkillStore(providerControlStore).
 			WithVectorStore(providerControlStore, gateway.VectorStoreRuntimeConfig{OwnerQuota: cfg.VectorStores.OwnerQuota, FileQuota: cfg.VectorStores.FileQuota})
 		handler, err = handler.WithA2APushNotifications(providerControlStore, []byte(cfg.Provider.CredentialKey))
@@ -170,12 +171,19 @@ func main() {
 		handler = handler.WithBudgetManagement(billingManagement).WithUsageReporting(billingManagement).WithRequestLogs(billingManagement).WithAudit(billingManagement)
 	}
 	var a2aPushWorkerDone <-chan struct{}
+	var batchWorkerDone <-chan struct{}
 	if providerControlStore != nil {
 		done := make(chan struct{})
 		a2aPushWorkerDone = done
 		go func() {
 			defer close(done)
 			gateway.RunA2APushWorker(appCtx, handler)
+		}()
+		batchDone := make(chan struct{})
+		batchWorkerDone = batchDone
+		go func() {
+			defer close(batchDone)
+			gateway.RunBatchWorker(appCtx, handler)
 		}()
 	}
 	server := &http.Server{
@@ -215,6 +223,13 @@ func main() {
 		case <-a2aPushWorkerDone:
 		case <-shutdownCtx.Done():
 			log.Printf("A2A push worker shutdown timed out")
+		}
+	}
+	if batchWorkerDone != nil {
+		select {
+		case <-batchWorkerDone:
+		case <-shutdownCtx.Done():
+			log.Printf("batch worker shutdown timed out")
 		}
 	}
 	if err := shutdownTelemetry(shutdownCtx); err != nil {

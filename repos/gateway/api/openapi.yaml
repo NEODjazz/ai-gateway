@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.229
+  version: 0.1.230
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -24,6 +24,7 @@ tags:
   - name: Tags
   - name: MCP
   - name: Files
+  - name: Batches
   - name: Vector stores
   - name: Skills
   - name: Projects and access
@@ -608,6 +609,86 @@ paths:
             application/octet-stream: {schema: {type: string, format: binary}}
         default:
           description: Authentication or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/batches:
+    post:
+      operationId: createBatch
+      tags: [Batches]
+      summary: Create a durable asynchronous inference batch
+      description: Validates an owner-scoped JSONL file with purpose=batch, authorizes every model and tool before accepting it, and atomically persists the Batch, its items and durable jobs. Each item executes through the normal routing, guardrail, rate-limit and billing pipeline with an independent execution ID. Mixed-model files are supported. Completed and failed lines are stored as owner-scoped Files resources.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BatchCreateRequest'}
+      responses:
+        '200':
+          description: Queued batch
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Batch'}
+        default:
+          description: Authentication, validation, authorization, quota, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    get:
+      operationId: listBatches
+      tags: [Batches]
+      summary: List batches owned by the authenticated credential and user
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: after, in: query, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200':
+          description: Cursor page of owned batches
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BatchList'}
+        default:
+          description: Authentication, validation, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/batches/{id}:
+    get:
+      operationId: getBatch
+      tags: [Batches]
+      summary: Retrieve an owned batch
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+      responses:
+        '200':
+          description: Current batch lifecycle state and authoritative request counts
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Batch'}
+        default:
+          description: Authentication, ownership, validation, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/batches/{id}/cancel:
+    post:
+      operationId: cancelBatch
+      tags: [Batches]
+      summary: Cancel an owned queued or running batch
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+      responses:
+        '200':
+          description: Cancelled batch
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Batch'}
+        default:
+          description: Authentication, ownership, lifecycle conflict, or storage failure
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -3650,6 +3731,67 @@ components:
         has_more: {type: boolean}
         first_id: {type: string}
         last_id: {type: string}
+    BatchCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [input_file_id, endpoint, completion_window]
+      properties:
+        input_file_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+        endpoint:
+          type: string
+          enum: [/v1/responses, /v1/chat/completions, /v1/embeddings, /v1/completions, /v1/moderations]
+        completion_window: {type: string, const: 24h}
+        metadata:
+          type: object
+          maxProperties: 16
+          additionalProperties: {type: string, maxLength: 512}
+    BatchRequestCounts:
+      type: object
+      additionalProperties: false
+      required: [total, completed, failed]
+      properties:
+        total: {type: integer, minimum: 1, maximum: 50000}
+        completed: {type: integer, minimum: 0}
+        failed: {type: integer, minimum: 0}
+    Batch:
+      type: object
+      additionalProperties: false
+      required: [id, object, endpoint, errors, input_file_id, completion_window, status, created_at, expires_at, request_counts]
+      properties:
+        id: {type: string}
+        object: {type: string, const: batch}
+        endpoint: {type: string}
+        errors:
+          oneOf:
+            - {type: 'null'}
+            - {type: object}
+        input_file_id: {type: string}
+        completion_window: {type: string, const: 24h}
+        status: {type: string, enum: [queued, in_progress, finalizing, completed, failed, expired, cancelled]}
+        output_file_id: {type: string}
+        error_file_id: {type: string}
+        created_at: {type: integer, format: int64}
+        in_progress_at: {type: integer, format: int64}
+        expires_at: {type: integer, format: int64}
+        finalizing_at: {type: integer, format: int64}
+        completed_at: {type: integer, format: int64}
+        failed_at: {type: integer, format: int64}
+        cancelling_at: {type: integer, format: int64}
+        cancelled_at: {type: integer, format: int64}
+        request_counts: {$ref: '#/components/schemas/BatchRequestCounts'}
+        metadata:
+          type: object
+          additionalProperties: {type: string}
+    BatchList:
+      type: object
+      additionalProperties: false
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, items: {$ref: '#/components/schemas/Batch'}}
+        first_id: {type: string}
+        last_id: {type: string}
+        has_more: {type: boolean}
     FileObject:
       type: object
       additionalProperties: false

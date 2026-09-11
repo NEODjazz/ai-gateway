@@ -14,6 +14,7 @@ import (
 
 	"ai-gateway-gateway/internal/a2astate"
 	"ai-gateway-gateway/internal/asyncstate"
+	"ai-gateway-gateway/internal/batchstate"
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/mcpclient"
 	"ai-gateway-gateway/internal/mcpstate"
@@ -53,6 +54,8 @@ type Handler struct {
 	mcpCalls          mcpstate.Store
 	files             filestate.Store
 	fileConfig        FileRuntimeConfig
+	batches           batchstate.Store
+	batchJobs         asyncstate.Store
 	skills            skillstate.Store
 	vectorStores      vectorstate.Store
 	vectorStoreConfig VectorStoreRuntimeConfig
@@ -65,6 +68,12 @@ type Handler struct {
 	apiDocs           apiDocsConfig
 	adminUI           bool
 	adminState        *AdminStateRuntime
+}
+
+func (h Handler) WithBatchStore(store batchstate.Store, jobs asyncstate.Store) Handler {
+	h.batches = store
+	h.batchJobs = jobs
+	return h
 }
 
 func (h Handler) WithAdminState(runtime *AdminStateRuntime) Handler {

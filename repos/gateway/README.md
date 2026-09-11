@@ -28,6 +28,10 @@ permission examples, see [MCP integration](../../docs/mcp.md).
 - `DELETE /v1/responses/{id}`
 - `POST /v1/responses/{id}/cancel`
 - `GET /v1/responses/{id}/input_items`
+- `POST /v1/batches`
+- `GET /v1/batches`
+- `GET /v1/batches/{id}`
+- `POST /v1/batches/{id}/cancel`
 - `GET /admin/v1/session`
 - `GET /admin/v1/usage/report`
 - `GET /admin/v1/request-logs`
@@ -65,6 +69,13 @@ after provider post-processing and billing settlement succeed.
 Concurrent subscriptions, stream duration and polling frequency are limited by
 `A2A_SUBSCRIPTION_LIMIT`, `A2A_SUBSCRIPTION_DURATION_SECONDS` and
 `A2A_SUBSCRIPTION_POLL_MILLISECONDS`.
+
+The Batches API accepts owner-scoped JSONL Files for Chat Completions, Responses,
+Completions, Embeddings and Moderations. Every line is validated and authorized before
+the batch is queued. Durable per-item jobs reuse the normal routing, content-policy,
+rate-limit and billing path with independent execution IDs, including mixed-model files.
+Results and errors are written back as owner-scoped JSONL Files. Batch creation and job
+enqueue are one PostgreSQL transaction, and at most 100 active batches are allowed per owner.
 
 Gateway-level module:
 
