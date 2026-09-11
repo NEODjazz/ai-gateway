@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.243
+  version: 0.1.244
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -159,6 +159,74 @@ paths:
           description: Thread deletion result
           content: {application/json: {schema: {$ref: '#/components/schemas/AssistantThreadDeletion'}}}
         '404': {description: Thread is absent or belongs to another owner}
+  /v1/threads/{thread_id}/messages:
+    parameters:
+      - {name: thread_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+    post:
+      operationId: createAssistantMessage
+      tags: [Assistants]
+      summary: Create a message in an owned assistant thread
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AssistantMessageCreateRequest'}}}
+      responses:
+        '200':
+          description: Created thread message
+          content: {application/json: {schema: {$ref: '#/components/schemas/AssistantMessage'}}}
+        '400': {description: "Invalid content, attachment, or unowned file"}
+        '404': {description: Thread is absent or belongs to another owner}
+        '429': {description: Per-thread message quota exceeded}
+    get:
+      operationId: listAssistantMessages
+      tags: [Assistants]
+      summary: List messages in an owned assistant thread
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
+        - {name: after, in: query, schema: {type: string, maxLength: 128}}
+        - {name: before, in: query, schema: {type: string, maxLength: 128}}
+      responses:
+        '200':
+          description: Owner-filtered message page
+          content: {application/json: {schema: {$ref: '#/components/schemas/AssistantMessageList'}}}
+        '400': {description: Invalid or conflicting pagination controls}
+        '404': {description: Thread or pagination boundary is absent for this owner}
+  /v1/threads/{thread_id}/messages/{message_id}:
+    parameters:
+      - {name: thread_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+      - {name: message_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+    get:
+      operationId: getAssistantMessage
+      tags: [Assistants]
+      summary: Retrieve an owned assistant thread message
+      responses:
+        '200':
+          description: Thread message
+          content: {application/json: {schema: {$ref: '#/components/schemas/AssistantMessage'}}}
+        '404': {description: Thread message is absent or belongs to another owner}
+    post:
+      operationId: updateAssistantMessage
+      tags: [Assistants]
+      summary: Replace metadata on an owned assistant thread message
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AssistantMessageUpdateRequest'}}}
+      responses:
+        '200':
+          description: Updated thread message
+          content: {application/json: {schema: {$ref: '#/components/schemas/AssistantMessage'}}}
+        '400': {description: Invalid metadata update}
+        '404': {description: Thread message is absent or belongs to another owner}
+        '409': {description: Thread message was modified concurrently}
+    delete:
+      operationId: deleteAssistantMessage
+      tags: [Assistants]
+      summary: Delete an owned assistant thread message
+      responses:
+        '200':
+          description: Message deletion result
+          content: {application/json: {schema: {$ref: '#/components/schemas/AssistantMessageDeletion'}}}
+        '404': {description: Thread message is absent or belongs to another owner}
   /v1/realtime:
     get:
       operationId: openRealtimeSession
@@ -3982,6 +4050,108 @@ components:
       properties:
         id: {type: string}
         object: {type: string, const: thread.deleted}
+        deleted: {type: boolean, const: true}
+    AssistantMessageImageFile:
+      type: object
+      additionalProperties: false
+      required: [file_id]
+      properties:
+        file_id: {type: string, minLength: 1, maxLength: 128}
+        detail: {type: string, enum: [auto, low, high]}
+    AssistantMessageImageURL:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: {type: string, minLength: 1, maxLength: 2097152}
+        detail: {type: string, enum: [auto, low, high]}
+    AssistantMessageInputContentPart:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [type, text]
+          properties:
+            type: {type: string, const: text}
+            text: {type: string, minLength: 1, maxLength: 1048576}
+        - type: object
+          additionalProperties: false
+          required: [type, image_file]
+          properties:
+            type: {type: string, const: image_file}
+            image_file: {$ref: '#/components/schemas/AssistantMessageImageFile'}
+        - type: object
+          additionalProperties: false
+          required: [type, image_url]
+          properties:
+            type: {type: string, const: image_url}
+            image_url: {$ref: '#/components/schemas/AssistantMessageImageURL'}
+    AssistantMessageAttachment:
+      type: object
+      additionalProperties: false
+      required: [file_id, tools]
+      properties:
+        file_id: {type: string, minLength: 1, maxLength: 128}
+        tools:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            type: object
+            additionalProperties: false
+            required: [type]
+            properties:
+              type: {type: string, enum: [code_interpreter, file_search]}
+    AssistantMessageCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [role, content]
+      properties:
+        role: {type: string, enum: [user, assistant]}
+        content:
+          oneOf:
+            - {type: string, minLength: 1, maxLength: 1048576}
+            - {type: array, minItems: 1, maxItems: 64, items: {$ref: '#/components/schemas/AssistantMessageInputContentPart'}}
+        attachments: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/AssistantMessageAttachment'}}
+        metadata: {type: object, maxProperties: 16, additionalProperties: {type: string, maxLength: 512}}
+    AssistantMessageUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [metadata]
+      properties:
+        metadata: {type: object, maxProperties: 16, additionalProperties: {type: string, maxLength: 512}}
+    AssistantMessage:
+      type: object
+      additionalProperties: false
+      required: [id, object, created_at, thread_id, role, content, attachments, metadata, assistant_id, run_id]
+      properties:
+        id: {type: string}
+        object: {type: string, const: thread.message}
+        created_at: {type: integer}
+        thread_id: {type: string}
+        role: {type: string, enum: [user, assistant]}
+        content: {type: array, minItems: 1, maxItems: 64, items: {type: object, additionalProperties: true}}
+        attachments: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/AssistantMessageAttachment'}}
+        metadata: {type: object, maxProperties: 16, additionalProperties: {type: string, maxLength: 512}}
+        assistant_id: {type: [string, 'null']}
+        run_id: {type: [string, 'null']}
+    AssistantMessageList:
+      type: object
+      additionalProperties: false
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, items: {$ref: '#/components/schemas/AssistantMessage'}}
+        has_more: {type: boolean}
+        first_id: {type: string}
+        last_id: {type: string}
+    AssistantMessageDeletion:
+      type: object
+      additionalProperties: false
+      required: [id, object, deleted]
+      properties:
+        id: {type: string}
+        object: {type: string, const: thread.message.deleted}
         deleted: {type: boolean, const: true}
     A2APart:
       type: object

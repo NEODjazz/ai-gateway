@@ -57,6 +57,8 @@ gateway:
     ownerQuota: 1000
     # Maximum durable threads per credential-and-user owner.
     threadOwnerQuota: 10000
+    # Maximum durable messages per assistant thread.
+    messageThreadQuota: 100000
   a2aTasks:
     # Maximum retained tasks per credential-and-user owner.
     ownerQuota: 1000

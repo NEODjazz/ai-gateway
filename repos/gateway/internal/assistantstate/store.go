@@ -51,6 +51,13 @@ type MessageRecord struct {
 	UpdatedAt time.Time
 }
 
+type MessagePageOptions struct {
+	Limit  int
+	After  string
+	Before string
+	Order  string
+}
+
 type ThreadStore interface {
 	CreateThread(context.Context, ThreadRecord, int) (ThreadRecord, error)
 	ListThreads(context.Context, string, int, string) ([]ThreadRecord, string, error)
@@ -58,7 +65,7 @@ type ThreadStore interface {
 	UpdateThread(context.Context, string, string, []byte, int64) (ThreadRecord, error)
 	DeleteThread(context.Context, string, string) error
 	CreateThreadMessage(context.Context, MessageRecord, int) (MessageRecord, error)
-	ListThreadMessages(context.Context, string, string, int, string) ([]MessageRecord, string, error)
+	ListThreadMessages(context.Context, string, string, MessagePageOptions) ([]MessageRecord, string, error)
 	GetThreadMessage(context.Context, string, string, string) (MessageRecord, error)
 	UpdateThreadMessage(context.Context, string, string, string, []byte, int64) (MessageRecord, error)
 	DeleteThreadMessage(context.Context, string, string, string) error

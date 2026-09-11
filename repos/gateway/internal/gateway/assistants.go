@@ -18,8 +18,9 @@ import (
 )
 
 type AssistantRuntimeConfig struct {
-	OwnerQuota       int
-	ThreadOwnerQuota int
+	OwnerQuota         int
+	ThreadOwnerQuota   int
+	MessageThreadQuota int
 }
 
 type assistantSnapshot struct {

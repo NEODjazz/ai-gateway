@@ -18,9 +18,10 @@ import (
 
 type memoryAssistantThreadStore struct {
 	*memoryAssistantStore
-	mu      sync.Mutex
-	threads map[string]assistantstate.ThreadRecord
-	clock   int64
+	mu       sync.Mutex
+	threads  map[string]assistantstate.ThreadRecord
+	messages map[string]assistantstate.MessageRecord
+	clock    int64
 }
 
 func (s *memoryAssistantThreadStore) CreateThread(_ context.Context, record assistantstate.ThreadRecord, quota int) (assistantstate.ThreadRecord, error) {
@@ -103,23 +104,122 @@ func (s *memoryAssistantThreadStore) DeleteThread(_ context.Context, owner, id s
 		return assistantstate.ErrNotFound
 	}
 	delete(s.threads, key)
+	for messageKey, message := range s.messages {
+		if message.OwnerKey == owner && message.ThreadID == id {
+			delete(s.messages, messageKey)
+		}
+	}
 	return nil
 }
 
-func (*memoryAssistantThreadStore) CreateThreadMessage(context.Context, assistantstate.MessageRecord, int) (assistantstate.MessageRecord, error) {
-	return assistantstate.MessageRecord{}, assistantstate.ErrUnavailable
+func (s *memoryAssistantThreadStore) CreateThreadMessage(_ context.Context, record assistantstate.MessageRecord, quota int) (assistantstate.MessageRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.messages == nil {
+		s.messages = map[string]assistantstate.MessageRecord{}
+	}
+	if _, found := s.threads[record.OwnerKey+"/"+record.ThreadID]; !found {
+		return assistantstate.MessageRecord{}, assistantstate.ErrNotFound
+	}
+	count := 0
+	for _, existing := range s.messages {
+		if existing.OwnerKey == record.OwnerKey && existing.ThreadID == record.ThreadID {
+			count++
+		}
+	}
+	if count >= quota {
+		return assistantstate.MessageRecord{}, assistantstate.ErrQuotaExceeded
+	}
+	s.clock++
+	record.Revision = 1
+	record.CreatedAt = time.Unix(s.clock, 0).UTC()
+	record.UpdatedAt = record.CreatedAt
+	record.Snapshot = append([]byte(nil), record.Snapshot...)
+	s.messages[record.OwnerKey+"/"+record.ThreadID+"/"+record.ID] = record
+	return record, nil
 }
-func (*memoryAssistantThreadStore) ListThreadMessages(context.Context, string, string, int, string) ([]assistantstate.MessageRecord, string, error) {
-	return nil, "", assistantstate.ErrUnavailable
+func (s *memoryAssistantThreadStore) ListThreadMessages(_ context.Context, owner, threadID string, options assistantstate.MessagePageOptions) ([]assistantstate.MessageRecord, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, found := s.threads[owner+"/"+threadID]; !found {
+		return nil, "", assistantstate.ErrNotFound
+	}
+	values := make([]assistantstate.MessageRecord, 0)
+	for _, record := range s.messages {
+		if record.OwnerKey == owner && record.ThreadID == threadID {
+			values = append(values, record)
+		}
+	}
+	sort.Slice(values, func(i, j int) bool {
+		if options.Order == "asc" {
+			return values[i].CreatedAt.Before(values[j].CreatedAt)
+		}
+		return values[i].CreatedAt.After(values[j].CreatedAt)
+	})
+	boundary := options.After
+	before := false
+	if boundary == "" {
+		boundary, before = options.Before, options.Before != ""
+	}
+	if boundary != "" {
+		index := -1
+		for current := range values {
+			if values[current].ID == boundary {
+				index = current
+				break
+			}
+		}
+		if index < 0 {
+			return nil, "", assistantstate.ErrNotFound
+		}
+		if before {
+			values = values[:index]
+		} else {
+			values = values[index+1:]
+		}
+	}
+	next := ""
+	if len(values) > options.Limit {
+		next = values[options.Limit-1].ID
+		values = values[:options.Limit]
+	}
+	return append([]assistantstate.MessageRecord(nil), values...), next, nil
 }
-func (*memoryAssistantThreadStore) GetThreadMessage(context.Context, string, string, string) (assistantstate.MessageRecord, error) {
-	return assistantstate.MessageRecord{}, assistantstate.ErrUnavailable
+func (s *memoryAssistantThreadStore) GetThreadMessage(_ context.Context, owner, threadID, id string) (assistantstate.MessageRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, found := s.messages[owner+"/"+threadID+"/"+id]
+	if !found {
+		return assistantstate.MessageRecord{}, assistantstate.ErrNotFound
+	}
+	return record, nil
 }
-func (*memoryAssistantThreadStore) UpdateThreadMessage(context.Context, string, string, string, []byte, int64) (assistantstate.MessageRecord, error) {
-	return assistantstate.MessageRecord{}, assistantstate.ErrUnavailable
+func (s *memoryAssistantThreadStore) UpdateThreadMessage(_ context.Context, owner, threadID, id string, snapshot []byte, revision int64) (assistantstate.MessageRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := owner + "/" + threadID + "/" + id
+	record, found := s.messages[key]
+	if !found {
+		return assistantstate.MessageRecord{}, assistantstate.ErrNotFound
+	}
+	if record.Revision != revision {
+		return assistantstate.MessageRecord{}, assistantstate.ErrConflict
+	}
+	record.Revision++
+	record.UpdatedAt = record.UpdatedAt.Add(time.Second)
+	record.Snapshot = append([]byte(nil), snapshot...)
+	s.messages[key] = record
+	return record, nil
 }
-func (*memoryAssistantThreadStore) DeleteThreadMessage(context.Context, string, string, string) error {
-	return assistantstate.ErrUnavailable
+func (s *memoryAssistantThreadStore) DeleteThreadMessage(_ context.Context, owner, threadID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := owner + "/" + threadID + "/" + id
+	if _, found := s.messages[key]; !found {
+		return assistantstate.ErrNotFound
+	}
+	delete(s.messages, key)
+	return nil
 }
 
 func TestAssistantThreadCRUDOwnershipQuotaAndValidation(t *testing.T) {

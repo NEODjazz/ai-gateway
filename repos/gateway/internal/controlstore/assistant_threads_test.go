@@ -29,13 +29,25 @@ func TestPostgresAssistantThreadAndMessageLifecycleIntegration(t *testing.T) {
 	if _, err = store.CreateThreadMessage(t.Context(), assistantstate.MessageRecord{ID: "msg_c", ThreadID: thread.ID, OwnerKey: "owner-a", Snapshot: []byte(`{"role":"user"}`)}, 2); !errors.Is(err, assistantstate.ErrQuotaExceeded) {
 		t.Fatalf("message quota err=%v", err)
 	}
-	page, next, err := store.ListThreadMessages(t.Context(), "owner-a", thread.ID, 1, "")
+	page, next, err := store.ListThreadMessages(t.Context(), "owner-a", thread.ID, assistantstate.MessagePageOptions{Limit: 1, Order: "desc"})
 	if err != nil || len(page) != 1 || next == "" {
 		t.Fatalf("page=%+v next=%q err=%v", page, next, err)
 	}
-	rest, finalNext, err := store.ListThreadMessages(t.Context(), "owner-a", thread.ID, 1, next)
+	rest, finalNext, err := store.ListThreadMessages(t.Context(), "owner-a", thread.ID, assistantstate.MessagePageOptions{Limit: 1, After: next, Order: "desc"})
 	if err != nil || len(rest) != 1 || finalNext != "" || rest[0].ID == page[0].ID {
 		t.Fatalf("rest=%+v next=%q err=%v", rest, finalNext, err)
+	}
+	ascending, _, err := store.ListThreadMessages(t.Context(), "owner-a", thread.ID, assistantstate.MessagePageOptions{Limit: 2, Order: "asc"})
+	if err != nil || len(ascending) != 2 || ascending[0].ID != rest[0].ID || ascending[1].ID != page[0].ID {
+		t.Fatalf("ascending=%+v err=%v", ascending, err)
+	}
+	before, _, err := store.ListThreadMessages(t.Context(), "owner-a", thread.ID, assistantstate.MessagePageOptions{Limit: 2, Before: page[0].ID, Order: "desc"})
+	if err != nil || len(before) != 0 {
+		t.Fatalf("before newest=%+v err=%v", before, err)
+	}
+	beforeOldest, _, err := store.ListThreadMessages(t.Context(), "owner-a", thread.ID, assistantstate.MessagePageOptions{Limit: 2, Before: rest[0].ID, Order: "desc"})
+	if err != nil || len(beforeOldest) != 1 || beforeOldest[0].ID != page[0].ID {
+		t.Fatalf("before oldest=%+v err=%v", beforeOldest, err)
 	}
 	updated, err := store.UpdateThreadMessage(t.Context(), "owner-a", thread.ID, message.ID, []byte(`{"role":"user","content":"updated"}`), message.Revision)
 	if err != nil || updated.Revision != 2 {

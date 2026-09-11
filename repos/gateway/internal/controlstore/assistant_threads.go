@@ -149,11 +149,11 @@ func (s *PostgresStore) CreateThreadMessage(ctx context.Context, record assistan
 	return created, nil
 }
 
-func (s *PostgresStore) ListThreadMessages(ctx context.Context, owner, threadID string, limit int, after string) ([]assistantstate.MessageRecord, string, error) {
+func (s *PostgresStore) ListThreadMessages(ctx context.Context, owner, threadID string, options assistantstate.MessagePageOptions) ([]assistantstate.MessageRecord, string, error) {
 	if s == nil || s.pool == nil {
 		return nil, "", assistantstate.ErrUnavailable
 	}
-	if owner == "" || threadID == "" || limit < 1 || limit > 100 {
+	if owner == "" || threadID == "" || options.Limit < 1 || options.Limit > 100 || options.After != "" && options.Before != "" || options.Order != "asc" && options.Order != "desc" {
 		return nil, "", assistantstate.ErrInvalid
 	}
 	if _, err := s.GetThread(ctx, owner, threadID); err != nil {
@@ -161,9 +161,13 @@ func (s *PostgresStore) ListThreadMessages(ctx context.Context, owner, threadID 
 	}
 	var cursor *time.Time
 	var cursorID string
-	if after != "" {
+	boundary := options.After
+	if boundary == "" {
+		boundary = options.Before
+	}
+	if boundary != "" {
 		var created time.Time
-		err := s.pool.QueryRow(ctx, `SELECT created_at,id FROM gateway_assistant_messages WHERE owner_key=$1 AND thread_id=$2 AND id=$3`, owner, threadID, after).Scan(&created, &cursorID)
+		err := s.pool.QueryRow(ctx, `SELECT created_at,id FROM gateway_assistant_messages WHERE owner_key=$1 AND thread_id=$2 AND id=$3`, owner, threadID, boundary).Scan(&created, &cursorID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, "", assistantstate.ErrNotFound
 		}
@@ -172,12 +176,28 @@ func (s *PostgresStore) ListThreadMessages(ctx context.Context, owner, threadID 
 		}
 		cursor = &created
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id,thread_id,owner_key,snapshot,revision,created_at,updated_at FROM gateway_assistant_messages WHERE owner_key=$1 AND thread_id=$2 AND ($3::timestamptz IS NULL OR (created_at,id)<($3,$4)) ORDER BY created_at DESC,id DESC LIMIT $5`, owner, threadID, cursor, cursorID, limit+1)
+	comparison := "<"
+	if options.Order == "asc" {
+		comparison = ">"
+	}
+	if options.Before != "" {
+		if comparison == "<" {
+			comparison = ">"
+		} else {
+			comparison = "<"
+		}
+	}
+	order := "DESC"
+	if options.Order == "asc" {
+		order = "ASC"
+	}
+	query := `SELECT id,thread_id,owner_key,snapshot,revision,created_at,updated_at FROM gateway_assistant_messages WHERE owner_key=$1 AND thread_id=$2 AND ($3::timestamptz IS NULL OR (created_at,id)` + comparison + `($3,$4)) ORDER BY created_at ` + order + `,id ` + order + ` LIMIT $5`
+	rows, err := s.pool.Query(ctx, query, owner, threadID, cursor, cursorID, options.Limit+1)
 	if err != nil {
 		return nil, "", err
 	}
 	defer rows.Close()
-	values := make([]assistantstate.MessageRecord, 0, limit+1)
+	values := make([]assistantstate.MessageRecord, 0, options.Limit+1)
 	for rows.Next() {
 		value, scanErr := scanAssistantMessage(rows)
 		if scanErr != nil {
@@ -189,9 +209,9 @@ func (s *PostgresStore) ListThreadMessages(ctx context.Context, owner, threadID 
 		return nil, "", err
 	}
 	next := ""
-	if len(values) > limit {
-		next = values[limit-1].ID
-		values = values[:limit]
+	if len(values) > options.Limit {
+		next = values[options.Limit-1].ID
+		values = values[:options.Limit]
 	}
 	return values, next, nil
 }
