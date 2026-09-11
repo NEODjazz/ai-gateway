@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.216
+  version: 0.1.217
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -439,7 +439,7 @@ paths:
       operationId: transcribeAudio
       tags: [Inference]
       summary: Transcribe an uploaded audio file through an explicitly capable deployment
-      description: Applies bounded multipart decoding, file signature checks, AV and prompt DLP policies, RPM/TPM admission, retries and exact provider usage settlement. Duration-priced native deployments reserve validated container duration before execution.
+      description: Applies bounded multipart decoding, file signature checks, AV and prompt DLP policies, RPM/TPM admission, retries and exact provider usage settlement. Duration-priced native deployments reserve validated container duration before execution. Native Gemini supports bounded inline WAV/MP3/MPEG/OGG/FLAC/WebM input, language hints, vocabulary, prompt guidance and temperature; unsupported structured modes fail before upstream execution.
       security: [{bearerAuth: []}]
       requestBody:
         required: true

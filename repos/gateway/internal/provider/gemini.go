@@ -103,22 +103,27 @@ type geminiTool struct {
 	Functions []geminiFunction `json:"functionDeclarations"`
 }
 type geminiGeneration struct {
-	MaxOutputTokens    *int                  `json:"maxOutputTokens,omitempty"`
-	Temperature        *float64              `json:"temperature,omitempty"`
-	TopP               *float64              `json:"topP,omitempty"`
-	TopK               *int                  `json:"topK,omitempty"`
-	FrequencyPenalty   *float64              `json:"frequencyPenalty,omitempty"`
-	PresencePenalty    *float64              `json:"presencePenalty,omitempty"`
-	ResponseLogprobs   *bool                 `json:"responseLogprobs,omitempty"`
-	Logprobs           *int                  `json:"logprobs,omitempty"`
-	CandidateCount     *int                  `json:"candidateCount,omitempty"`
-	ThinkingConfig     *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
-	ImageConfig        *geminiImageConfig    `json:"imageConfig,omitempty"`
-	ResponseModalities []string              `json:"responseModalities,omitempty"`
-	Seed               *int64                `json:"seed,omitempty"`
-	Stop               []string              `json:"stopSequences,omitempty"`
-	ResponseMIMEType   string                `json:"responseMimeType,omitempty"`
-	ResponseJSONSchema any                   `json:"responseJsonSchema,omitempty"`
+	MaxOutputTokens    *int                            `json:"maxOutputTokens,omitempty"`
+	Temperature        *float64                        `json:"temperature,omitempty"`
+	TopP               *float64                        `json:"topP,omitempty"`
+	TopK               *int                            `json:"topK,omitempty"`
+	FrequencyPenalty   *float64                        `json:"frequencyPenalty,omitempty"`
+	PresencePenalty    *float64                        `json:"presencePenalty,omitempty"`
+	ResponseLogprobs   *bool                           `json:"responseLogprobs,omitempty"`
+	Logprobs           *int                            `json:"logprobs,omitempty"`
+	CandidateCount     *int                            `json:"candidateCount,omitempty"`
+	ThinkingConfig     *geminiThinkingConfig           `json:"thinkingConfig,omitempty"`
+	ImageConfig        *geminiImageConfig              `json:"imageConfig,omitempty"`
+	AudioTranscription *geminiAudioTranscriptionConfig `json:"audioTranscriptionConfig,omitempty"`
+	ResponseModalities []string                        `json:"responseModalities,omitempty"`
+	Seed               *int64                          `json:"seed,omitempty"`
+	Stop               []string                        `json:"stopSequences,omitempty"`
+	ResponseMIMEType   string                          `json:"responseMimeType,omitempty"`
+	ResponseJSONSchema any                             `json:"responseJsonSchema,omitempty"`
+}
+type geminiAudioTranscriptionConfig struct {
+	LanguageCodes    []string `json:"languageCodes,omitempty"`
+	CustomVocabulary []string `json:"customVocabulary,omitempty"`
 }
 type geminiImageConfig struct {
 	AspectRatio string `json:"aspectRatio,omitempty"`

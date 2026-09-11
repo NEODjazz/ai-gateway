@@ -195,6 +195,12 @@ GenerateContent: один проверенный PNG/JPEG/WebP input преоб�
 base64 result. Gateway задает нейтральную variation instruction; URL output,
 несколько результатов, exact size и user metadata отклоняются до upstream.
 
+Native Gemini deployments с capability `audio_transcription` передают проверенный
+WAV/MP3/MPEG/OGG/FLAC/WebM input в GenerateContent transcription config. Language
+hints, custom vocabulary, prompt guidance и temperature отображаются явно;
+provider token usage проходит общий exact settlement. Structured timestamps,
+diarization, chunking и known-speaker режимы отклоняются до upstream.
+
 Ответ ограничен 64 MiB, содержит ровно запрошенное число результатов и для
 каждого результата допускает ровно один источник: HTTP(S) URL без credentials
 либо корректный base64 размером до 20 MiB после декодирования. Token usage
