@@ -5,6 +5,23 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  027_gateway_assistants.sql: |
+    CREATE TABLE IF NOT EXISTS gateway_assistants (
+        id TEXT NOT NULL,
+        owner_key TEXT NOT NULL,
+        snapshot JSONB NOT NULL,
+        revision BIGINT NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (length(id) BETWEEN 1 AND 128),
+        CHECK (length(owner_key) BETWEEN 1 AND 256),
+        CHECK (jsonb_typeof(snapshot) = 'object'),
+        CHECK (octet_length(snapshot::text) BETWEEN 2 AND 1048576),
+        CHECK (revision > 0),
+        PRIMARY KEY (owner_key, id)
+    );
+    CREATE INDEX IF NOT EXISTS gateway_assistants_owner_created_idx
+        ON gateway_assistants (owner_key, created_at DESC, id DESC);
   015_billing_video_duration.sql: |
     ALTER TABLE billing_budget_reservations
         ADD COLUMN IF NOT EXISTS video_cost_per_second numeric(20,10) NOT NULL DEFAULT 0;
