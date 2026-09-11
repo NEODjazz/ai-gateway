@@ -1727,3 +1727,13 @@ metadata lifecycle.
 Attaching a file applies both the atomic per-store file-count limit and the
 overflow-safe aggregate byte limit configured by `VECTOR_STORE_FILE_QUOTA` and
 `VECTOR_STORE_BYTE_QUOTA`. Expired source files do not consume either limit.
+
+`POST /v1/vector_stores/{id}/search` provides bounded semantic retrieval for an
+owned store. It accepts an explicit authorized embedding model, loads at most 20
+attached `purpose=assistants` UTF-8 text, Markdown, CSV, or JSON files and at
+most 1 MiB of content, then splits them into at most 100 Unicode-safe chunks.
+The query and chunks enter the normal content-policy and token/budget admission
+path together. One provider embedding batch is settled from reported usage, and
+the gateway validates dimensions, indices and finite values before cosine
+ranking. Stores above the synchronous limits fail before an upstream request;
+durable ingestion and indexing remain unavailable.

@@ -76,6 +76,12 @@ rejected before inference. Accepted document text enters the shared Responses
 input policy, token reserve and billing path, and remote URLs are replaced with
 validated inline content before task persistence.
 
+Synchronous vector-store search resolves ownership before reading files and
+allows only bounded UTF-8 text formats with `purpose=assistants`. Query and file
+chunks pass through the configured inference content policy and token admission
+before one billed embeddings batch. Malformed, non-finite or dimensionally
+inconsistent vectors fail closed before ranking.
+
 Chat cache identity also includes validated provider-native message blocks, their
 reserved input size, Bedrock service tier, latency selection and requested
 additional response-field paths. Semantic

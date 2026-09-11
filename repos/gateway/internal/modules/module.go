@@ -117,6 +117,24 @@ func (p Pipeline) Run(ctx context.Context, req *RequestContext) error {
 	return p.runPre(ctx, req, false)
 }
 
+// RunAfterAuthentication applies inference policy and billing after an owned
+// resource has been resolved from an authenticated identity.
+func (p Pipeline) RunAfterAuthentication(ctx context.Context, req *RequestContext) error {
+	for _, module := range p.modules {
+		if module.Name() == "auth" {
+			continue
+		}
+		err := p.run(ctx, req, module, "pre", module.Handle)
+		if err != nil {
+			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
+				return fmt.Errorf("%s module failed: %w", module.Name(), err)
+			}
+			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
+		}
+	}
+	return nil
+}
+
 // RunTokenCount applies the configured pre-inference policies without opening
 // the generation billing lifecycle. Counting never runs post/failure billing.
 func (p Pipeline) RunTokenCount(ctx context.Context, req *RequestContext) error {
