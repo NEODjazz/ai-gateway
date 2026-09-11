@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.240
+  version: 0.1.241
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -705,7 +705,7 @@ paths:
       operationId: createVideo
       tags: [Inference]
       summary: Create an owner-scoped video generation job
-      description: Selects a video-capable deployment and stores its exact deployment binding durably. When billing is configured, creation fails closed until duration pricing is configured by the gateway runtime.
+      description: Selects a video-capable deployment, reserves the requested duration against billing, and stores its exact deployment binding durably before settling usage.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -761,6 +761,7 @@ paths:
       operationId: remixVideo
       tags: [Inference]
       summary: Create an owner-scoped remix through the source video's pinned deployment
+      description: Reserves and settles the source video duration while preserving the source deployment binding.
       security: [{bearerAuth: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}

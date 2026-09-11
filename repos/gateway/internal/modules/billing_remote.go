@@ -205,12 +205,15 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.APIType = "fine_tuning"
 	case "video":
 		request.APIType = "video"
+		request.UsageEstimated = metadataValue(req.Metadata, "gateway.video_usage_exact") != "true"
 	}
 	if request.APIType == "fine_tuning" || request.APIType == "video" {
 		request.InputTokens = 0
 		request.PromptTokensEstimated = 0
 		request.OutputTokens = 0
-		request.UsageEstimated = true
+		if request.APIType == "fine_tuning" {
+			request.UsageEstimated = true
+		}
 	} else if request.OutputTokens == 0 && req.CompletionRequest == nil {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
 	}

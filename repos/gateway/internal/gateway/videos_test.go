@@ -88,6 +88,35 @@ type gatewayVideoProvider struct {
 	nextID  int
 }
 
+type videoBillingModule struct {
+	phases     []string
+	seconds    []int
+	estimated  []bool
+	reserveErr error
+	commitErr  error
+}
+
+func (*videoBillingModule) Name() string   { return "billing" }
+func (*videoBillingModule) Required() bool { return true }
+func (m *videoBillingModule) Handle(_ context.Context, req *modules.RequestContext) error {
+	m.record("reserve", req)
+	return m.reserveErr
+}
+func (*videoBillingModule) PostResponseEnabled() bool { return true }
+func (m *videoBillingModule) HandlePostResponse(_ context.Context, req *modules.RequestContext) error {
+	m.record("commit", req)
+	return m.commitErr
+}
+func (m *videoBillingModule) HandleFailure(_ context.Context, req *modules.RequestContext, _ error) error {
+	m.record("cancel", req)
+	return nil
+}
+func (m *videoBillingModule) record(phase string, req *modules.RequestContext) {
+	m.phases = append(m.phases, phase)
+	m.seconds = append(m.seconds, req.VideoSeconds)
+	m.estimated = append(m.estimated, req.Metadata["gateway.video_usage_exact"] != "true")
+}
+
 func (p *gatewayVideoProvider) CreateVideo(ctx context.Context, identity modules.RequestContext, input openai.VideoCreateRequest, admit func(context.Context, *modules.RequestContext) error) (openai.Video, provider.VideoBinding, error) {
 	identity.Request.Model = input.Model
 	identity.Metadata["gateway.api_type"] = "video"
@@ -162,18 +191,65 @@ func TestVideoOwnedLifecycle(t *testing.T) {
 
 func TestVideoCreationCompensatesPersistenceFailure(t *testing.T) {
 	runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
-	handler := videoTestHandler(&memoryVideoStore{records: map[string]videostate.Record{}, createErr: errors.New("database unavailable")}, runtime, nil)
+	billing := &videoBillingModule{}
+	handler := videoTestHandler(&memoryVideoStore{records: map[string]videostate.Record{}, createErr: errors.New("database unavailable")}, runtime, billing)
 	response := videoRequest(t, handler, http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat"}`)
-	if response.Code != http.StatusServiceUnavailable || strings.Join(runtime.actions, ",") != "create,delete" {
-		t.Fatalf("status=%d actions=%v body=%s", response.Code, runtime.actions, response.Body.String())
+	if response.Code != http.StatusServiceUnavailable || strings.Join(runtime.actions, ",") != "create,delete" || strings.Join(billing.phases, ",") != "reserve,cancel" {
+		t.Fatalf("status=%d actions=%v phases=%v body=%s", response.Code, runtime.actions, billing.phases, response.Body.String())
 	}
 }
 
-func TestVideoCreationFailsClosedWithBilling(t *testing.T) {
+func TestVideoCreationUsesDurationBillingLifecycle(t *testing.T) {
 	runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
-	handler := videoTestHandler(&memoryVideoStore{records: map[string]videostate.Record{}}, runtime, &lifecycleBillingModule{})
-	response := videoRequest(t, handler, http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat"}`)
-	if response.Code != http.StatusNotImplemented || len(runtime.actions) != 0 {
+	billing := &videoBillingModule{}
+	handler := videoTestHandler(&memoryVideoStore{records: map[string]videostate.Record{}}, runtime, billing)
+	response := videoRequest(t, handler, http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat","seconds":"8"}`)
+	if response.Code != http.StatusOK || strings.Join(billing.phases, ",") != "reserve,commit" || len(billing.seconds) != 2 || billing.seconds[0] != 8 || billing.seconds[1] != 8 || !billing.estimated[0] || billing.estimated[1] {
+		t.Fatalf("status=%d phases=%v seconds=%v estimated=%v body=%s", response.Code, billing.phases, billing.seconds, billing.estimated, response.Body.String())
+	}
+}
+
+func TestVideoBillingFailuresCompensateProviderAndOwnership(t *testing.T) {
+	t.Run("reserve", func(t *testing.T) {
+		runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+		billing := &videoBillingModule{reserveErr: modules.ErrBudgetExceeded}
+		handler := videoTestHandler(&memoryVideoStore{records: map[string]videostate.Record{}}, runtime, billing)
+		response := videoRequest(t, handler, http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat"}`)
+		if response.Code != http.StatusTooManyRequests || len(runtime.actions) != 0 || strings.Join(billing.phases, ",") != "reserve" {
+			t.Fatalf("status=%d actions=%v phases=%v body=%s", response.Code, runtime.actions, billing.phases, response.Body.String())
+		}
+	})
+
+	t.Run("commit", func(t *testing.T) {
+		runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+		billing := &videoBillingModule{commitErr: errors.New("billing unavailable")}
+		store := &memoryVideoStore{records: map[string]videostate.Record{}}
+		handler := videoTestHandler(store, runtime, billing)
+		response := videoRequest(t, handler, http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat"}`)
+		if response.Code != http.StatusServiceUnavailable || strings.Join(runtime.actions, ",") != "create,delete" || strings.Join(billing.phases, ",") != "reserve,commit,cancel" || len(store.records) != 0 {
+			t.Fatalf("status=%d actions=%v phases=%v records=%v body=%s", response.Code, runtime.actions, billing.phases, store.records, response.Body.String())
+		}
+	})
+}
+
+func TestVideoRemixUsesSourceDurationForBilling(t *testing.T) {
+	identity := modules.RequestContext{CredentialID: "credential", UserID: "user"}
+	owner := fileOwnerKey(identity)
+	store := &memoryVideoStore{records: map[string]videostate.Record{videoStoreKey(owner, "video_source"): {OwnerKey: owner, Binding: provider.VideoBinding{Endpoint: "video", Model: "model-a", Deployment: strings.Repeat("a", 64)}, Video: openai.Video{ID: "video_source", Model: "model-a", Seconds: "12"}}}}
+	runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+	billing := &videoBillingModule{}
+	handler := videoTestHandler(store, runtime, billing)
+	response := videoRequest(t, handler, http.MethodPost, "/v1/videos/video_source/remix", `{"prompt":"take a bow"}`)
+	if response.Code != http.StatusOK || strings.Join(billing.phases, ",") != "reserve,commit" || billing.seconds[0] != 12 || billing.seconds[1] != 12 {
+		t.Fatalf("status=%d phases=%v seconds=%v body=%s", response.Code, billing.phases, billing.seconds, response.Body.String())
+	}
+}
+
+func TestVideoRejectsInvalidDurationBeforeProviderCall(t *testing.T) {
+	runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+	handler := videoTestHandler(&memoryVideoStore{records: map[string]videostate.Record{}}, runtime, nil)
+	response := videoRequest(t, handler, http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat","seconds":"7"}`)
+	if response.Code != http.StatusBadRequest || len(runtime.actions) != 0 {
 		t.Fatalf("status=%d actions=%v body=%s", response.Code, runtime.actions, response.Body.String())
 	}
 }

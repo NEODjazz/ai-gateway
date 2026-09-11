@@ -246,6 +246,24 @@ func TestRemoteBillingUsesOnlyTrainingTokensForFineTuning(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingUsesOnlyDurationForVideo(t *testing.T) {
+	req := sensitiveContext()
+	req.VideoSeconds = 8
+	if req.Metadata == nil {
+		req.Metadata = map[string]string{}
+	}
+	req.Metadata["gateway.api_type"] = "video"
+	reserve := billingRequest(&req)
+	if reserve.APIType != "video" || reserve.VideoSeconds != 8 || reserve.InputTokens != 0 || reserve.OutputTokens != 0 || reserve.TotalTokens != 0 || !reserve.UsageEstimated {
+		t.Fatalf("reserve=%+v", reserve)
+	}
+	req.Metadata["gateway.video_usage_exact"] = "true"
+	commit := billingRequest(&req)
+	if commit.VideoSeconds != 8 || commit.UsageEstimated {
+		t.Fatalf("commit=%+v", commit)
+	}
+}
+
 func TestRemoteBillingSettlesAudioSpeechWithExactCharacters(t *testing.T) {
 	request := openai.AudioSpeechRequest{Provider: "speech", Model: "tts", Input: "Привет 👋", Voice: "alloy"}
 	req := RequestContext{

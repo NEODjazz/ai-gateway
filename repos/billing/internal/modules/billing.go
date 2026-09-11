@@ -167,6 +167,10 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	}
 	promptTokens := estimatePromptTokens(req)
 	inputTokens, outputTokens, totalTokens, usageEstimated := usageTokens(req, promptTokens)
+	if req.APIType == "video" {
+		inputTokens, outputTokens, totalTokens = 0, 0, 0
+		usageEstimated = metadataBool(req, "usage.estimated")
+	}
 	inputCharacters := req.InputCharacters
 	inputPages := req.InputPages
 	inputAudioMilliseconds := req.InputAudioMilliseconds

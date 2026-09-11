@@ -39,12 +39,13 @@ func (h Handler) CreateVideo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "video_unavailable", "video storage is unavailable")
 		return
 	}
-	if h.pipeline.HasModule("billing") {
-		writeError(w, http.StatusNotImplemented, "video_billing_unsupported", "video creation requires duration billing support")
-		return
-	}
 	if input.Model == "" || len(input.Model) > 256 || len(input.Prompt) < 1 || len(input.Prompt) > 32000 {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid video request")
+		return
+	}
+	videoSeconds, err := billableVideoSeconds(input.Seconds, true)
+	if err != nil {
+		writeProviderParameterError(w, http.StatusBadRequest, "invalid_parameter", err.Error(), "seconds")
 		return
 	}
 	if !h.authorizeBatchModel(w, identity, input.Model) {
@@ -59,8 +60,24 @@ func (h Handler) CreateVideo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotImplemented, "unsupported_operation", "video generation is not supported")
 		return
 	}
-	video, binding, err := runtime.CreateVideo(r.Context(), identity, input, nil)
+	var billingRequest modules.RequestContext
+	billingReserved := false
+	billingErr := error(nil)
+	video, binding, err := runtime.CreateVideo(r.Context(), identity, input, func(ctx context.Context, request *modules.RequestContext) error {
+		billingRequest = *request
+		billingRequest.VideoSeconds = videoSeconds
+		billingErr = h.pipeline.RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
+		billingReserved = billingErr == nil && h.pipeline.HasModule("billing")
+		return billingErr
+	})
 	if err != nil {
+		if billingReserved {
+			h.cancelVideoBilling(r.Context(), &billingRequest, err)
+		}
+		if billingErr != nil {
+			writeVideoBillingFailure(w, billingErr)
+			return
+		}
 		writeProviderFailure(w, err)
 		return
 	}
@@ -69,8 +86,26 @@ func (h Handler) CreateVideo(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 		_, _ = runtime.DeleteVideo(ctx, binding, video.ID)
 		cancel()
+		if billingReserved {
+			h.cancelVideoBilling(r.Context(), &billingRequest, err)
+		}
 		writeVideoStoreError(w, err)
 		return
+	}
+	if billingReserved {
+		if billingRequest.Metadata == nil {
+			billingRequest.Metadata = map[string]string{}
+		}
+		billingRequest.Metadata["gateway.video_usage_exact"] = "true"
+		if err = h.pipeline.RunBillingLifecycle(r.Context(), &billingRequest, "commit", nil); err != nil {
+			compensation, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+			_, _ = runtime.DeleteVideo(compensation, binding, video.ID)
+			_ = h.videos.DeleteVideoRecord(compensation, fileOwnerKey(identity), video.ID)
+			cancel()
+			h.cancelVideoBilling(r.Context(), &billingRequest, err)
+			writeVideoBillingFailure(w, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, created.Video)
 }
@@ -195,16 +230,33 @@ func (h Handler) RemixVideo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if h.pipeline.HasModule("billing") {
-		writeError(w, http.StatusNotImplemented, "video_billing_unsupported", "video remix requires duration billing support")
-		return
-	}
 	record, ok := h.videoRecord(w, r, owner)
 	if !ok {
 		return
 	}
-	video, binding, err := runtime.RemixVideo(r.Context(), identity, record.Binding, record.Video.ID, input, nil)
+	videoSeconds, err := billableVideoSeconds(record.Video.Seconds, false)
 	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "video_unavailable", "stored video duration is invalid")
+		return
+	}
+	var billingRequest modules.RequestContext
+	billingReserved := false
+	billingErr := error(nil)
+	video, binding, err := runtime.RemixVideo(r.Context(), identity, record.Binding, record.Video.ID, input, func(ctx context.Context, request *modules.RequestContext) error {
+		billingRequest = *request
+		billingRequest.VideoSeconds = videoSeconds
+		billingErr = h.pipeline.RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
+		billingReserved = billingErr == nil && h.pipeline.HasModule("billing")
+		return billingErr
+	})
+	if err != nil {
+		if billingReserved {
+			h.cancelVideoBilling(r.Context(), &billingRequest, err)
+		}
+		if billingErr != nil {
+			writeVideoBillingFailure(w, billingErr)
+			return
+		}
 		writeProviderFailure(w, err)
 		return
 	}
@@ -213,10 +265,53 @@ func (h Handler) RemixVideo(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 		_, _ = runtime.DeleteVideo(ctx, binding, video.ID)
 		cancel()
+		if billingReserved {
+			h.cancelVideoBilling(r.Context(), &billingRequest, err)
+		}
 		writeVideoStoreError(w, err)
 		return
 	}
+	if billingReserved {
+		if billingRequest.Metadata == nil {
+			billingRequest.Metadata = map[string]string{}
+		}
+		billingRequest.Metadata["gateway.video_usage_exact"] = "true"
+		if err = h.pipeline.RunBillingLifecycle(r.Context(), &billingRequest, "commit", nil); err != nil {
+			compensation, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+			_, _ = runtime.DeleteVideo(compensation, binding, video.ID)
+			_ = h.videos.DeleteVideoRecord(compensation, owner, video.ID)
+			cancel()
+			h.cancelVideoBilling(r.Context(), &billingRequest, err)
+			writeVideoBillingFailure(w, err)
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, created.Video)
+}
+
+func billableVideoSeconds(raw string, defaultValue bool) (int, error) {
+	if raw == "" && defaultValue {
+		return 4, nil
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || (seconds != 4 && seconds != 8 && seconds != 12) {
+		return 0, errors.New("seconds must be 4, 8, or 12")
+	}
+	return seconds, nil
+}
+
+func (h Handler) cancelVideoBilling(ctx context.Context, request *modules.RequestContext, cause error) {
+	compensation, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	_ = h.pipeline.RunBillingLifecycle(compensation, request, "cancel", cause)
+}
+
+func writeVideoBillingFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, modules.ErrBudgetExceeded) {
+		writeError(w, http.StatusTooManyRequests, "budget_exceeded", "budget exceeded")
+		return
+	}
+	writeError(w, http.StatusServiceUnavailable, "billing_unavailable", "billing is unavailable")
 }
 
 func (h Handler) videoOwner(w http.ResponseWriter, r *http.Request) (string, provider.VideoProvider, modules.RequestContext, bool) {

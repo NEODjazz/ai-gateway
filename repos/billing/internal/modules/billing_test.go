@@ -440,7 +440,7 @@ func TestBillingRejectsInvalidInputAudioDurations(t *testing.T) {
 }
 
 func TestBillingPricesAndValidatesVideoDuration(t *testing.T) {
-	module := NewBillingModuleWithSettings(true, Settings{Pricing: PricingConfig{Currency: "USD"}, ModelCatalogJSON: `{"version":"v1","models":[{"provider":"openai","model":"video-1","video_cost_per_second":0.25,"currency":"USD"}]}`})
+	module := NewBillingModuleWithSettings(true, Settings{Pricing: PricingConfig{Currency: "USD"}, DefaultReserveOutputTokens: 1024, ModelCatalogJSON: `{"version":"v1","models":[{"provider":"openai","model":"video-1","video_cost_per_second":0.25,"currency":"USD"}]}`})
 	req := RequestContext{RequestID: "video-duration", APIType: "video", VideoSeconds: 12, Request: openai.ChatCompletionRequest{Provider: "openai", Model: "video-1"}}
 	if err := module.Handle(context.Background(), &req); err != nil {
 		t.Fatal(err)
