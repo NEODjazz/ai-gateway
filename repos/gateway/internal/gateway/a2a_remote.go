@@ -28,12 +28,12 @@ func countA2ARemoteParts(parts []a2aPart) (int, error) {
 			continue
 		}
 		count++
-		if count > openai.MaxImageAttachments || part.Text != nil || part.Raw != nil || len(part.Data) != 0 || !validA2AFilename(part.Filename) || !supportedA2AImageType(part.MediaType) {
-			return 0, errors.New("invalid remote image part")
+		if count > openai.MaxImageAttachments || part.Text != nil || part.Raw != nil || len(part.Data) != 0 || !validA2AFilename(part.Filename) || !supportedA2ARemoteType(part.MediaType) {
+			return 0, errors.New("invalid remote media part")
 		}
 		parsed, err := url.Parse(*part.URL)
 		if err != nil || len(*part.URL) > 2048 || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
-			return 0, errors.New("invalid remote image URL")
+			return 0, errors.New("invalid remote media URL")
 		}
 	}
 	return count, nil
@@ -43,7 +43,7 @@ func (h Handler) resolveA2ARemoteParts(ctx context.Context, parts []a2aPart) err
 	if h.a2aHTTPClient == nil {
 		return errA2ARemoteUnavailable
 	}
-	total := 0
+	imageTotal, audioTotal, remoteTotal := 0, 0, 0
 	for index := range parts {
 		part := &parts[index]
 		if part.URL == nil {
@@ -51,30 +51,39 @@ func (h Handler) resolveA2ARemoteParts(ctx context.Context, parts []a2aPart) err
 		}
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, *part.URL, nil)
 		if err != nil {
-			return errors.New("invalid remote image URL")
+			return errors.New("invalid remote media URL")
 		}
-		request.Header.Set("Accept", "image/jpeg, image/png, image/gif, image/webp")
+		request.Header.Set("Accept", "image/jpeg, image/png, image/gif, image/webp, audio/wav, audio/mpeg")
 		response, err := h.a2aHTTPClient.Do(request)
 		if err != nil {
 			return fmt.Errorf("%w: %v", errA2ARemoteUnavailable, err)
 		}
-		data, mediaType, readErr := readA2ARemoteImage(response, part.MediaType, openai.MaxTotalImageBytes-total)
+		data, mediaType, readErr := readA2ARemoteContent(response, part.MediaType, openai.MaxTotalImageBytes-imageTotal, openai.MaxAudioBytes-audioTotal, openai.MaxInferenceBodyBytes-remoteTotal)
 		if readErr != nil {
 			return readErr
 		}
-		total += len(data)
-		encoded := base64.StdEncoding.EncodeToString(data)
-		if _, err := openai.ParseDataImageURL("data:" + mediaType + ";base64," + encoded); err != nil {
-			return errors.New("remote image bytes do not match its media type")
+		if strings.HasPrefix(mediaType, "image/") {
+			imageTotal += len(data)
+		} else {
+			audioTotal += len(data)
 		}
+		remoteTotal += len(data)
+		encoded := base64.StdEncoding.EncodeToString(data)
 		part.Raw = &encoded
 		part.URL = nil
 		part.MediaType = mediaType
+		if _, ok := a2aInputPart(*part); !ok {
+			return errors.New("remote media bytes do not match its media type")
+		}
 	}
 	return nil
 }
 
 func readA2ARemoteImage(response *http.Response, requestedType string, remaining int) ([]byte, string, error) {
+	return readA2ARemoteContent(response, requestedType, remaining, 0, remaining)
+}
+
+func readA2ARemoteContent(response *http.Response, requestedType string, imageRemaining, audioRemaining, totalRemaining int) ([]byte, string, error) {
 	if response == nil || response.Body == nil {
 		return nil, "", errA2ARemoteUnavailable
 	}
@@ -83,22 +92,28 @@ func readA2ARemoteImage(response *http.Response, requestedType string, remaining
 		return nil, "", fmt.Errorf("%w: HTTP status %d", errA2ARemoteUnavailable, response.StatusCode)
 	}
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if err != nil || !supportedA2AImageType(mediaType) || requestedType != "" && requestedType != mediaType {
-		return nil, "", errors.New("remote image content type is invalid")
+	if err != nil || !supportedA2ARemoteType(mediaType) || mediaType == "" || requestedType != "" && requestedType != mediaType {
+		return nil, "", errors.New("remote media content type is invalid")
 	}
-	limit := openai.MaxImageBytes
+	limit, remaining := openai.MaxImageBytes, imageRemaining
+	if strings.HasPrefix(mediaType, "audio/") {
+		limit, remaining = openai.MaxAudioBytes, audioRemaining
+	}
 	if remaining < limit {
 		limit = remaining
 	}
+	if totalRemaining < limit {
+		limit = totalRemaining
+	}
 	if limit <= 0 || response.ContentLength > int64(limit) {
-		return nil, "", errors.New("remote images exceed their size limit")
+		return nil, "", errors.New("remote media exceed their size limit")
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, int64(limit)+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: read response: %v", errA2ARemoteUnavailable, err)
 	}
 	if len(data) == 0 || len(data) > limit {
-		return nil, "", errors.New("remote image exceeds its size limit")
+		return nil, "", errors.New("remote media exceeds its size limit")
 	}
 	return data, mediaType, nil
 }
@@ -110,6 +125,10 @@ func supportedA2AImageType(mediaType string) bool {
 	default:
 		return false
 	}
+}
+
+func supportedA2ARemoteType(mediaType string) bool {
+	return supportedA2AImageType(mediaType) || mediaType == "audio/wav" || mediaType == "audio/mpeg"
 }
 
 func validA2AFilename(filename string) bool {

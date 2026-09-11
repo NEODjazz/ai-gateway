@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.251
+  version: 0.1.252
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -4391,11 +4391,11 @@ components:
     A2APart:
       type: object
       additionalProperties: false
-      description: A2A 1.0 member-discriminated part. Supply text, structured JSON data, inline image/audio bytes, or an HTTPS image with one advertised mediaType. Remote images are converted to validated inline bytes before durable storage.
+      description: A2A 1.0 member-discriminated part. Supply text, structured JSON data, inline image/audio bytes, or HTTPS image/audio media with one advertised mediaType. Remote media are converted to validated inline bytes before durable storage.
       properties:
         text: {type: string}
         raw: {type: string, contentEncoding: base64}
-        url: {type: string, format: uri, maxLength: 2048, pattern: '^https://', description: Public HTTPS image URL without credentials or fragment}
+        url: {type: string, format: uri, maxLength: 2048, pattern: '^https://', description: Public HTTPS image or audio URL without credentials or fragment}
         data: {description: Structured JSON value accepted with application/json mediaType}
         mediaType: {type: string, enum: [text/plain, application/json, image/jpeg, image/png, image/gif, image/webp, audio/wav, audio/mpeg]}
         filename: {type: string, maxLength: 256, pattern: '^[^/\\\x00]+$'}
