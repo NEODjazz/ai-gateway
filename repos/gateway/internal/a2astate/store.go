@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"ai-gateway-gateway/internal/asyncstate"
 )
 
 const MaxPayloadBytes = 2 << 20
@@ -41,4 +43,13 @@ type Store interface {
 	UpdateA2ATask(context.Context, Task, time.Time, time.Duration) (Task, error)
 	GetA2ATask(context.Context, string, string, string) (Task, error)
 	ListA2ATasks(context.Context, string, string, ListOptions) ([]Task, string, int, error)
+}
+
+// AtomicOutboxStore persists a task transition and its durable follow-up job
+// in one transaction. Callers use this for externally observable task events
+// that must not be lost between independent database writes.
+type AtomicOutboxStore interface {
+	Store
+	CreateA2ATaskWithJob(context.Context, Task, int, time.Duration, asyncstate.Job) (Task, error)
+	UpdateA2ATaskWithJob(context.Context, Task, time.Time, time.Duration, asyncstate.Job) (Task, error)
 }
