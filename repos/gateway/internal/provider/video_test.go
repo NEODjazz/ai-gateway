@@ -2,12 +2,15 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
 
@@ -78,6 +81,37 @@ func TestOpenAICompatibleVideoLifecycle(t *testing.T) {
 	}
 	if deleted, err := client.DeleteVideo(context.Background(), created.ID); err != nil || !deleted.Deleted {
 		t.Fatalf("deleted=%+v err=%v", deleted, err)
+	}
+}
+
+func TestVideoRouterPinsSelectedDeployment(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/videos" && r.URL.Path != "/v1/videos/video_123" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, videoFixture)
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "video-primary", Type: "openai", BaseURL: server.URL + "/v1", Models: []string{"public-video"}, ModelAliases: map[string]string{"public-video": "video-model"}, Capabilities: []string{"video"}}}})
+	runtime, ok := router.(VideoProvider)
+	if !ok {
+		t.Fatal("router does not expose video lifecycle")
+	}
+	admitted := false
+	created, binding, err := runtime.CreateVideo(t.Context(), modules.RequestContext{}, openai.VideoCreateRequest{Model: "public-video", Prompt: "a cat", Seconds: "4", Size: "720x1280"}, func(_ context.Context, request *modules.RequestContext) error {
+		admitted = request.Request.Model == "public-video" && request.Metadata["provider.endpoint.name"] == "video-primary" && request.Metadata["gateway.api_type"] == "video"
+		return nil
+	})
+	if err != nil || !admitted || created.Model != "public-video" || binding.Endpoint != "video-primary" || binding.Model != "public-video" || len(binding.Deployment) != 64 {
+		t.Fatalf("created=%+v binding=%+v admitted=%v err=%v", created, binding, admitted, err)
+	}
+	if retrieved, err := runtime.RetrieveVideo(t.Context(), binding, created.ID); err != nil || retrieved.Model != "public-video" {
+		t.Fatalf("retrieved=%+v err=%v", retrieved, err)
+	}
+	binding.Deployment = strings.Repeat("0", 64)
+	if _, err := runtime.RetrieveVideo(t.Context(), binding, created.ID); !errors.Is(err, ErrVideoDeploymentChanged) {
+		t.Fatalf("changed deployment error=%v", err)
 	}
 }
 

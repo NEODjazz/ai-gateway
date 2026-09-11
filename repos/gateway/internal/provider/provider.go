@@ -55,6 +55,20 @@ type FineTuningProvider interface {
 	DeleteFineTunedModel(context.Context, FineTuningBinding, string) (openai.ModelDeletion, error)
 }
 
+type VideoBinding struct {
+	Endpoint   string `json:"endpoint"`
+	Model      string `json:"model"`
+	Deployment string `json:"deployment"`
+}
+
+type VideoProvider interface {
+	CreateVideo(context.Context, modules.RequestContext, openai.VideoCreateRequest, func(context.Context, *modules.RequestContext) error) (openai.Video, VideoBinding, error)
+	RetrieveVideo(context.Context, VideoBinding, string) (openai.Video, error)
+	DeleteVideo(context.Context, VideoBinding, string) (openai.VideoDeletion, error)
+	DownloadVideoContent(context.Context, VideoBinding, string, string) (VideoContent, error)
+	RemixVideo(context.Context, modules.RequestContext, VideoBinding, string, openai.VideoRemixRequest, func(context.Context, *modules.RequestContext) error) (openai.Video, VideoBinding, error)
+}
+
 type ResponseResourceResolver interface {
 	ResolveResponseResource(ctx context.Context, req modules.RequestContext, id string) (string, error)
 }
@@ -2779,6 +2793,11 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 			return false
 		}
 	}
+	if hasCapability(required, "video") {
+		if _, ok := e.Provider.(VideoClient); !ok || e.Type != "openai" && e.Type != "openai-compatible" {
+			return false
+		}
+	}
 	if hasCapability(required, "web_fetch") {
 		client, ok := e.Provider.(interface{ SupportsWebFetch() bool })
 		if !ok || !client.SupportsWebFetch() {
@@ -2839,11 +2858,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses")
+	return hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "video") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "audio") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses"} {
+	for _, capability := range []string{"mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "video", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

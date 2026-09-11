@@ -16,6 +16,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "ocr", label: "OCR", description: "Extract structured text from documents and images" },
   { value: "search", label: "Search", description: "Execute standalone search requests" },
   { value: "skills", label: "Skills", description: "Manage provider-native skill packages" },
+  { value: "video", label: "Video", description: "Generate and manage video jobs" },
   { value: "stream", label: "Stream", description: "Streaming responses" },
   { value: "tools", label: "Tools", description: "Function and tool calling" },
   { value: "structured_output", label: "Structured output", description: "Structured JSON output" },

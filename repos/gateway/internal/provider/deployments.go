@@ -365,7 +365,7 @@ func ValidModelCapability(capability string) bool {
 	switch capability {
 	case "chat", "responses", "embeddings", "rerank", "moderation",
 		"image_generation", "image_edit", "image_variation",
-		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning",
+		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video",
 		"stream", "tools", "structured_output", "mcp", "vision",
 		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses":
 		return true
@@ -491,6 +491,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	case "skills":
 		_, ok := endpoint.Provider.(SkillClient)
 		return ok
+	case "video":
+		_, ok := endpoint.Provider.(VideoClient)
+		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible")
 	case "background_responses":
 		if endpoint.Type != "openai" && endpoint.Type != "openai-compatible" && endpoint.Type != "azure-openai" {
 			return false
