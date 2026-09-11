@@ -382,6 +382,8 @@ func supportedCompatibleServiceTier(providerName, value string) bool {
 	switch providerName {
 	case "openai":
 		return value == "auto" || value == "default" || value == "flex" || value == "priority"
+	case "xai":
+		return value == "default" || value == "priority"
 	case "groq", "openrouter":
 		return true
 	default:

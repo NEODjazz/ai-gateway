@@ -123,6 +123,10 @@ func (p OpenAICompatible) CancelResponse(ctx context.Context, id string) (openai
 }
 
 func (p OpenAICompatible) DeleteResponse(ctx context.Context, id string) (openai.ResponseDeletion, error) {
+	return p.deleteResponse(ctx, id, "response.deleted")
+}
+
+func (p OpenAICompatible) deleteResponse(ctx context.Context, id, object string) (openai.ResponseDeletion, error) {
 	if !validResponseResourceID(id) {
 		return openai.ResponseDeletion{}, &Error{Class: FailureClientRequest, StatusCode: 400, UpstreamCode: "invalid_request", Param: "response_id", Err: errors.New("invalid response ID")}
 	}
@@ -155,7 +159,7 @@ func (p OpenAICompatible) DeleteResponse(ctx context.Context, id string) (openai
 	if err := json.Unmarshal(payload, &result); err != nil {
 		return openai.ResponseDeletion{}, err
 	}
-	if result == nil || result.ID != id || result.Object != "response.deleted" || !result.Deleted {
+	if result == nil || result.ID != id || result.Object != object || !result.Deleted {
 		return openai.ResponseDeletion{}, errors.New("invalid upstream response deletion")
 	}
 	return *result, nil

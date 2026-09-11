@@ -2980,6 +2980,8 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 		return NewGroq(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "deepseek":
 		return NewDeepSeek(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
+	case "xai":
+		return NewXAI(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "demo":
 		return Demo{}
 	default:

@@ -117,6 +117,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "groq", capability: "embeddings"},
 		{providerType: "deepseek", capability: "embeddings"},
 		{providerType: "deepseek", capability: "audio_transcription"},
+		{providerType: "xai", capability: "embeddings"},
 		{providerType: "ollama", capability: "rerank"},
 		{providerType: "demo", capability: "stream"},
 		{providerType: "gemini", capability: "web_fetch"},
@@ -305,6 +306,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Equal(profilesByType["deepseek"].Operations, []string{"chat", "responses", "stream"}) || !slices.Equal(profilesByType["deepseek"].Capabilities, []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}) {
 		t.Fatalf("deepseek profile=%+v", profilesByType["deepseek"])
 	}
+	if !slices.Equal(profilesByType["xai"].Operations, []string{"chat", "responses", "stream"}) || !slices.Equal(profilesByType["xai"].Capabilities, []string{"chat", "responses", "stream", "tools", "structured_output", "vision", "web_search"}) {
+		t.Fatalf("xai profile=%+v", profilesByType["xai"])
+	}
 	if !slices.Equal(profilesByType["openrouter"].Operations, []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream"}) || !slices.Equal(profilesByType["openrouter"].Capabilities, []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}) {
 		t.Fatalf("openrouter profile=%+v", profilesByType["openrouter"])
 	}
@@ -328,6 +332,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedChatParameters(t *testi
 		"cohere":            {ReasoningEffort: []string{}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
 		"mistral":           {ReasoningEffort: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Logprobs: []string{}, ServiceTier: []string{}},
 		"deepseek":          {ReasoningEffort: []string{}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
+		"xai":               {ReasoningEffort: []string{"none", "low", "medium", "high", "xhigh"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{"default", "priority"}},
 		"groq":              {ReasoningEffort: allReasoning, Logprobs: []string{}, ServiceTier: []string{"auto", "default", "on_demand", "flex", "performance"}},
 		"openrouter":        {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: allTiers},
 		"openai-compatible": {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},

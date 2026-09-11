@@ -40,7 +40,7 @@ type ProviderChatParameterPolicy struct {
 	ServiceTier     []string `json:"service_tier"`
 }
 
-var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek"}
+var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai"}
 
 var managedOperationCapabilities = []string{
 	"chat", "responses", "count_tokens", "embeddings", "rerank", "moderation",

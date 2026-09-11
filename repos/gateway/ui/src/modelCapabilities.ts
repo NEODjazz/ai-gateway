@@ -48,6 +48,8 @@ export function defaultModelCapabilities(providerType: string): string[] {
       return ["chat", "stream"];
     case "deepseek":
       return ["chat", "responses", "stream"];
+    case "xai":
+      return ["chat", "responses", "stream"];
     case "openrouter":
       return ["chat", "responses", "stream"];
     case "demo":

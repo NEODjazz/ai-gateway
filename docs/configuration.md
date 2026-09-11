@@ -82,7 +82,7 @@ Deployment — до Model Group. UI использует выбор из уже 
 принимает их IDs и возвращает `409` при удалении используемого ресурса. Managed
 Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`,
-`voyage`, `bedrock`, `groq` и `deepseek`.
+`voyage`, `bedrock`, `groq`, `deepseek` и `xai`.
 
 `GET /admin/v1/provider-capabilities` возвращает для каждого типа отдельно
 реально реализованные операции адаптера, допустимые capabilities deployment,
