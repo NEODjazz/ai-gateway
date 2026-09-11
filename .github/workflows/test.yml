@@ -197,6 +197,18 @@ jobs:
       - name: Render chart
         run: helm template "${{ matrix.chart }}" "charts/${{ matrix.chart }}" --namespace ai-gateway > /dev/null
 
+      - name: Verify gateway integer environment rendering
+        if: matrix.chart == 'ai-gateway'
+        shell: bash
+        run: |
+          rendered="$(helm template ai-gateway charts/ai-gateway --namespace ai-gateway)"
+          if grep -Eq 'value: "[0-9]+(\.[0-9]+)?e[+-][0-9]+"' <<< "$rendered"; then
+            echo "Integer environment values must use decimal notation"
+            exit 1
+          fi
+          grep -A1 'name: ASSISTANT_RUN_RETENTION_SECONDS' <<< "$rendered" | grep -q 'value: "2592000"'
+          grep -A1 'name: A2A_TASK_TTL_SECONDS' <<< "$rendered" | grep -q 'value: "2592000"'
+
       - name: Verify published image defaults
         shell: bash
         run: |

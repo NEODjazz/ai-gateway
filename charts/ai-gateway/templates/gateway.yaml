@@ -77,56 +77,56 @@ spec:
                   name: {{ include "ai-gateway.providerConfigName" . }}
                   key: guardrail-policies.json
             - name: GUARDRAIL_MONITOR_CAPACITY
-              value: {{ .Values.gateway.guardrailMonitor.capacity | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.guardrailMonitor.capacity | quote }}
             - name: GUARDRAIL_MONITOR_TTL_SECONDS
-              value: {{ .Values.gateway.guardrailMonitor.ttlSeconds | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.guardrailMonitor.ttlSeconds | quote }}
             - name: FILE_MAX_BYTES
-              value: {{ printf "%.0f" (float64 .Values.gateway.files.maxBytes) | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.files.maxBytes | quote }}
             - name: FILE_OWNER_QUOTA_BYTES
-              value: {{ printf "%.0f" (float64 .Values.gateway.files.ownerQuotaBytes) | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.files.ownerQuotaBytes | quote }}
             - name: VECTOR_STORE_OWNER_QUOTA
-              value: {{ .Values.gateway.vectorStores.ownerQuota | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.vectorStores.ownerQuota | quote }}
             - name: VECTOR_STORE_FILE_QUOTA
-              value: {{ .Values.gateway.vectorStores.fileQuota | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.vectorStores.fileQuota | quote }}
             - name: ASSISTANT_OWNER_QUOTA
-              value: {{ .Values.gateway.assistants.ownerQuota | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.assistants.ownerQuota | quote }}
             - name: ASSISTANT_THREAD_OWNER_QUOTA
-              value: {{ .Values.gateway.assistants.threadOwnerQuota | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.assistants.threadOwnerQuota | quote }}
             - name: ASSISTANT_MESSAGE_THREAD_QUOTA
-              value: {{ .Values.gateway.assistants.messageThreadQuota | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.assistants.messageThreadQuota | quote }}
             - name: ASSISTANT_RUN_OWNER_QUOTA
-              value: {{ .Values.gateway.assistants.runOwnerQuota | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.assistants.runOwnerQuota | quote }}
             - name: ASSISTANT_RUN_STEP_QUOTA
-              value: {{ .Values.gateway.assistants.runStepQuota | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.assistants.runStepQuota | quote }}
             - name: ASSISTANT_RUN_RETENTION_SECONDS
-              value: {{ .Values.gateway.assistants.runRetentionSeconds | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.assistants.runRetentionSeconds | quote }}
             - name: A2A_TASK_OWNER_QUOTA
-              value: {{ .Values.gateway.a2aTasks.ownerQuota | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.a2aTasks.ownerQuota | quote }}
             - name: A2A_TASK_TTL_SECONDS
-              value: {{ .Values.gateway.a2aTasks.ttlSeconds | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.a2aTasks.ttlSeconds | quote }}
             - name: A2A_SUBSCRIPTION_LIMIT
-              value: {{ .Values.gateway.a2aTasks.subscriptionLimit | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.a2aTasks.subscriptionLimit | quote }}
             - name: A2A_SUBSCRIPTION_DURATION_SECONDS
-              value: {{ .Values.gateway.a2aTasks.subscriptionDurationSeconds | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.a2aTasks.subscriptionDurationSeconds | quote }}
             - name: A2A_SUBSCRIPTION_POLL_MILLISECONDS
-              value: {{ .Values.gateway.a2aTasks.subscriptionPollMilliseconds | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.a2aTasks.subscriptionPollMilliseconds | quote }}
             - name: MODEL_CATALOG_JSON
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "ai-gateway.providerConfigName" . }}
                   key: model-catalog.json
             - name: EXACT_CACHE_TTL_SECONDS
-              value: {{ .Values.gateway.exactCache.ttlSeconds | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.exactCache.ttlSeconds | quote }}
             - name: EXACT_CACHE_MAX_BYTES
-              value: {{ printf "%.0f" (float64 .Values.gateway.exactCache.maxBytes) | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.exactCache.maxBytes | quote }}
             - name: SEMANTIC_CACHE_TTL_SECONDS
-              value: {{ .Values.gateway.semanticCache.ttlSeconds | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.semanticCache.ttlSeconds | quote }}
             - name: SEMANTIC_CACHE_THRESHOLD
               value: {{ .Values.gateway.semanticCache.threshold | quote }}
             - name: SEMANTIC_CACHE_MAX_ENTRIES
-              value: {{ .Values.gateway.semanticCache.maxEntries | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.semanticCache.maxEntries | quote }}
             - name: SEMANTIC_CACHE_MAX_BYTES
-              value: {{ printf "%.0f" (float64 .Values.gateway.semanticCache.maxBytes) | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.semanticCache.maxBytes | quote }}
             - name: SEMANTIC_CACHE_EMBEDDING_URL
               value: {{ .Values.gateway.semanticCache.embeddingUrl | quote }}
             - name: SEMANTIC_CACHE_EMBEDDING_MODEL
@@ -142,11 +142,11 @@ spec:
             - name: ADAPTIVE_ROUTING_EWMA_ALPHA
               value: {{ .Values.gateway.routing.adaptiveEwmaAlpha | quote }}
             - name: RESPONSES_AFFINITY_TTL_SECONDS
-              value: {{ .Values.gateway.routing.responsesAffinityTtlSeconds | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.routing.responsesAffinityTtlSeconds | quote }}
             - name: RESPONSES_OWNERSHIP_TTL_SECONDS
-              value: {{ .Values.gateway.routing.responsesOwnershipTtlSeconds | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.routing.responsesOwnershipTtlSeconds | quote }}
             - name: PROVIDER_CONTROL_PLANE_REFRESH_SECONDS
-              value: {{ .Values.gateway.controlPlane.refreshSeconds | quote }}
+              value: {{ include "ai-gateway.integerString" .Values.gateway.controlPlane.refreshSeconds | quote }}
             - name: PROVIDER_CONTROL_PLANE_POSTGRES_DSN
               valueFrom:
                 secretKeyRef:

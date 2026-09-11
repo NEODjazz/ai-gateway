@@ -99,3 +99,11 @@ volumes:
 {{- define "ai-gateway.providerApiKeyEnvName" -}}
 {{- printf "PROVIDER_API_KEY_%s" (.name | replace "-" "_" | replace "." "_" | replace "/" "_" | upper) -}}
 {{- end -}}
+
+{{- define "ai-gateway.integerString" -}}
+{{- if kindIs "float64" . -}}
+{{- printf "%.0f" . -}}
+{{- else -}}
+{{- printf "%v" . -}}
+{{- end -}}
+{{- end -}}
