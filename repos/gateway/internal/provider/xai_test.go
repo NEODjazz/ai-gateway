@@ -1,11 +1,16 @@
 package provider
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 
 	"ai-gateway-gateway/internal/config"
@@ -18,6 +23,8 @@ var _ StreamingClient = XAI{}
 var _ EmbeddingClient = XAI{}
 var _ ImageGenerationClient = XAI{}
 var _ ImageEditClient = XAI{}
+var _ AudioTranscriptionClient = XAI{}
+var _ AudioTranscriptionDurationReserver = XAI{}
 var _ responseRetrieveClient = XAI{}
 var _ responseInputItemsClient = XAI{}
 var _ responseDeleteClient = XAI{}
@@ -283,6 +290,100 @@ func TestXAIImagesFailClosedBeforeAndAfterHTTP(t *testing.T) {
 	}
 	if _, err := client.GenerateImage(t.Context(), openai.ImageGenerationRequest{Model: "image", Prompt: "draw"}); err == nil || calls != 1 {
 		t.Fatalf("missing exact cost err=%v calls=%d", err, calls)
+	}
+}
+
+func TestXAITranscriptionContract(t *testing.T) {
+	audio := mistralWAVAttachment(1250)
+	audio.Filename = "sample.wav"
+	expectedAudio, err := base64.StdEncoding.DecodeString(audio.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/stt" || r.Header.Get("Authorization") != "Bearer xai-key" {
+			t.Fatalf("unexpected request: %s %s auth=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+		}
+		rawBody, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		languageOffset := bytes.Index(rawBody, []byte(`name="language"`))
+		fileOffset := bytes.Index(rawBody, []byte(`name="file"`))
+		if languageOffset < 0 || fileOffset < 0 || languageOffset >= fileOffset {
+			t.Fatalf("multipart fields are not before file: language=%d file=%d", languageOffset, fileOffset)
+		}
+		r.Body = io.NopCloser(bytes.NewReader(rawBody))
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatal(err)
+		}
+		if r.FormValue("language") != "en" || !slices.Equal(r.MultipartForm.Value["keyterm"], []string{"Codex", "Grok"}) || r.FormValue("model") != "" {
+			t.Fatalf("form=%v", r.MultipartForm.Value)
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		contents, _ := io.ReadAll(file)
+		if header.Filename != "sample.wav" || string(contents) != string(expectedAudio) {
+			t.Fatalf("file=%q contents=%d", header.Filename, len(contents))
+		}
+		_, _ = fmt.Fprint(w, `{"text":"hello world","language":"en","duration":1.251,"words":[{"text":"hello","start":0,"end":0.5},{"text":"world","start":0.5,"end":1.251}]}`)
+	}))
+	defer server.Close()
+	client := NewXAI(server.URL+"/v1", "xai-key", false)
+	request := openai.AudioTranscriptionRequest{Model: "speech", File: audio, Language: "en", Keywords: []string{"Codex", "Grok"}}
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "xai-speech", Type: "xai", BaseURL: server.URL + "/v1", APIKey: "xai-key",
+		Models: []string{"speech"}, ModelAliases: map[string]string{"speech": "ignored-by-native-stt"}, Capabilities: []string{"audio_transcription"},
+	}}}).(*Router)
+	response, err := router.TranscribeAudio(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, AudioTranscriptionRequest: &request})
+	if err != nil || response.Text != "hello world" || response.Usage == nil || response.Usage.Type != "duration" || response.Usage.InputAudioMilliseconds != 1251 || len(response.Words) != 2 || response.Words[0].Word != "hello" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+	if reserved, err := client.ReserveAudioMilliseconds(request); err != nil || reserved != 1250 {
+		t.Fatalf("reserved=%d err=%v", reserved, err)
+	}
+}
+
+func TestXAITranscriptionRejectsUnsupportedParametersAndInvalidResponse(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = fmt.Fprint(w, `{"text":"hello","language":"en","duration":0}`)
+	}))
+	defer server.Close()
+	client := NewXAI(server.URL, "key", false)
+	base := openai.AudioTranscriptionRequest{Model: "speech", File: mistralWAVAttachment(1250)}
+	temperature := 0.1
+	tests := []struct {
+		name  string
+		param string
+		code  string
+		apply func(*openai.AudioTranscriptionRequest)
+	}{
+		{name: "prompt", param: "prompt", code: "unsupported_parameter", apply: func(r *openai.AudioTranscriptionRequest) { r.Prompt = "context" }},
+		{name: "format", param: "response_format", code: "unsupported_parameter", apply: func(r *openai.AudioTranscriptionRequest) { r.ResponseFormat = "json" }},
+		{name: "temperature", param: "temperature", code: "unsupported_parameter", apply: func(r *openai.AudioTranscriptionRequest) { r.Temperature = &temperature }},
+		{name: "timestamps", param: "timestamp_granularities", code: "unsupported_parameter", apply: func(r *openai.AudioTranscriptionRequest) {
+			r.ResponseFormat = "verbose_json"
+			r.TimestampGranularities = []string{"word"}
+		}},
+		{name: "long keyword", param: "keywords", code: "invalid_request", apply: func(r *openai.AudioTranscriptionRequest) { r.Keywords = []string{strings.Repeat("x", 51)} }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := base
+			test.apply(&request)
+			_, err := client.TranscribeAudio(t.Context(), request)
+			if !xaiFailure(err, test.param, test.code) || calls != 0 {
+				t.Fatalf("err=%v calls=%d", err, calls)
+			}
+		})
+	}
+	if _, err := client.TranscribeAudio(t.Context(), base); err == nil || calls != 1 {
+		t.Fatalf("invalid response err=%v calls=%d", err, calls)
 	}
 }
 

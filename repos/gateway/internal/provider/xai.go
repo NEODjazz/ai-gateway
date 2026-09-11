@@ -1,9 +1,13 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"math"
+	"mime/multipart"
 	"net/http"
 	"strings"
 
@@ -21,14 +25,117 @@ func NewXAI(baseURL, apiKey string, stream bool) XAI {
 	return XAI{compatible: compatible}
 }
 
-func (XAI) SupportsResponses() bool        { return true }
-func (XAI) SupportsEmbeddings() bool       { return true }
-func (XAI) SupportsTools() bool            { return true }
-func (XAI) SupportsStructuredOutput() bool { return true }
-func (XAI) SupportsVision() bool           { return true }
-func (XAI) SupportsWebSearch() bool        { return true }
-func (XAI) SupportsImageGeneration() bool  { return true }
-func (XAI) SupportsImageEdit() bool        { return true }
+func (XAI) SupportsResponses() bool          { return true }
+func (XAI) SupportsEmbeddings() bool         { return true }
+func (XAI) SupportsTools() bool              { return true }
+func (XAI) SupportsStructuredOutput() bool   { return true }
+func (XAI) SupportsVision() bool             { return true }
+func (XAI) SupportsWebSearch() bool          { return true }
+func (XAI) SupportsImageGeneration() bool    { return true }
+func (XAI) SupportsImageEdit() bool          { return true }
+func (XAI) SupportsAudioTranscription() bool { return true }
+
+func (x XAI) ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest) (int, error) {
+	return x.compatible.ReserveTranslationAudioMilliseconds(request)
+}
+
+func (x XAI) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
+	if message := request.Validate(); message != "" {
+		return openai.AudioTranscriptionResponse{}, xaiParameterError("", message)
+	}
+	for _, keyword := range request.Keywords {
+		if len([]rune(keyword)) > 50 {
+			return openai.AudioTranscriptionResponse{}, xaiParameterError("keywords", "each keyword must be at most 50 characters")
+		}
+	}
+	if err := rejectParameters("xai",
+		parameterCheck{"prompt", request.Prompt != ""},
+		parameterCheck{"timestamp_granularities", len(request.TimestampGranularities) > 0},
+		parameterCheck{"response_format", request.ResponseFormat != ""},
+		parameterCheck{"temperature", request.Temperature != nil},
+		parameterCheck{"include", len(request.Include) > 0},
+		parameterCheck{"languages", len(request.Languages) > 0},
+		parameterCheck{"chunking_strategy", request.ChunkingStrategy != nil},
+		parameterCheck{"known_speaker_names", len(request.KnownSpeakerNames) > 0},
+		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},
+	); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	if _, err := x.ReserveAudioMilliseconds(request); err != nil {
+		return openai.AudioTranscriptionResponse{}, xaiParameterError("file", err.Error())
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if request.Language != "" {
+		if err := writer.WriteField("language", request.Language); err != nil {
+			return openai.AudioTranscriptionResponse{}, err
+		}
+	}
+	for _, keyword := range request.Keywords {
+		if err := writer.WriteField("keyterm", keyword); err != nil {
+			return openai.AudioTranscriptionResponse{}, err
+		}
+	}
+	if err := writeAudioPart(writer, request.File); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	if err := writer.Close(); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(x.compatible.baseURL, "stt"), &body)
+	if err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+	if x.compatible.apiKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+x.compatible.apiKey)
+	}
+	response, err := x.compatible.client.Do(httpRequest)
+	if err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return openai.AudioTranscriptionResponse{}, responseStatusError("xai", response)
+	}
+	return decodeXAITranscriptionResponse(response.Body)
+}
+
+func decodeXAITranscriptionResponse(reader io.Reader) (openai.AudioTranscriptionResponse, error) {
+	payload, err := io.ReadAll(io.LimitReader(reader, maxAudioTranscriptionResponseBytes+1))
+	if err != nil || len(payload) > maxAudioTranscriptionResponseBytes {
+		return openai.AudioTranscriptionResponse{}, errors.New("audio transcription response exceeds limit")
+	}
+	var wire *struct {
+		Text     string  `json:"text"`
+		Language string  `json:"language"`
+		Duration float64 `json:"duration"`
+		Words    []struct {
+			Text  string  `json:"text"`
+			Start float64 `json:"start"`
+			End   float64 `json:"end"`
+		} `json:"words"`
+	}
+	if err := json.Unmarshal(payload, &wire); err != nil || wire == nil {
+		return openai.AudioTranscriptionResponse{}, errors.New("audio transcription response must be an object")
+	}
+	if wire.Duration <= 0 || math.IsNaN(wire.Duration) || math.IsInf(wire.Duration, 0) || wire.Duration > 7*24*60*60 {
+		return openai.AudioTranscriptionResponse{}, errors.New("invalid transcription duration")
+	}
+	durationMilliseconds := int(math.Ceil(wire.Duration * 1000))
+	result := openai.AudioTranscriptionResponse{
+		Text: wire.Text, Language: wire.Language, Duration: wire.Duration,
+		Usage: &openai.AudioTranscriptionUsage{Type: "duration", InputAudioMilliseconds: durationMilliseconds},
+		Words: make([]openai.AudioTranscriptionWord, len(wire.Words)),
+	}
+	for index, word := range wire.Words {
+		result.Words[index] = openai.AudioTranscriptionWord{Word: word.Text, Start: word.Start, End: word.End}
+	}
+	if message := result.Validate(); message != "" {
+		return openai.AudioTranscriptionResponse{}, errors.New(message)
+	}
+	return result, nil
+}
 
 func (x XAI) GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
 	if message := request.Validate(); message != "" {
