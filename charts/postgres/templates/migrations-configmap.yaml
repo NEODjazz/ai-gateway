@@ -5,6 +5,12 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  023_gateway_file_expiration.sql: |
+    ALTER TABLE gateway_files
+        ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+    CREATE INDEX IF NOT EXISTS gateway_files_expiration_idx
+        ON gateway_files (expires_at)
+        WHERE expires_at IS NOT NULL;
   022_gateway_batches.sql: |
     CREATE TABLE IF NOT EXISTS gateway_batches (
         id TEXT PRIMARY KEY,

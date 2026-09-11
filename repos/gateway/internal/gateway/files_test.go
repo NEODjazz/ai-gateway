@@ -38,8 +38,13 @@ func (m *fileAuthModule) Handle(_ context.Context, req *modules.RequestContext) 
 func (s *memoryFileStore) Create(_ context.Context, file filestate.File, quota int64) (filestate.File, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	now := time.Now().UTC()
 	var used int64
-	for _, existing := range s.files {
+	for id, existing := range s.files {
+		if existing.ExpiresAt != nil && !existing.ExpiresAt.After(now) {
+			delete(s.files, id)
+			continue
+		}
 		if existing.OwnerKey == file.OwnerKey {
 			used += existing.Bytes
 		}
@@ -50,7 +55,11 @@ func (s *memoryFileStore) Create(_ context.Context, file filestate.File, quota i
 	if _, found := s.files[file.ID]; found {
 		return filestate.File{}, filestate.ErrConflict
 	}
-	file.CreatedAt = time.Unix(123, 0).UTC()
+	file.CreatedAt = now
+	if file.ExpiresAfterSeconds > 0 {
+		expiresAt := now.Add(time.Duration(file.ExpiresAfterSeconds) * time.Second)
+		file.ExpiresAt = &expiresAt
+	}
 	s.files[file.ID] = file
 	file.Content = nil
 	return file, nil
@@ -60,7 +69,12 @@ func (s *memoryFileStore) List(_ context.Context, owner, purpose string, limit i
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := make([]filestate.File, 0, len(s.files))
-	for _, file := range s.files {
+	now := time.Now()
+	for id, file := range s.files {
+		if file.ExpiresAt != nil && !file.ExpiresAt.After(now) {
+			delete(s.files, id)
+			continue
+		}
 		if file.OwnerKey == owner && (purpose == "" || file.Purpose == purpose) {
 			file.Content = nil
 			result = append(result, file)
@@ -73,7 +87,10 @@ func (s *memoryFileStore) Get(_ context.Context, owner, id string, content bool)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	file, found := s.files[id]
-	if !found || file.OwnerKey != owner {
+	if !found || file.OwnerKey != owner || file.ExpiresAt != nil && !file.ExpiresAt.After(time.Now()) {
+		if found && file.OwnerKey == owner {
+			delete(s.files, id)
+		}
 		return filestate.File{}, filestate.ErrNotFound
 	}
 	if !content {
@@ -94,11 +111,20 @@ func (s *memoryFileStore) Delete(_ context.Context, owner, id string) error {
 }
 
 func fileUploadBody(t *testing.T, purpose, filename string, payload []byte) (*bytes.Buffer, string) {
+	return fileUploadBodyWithFields(t, purpose, filename, payload, nil)
+}
+
+func fileUploadBodyWithFields(t *testing.T, purpose, filename string, payload []byte, fields map[string]string) (*bytes.Buffer, string) {
 	t.Helper()
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	if purpose != "" {
 		if err := writer.WriteField("purpose", purpose); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, value := range fields {
+		if err := writer.WriteField(name, value); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -115,6 +141,53 @@ func fileUploadBody(t *testing.T, purpose, filename string, payload []byte) (*by
 		t.Fatal(err)
 	}
 	return body, writer.FormDataContentType()
+}
+
+func TestFileUploadPurposeAndExpirationPolicy(t *testing.T) {
+	store := &memoryFileStore{files: map[string]filestate.File{}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), modelsProvider{}).
+		WithFileStore(store, FileRuntimeConfig{MaxBytes: 1024, OwnerQuotaBytes: 4096}))
+
+	upload := func(purpose string, fields map[string]string) *httptest.ResponseRecorder {
+		body, contentType := fileUploadBodyWithFields(t, purpose, "input.jsonl", []byte("payload"), fields)
+		request := httptest.NewRequest(http.MethodPost, "/v1/files", body)
+		request.Header.Set("Authorization", "Bearer key")
+		request.Header.Set("Content-Type", contentType)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+
+	batch := upload("batch", nil)
+	if batch.Code != http.StatusOK || !strings.Contains(batch.Body.String(), `"expires_at":`) {
+		t.Fatalf("default batch expiry status=%d body=%s", batch.Code, batch.Body.String())
+	}
+	fineTune := upload("fine-tune", map[string]string{"expires_after[anchor]": "created_at", "expires_after[seconds]": "3600"})
+	if fineTune.Code != http.StatusOK || !strings.Contains(fineTune.Body.String(), `"expires_at":`) {
+		t.Fatalf("explicit expiry status=%d body=%s", fineTune.Code, fineTune.Body.String())
+	}
+	permanent := upload("user_data", nil)
+	if permanent.Code != http.StatusOK || strings.Contains(permanent.Body.String(), `"expires_at":`) {
+		t.Fatalf("permanent file status=%d body=%s", permanent.Code, permanent.Body.String())
+	}
+
+	for name, test := range map[string]struct {
+		purpose string
+		fields  map[string]string
+	}{
+		"unsupported purpose": {purpose: "batch_output"},
+		"missing anchor":      {purpose: "fine-tune", fields: map[string]string{"expires_after[seconds]": "3600"}},
+		"invalid anchor":      {purpose: "fine-tune", fields: map[string]string{"expires_after[anchor]": "uploaded_at", "expires_after[seconds]": "3600"}},
+		"too short":           {purpose: "fine-tune", fields: map[string]string{"expires_after[anchor]": "created_at", "expires_after[seconds]": "3599"}},
+		"too long":            {purpose: "fine-tune", fields: map[string]string{"expires_after[anchor]": "created_at", "expires_after[seconds]": "2592001"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := upload(test.purpose, test.fields)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
 }
 
 func TestFileHTTPLifecycle(t *testing.T) {

@@ -32,6 +32,9 @@ func TestPostgresFileLifecycleAndIsolationIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	if _, err := store.Create(ctx, filestate.File{ID: "file_invalid_expiry", OwnerKey: owner, Filename: "bad", Purpose: "batch", ContentType: "text/plain", Bytes: 1, Content: []byte("x"), ExpiresAfterSeconds: 1}, 1024); !errors.Is(err, filestate.ErrInvalid) {
+		t.Fatalf("invalid expiry error=%v", err)
+	}
 
 	created, err := store.Create(ctx, filestate.File{
 		ID: "file_lifecycle", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch",
@@ -183,6 +186,50 @@ func TestPostgresFileListPaginationIntegration(t *testing.T) {
 	}
 }
 
+func TestPostgresExpiredFilesAreRemovedFromQuotaIntegration(t *testing.T) {
+	dsn := requiredPostgresTestDSN(t)
+	ctx := context.Background()
+	pool := prepareFileTable(t, ctx, dsn)
+	owner := "file-expiry/" + time.Now().UTC().Format("20060102150405.000000000")
+	store, err := NewPostgresStore(ctx, dsn, nil)
+	if err != nil {
+		pool.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		store.Close()
+		pool.Close()
+	})
+
+	if _, err := store.Create(ctx, filestate.File{
+		ID: "file_expired", OwnerKey: owner, Filename: "old.jsonl", Purpose: "batch",
+		ContentType: "application/jsonl", Bytes: 6, Content: []byte("123456"), ExpiresAfterSeconds: 3600,
+	}, 6); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE gateway_files SET expires_at=now()-interval '1 second' WHERE owner_key=$1`, owner); err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.Create(ctx, filestate.File{
+		ID: "file_replacement", OwnerKey: owner, Filename: "new.jsonl", Purpose: "batch",
+		ContentType: "application/jsonl", Bytes: 6, Content: []byte("abcdef"), ExpiresAfterSeconds: 3600,
+	}, 6)
+	if err != nil || created.ExpiresAt == nil || !created.ExpiresAt.After(created.CreatedAt) {
+		t.Fatalf("replacement=%+v err=%v", created, err)
+	}
+	if _, err := store.Get(ctx, owner, "file_expired", false); !errors.Is(err, filestate.ErrNotFound) {
+		t.Fatalf("expired get error=%v", err)
+	}
+	files, _, err := store.List(ctx, owner, "", 20, "")
+	if err != nil || len(files) != 1 || files[0].ID != created.ID {
+		t.Fatalf("files=%+v err=%v", files, err)
+	}
+	var expiredCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM gateway_files WHERE owner_key=$1 AND id='file_expired'`, owner).Scan(&expiredCount); err != nil || expiredCount != 0 {
+		t.Fatalf("expired rows=%d err=%v", expiredCount, err)
+	}
+}
+
 func requiredPostgresTestDSN(t *testing.T) string {
 	t.Helper()
 	baseDSN := os.Getenv("CONTROL_PLANE_POSTGRES_TEST_DSN")
@@ -263,7 +310,7 @@ func prepareFileTable(t *testing.T, ctx context.Context, dsn string) *pgxpool.Po
 	_, err = pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS gateway_files
 		(id TEXT PRIMARY KEY, owner_key TEXT NOT NULL, filename TEXT NOT NULL, purpose TEXT NOT NULL,
 		content_type TEXT NOT NULL, bytes BIGINT NOT NULL CHECK (bytes >= 0), content BYTEA NOT NULL,
-		created_at TIMESTAMPTZ NOT NULL DEFAULT now(), CHECK (octet_length(content) = bytes))`)
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ, CHECK (octet_length(content) = bytes))`)
 	if err != nil {
 		pool.Close()
 		t.Fatal(err)

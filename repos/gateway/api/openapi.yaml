@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.230
+  version: 0.1.231
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -515,7 +515,7 @@ paths:
       operationId: createFile
       tags: [Files]
       summary: Store a bounded file for later gateway operations
-      description: Authenticates the virtual key, consumes RPM admission and stores the file in PostgreSQL under a credential-and-user owner key. Uploads fail closed when durable storage is unavailable and an atomic per-owner byte quota prevents concurrent requests from exceeding the configured limit.
+      description: Authenticates the virtual key, consumes RPM admission and stores the file in PostgreSQL under a credential-and-user owner key. Uploads fail closed when durable storage is unavailable and an atomic per-owner byte quota prevents concurrent requests from exceeding the configured limit. Expired files are removed from storage and quota accounting. Batch input files expire after 30 days unless an explicit policy is supplied.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -527,7 +527,14 @@ paths:
               required: [file, purpose]
               properties:
                 file: {type: string, format: binary}
-                purpose: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_.-]+$'}
+                purpose: {type: string, enum: [assistants, batch, fine-tune, vision, user_data, evals]}
+                expires_after:
+                  type: object
+                  additionalProperties: false
+                  required: [anchor, seconds]
+                  properties:
+                    anchor: {type: string, const: created_at}
+                    seconds: {type: integer, format: int64, minimum: 3600, maximum: 2592000}
       responses:
         '200':
           description: Stored file metadata
@@ -3804,6 +3811,7 @@ components:
         filename: {type: string, minLength: 1, maxLength: 512}
         purpose: {type: string, minLength: 1, maxLength: 64}
         status: {type: string, const: processed}
+        expires_at: {type: integer, format: int64}
     FileList:
       type: object
       additionalProperties: false

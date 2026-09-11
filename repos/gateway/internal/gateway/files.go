@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -32,6 +33,7 @@ type fileObject struct {
 	Filename  string `json:"filename"`
 	Purpose   string `json:"purpose"`
 	Status    string `json:"status"`
+	ExpiresAt *int64 `json:"expires_at,omitempty"`
 }
 
 func (h Handler) WithFileStore(store filestate.Store, config FileRuntimeConfig) Handler {
@@ -237,7 +239,7 @@ func decodeFileUpload(w http.ResponseWriter, r *http.Request, maxBytes int64) (f
 			return filestate.File{}, false
 		}
 		name := part.FormName()
-		if seen[name] || (name != "file" && name != "purpose") {
+		if seen[name] || (name != "file" && name != "purpose" && name != "expires_after[anchor]" && name != "expires_after[seconds]") {
 			_ = part.Close()
 			writeError(w, http.StatusBadRequest, "invalid_request", "unknown or repeated multipart field")
 			return filestate.File{}, false
@@ -257,6 +259,20 @@ func decodeFileUpload(w http.ResponseWriter, r *http.Request, maxBytes int64) (f
 				writeError(w, http.StatusBadRequest, "invalid_request", "purpose is invalid")
 				return filestate.File{}, false
 			}
+		case "expires_after[anchor]":
+			value, valid := readFileScalar(part, 32)
+			if !valid || value != "created_at" {
+				writeError(w, http.StatusBadRequest, "invalid_request", "expires_after anchor must be created_at")
+				return filestate.File{}, false
+			}
+		case "expires_after[seconds]":
+			value, valid := readFileScalar(part, 16)
+			seconds, parseErr := strconv.ParseInt(value, 10, 64)
+			if !valid || parseErr != nil || seconds < filestate.MinimumExpirySeconds || seconds > filestate.MaximumExpirySeconds {
+				writeError(w, http.StatusBadRequest, "invalid_request", "expires_after seconds must be between 3600 and 2592000")
+				return filestate.File{}, false
+			}
+			file.ExpiresAfterSeconds = seconds
 		case "file":
 			filename := filepath.Base(part.FileName())
 			payload, readErr := io.ReadAll(io.LimitReader(part, maxBytes+1))
@@ -284,7 +300,42 @@ func decodeFileUpload(w http.ResponseWriter, r *http.Request, maxBytes int64) (f
 		writeError(w, http.StatusBadRequest, "invalid_request", "file and purpose are required")
 		return filestate.File{}, false
 	}
+	if !validUploadFilePurpose(file.Purpose) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "purpose is unsupported")
+		return filestate.File{}, false
+	}
+	hasExpiryAnchor := seen["expires_after[anchor]"]
+	hasExpirySeconds := seen["expires_after[seconds]"]
+	if hasExpiryAnchor != hasExpirySeconds {
+		writeError(w, http.StatusBadRequest, "invalid_request", "expires_after anchor and seconds are required together")
+		return filestate.File{}, false
+	}
+	if !hasExpirySeconds && file.Purpose == "batch" {
+		file.ExpiresAfterSeconds = filestate.MaximumExpirySeconds
+	}
 	return file, true
+}
+
+func readFileScalar(part *multipart.Part, maximumBytes int64) (string, bool) {
+	if part.FileName() != "" {
+		_ = part.Close()
+		return "", false
+	}
+	value, err := io.ReadAll(io.LimitReader(part, maximumBytes+1))
+	_ = part.Close()
+	if err != nil || int64(len(value)) > maximumBytes {
+		return "", false
+	}
+	return strings.TrimSpace(string(value)), true
+}
+
+func validUploadFilePurpose(purpose string) bool {
+	switch purpose {
+	case "assistants", "batch", "fine-tune", "vision", "user_data", "evals":
+		return true
+	default:
+		return false
+	}
 }
 
 func fileOwnerKey(req modules.RequestContext) string {
@@ -326,7 +377,12 @@ func validFileName(value string) bool {
 }
 
 func publicFile(file filestate.File) fileObject {
-	return fileObject{ID: file.ID, Object: "file", Bytes: file.Bytes, CreatedAt: file.CreatedAt.Unix(), Filename: file.Filename, Purpose: file.Purpose, Status: "processed"}
+	result := fileObject{ID: file.ID, Object: "file", Bytes: file.Bytes, CreatedAt: file.CreatedAt.Unix(), Filename: file.Filename, Purpose: file.Purpose, Status: "processed"}
+	if file.ExpiresAt != nil {
+		expiresAt := file.ExpiresAt.Unix()
+		result.ExpiresAt = &expiresAt
+	}
+	return result
 }
 
 func writeFileStoreError(w http.ResponseWriter, err error) {

@@ -88,6 +88,15 @@ func TestPostgresVectorStoreFileLifecycleIsolationAndQuotaIntegration(t *testing
 			t.Fatal(err)
 		}
 	}
+	if _, err = store.Create(ctx, filestate.File{ID: "file_vector_expired", OwnerKey: owner, Filename: "expired.txt", Purpose: "assistants", ContentType: "text/plain", Bytes: 1, Content: []byte("x"), ExpiresAfterSeconds: 3600}, 100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE gateway_files SET expires_at=now()-interval '1 second' WHERE owner_key=$1 AND id='file_vector_expired'`, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_expired", 2); !errors.Is(err, vectorstate.ErrFileNotFound) {
+		t.Fatalf("expired file error=%v", err)
+	}
 	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "missing", 2); !errors.Is(err, vectorstate.ErrFileNotFound) {
 		t.Fatalf("missing file error=%v", err)
 	}
@@ -232,7 +241,7 @@ func prepareVectorStoreTable(t *testing.T, ctx context.Context, dsn string) *pgx
 		_, err = pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS gateway_files (
 			id TEXT PRIMARY KEY, owner_key TEXT NOT NULL, filename TEXT NOT NULL, purpose TEXT NOT NULL,
 			content_type TEXT NOT NULL, bytes BIGINT NOT NULL CHECK (bytes >= 0), content BYTEA NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT now(), CHECK (octet_length(content) = bytes))`)
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ, CHECK (octet_length(content) = bytes))`)
 	}
 	if err == nil {
 		_, err = pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS gateway_vector_store_files (

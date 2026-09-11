@@ -12,15 +12,22 @@ var ErrConflict = errors.New("file already exists")
 var ErrUnavailable = errors.New("file storage is unavailable")
 var ErrInvalid = errors.New("invalid file storage request")
 
+const (
+	MinimumExpirySeconds int64 = 3600
+	MaximumExpirySeconds int64 = 30 * 24 * 60 * 60
+)
+
 type File struct {
-	ID          string    `json:"id"`
-	OwnerKey    string    `json:"-"`
-	Filename    string    `json:"filename"`
-	Purpose     string    `json:"purpose"`
-	ContentType string    `json:"content_type"`
-	Bytes       int64     `json:"bytes"`
-	CreatedAt   time.Time `json:"-"`
-	Content     []byte    `json:"-"`
+	ID                  string     `json:"id"`
+	OwnerKey            string     `json:"-"`
+	Filename            string     `json:"filename"`
+	Purpose             string     `json:"purpose"`
+	ContentType         string     `json:"content_type"`
+	Bytes               int64      `json:"bytes"`
+	CreatedAt           time.Time  `json:"-"`
+	ExpiresAt           *time.Time `json:"-"`
+	ExpiresAfterSeconds int64      `json:"-"`
+	Content             []byte     `json:"-"`
 }
 
 type Store interface {

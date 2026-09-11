@@ -78,8 +78,8 @@ func (s *PostgresStore) ListVectorStores(ctx context.Context, owner string, limi
 	}
 	rows, err := s.pool.Query(ctx, `SELECT v.id,v.owner_key,v.name,v.metadata,v.expires_after_days,v.created_at,v.last_active_at,v.expires_at,
 		(v.expires_at IS NOT NULL AND v.expires_at<=now()),
-		COALESCE((SELECT sum(f.bytes) FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key WHERE a.vector_store_id=v.id AND a.owner_key=v.owner_key),0),
-		(SELECT count(*) FROM gateway_vector_store_files a WHERE a.vector_store_id=v.id AND a.owner_key=v.owner_key)
+		COALESCE((SELECT sum(f.bytes) FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.vector_store_id=v.id AND a.owner_key=v.owner_key),0),
+		(SELECT count(*) FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.vector_store_id=v.id AND a.owner_key=v.owner_key)
 		FROM gateway_vector_stores v WHERE v.owner_key=$1
 		AND ($2::timestamptz IS NULL OR (v.created_at,v.id)<($2::timestamptz,$3))
 		ORDER BY v.created_at DESC,v.id DESC LIMIT $4`, owner, cursorTime, cursorID, limit+1)
@@ -181,7 +181,7 @@ func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vector
 		return vectorstate.File{}, err
 	}
 	var bytes int64
-	if err = tx.QueryRow(ctx, `SELECT bytes FROM gateway_files WHERE owner_key=$1 AND id=$2`, owner, fileID).Scan(&bytes); errors.Is(err, pgx.ErrNoRows) {
+	if err = tx.QueryRow(ctx, `SELECT bytes FROM gateway_files WHERE owner_key=$1 AND id=$2 AND (expires_at IS NULL OR expires_at>now())`, owner, fileID).Scan(&bytes); errors.Is(err, pgx.ErrNoRows) {
 		return vectorstate.File{}, vectorstate.ErrFileNotFound
 	} else if err != nil {
 		return vectorstate.File{}, err
@@ -194,7 +194,7 @@ func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vector
 		return vectorstate.File{}, vectorstate.ErrConflict
 	}
 	var count int
-	if err = tx.QueryRow(ctx, `SELECT count(*) FROM gateway_vector_store_files WHERE owner_key=$1 AND vector_store_id=$2`, owner, vectorStoreID).Scan(&count); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2`, owner, vectorStoreID).Scan(&count); err != nil {
 		return vectorstate.File{}, err
 	}
 	if count >= quota {
@@ -235,7 +235,7 @@ func (s *PostgresStore) ListVectorStoreFiles(ctx context.Context, owner, vectorS
 	var cursorID string
 	if after != "" {
 		var createdAt time.Time
-		err := s.pool.QueryRow(ctx, `SELECT created_at,file_id FROM gateway_vector_store_files WHERE owner_key=$1 AND vector_store_id=$2 AND file_id=$3`, owner, vectorStoreID, after).Scan(&createdAt, &cursorID)
+		err := s.pool.QueryRow(ctx, `SELECT a.created_at,a.file_id FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND a.file_id=$3`, owner, vectorStoreID, after).Scan(&createdAt, &cursorID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, "", vectorstate.ErrFileNotFound
 		}
@@ -244,7 +244,7 @@ func (s *PostgresStore) ListVectorStoreFiles(ctx context.Context, owner, vectorS
 		}
 		cursorTime = &createdAt
 	}
-	rows, err := s.pool.Query(ctx, `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3::timestamptz IS NULL OR (a.created_at,a.file_id)<($3::timestamptz,$4)) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $5`, owner, vectorStoreID, cursorTime, cursorID, limit+1)
+	rows, err := s.pool.Query(ctx, `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3::timestamptz IS NULL OR (a.created_at,a.file_id)<($3::timestamptz,$4)) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $5`, owner, vectorStoreID, cursorTime, cursorID, limit+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -300,7 +300,7 @@ type vectorStoreFileQuerier interface {
 }
 
 func getVectorStoreFile(ctx context.Context, query vectorStoreFileQuerier, owner, vectorStoreID, fileID string) (vectorstate.File, error) {
-	file, err := scanVectorStoreFile(query.QueryRow(ctx, `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND a.file_id=$3`, owner, vectorStoreID, fileID))
+	file, err := scanVectorStoreFile(query.QueryRow(ctx, `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND a.file_id=$3`, owner, vectorStoreID, fileID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return vectorstate.File{}, vectorstate.ErrFileNotFound
 	}
@@ -322,8 +322,8 @@ type vectorStoreQuerier interface {
 func getVectorStore(ctx context.Context, query vectorStoreQuerier, owner, id string) (vectorstate.VectorStore, error) {
 	store, err := scanVectorStore(query.QueryRow(ctx, `SELECT v.id,v.owner_key,v.name,v.metadata,v.expires_after_days,v.created_at,v.last_active_at,v.expires_at,
 		(v.expires_at IS NOT NULL AND v.expires_at<=now()),
-		COALESCE((SELECT sum(f.bytes) FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key WHERE a.vector_store_id=v.id AND a.owner_key=v.owner_key),0),
-		(SELECT count(*) FROM gateway_vector_store_files a WHERE a.vector_store_id=v.id AND a.owner_key=v.owner_key)
+		COALESCE((SELECT sum(f.bytes) FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.vector_store_id=v.id AND a.owner_key=v.owner_key),0),
+		(SELECT count(*) FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.vector_store_id=v.id AND a.owner_key=v.owner_key)
 		FROM gateway_vector_stores v WHERE v.owner_key=$1 AND v.id=$2`, owner, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return vectorstate.VectorStore{}, vectorstate.ErrNotFound
