@@ -32,6 +32,12 @@ func (s *backgroundJobStore) EnqueueAsyncJob(_ context.Context, job asyncstate.J
 	return true, nil
 }
 
+func (s *backgroundJobStore) HasAsyncJob(_ context.Context, kind, resourceID, ownerKey string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.job != nil && s.job.Kind == kind && s.job.ResourceID == resourceID && s.job.OwnerKey == ownerKey, nil
+}
+
 func (s *backgroundJobStore) ClaimAsyncJobs(_ context.Context, kind string, _ int, _ time.Duration) ([]asyncstate.Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -129,11 +135,17 @@ func TestBackgroundResponseDefersSettlementAndSurvivesRouterRestart(t *testing.T
 	if jobs.job == nil || bytes.Contains(jobs.job.Payload, []byte("prompt-must-not-be-persisted")) {
 		t.Fatalf("unsafe or missing durable job: %+v", jobs.job)
 	}
+	if settled, err := router.BackgroundResponseSettled(t.Context(), req, response.ID); err != nil || settled {
+		t.Fatalf("pending settled=%t err=%v", settled, err)
+	}
 
 	restarted := router
 	processed, err := restarted.ProcessBackgroundResponses(t.Context())
 	if err != nil || processed != 1 || recorder.post != 1 || recorder.requestID != "execution-original" || recorder.totalTokens != 7 || jobs.job != nil {
 		t.Fatalf("processed=%d lifecycle=%+v pending=%+v err=%v", processed, recorder, jobs.job, err)
+	}
+	if settled, err := restarted.BackgroundResponseSettled(t.Context(), req, response.ID); err != nil || !settled {
+		t.Fatalf("completed settled=%t err=%v", settled, err)
 	}
 }
 

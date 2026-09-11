@@ -45,6 +45,18 @@ func (s *PostgresStore) EnqueueAsyncJob(ctx context.Context, job asyncstate.Job)
 	return false, nil
 }
 
+func (s *PostgresStore) HasAsyncJob(ctx context.Context, kind, resourceID, ownerKey string) (bool, error) {
+	if s == nil || s.pool == nil {
+		return false, asyncstate.ErrUnavailable
+	}
+	if kind == "" || resourceID == "" || ownerKey == "" {
+		return false, asyncstate.ErrInvalid
+	}
+	var exists bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM gateway_async_jobs WHERE kind=$1 AND resource_id=$2 AND owner_key=$3)`, kind, resourceID, ownerKey).Scan(&exists)
+	return exists, err
+}
+
 func (s *PostgresStore) ClaimAsyncJobs(ctx context.Context, kind string, limit int, lease time.Duration) ([]asyncstate.Job, error) {
 	if s == nil || s.pool == nil {
 		return nil, asyncstate.ErrUnavailable

@@ -564,6 +564,22 @@ func (h Handler) getA2ATask(w http.ResponseWriter, r *http.Request, request a2aR
 			h.writeA2AError(w, request.ID, http.StatusBadGateway, -32603, "Task status is temporarily unavailable")
 			return
 		}
+		if response.Status != "queued" && response.Status != "in_progress" {
+			settlements, supported := h.provider.(provider.BackgroundResponseSettlementProvider)
+			settled := false
+			if supported {
+				settled, err = settlements.BackgroundResponseSettled(r.Context(), reqCtx, backgroundResponseID)
+			}
+			if !supported || err != nil {
+				h.writeA2AError(w, request.ID, http.StatusBadGateway, -32603, "Task status is temporarily unavailable")
+				return
+			}
+			if !settled {
+				trimA2AHistory(&decoded, request.Params.HistoryLength)
+				writeJSON(w, http.StatusOK, a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: decoded})
+				return
+			}
+		}
 		updated := materializeA2ABackgroundTask(decoded, response)
 		if updated.Status.State != decoded.Status.State || a2aTaskTerminal(updated.Status.State) {
 			persistedResponseID := backgroundResponseID

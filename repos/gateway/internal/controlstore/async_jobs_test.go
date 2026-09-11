@@ -27,6 +27,12 @@ func TestPostgresAsyncJobLifecycleAndFencingIntegration(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("created=%t err=%v", created, err)
 	}
+	if exists, err := store.HasAsyncJob(t.Context(), kind, job.ResourceID, job.OwnerKey); err != nil || !exists {
+		t.Fatalf("pending exists=%t err=%v", exists, err)
+	}
+	if exists, err := store.HasAsyncJob(t.Context(), kind, job.ResourceID, "other-owner"); err != nil || exists {
+		t.Fatalf("cross-owner exists=%t err=%v", exists, err)
+	}
 	created, err = store.EnqueueAsyncJob(t.Context(), job)
 	if err != nil || created {
 		t.Fatalf("idempotent created=%t err=%v", created, err)
@@ -53,6 +59,9 @@ func TestPostgresAsyncJobLifecycleAndFencingIntegration(t *testing.T) {
 	}
 	if err := store.CompleteAsyncJob(t.Context(), kind, job.ResourceID, claimed[0].LeaseGeneration); err != nil {
 		t.Fatal(err)
+	}
+	if exists, err := store.HasAsyncJob(t.Context(), kind, job.ResourceID, job.OwnerKey); err != nil || exists {
+		t.Fatalf("completed exists=%t err=%v", exists, err)
 	}
 	if jobs, err := store.ClaimAsyncJobs(t.Context(), kind, 1, time.Minute); err != nil || len(jobs) != 0 {
 		t.Fatalf("completed jobs=%+v err=%v", jobs, err)

@@ -30,6 +30,7 @@ type a2aTestProvider struct {
 	preStreamFailure  bool
 	streamFailure     bool
 	terminalFailure   bool
+	backgroundSettled bool
 }
 
 type a2aCredentialAuth struct{}
@@ -174,6 +175,9 @@ func (p *a2aTestProvider) RetrieveResponse(context.Context, modules.RequestConte
 func (p *a2aTestProvider) CancelResponse(context.Context, modules.RequestContext, string) (openai.ResponseResponse, error) {
 	p.cancellationCalls++
 	return p.canceled, nil
+}
+func (p *a2aTestProvider) BackgroundResponseSettled(context.Context, modules.RequestContext, string) (bool, error) {
+	return p.backgroundSettled, nil
 }
 
 func a2aTestHandler(t *testing.T) (http.Handler, *a2aTestProvider, *lifecycleBillingModule) {
@@ -569,7 +573,16 @@ func TestA2AReturnImmediatelyPersistsAndMaterializesBackgroundTask(t *testing.T)
 	}
 
 	llm.retrieved = openai.ResponseResponse{ID: "resp_background", Model: "test-model", Status: "completed", OutputText: "done"}
-	get := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"get","method":"GetTask","params":{"tenant":"research","id":"`+sent.Result.Task.ID+`"}}`))
+	get := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"get-pending","method":"GetTask","params":{"tenant":"research","id":"`+sent.Result.Task.ID+`"}}`))
+	get.Header.Set("A2A-Version", "1.0")
+	get.Header.Set("Authorization", "Bearer key")
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, get)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"TASK_STATE_SUBMITTED"`) || strings.Contains(response.Body.String(), `"state":"TASK_STATE_COMPLETED"`) {
+		t.Fatalf("unsettled status=%d body=%s", response.Code, response.Body.String())
+	}
+	llm.backgroundSettled = true
+	get = httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"get","method":"GetTask","params":{"tenant":"research","id":"`+sent.Result.Task.ID+`"}}`))
 	get.Header.Set("A2A-Version", "1.0")
 	get.Header.Set("Authorization", "Bearer key")
 	response = httptest.NewRecorder()
@@ -583,7 +596,7 @@ func TestA2AReturnImmediatelyPersistsAndMaterializesBackgroundTask(t *testing.T)
 	if got.Result.Status.State != "TASK_STATE_COMPLETED" || len(got.Result.History) != 2 || len(got.Result.Artifacts) != 1 || *got.Result.Artifacts[0].Parts[0].Text != "done" {
 		t.Fatalf("unexpected completed task: %+v", got.Result)
 	}
-	if llm.retrieveCalls != 1 || billing.calls != 1 {
+	if llm.retrieveCalls != 2 || billing.calls != 1 {
 		t.Fatalf("retrieve=%d billing=%d", llm.retrieveCalls, billing.calls)
 	}
 	_, backgroundID, err = decodeA2AStoredTask(store.tasks[sent.Result.Task.ID].Payload)

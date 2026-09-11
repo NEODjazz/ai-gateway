@@ -29,6 +29,10 @@ type BackgroundResponseProcessor interface {
 	ProcessBackgroundResponses(context.Context) (int, error)
 }
 
+type BackgroundResponseSettlementProvider interface {
+	BackgroundResponseSettled(context.Context, modules.RequestContext, string) (bool, error)
+}
+
 type backgroundResponseJob struct {
 	RequestID       string            `json:"request_id"`
 	SessionID       string            `json:"session_id,omitempty"`
@@ -110,6 +114,17 @@ func (r Router) enqueueBackgroundResponse(ctx context.Context, req modules.Reque
 		return errors.Join(ErrBackgroundResponseStorageUnavailable, err)
 	}
 	return nil
+}
+
+func (r Router) BackgroundResponseSettled(ctx context.Context, req modules.RequestContext, responseID string) (bool, error) {
+	if interfaceIsNil(r.asyncJobs) {
+		return false, ErrBackgroundResponseStorageUnavailable
+	}
+	pending, err := r.asyncJobs.HasAsyncJob(ctx, backgroundResponseJobKind, responseID, backgroundResponseOwner(req))
+	if err != nil {
+		return false, errors.Join(ErrBackgroundResponseStorageUnavailable, err)
+	}
+	return !pending, nil
 }
 
 func (r Router) compensateBackgroundResponse(ctx context.Context, req modules.RequestContext, responseID, model string, endpoint Endpoint) {
