@@ -711,6 +711,19 @@ func (h Handler) cancelA2ATask(w http.ResponseWriter, r *http.Request, request a
 			h.writeA2AError(w, request.ID, http.StatusBadGateway, -32603, "Task cancellation failed")
 			return
 		}
+		settlements, supported := h.provider.(provider.BackgroundResponseSettlementProvider)
+		settled := false
+		if supported {
+			settled, cancelErr = settlements.BackgroundResponseSettled(r.Context(), reqCtx, backgroundResponseID)
+		}
+		if !supported || cancelErr != nil {
+			h.writeA2AError(w, request.ID, http.StatusBadGateway, -32603, "Task cancellation status is temporarily unavailable")
+			return
+		}
+		if !settled {
+			writeJSON(w, http.StatusOK, a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: decoded})
+			return
+		}
 		updated := materializeA2ABackgroundTask(decoded, response)
 		if a2aTaskPending(updated.Status.State) {
 			updated.Status = a2aTaskStatus{State: "TASK_STATE_CANCELED", Timestamp: time.Now().UTC().Format(time.RFC3339Nano)}

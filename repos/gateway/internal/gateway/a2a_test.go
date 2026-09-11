@@ -655,7 +655,7 @@ func TestMaterializeA2ABackgroundTaskMapsTerminalFailure(t *testing.T) {
 	}
 }
 
-func TestA2ACancelBackgroundTaskPersistsTerminalState(t *testing.T) {
+func TestA2ACancelBackgroundTaskWaitsForSettlementBeforeTerminalState(t *testing.T) {
 	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
 	router, llm, billing := a2aTestHandlerWithTasks(t, store)
 	llm.response = openai.ResponseResponse{ID: "resp_cancel", Model: "test-model", Status: "in_progress"}
@@ -679,13 +679,19 @@ func TestA2ACancelBackgroundTaskPersistsTerminalState(t *testing.T) {
 		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
 	}
 	canceled := call(`{"jsonrpc":"2.0","id":"cancel","method":"CancelTask","params":{"tenant":"research","id":"` + sent.Result.Task.ID + `"}}`)
-	if canceled.Code != http.StatusOK || !strings.Contains(canceled.Body.String(), `"state":"TASK_STATE_CANCELED"`) || llm.cancellationCalls != 1 || billing.calls != 1 {
+	if canceled.Code != http.StatusOK || !strings.Contains(canceled.Body.String(), `"state":"TASK_STATE_WORKING"`) || strings.Contains(canceled.Body.String(), `"state":"TASK_STATE_CANCELED"`) || llm.cancellationCalls != 1 || billing.calls != 1 {
 		t.Fatalf("cancel status=%d calls=%d billing=%d body=%s", canceled.Code, llm.cancellationCalls, billing.calls, canceled.Body.String())
 	}
 	stored := store.tasks[sent.Result.Task.ID]
 	decoded, backgroundID, err := decodeA2AStoredTask(stored.Payload)
-	if err != nil || decoded.Status.State != "TASK_STATE_CANCELED" || backgroundID != "" {
+	if err != nil || decoded.Status.State != "TASK_STATE_WORKING" || backgroundID != "resp_cancel" {
 		t.Fatalf("stored=%+v binding=%q err=%v", decoded, backgroundID, err)
+	}
+	llm.backgroundSettled = true
+	llm.retrieved = llm.canceled
+	settled := call(`{"jsonrpc":"2.0","id":"get-settled","method":"GetTask","params":{"tenant":"research","id":"` + sent.Result.Task.ID + `"}}`)
+	if settled.Code != http.StatusOK || !strings.Contains(settled.Body.String(), `"state":"TASK_STATE_CANCELED"`) || llm.cancellationCalls != 1 {
+		t.Fatalf("settled status=%d cancel calls=%d body=%s", settled.Code, llm.cancellationCalls, settled.Body.String())
 	}
 }
 
