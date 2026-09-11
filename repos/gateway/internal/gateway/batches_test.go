@@ -95,35 +95,12 @@ func (s *memoryBatchStore) StartBatch(_ context.Context, owner, id string) (batc
 	}
 	return b, nil
 }
-func (s *memoryBatchStore) StageBatchItem(_ context.Context, item batchstate.Item, failed bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	stored := s.items[item.BatchID][item.Ordinal]
-	state := "settling_success"
-	if failed {
-		state = "settling_failure"
-	}
-	if stored.State != "pending" && (stored.State != state || string(stored.Result) != string(item.Result)) {
-		return batchstate.ErrConflict
-	}
-	stored.State = state
-	stored.Result = append([]byte(nil), item.Result...)
-	s.items[item.BatchID][item.Ordinal] = stored
-	return nil
-}
 func (s *memoryBatchStore) FinishBatchItem(_ context.Context, item batchstate.Item, failed bool) (batchstate.Batch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	stored := s.items[item.BatchID][item.Ordinal]
-	wantState := "settling_success"
-	if failed {
-		wantState = "settling_failure"
-	}
-	if stored.State == "completed" || stored.State == "failed" {
+	if stored.State != "pending" {
 		return s.batches[item.BatchID], nil
-	}
-	if stored.State != wantState {
-		return batchstate.Batch{}, batchstate.ErrConflict
 	}
 	stored.Result = item.Result
 	if failed {
@@ -262,62 +239,13 @@ type batchProvider struct {
 	mu         sync.Mutex
 	models     []string
 	executions []string
-	err        error
-}
-
-type batchBillingModule struct {
-	mu             sync.Mutex
-	phases         []string
-	executionIDs   []string
-	committedUsage []openai.Usage
-	failCommits    int
-	failCancels    int
-}
-
-func (*batchBillingModule) Name() string   { return "billing" }
-func (*batchBillingModule) Required() bool { return true }
-func (m *batchBillingModule) Handle(_ context.Context, req *modules.RequestContext) error {
-	m.record("reserve", req)
-	return nil
-}
-func (*batchBillingModule) PostResponseEnabled() bool { return true }
-func (m *batchBillingModule) HandlePostResponse(_ context.Context, req *modules.RequestContext) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.phases = append(m.phases, "commit")
-	m.executionIDs = append(m.executionIDs, req.RequestID)
-	if req.Response != nil {
-		m.committedUsage = append(m.committedUsage, req.Response.Usage)
-	}
-	if m.failCommits > 0 {
-		m.failCommits--
-		return errors.New("billing unavailable")
-	}
-	return nil
-}
-func (m *batchBillingModule) HandleFailure(_ context.Context, req *modules.RequestContext, _ error) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.phases = append(m.phases, "cancel")
-	m.executionIDs = append(m.executionIDs, req.RequestID)
-	if m.failCancels > 0 {
-		m.failCancels--
-		return errors.New("billing unavailable")
-	}
-	return nil
-}
-func (m *batchBillingModule) record(phase string, req *modules.RequestContext) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.phases = append(m.phases, phase)
-	m.executionIDs = append(m.executionIDs, req.RequestID)
 }
 
 func (p *batchProvider) ChatCompletions(_ context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
 	p.mu.Lock()
 	p.executions = append(p.executions, req.RequestID)
 	p.mu.Unlock()
-	return openai.ChatCompletionResponse{ID: "chat_" + req.RequestID, Object: "chat.completion", Model: req.Request.Model, Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "ok"}}}, Usage: openai.Usage{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5}}, p.err
+	return openai.ChatCompletionResponse{ID: "chat_" + req.RequestID, Object: "chat.completion", Model: req.Request.Model, Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "ok"}}}}, nil
 }
 func (p *batchProvider) StreamChatCompletions(context.Context, modules.RequestContext, providerpkg.ChatCompletionStreamWriter) (openai.ChatCompletionResponse, bool, error) {
 	return openai.ChatCompletionResponse{}, false, nil
@@ -344,8 +272,7 @@ func TestBatchLifecycleExecutesMixedModelsWithDistinctBillingIDs(t *testing.T) {
 	owner := fileOwnerKey(identity)
 	payload := []byte("{\"custom_id\":\"a\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"model-a\",\"messages\":[{\"role\":\"user\",\"content\":\"one\"}]}}\n{\"custom_id\":\"b\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"model-b\",\"messages\":[{\"role\":\"user\",\"content\":\"two\"}]}}\n")
 	files.files["file_input"] = filestate.File{ID: "file_input", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(payload)), Content: payload}
-	billing := &batchBillingModule{}
-	h := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}, billing}), provider).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
+	h := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), provider).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
 	routes := Routes(h)
 	request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_input","endpoint":"/v1/chat/completions","completion_window":"24h","output_expires_after":{"anchor":"created_at","seconds":3600}}`))
 	request.Header.Set("Authorization", "Bearer key")
@@ -389,87 +316,6 @@ func TestBatchLifecycleExecutesMixedModelsWithDistinctBillingIDs(t *testing.T) {
 	provider.mu.Unlock()
 	if len(executions) != 2 || executions[0] == executions[1] {
 		t.Fatalf("execution IDs=%v", executions)
-	}
-	billing.mu.Lock()
-	phases := append([]string(nil), billing.phases...)
-	billingIDs := append([]string(nil), billing.executionIDs...)
-	usage := append([]openai.Usage(nil), billing.committedUsage...)
-	billing.mu.Unlock()
-	sort.Strings(phases)
-	if strings.Join(phases, ",") != "commit,commit,reserve,reserve" || len(billingIDs) != 4 || len(usage) != 2 || usage[0].TotalTokens != 5 || usage[1].TotalTokens != 5 {
-		t.Fatalf("billing phases=%v ids=%v usage=%+v", phases, billingIDs, usage)
-	}
-}
-
-func TestBatchRetriesStoredSettlementWithoutRepeatingProvider(t *testing.T) {
-	store := newMemoryBatchStore()
-	provider := &batchProvider{models: []string{"model-a"}}
-	billing := &batchBillingModule{failCommits: 1}
-	files := &memoryFileStore{files: map[string]filestate.File{}}
-	owner := "credential:credential:user:user"
-	batch := batchstate.Batch{ID: "batch_settlement", OwnerKey: owner, Endpoint: "/v1/chat/completions", Status: "queued", Total: 1, ExpiresAt: time.Now().Add(time.Hour)}
-	identity, _ := json.Marshal(modules.RequestContext{CredentialID: "credential", UserID: "user"})
-	item := batchstate.Item{BatchID: batch.ID, OwnerKey: owner, Ordinal: 0, CustomID: "one", URL: batch.Endpoint, Body: []byte(`{"model":"model-a","messages":[{"role":"user","content":"hello"}]}`), Identity: identity, State: "pending", ExecutionID: "exec_settlement"}
-	payload, _ := json.Marshal(batchJob{Ordinal: 0})
-	store.batches[batch.ID] = batch
-	store.items[batch.ID] = map[int]batchstate.Item{0: item}
-	store.jobs[batch.ID+":0"] = asyncstate.Job{Kind: batchJobKind, ResourceID: batch.ID + ":0", OwnerKey: owner, EndpointID: "gateway", ExecutionID: item.ExecutionID, Payload: payload}
-	h := NewHandler(modules.NewPipeline([]modules.Module{billing}), provider).
-		WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).
-		WithBatchStore(store, store)
-
-	if processed, err := h.ProcessBatchItems(t.Context()); processed != 1 || err == nil {
-		t.Fatalf("first processing=%d err=%v", processed, err)
-	}
-	staged, _ := store.GetBatchItem(t.Context(), owner, batch.ID, 0)
-	if staged.State != "settling_success" {
-		t.Fatalf("item published before billing settlement: %+v", staged)
-	}
-	if processed, err := h.ProcessBatchItems(t.Context()); processed != 1 || err != nil {
-		t.Fatalf("retry processing=%d err=%v", processed, err)
-	}
-	provider.mu.Lock()
-	providerCalls := len(provider.executions)
-	provider.mu.Unlock()
-	settled, _ := store.GetBatchItem(t.Context(), owner, batch.ID, 0)
-	if providerCalls != 1 || settled.State != "completed" {
-		t.Fatalf("provider calls=%d item=%+v", providerCalls, settled)
-	}
-}
-
-func TestBatchRetriesStoredCancellationWithoutRepeatingProvider(t *testing.T) {
-	store := newMemoryBatchStore()
-	provider := &batchProvider{models: []string{"model-a"}, err: errors.New("upstream failed")}
-	billing := &batchBillingModule{failCancels: 1}
-	files := &memoryFileStore{files: map[string]filestate.File{}}
-	owner := "credential:credential:user:user"
-	batch := batchstate.Batch{ID: "batch_cancellation", OwnerKey: owner, Endpoint: "/v1/chat/completions", Status: "queued", Total: 1, ExpiresAt: time.Now().Add(time.Hour)}
-	identity, _ := json.Marshal(modules.RequestContext{CredentialID: "credential", UserID: "user"})
-	item := batchstate.Item{BatchID: batch.ID, OwnerKey: owner, Ordinal: 0, CustomID: "one", URL: batch.Endpoint, Body: []byte(`{"model":"model-a","messages":[{"role":"user","content":"hello"}]}`), Identity: identity, State: "pending", ExecutionID: "exec_cancellation"}
-	payload, _ := json.Marshal(batchJob{Ordinal: 0})
-	store.batches[batch.ID] = batch
-	store.items[batch.ID] = map[int]batchstate.Item{0: item}
-	store.jobs[batch.ID+":0"] = asyncstate.Job{Kind: batchJobKind, ResourceID: batch.ID + ":0", OwnerKey: owner, EndpointID: "gateway", ExecutionID: item.ExecutionID, Payload: payload}
-	h := NewHandler(modules.NewPipeline([]modules.Module{billing}), provider).
-		WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).
-		WithBatchStore(store, store)
-
-	if processed, err := h.ProcessBatchItems(t.Context()); processed != 1 || err == nil {
-		t.Fatalf("first processing=%d err=%v", processed, err)
-	}
-	staged, _ := store.GetBatchItem(t.Context(), owner, batch.ID, 0)
-	if staged.State != "settling_failure" {
-		t.Fatalf("failure published before billing cancellation: %+v", staged)
-	}
-	if processed, err := h.ProcessBatchItems(t.Context()); processed != 1 || err != nil {
-		t.Fatalf("retry processing=%d err=%v", processed, err)
-	}
-	provider.mu.Lock()
-	providerCalls := len(provider.executions)
-	provider.mu.Unlock()
-	settled, _ := store.GetBatchItem(t.Context(), owner, batch.ID, 0)
-	if providerCalls != 1 || settled.State != "failed" {
-		t.Fatalf("provider calls=%d item=%+v", providerCalls, settled)
 	}
 }
 

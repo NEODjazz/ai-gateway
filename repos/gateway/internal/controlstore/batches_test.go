@@ -45,21 +45,11 @@ func TestPostgresBatchLifecycleIsAtomicAndOwnerIsolatedIntegration(t *testing.T)
 		t.Fatalf("started=%+v err=%v", started, err)
 	}
 	items[0].Result = []byte(`{"custom_id":"one"}`)
-	if err = store.StageBatchItem(t.Context(), items[0], false); err != nil {
-		t.Fatal(err)
-	}
-	staged, err := store.GetBatchItem(t.Context(), batch.OwnerKey, batch.ID, 0)
-	if err != nil || staged.State != "settling_success" || string(staged.Result) != string(items[0].Result) {
-		t.Fatalf("staged=%+v err=%v", staged, err)
-	}
 	progress, err := store.FinishBatchItem(t.Context(), items[0], false)
 	if err != nil || progress.Status != "in_progress" || progress.Completed != 1 {
 		t.Fatalf("progress=%+v err=%v", progress, err)
 	}
 	items[1].Result = []byte(`{"custom_id":"two","error":{}}`)
-	if err = store.StageBatchItem(t.Context(), items[1], true); err != nil {
-		t.Fatal(err)
-	}
 	finalizing, err := store.FinishBatchItem(t.Context(), items[1], true)
 	if err != nil || finalizing.Status != "finalizing" || finalizing.Failed != 1 {
 		t.Fatalf("finalizing=%+v err=%v", finalizing, err)

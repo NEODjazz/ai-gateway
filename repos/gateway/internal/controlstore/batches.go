@@ -1,7 +1,6 @@
 package controlstore
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -210,34 +209,6 @@ func (s *PostgresStore) StartBatch(ctx context.Context, owner, id string) (batch
 	return b, err
 }
 
-func (s *PostgresStore) StageBatchItem(ctx context.Context, item batchstate.Item, failed bool) error {
-	if s == nil || s.pool == nil {
-		return batchstate.ErrUnavailable
-	}
-	if len(item.Result) == 0 || !json.Valid(item.Result) {
-		return batchstate.ErrInvalid
-	}
-	state := "settling_success"
-	if failed {
-		state = "settling_failure"
-	}
-	command, err := s.pool.Exec(ctx, `UPDATE gateway_batch_items SET state=$4,result=$5 WHERE owner_key=$1 AND batch_id=$2 AND ordinal=$3 AND execution_id=$6 AND state='pending'`, item.OwnerKey, item.BatchID, item.Ordinal, state, item.Result, item.ExecutionID)
-	if err != nil {
-		return err
-	}
-	if command.RowsAffected() == 1 {
-		return nil
-	}
-	existing, err := s.GetBatchItem(ctx, item.OwnerKey, item.BatchID, item.Ordinal)
-	if err != nil {
-		return err
-	}
-	if existing.ExecutionID == item.ExecutionID && existing.State == state && bytes.Equal(existing.Result, item.Result) {
-		return nil
-	}
-	return batchstate.ErrConflict
-}
-
 func (s *PostgresStore) FinishBatchItem(ctx context.Context, item batchstate.Item, failed bool) (batchstate.Batch, error) {
 	if s == nil || s.pool == nil {
 		return batchstate.Batch{}, batchstate.ErrUnavailable
@@ -262,18 +233,11 @@ func (s *PostgresStore) FinishBatchItem(ctx context.Context, item batchstate.Ite
 	if existing.ExecutionID != item.ExecutionID {
 		return batchstate.Batch{}, batchstate.ErrConflict
 	}
-	wantState := "settling_success"
-	if failed {
-		wantState = "settling_failure"
-	}
-	if existing.State == "completed" || existing.State == "failed" {
+	if existing.State != "pending" {
 		if string(existing.Result) != string(item.Result) {
 			return batchstate.Batch{}, batchstate.ErrConflict
 		}
 		return b, nil
-	}
-	if existing.State != wantState || string(existing.Result) != string(item.Result) {
-		return batchstate.Batch{}, batchstate.ErrConflict
 	}
 	state := "completed"
 	completedDelta, failedDelta := 1, 0
@@ -281,13 +245,13 @@ func (s *PostgresStore) FinishBatchItem(ctx context.Context, item batchstate.Ite
 		state = "failed"
 		completedDelta, failedDelta = 0, 1
 	}
-	if b.Status == "cancelled" || b.Status == "expired" || b.Status == "failed" || b.Status == "completed" {
+	if b.Status == "cancelled" {
 		return b, nil
 	}
 	if b.Status != "queued" && b.Status != "in_progress" {
 		return batchstate.Batch{}, batchstate.ErrConflict
 	}
-	if _, err = tx.Exec(ctx, `UPDATE gateway_batch_items SET state=$4,result=$5 WHERE owner_key=$1 AND batch_id=$2 AND ordinal=$3 AND state=$6`, item.OwnerKey, item.BatchID, item.Ordinal, state, item.Result, wantState); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE gateway_batch_items SET state=$4,result=$5 WHERE owner_key=$1 AND batch_id=$2 AND ordinal=$3 AND state='pending'`, item.OwnerKey, item.BatchID, item.Ordinal, state, item.Result); err != nil {
 		return batchstate.Batch{}, err
 	}
 	status := `CASE WHEN completed+$3+failed+$4=total THEN 'finalizing' ELSE 'in_progress' END`
