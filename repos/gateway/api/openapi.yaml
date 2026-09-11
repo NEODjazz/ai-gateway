@@ -40,6 +40,21 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /v1/realtime:
+    get:
+      operationId: openRealtimeSession
+      tags: [Inference]
+      summary: Open a bounded bidirectional Realtime session
+      description: Authenticates the gateway credential, authorizes the public model, selects one Realtime-capable deployment, and proxies text WebSocket events without exposing provider credentials. Each event is limited to 4 MiB and each provider connection to 30 minutes.
+      parameters:
+        - {name: model, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 256}}
+      responses:
+        '101': {description: WebSocket session established}
+        '400': {description: Invalid model or WebSocket handshake}
+        '401': {description: Invalid gateway credential}
+        '403': {description: Model is not allowed}
+        '429': {description: "Credential, deployment, or provider capacity exceeded"}
+        '503': {description: No eligible Realtime deployment is available}
   /a2a/{agent}/.well-known/agent-card.json:
     get:
       operationId: getA2AAgentCard
