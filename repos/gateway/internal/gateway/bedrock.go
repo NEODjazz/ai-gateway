@@ -1,11 +1,67 @@
 package gateway
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
 	"ai-gateway-gateway/internal/openai"
 )
+
+type bedrockInvokeRequest struct {
+	AnthropicVersion string              `json:"anthropic_version"`
+	MaxTokens        int                 `json:"max_tokens"`
+	Messages         []messagesInput     `json:"messages"`
+	System           json.RawMessage     `json:"system,omitempty"`
+	Tools            []messagesTool      `json:"tools,omitempty"`
+	ToolChoice       *messagesToolChoice `json:"tool_choice,omitempty"`
+	Temperature      *float64            `json:"temperature,omitempty"`
+	TopP             *float64            `json:"top_p,omitempty"`
+	StopSequences    []string            `json:"stop_sequences,omitempty"`
+}
+
+func (request bedrockInvokeRequest) chat(model, provider string) (openai.ChatCompletionRequest, error) {
+	if request.AnthropicVersion != "bedrock-2023-05-31" {
+		return openai.ChatCompletionRequest{}, errors.New("anthropic_version must be bedrock-2023-05-31")
+	}
+	messages := messagesRequest{
+		Model: model, MaxTokens: request.MaxTokens, Messages: request.Messages, System: request.System,
+		Tools: request.Tools, ToolChoice: request.ToolChoice, Temperature: request.Temperature,
+		TopP: request.TopP, StopSequences: request.StopSequences,
+	}
+	chat, err := messages.chat()
+	if err != nil {
+		return chat, err
+	}
+	if chat.WebSearchOptions != nil || chat.WebFetchOptions != nil {
+		return chat, errors.New("InvokeModel supports function tools only")
+	}
+	chat.Provider = provider
+	chat.BedrockInvoke = true
+	return chat, nil
+}
+
+func (h Handler) BedrockInvoke(w http.ResponseWriter, r *http.Request) {
+	output := &messagesWriter{destination: w, headers: make(http.Header), status: http.StatusOK, tools: map[int]int{}}
+	defer output.finish()
+	model := strings.TrimSpace(r.PathValue("model"))
+	if model == "" || len(model) > 2048 {
+		writeError(output, http.StatusBadRequest, "invalid_request", "model is required")
+		return
+	}
+	var request bedrockInvokeRequest
+	if !decodeInferenceRequest(output, r, &request) {
+		return
+	}
+	chat, err := request.chat(model, strings.TrimSpace(r.URL.Query().Get("provider")))
+	if err != nil {
+		writeError(output, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	output.model = model
+	h.serveChatAs(output, r, chat, "bedrock_invoke")
+}
 
 func (h Handler) BedrockConverse(w http.ResponseWriter, r *http.Request) {
 	model := strings.TrimSpace(r.PathValue("model"))

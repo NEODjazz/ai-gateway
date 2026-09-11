@@ -52,6 +52,65 @@ func TestBedrockConverseMapsMessagesToolsAndUsage(t *testing.T) {
 	}
 }
 
+func TestBedrockInvokeMapsAnthropicMessagesAndUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/model/us.anthropic.claude-v1:0/invoke" || r.Header.Get("Authorization") != "Bearer provider-key" {
+			t.Fatalf("path=%q authorization=%q", r.URL.EscapedPath(), r.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["anthropic_version"] != "bedrock-2023-05-31" || body["model"] != nil || body["max_tokens"] != float64(32) {
+			t.Fatalf("request=%#v", body)
+		}
+		if len(body["messages"].([]any)) != 1 || len(body["tools"].([]any)) != 1 {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"msg_1","type":"message","role":"assistant","model":"upstream","content":[{"type":"tool_use","id":"call_1","name":"weather","input":{"city":"Paris"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":7,"output_tokens":5}}`)
+	}))
+	defer server.Close()
+	maxTokens := 32
+	request := openai.ChatCompletionRequest{
+		Model: "us.anthropic.claude-v1:0", BedrockInvoke: true, MaxTokens: &maxTokens,
+		Messages: []openai.Message{{Role: "user", Content: "weather"}},
+		Tools:    []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object"}}}},
+	}
+	response, err := NewBedrock(server.URL, "provider-key").ChatCompletions(t.Context(), request)
+	if err != nil || response.Usage.TotalTokens != 12 || response.Choices[0].FinishReason != "tool_calls" || len(response.Choices[0].Message.ToolCalls) != 1 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestBedrockInvokeRejectsMalformedResponses(t *testing.T) {
+	responses := []string{
+		`{"id":"msg_1","type":"message","role":"assistant","content":[],"stop_reason":"end_turn"}`,
+		`{"id":"msg_1","type":"message","role":"assistant","content":[],"stop_reason":"future_reason","usage":{"input_tokens":1,"output_tokens":1}}`,
+		`{"id":"msg_1","type":"message","role":"user","content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`,
+		`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"future_block"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`,
+		`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"tool_use","name":"weather","input":{}}],"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}}`,
+	}
+	for _, responseBody := range responses {
+		t.Run(responseBody, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprint(w, responseBody) }))
+			defer server.Close()
+			maxTokens := 1
+			_, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", BedrockInvoke: true, MaxTokens: &maxTokens, Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+			if err == nil {
+				t.Fatal("malformed InvokeModel response accepted")
+			}
+		})
+	}
+}
+
+func TestBedrockInvokeRejectsConverseOnlyControlsBeforeHTTP(t *testing.T) {
+	client := NewBedrock("http://unused.invalid", "key")
+	request := openai.ChatCompletionRequest{Model: "model", BedrockInvoke: true, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "priority"}, Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	if err := client.ValidateChatParameters(request); err == nil {
+		t.Fatal("Converse-only control accepted by InvokeModel")
+	}
+}
+
 func TestBedrockConversePreservesReasoningHistoryAndResponse(t *testing.T) {
 	first, third := 0, 2
 	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{

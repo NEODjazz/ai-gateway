@@ -344,7 +344,7 @@ func validDeploymentCapabilities(capabilities []string) bool {
 		}
 		seen[capability] = true
 	}
-	requiresChatOrResponses := []string{"stream", "tools", "structured_output", "vision", "file_input"}
+	requiresChatOrResponses := []string{"stream", "tools", "structured_output", "vision", "file_input", "bedrock_invoke"}
 	for _, capability := range requiresChatOrResponses {
 		if seen[capability] && !seen["chat"] && !seen["responses"] {
 			return false
@@ -367,7 +367,7 @@ func ValidModelCapability(capability string) bool {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses", "file_input":
+		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke":
 		return true
 	default:
 		return false
@@ -535,6 +535,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 		}
 		client, ok := endpoint.Provider.(interface{ SupportsFileInput() bool })
 		return ok && client.SupportsFileInput()
+	case "bedrock_invoke":
+		client, ok := endpoint.Provider.(interface{ SupportsBedrockInvoke() bool })
+		return endpoint.Type == "bedrock" && ok && client.SupportsBedrockInvoke()
 	case "prompt_cache":
 		client, ok := endpoint.Provider.(interface{ SupportsPromptCache() bool })
 		return ok && client.SupportsPromptCache()

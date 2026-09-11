@@ -129,6 +129,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "openai", capability: "prompt_cache"},
 		{providerType: "openai", capability: "assistant_prefill"},
 		{providerType: "anthropic", capability: "background_responses"},
+		{providerType: "anthropic", capability: "bedrock_invoke"},
 	}
 	for _, test := range tests {
 		t.Run(test.providerType+"/"+test.capability, func(t *testing.T) {
@@ -138,7 +139,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 			}
 			capabilities := []string{test.capability}
 			switch test.capability {
-			case "stream", "tools", "structured_output", "vision", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill":
+			case "stream", "tools", "structured_output", "vision", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "bedrock_invoke":
 				capabilities = append([]string{"chat"}, capabilities...)
 			case "background_responses":
 				capabilities = []string{"responses", "background_responses"}
@@ -169,6 +170,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"responses", "assistant_prefill"},
 		{"background_responses"},
 		{"file_input"},
+		{"bedrock_invoke"},
 	}
 	for _, capabilities := range tests {
 		if validDeploymentCapabilities(capabilities) {
@@ -185,6 +187,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"responses", "background_responses"},
 		{"responses", "file_input"},
 		{"chat", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill"},
+		{"chat", "bedrock_invoke"},
 		{"embeddings"},
 	} {
 		if !validDeploymentCapabilities(capabilities) {
@@ -226,7 +229,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "anthropic", capabilities: []string{"chat", "tools", "structured_output", "vision", "web_search", "web_fetch", "prompt_cache", "assistant_prefill"}},
 		{providerType: "gemini", capabilities: []string{"chat", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision"}},
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
-		{providerType: "bedrock", capabilities: []string{"chat", "tools"}},
+		{providerType: "bedrock", capabilities: []string{"chat", "tools", "bedrock_invoke"}},
 		{providerType: "groq", capabilities: []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}},
 		{providerType: "deepseek", capabilities: []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}},
 		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}},
@@ -279,7 +282,7 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Contains(profilesByType["mistral"].Operations, "audio_transcription") || !slices.Contains(profilesByType["mistral"].Capabilities, "audio_transcription") {
 		t.Fatalf("mistral profile is missing native transcription: %+v", profilesByType["mistral"])
 	}
-	if !slices.Equal(profilesByType["bedrock"].Operations, []string{"chat", "count_tokens", "stream"}) || !slices.Equal(profilesByType["bedrock"].Capabilities, []string{"chat", "stream", "tools", "vision"}) || !slices.Equal(profilesByType["bedrock"].AuthTypes, []string{"bearer", "aws_sigv4"}) {
+	if !slices.Equal(profilesByType["bedrock"].Operations, []string{"chat", "count_tokens", "stream", "bedrock_invoke"}) || !slices.Equal(profilesByType["bedrock"].Capabilities, []string{"chat", "stream", "bedrock_invoke", "tools", "vision"}) || !slices.Equal(profilesByType["bedrock"].AuthTypes, []string{"bearer", "aws_sigv4"}) {
 		t.Fatalf("bedrock profile=%+v", profilesByType["bedrock"])
 	}
 	if !slices.Contains(profilesByType["anthropic"].Operations, "count_tokens") || !slices.Contains(profilesByType["gemini"].Operations, "count_tokens") || !slices.Equal(profilesByType["gemini"].AuthTypes, []string{"api_key", "gcp_adc"}) || !slices.Equal(profilesByType["azure-openai"].AuthTypes, []string{"api_key", "entra"}) {

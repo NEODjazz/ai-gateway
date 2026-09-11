@@ -5,6 +5,7 @@ describe("modelCapabilityOptions", () => {
   it("exposes every configurable inference capability", () => {
     expect(modelCapabilityOptions.map(({ value }) => value)).toEqual([
       "chat",
+      "bedrock_invoke",
       "responses",
       "background_responses",
       "embeddings",

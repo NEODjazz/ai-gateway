@@ -237,6 +237,7 @@ func (Bedrock) SupportsVision() bool                { return true }
 func (Bedrock) SupportsBedrockNativeControls() bool { return true }
 func (Bedrock) SupportsReasoningBlocks() bool       { return true }
 func (Bedrock) SupportsUnsignedReasoning() bool     { return true }
+func (Bedrock) SupportsBedrockInvoke() bool         { return true }
 
 func bedrockInvalid(param string) error {
 	return &Error{Class: FailureClientRequest, Provider: "bedrock", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: param, Err: fmt.Errorf("unsupported or invalid %s for Bedrock adapter", param)}
@@ -246,8 +247,20 @@ func (b Bedrock) ValidateChatParameters(request openai.ChatCompletionRequest) er
 	if err := validateChatReasoningContent("bedrock", request.Messages, false); err != nil {
 		return err
 	}
+	if request.BedrockInvoke {
+		if err := validateBedrockInvokeParameters(request); err != nil {
+			return err
+		}
+	}
 	_, err := bedrockChatRequest(request)
 	return err
+}
+
+func validateBedrockInvokeParameters(request openai.ChatCompletionRequest) error {
+	if request.ResponseFormat != nil || request.Metadata != nil || request.ServiceTier != "" || request.ReasoningEffort != "" || len(request.BedrockAdditionalModelRequestFields) != 0 || len(request.BedrockAdditionalModelResponseFieldPaths) != 0 || request.BedrockGuardrailConfig != nil || len(request.BedrockRequestMetadata) != 0 || request.BedrockPerformanceLatency != "" || request.BedrockServiceTier != "" {
+		return bedrockInvalid("invoke_model_parameters")
+	}
+	return nil
 }
 
 func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, error) {
@@ -579,6 +592,9 @@ func (b Bedrock) ChatCompletions(ctx context.Context, request openai.ChatComplet
 	if request.Stream {
 		return openai.ChatCompletionResponse{}, bedrockInvalid("stream")
 	}
+	if request.BedrockInvoke {
+		return b.invokeAnthropic(ctx, request)
+	}
 	body, err := bedrockChatRequest(request)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -627,6 +643,120 @@ func (b Bedrock) ChatCompletions(ctx context.Context, request openai.ChatComplet
 		}
 	}
 	return bedrockToChat(decoded, request.Model)
+}
+
+type bedrockAnthropicInvokeRequest struct {
+	AnthropicVersion string             `json:"anthropic_version"`
+	StopSequences    []string           `json:"stop_sequences,omitempty"`
+	System           any                `json:"system,omitempty"`
+	Messages         []anthropicMessage `json:"messages"`
+	Tools            []anthropicTool    `json:"tools,omitempty"`
+	ToolChoice       map[string]any     `json:"tool_choice,omitempty"`
+	MaxTokens        int                `json:"max_tokens"`
+	Temperature      *float64           `json:"temperature,omitempty"`
+	TopP             *float64           `json:"top_p,omitempty"`
+}
+
+func (b Bedrock) invokeAnthropic(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	if err := validateBedrockInvokeParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	native := anthropicChatRequest(request, false)
+	payload, err := json.Marshal(bedrockAnthropicInvokeRequest{
+		AnthropicVersion: "bedrock-2023-05-31", StopSequences: native.StopSequences,
+		System: native.System, Messages: native.Messages, Tools: native.Tools, ToolChoice: native.ToolChoice,
+		MaxTokens: native.MaxTokens, Temperature: native.Temperature, TopP: native.TopP,
+	})
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	endpoint := b.baseURL + "/model/" + url.PathEscape(request.Model) + "/invoke"
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	if err := b.authorize(ctx, httpRequest, payload); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	response, err := b.client.Do(httpRequest)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		failure := responseStatusError("bedrock", response)
+		_ = response.Body.Close()
+		return openai.ChatCompletionResponse{}, failure
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxChatCompletionResponseBytes+1))
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	if len(data) > maxChatCompletionResponseBytes {
+		return openai.ChatCompletionResponse{}, errors.New("Bedrock response exceeds limit")
+	}
+	var decoded anthropicResponse
+	var envelope struct {
+		Usage json.RawMessage `json:"usage"`
+	}
+	if json.Unmarshal(data, &decoded) != nil || json.Unmarshal(data, &envelope) != nil || len(envelope.Usage) == 0 || string(envelope.Usage) == "null" || validateAnthropicUsage(decoded.Usage) != nil || validateBedrockInvokeContent(decoded.Content) != nil {
+		return openai.ChatCompletionResponse{}, errors.New("invalid Bedrock InvokeModel response")
+	}
+	if decoded.ID == "" || decoded.Type != "message" || decoded.Role != "assistant" || decoded.Content == nil {
+		return openai.ChatCompletionResponse{}, errors.New("invalid Bedrock InvokeModel response")
+	}
+	switch decoded.StopReason {
+	case "end_turn", "max_tokens", "stop_sequence", "tool_use":
+	default:
+		return openai.ChatCompletionResponse{}, errors.New("invalid Bedrock InvokeModel stop reason")
+	}
+	if _, err := anthropicAnnotations(decoded); err != nil {
+		return openai.ChatCompletionResponse{}, errors.New("invalid Bedrock InvokeModel response")
+	}
+	if decoded.StopReason == "stop_sequence" && decoded.StopSequence == nil {
+		return openai.ChatCompletionResponse{}, errors.New("Bedrock InvokeModel omitted matched stop sequence")
+	}
+	converted := anthropicToChatCompletion(decoded, request.Model)
+	if err := openai.ValidateReasoningBlocks(converted.Choices[0].Message.Reasoning); err != nil {
+		return openai.ChatCompletionResponse{}, errors.New("invalid Bedrock InvokeModel reasoning content")
+	}
+	return converted, nil
+}
+
+func validateBedrockInvokeContent(content []anthropicContent) error {
+	if len(content) > 128 {
+		return errors.New("too many Bedrock InvokeModel content blocks")
+	}
+	total := 0
+	for _, block := range content {
+		switch block.Type {
+		case "text":
+			if block.Text == "" {
+				return errors.New("empty Bedrock InvokeModel text block")
+			}
+		case "tool_use":
+			if block.ID == "" || block.Name == "" || block.Input == nil {
+				return errors.New("invalid Bedrock InvokeModel tool block")
+			}
+		case "thinking":
+			if block.Thinking == "" || block.Signature == "" {
+				return errors.New("invalid Bedrock InvokeModel thinking block")
+			}
+		case "redacted_thinking":
+			if block.Data == "" {
+				return errors.New("invalid Bedrock InvokeModel redacted thinking block")
+			}
+		default:
+			return errors.New("unsupported Bedrock InvokeModel content block")
+		}
+		encoded, err := anthropicContentJSON(block)
+		if err != nil || len(encoded) > 4<<20 || total > (32<<20)-len(encoded) {
+			return errors.New("Bedrock InvokeModel content exceeds limit")
+		}
+		total += len(encoded)
+	}
+	return nil
 }
 
 func (b Bedrock) authorize(ctx context.Context, request *http.Request, payload []byte) error {

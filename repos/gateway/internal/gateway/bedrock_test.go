@@ -42,6 +42,49 @@ func TestBedrockConverseUsesChatPolicyRoutingAndBilling(t *testing.T) {
 	}
 }
 
+func TestBedrockInvokeUsesPolicyRoutingAndBilling(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.EscapedPath() != "/model/upstream/invoke" {
+			t.Fatalf("path=%q", r.URL.EscapedPath())
+		}
+		_, _ = fmt.Fprint(w, `{"id":"msg_1","type":"message","role":"assistant","model":"upstream","content":[{"type":"text","text":"sunny"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":7,"output_tokens":5}}`)
+	}))
+	defer upstream.Close()
+	recorder := &messagesUsageRecorder{}
+	router := provider.New(provider.Config{
+		Endpoints: []config.ProviderEndpointConfig{{Name: "deployment", Type: "bedrock", BaseURL: upstream.URL, APIKey: "provider-key", Models: []string{"public"}, ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"chat", "bedrock_invoke"}}},
+		Modules:   modules.NewPipeline([]modules.Module{recorder}),
+	})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"public"}}}}), router))
+	request := httptest.NewRequest(http.MethodPost, "/model/public/invoke?provider=deployment", strings.NewReader(`{"anthropic_version":"bedrock-2023-05-31","max_tokens":32,"messages":[{"role":"user","content":"weather"}]}`))
+	request.Header.Set("Authorization", "Bearer gateway-test-key")
+	request.Header.Set("X-Request-ID", "bedrock-invoke-external")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("X-Execution-ID") == "" || !strings.Contains(response.Body.String(), `"type":"message"`) || !strings.Contains(response.Body.String(), `"input_tokens":7`) {
+		t.Fatalf("status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	if calls.Load() != 1 || recorder.calls != 1 || recorder.usage.TotalTokens != 12 {
+		t.Fatalf("calls=%d billing_calls=%d usage=%+v", calls.Load(), recorder.calls, recorder.usage)
+	}
+}
+
+func TestBedrockInvokeRejectsInvalidContractBeforeExecution(t *testing.T) {
+	for _, body := range []string{
+		`{"anthropic_version":"2023-06-01","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`,
+		`{"anthropic_version":"bedrock-2023-05-31","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":true}`,
+	} {
+		upstream := &chatProvider{}
+		response := httptest.NewRecorder()
+		Routes(NewHandler(modules.NewPipeline(nil), upstream)).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/model/invoke", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest || upstream.request.Request.Model != "" {
+			t.Fatalf("status=%d request=%+v body=%s", response.Code, upstream.request.Request, response.Body.String())
+		}
+	}
+}
+
 func TestBedrockConverseAcceptsBoundedNativeImage(t *testing.T) {
 	upstream := &chatProvider{}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))

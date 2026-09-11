@@ -25,3 +25,18 @@ func TestPromptCacheRequiresExplicitDeploymentCapability(t *testing.T) {
 		t.Fatal("declared prompt_cache capability rejected")
 	}
 }
+
+func TestBedrockInvokeRequiresExplicitDeploymentCapability(t *testing.T) {
+	request := openai.ChatCompletionRequest{BedrockInvoke: true}
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,bedrock_invoke" {
+		t.Fatalf("required capabilities=%q", got)
+	}
+	endpoint := Endpoint{Capabilities: []string{"chat"}}
+	if endpoint.supportsCapabilities(requiredChatCapabilities(request, false)...) {
+		t.Fatal("deployment without bedrock_invoke capability accepted")
+	}
+	endpoint.Capabilities = append(endpoint.Capabilities, "bedrock_invoke")
+	if !endpoint.supportsCapabilities(requiredChatCapabilities(request, false)...) {
+		t.Fatal("declared bedrock_invoke capability rejected")
+	}
+}

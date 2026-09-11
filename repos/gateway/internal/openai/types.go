@@ -12,6 +12,8 @@ import (
 type ChatCompletionRequest struct {
 	// RequireMatchedStop is an internal protocol requirement, never client JSON.
 	RequireMatchedStop bool `json:"-"`
+	// BedrockInvoke selects the validated Anthropic Messages dialect of InvokeModel.
+	BedrockInvoke bool `json:"-"`
 	// NativeInputTokens reserves provider-native context omitted from the public Chat wire shape.
 	NativeInputTokens int `json:"-"`
 	// Bedrock native controls cannot be supplied through the public Chat wire shape.

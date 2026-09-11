@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.254
+  version: 0.1.255
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -423,6 +423,43 @@ paths:
           content:
             application/vnd.amazon.eventstream:
               schema: {type: string, format: binary}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/RequestTooLarge'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '451': {$ref: '#/components/responses/ContentRejected'}
+        '502': {$ref: '#/components/responses/ProviderFailed'}
+  /model/{model}/invoke:
+    post:
+      operationId: bedrockInvokeModel
+      tags: [Inference]
+      summary: Invoke a Bedrock model using the Anthropic Messages dialect
+      description: Accepts the bounded Anthropic Messages request shape for Bedrock and uses the shared authentication, model and function-tool authorization, quota, content policy, routing, retry and exact billing lifecycle. Routing requires a Bedrock deployment with explicit chat and bedrock_invoke capabilities. Unknown fields and unsupported native controls are rejected before provider execution.
+      parameters:
+        - in: path
+          name: model
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 2048}
+        - in: query
+          name: provider
+          required: false
+          schema: {type: string}
+          description: Optional gateway deployment selector.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BedrockInvokeRequest'}
+      responses:
+        '200':
+          description: Anthropic Messages response with provider-reported usage
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MessagesResponse'}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
@@ -4967,6 +5004,61 @@ components:
         id: {type: string}
         object: {type: string, const: vector_store.file.deleted}
         deleted: {type: boolean, const: true}
+    BedrockInvokeRequest:
+      type: object
+      additionalProperties: false
+      required: [anthropic_version, max_tokens, messages]
+      properties:
+        anthropic_version: {type: string, const: bedrock-2023-05-31}
+        max_tokens: {type: integer, minimum: 1, maximum: 2147483647}
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items:
+            type: object
+            additionalProperties: false
+            required: [role, content]
+            properties:
+              role: {type: string, enum: [user, assistant]}
+              content:
+                oneOf:
+                  - {type: string}
+                  - type: array
+                    minItems: 1
+                    items: {type: object, description: 'Text, image, tool_use, tool_result, thinking or redacted_thinking block'}
+        system:
+          description: Text or an array of text blocks.
+          oneOf:
+            - {type: string}
+            - type: array
+              minItems: 1
+              items: {type: object}
+        tools:
+          type: array
+          maxItems: 128
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, input_schema]
+            properties:
+              name: {type: string, minLength: 1}
+              description: {type: string}
+              input_schema: {type: object, additionalProperties: true}
+        tool_choice:
+          type: object
+          additionalProperties: false
+          required: [type]
+          properties:
+            type: {type: string, enum: [auto, any, none, tool]}
+            name: {type: string}
+            disable_parallel_tool_use: {type: boolean}
+        temperature: {type: number, minimum: 0, maximum: 1}
+        top_p: {type: number, minimum: 0, maximum: 1}
+        stop_sequences:
+          type: array
+          maxItems: 4
+          items: {type: string, minLength: 1}
     BedrockConverseRequest:
       type: object
       additionalProperties: false
@@ -5751,7 +5843,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, video, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input]}
+          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, video, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -7869,7 +7961,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, video, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input]}
+          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, video, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true
