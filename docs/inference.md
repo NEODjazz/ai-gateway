@@ -184,6 +184,12 @@ native эквивалента, URL output и `n` больше единицы о�
 Gemini `usageMetadata.totalTokenCount` используется для полного settlement,
 включая reasoning и другие учтенные upstream output tokens.
 
+`POST /v1/images/edits` использует тот же общий lifecycle для совместимых,
+Azure и native Gemini deployments. Gemini transport передает prompt и от одного
+до восьми проверенных PNG/JPEG/WebP изображений как inline GenerateContent parts
+и принимает ровно один base64 image result. Mask editing, URL output, несколько
+результатов и параметры без точного native эквивалента отклоняются до сети.
+
 Ответ ограничен 64 MiB, содержит ровно запрошенное число результатов и для
 каждого результата допускает ровно один источник: HTTP(S) URL без credentials
 либо корректный base64 размером до 20 MiB после декодирования. Token usage

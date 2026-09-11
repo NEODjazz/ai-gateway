@@ -41,6 +41,73 @@ func TestGeminiImageGenerationContract(t *testing.T) {
 	}
 }
 
+func TestGeminiImageEditContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1beta/models/gemini-image:generateContent" || r.Header.Get("x-goog-api-key") != "secret" {
+			t.Fatalf("unexpected request: %s %s headers=%v", r.Method, r.URL.String(), r.Header)
+		}
+		var body geminiRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Contents) != 1 || len(body.Contents[0].Parts) != 3 {
+			t.Fatalf("request=%+v err=%v", body, err)
+		}
+		parts := body.Contents[0].Parts
+		if parts[0].Text != "edit" || parts[1].InlineData == nil || parts[1].InlineData.MIMEType != "image/png" || parts[1].InlineData.Data != editAttachment().Data || parts[2].InlineData == nil || parts[2].InlineData.MIMEType != "image/jpeg" || len(body.Generation.ResponseModalities) != 1 || body.Generation.ResponseModalities[0] != "IMAGE" || body.Generation.ImageConfig != nil {
+			t.Fatalf("request=%+v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":5,"thoughtsTokenCount":2,"totalTokenCount":18}}`)
+	}))
+	defer server.Close()
+	jpeg := openai.ImageAttachment{MediaType: "image/jpeg", Data: "/9j/Zml4dHVyZQ=="}
+	n := 1
+	response, err := NewGemini(server.URL, "secret", false).EditImage(t.Context(), openai.ImageEditRequest{Model: "models/gemini-image", Prompt: "edit", Images: []openai.ImageAttachment{editAttachment(), jpeg}, N: &n, ResponseFormat: "b64_json"})
+	if err != nil || len(response.Data) != 1 || response.Data[0].B64JSON != "aW1hZ2U=" || response.Usage == nil || response.Usage.InputTokens != 11 || response.Usage.OutputTokens != 7 || response.Usage.TotalTokens != 18 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGeminiImageEditRejectsUnsupportedParametersBeforeNetwork(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	two := 2
+	compression := 90
+	mask := editAttachment()
+	gif := openai.ImageAttachment{MediaType: "image/gif", Data: "R0lGODlhZml4dHVyZQ=="}
+	tests := []struct {
+		name    string
+		request openai.ImageEditRequest
+		param   string
+	}{
+		{"mask", openai.ImageEditRequest{Mask: &mask}, "mask"},
+		{"gif", openai.ImageEditRequest{Images: []openai.ImageAttachment{gif}}, "image"},
+		{"n", openai.ImageEditRequest{N: &two}, "n"},
+		{"response format", openai.ImageEditRequest{ResponseFormat: "url"}, "response_format"},
+		{"quality", openai.ImageEditRequest{Quality: "high"}, "quality"},
+		{"size", openai.ImageEditRequest{Size: "1024x1024"}, "size"},
+		{"user", openai.ImageEditRequest{User: "user"}, "user"},
+		{"background", openai.ImageEditRequest{Background: "opaque"}, "background"},
+		{"output format", openai.ImageEditRequest{OutputFormat: "png"}, "output_format"},
+		{"compression", openai.ImageEditRequest{OutputCompression: &compression}, "output_compression"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.request.Model = "image"
+			test.request.Prompt = "edit"
+			if len(test.request.Images) == 0 {
+				test.request.Images = []openai.ImageAttachment{editAttachment()}
+			}
+			_, err := NewGemini(server.URL, "secret", false).EditImage(t.Context(), test.request)
+			var providerErr *Error
+			if !errors.As(err, &providerErr) || providerErr.UpstreamCode != "unsupported_parameter" || providerErr.Param != test.param {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+	if calls != 0 {
+		t.Fatalf("network calls=%d", calls)
+	}
+}
+
 func TestGeminiImageGenerationOmitsAutomaticImageConfigValues(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -158,6 +225,25 @@ func TestRouterRoutesNativeGeminiImageGenerationWithAlias(t *testing.T) {
 	request := openai.ImageGenerationRequest{Model: "public-image", Prompt: "draw"}
 	response, err := router.GenerateImage(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, ImageGenerationRequest: &request})
 	if err != nil || len(response.Data) != 1 || response.Usage == nil || response.Usage.TotalTokens != 3 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestRouterRoutesNativeGeminiImageEditWithAlias(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models/upstream-image:generateContent" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":2,"totalTokenCount":4}}`)
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "gemini-images", Type: "gemini", BaseURL: server.URL, APIKey: "secret", Models: []string{"public-image"},
+		ModelAliases: map[string]string{"public-image": "upstream-image"}, Capabilities: []string{"image_edit"},
+	}}}).(*Router)
+	request := openai.ImageEditRequest{Model: "public-image", Prompt: "edit", Images: []openai.ImageAttachment{editAttachment()}}
+	response, err := router.EditImage(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, ImageEditRequest: &request})
+	if err != nil || len(response.Data) != 1 || response.Usage == nil || response.Usage.TotalTokens != 4 {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }

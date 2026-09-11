@@ -15,14 +15,11 @@ import (
 )
 
 func (Gemini) SupportsImageGeneration() bool { return true }
+func (Gemini) SupportsImageEdit() bool       { return true }
 
 func (g Gemini) GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
 	if err := validateGeminiImageRequest(request); err != nil {
 		return openai.ImageGenerationResponse{}, err
-	}
-	model := strings.TrimPrefix(request.Model, "models/")
-	if model == "" || strings.ContainsAny(model, "/\\?#%") || model == "." || model == ".." {
-		return openai.ImageGenerationResponse{}, geminiInvalid("model")
 	}
 	imageConfig := &geminiImageConfig{}
 	if request.AspectRatio != "auto" {
@@ -38,6 +35,30 @@ func (g Gemini) GenerateImage(ctx context.Context, request openai.ImageGeneratio
 			ResponseModalities: []string{"IMAGE"},
 			ImageConfig:        imageConfig,
 		},
+	}
+	return g.executeImageRequest(ctx, request.Model, body, request)
+}
+
+func (g Gemini) EditImage(ctx context.Context, request openai.ImageEditRequest) (openai.ImageGenerationResponse, error) {
+	if err := validateGeminiImageEditRequest(request); err != nil {
+		return openai.ImageGenerationResponse{}, err
+	}
+	parts := make([]geminiPart, 0, len(request.Images)+1)
+	parts = append(parts, geminiPart{Text: request.Prompt})
+	for _, image := range request.Images {
+		parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: image.MediaType, Data: image.Data}})
+	}
+	body := geminiRequest{
+		Contents:   []geminiContent{{Parts: parts}},
+		Generation: geminiGeneration{ResponseModalities: []string{"IMAGE"}},
+	}
+	return g.executeImageRequest(ctx, request.Model, body, request.GenerationRequest())
+}
+
+func (g Gemini) executeImageRequest(ctx context.Context, modelName string, body geminiRequest, responseRequest openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
+	model := strings.TrimPrefix(modelName, "models/")
+	if model == "" || strings.ContainsAny(model, "/\\?#%") || model == "." || model == ".." {
+		return openai.ImageGenerationResponse{}, geminiInvalid("model")
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -64,7 +85,43 @@ func (g Gemini) GenerateImage(ctx context.Context, request openai.ImageGeneratio
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return openai.ImageGenerationResponse{}, responseStatusError("gemini", response)
 	}
-	return decodeGeminiImageResponse(response.Body, request)
+	return decodeGeminiImageResponse(response.Body, responseRequest)
+}
+
+func validateGeminiImageEditRequest(request openai.ImageEditRequest) error {
+	if message := request.Validate(); message != "" {
+		return &Error{Class: FailureClientRequest, Provider: "gemini", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	if request.Mask != nil {
+		return geminiInvalid("mask")
+	}
+	for _, image := range request.Images {
+		if !oneOfOrEmptyImageValue(image.MediaType, "image/png", "image/jpeg", "image/webp") {
+			return geminiInvalid("image")
+		}
+	}
+	if request.N != nil && *request.N != 1 {
+		return geminiInvalid("n")
+	}
+	if request.ResponseFormat != "" && request.ResponseFormat != "b64_json" {
+		return geminiInvalid("response_format")
+	}
+	for _, unsupported := range []struct {
+		name string
+		set  bool
+	}{
+		{"quality", request.Quality != ""},
+		{"size", request.Size != ""},
+		{"user", request.User != ""},
+		{"background", request.Background != ""},
+		{"output_format", request.OutputFormat != ""},
+		{"output_compression", request.OutputCompression != nil},
+	} {
+		if unsupported.set {
+			return geminiInvalid(unsupported.name)
+		}
+	}
+	return nil
 }
 
 func validateGeminiImageRequest(request openai.ImageGenerationRequest) error {
