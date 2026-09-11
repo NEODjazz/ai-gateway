@@ -36,8 +36,8 @@ func (h Handler) serveNativeInteraction(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
-	if request.Stream || request.Background || request.PreviousInteractionID != "" || request.Store != nil && *request.Store {
-		writeError(w, http.StatusBadRequest, "unsupported_operation", "native interaction persistence and streaming require lifecycle support")
+	if request.Background || request.PreviousInteractionID != "" || request.Store != nil && *request.Store {
+		writeError(w, http.StatusBadRequest, "unsupported_operation", "native interaction persistence requires lifecycle support")
 		return
 	}
 	if _, err := openai.ResponseImageAttachments(shared.Input); err != nil {
@@ -86,6 +86,71 @@ func (h Handler) serveNativeInteraction(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	request = request.WithResponseRequest(*reqCtx.ResponseRequest)
+	if request.Stream {
+		streaming, ok := native.(provider.StreamingInteractionProvider)
+		if ok {
+			started := false
+			write := func(event, payload string) error {
+				if !started {
+					writeStreamHeaders(w)
+					w.WriteHeader(http.StatusOK)
+					started = true
+				}
+				return writeSSEResponseEvent(w, event, payload)
+			}
+			if _, streamed, err := streaming.StreamInteractions(r.Context(), reqCtx, request, write); streamed {
+				if err != nil {
+					if started {
+						_ = write("error", errorStreamPayload(err))
+						writeResponseStreamDone(w, true)
+						return
+					}
+					writeProviderFailure(w, err)
+					return
+				}
+				writeResponseStreamDone(w, true)
+				return
+			} else if err != nil {
+				writeProviderFailure(w, err)
+				return
+			}
+		}
+		request.Stream = false
+		response, err := native.Interactions(r.Context(), reqCtx, request)
+		if err != nil {
+			writeProviderFailure(w, err)
+			return
+		}
+		started := false
+		transformer := newInteractionStreamTransformer()
+		err = synthesizeResponseStream(openai.ResponseFromInteraction(response), func(event, payload string) error {
+			events, transformErr := transformer.Transform(event, payload)
+			if transformErr != nil {
+				return transformErr
+			}
+			if len(events) > 0 && !started {
+				writeStreamHeaders(w)
+				w.WriteHeader(http.StatusOK)
+				started = true
+			}
+			for _, transformed := range events {
+				if err := writeSSEResponseEvent(w, transformed.Name, transformed.Payload); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			if started {
+				_ = writeSSEResponseEvent(w, "error", errorStreamPayload(err))
+				return
+			}
+			writeProviderFailure(w, err)
+			return
+		}
+		writeResponseStreamDone(w, true)
+		return
+	}
 	response, err := native.Interactions(r.Context(), reqCtx, request)
 	if err != nil {
 		writeProviderFailure(w, err)

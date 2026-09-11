@@ -47,6 +47,14 @@ type InteractionClient interface {
 	Interactions(context.Context, openai.InteractionRequest) (openai.InteractionResponse, error)
 }
 
+type StreamingInteractionProvider interface {
+	StreamInteractions(context.Context, modules.RequestContext, openai.InteractionRequest, ResponseStreamWriter) (openai.InteractionResponse, bool, error)
+}
+
+type StreamingInteractionClient interface {
+	StreamInteractions(context.Context, openai.InteractionRequest, ResponseStreamWriter) (openai.InteractionResponse, error)
+}
+
 type FineTuningBinding struct {
 	Endpoint   string `json:"endpoint"`
 	Model      string `json:"model"`

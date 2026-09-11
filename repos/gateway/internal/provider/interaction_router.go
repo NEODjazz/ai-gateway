@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -9,6 +10,140 @@ import (
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
+
+func (r Router) StreamInteractions(ctx context.Context, req modules.RequestContext, request openai.InteractionRequest, write ResponseStreamWriter) (openai.InteractionResponse, bool, error) {
+	if req.ResponseRequest == nil {
+		return openai.InteractionResponse{}, true, errors.New("missing interaction policy request")
+	}
+	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model, MaxTokens: request.GenerationConfig.MaxOutputTokens}, requiredInteractionCapabilities(request)...)
+	if len(candidates) == 0 || outputDLPRequired(req, candidates) {
+		return openai.InteractionResponse{}, false, nil
+	}
+	var failures []error
+	var lastAttempt *modules.RequestContext
+	totalRetries, fallbackCount := 0, 0
+	progress := newRouteProgress(candidates)
+	if progress.initialFailure != nil {
+		failures = append(failures, progress.initialFailure)
+		fallbackCount = 1
+	}
+	for index, endpoint := range candidates {
+		client, ok := endpoint.Provider.(StreamingInteractionClient)
+		if !ok || !progress.allows(endpoint) {
+			continue
+		}
+		progress.enter(endpoint)
+		attemptCtx := providerAttemptContext(req, endpoint)
+		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
+		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
+			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
+			failures = append(failures, err)
+			progress.fail(err)
+			continue
+		}
+		attemptCtx.ResponseRequest.Stream = true
+		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
+			if terminalModuleError(err) || ctx.Err() != nil {
+				return openai.InteractionResponse{}, false, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			}
+			failures = append(failures, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
+			continue
+		}
+		if attemptCtx.ResponseRequest == nil {
+			return openai.InteractionResponse{}, false, fmt.Errorf("%s/%s modules removed interaction request", endpoint.Type, endpoint.Name)
+		}
+		providerRequest := request.WithResponseRequest(*attemptCtx.ResponseRequest)
+		providerRequest.Stream = true
+		lastAttempt = &attemptCtx
+		started := time.Now()
+		release, err := r.acquireEndpoint(ctx, endpoint, openai.ResponseReserveTokens(*attemptCtx.ResponseRequest))
+		if err != nil {
+			setAttemptMetadata(&attemptCtx, started, err)
+			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
+			failures = append(failures, fmt.Errorf("%s/%s admission failed: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
+			fallbackCount++
+			continue
+		}
+		if err := r.health.permit(ctx, endpoint); err != nil {
+			release()
+			setAttemptMetadata(&attemptCtx, started, err)
+			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
+			failures = append(failures, fmt.Errorf("%s/%s circuit denied call: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
+			fallbackCount++
+			continue
+		}
+		streamStarted := false
+		firstTokenLatency := time.Duration(0)
+		var response openai.InteractionResponse
+		for retry := 0; ; retry++ {
+			tracker := newStreamAttemptTracker(started)
+			providerCtx, finish := r.startProviderCall(ctx, endpoint, "interactions.stream")
+			response, err = client.StreamInteractions(providerCtx, providerRequest, deanonymizingResponseStreamWriter(attemptCtx.AnonymizationValues, tracker.responseWriter(write)))
+			finish(err)
+			streamStarted, firstTokenLatency = tracker.state()
+			if err == nil || streamStarted || ctx.Err() != nil || retry >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
+				break
+			}
+			if waitErr := r.retry.beforeRetry(ctx, err, retry); waitErr != nil {
+				err = waitErr
+				break
+			}
+			totalRetries++
+		}
+		release()
+		setAttemptMetadata(&attemptCtx, started, err)
+		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
+		if streamStarted {
+			setFirstTokenLatency(&attemptCtx, firstTokenLatency)
+		}
+		if err != nil {
+			if ctx.Err() == nil {
+				r.health.failure(ctx, endpoint, err)
+			}
+			wrapped := fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err)
+			progress.fail(err)
+			if streamStarted || ctx.Err() != nil || !progress.hasNext(candidates[index+1:]) {
+				r.modules.RunFailure(ctx, &attemptCtx, wrapped)
+				return openai.InteractionResponse{}, streamStarted, wrapped
+			}
+			failures = append(failures, wrapped)
+			fallbackCount++
+			continue
+		}
+		r.health.success(ctx, endpoint)
+		shared := openai.ResponseFromInteraction(response)
+		if err := mergeResponseUsage(&shared, attemptCtx.Usage); err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.InteractionResponse{}, streamStarted, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+		}
+		attemptCtx.ResponsesResponse = &shared
+		if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
+			return openai.InteractionResponse{}, streamStarted, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+		}
+		modules.DeanonymizeResponsesResponse(&attemptCtx, &shared)
+		result := openai.InteractionFromResponse(shared)
+		result.Agent, result.Updated = response.Agent, response.Updated
+		terminal, err := json.Marshal(map[string]any{"event_type": "interaction.completed", "interaction": result})
+		if err != nil {
+			return openai.InteractionResponse{}, streamStarted, err
+		}
+		if err := write("interaction.completed", string(terminal)); err != nil {
+			return openai.InteractionResponse{}, true, err
+		}
+		return result, true, nil
+	}
+	if len(failures) > 0 {
+		joined := errors.Join(failures...)
+		if lastAttempt != nil {
+			r.modules.RunFailure(ctx, lastAttempt, joined)
+		}
+		return openai.InteractionResponse{}, false, joined
+	}
+	return openai.InteractionResponse{}, false, nil
+}
 
 func (r Router) CanRouteInteraction(ctx context.Context, request openai.InteractionRequest) bool {
 	if request.Model == "" {
@@ -103,6 +238,9 @@ func (r Router) Interactions(ctx context.Context, req modules.RequestContext, re
 
 func requiredInteractionCapabilities(request openai.InteractionRequest) []string {
 	required := []string{"interactions"}
+	if request.Stream {
+		required = append(required, "stream")
+	}
 	if len(request.Tools) > 0 {
 		required = append(required, "tools")
 	}

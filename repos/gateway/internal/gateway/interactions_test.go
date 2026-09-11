@@ -104,7 +104,6 @@ func TestInteractionsUsesNativeGeminiRoutingAndBilling(t *testing.T) {
 		t.Fatalf("status=%d calls=%d totals=%v body=%s", response.Code, calls.Load(), recorder.totals, response.Body.String())
 	}
 	for _, unsupported := range []string{
-		`{"provider":"gemini-deployment","model":"public","input":"hello","stream":true}`,
 		`{"provider":"gemini-deployment","model":"public","input":"hello","store":true}`,
 		`{"provider":"gemini-deployment","model":"public","input":"hello","previous_interaction_id":"interaction_previous"}`,
 	} {
@@ -118,6 +117,36 @@ func TestInteractionsUsesNativeGeminiRoutingAndBilling(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("unsupported native interaction reached provider: calls=%d", calls.Load())
+	}
+}
+
+func TestInteractionsStreamsNativeGeminiAndSettlesBeforeCompletion(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("alt") != "sse" {
+			t.Errorf("query=%s", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"event_type\":\"interaction.created\",\"interaction\":{\"id\":\"interaction_stream\",\"object\":\"interaction\",\"model\":\"upstream\",\"status\":\"in_progress\"}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"event_type\":\"step.delta\",\"index\":0,\"delta\":{\"text\":\"native\"}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"event_type\":\"interaction.completed\",\"interaction\":{\"id\":\"interaction_stream\",\"object\":\"interaction\",\"model\":\"upstream\",\"status\":\"completed\",\"steps\":[{\"id\":\"step_1\",\"type\":\"model_output\",\"content\":[{\"type\":\"text\",\"text\":\"native\"}]}],\"usage\":{\"total_input_tokens\":4,\"total_output_tokens\":2,\"total_tokens\":6}}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+	recorder := &statelessUsageRecorder{}
+	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "gemini-deployment", Type: "gemini", BaseURL: upstream.URL, APIKey: "secret", Models: []string{"public"}, ModelAliases: map[string]string{"public": "upstream"}, Stream: true, Capabilities: []string{"interactions", "stream"}}}, Modules: modules.NewPipeline([]modules.Module{recorder})})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"public"}, tpm: 100}}}), router))
+	request := httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"provider":"gemini-deployment","model":"public","input":"hello","stream":true,"generation_config":{"max_output_tokens":8}}`))
+	request.Header.Set("Authorization", "Bearer gateway-test-key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	for _, expected := range []string{"event: interaction.created", "event: step.delta", "event: interaction.completed", `"total_tokens":6`, "event: done\ndata: [DONE]"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("missing %q in %s", expected, body)
+		}
+	}
+	if response.Code != http.StatusOK || len(recorder.totals) != 1 || recorder.totals[0] != 6 {
+		t.Fatalf("status=%d totals=%v body=%s", response.Code, recorder.totals, body)
 	}
 }
 
