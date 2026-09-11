@@ -225,7 +225,10 @@ func (p Pipeline) RunNamed(ctx context.Context, req *RequestContext, name string
 			continue
 		}
 		if err := p.run(ctx, req, module, "pre", module.Handle); err != nil {
-			return fmt.Errorf("%s module failed: %w", name, err)
+			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
+				return fmt.Errorf("%s module failed: %w", name, err)
+			}
+			log.Printf("optional module %s skipped after error: %v", name, err)
 		}
 		return nil
 	}
@@ -245,7 +248,10 @@ func (p Pipeline) RunNamedPostResponse(ctx context.Context, req *RequestContext,
 			return fmt.Errorf("%s post-response module is unavailable: %w", name, ErrGuardrailUnavailable)
 		}
 		if err := p.run(ctx, req, module, "post", postModule.HandlePostResponse); err != nil {
-			return fmt.Errorf("%s post-response module failed: %w", name, err)
+			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
+				return fmt.Errorf("%s post-response module failed: %w", name, err)
+			}
+			log.Printf("optional post-response module %s skipped after error: %v", name, err)
 		}
 		return nil
 	}

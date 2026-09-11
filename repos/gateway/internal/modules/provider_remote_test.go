@@ -422,6 +422,45 @@ func TestPostResponseLifecycleContinuesAfterOutputRejection(t *testing.T) {
 	}
 }
 
+func TestNamedModuleLifecyclePreservesOptionalAndTerminalErrors(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		err      error
+		terminal bool
+	}{
+		{name: "optional error", err: errors.New("scanner timeout")},
+		{name: "content rejection", err: ErrContentRejected, terminal: true},
+		{name: "guardrail unavailable", err: ErrGuardrailUnavailable, terminal: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			preCalled, postCalled := false, false
+			pre := namedLifecycleModule{name: "dlp", err: test.err, called: &preCalled}
+			post := postLifecycleModule{name: "dlp", err: test.err, called: &postCalled}
+			preErr := NewPipeline([]Module{pre}).RunNamed(t.Context(), &RequestContext{}, "dlp")
+			postErr := NewPipeline([]Module{post}).RunNamedPostResponse(t.Context(), &RequestContext{}, "dlp")
+			if preCalled != true || postCalled != true || (preErr != nil) != test.terminal || (postErr != nil) != test.terminal {
+				t.Fatalf("pre_called=%v post_called=%v pre_err=%v post_err=%v", preCalled, postCalled, preErr, postErr)
+			}
+		})
+	}
+	if err := NewPipeline(nil).RunNamed(t.Context(), &RequestContext{}, "dlp"); !errors.Is(err, ErrGuardrailUnavailable) {
+		t.Fatalf("missing named module error=%v", err)
+	}
+}
+
+type namedLifecycleModule struct {
+	name   string
+	err    error
+	called *bool
+}
+
+func (m namedLifecycleModule) Name() string { return m.name }
+func (namedLifecycleModule) Required() bool { return false }
+func (m namedLifecycleModule) Handle(context.Context, *RequestContext) error {
+	*m.called = true
+	return m.err
+}
+
 type recordingModuleObserver struct {
 	module string
 	phase  string
