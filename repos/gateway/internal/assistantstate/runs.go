@@ -44,6 +44,7 @@ type RunStore interface {
 	ListRuns(context.Context, string, string, RunPageOptions) ([]RunRecord, string, error)
 	GetRun(context.Context, string, string, string) (RunRecord, error)
 	TransitionRun(context.Context, RunRecord, string, int64) (RunRecord, error)
+	TransitionRunWithStep(context.Context, RunRecord, string, int64, RunStepRecord, int) (RunRecord, RunStepRecord, error)
 	CreateRunStep(context.Context, RunStepRecord, int) (RunStepRecord, error)
 	ListRunSteps(context.Context, string, string, string, RunPageOptions) ([]RunStepRecord, string, error)
 	GetRunStep(context.Context, string, string, string, string) (RunStepRecord, error)

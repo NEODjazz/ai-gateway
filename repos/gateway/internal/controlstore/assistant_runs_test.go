@@ -166,6 +166,47 @@ func TestPostgresAssistantRunCompletionIsAtomicIntegration(t *testing.T) {
 	}
 }
 
+func TestPostgresAssistantRunToolStepTransitionIsAtomicIntegration(t *testing.T) {
+	store := prepareAssistantRunStore(t)
+	thread, err := store.CreateThread(t.Context(), assistantstate.ThreadRecord{ID: "thread_tool_step", OwnerKey: "owner", Snapshot: []byte(`{}`)}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.CreateRun(t.Context(), assistantstate.RunRecord{ID: "run_tool_step", ThreadID: thread.ID, OwnerKey: thread.OwnerKey, Status: "queued", Snapshot: []byte(`{}`), RetainUntil: time.Now().Add(time.Hour)}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Status = "in_progress"
+	run, err = store.TransitionRun(t.Context(), run, "queued", run.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Status, run.Snapshot = "requires_action", []byte(`{"required_action":{"type":"submit_tool_outputs"}}`)
+	step := assistantstate.RunStepRecord{ID: "step_tool_calls", RunID: run.ID, ThreadID: thread.ID, OwnerKey: thread.OwnerKey, Status: "completed", Snapshot: []byte(`{"type":"tool_calls"}`)}
+	_, err = store.CreateRunStep(t.Context(), assistantstate.RunStepRecord{ID: "step_existing", RunID: run.ID, ThreadID: thread.ID, OwnerKey: thread.OwnerKey, Status: "in_progress", Snapshot: []byte(`{}`)}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.TransitionRunWithStep(t.Context(), run, "in_progress", run.Revision, step, 1); !errors.Is(err, assistantstate.ErrQuotaExceeded) {
+		t.Fatalf("quota err=%v", err)
+	}
+	persisted, err := store.GetRun(t.Context(), thread.OwnerKey, thread.ID, run.ID)
+	if err != nil || persisted.Status != "in_progress" {
+		t.Fatalf("rollback run=%+v err=%v", persisted, err)
+	}
+	steps, _, err := store.ListRunSteps(t.Context(), thread.OwnerKey, thread.ID, run.ID, assistantstate.RunPageOptions{Limit: 10, Order: "asc"})
+	if err != nil || len(steps) != 1 || steps[0].ID != "step_existing" {
+		t.Fatalf("rollback steps=%+v err=%v", steps, err)
+	}
+	updated, created, err := store.TransitionRunWithStep(t.Context(), run, "in_progress", run.Revision, step, 2)
+	if err != nil || updated.Status != "requires_action" || created.ID != step.ID {
+		t.Fatalf("run=%+v step=%+v err=%v", updated, created, err)
+	}
+	if _, _, err = store.TransitionRunWithStep(t.Context(), run, "in_progress", run.Revision, step, 2); !errors.Is(err, assistantstate.ErrConflict) {
+		t.Fatalf("stale transition err=%v", err)
+	}
+}
+
 func prepareAssistantRunStore(t *testing.T) *PostgresStore {
 	t.Helper()
 	store := prepareAssistantThreadStore(t)

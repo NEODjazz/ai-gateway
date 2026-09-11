@@ -116,6 +116,56 @@ func (s *PostgresStore) TransitionRun(ctx context.Context, record assistantstate
 	return value, err
 }
 
+func (s *PostgresStore) TransitionRunWithStep(ctx context.Context, run assistantstate.RunRecord, expectedStatus string, expectedRevision int64, step assistantstate.RunStepRecord, stepQuota int) (assistantstate.RunRecord, assistantstate.RunStepRecord, error) {
+	if s == nil || s.pool == nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, assistantstate.ErrUnavailable
+	}
+	validTransition := assistantstate.ValidRunTransition(expectedStatus, run.Status) || expectedStatus == "queued" && run.Status == "requires_action"
+	if !validAssistantRun(run) || !validTransition || expectedRevision < 1 || step.Status != "completed" || !validAssistantRunStep(step) || step.RunID != run.ID || step.ThreadID != run.ThreadID || step.OwnerKey != run.OwnerKey || stepQuota < 1 || stepQuota > 100_000 {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, assistantstate.ErrInvalid
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var currentStatus string
+	var currentRevision int64
+	if err = tx.QueryRow(ctx, `SELECT status,revision FROM gateway_assistant_runs WHERE owner_key=$1 AND thread_id=$2 AND id=$3 FOR UPDATE`, run.OwnerKey, run.ThreadID, run.ID).Scan(&currentStatus, &currentRevision); errors.Is(err, pgx.ErrNoRows) {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, assistantstate.ErrNotFound
+	} else if err != nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, err
+	}
+	if currentStatus != expectedStatus || currentRevision != expectedRevision {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, assistantstate.ErrConflict
+	}
+	var count int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM gateway_assistant_run_steps WHERE owner_key=$1 AND thread_id=$2 AND run_id=$3`, run.OwnerKey, run.ThreadID, run.ID).Scan(&count); err != nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, err
+	}
+	if count >= stepQuota {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, assistantstate.ErrQuotaExceeded
+	}
+	updated, err := scanAssistantRun(tx.QueryRow(ctx, `UPDATE gateway_assistant_runs SET status=$4,snapshot=$5::jsonb,revision=revision+1,updated_at=now() WHERE owner_key=$1 AND thread_id=$2 AND id=$3 AND status=$6 AND revision=$7 RETURNING id,thread_id,owner_key,status,snapshot,revision,retain_until,created_at,updated_at`, run.OwnerKey, run.ThreadID, run.ID, run.Status, run.Snapshot, expectedStatus, expectedRevision))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, assistantstate.ErrConflict
+	}
+	if err != nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, err
+	}
+	created, err := scanAssistantRunStep(tx.QueryRow(ctx, `INSERT INTO gateway_assistant_run_steps (id,run_id,thread_id,owner_key,status,snapshot) VALUES ($1,$2,$3,$4,'completed',$5::jsonb) ON CONFLICT DO NOTHING RETURNING id,run_id,thread_id,owner_key,status,snapshot,revision,created_at,updated_at`, step.ID, step.RunID, step.ThreadID, step.OwnerKey, step.Snapshot))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, assistantstate.ErrConflict
+	}
+	if err != nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, err
+	}
+	return updated, created, nil
+}
+
 func (s *PostgresStore) CreateRunStep(ctx context.Context, record assistantstate.RunStepRecord, runQuota int) (assistantstate.RunStepRecord, error) {
 	if s == nil || s.pool == nil {
 		return assistantstate.RunStepRecord{}, assistantstate.ErrUnavailable

@@ -76,6 +76,7 @@ type assistantRunStepSnapshot struct {
 type assistantRunStepDetails struct {
 	Type            string                       `json:"type"`
 	MessageCreation *assistantRunMessageCreation `json:"message_creation,omitempty"`
+	ToolCalls       []assistantRunToolCall       `json:"tool_calls,omitempty"`
 }
 
 type assistantRunMessageCreation struct {
@@ -213,6 +214,8 @@ func (h Handler) CreateAssistantRun(w http.ResponseWriter, r *http.Request) {
 			if targetStatus != "queued" {
 				if targetStatus == "completed" {
 					record, createErr = h.completeAssistantRun(r, record, response)
+				} else if targetStatus == "requires_action" {
+					record, createErr = h.transitionAssistantRunWithToolStep(r, record, action)
 				} else {
 					record, createErr = h.transitionAssistantRun(r, record, targetStatus)
 				}
@@ -437,6 +440,8 @@ func (h Handler) SubmitAssistantRunToolOutputs(w http.ResponseWriter, r *http.Re
 		if storageErr == nil && target != "queued" {
 			if target == "completed" {
 				record, storageErr = h.completeAssistantRun(r, record, response)
+			} else if target == "requires_action" {
+				record, storageErr = h.transitionAssistantRunWithToolStep(r, record, snapshot.RequiredAction)
 			} else {
 				record, storageErr = h.transitionAssistantRun(r, record, target)
 			}
@@ -492,7 +497,7 @@ func (h Handler) reconcileAssistantRun(r *http.Request, identity modules.Request
 	if action != nil {
 		status = "requires_action"
 	}
-	if status == "queued" && record.Status == "queued" || status == "in_progress" && record.Status == "in_progress" {
+	if status == record.Status {
 		return record, nil
 	}
 	if response.Status != "queued" && response.Status != "in_progress" {
@@ -510,6 +515,9 @@ func (h Handler) reconcileAssistantRun(r *http.Request, identity modules.Request
 	record.Snapshot, _ = json.Marshal(snapshot)
 	if status == "completed" {
 		return h.completeAssistantRun(r, record, response)
+	}
+	if status == "requires_action" {
+		return h.transitionAssistantRunWithToolStep(r, record, action)
 	}
 	return h.transitionAssistantRun(r, record, status)
 }
@@ -659,6 +667,26 @@ func (h Handler) transitionAssistantRun(r *http.Request, record assistantstate.R
 	source := record.Status
 	record.Status = target
 	return h.assistantRuns.TransitionRun(r.Context(), record, source, record.Revision)
+}
+
+func (h Handler) transitionAssistantRunWithToolStep(r *http.Request, record assistantstate.RunRecord, action *assistantRunRequiredAction) (assistantstate.RunRecord, error) {
+	if action == nil || len(action.SubmitToolOutputs.ToolCalls) == 0 {
+		return record, assistantstate.ErrInvalid
+	}
+	stepID, ok := newAssistantResourceID("step_")
+	if !ok {
+		return record, assistantstate.ErrUnavailable
+	}
+	payload, err := json.Marshal(assistantRunStepSnapshot{Type: "tool_calls", StepDetails: assistantRunStepDetails{Type: "tool_calls", ToolCalls: action.SubmitToolOutputs.ToolCalls}})
+	if err != nil || len(payload) > assistantstate.MaxRunStepSnapshotBytes {
+		return record, assistantstate.ErrInvalid
+	}
+	source := record.Status
+	record.Status = "requires_action"
+	updated, _, err := h.assistantRuns.TransitionRunWithStep(r.Context(), record, source, record.Revision, assistantstate.RunStepRecord{
+		ID: stepID, RunID: record.ID, ThreadID: record.ThreadID, OwnerKey: record.OwnerKey, Status: "completed", Snapshot: payload,
+	}, h.assistantConfig.RunStepQuota)
+	return updated, err
 }
 
 func (h Handler) assistantRunInput(r *http.Request, owner, threadID string) ([]any, error) {

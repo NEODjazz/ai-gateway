@@ -111,6 +111,36 @@ func (s *memoryAssistantRunStore) TransitionRun(_ context.Context, record assist
 	return record, nil
 }
 
+func (s *memoryAssistantRunStore) TransitionRunWithStep(_ context.Context, run assistantstate.RunRecord, expectedStatus string, expectedRevision int64, step assistantstate.RunStepRecord, stepQuota int) (assistantstate.RunRecord, assistantstate.RunStepRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := run.OwnerKey + "/" + run.ThreadID + "/" + run.ID
+	current, found := s.runs[key]
+	if !found {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, assistantstate.ErrNotFound
+	}
+	validTransition := assistantstate.ValidRunTransition(expectedStatus, run.Status) || expectedStatus == "queued" && run.Status == "requires_action"
+	if current.Status != expectedStatus || current.Revision != expectedRevision || !validTransition {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, assistantstate.ErrConflict
+	}
+	count := 0
+	for _, existing := range s.steps {
+		if existing.OwnerKey == run.OwnerKey && existing.ThreadID == run.ThreadID && existing.RunID == run.ID {
+			count++
+		}
+	}
+	if count >= stepQuota {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, assistantstate.ErrQuotaExceeded
+	}
+	run.Revision++
+	run.UpdatedAt = current.UpdatedAt.Add(time.Second)
+	step.Revision = 1
+	step.CreatedAt, step.UpdatedAt = run.UpdatedAt, run.UpdatedAt
+	s.runs[key] = run
+	s.steps[run.OwnerKey+"/"+run.ThreadID+"/"+run.ID+"/"+step.ID] = step
+	return run, step, nil
+}
+
 func (*memoryAssistantRunStore) CreateRunStep(context.Context, assistantstate.RunStepRecord, int) (assistantstate.RunStepRecord, error) {
 	return assistantstate.RunStepRecord{}, assistantstate.ErrUnavailable
 }
@@ -321,6 +351,10 @@ func TestAssistantRunRequiresAllToolOutputsAndContinuesDurably(t *testing.T) {
 	runID := responseString(t, created, "id")
 	if !strings.Contains(created.Body.String(), `"status":"requires_action"`) || !strings.Contains(created.Body.String(), `"call_weather"`) {
 		t.Fatalf("required action body=%s", created.Body.String())
+	}
+	steps := assistantRequest(t, handler, http.MethodGet, "/v1/threads/"+threadID+"/runs/"+runID+"/steps?order=asc&limit=10", "")
+	if steps.Code != http.StatusOK || !strings.Contains(steps.Body.String(), `"type":"tool_calls"`) || !strings.Contains(steps.Body.String(), `"call_weather"`) || !strings.Contains(steps.Body.String(), `"call_time"`) {
+		t.Fatalf("tool steps status=%d body=%s", steps.Code, steps.Body.String())
 	}
 	missing := assistantRequest(t, handler, http.MethodPost, "/v1/threads/"+threadID+"/runs/"+runID+"/submit_tool_outputs", `{"tool_outputs":[{"tool_call_id":"call_weather","output":"sunny"}]}`)
 	if missing.Code != http.StatusBadRequest || provider.responseCalls != 1 {
