@@ -5,6 +5,26 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  026_gateway_video_jobs.sql: |
+    CREATE TABLE IF NOT EXISTS gateway_video_jobs (
+        video_id TEXT NOT NULL,
+        owner_key TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        model TEXT NOT NULL,
+        deployment TEXT NOT NULL,
+        snapshot JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (video_id <> '' AND length(video_id) <= 128),
+        CHECK (owner_key <> '' AND length(owner_key) <= 256),
+        CHECK (endpoint <> '' AND length(endpoint) <= 128),
+        CHECK (model <> '' AND length(model) <= 256),
+        CHECK (length(deployment) = 64),
+        CHECK (octet_length(snapshot::text) <= 4194304),
+        PRIMARY KEY (owner_key, video_id)
+    );
+    CREATE INDEX IF NOT EXISTS gateway_video_jobs_owner_created_idx
+        ON gateway_video_jobs (owner_key, created_at DESC, video_id DESC);
   014_billing_training_tokens.sql: |
     ALTER TABLE billing_budget_reservations
         ADD COLUMN IF NOT EXISTS training_cost_per_1m NUMERIC(18, 8) NOT NULL DEFAULT 0;
