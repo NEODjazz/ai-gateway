@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -72,6 +73,7 @@ type backgroundResponseClient struct {
 	responseCalls int
 	cancelCalls   int
 	retrieve      openai.ResponseResponse
+	retrieveErr   error
 }
 
 func (*backgroundResponseClient) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
@@ -84,7 +86,33 @@ func (c *backgroundResponseClient) Responses(_ context.Context, request openai.R
 }
 
 func (c *backgroundResponseClient) RetrieveResponse(context.Context, string) (openai.ResponseResponse, error) {
-	return c.retrieve, nil
+	return c.retrieve, c.retrieveErr
+}
+
+func TestBackgroundResponseReportsCauseAfterSchedulingRetry(t *testing.T) {
+	retrieveErr := errors.New("provider unavailable")
+	jobs := &backgroundJobStore{}
+	request := openai.ResponseRequest{Model: "public-model", Input: "prompt", Background: true}
+	req := modules.RequestContext{RequestID: "execution", CredentialID: "credential", Request: openai.ChatCompletionRequest{Model: request.Model}, ResponseRequest: &request}
+	client := &backgroundResponseClient{retrieveErr: retrieveErr}
+	endpoint := Endpoint{Name: "deployment", ProviderID: "provider", Type: "openai-compatible", Models: []string{request.Model}, Capabilities: []string{"responses", "background_responses"}, Provider: client, Admission: newAdmissionController(0, 0, 0)}
+	ownership := newResponseOwnershipStore(time.Hour, &ownershipTestStore{data: map[string][]byte{}})
+	router := Router{endpoints: []Endpoint{endpoint}, endpointState: &endpointRegistry{}, modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, ownership: ownership, asyncJobs: jobs}
+	router.endpointState.current.Store(&router.endpoints)
+	if err := ownership.put(t.Context(), req, "resp_background", responseOwnership{Endpoint: endpoint.Name, Model: request.Model, Deployment: responseDeploymentIdentity(endpoint)}); err != nil {
+		t.Fatal(err)
+	}
+
+	job := newBackgroundResponseJob(req)
+	payload, err := json.Marshal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs.job = &asyncstate.Job{Kind: backgroundResponseJobKind, ResourceID: "resp_background", OwnerKey: backgroundResponseOwner(req), EndpointID: "deployment", ExecutionID: req.RequestID, Payload: payload}
+	processed, err := router.ProcessBackgroundResponses(t.Context())
+	if processed != 1 || !errors.Is(err, retrieveErr) || jobs.job == nil || jobs.job.Attempts != 1 {
+		t.Fatalf("processed=%d err=%v job=%+v", processed, err, jobs.job)
+	}
 }
 
 func (c *backgroundResponseClient) CancelResponse(_ context.Context, id string) (openai.ResponseResponse, error) {

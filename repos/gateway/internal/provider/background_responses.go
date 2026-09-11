@@ -157,18 +157,15 @@ func (r Router) ProcessBackgroundResponses(ctx context.Context) (int, error) {
 func (r Router) processBackgroundResponse(ctx context.Context, claimed asyncstate.Job) error {
 	var job backgroundResponseJob
 	if json.Unmarshal(claimed.Payload, &job) != nil || job.RequestID != claimed.ExecutionID || job.CredentialID == "" || job.Model == "" {
-		if err := r.asyncJobs.RetryAsyncJob(ctx, claimed.Kind, claimed.ResourceID, claimed.LeaseGeneration, backgroundResponseRetry(claimed.Attempts)); err != nil {
-			return err
-		}
-		return errors.New("invalid persisted background response job")
+		return r.retryBackgroundResponse(ctx, claimed, errors.New("invalid persisted background response job"))
 	}
 	req := job.requestContext()
 	response, err := r.RetrieveResponse(ctx, req, claimed.ResourceID)
 	if err != nil {
-		return r.asyncJobs.RetryAsyncJob(ctx, claimed.Kind, claimed.ResourceID, claimed.LeaseGeneration, backgroundResponseRetry(claimed.Attempts))
+		return r.retryBackgroundResponse(ctx, claimed, err)
 	}
 	if backgroundResponsePending(response) {
-		return r.asyncJobs.RetryAsyncJob(ctx, claimed.Kind, claimed.ResourceID, claimed.LeaseGeneration, backgroundResponseRetry(claimed.Attempts))
+		return r.retryBackgroundResponse(ctx, claimed, nil)
 	}
 	if response.Status == "failed" || response.Status == "cancelled" {
 		if req.Metadata == nil {
@@ -181,9 +178,14 @@ func (r Router) processBackgroundResponse(ctx context.Context, claimed asyncstat
 	}
 	req.ResponsesResponse = &response
 	if err := r.modules.RunPostResponse(ctx, &req); err != nil && !errors.Is(err, modules.ErrContentRejected) {
-		return r.asyncJobs.RetryAsyncJob(ctx, claimed.Kind, claimed.ResourceID, claimed.LeaseGeneration, backgroundResponseRetry(claimed.Attempts))
+		return r.retryBackgroundResponse(ctx, claimed, err)
 	}
 	return r.asyncJobs.CompleteAsyncJob(ctx, claimed.Kind, claimed.ResourceID, claimed.LeaseGeneration)
+}
+
+func (r Router) retryBackgroundResponse(ctx context.Context, job asyncstate.Job, cause error) error {
+	retryErr := r.asyncJobs.RetryAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration, backgroundResponseRetry(job.Attempts))
+	return errors.Join(cause, retryErr)
 }
 
 func backgroundResponseRetry(attempt int) time.Duration {
