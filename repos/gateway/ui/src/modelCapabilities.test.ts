@@ -7,6 +7,7 @@ describe("modelCapabilityOptions", () => {
       "chat",
       "bedrock_invoke",
       "responses",
+      "interactions",
       "background_responses",
       "embeddings",
       "rerank",
@@ -41,7 +42,8 @@ describe("modelCapabilityOptions", () => {
     expect(defaultModelCapabilities("bedrock")).toEqual(["chat"]);
     expect(defaultModelCapabilities("groq")).toEqual(["chat", "stream"]);
     expect(defaultModelCapabilities("deepseek")).toEqual(["chat", "responses", "stream"]);
-	expect(defaultModelCapabilities("xai")).toEqual(["chat", "responses", "embeddings", "stream"]);
+    expect(defaultModelCapabilities("gemini")).toEqual(["chat", "interactions", "stream"]);
+    expect(defaultModelCapabilities("xai")).toEqual(["chat", "responses", "embeddings", "stream"]);
     expect(defaultModelCapabilities("demo")).toEqual(["chat", "responses", "embeddings"]);
     expect(defaultModelCapabilities("ollama")).toEqual(["chat", "responses", "embeddings", "stream"]);
     expect(defaultModelCapabilities("anthropic")).toEqual(["chat", "responses", "stream"]);

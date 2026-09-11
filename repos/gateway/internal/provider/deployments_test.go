@@ -108,6 +108,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "cohere", capability: "responses"},
 		{providerType: "cohere", capability: "image_generation"},
 		{providerType: "gemini", capability: "responses"},
+		{providerType: "openai", capability: "interactions"},
 		{providerType: "gemini", capability: "moderation"},
 		{providerType: "mistral", capability: "image_generation"},
 		{providerType: "mistral", capability: "search"},
@@ -190,6 +191,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"chat", "tools", "structured_output", "vision"},
 		{"responses", "tools", "mcp"},
 		{"responses", "background_responses"},
+		{"interactions", "tools", "structured_output", "vision"},
 		{"responses", "file_input"},
 		{"chat", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill"},
 		{"chat", "bedrock_invoke"},
@@ -297,6 +299,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	}
 	if !slices.Contains(profilesByType["gemini"].Operations, "image_generation") || !slices.Contains(profilesByType["gemini"].Capabilities, "image_generation") || !slices.Contains(profilesByType["gemini"].Operations, "image_edit") || !slices.Contains(profilesByType["gemini"].Capabilities, "image_edit") || !slices.Contains(profilesByType["gemini"].Operations, "image_variation") || !slices.Contains(profilesByType["gemini"].Capabilities, "image_variation") {
 		t.Fatalf("Gemini profile is missing native image operations: %+v", profilesByType["gemini"])
+	}
+	if !slices.Contains(profilesByType["gemini"].Operations, "interactions") || slices.Contains(profilesByType["openai"].Operations, "interactions") {
+		t.Fatalf("native interaction profiles are incorrect: gemini=%+v openai=%+v", profilesByType["gemini"], profilesByType["openai"])
 	}
 	for _, providerType := range []string{"anthropic", "gemini", "bedrock"} {
 		if slices.Contains(profilesByType[providerType].Capabilities, "count_tokens") {

@@ -43,7 +43,7 @@ type ProviderChatParameterPolicy struct {
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai"}
 
 var managedOperationCapabilities = []string{
-	"chat", "responses", "count_tokens", "embeddings", "rerank", "moderation",
+	"chat", "responses", "interactions", "count_tokens", "embeddings", "rerank", "moderation",
 	"image_generation", "image_edit", "image_variation",
 	"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "realtime", "stream", "bedrock_invoke",
 }

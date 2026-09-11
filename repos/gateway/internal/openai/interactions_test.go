@@ -38,6 +38,19 @@ func TestInteractionRequestMapsDurableBackgroundSemantics(t *testing.T) {
 	}
 }
 
+func TestNativeInteractionRequestPreservesGenerationConfig(t *testing.T) {
+	seed := int64(7)
+	request := InteractionRequest{Model: "model", Input: "hello", GenerationConfig: InteractionGenerationConfig{Seed: &seed, StopSequences: []string{"END"}, ThinkingLevel: "high"}}
+	shared, message := request.NativeResponseRequest()
+	if message != "" || shared.Model != "model" || shared.Input != "hello" {
+		t.Fatalf("shared=%+v message=%q", shared, message)
+	}
+	mapped := request.WithResponseRequest(ResponseRequest{Provider: "deployment", Model: "upstream", Input: "rewritten", MaxOutputTokens: shared.MaxOutputTokens})
+	if mapped.Provider != "deployment" || mapped.Model != "upstream" || mapped.Input != "rewritten" || mapped.GenerationConfig.Seed == nil || *mapped.GenerationConfig.Seed != seed || mapped.GenerationConfig.ThinkingLevel != "high" {
+		t.Fatalf("mapped=%+v", mapped)
+	}
+}
+
 func TestInteractionRequestRejectsUnsupportedOrInvalidSemantics(t *testing.T) {
 	seed := int64(1)
 	zero := 0

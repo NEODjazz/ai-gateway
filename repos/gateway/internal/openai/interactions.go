@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"time"
 )
@@ -31,6 +32,28 @@ type InteractionGenerationConfig struct {
 }
 
 func (r InteractionRequest) ResponseRequest() (ResponseRequest, string) {
+	result, message := r.NativeResponseRequest()
+	if message != "" {
+		return ResponseRequest{}, message
+	}
+	if strings.TrimSpace(r.Model) == "" {
+		return ResponseRequest{}, "model is required"
+	}
+	if r.GenerationConfig.Seed != nil {
+		return ResponseRequest{}, "generation_config.seed is not supported"
+	}
+	if len(r.GenerationConfig.StopSequences) > 0 {
+		return ResponseRequest{}, "generation_config.stop_sequences is not supported"
+	}
+	if r.GenerationConfig.ThinkingLevel != "" {
+		return ResponseRequest{}, "generation_config.thinking_level is not supported"
+	}
+	return result, ""
+}
+
+// NativeResponseRequest validates the model-based Interactions contract and
+// returns its shared Responses representation for policy, token, and billing modules.
+func (r InteractionRequest) NativeResponseRequest() (ResponseRequest, string) {
 	if strings.TrimSpace(r.Agent) != "" {
 		return ResponseRequest{}, "agent interactions are not supported"
 	}
@@ -51,14 +74,19 @@ func (r InteractionRequest) ResponseRequest() (ResponseRequest, string) {
 	default:
 		return ResponseRequest{}, "input must be a string or a non-empty array"
 	}
-	if r.GenerationConfig.Seed != nil {
-		return ResponseRequest{}, "generation_config.seed is not supported"
+	if r.GenerationConfig.Seed != nil && (*r.GenerationConfig.Seed < math.MinInt32 || *r.GenerationConfig.Seed > math.MaxInt32) {
+		return ResponseRequest{}, "generation_config.seed must be a signed 32-bit integer"
 	}
-	if len(r.GenerationConfig.StopSequences) > 0 {
-		return ResponseRequest{}, "generation_config.stop_sequences is not supported"
+	if len(r.GenerationConfig.StopSequences) > 5 {
+		return ResponseRequest{}, "generation_config.stop_sequences must contain at most 5 strings"
 	}
-	if r.GenerationConfig.ThinkingLevel != "" {
-		return ResponseRequest{}, "generation_config.thinking_level is not supported"
+	for _, sequence := range r.GenerationConfig.StopSequences {
+		if strings.TrimSpace(sequence) == "" {
+			return ResponseRequest{}, "generation_config.stop_sequences must contain non-empty strings"
+		}
+	}
+	if level := r.GenerationConfig.ThinkingLevel; level != "" && level != "minimal" && level != "low" && level != "medium" && level != "high" {
+		return ResponseRequest{}, "generation_config.thinking_level is invalid"
 	}
 	for _, tool := range r.Tools {
 		if tool.Type != "function" {
@@ -92,17 +120,67 @@ func (r InteractionRequest) ResponseRequest() (ResponseRequest, string) {
 	return result, ""
 }
 
+func (r InteractionRequest) WithResponseRequest(shared ResponseRequest) InteractionRequest {
+	r.Provider, r.Model, r.Input, r.SystemInstruction = shared.Provider, shared.Model, shared.Input, shared.Instructions
+	r.Tools, r.ResponseFormat, r.PreviousInteractionID = shared.Tools, nil, shared.PreviousResponse
+	if text, ok := shared.Text.(map[string]any); ok {
+		r.ResponseFormat = text["format"]
+	}
+	r.Store, r.Stream, r.Background = shared.Store, shared.Stream, shared.Background
+	r.GenerationConfig.MaxOutputTokens, r.GenerationConfig.Temperature, r.GenerationConfig.TopP = shared.MaxOutputTokens, shared.Temperature, shared.TopP
+	return r
+}
+
 type InteractionResponse struct {
 	ID                string                     `json:"id"`
 	Object            string                     `json:"object"`
 	Created           string                     `json:"created,omitempty"`
 	Updated           string                     `json:"updated,omitempty"`
 	Model             string                     `json:"model"`
+	Agent             string                     `json:"agent,omitempty"`
 	Status            string                     `json:"status"`
 	Steps             []InteractionStep          `json:"steps,omitempty"`
 	Usage             InteractionUsage           `json:"usage,omitempty"`
 	Error             *ResponseError             `json:"error,omitempty"`
 	IncompleteDetails *ResponseIncompleteDetails `json:"incomplete_details,omitempty"`
+}
+
+func ResponseFromInteraction(interaction InteractionResponse) ResponseResponse {
+	response := ResponseResponse{ID: interaction.ID, Object: "response", Model: interaction.Model, Status: interaction.Status, Error: interaction.Error, IncompleteDetails: interaction.IncompleteDetails}
+	if created, err := time.Parse(time.RFC3339Nano, interaction.Created); err == nil {
+		response.CreatedAt = created.Unix()
+	}
+	for _, step := range interaction.Steps {
+		switch step.Type {
+		case "model_output":
+			item := ResponseOutputItem{ID: step.ID, Type: "message", Role: "assistant"}
+			for _, content := range step.Content {
+				if content.Text != "" {
+					item.Content = append(item.Content, ResponseOutputContent{Type: "output_text", Text: content.Text})
+				}
+			}
+			response.Output = append(response.Output, item)
+		case "function_call":
+			arguments, _ := json.Marshal(step.Arguments)
+			response.Output = append(response.Output, ResponseOutputItem{ID: step.ID, CallID: step.ID, Type: "function_call", Name: step.Name, Arguments: string(arguments)})
+		case "thought":
+			item := ResponseOutputItem{ID: step.ID, Type: "reasoning"}
+			for _, content := range step.Content {
+				if content.Text != "" {
+					item.Summary = append(item.Summary, ResponseOutputContent{Type: "summary_text", Text: content.Text})
+				}
+			}
+			response.Output = append(response.Output, item)
+		}
+	}
+	response.Usage = ResponseUsage{InputTokens: interaction.Usage.TotalInputTokens, OutputTokens: interaction.Usage.TotalOutputTokens, TotalTokens: interaction.Usage.TotalTokens}
+	if interaction.Usage.TotalCachedTokens > 0 {
+		response.Usage.InputTokensDetails = &InputTokenDetails{CachedTokens: interaction.Usage.TotalCachedTokens}
+	}
+	if interaction.Usage.TotalThoughtTokens > 0 {
+		response.Usage.OutputTokensDetails = &CompletionTokenDetails{ReasoningTokens: interaction.Usage.TotalThoughtTokens}
+	}
+	return response
 }
 
 type InteractionStep struct {

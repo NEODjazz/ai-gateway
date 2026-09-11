@@ -4,6 +4,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "chat", label: "Chat", description: "Chat Completions API" },
   { value: "bedrock_invoke", label: "Bedrock Invoke", description: "Anthropic Messages through Bedrock InvokeModel" },
   { value: "responses", label: "Responses", description: "Responses API" },
+  { value: "interactions", label: "Interactions", description: "Native model interactions" },
   { value: "background_responses", label: "Background responses", description: "Durable asynchronous Responses execution" },
   { value: "embeddings", label: "Embeddings", description: "Vector embeddings" },
   { value: "rerank", label: "Rerank", description: "Document reranking" },
@@ -48,8 +49,10 @@ export function defaultModelCapabilities(providerType: string): string[] {
       return ["chat", "stream"];
     case "deepseek":
       return ["chat", "responses", "stream"];
-	case "xai":
-		return ["chat", "responses", "embeddings", "stream"];
+    case "gemini":
+      return ["chat", "interactions", "stream"];
+    case "xai":
+      return ["chat", "responses", "embeddings", "stream"];
     case "openrouter":
       return ["chat", "responses", "stream"];
     case "demo":

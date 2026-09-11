@@ -344,11 +344,14 @@ func validDeploymentCapabilities(capabilities []string) bool {
 		}
 		seen[capability] = true
 	}
-	requiresChatOrResponses := []string{"stream", "tools", "structured_output", "vision", "file_input", "bedrock_invoke"}
+	requiresChatOrResponses := []string{"stream", "tools", "structured_output", "vision", "file_input"}
 	for _, capability := range requiresChatOrResponses {
-		if seen[capability] && !seen["chat"] && !seen["responses"] {
+		if seen[capability] && !seen["chat"] && !seen["responses"] && !seen["interactions"] {
 			return false
 		}
+	}
+	if seen["bedrock_invoke"] && !seen["chat"] && !seen["responses"] {
+		return false
 	}
 	for _, capability := range []string{"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill"} {
 		if seen[capability] && !seen["chat"] {
@@ -366,7 +369,7 @@ func validDeploymentCapabilities(capabilities []string) bool {
 
 func ValidModelCapability(capability string) bool {
 	switch capability {
-	case "chat", "responses", "embeddings", "rerank", "moderation",
+	case "chat", "responses", "interactions", "embeddings", "rerank", "moderation",
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
@@ -455,6 +458,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	switch capability {
 	case "chat", "responses":
 		return true
+	case "interactions":
+		_, ok := endpoint.Provider.(InteractionClient)
+		return ok
 	case "count_tokens":
 		_, ok := endpoint.Provider.(TokenCountClient)
 		return ok

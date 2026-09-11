@@ -75,6 +75,52 @@ func TestInteractionsUsesResponsesPolicyRoutingAndBilling(t *testing.T) {
 	}
 }
 
+func TestInteractionsUsesNativeGeminiRoutingAndBilling(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body["model"] != "upstream" || body["input"] != "hello" {
+			t.Errorf("body=%#v", body)
+		}
+		generation, _ := body["generation_config"].(map[string]any)
+		if generation["seed"] != float64(7) || generation["thinking_level"] != "high" || len(generation["stop_sequences"].([]any)) != 1 {
+			t.Errorf("generation=%#v", generation)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"interaction_native","object":"interaction","model":"upstream","status":"completed","steps":[{"id":"message","type":"model_output","content":[{"type":"text","text":"native"}]}],"usage":{"total_input_tokens":4,"total_output_tokens":2,"total_tokens":6}}`)
+	}))
+	defer upstream.Close()
+	recorder := &statelessUsageRecorder{}
+	router := provider.New(provider.Config{
+		Endpoints: []config.ProviderEndpointConfig{{Name: "gemini-deployment", Type: "gemini", BaseURL: upstream.URL, APIKey: "secret", Models: []string{"public"}, ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"interactions"}}},
+		Modules:   modules.NewPipeline([]modules.Module{recorder}),
+	})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"public"}, tpm: 100}}}), router))
+	request := httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"provider":"gemini-deployment","model":"public","input":"hello","generation_config":{"max_output_tokens":8,"seed":7,"stop_sequences":["END"],"thinking_level":"high"}}`))
+	request.Header.Set("Authorization", "Bearer gateway-test-key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || calls.Load() != 1 || !strings.Contains(response.Body.String(), `"id":"interaction_native"`) || !strings.Contains(response.Body.String(), `"text":"native"`) || len(recorder.totals) != 1 || recorder.totals[0] != 6 {
+		t.Fatalf("status=%d calls=%d totals=%v body=%s", response.Code, calls.Load(), recorder.totals, response.Body.String())
+	}
+	for _, unsupported := range []string{
+		`{"provider":"gemini-deployment","model":"public","input":"hello","stream":true}`,
+		`{"provider":"gemini-deployment","model":"public","input":"hello","store":true}`,
+		`{"provider":"gemini-deployment","model":"public","input":"hello","previous_interaction_id":"interaction_previous"}`,
+	} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(unsupported))
+		request.Header.Set("Authorization", "Bearer gateway-test-key")
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"unsupported_operation"`) {
+			t.Fatalf("request=%s status=%d body=%s", unsupported, response.Code, response.Body.String())
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("unsupported native interaction reached provider: calls=%d", calls.Load())
+	}
+}
+
 func TestInteractionsRejectsUnsupportedModesBeforeExecution(t *testing.T) {
 	for _, field := range []string{`"stream":true,"background":true`, `"background":true,"store":false`, `"agent":"research"`, `"generation_config":{"seed":1}`, `"unknown":true`} {
 		response := httptest.NewRecorder()
