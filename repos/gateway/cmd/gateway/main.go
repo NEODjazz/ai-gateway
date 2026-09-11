@@ -149,6 +149,7 @@ func main() {
 			}).
 			WithFileStore(providerControlStore, gateway.FileRuntimeConfig{MaxBytes: cfg.Files.MaxBytes, OwnerQuotaBytes: cfg.Files.OwnerQuotaBytes}).
 			WithBatchStore(providerControlStore, providerControlStore).
+			WithFineTuningStore(providerControlStore).
 			WithSkillStore(providerControlStore).
 			WithVectorStore(providerControlStore, gateway.VectorStoreRuntimeConfig{OwnerQuota: cfg.VectorStores.OwnerQuota, FileQuota: cfg.VectorStores.FileQuota})
 		handler, err = handler.WithA2APushNotifications(providerControlStore, []byte(cfg.Provider.CredentialKey))

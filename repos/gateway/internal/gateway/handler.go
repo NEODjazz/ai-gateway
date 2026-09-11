@@ -16,6 +16,7 @@ import (
 	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/batchstate"
 	"ai-gateway-gateway/internal/filestate"
+	"ai-gateway-gateway/internal/finetunestate"
 	"ai-gateway-gateway/internal/mcpclient"
 	"ai-gateway-gateway/internal/mcpstate"
 	"ai-gateway-gateway/internal/modelcatalog"
@@ -55,6 +56,7 @@ type Handler struct {
 	files             filestate.Store
 	fileConfig        FileRuntimeConfig
 	batches           batchstate.Store
+	fineTuning        finetunestate.Store
 	batchJobs         asyncstate.Store
 	skills            skillstate.Store
 	vectorStores      vectorstate.Store

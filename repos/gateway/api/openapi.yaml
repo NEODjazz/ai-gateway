@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.232
+  version: 0.1.233
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -25,6 +25,7 @@ tags:
   - name: MCP
   - name: Files
   - name: Batches
+  - name: Fine-tuning
   - name: Vector stores
   - name: Skills
   - name: Projects and access
@@ -699,6 +700,126 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/fine_tuning/jobs:
+    post:
+      operationId: createFineTuningJob
+      tags: [Fine-tuning]
+      summary: Create a fine-tuning job from owner-scoped files
+      description: Validates model access and owner-scoped training and validation files with purpose=fine-tune before selecting a capable deployment. The deployment binding and latest job snapshot are stored durably so lifecycle calls cannot move to a different provider deployment. If persistence fails after provider acceptance, the gateway makes a bounded compensating cancellation attempt.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FineTuningCreateRequest'}
+      responses:
+        '200':
+          description: Created fine-tuning job
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FineTuningJob'}
+        default:
+          description: Authentication, validation, authorization, provider, quota, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    get:
+      operationId: listFineTuningJobs
+      tags: [Fine-tuning]
+      summary: List durable fine-tuning job snapshots owned by the authenticated credential and user
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: after, in: query, schema: {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9_.-]+$'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200':
+          description: Cursor page of owned fine-tuning jobs
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FineTuningJobList'}
+        default:
+          description: Authentication, validation, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/fine_tuning/jobs/{id}:
+    get:
+      operationId: getFineTuningJob
+      tags: [Fine-tuning]
+      summary: Refresh and retrieve an owned fine-tuning job from its pinned deployment
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/FineTuningJobID'}
+      responses:
+        '200':
+          description: Current fine-tuning job
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FineTuningJob'}
+        default:
+          description: Authentication, ownership, provider, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/fine_tuning/jobs/{id}/cancel:
+    post:
+      operationId: cancelFineTuningJob
+      tags: [Fine-tuning]
+      summary: Cancel an owned fine-tuning job on its pinned deployment
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/FineTuningJobID'}
+      responses:
+        '200': {description: Cancelled fine-tuning job, content: {application/json: {schema: {$ref: '#/components/schemas/FineTuningJob'}}}}
+        default: {description: 'Authentication, ownership, provider, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/fine_tuning/jobs/{id}/pause:
+    post:
+      operationId: pauseFineTuningJob
+      tags: [Fine-tuning]
+      summary: Pause an owned fine-tuning job on its pinned deployment
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/FineTuningJobID'}
+      responses:
+        '200': {description: Paused fine-tuning job, content: {application/json: {schema: {$ref: '#/components/schemas/FineTuningJob'}}}}
+        default: {description: 'Authentication, ownership, provider, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/fine_tuning/jobs/{id}/resume:
+    post:
+      operationId: resumeFineTuningJob
+      tags: [Fine-tuning]
+      summary: Resume an owned fine-tuning job on its pinned deployment
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/FineTuningJobID'}
+      responses:
+        '200': {description: Resumed fine-tuning job, content: {application/json: {schema: {$ref: '#/components/schemas/FineTuningJob'}}}}
+        default: {description: 'Authentication, ownership, provider, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/fine_tuning/jobs/{id}/events:
+    get:
+      operationId: listFineTuningEvents
+      tags: [Fine-tuning]
+      summary: List events for an owned fine-tuning job from its pinned deployment
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/FineTuningJobID'}
+        - {name: after, in: query, schema: {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9_.-]+$'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200': {description: Fine-tuning event page, content: {application/json: {schema: {$ref: '#/components/schemas/FineTuningEventList'}}}}
+        default: {description: 'Authentication, ownership, provider, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/fine_tuning/jobs/{id}/checkpoints:
+    get:
+      operationId: listFineTuningCheckpoints
+      tags: [Fine-tuning]
+      summary: List checkpoints for an owned fine-tuning job from its pinned deployment
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/FineTuningJobID'}
+        - {name: after, in: query, schema: {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9_.-]+$'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200': {description: Fine-tuning checkpoint page, content: {application/json: {schema: {$ref: '#/components/schemas/FineTuningCheckpointList'}}}}
+        default: {description: 'Authentication, ownership, provider, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /v1/vector_stores:
     post:
       operationId: createVectorStore
@@ -3365,6 +3486,11 @@ components:
         type: string
         maxLength: 128
   parameters:
+    FineTuningJobID:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
     SkillID:
       name: id
       in: path
@@ -3738,6 +3864,98 @@ components:
         has_more: {type: boolean}
         first_id: {type: string}
         last_id: {type: string}
+    FineTuningCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [model, training_file]
+      properties:
+        model: {type: string, minLength: 1, maxLength: 256}
+        training_file: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+        validation_file: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+        suffix: {type: string, maxLength: 18}
+        seed: {type: integer, format: int64}
+        metadata:
+          type: object
+          maxProperties: 16
+          propertyNames: {minLength: 1, maxLength: 64}
+          additionalProperties: {type: string, maxLength: 512}
+        method: {type: object}
+    FineTuningJob:
+      type: object
+      additionalProperties: false
+      required: [id, object, created_at, model, organization_id, result_files, status, training_file]
+      properties:
+        id: {type: string}
+        object: {type: string, const: fine_tuning.job}
+        created_at: {type: integer, format: int64}
+        finished_at: {type: [integer, 'null'], format: int64}
+        fine_tuned_model: {type: [string, 'null']}
+        model: {type: string}
+        organization_id: {type: string}
+        result_files: {type: array, items: {type: string}}
+        status: {type: string, enum: [validating_files, queued, running, succeeded, failed, cancelled, paused]}
+        trained_tokens: {type: [integer, 'null'], format: int64}
+        training_file: {type: string}
+        validation_file: {type: [string, 'null']}
+        error: {}
+        hyperparameters: {}
+        integrations: {type: array, items: {}}
+        seed: {type: integer, format: int64}
+        estimated_finish: {type: [integer, 'null'], format: int64}
+        method: {}
+        metadata:
+          type: object
+          additionalProperties: {type: string}
+    FineTuningJobList:
+      type: object
+      additionalProperties: false
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/FineTuningJob'}}
+        has_more: {type: boolean}
+    FineTuningEvent:
+      type: object
+      additionalProperties: false
+      required: [id, object, created_at, level, message]
+      properties:
+        id: {type: string}
+        object: {type: string, const: fine_tuning.job.event}
+        created_at: {type: integer, format: int64}
+        level: {type: string, enum: [info, warn, error]}
+        message: {type: string}
+        type: {type: string}
+        data: {}
+    FineTuningEventList:
+      type: object
+      additionalProperties: false
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/FineTuningEvent'}}
+        has_more: {type: boolean}
+    FineTuningCheckpoint:
+      type: object
+      additionalProperties: false
+      required: [id, object, created_at, fine_tuned_model_checkpoint, fine_tuning_job_id, metrics, step_number]
+      properties:
+        id: {type: string}
+        object: {type: string, const: fine_tuning.job.checkpoint}
+        created_at: {type: integer, format: int64}
+        fine_tuned_model_checkpoint: {type: string}
+        fine_tuning_job_id: {type: string}
+        metrics:
+          type: object
+          additionalProperties: {}
+        step_number: {type: integer, minimum: 0}
+    FineTuningCheckpointList:
+      type: object
+      additionalProperties: false
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/FineTuningCheckpoint'}}
+        has_more: {type: boolean}
     BatchCreateRequest:
       type: object
       additionalProperties: false
