@@ -150,6 +150,10 @@ func main() {
 			WithFileStore(providerControlStore, gateway.FileRuntimeConfig{MaxBytes: cfg.Files.MaxBytes, OwnerQuotaBytes: cfg.Files.OwnerQuotaBytes}).
 			WithSkillStore(providerControlStore).
 			WithVectorStore(providerControlStore, gateway.VectorStoreRuntimeConfig{OwnerQuota: cfg.VectorStores.OwnerQuota, FileQuota: cfg.VectorStores.FileQuota})
+		handler, err = handler.WithA2APushNotifications(providerControlStore, []byte(cfg.Provider.CredentialKey))
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	if cfg.APIDocs.Enabled {
 		handler = handler.WithAPIDocs(cfg.APIDocs.TryItOutEnabled)
@@ -164,6 +168,15 @@ func main() {
 	if cfg.Management.BillingURL != "" && cfg.Management.BillingSecret != "" {
 		billingManagement := gateway.NewRemoteBudgetManagementClient(cfg.Management.BillingURL, cfg.Management.BillingSecret)
 		handler = handler.WithBudgetManagement(billingManagement).WithUsageReporting(billingManagement).WithRequestLogs(billingManagement).WithAudit(billingManagement)
+	}
+	var a2aPushWorkerDone <-chan struct{}
+	if providerControlStore != nil {
+		done := make(chan struct{})
+		a2aPushWorkerDone = done
+		go func() {
+			defer close(done)
+			gateway.RunA2APushWorker(appCtx, handler)
+		}()
 	}
 	server := &http.Server{
 		Addr:    cfg.HTTP.Addr,
@@ -195,6 +208,13 @@ func main() {
 		case <-backgroundWorkerDone:
 		case <-shutdownCtx.Done():
 			log.Printf("background response worker shutdown timed out")
+		}
+	}
+	if a2aPushWorkerDone != nil {
+		select {
+		case <-a2aPushWorkerDone:
+		case <-shutdownCtx.Done():
+			log.Printf("A2A push worker shutdown timed out")
 		}
 	}
 	if err := shutdownTelemetry(shutdownCtx); err != nil {

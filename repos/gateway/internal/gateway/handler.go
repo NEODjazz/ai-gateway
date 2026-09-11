@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/a2astate"
+	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/mcpclient"
 	"ai-gateway-gateway/internal/mcpstate"
@@ -44,6 +45,8 @@ type Handler struct {
 	a2aTaskConfig     A2ATaskRuntimeConfig
 	a2aSubscriptions  chan struct{}
 	a2aHTTPClient     httpDoer
+	a2aPushJobs       asyncstate.Store
+	a2aPushVault      *a2aPushVault
 	mcp               *MCPRegistry
 	mcpRuntime        MCPRuntimeFactory
 	mcpCalls          mcpstate.Store

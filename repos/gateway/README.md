@@ -50,7 +50,10 @@ routing and billing path. With durable task and background-response storage,
 Text, structured JSON data, bounded inline images and HTTPS image references reuse the Responses
 media validation, scan, token reserve and billing path. Remote images are fetched only after
 credential and model authorization, through the public-network transport, and stored as validated
-inline bytes. Push notifications and other media parts fail with explicit protocol errors.
+inline bytes. `SendMessage` push callbacks use an encrypted PostgreSQL outbox, wait for background
+billing settlement, and retry failed HTTPS delivery without losing the task transition. The callback
+transport rejects redirects and non-public destinations. Push configuration on streaming messages
+and other media parts fail with explicit protocol errors.
 `GetExtendedAgentCard` returns the current card only after bearer
 authentication, model authorization and RPM admission.
 With durable task storage, `SendStreamingMessage` emits an ordered SSE

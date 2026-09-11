@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.227
+  version: 0.1.228
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -43,7 +43,7 @@ paths:
       operationId: getA2AAgentCard
       tags: [A2A]
       summary: Discover one enabled executable agent profile
-      description: Returns an A2A 1.0 Agent Card for direct discovery. The card advertises text, structured JSON data and bounded inline or HTTPS image inputs, text output, bearer authentication, authenticated extended-card retrieval and streaming when durable task storage is configured; push notifications are not advertised.
+      description: Returns an A2A 1.0 Agent Card for direct discovery. The card advertises text, structured JSON data and bounded inline or HTTPS image inputs, text output, bearer authentication, authenticated extended-card retrieval, streaming when durable task storage is configured, and push notifications when the durable encrypted outbox is configured.
       security: []
       parameters:
         - {name: agent, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
@@ -59,7 +59,7 @@ paths:
       operationId: callA2AAgent
       tags: [A2A]
       summary: Execute A2A messages and task lifecycle operations
-      description: Implements A2A 1.0 SendMessage, SendStreamingMessage, SubscribeToTask, GetTask, ListTasks, CancelTask and authenticated GetExtendedAgentCard. New messages pass through the same authentication, model authorization, rate limit, guardrail, routing and billing pipeline as Responses. Text, structured JSON data and bounded inline or HTTPS JPEG, PNG, GIF and WebP parts are accepted. HTTPS images are retrieved only after credential and model authorization, reject redirects and non-public destinations, and are persisted as validated inline bytes. When durable task storage is configured, SendMessage creates or continues an owner-scoped task using optimistic concurrency. Setting returnImmediately=true uses durable background Responses execution; GetTask reconciles pending execution and CancelTask cancels it. Streaming methods emit ordered task, artifact-update and terminal-status SSE lifecycles. Subscriptions have bounded concurrency, duration and polling frequency. Other media parts and push notifications return explicit protocol errors.
+      description: Implements A2A 1.0 SendMessage, SendStreamingMessage, SubscribeToTask, GetTask, ListTasks, CancelTask and authenticated GetExtendedAgentCard. New messages pass through the same authentication, model authorization, rate limit, guardrail, routing and billing pipeline as Responses. Text, structured JSON data and bounded inline or HTTPS JPEG, PNG, GIF and WebP parts are accepted. HTTPS images are retrieved only after credential and model authorization, reject redirects and non-public destinations, and are persisted as validated inline bytes. When durable task storage is configured, SendMessage creates or continues an owner-scoped task using optimistic concurrency. Setting returnImmediately=true uses durable background Responses execution; GetTask reconciles pending execution and CancelTask cancels it. SendMessage push configuration is encrypted at rest and atomically persisted with the task; terminal delivery uses bounded durable retries after billing settlement. Streaming methods emit ordered task, artifact-update and terminal-status SSE lifecycles. Subscriptions have bounded concurrency, duration and polling frequency. Other media parts and push configuration on streaming messages return explicit protocol errors.
       security: [{bearerAuth: []}]
       parameters:
         - {name: agent, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
@@ -3494,6 +3494,22 @@ components:
               properties:
                 acceptedOutputModes: {type: array, items: {type: string, const: text/plain}}
                 returnImmediately: {type: boolean, description: Return an owner-scoped submitted or working task while durable background execution continues}
+                pushNotificationConfig: {$ref: '#/components/schemas/A2APushNotificationConfig'}
+    A2APushNotificationConfig:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+        url: {type: string, format: uri, maxLength: 2048, pattern: '^https://', description: Public HTTPS callback URL without credentials or fragment}
+        token: {type: string, maxLength: 4096, description: Opaque value delivered in X-A2A-Notification-Token and encrypted at rest}
+        authentication:
+          type: object
+          additionalProperties: false
+          required: [schemes, credentials]
+          properties:
+            schemes: {type: array, minItems: 1, maxItems: 1, items: {type: string, enum: [Bearer, Basic]}}
+            credentials: {type: string, minLength: 1, maxLength: 4096, description: Static callback credential encrypted at rest}
     A2AJSONRPCResponse:
       type: object
       additionalProperties: false

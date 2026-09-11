@@ -55,9 +55,9 @@ type a2aRequest struct {
 		StatusTimestampAfter string     `json:"statusTimestampAfter,omitempty"`
 		Message              a2aMessage `json:"message"`
 		Configuration        struct {
-			AcceptedOutputModes    []string        `json:"acceptedOutputModes,omitempty"`
-			ReturnImmediately      *bool           `json:"returnImmediately,omitempty"`
-			PushNotificationConfig json.RawMessage `json:"pushNotificationConfig,omitempty"`
+			AcceptedOutputModes    []string       `json:"acceptedOutputModes,omitempty"`
+			ReturnImmediately      *bool          `json:"returnImmediately,omitempty"`
+			PushNotificationConfig *a2aPushConfig `json:"pushNotificationConfig,omitempty"`
 		} `json:"configuration,omitempty"`
 	} `json:"params"`
 }
@@ -155,7 +155,7 @@ func (h Handler) a2aAgentCard(r *http.Request, profile AgentProfile) map[string]
 		"supportedInterfaces": []any{map[string]any{"url": endpoint, "protocolBinding": "JSONRPC", "tenant": profile.ID, "protocolVersion": a2aProtocolVersion}},
 		"capabilities": map[string]any{
 			"streaming":         h.a2aTasks != nil && h.a2aTaskConfig.OwnerQuota > 0 && h.a2aTaskConfig.TTL > 0,
-			"pushNotifications": false, "extendedAgentCard": true,
+			"pushNotifications": h.a2aPushJobs != nil && h.a2aPushVault != nil, "extendedAgentCard": true,
 		},
 		"securitySchemes": map[string]any{"bearer": map[string]any{"httpAuthSecurityScheme": map[string]any{
 			"description": "Gateway virtual key", "scheme": "Bearer",
@@ -282,9 +282,26 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32005, "Content type is not supported")
 		return
 	}
-	if len(request.Params.Configuration.PushNotificationConfig) != 0 && string(request.Params.Configuration.PushNotificationConfig) != "null" {
-		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32003, "Push notifications are not supported")
-		return
+	pushConfig := request.Params.Configuration.PushNotificationConfig
+	if pushConfig != nil {
+		if stream {
+			h.writeA2AError(w, request.ID, http.StatusBadRequest, -32003, "Push notifications are not supported for streaming messages")
+			return
+		}
+		if _, ok := h.a2aTasks.(a2astate.AtomicOutboxStore); !ok || h.a2aPushJobs == nil || h.a2aPushVault == nil {
+			h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32003, "Push notifications are not supported")
+			return
+		}
+		if err := pushConfig.validate(); err != nil {
+			h.writeA2AError(w, request.ID, http.StatusBadRequest, -32602, "Invalid push notification configuration")
+			return
+		}
+		if request.Params.Message.ContextID == "" {
+			request.Params.Message.ContextID = newA2AID("ctx")
+		}
+		if request.Params.Message.TaskID == "" {
+			request.Params.Message.TaskID = newA2AID("task")
+		}
 	}
 	for _, mode := range request.Params.Configuration.AcceptedOutputModes {
 		if mode != "text/plain" {
@@ -323,6 +340,17 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 			}
 			h.writeA2ATaskStoreError(w, request.ID, err)
 			return
+		}
+		if h.a2aPushJobs != nil {
+			pendingPush, pushErr := h.a2aPushJobs.HasAsyncJob(r.Context(), a2aPushJobKind, stored.ID, stored.OwnerKey)
+			if pushErr != nil {
+				h.writeA2AError(w, request.ID, http.StatusServiceUnavailable, -32603, "Task notification status is unavailable")
+				return
+			}
+			if pendingPush {
+				h.writeA2AError(w, request.ID, http.StatusConflict, -32602, "Task notification is pending")
+				return
+			}
 		}
 		if existing.Status.State != "TASK_STATE_COMPLETED" {
 			h.writeA2AError(w, request.ID, http.StatusConflict, -32602, "Task cannot be continued in its current state")
@@ -395,16 +423,15 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 				backgroundResponseID = ""
 			}
 			payload, err := encodeA2AStoredTask(task, backgroundResponseID)
-			if err == nil && continuation {
-				_, err = h.a2aTasks.UpdateA2ATask(r.Context(), a2astate.Task{
-					ID: task.ID, OwnerKey: fileOwnerKey(reqCtx), AgentID: profile.ID, Model: stored.Model, ContextID: task.ContextID,
+			if err == nil {
+				model := profile.Model
+				if continuation {
+					model = stored.Model
+				}
+				err = h.saveA2ATask(r.Context(), reqCtx, a2astate.Task{
+					ID: task.ID, OwnerKey: fileOwnerKey(reqCtx), AgentID: profile.ID, Model: model, ContextID: task.ContextID,
 					State: task.Status.State, Payload: payload,
-				}, stored.UpdatedAt, h.a2aTaskConfig.TTL)
-			} else if err == nil {
-				_, err = h.a2aTasks.CreateA2ATask(r.Context(), a2astate.Task{
-					ID: task.ID, OwnerKey: fileOwnerKey(reqCtx), AgentID: profile.ID, Model: profile.Model, ContextID: task.ContextID,
-					State: task.Status.State, Payload: payload,
-				}, h.a2aTaskConfig.OwnerQuota, h.a2aTaskConfig.TTL)
+				}, continuation, stored.UpdatedAt, pushConfig)
 			}
 			storageErr = err
 			if err != nil {
@@ -446,16 +473,15 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		if err == nil && len(payload) > a2astate.MaxPayloadBytes {
 			err = a2astate.ErrInvalid
 		}
-		if err == nil && continuation {
-			_, err = h.a2aTasks.UpdateA2ATask(r.Context(), a2astate.Task{
-				ID: taskID, OwnerKey: fileOwnerKey(reqCtx), AgentID: profile.ID, Model: stored.Model, ContextID: contextID,
+		if err == nil {
+			model := profile.Model
+			if continuation {
+				model = stored.Model
+			}
+			err = h.saveA2ATask(r.Context(), reqCtx, a2astate.Task{
+				ID: taskID, OwnerKey: fileOwnerKey(reqCtx), AgentID: profile.ID, Model: model, ContextID: contextID,
 				State: task.Status.State, Payload: payload,
-			}, stored.UpdatedAt, h.a2aTaskConfig.TTL)
-		} else if err == nil {
-			_, err = h.a2aTasks.CreateA2ATask(r.Context(), a2astate.Task{
-				ID: taskID, OwnerKey: fileOwnerKey(reqCtx), AgentID: profile.ID, Model: profile.Model, ContextID: contextID,
-				State: task.Status.State, Payload: payload,
-			}, h.a2aTaskConfig.OwnerQuota, h.a2aTaskConfig.TTL)
+			}, continuation, stored.UpdatedAt, pushConfig)
 		}
 		storageErr = err
 		return a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: map[string]any{"task": task}}
