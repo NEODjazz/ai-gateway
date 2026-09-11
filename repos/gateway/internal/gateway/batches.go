@@ -481,28 +481,39 @@ func (h Handler) ProcessBatchItems(ctx context.Context) (int, error) {
 func (h Handler) processBatchItem(ctx context.Context, job asyncstate.Job) error {
 	var payload batchJob
 	if json.Unmarshal(job.Payload, &payload) != nil || payload.Ordinal < 0 {
-		return h.retryBatchJob(ctx, job)
+		return h.retryBatchJob(ctx, job, errors.New("invalid batch job payload"))
 	}
 	resource := strings.SplitN(job.ResourceID, ":", 2)
 	if len(resource) != 2 {
-		return h.retryBatchJob(ctx, job)
+		return h.retryBatchJob(ctx, job, errors.New("invalid batch job resource ID"))
 	}
 	batch, err := h.batches.GetBatch(ctx, job.OwnerKey, resource[0])
 	if err != nil {
-		return h.retryBatchJob(ctx, job)
-	}
-	if batch.Status == "cancelled" || batch.Status == "completed" || batch.Status == "failed" || batch.Status == "expired" {
-		return h.batchJobs.CompleteAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration)
-	}
-	if !time.Now().Before(batch.ExpiresAt) {
-		if _, err := h.batches.ExpireBatch(ctx, job.OwnerKey, batch.ID); err != nil && !errors.Is(err, batchstate.ErrConflict) {
-			return h.retryBatchJob(ctx, job)
-		}
-		return h.batchJobs.CompleteAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration)
+		return h.retryBatchJob(ctx, job, err)
 	}
 	item, err := h.batches.GetBatchItem(ctx, job.OwnerKey, batch.ID, payload.Ordinal)
 	if err != nil {
-		return h.retryBatchJob(ctx, job)
+		return h.retryBatchJob(ctx, job, err)
+	}
+	if item.State == "settling_success" || item.State == "settling_failure" {
+		failed := item.State == "settling_failure"
+		if err := h.settleBatchItem(ctx, item, failed); err != nil {
+			return h.retryBatchJob(ctx, job, err)
+		}
+		batch, err = h.batches.FinishBatchItem(ctx, item, failed)
+		if err != nil {
+			return h.retryBatchJob(ctx, job, err)
+		}
+	} else {
+		if batch.Status == "cancelled" || batch.Status == "completed" || batch.Status == "failed" || batch.Status == "expired" {
+			return h.batchJobs.CompleteAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration)
+		}
+		if !time.Now().Before(batch.ExpiresAt) {
+			if _, err := h.batches.ExpireBatch(ctx, job.OwnerKey, batch.ID); err != nil && !errors.Is(err, batchstate.ErrConflict) {
+				return h.retryBatchJob(ctx, job, err)
+			}
+			return h.batchJobs.CompleteAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration)
+		}
 	}
 	if item.State == "pending" {
 		batch, err = h.batches.StartBatch(ctx, job.OwnerKey, batch.ID)
@@ -510,141 +521,200 @@ func (h Handler) processBatchItem(ctx context.Context, job asyncstate.Job) error
 			if errors.Is(err, batchstate.ErrConflict) {
 				return h.batchJobs.CompleteAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration)
 			}
-			return h.retryBatchJob(ctx, job)
+			return h.retryBatchJob(ctx, job, err)
 		}
 		itemCtx, cancel := context.WithTimeout(ctx, batchItemTimeout)
-		result, failed, retry := h.executeBatchItem(itemCtx, batch, item)
+		result, failed, executeErr := h.executeBatchItem(itemCtx, batch, item)
 		cancel()
-		if retry {
-			return h.retryBatchJob(ctx, job)
+		if executeErr != nil {
+			return h.retryBatchJob(ctx, job, executeErr)
 		}
 		item.Result = result
+		if err := h.batches.StageBatchItem(ctx, item, failed); err != nil {
+			return h.retryBatchJob(ctx, job, err)
+		}
+		if err := h.settleBatchItem(ctx, item, failed); err != nil {
+			return h.retryBatchJob(ctx, job, err)
+		}
 		batch, err = h.batches.FinishBatchItem(ctx, item, failed)
 		if err != nil {
-			return h.retryBatchJob(ctx, job)
+			return h.retryBatchJob(ctx, job, err)
 		}
 	} else {
 		batch, err = h.batches.GetBatch(ctx, job.OwnerKey, batch.ID)
 		if err != nil {
-			return h.retryBatchJob(ctx, job)
+			return h.retryBatchJob(ctx, job, err)
 		}
 	}
 	if batch.Status == "finalizing" {
 		if _, err = h.finalizeBatch(ctx, batch); err != nil {
-			return h.retryBatchJob(ctx, job)
+			return h.retryBatchJob(ctx, job, err)
 		}
 	}
 	return h.batchJobs.CompleteAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration)
 }
 
-func (h Handler) executeBatchItem(ctx context.Context, batch batchstate.Batch, item batchstate.Item) ([]byte, bool, bool) {
-	var identity modules.RequestContext
-	if json.Unmarshal(item.Identity, &identity) != nil {
-		return batchErrorResult(item, "invalid_batch_state", "stored batch identity is invalid"), true, false
+func (h Handler) executeBatchItem(ctx context.Context, batch batchstate.Batch, item batchstate.Item) ([]byte, bool, error) {
+	identity, tokens, err := prepareBatchItemRequest(item)
+	if err != nil {
+		return batchErrorResult(item, "invalid_batch_state", "stored batch identity is invalid"), true, nil
 	}
-	identity.RequestID = item.ExecutionID
-	if identity.Metadata == nil {
-		identity.Metadata = map[string]string{}
-	}
-	identity.Metadata["gateway.api_type"] = "batch"
 	identity.Metadata["gateway.batch_id"] = batch.ID
 	identity.Metadata["gateway.batch_custom_id"] = item.CustomID
-	status, body, err := h.callBatchProvider(ctx, &identity, item.URL, item.Body)
-	if errors.Is(err, errBatchRateLimited) {
-		return nil, false, true
+	if !h.allowBatchRate(ctx, identity, tokens) {
+		return nil, false, errBatchRateLimited
 	}
+	if err := h.resourceBillingPipeline().RunBillingLifecycle(ctx, &identity, "reserve", nil); err != nil {
+		return nil, false, err
+	}
+	status, body, err := h.callBatchProvider(ctx, &identity, item.URL)
 	if err != nil {
 		log.Printf("batch item %s/%s failed: %v", batch.ID, item.CustomID, err)
-		return batchErrorResult(item, "provider_error", "batch item execution failed"), true, false
+		return batchErrorResult(item, "provider_error", "batch item execution failed"), true, nil
 	}
 	line := openai.BatchOutputLine{ID: "batch_req_" + item.ExecutionID, CustomID: item.CustomID, Response: &openai.BatchOutputResponse{StatusCode: status, RequestID: item.ExecutionID, Body: body}}
 	encoded, _ := json.Marshal(line)
-	return encoded, false, false
+	return encoded, false, nil
 }
 
-func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestContext, endpoint string, body []byte) (int, json.RawMessage, error) {
-	switch endpoint {
+func prepareBatchItemRequest(item batchstate.Item) (modules.RequestContext, int, error) {
+	var req modules.RequestContext
+	if json.Unmarshal(item.Identity, &req) != nil {
+		return modules.RequestContext{}, 0, batchstate.ErrInvalid
+	}
+	req.RequestID = item.ExecutionID
+	if req.Metadata == nil {
+		req.Metadata = map[string]string{}
+	}
+	req.Metadata["gateway.api_type"] = "batch"
+	switch item.URL {
 	case "/v1/chat/completions":
-		var value openai.ChatCompletionRequest
-		if err := json.Unmarshal(body, &value); err != nil {
-			return 0, nil, err
+		if err := json.Unmarshal(item.Body, &req.Request); err != nil {
+			return modules.RequestContext{}, 0, err
 		}
-		req.Request = value
-		if !h.allowBatchRate(ctx, *req, estimateChatTokens(value)) {
-			return 0, nil, errBatchRateLimited
-		}
-		response, err := h.provider.ChatCompletions(ctx, *req)
-		payload, _ := json.Marshal(response)
-		return http.StatusOK, payload, err
+		return req, estimateChatTokens(req.Request), nil
 	case "/v1/responses":
 		var value openai.ResponseRequest
-		if err := json.Unmarshal(body, &value); err != nil {
-			return 0, nil, err
+		if err := json.Unmarshal(item.Body, &value); err != nil {
+			return modules.RequestContext{}, 0, err
 		}
 		req.ResponseRequest = &value
 		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model, Messages: responseMessages(value)}
-		if !h.allowBatchRate(ctx, *req, estimateResponseTokens(value)) {
-			return 0, nil, errBatchRateLimited
-		}
-		response, err := h.provider.Responses(ctx, *req)
-		payload, _ := json.Marshal(response)
-		return http.StatusOK, payload, err
+		return req, estimateResponseTokens(value), nil
 	case "/v1/completions":
 		var value openai.CompletionRequest
-		if err := json.Unmarshal(body, &value); err != nil {
-			return 0, nil, err
+		if err := json.Unmarshal(item.Body, &value); err != nil {
+			return modules.RequestContext{}, 0, err
 		}
 		req.CompletionRequest = &value
 		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model}
-		if !h.allowBatchRate(ctx, *req, estimateCompletionTokens(value)) {
-			return 0, nil, errBatchRateLimited
+		return req, estimateCompletionTokens(value), nil
+	case "/v1/embeddings":
+		var value openai.EmbeddingRequest
+		if err := json.Unmarshal(item.Body, &value); err != nil {
+			return modules.RequestContext{}, 0, err
 		}
+		req.EmbeddingRequest = &value
+		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model}
+		return req, estimateEmbeddingTokens(value), nil
+	case "/v1/moderations":
+		var value openai.ModerationRequest
+		if err := json.Unmarshal(item.Body, &value); err != nil {
+			return modules.RequestContext{}, 0, err
+		}
+		req.ModerationRequest = &value
+		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model}
+		return req, openai.ModerationInputTokenCount(value.Input), nil
+	}
+	return modules.RequestContext{}, 0, batchstate.ErrInvalid
+}
+
+func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestContext, endpoint string) (int, json.RawMessage, error) {
+	switch endpoint {
+	case "/v1/chat/completions":
+		response, err := h.provider.ChatCompletions(ctx, *req)
+		req.Response = &response
+		payload, _ := json.Marshal(response)
+		return http.StatusOK, payload, err
+	case "/v1/responses":
+		response, err := h.provider.Responses(ctx, *req)
+		req.ResponsesResponse = &response
+		payload, _ := json.Marshal(response)
+		return http.StatusOK, payload, err
+	case "/v1/completions":
 		client, ok := h.provider.(provider.CompletionProvider)
 		if !ok {
 			return 0, nil, provider.ErrCompletionsUnsupported
 		}
 		response, err := client.Completions(ctx, *req)
+		req.CompletionResponse = &response
 		payload, _ := json.Marshal(response)
 		return http.StatusOK, payload, err
 	case "/v1/embeddings":
-		var value openai.EmbeddingRequest
-		if err := json.Unmarshal(body, &value); err != nil {
-			return 0, nil, err
-		}
-		req.EmbeddingRequest = &value
-		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model}
-		if !h.allowBatchRate(ctx, *req, estimateEmbeddingTokens(value)) {
-			return 0, nil, errBatchRateLimited
-		}
 		client, ok := h.provider.(provider.EmbeddingProvider)
 		if !ok {
 			return 0, nil, errors.New("embeddings unsupported")
 		}
 		response, err := client.Embeddings(ctx, *req)
+		req.EmbeddingResponse = &response
 		payload, _ := json.Marshal(response)
 		return http.StatusOK, payload, err
 	case "/v1/moderations":
-		var value openai.ModerationRequest
-		if err := json.Unmarshal(body, &value); err != nil {
-			return 0, nil, err
-		}
-		req.ModerationRequest = &value
-		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model}
-		if !h.allowBatchRate(ctx, *req, openai.ModerationInputTokenCount(value.Input)) {
-			return 0, nil, errBatchRateLimited
-		}
 		client, ok := h.provider.(provider.ModerationProvider)
 		if !ok {
 			return 0, nil, errors.New("moderations unsupported")
 		}
 		response, err := client.Moderations(ctx, *req)
+		req.ModerationResponse = &response
 		payload, _ := json.Marshal(response)
 		return http.StatusOK, payload, err
 	}
 	return 0, nil, errors.New("unsupported endpoint")
 }
 
-var errBatchRateLimited = errors.New("batch item rate limited")
+func (h Handler) settleBatchItem(ctx context.Context, item batchstate.Item, failed bool) error {
+	req, _, err := prepareBatchItemRequest(item)
+	if err != nil {
+		return err
+	}
+	req.Metadata["gateway.batch_id"] = item.BatchID
+	req.Metadata["gateway.batch_custom_id"] = item.CustomID
+	if failed {
+		return h.resourceBillingPipeline().RunBillingLifecycle(ctx, &req, "cancel", errors.New("batch item execution failed"))
+	}
+	var line openai.BatchOutputLine
+	if json.Unmarshal(item.Result, &line) != nil || line.Response == nil {
+		return batchstate.ErrInvalid
+	}
+	switch item.URL {
+	case "/v1/chat/completions":
+		var response openai.ChatCompletionResponse
+		err = json.Unmarshal(line.Response.Body, &response)
+		req.Response = &response
+	case "/v1/responses":
+		var response openai.ResponseResponse
+		err = json.Unmarshal(line.Response.Body, &response)
+		req.ResponsesResponse = &response
+	case "/v1/completions":
+		var response openai.CompletionResponse
+		err = json.Unmarshal(line.Response.Body, &response)
+		req.CompletionResponse = &response
+	case "/v1/embeddings":
+		var response openai.EmbeddingResponse
+		err = json.Unmarshal(line.Response.Body, &response)
+		req.EmbeddingResponse = &response
+	case "/v1/moderations":
+		var response openai.ModerationResponse
+		err = json.Unmarshal(line.Response.Body, &response)
+		req.ModerationResponse = &response
+	default:
+		err = batchstate.ErrInvalid
+	}
+	if err != nil {
+		return err
+	}
+	return h.resourceBillingPipeline().RunBillingLifecycle(ctx, &req, "commit", nil)
+}
 
 func (h Handler) allowBatchRate(ctx context.Context, req modules.RequestContext, tokens int) bool {
 	key := req.CredentialID
@@ -654,12 +724,16 @@ func (h Handler) allowBatchRate(ctx context.Context, req modules.RequestContext,
 	allowed, _, err := h.rateLimits.Allow(ctx, key, RateLimit{Requests: req.RateLimitRPM, Tokens: req.RateLimitTPM}, tokens)
 	return err == nil && allowed
 }
+
+var errBatchRateLimited = errors.New("batch item rate limited")
+
 func batchErrorResult(item batchstate.Item, code, message string) []byte {
 	payload, _ := json.Marshal(openai.BatchOutputLine{ID: "batch_req_" + item.ExecutionID, CustomID: item.CustomID, Error: &openai.BatchOutputLineError{Code: code, Message: message}})
 	return payload
 }
-func (h Handler) retryBatchJob(ctx context.Context, job asyncstate.Job) error {
-	return h.batchJobs.RetryAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration, backgroundRetry(job.Attempts))
+func (h Handler) retryBatchJob(ctx context.Context, job asyncstate.Job, cause error) error {
+	retryErr := h.batchJobs.RetryAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration, backgroundRetry(job.Attempts))
+	return errors.Join(cause, retryErr)
 }
 func backgroundRetry(attempt int) time.Duration {
 	if attempt < 1 {
