@@ -121,7 +121,7 @@ func insertA2APushConfig(ctx context.Context, tx pgx.Tx, config a2astate.PushCon
 	if !validA2APushConfig(config) {
 		return a2astate.ErrInvalid
 	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 3))`, config.OwnerKey+"\x00"+config.TaskID); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,hashtextextended($2,3)))`, config.OwnerKey, config.TaskID); err != nil {
 		return err
 	}
 	var taskExists bool
