@@ -67,7 +67,7 @@ func (pinnedPricingPolicy) Apply(_ context.Context, event *BillingEvent) error {
 		event.InputCostPer1M = 1
 		event.OutputCostPer1M = 2
 		event.Currency = "USD"
-		event.Cost = pricingCost(event.InputTokens, event.OutputTokens, 0, event.InputCharacters, event.InputPages, 0, event.SearchRequests, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2})
+		event.Cost = pricingCost(event.InputTokens, event.OutputTokens, 0, event.InputCharacters, event.InputPages, 0, 0, event.SearchRequests, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2})
 	}
 	return nil
 }
@@ -105,6 +105,7 @@ func TestModelCatalogRejectsInvalidEntries(t *testing.T) {
 		`{"version":"v1","models":[{"provider":"p","model":"m","character_cost_per_1m":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m","page_cost_per_1k":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m","audio_cost_per_minute":-1}]}`,
+		`{"version":"v1","models":[{"provider":"p","model":"m","video_cost_per_second":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m"},{"provider":"p","model":"m"}]}`,
 	} {
 		if _, err := ParseModelCatalog(raw); err == nil {
@@ -125,12 +126,12 @@ func TestDocumentedModelCatalogExampleMatchesBillingSchema(t *testing.T) {
 }
 
 func TestSuppliedRuntimePricingSnapshotOverridesStaticCatalog(t *testing.T) {
-	req := &RequestContext{Metadata: map[string]string{"model_catalog.version": "runtime-v2", "model_catalog.pricing_key": "endpoint/model", "model_catalog.input_cost_per_1m": "2.5", "model_catalog.output_cost_per_1m": "5", "model_catalog.training_cost_per_1m": "7.5", "model_catalog.search_cost_per_1k": "12", "model_catalog.character_cost_per_1m": "15", "model_catalog.audio_cost_per_minute": "0.12", "model_catalog.currency": "EUR"}}
+	req := &RequestContext{Metadata: map[string]string{"model_catalog.version": "runtime-v2", "model_catalog.pricing_key": "endpoint/model", "model_catalog.input_cost_per_1m": "2.5", "model_catalog.output_cost_per_1m": "5", "model_catalog.training_cost_per_1m": "7.5", "model_catalog.search_cost_per_1k": "12", "model_catalog.character_cost_per_1m": "15", "model_catalog.audio_cost_per_minute": "0.12", "model_catalog.video_cost_per_second": "0.25", "model_catalog.currency": "EUR"}}
 	pricing, supplied, err := suppliedPricingSnapshot(req)
 	if err != nil || !supplied {
 		t.Fatalf("supplied=%v err=%v", supplied, err)
 	}
-	if pricing.CatalogVersion != "runtime-v2" || pricing.InputCostPer1M != 2.5 || pricing.TrainingCostPer1M != 7.5 || pricing.SearchCostPer1K != 12 || pricing.CharacterCostPer1M != 15 || pricing.AudioCostPerMinute != 0.12 || pricing.Currency != "EUR" {
+	if pricing.CatalogVersion != "runtime-v2" || pricing.InputCostPer1M != 2.5 || pricing.TrainingCostPer1M != 7.5 || pricing.SearchCostPer1K != 12 || pricing.CharacterCostPer1M != 15 || pricing.AudioCostPerMinute != 0.12 || pricing.VideoCostPerSecond != 0.25 || pricing.Currency != "EUR" {
 		t.Fatalf("pricing=%+v", pricing)
 	}
 }
@@ -145,7 +146,7 @@ func TestSuppliedRuntimePricingSnapshotFailsClosed(t *testing.T) {
 func TestSuppliedRuntimePricingSnapshotDefaultsMissingSearchPriceToZero(t *testing.T) {
 	req := &RequestContext{Metadata: map[string]string{"model_catalog.version": "runtime-v1", "model_catalog.pricing_key": "endpoint/model", "model_catalog.input_cost_per_1m": "2.5", "model_catalog.output_cost_per_1m": "5", "model_catalog.currency": "USD"}}
 	pricing, supplied, err := suppliedPricingSnapshot(req)
-	if err != nil || !supplied || pricing.SearchCostPer1K != 0 || pricing.CharacterCostPer1M != 0 || pricing.AudioCostPerMinute != 0 {
+	if err != nil || !supplied || pricing.SearchCostPer1K != 0 || pricing.CharacterCostPer1M != 0 || pricing.AudioCostPerMinute != 0 || pricing.VideoCostPerSecond != 0 {
 		t.Fatalf("pricing=%+v supplied=%v err=%v", pricing, supplied, err)
 	}
 }

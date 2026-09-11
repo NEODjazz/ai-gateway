@@ -41,6 +41,7 @@ type UsageRequest struct {
 	InputCharacters         int      `json:"input_characters"`
 	InputPages              int      `json:"input_pages"`
 	InputAudioMilliseconds  int      `json:"input_audio_milliseconds"`
+	VideoSeconds            int      `json:"video_seconds"`
 	ToolRequests            int      `json:"tool_requests"`
 	TrainingTokens          int      `json:"training_tokens"`
 	InputTokens             int      `json:"input_tokens"`
@@ -59,6 +60,7 @@ type UsageRequest struct {
 	CharacterCostPer1M      string   `json:"character_cost_per_1m,omitempty"`
 	PageCostPer1K           string   `json:"page_cost_per_1k,omitempty"`
 	AudioCostPerMinute      string   `json:"audio_cost_per_minute,omitempty"`
+	VideoCostPerSecond      string   `json:"video_cost_per_second,omitempty"`
 	Currency                string   `json:"currency,omitempty"`
 }
 
@@ -157,6 +159,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		InputCharacters:        req.InputCharacters,
 		InputPages:             req.InputPages,
 		InputAudioMilliseconds: req.InputAudioMilliseconds,
+		VideoSeconds:           req.VideoSeconds,
 		ToolRequests:           req.ToolRequests,
 		TrainingTokens:         req.TrainingTokens,
 		CatalogVersion:         metadataValue(req.Metadata, "model_catalog.version"),
@@ -168,6 +171,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		CharacterCostPer1M:     metadataValue(req.Metadata, "model_catalog.character_cost_per_1m"),
 		PageCostPer1K:          metadataValue(req.Metadata, "model_catalog.page_cost_per_1k"),
 		AudioCostPerMinute:     metadataValue(req.Metadata, "model_catalog.audio_cost_per_minute"),
+		VideoCostPerSecond:     metadataValue(req.Metadata, "model_catalog.video_cost_per_second"),
 		Currency:               metadataValue(req.Metadata, "model_catalog.currency"),
 	}
 	request.InputTokens = request.PromptTokensEstimated
@@ -199,8 +203,10 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.APIType = "mcp_tools_call"
 	case "fine_tuning":
 		request.APIType = "fine_tuning"
+	case "video":
+		request.APIType = "video"
 	}
-	if request.APIType == "fine_tuning" {
+	if request.APIType == "fine_tuning" || request.APIType == "video" {
 		request.InputTokens = 0
 		request.PromptTokensEstimated = 0
 		request.OutputTokens = 0
@@ -208,7 +214,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 	} else if request.OutputTokens == 0 && req.CompletionRequest == nil {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
 	}
-	if request.APIType == "fine_tuning" {
+	if request.APIType == "fine_tuning" || request.APIType == "video" {
 		request.TotalTokens = 0
 	} else {
 		request.TotalTokens = openai.ReserveTokens(request.InputTokens, request.OutputTokens)
@@ -447,7 +453,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.UsageEstimated = false
 	}
 	providerReportedUsage := (req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil) || (req.AudioTranscriptionResponse != nil && req.AudioTranscriptionResponse.Usage != nil)
-	if request.TotalTokens == 0 && request.APIType != "fine_tuning" && request.CacheStatus != "hit" && !providerReportedUsage {
+	if request.TotalTokens == 0 && request.APIType != "fine_tuning" && request.APIType != "video" && request.CacheStatus != "hit" && !providerReportedUsage {
 		if req.CompletionRequest != nil {
 			request.InputTokens = openai.CompletionInputTokens(*req.CompletionRequest)
 			request.TotalTokens = openai.CompletionReserveTokens(*req.CompletionRequest)

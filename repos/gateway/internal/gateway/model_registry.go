@@ -108,7 +108,7 @@ func (h Handler) PutModelCatalog(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_request", "invalid model currency")
 			return
 		}
-		if (entry.InputCostPer1M > 0 || entry.OutputCostPer1M > 0 || entry.SearchCostPer1K > 0 || entry.CharacterCostPer1M > 0 || entry.PageCostPer1K > 0 || entry.AudioCostPerMinute > 0) && entry.Currency == "" {
+		if (entry.InputCostPer1M > 0 || entry.OutputCostPer1M > 0 || entry.SearchCostPer1K > 0 || entry.CharacterCostPer1M > 0 || entry.PageCostPer1K > 0 || entry.AudioCostPerMinute > 0 || entry.VideoCostPerSecond > 0) && entry.Currency == "" {
 			writeError(w, http.StatusBadRequest, "invalid_request", "priced runtime catalog entries require currency")
 			return
 		}

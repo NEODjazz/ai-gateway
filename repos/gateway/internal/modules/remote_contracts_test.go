@@ -198,9 +198,11 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	req.Metadata["model_catalog.character_cost_per_1m"] = "15"
 	req.Metadata["model_catalog.page_cost_per_1k"] = "100"
 	req.Metadata["model_catalog.audio_cost_per_minute"] = "0.12"
+	req.Metadata["model_catalog.video_cost_per_second"] = "0.25"
 	req.InputCharacters = 4096
 	req.InputPages = 4
 	req.InputAudioMilliseconds = 90000
+	req.VideoSeconds = 12
 	req.ToolRequests = 3
 	req.TrainingTokens = 1000
 	req.Metadata["model_catalog.currency"] = "USD"
@@ -213,7 +215,7 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	req.Request.Model = "fallback-group"
 	req.Response = &openai.ChatCompletionResponse{Model: "gpt-5.6-luna-2026-07-09", Usage: openai.Usage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11, PromptTokensDetails: &openai.PromptTokenDetails{CachedTokens: 6, CacheCreationTokens: 2}, CompletionTokensDetails: &openai.CompletionTokenDetails{AcceptedPredictionTokens: 2, RejectedPredictionTokens: 1}}}
 	request := billingRequest(&req)
-	if request.CatalogVersion != "runtime-v2" || request.PricingKey != "endpoint/model" || request.InputCostPer1M != "1.5" || request.TrainingCostPer1M != "5" || request.TrainingTokens != 1000 || request.SearchCostPer1K != "10" || request.CharacterCostPer1M != "15" || request.PageCostPer1K != "100" || request.AudioCostPerMinute != "0.12" || request.InputCharacters != 4096 || request.InputPages != 4 || request.InputAudioMilliseconds != 90000 || request.ToolRequests != 3 || request.Currency != "USD" {
+	if request.CatalogVersion != "runtime-v2" || request.PricingKey != "endpoint/model" || request.InputCostPer1M != "1.5" || request.TrainingCostPer1M != "5" || request.TrainingTokens != 1000 || request.SearchCostPer1K != "10" || request.CharacterCostPer1M != "15" || request.PageCostPer1K != "100" || request.AudioCostPerMinute != "0.12" || request.VideoCostPerSecond != "0.25" || request.InputCharacters != 4096 || request.InputPages != 4 || request.InputAudioMilliseconds != 90000 || request.VideoSeconds != 12 || request.ToolRequests != 3 || request.Currency != "USD" {
 		t.Fatalf("pricing snapshot=%+v", request)
 	}
 	if request.ProviderID != "azure-open-ai" || request.Model != "gpt-5.6-luna" || request.UpstreamModel != "gpt-5.6-luna-2026-07-09" {

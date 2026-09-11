@@ -5,6 +5,12 @@ metadata:
   labels:
     {{- include "clickhouse.labels" . | nindent 4 }}
 data:
+  015_usage_video_duration.sql: |
+    ALTER TABLE ai_gateway.usage_events
+        ADD COLUMN IF NOT EXISTS video_seconds UInt32 AFTER input_audio_milliseconds;
+
+    ALTER TABLE ai_gateway.usage_events
+        ADD COLUMN IF NOT EXISTS video_cost_per_second Float64 AFTER audio_cost_per_minute;
   014_usage_training_tokens.sql: |
     ALTER TABLE ai_gateway.usage_events
         ADD COLUMN IF NOT EXISTS training_tokens UInt64 AFTER total_tokens;

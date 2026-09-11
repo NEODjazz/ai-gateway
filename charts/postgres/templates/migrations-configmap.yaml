@@ -5,6 +5,9 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  015_billing_video_duration.sql: |
+    ALTER TABLE billing_budget_reservations
+        ADD COLUMN IF NOT EXISTS video_cost_per_second numeric(20,10) NOT NULL DEFAULT 0;
   026_gateway_video_jobs.sql: |
     CREATE TABLE IF NOT EXISTS gateway_video_jobs (
         video_id TEXT NOT NULL,

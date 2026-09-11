@@ -45,6 +45,7 @@ type budgetReservation struct {
 	CharacterCostPer1M float64
 	PageCostPer1K      float64
 	AudioCostPerMinute float64
+	VideoCostPerSecond float64
 }
 
 func NewPostgresBudgetPolicyChecker(dsn string, ttl time.Duration) *PostgresBudgetPolicyChecker {
@@ -72,7 +73,7 @@ func (c *PostgresBudgetPolicyChecker) Ready(ctx context.Context) error {
 	if err := c.pool.Ping(ctx); err != nil {
 		return errors.New("billing policy postgres is unavailable")
 	}
-	var policies, reservations, pricingSnapshots, tagSnapshots, organizationSnapshots, serverToolSnapshots, characterSnapshots, pageSnapshots, audioSnapshots, trainingSnapshots bool
+	var policies, reservations, pricingSnapshots, tagSnapshots, organizationSnapshots, serverToolSnapshots, characterSnapshots, pageSnapshots, audioSnapshots, videoSnapshots, trainingSnapshots bool
 	if err := c.pool.QueryRow(ctx, `
 		SELECT to_regclass('public.billing_budget_policies') IS NOT NULL,
 		       to_regclass('public.billing_budget_reservations') IS NOT NULL,
@@ -99,7 +100,10 @@ func (c *PostgresBudgetPolicyChecker) Ready(ctx context.Context) error {
 		                 AND column_name='audio_cost_per_minute'),
 		       EXISTS (SELECT 1 FROM information_schema.columns
 		               WHERE table_schema='public' AND table_name='billing_budget_reservations'
-		                 AND column_name='training_cost_per_1m')`).Scan(&policies, &reservations, &pricingSnapshots, &tagSnapshots, &organizationSnapshots, &serverToolSnapshots, &characterSnapshots, &pageSnapshots, &audioSnapshots, &trainingSnapshots); err != nil || !policies || !reservations || !pricingSnapshots || !tagSnapshots || !organizationSnapshots || !serverToolSnapshots || !characterSnapshots || !pageSnapshots || !audioSnapshots || !trainingSnapshots {
+		                 AND column_name='video_cost_per_second'),
+		       EXISTS (SELECT 1 FROM information_schema.columns
+		               WHERE table_schema='public' AND table_name='billing_budget_reservations'
+		                 AND column_name='training_cost_per_1m')`).Scan(&policies, &reservations, &pricingSnapshots, &tagSnapshots, &organizationSnapshots, &serverToolSnapshots, &characterSnapshots, &pageSnapshots, &audioSnapshots, &videoSnapshots, &trainingSnapshots); err != nil || !policies || !reservations || !pricingSnapshots || !tagSnapshots || !organizationSnapshots || !serverToolSnapshots || !characterSnapshots || !pageSnapshots || !audioSnapshots || !videoSnapshots || !trainingSnapshots {
 		return errors.New("billing budget migration is not applied")
 	}
 	return nil
@@ -173,10 +177,10 @@ func (c *PostgresBudgetPolicyChecker) applyTx(ctx context.Context, tx pgx.Tx, ev
 				UPDATE billing_budget_reservations
 				SET provider_name=$2, provider_type=$3, model=$4, currency=$5,
 				    reserved_cost=$6, reserved_tokens=$7, catalog_version=$8,
-				    pricing_key=$9, input_cost_per_1m=$10, output_cost_per_1m=$11, training_cost_per_1m=$12, search_cost_per_1k=$13, character_cost_per_1m=$14, page_cost_per_1k=$15, audio_cost_per_minute=$16, updated_at=now()
+				    pricing_key=$9, input_cost_per_1m=$10, output_cost_per_1m=$11, training_cost_per_1m=$12, search_cost_per_1k=$13, character_cost_per_1m=$14, page_cost_per_1k=$15, audio_cost_per_minute=$16, video_cost_per_second=$17, updated_at=now()
 				WHERE request_id=$1`, event.RequestID, budgetProviderName(*event),
 				budgetProviderType(*event), event.Model, event.Currency, event.Cost, event.TotalTokens,
-				event.CatalogVersion, event.PricingKey, event.InputCostPer1M, event.OutputCostPer1M, event.TrainingCostPer1M, event.SearchCostPer1K, event.CharacterCostPer1M, event.PageCostPer1K, event.AudioCostPerMinute)
+				event.CatalogVersion, event.PricingKey, event.InputCostPer1M, event.OutputCostPer1M, event.TrainingCostPer1M, event.SearchCostPer1K, event.CharacterCostPer1M, event.PageCostPer1K, event.AudioCostPerMinute, event.VideoCostPerSecond)
 			break
 		}
 		if err := checkBudgetPolicies(ctx, tx, policies, *event); err != nil {
@@ -186,14 +190,14 @@ func (c *PostgresBudgetPolicyChecker) applyTx(ctx context.Context, tx pgx.Tx, ev
 			INSERT INTO billing_budget_reservations
 			(request_id, owner_key, credential_id, user_id, team_id, organization_id, tags, provider_name,
 			 provider_type, model, currency, state, reserved_cost, reserved_tokens,
-			 catalog_version, pricing_key, input_cost_per_1m, output_cost_per_1m, training_cost_per_1m, search_cost_per_1k, character_cost_per_1m, page_cost_per_1k, audio_cost_per_minute,
+			 catalog_version, pricing_key, input_cost_per_1m, output_cost_per_1m, training_cost_per_1m, search_cost_per_1k, character_cost_per_1m, page_cost_per_1k, audio_cost_per_minute, video_cost_per_second,
 			 reservation_expires_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'reserved',$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
-			        clock_timestamp() + ($23 * interval '1 millisecond'))`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'reserved',$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
+		        clock_timestamp() + ($24 * interval '1 millisecond'))`,
 			event.RequestID, reservationOwner(*event), event.APIKeyFingerprint, event.UserID,
 			event.TeamID, event.OrganizationID, budgetTags(*event), budgetProviderName(*event), budgetProviderType(*event), event.Model,
 			event.Currency, event.Cost, event.TotalTokens, event.CatalogVersion, event.PricingKey,
-			event.InputCostPer1M, event.OutputCostPer1M, event.TrainingCostPer1M, event.SearchCostPer1K, event.CharacterCostPer1M, event.PageCostPer1K, event.AudioCostPerMinute, c.ttl.Milliseconds())
+			event.InputCostPer1M, event.OutputCostPer1M, event.TrainingCostPer1M, event.SearchCostPer1K, event.CharacterCostPer1M, event.PageCostPer1K, event.AudioCostPerMinute, event.VideoCostPerSecond, c.ttl.Milliseconds())
 	case "commit":
 		if found && reservation.State == "committed" {
 			return nil
@@ -214,13 +218,13 @@ func (c *PostgresBudgetPolicyChecker) applyTx(ctx context.Context, tx pgx.Tx, ev
 				INSERT INTO billing_budget_reservations
 				(request_id, owner_key, credential_id, user_id, team_id, organization_id, tags, provider_name,
 				 provider_type, model, currency, state, actual_cost, actual_tokens,
-				 catalog_version, pricing_key, input_cost_per_1m, output_cost_per_1m, training_cost_per_1m, search_cost_per_1k, character_cost_per_1m, page_cost_per_1k, audio_cost_per_minute,
+				 catalog_version, pricing_key, input_cost_per_1m, output_cost_per_1m, training_cost_per_1m, search_cost_per_1k, character_cost_per_1m, page_cost_per_1k, audio_cost_per_minute, video_cost_per_second,
 				 reservation_expires_at)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'committed',$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,now())`,
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'committed',$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,now())`,
 				event.RequestID, reservationOwner(*event), event.APIKeyFingerprint, event.UserID,
 				event.TeamID, event.OrganizationID, budgetTags(*event), budgetProviderName(*event), budgetProviderType(*event), event.Model,
 				event.Currency, event.Cost, event.TotalTokens, event.CatalogVersion, event.PricingKey,
-				event.InputCostPer1M, event.OutputCostPer1M, event.TrainingCostPer1M, event.SearchCostPer1K, event.CharacterCostPer1M, event.PageCostPer1K, event.AudioCostPerMinute)
+				event.InputCostPer1M, event.OutputCostPer1M, event.TrainingCostPer1M, event.SearchCostPer1K, event.CharacterCostPer1M, event.PageCostPer1K, event.AudioCostPerMinute, event.VideoCostPerSecond)
 		}
 	case "cancel":
 		if found && reservation.State == "committed" {
@@ -311,11 +315,11 @@ func reservationState(ctx context.Context, tx pgx.Tx, requestID string) (budgetR
 	var reservation budgetReservation
 	err := tx.QueryRow(ctx, `
 		SELECT state, owner_key, tags, organization_id, provider_name, provider_type, model, currency,
-		       catalog_version, pricing_key, input_cost_per_1m::float8, output_cost_per_1m::float8, training_cost_per_1m::float8, search_cost_per_1k::float8, character_cost_per_1m::float8, page_cost_per_1k::float8, audio_cost_per_minute::float8
+		       catalog_version, pricing_key, input_cost_per_1m::float8, output_cost_per_1m::float8, training_cost_per_1m::float8, search_cost_per_1k::float8, character_cost_per_1m::float8, page_cost_per_1k::float8, audio_cost_per_minute::float8, video_cost_per_second::float8
 		FROM billing_budget_reservations WHERE request_id=$1 FOR UPDATE`, requestID).Scan(
 		&reservation.State, &reservation.Owner, &reservation.Tags, &reservation.OrganizationID, &reservation.ProviderName, &reservation.ProviderType,
 		&reservation.Model, &reservation.Currency, &reservation.CatalogVersion, &reservation.PricingKey,
-		&reservation.InputCostPer1M, &reservation.OutputCostPer1M, &reservation.TrainingCostPer1M, &reservation.SearchCostPer1K, &reservation.CharacterCostPer1M, &reservation.PageCostPer1K, &reservation.AudioCostPerMinute)
+		&reservation.InputCostPer1M, &reservation.OutputCostPer1M, &reservation.TrainingCostPer1M, &reservation.SearchCostPer1K, &reservation.CharacterCostPer1M, &reservation.PageCostPer1K, &reservation.AudioCostPerMinute, &reservation.VideoCostPerSecond)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return budgetReservation{}, false, nil
 	}
@@ -338,8 +342,9 @@ func applyReservationPricing(event *BillingEvent, reservation budgetReservation)
 	event.CharacterCostPer1M = reservation.CharacterCostPer1M
 	event.PageCostPer1K = reservation.PageCostPer1K
 	event.AudioCostPerMinute = reservation.AudioCostPerMinute
-	event.Cost = pricingCost(event.InputTokens, event.OutputTokens, event.TrainingTokens, event.InputCharacters, event.InputPages, event.InputAudioMilliseconds, event.SearchRequests, PricingSnapshot{
-		InputCostPer1M: reservation.InputCostPer1M, OutputCostPer1M: reservation.OutputCostPer1M, TrainingCostPer1M: reservation.TrainingCostPer1M, SearchCostPer1K: reservation.SearchCostPer1K, CharacterCostPer1M: reservation.CharacterCostPer1M, PageCostPer1K: reservation.PageCostPer1K, AudioCostPerMinute: reservation.AudioCostPerMinute,
+	event.VideoCostPerSecond = reservation.VideoCostPerSecond
+	event.Cost = pricingCost(event.InputTokens, event.OutputTokens, event.TrainingTokens, event.InputCharacters, event.InputPages, event.InputAudioMilliseconds, event.VideoSeconds, event.SearchRequests, PricingSnapshot{
+		InputCostPer1M: reservation.InputCostPer1M, OutputCostPer1M: reservation.OutputCostPer1M, TrainingCostPer1M: reservation.TrainingCostPer1M, SearchCostPer1K: reservation.SearchCostPer1K, CharacterCostPer1M: reservation.CharacterCostPer1M, PageCostPer1K: reservation.PageCostPer1K, AudioCostPerMinute: reservation.AudioCostPerMinute, VideoCostPerSecond: reservation.VideoCostPerSecond,
 	})
 }
 

@@ -28,6 +28,7 @@ type UsageAggregate struct {
 	InputCharacters        uint64  `json:"input_characters"`
 	InputPages             uint64  `json:"input_pages"`
 	InputAudioMilliseconds uint64  `json:"input_audio_milliseconds"`
+	VideoSeconds           uint64  `json:"video_seconds"`
 	ToolRequests           uint64  `json:"tool_requests"`
 	CacheReadInputTokens   uint64  `json:"cache_read_input_tokens"`
 	CacheWriteInputTokens  uint64  `json:"cache_write_input_tokens"`
@@ -233,7 +234,7 @@ func usageReportQuery(table string, scopeType string, filterModel, filterUpstrea
 	// Qualify the source cost column because ClickHouse expands the `cost` result
 	// alias inside later expressions after ARRAY JOIN and otherwise reports a
 	// nested aggregate (sum(sum(cost))).
-	metrics := "count() AS requests, countIf(status != 'ok') AS errors, sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens, sum(training_tokens) AS training_tokens, sum(total_tokens) AS total_tokens, sum(input_characters) AS input_characters, sum(input_pages) AS input_pages, sum(input_audio_milliseconds) AS input_audio_milliseconds, sum(tool_requests) AS tool_requests, sum(cache_read_input_tokens) AS cache_read_input_tokens, sum(cache_write_input_tokens) AS cache_write_input_tokens, sum(search_requests) AS search_requests, sum(usage.cost) AS cost, avg(latency_ms) AS avg_latency_ms, countIf(cache_status = 'hit') AS cache_hits, if(count() = 0, 0, sum(usage.cost) / count()) AS cost_per_request"
+	metrics := "count() AS requests, countIf(status != 'ok') AS errors, sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens, sum(training_tokens) AS training_tokens, sum(total_tokens) AS total_tokens, sum(input_characters) AS input_characters, sum(input_pages) AS input_pages, sum(input_audio_milliseconds) AS input_audio_milliseconds, sum(video_seconds) AS video_seconds, sum(tool_requests) AS tool_requests, sum(cache_read_input_tokens) AS cache_read_input_tokens, sum(cache_write_input_tokens) AS cache_write_input_tokens, sum(search_requests) AS search_requests, sum(usage.cost) AS cost, avg(latency_ms) AS avg_latency_ms, countIf(cache_status = 'hit') AS cache_hits, if(count() = 0, 0, sum(usage.cost) / count()) AS cost_per_request"
 	return fmt.Sprintf(`
 SELECT 'total' AS kind, '' AS date, '' AS name, currency, %s FROM %s AS usage WHERE %s GROUP BY currency
 UNION ALL SELECT 'day' AS kind, toString(toDate(parseDateTimeBestEffort(timestamp))) AS date, '' AS name, currency, %s FROM %s AS usage WHERE %s GROUP BY date,currency

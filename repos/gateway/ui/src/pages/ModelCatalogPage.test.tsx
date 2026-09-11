@@ -40,6 +40,7 @@ describe("ModelCatalogPage", () => {
 	await userEvent.type(screen.getByLabelText("Character cost / 1M"), "15");
 	await userEvent.type(screen.getByLabelText("Page cost / 1K"), "100");
 	await userEvent.type(screen.getByLabelText("Audio cost / minute"), "0.12");
+	await userEvent.type(screen.getByLabelText("Video cost / second"), "0.25");
     await userEvent.click(screen.getByLabelText("Capabilities"));
     await userEvent.click(screen.getByRole("option", { name: /Tools/ }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -53,6 +54,7 @@ describe("ModelCatalogPage", () => {
 	expect(body.models[0].character_cost_per_1m).toBe(15);
 	expect(body.models[0].page_cost_per_1k).toBe(100);
 	expect(body.models[0].audio_cost_per_minute).toBe(0.12);
+	expect(body.models[0].video_cost_per_second).toBe(0.25);
   });
 
   it("deletes only catalog metadata", async () => {

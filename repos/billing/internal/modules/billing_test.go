@@ -439,6 +439,22 @@ func TestBillingRejectsInvalidInputAudioDurations(t *testing.T) {
 	}
 }
 
+func TestBillingPricesAndValidatesVideoDuration(t *testing.T) {
+	module := NewBillingModuleWithSettings(true, Settings{Pricing: PricingConfig{Currency: "USD"}, ModelCatalogJSON: `{"version":"v1","models":[{"provider":"openai","model":"video-1","video_cost_per_second":0.25,"currency":"USD"}]}`})
+	req := RequestContext{RequestID: "video-duration", APIType: "video", VideoSeconds: 12, Request: openai.ChatCompletionRequest{Provider: "openai", Model: "video-1"}}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.BillingEvent == nil || req.BillingEvent.VideoSeconds != 12 || req.BillingEvent.VideoCostPerSecond != 0.25 || req.BillingEvent.Cost != 3 || req.BillingEvent.TotalTokens != 0 {
+		t.Fatalf("unexpected video billing event: %+v", req.BillingEvent)
+	}
+	for _, seconds := range []int{-1, maxBillableVideoSeconds + 1} {
+		if err := module.Handle(context.Background(), &RequestContext{RequestID: "invalid-video-duration", VideoSeconds: seconds}); err == nil {
+			t.Fatalf("accepted video_seconds=%d", seconds)
+		}
+	}
+}
+
 func TestBillingPersistsBoundedToolRequestsWithoutInventingCost(t *testing.T) {
 	repository := &fakeDurableRepository{seen: map[string]bool{}}
 	module := BillingModule{
