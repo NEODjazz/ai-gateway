@@ -30,7 +30,8 @@ describe("modelCapabilityOptions", () => {
       "web_fetch",
       "audio",
       "prompt_cache",
-      "assistant_prefill"
+      "assistant_prefill",
+      "file_input"
     ]);
   });
 

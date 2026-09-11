@@ -690,11 +690,16 @@ func TestOpenAICompatibleForwardsResponseCacheIdentifiers(t *testing.T) {
 	defer server.Close()
 
 	provider := NewOpenAICompatible(server.URL, "", false)
-	if _, err := provider.Responses(context.Background(), openai.ResponseRequest{Model: "test-model", Input: "hello", SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread"}); err != nil {
+	input := []any{map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64,JVBERi0xLjQK", "filename": "input.pdf"}}
+	if _, err := provider.Responses(context.Background(), openai.ResponseRequest{Model: "test-model", Input: input, SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread"}); err != nil {
 		t.Fatal(err)
 	}
 	if upstreamRequest.SafetyIdentifier != "provider-user" || upstreamRequest.PromptCacheKey != "tenant-thread" {
 		t.Fatalf("cache identifiers were not forwarded: %+v", upstreamRequest)
+	}
+	parts, ok := upstreamRequest.Input.([]any)
+	if !ok || len(parts) != 1 || parts[0].(map[string]any)["type"] != "input_file" {
+		t.Fatalf("file input was not forwarded: %#v", upstreamRequest.Input)
 	}
 }
 

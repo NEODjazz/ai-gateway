@@ -57,6 +57,14 @@ func (h Handler) CountResponseInputTokens(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
 		return
 	}
+	if _, err := openai.ResponseAudioAttachments(responseRequest.Input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_audio", err.Error())
+		return
+	}
+	if _, err := openai.ResponseFileAttachments(responseRequest.Input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_file", err.Error())
+		return
+	}
 	toolIdentifiers, validTools := responseToolIdentifiers(responseRequest.Tools)
 	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) ||
 		!h.authorizeAccess(w, r.Context(), reqCtx, responseRequest.Model, openai.ResponseInputTokens(responseRequest)) {

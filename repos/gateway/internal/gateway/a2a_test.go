@@ -444,6 +444,35 @@ func TestA2ASendMessageAcceptsValidatedInlineAudio(t *testing.T) {
 	}
 }
 
+func TestA2ASendMessageAcceptsValidatedInlinePDF(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	registry := NewAgentRegistry()
+	if _, err := registry.PutToolPolicy("safe", ToolPolicy{Name: "Safe", AllowedTools: []string{"weather"}, MaxToolCalls: 2, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.PutAgentProfile("research", AgentProfile{Name: "Research", Model: "test-model", ToolPolicyID: "safe", MaxIterations: 3, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	llm := &a2aTestProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"test-model"}}, &lifecycleBillingModule{}}), llm).
+		WithAgentRegistry(registry).
+		WithA2ATaskStore(store, A2ATaskRuntimeConfig{OwnerQuota: 10, TTL: time.Hour}))
+	body := `{"jsonrpc":"2.0","id":"pdf","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"client-pdf","role":"ROLE_USER","parts":[{"raw":"JVBERi0xLjcKY29udGVudA==","mediaType":"application/pdf","filename":"report.pdf"}]}}}`
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	input := llm.request.ResponseRequest.Input.([]any)
+	file := input[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if file["type"] != "input_file" || file["filename"] != "report.pdf" {
+		t.Fatalf("file input=%#v", input)
+	}
+}
+
 func TestA2ASendMessageFetchesValidatedRemoteAudio(t *testing.T) {
 	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
 	registry := NewAgentRegistry()

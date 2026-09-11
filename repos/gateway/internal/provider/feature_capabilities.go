@@ -8,6 +8,7 @@ func (OpenAICompatible) SupportsTools() bool            { return true }
 func (OpenAICompatible) SupportsStructuredOutput() bool { return true }
 func (OpenAICompatible) SupportsWebSearch() bool        { return true }
 func (OpenAICompatible) SupportsChatAudio() bool        { return true }
+func (OpenAICompatible) SupportsFileInput() bool        { return true }
 func (p OpenAICompatible) SupportsAssistantPrefill() bool {
 	return p.supportsMessagePrefix
 }

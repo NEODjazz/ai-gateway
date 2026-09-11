@@ -18,7 +18,7 @@ import (
 
 const a2aProtocolVersion = "1.0"
 
-var a2aInputModes = []string{"text/plain", "application/json", "image/jpeg", "image/png", "image/gif", "image/webp", "audio/wav", "audio/mpeg"}
+var a2aInputModes = []string{"text/plain", "application/json", "image/jpeg", "image/png", "image/gif", "image/webp", "audio/wav", "audio/mpeg", "application/pdf"}
 var errA2ATaskStatusUnavailable = errors.New("A2A task status is temporarily unavailable")
 
 type a2aPart struct {
@@ -624,6 +624,17 @@ func a2aInputPart(part a2aPart) (map[string]any, bool) {
 			return nil, false
 		}
 		return map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": *part.Raw, "format": format}}, true
+	}
+	if part.MediaType == "application/pdf" {
+		filename := part.Filename
+		if filename == "" {
+			filename = "input.pdf"
+		}
+		input := map[string]any{"type": "input_file", "file_data": dataURL, "filename": filename}
+		if _, err := openai.ResponseFileAttachments([]any{input}); err != nil {
+			return nil, false
+		}
+		return input, true
 	}
 	if _, err := openai.ParseDataImageURL(dataURL); err != nil {
 		return nil, false

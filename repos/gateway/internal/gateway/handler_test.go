@@ -1444,6 +1444,21 @@ func TestChatCompletionsRejectsRemoteImageURL(t *testing.T) {
 	}
 }
 
+func TestResponsesRejectsUnownedFileReferenceBeforeExecution(t *testing.T) {
+	provider := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), provider))
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test-model","input":[{"type":"input_file","file_id":"file_external"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "invalid_file") {
+		t.Fatalf("unowned file reference accepted: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if provider.request.ResponseRequest != nil {
+		t.Fatal("invalid file reached provider")
+	}
+}
+
 func TestChatCompletionsRejectsOversizedBody(t *testing.T) {
 	handler := Routes(NewHandler(modules.NewPipeline(nil), &chatProvider{}))
 	body := strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"` + strings.Repeat("x", openai.MaxInferenceBodyBytes) + `"}]}`)

@@ -344,7 +344,7 @@ func validDeploymentCapabilities(capabilities []string) bool {
 		}
 		seen[capability] = true
 	}
-	requiresChatOrResponses := []string{"stream", "tools", "structured_output", "vision"}
+	requiresChatOrResponses := []string{"stream", "tools", "structured_output", "vision", "file_input"}
 	for _, capability := range requiresChatOrResponses {
 		if seen[capability] && !seen["chat"] && !seen["responses"] {
 			return false
@@ -367,7 +367,7 @@ func ValidModelCapability(capability string) bool {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses":
+		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses", "file_input":
 		return true
 	default:
 		return false
@@ -529,6 +529,12 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	case "audio":
 		client, ok := endpoint.Provider.(interface{ SupportsChatAudio() bool })
 		return ok && client.SupportsChatAudio()
+	case "file_input":
+		if endpoint.Type != "openai" && endpoint.Type != "openai-compatible" && endpoint.Type != "azure-openai" {
+			return false
+		}
+		client, ok := endpoint.Provider.(interface{ SupportsFileInput() bool })
+		return ok && client.SupportsFileInput()
 	case "prompt_cache":
 		client, ok := endpoint.Provider.(interface{ SupportsPromptCache() bool })
 		return ok && client.SupportsPromptCache()

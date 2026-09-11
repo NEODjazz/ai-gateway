@@ -251,6 +251,12 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		if _, err := openai.ResponseImageAttachments(request.Input); err != nil {
 			return nil, "", nil, err
 		}
+		if _, err := openai.ResponseAudioAttachments(request.Input); err != nil {
+			return nil, "", nil, err
+		}
+		if _, err := openai.ResponseFileAttachments(request.Input); err != nil {
+			return nil, "", nil, err
+		}
 		model = request.Model
 		var valid bool
 		tools, valid = responseToolIdentifiers(request.Tools)

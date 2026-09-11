@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.252
+  version: 0.1.253
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1796,7 +1796,7 @@ paths:
       operationId: createResponse
       tags: [Inference]
       summary: Create a Responses API response
-      description: Supports function tools, explicitly scoped MCP connectors, structured output, previous-response affinity, SSE, durable background execution, and inline images. Background requests require store=true, stream=false, and an explicit background_responses deployment capability; billing settlement is resumed from PostgreSQL after process restarts. MCP definitions are forwarded to an upstream provider that must support remote MCP; the gateway does not execute MCP calls. Routing requires explicit mcp capability. Tool authorization checks connector identity (label and canonical URL), not individual remote tool names.
+      description: Supports function tools, explicitly scoped MCP connectors, structured output, previous-response affinity, SSE, durable background execution, inline images and bounded inline PDF file_data. PDF bytes are signature-validated, projected to configured scanners and require an explicit file_input deployment capability. Background requests require store=true, stream=false, and an explicit background_responses deployment capability; billing settlement is resumed from PostgreSQL after process restarts. MCP definitions are forwarded to an upstream provider that must support remote MCP; the gateway does not execute MCP calls. Routing requires explicit mcp capability. Tool authorization checks connector identity (label and canonical URL), not individual remote tool names.
       requestBody:
         required: true
         content:
@@ -4391,13 +4391,13 @@ components:
     A2APart:
       type: object
       additionalProperties: false
-      description: A2A 1.0 member-discriminated part. Supply text, structured JSON data, inline image/audio bytes, or HTTPS image/audio media with one advertised mediaType. Remote media are converted to validated inline bytes before durable storage.
+      description: A2A 1.0 member-discriminated part. Supply text, structured JSON data, inline image/audio/PDF bytes, or HTTPS image/audio media with one advertised mediaType. PDF input is signature-validated, bounded, scanner-projected, and routed only to deployments declaring file_input. Remote media are converted to validated inline bytes before durable storage.
       properties:
         text: {type: string}
         raw: {type: string, contentEncoding: base64}
         url: {type: string, format: uri, maxLength: 2048, pattern: '^https://', description: Public HTTPS image or audio URL without credentials or fragment}
         data: {description: Structured JSON value accepted with application/json mediaType}
-        mediaType: {type: string, enum: [text/plain, application/json, image/jpeg, image/png, image/gif, image/webp, audio/wav, audio/mpeg]}
+        mediaType: {type: string, enum: [text/plain, application/json, image/jpeg, image/png, image/gif, image/webp, audio/wav, audio/mpeg, application/pdf]}
         filename: {type: string, maxLength: 256, pattern: '^[^/\\\x00]+$'}
     A2AMessage:
       type: object
@@ -5751,7 +5751,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, video, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
+          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, video, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -7869,7 +7869,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, video, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill]}
+          items: {type: string, enum: [chat, responses, background_responses, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, video, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input]}
         auth_types:
           type: array
           uniqueItems: true

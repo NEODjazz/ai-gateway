@@ -1681,10 +1681,26 @@ func TestResponsesCatalogRequirementsIncludeToolsStructuredOutputAndStream(t *te
 		Text:  map[string]any{"format": map[string]any{"type": "json_object"}},
 		Input: []any{map[string]any{"type": "input_audio", "input_audio": map[string]any{
 			"data": "UklGRgAAAABXQVZF", "format": "wav",
-		}}},
+		}}, map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64,JVBERi0xLjQK", "filename": "input.pdf"}},
 	}, true)
-	if strings.Join(required, ",") != "responses,stream,tools,structured_output,audio" {
+	if strings.Join(required, ",") != "responses,stream,tools,structured_output,audio,file_input" {
 		t.Fatalf("unexpected Responses capabilities: %v", required)
+	}
+}
+
+func TestResponseFileInputRequiresExplicitEndpointCapability(t *testing.T) {
+	legacy := &modelCaptureProvider{content: "legacy"}
+	files := &modelCaptureProvider{content: "files"}
+	router := Router{health: newEndpointHealthTracker(), endpoints: []Endpoint{
+		{Name: "legacy", Type: "openai-compatible", Priority: 1, Capabilities: []string{"responses"}, Provider: legacy},
+		{Name: "files", Type: "openai-compatible", Priority: 2, Capabilities: []string{"responses", "file_input"}, Provider: files},
+	}}
+	request := openai.ResponseRequest{Model: "model", Input: []any{map[string]any{
+		"type": "input_file", "file_data": "data:application/pdf;base64,JVBERi0xLjQK", "filename": "input.pdf",
+	}}}
+	_, err := router.Responses(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request})
+	if err != nil || legacy.seenModel != "" || files.seenModel != "model" {
+		t.Fatalf("file input routing used an undeclared endpoint: legacy=%q files=%q err=%v", legacy.seenModel, files.seenModel, err)
 	}
 }
 

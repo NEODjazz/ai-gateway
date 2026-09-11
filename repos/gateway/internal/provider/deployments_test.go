@@ -168,6 +168,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"responses", "prompt_cache"},
 		{"responses", "assistant_prefill"},
 		{"background_responses"},
+		{"file_input"},
 	}
 	for _, capabilities := range tests {
 		if validDeploymentCapabilities(capabilities) {
@@ -182,6 +183,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"chat", "tools", "structured_output", "vision"},
 		{"responses", "tools", "mcp"},
 		{"responses", "background_responses"},
+		{"responses", "file_input"},
 		{"chat", "web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill"},
 		{"embeddings"},
 	} {
@@ -229,7 +231,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "deepseek", capabilities: []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}},
 		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}},
 		{providerType: "mistral", capabilities: []string{"chat", "audio_transcription", "audio_speech", "tools", "structured_output", "vision", "assistant_prefill"}},
-		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "background_responses", "audio_translation", "tools", "structured_output", "mcp", "vision", "web_search", "audio"}},
+		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "background_responses", "audio_translation", "tools", "structured_output", "mcp", "vision", "web_search", "audio", "file_input"}},
 	}
 	for _, test := range tests {
 		t.Run(test.providerType, func(t *testing.T) {
