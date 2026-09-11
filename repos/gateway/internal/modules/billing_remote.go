@@ -207,6 +207,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 	case "video":
 		request.APIType = "video"
 		request.UsageEstimated = metadataValue(req.Metadata, "gateway.video_usage_exact") != "true"
+		request.ProviderCostUSDTicks = trustedProviderCost(req, req.VideoProviderCostUSDTicks)
 	case "realtime":
 		request.APIType = "realtime"
 	}

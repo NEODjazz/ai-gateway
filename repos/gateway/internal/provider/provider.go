@@ -2808,7 +2808,7 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 		}
 	}
 	if hasCapability(required, "video") {
-		if _, ok := e.Provider.(VideoClient); !ok || e.Type != "openai" && e.Type != "openai-compatible" {
+		if _, ok := e.Provider.(VideoClient); !ok || e.Type != "openai" && e.Type != "openai-compatible" && e.Type != "xai" {
 			return false
 		}
 	}

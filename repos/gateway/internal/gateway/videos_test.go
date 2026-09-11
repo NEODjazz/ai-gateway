@@ -184,14 +184,16 @@ type gatewayVideoProvider struct {
 	actions        []string
 	nextID         int
 	retrieveStatus string
+	providerCost   *int64
 }
 
 type videoBillingModule struct {
-	phases     []string
-	seconds    []int
-	estimated  []bool
-	reserveErr error
-	commitErr  error
+	phases       []string
+	seconds      []int
+	estimated    []bool
+	providerCost []*int64
+	reserveErr   error
+	commitErr    error
 }
 
 func (*videoBillingModule) Name() string   { return "billing" }
@@ -213,6 +215,7 @@ func (m *videoBillingModule) record(phase string, req *modules.RequestContext) {
 	m.phases = append(m.phases, phase)
 	m.seconds = append(m.seconds, req.VideoSeconds)
 	m.estimated = append(m.estimated, req.Metadata["gateway.video_usage_exact"] != "true")
+	m.providerCost = append(m.providerCost, req.VideoProviderCostUSDTicks)
 }
 
 func (p *gatewayVideoProvider) CreateVideo(ctx context.Context, identity modules.RequestContext, input openai.VideoCreateRequest, admit func(context.Context, *modules.RequestContext) error) (openai.Video, provider.VideoBinding, error) {
@@ -234,7 +237,7 @@ func (p *gatewayVideoProvider) RetrieveVideo(_ context.Context, _ provider.Video
 	if status == "" {
 		status = "completed"
 	}
-	return openai.Video{ID: id, Object: "video", Model: "model-a", Status: status, Seconds: "4", Size: "720x1280"}, nil
+	return openai.Video{ID: id, Object: "video", Model: "model-a", Status: status, Seconds: "4", Size: "720x1280", ProviderCostUSDTicks: p.providerCost}, nil
 }
 func (p *gatewayVideoProvider) DeleteVideo(_ context.Context, _ provider.VideoBinding, id string) (openai.VideoDeletion, error) {
 	p.actions = append(p.actions, "delete")
@@ -320,7 +323,8 @@ func TestVideoCreationUsesDurationBillingLifecycle(t *testing.T) {
 
 func TestVideoBillingUsesProductionResourcePipeline(t *testing.T) {
 	store := &memoryVideoStore{records: map[string]videostate.Record{}}
-	runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+	ticks := int64(500_000_000)
+	runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}, providerCost: &ticks}
 	billing := &videoBillingModule{}
 	auth := modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}})
 	providerModules := modules.NewPipeline([]modules.Module{billing})
@@ -329,7 +333,7 @@ func TestVideoBillingUsesProductionResourcePipeline(t *testing.T) {
 	if processed, err := gateway.ProcessVideoSettlements(t.Context()); err != nil || processed != 1 {
 		t.Fatalf("processed=%d err=%v", processed, err)
 	}
-	if response.Code != http.StatusOK || strings.Join(billing.phases, ",") != "reserve,commit" {
+	if response.Code != http.StatusOK || strings.Join(billing.phases, ",") != "reserve,commit" || len(billing.providerCost) != 2 || billing.providerCost[0] != nil || billing.providerCost[1] == nil || *billing.providerCost[1] != ticks {
 		t.Fatalf("status=%d phases=%v body=%s", response.Code, billing.phases, response.Body.String())
 	}
 }

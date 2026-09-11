@@ -493,7 +493,7 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 		return ok
 	case "video":
 		_, ok := endpoint.Provider.(VideoClient)
-		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible")
+		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible" || endpoint.Type == "xai")
 	case "realtime":
 		_, ok := endpoint.Provider.(RealtimeClient)
 		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible")

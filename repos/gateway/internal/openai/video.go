@@ -20,20 +20,22 @@ type VideoRemixRequest struct {
 }
 
 type Video struct {
-	ID                 string          `json:"id"`
-	Object             string          `json:"object"`
-	Model              string          `json:"model"`
-	Status             string          `json:"status"`
-	Progress           float64         `json:"progress"`
-	CreatedAt          int64           `json:"created_at"`
-	CompletedAt        *int64          `json:"completed_at"`
-	ExpiresAt          *int64          `json:"expires_at"`
-	Prompt             *string         `json:"prompt"`
-	RemixedFromVideoID *string         `json:"remixed_from_video_id"`
-	Seconds            string          `json:"seconds"`
-	Size               string          `json:"size"`
-	Quality            string          `json:"quality,omitempty"`
-	Error              json.RawMessage `json:"error"`
+	ID                   string          `json:"id"`
+	Object               string          `json:"object"`
+	Model                string          `json:"model"`
+	Status               string          `json:"status"`
+	Progress             float64         `json:"progress"`
+	CreatedAt            int64           `json:"created_at"`
+	CompletedAt          *int64          `json:"completed_at"`
+	ExpiresAt            *int64          `json:"expires_at"`
+	Prompt               *string         `json:"prompt"`
+	RemixedFromVideoID   *string         `json:"remixed_from_video_id"`
+	Seconds              string          `json:"seconds"`
+	Size                 string          `json:"size"`
+	Quality              string          `json:"quality,omitempty"`
+	Error                json.RawMessage `json:"error"`
+	ContentURL           string          `json:"-"`
+	ProviderCostUSDTicks *int64          `json:"-"`
 }
 
 type VideoList struct {

@@ -39,6 +39,17 @@ func TestProviderCostTicksAreDecodedButNotExposed(t *testing.T) {
 	}
 }
 
+func TestVideoInternalProviderFieldsAreNotExposed(t *testing.T) {
+	ticks := int64(500_000_000)
+	payload, err := json.Marshal(Video{ID: "video_1", ContentURL: "https://private.example/video.mp4", ProviderCostUSDTicks: &ticks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsJSONKey(payload, "content_url") || containsJSONKey(payload, "cost_in_usd_ticks") {
+		t.Fatalf("internal video fields leaked: %s", payload)
+	}
+}
+
 func containsJSONKey(payload []byte, key string) bool {
 	var value map[string]any
 	_ = json.Unmarshal(payload, &value)

@@ -173,6 +173,7 @@ func (h Handler) GetVideo(w http.ResponseWriter, r *http.Request) {
 		writeProviderFailure(w, err)
 		return
 	}
+	video = mergeVideoSnapshot(record.Video, video)
 	updated, err := h.videos.UpdateVideoRecord(r.Context(), owner, video)
 	if err != nil {
 		writeVideoStoreError(w, err)
@@ -391,6 +392,7 @@ func (h Handler) processVideoSettlement(ctx context.Context, claimed asyncstate.
 	if err != nil {
 		return h.retryVideoSettlement(ctx, claimed)
 	}
+	video = mergeVideoSnapshot(record.Video, video)
 	if video.Status == "queued" || video.Status == "in_progress" {
 		if _, err := h.videos.UpdateVideoRecord(ctx, claimed.OwnerKey, video); err != nil {
 			return h.retryVideoSettlement(ctx, claimed)
@@ -404,6 +406,7 @@ func (h Handler) processVideoSettlement(ctx context.Context, claimed asyncstate.
 			request.Metadata = map[string]string{}
 		}
 		request.Metadata["gateway.video_usage_exact"] = "true"
+		request.VideoProviderCostUSDTicks = video.ProviderCostUSDTicks
 		if err := h.videoBillingPipeline().RunBillingLifecycle(ctx, &request, "commit", nil); err != nil {
 			return h.retryVideoSettlement(ctx, claimed)
 		}
@@ -418,6 +421,25 @@ func (h Handler) processVideoSettlement(ctx context.Context, claimed asyncstate.
 		return h.retryVideoSettlement(ctx, claimed)
 	}
 	return h.videoJobs.CompleteAsyncJob(ctx, claimed.Kind, claimed.ResourceID, claimed.LeaseGeneration)
+}
+
+func mergeVideoSnapshot(previous, current openai.Video) openai.Video {
+	if current.Model == "" {
+		current.Model = previous.Model
+	}
+	if current.Seconds == "" {
+		current.Seconds = previous.Seconds
+	}
+	if current.Size == "" {
+		current.Size = previous.Size
+	}
+	if current.Prompt == nil {
+		current.Prompt = previous.Prompt
+	}
+	if current.Object == "" {
+		current.Object = "video"
+	}
+	return current
 }
 
 func (h Handler) retryVideoSettlement(ctx context.Context, job asyncstate.Job) error {

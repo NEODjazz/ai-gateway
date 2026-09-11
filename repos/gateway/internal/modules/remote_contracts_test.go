@@ -275,9 +275,16 @@ func TestRemoteBillingUsesOnlyDurationForVideo(t *testing.T) {
 		t.Fatalf("reserve=%+v", reserve)
 	}
 	req.Metadata["gateway.video_usage_exact"] = "true"
+	ticks := int64(500_000_000)
+	req.VideoProviderCostUSDTicks = &ticks
+	req.Metadata["provider.endpoint.type"] = "xai"
 	commit := billingRequest(&req)
-	if commit.VideoSeconds != 8 || commit.UsageEstimated {
+	if commit.VideoSeconds != 8 || commit.UsageEstimated || commit.ProviderCostUSDTicks == nil || *commit.ProviderCostUSDTicks != ticks {
 		t.Fatalf("commit=%+v", commit)
+	}
+	req.Metadata["provider.endpoint.type"] = "openai-compatible"
+	if untrusted := billingRequest(&req); untrusted.ProviderCostUSDTicks != nil {
+		t.Fatalf("untrusted provider cost=%v", *untrusted.ProviderCostUSDTicks)
 	}
 }
 

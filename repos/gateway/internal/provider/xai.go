@@ -10,20 +10,25 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"ai-gateway-gateway/internal/openai"
+	"ai-gateway-gateway/internal/publichttp"
 )
 
 // XAI exposes the provider operations whose wire contracts are validated here.
 type XAI struct {
-	compatible OpenAICompatible
+	compatible    OpenAICompatible
+	contentClient *http.Client
 }
 
 func NewXAI(baseURL, apiKey string, stream bool) XAI {
 	compatible := NewOpenAICompatible(baseURL, apiKey, stream)
 	compatible.errorProvider = "xai"
-	return XAI{compatible: compatible}
+	return XAI{compatible: compatible, contentClient: publichttp.NewClient(2 * time.Minute)}
 }
 
 func (XAI) SupportsResponses() bool          { return true }
@@ -36,6 +41,209 @@ func (XAI) SupportsImageGeneration() bool    { return true }
 func (XAI) SupportsImageEdit() bool          { return true }
 func (XAI) SupportsAudioTranscription() bool { return true }
 func (XAI) SupportsAudioSpeech() bool        { return true }
+func (XAI) SupportsVideo() bool              { return true }
+
+func (x XAI) CreateVideo(ctx context.Context, request openai.VideoCreateRequest) (openai.Video, error) {
+	if param, err := validateVideoCreateRequest(request); err != nil {
+		return openai.Video{}, xaiParameterError(param, err.Error())
+	}
+	aspectRatio, resolution, err := xaiVideoDimensions(request.Size)
+	if err != nil {
+		return openai.Video{}, err
+	}
+	size := request.Size
+	if size == "" {
+		size = "1280x720"
+	}
+	duration := 4
+	if request.Seconds != "" {
+		duration, _ = strconv.Atoi(request.Seconds)
+	}
+	type source struct {
+		URL string `json:"url"`
+	}
+	body := struct {
+		Model       string  `json:"model"`
+		Prompt      string  `json:"prompt"`
+		Duration    int     `json:"duration"`
+		AspectRatio string  `json:"aspect_ratio,omitempty"`
+		Resolution  string  `json:"resolution,omitempty"`
+		Image       *source `json:"image,omitempty"`
+	}{Model: request.Model, Prompt: request.Prompt, Duration: duration, AspectRatio: aspectRatio, Resolution: resolution}
+	if request.InputReference != nil {
+		if request.InputReference.FileID != "" {
+			return openai.Video{}, xaiUnsupportedParameter("input_reference.file_id")
+		}
+		if !validXAIMediaURL(request.InputReference.ImageURL) {
+			return openai.Video{}, xaiParameterError("input_reference.image_url", "image URL must use HTTPS")
+		}
+		body.Image = &source{URL: request.InputReference.ImageURL}
+	}
+	var response struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := x.xaiVideoJSON(ctx, http.MethodPost, "videos/generations", body, &response); err != nil {
+		return openai.Video{}, err
+	}
+	if !validResponseResourceID(response.RequestID) {
+		return openai.Video{}, errors.New("invalid xAI video request ID")
+	}
+	prompt := request.Prompt
+	return openai.Video{ID: response.RequestID, Object: "video", Model: request.Model, Status: "queued", Prompt: &prompt, Seconds: strconv.Itoa(duration), Size: size}, nil
+}
+
+func (x XAI) RetrieveVideo(ctx context.Context, id string) (openai.Video, error) {
+	if !validResponseResourceID(id) {
+		return openai.Video{}, xaiParameterError("video_id", "invalid video ID")
+	}
+	var response struct {
+		Status   string  `json:"status"`
+		Model    string  `json:"model"`
+		Progress float64 `json:"progress"`
+		Video    *struct {
+			URL      string  `json:"url"`
+			Duration float64 `json:"duration"`
+		} `json:"video"`
+		Usage *struct {
+			CostInUSDTicks *int64 `json:"cost_in_usd_ticks"`
+		} `json:"usage"`
+		Error json.RawMessage `json:"error"`
+	}
+	if err := x.xaiVideoJSON(ctx, http.MethodGet, "videos/"+id, nil, &response); err != nil {
+		return openai.Video{}, err
+	}
+	status := ""
+	switch response.Status {
+	case "pending", "queued":
+		status = "queued"
+	case "in_progress":
+		status = "in_progress"
+	case "done":
+		status = "completed"
+	case "failed":
+		status = "failed"
+	default:
+		return openai.Video{}, errors.New("invalid xAI video status")
+	}
+	result := openai.Video{ID: id, Object: "video", Model: response.Model, Status: status, Progress: response.Progress, Error: response.Error}
+	if response.Video != nil {
+		result.ContentURL = response.Video.URL
+		if response.Video.Duration > 0 && response.Video.Duration <= 15 && response.Video.Duration == math.Trunc(response.Video.Duration) {
+			result.Seconds = strconv.Itoa(int(response.Video.Duration))
+		}
+	}
+	if response.Usage != nil {
+		result.ProviderCostUSDTicks = response.Usage.CostInUSDTicks
+	}
+	if status == "completed" && (response.Video == nil || !validXAIMediaURL(result.ContentURL) || result.Seconds == "" || result.ProviderCostUSDTicks == nil || *result.ProviderCostUSDTicks < 0) {
+		return openai.Video{}, errors.New("invalid completed xAI video response")
+	}
+	return result, nil
+}
+
+func (x XAI) DownloadVideoContent(ctx context.Context, id, variant string) (VideoContent, error) {
+	if variant != "" && variant != "video" {
+		return VideoContent{}, xaiUnsupportedParameter("variant")
+	}
+	video, err := x.RetrieveVideo(ctx, id)
+	if err != nil {
+		return VideoContent{}, err
+	}
+	if video.Status != "completed" || !validXAIMediaURL(video.ContentURL) {
+		return VideoContent{}, errors.New("xAI video content is not ready")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, video.ContentURL, http.NoBody)
+	if err != nil {
+		return VideoContent{}, err
+	}
+	request.Header.Set("Accept", "video/*, application/octet-stream")
+	contentClient := x.contentClient
+	if contentClient == nil {
+		contentClient = publichttp.NewClient(2 * time.Minute)
+	}
+	response, err := contentClient.Do(request)
+	if err != nil {
+		return VideoContent{}, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		defer response.Body.Close()
+		return VideoContent{}, responseStatusError("xai", response)
+	}
+	contentType := strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0])
+	if !strings.HasPrefix(contentType, "video/") && contentType != "application/octet-stream" || response.ContentLength > maxVideoContentBytes {
+		response.Body.Close()
+		return VideoContent{}, errors.New("invalid xAI video content response")
+	}
+	return VideoContent{Body: response.Body, ContentType: contentType, ContentLength: response.ContentLength}, nil
+}
+
+func (x XAI) RemixVideo(context.Context, string, openai.VideoRemixRequest) (openai.Video, error) {
+	return openai.Video{}, xaiUnsupportedParameter("remix")
+}
+
+func (XAI) ListVideos(context.Context, VideoListOptions) (openai.VideoList, error) {
+	return openai.VideoList{}, xaiUnsupportedParameter("list")
+}
+
+func (XAI) DeleteVideo(_ context.Context, id string) (openai.VideoDeletion, error) {
+	if !validResponseResourceID(id) {
+		return openai.VideoDeletion{}, xaiParameterError("video_id", "invalid video ID")
+	}
+	return openai.VideoDeletion{ID: id, Object: "video.deleted", Deleted: true}, nil
+}
+
+func (x XAI) xaiVideoJSON(ctx context.Context, method, path string, input, output any) error {
+	var body io.Reader = http.NoBody
+	if input != nil {
+		payload, err := json.Marshal(input)
+		if err != nil {
+			return err
+		}
+		body = bytes.NewReader(payload)
+	}
+	request, err := http.NewRequestWithContext(ctx, method, providerURL(x.compatible.baseURL, path), body)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "application/json")
+	if input != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	if x.compatible.apiKey != "" {
+		request.Header.Set("Authorization", "Bearer "+x.compatible.apiKey)
+	}
+	response, err := x.compatible.client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return responseStatusError("xai", response)
+	}
+	payload, err := io.ReadAll(io.LimitReader(response.Body, maxVideoMetadataBytes+1))
+	if err != nil || len(payload) > maxVideoMetadataBytes || json.Unmarshal(payload, output) != nil {
+		return errors.New("invalid xAI video response")
+	}
+	return nil
+}
+
+func xaiVideoDimensions(size string) (string, string, error) {
+	switch size {
+	case "":
+		return "16:9", "720p", nil
+	case "720x1280":
+		return "9:16", "720p", nil
+	case "1280x720":
+		return "16:9", "720p", nil
+	default:
+		return "", "", xaiParameterError("size", "xAI video size must be 720x1280 or 1280x720")
+	}
+}
+
+func validXAIMediaURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	return err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil
+}
 
 func (x XAI) ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest) (int, error) {
 	return x.compatible.ReserveTranslationAudioMilliseconds(request)

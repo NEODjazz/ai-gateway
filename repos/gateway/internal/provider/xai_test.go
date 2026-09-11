@@ -26,6 +26,7 @@ var _ ImageEditClient = XAI{}
 var _ AudioTranscriptionClient = XAI{}
 var _ AudioTranscriptionDurationReserver = XAI{}
 var _ AudioSpeechClient = XAI{}
+var _ VideoClient = XAI{}
 var _ responseRetrieveClient = XAI{}
 var _ responseInputItemsClient = XAI{}
 var _ responseDeleteClient = XAI{}
@@ -452,6 +453,108 @@ func TestXAISpeechDefaultsLanguageAndRejectsUnsupportedParameters(t *testing.T) 
 	response, err := client.GenerateSpeech(t.Context(), base)
 	if err != nil || string(response.Data) != "audio" || calls != 1 {
 		t.Fatalf("response=%+v err=%v calls=%d", response, err, calls)
+	}
+}
+
+func TestXAIVideoGenerationRetrievalAndContentContracts(t *testing.T) {
+	const ticks = int64(500_000_000)
+	var server *httptest.Server
+	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/videos/generations":
+			if r.Header.Get("Authorization") != "Bearer xai-key" || r.Header.Get("Content-Type") != "application/json" {
+				t.Fatalf("headers=%v", r.Header)
+			}
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			image, ok := body["image"].(map[string]any)
+			if !ok || body["model"] != "grok-video" || body["prompt"] != "a cat" || body["duration"] != float64(8) || body["aspect_ratio"] != "9:16" || body["resolution"] != "720p" || image["url"] != "https://images.example/cat.png" {
+				t.Fatalf("body=%#v", body)
+			}
+			_, _ = io.WriteString(w, `{"request_id":"video_request_1"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/videos/video_request_1":
+			if r.Header.Get("Authorization") != "Bearer xai-key" {
+				t.Fatalf("authorization=%q", r.Header.Get("Authorization"))
+			}
+			_, _ = fmt.Fprintf(w, `{"status":"done","video":{"url":%q,"duration":8},"model":"grok-video","usage":{"cost_in_usd_ticks":%d},"progress":100}`, server.URL+"/asset.mp4", ticks)
+		case r.Method == http.MethodGet && r.URL.Path == "/asset.mp4":
+			if r.Header.Get("Authorization") != "" {
+				t.Fatal("provider credential leaked to content host")
+			}
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = io.WriteString(w, "video-bytes")
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client := NewXAI(server.URL+"/v1", "xai-key", false)
+	client.compatible.client = server.Client()
+	client.contentClient = server.Client()
+	created, err := client.CreateVideo(t.Context(), openai.VideoCreateRequest{Model: "grok-video", Prompt: "a cat", Seconds: "8", Size: "720x1280", InputReference: &openai.VideoInputReference{ImageURL: "https://images.example/cat.png"}})
+	if err != nil || created.ID != "video_request_1" || created.Status != "queued" || created.Seconds != "8" || created.Size != "720x1280" {
+		t.Fatalf("created=%+v err=%v", created, err)
+	}
+	retrieved, err := client.RetrieveVideo(t.Context(), created.ID)
+	if err != nil || retrieved.Status != "completed" || retrieved.Progress != 100 || retrieved.ProviderCostUSDTicks == nil || *retrieved.ProviderCostUSDTicks != ticks || retrieved.ContentURL == "" {
+		t.Fatalf("retrieved=%+v err=%v", retrieved, err)
+	}
+	content, err := client.DownloadVideoContent(t.Context(), created.ID, "video")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer content.Body.Close()
+	data, err := io.ReadAll(content.Body)
+	if err != nil || string(data) != "video-bytes" || content.ContentType != "video/mp4" {
+		t.Fatalf("content=%q type=%q err=%v", data, content.ContentType, err)
+	}
+	deleted, err := client.DeleteVideo(t.Context(), created.ID)
+	if err != nil || !deleted.Deleted || deleted.ID != created.ID {
+		t.Fatalf("deleted=%+v err=%v", deleted, err)
+	}
+}
+
+func TestXAIVideoRoutingAliasAndValidation(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["model"] != "grok-imagine-video" || body["duration"] != float64(4) || body["aspect_ratio"] != "16:9" || body["resolution"] != "720p" {
+			t.Fatalf("body=%#v err=%v", body, err)
+		}
+		_, _ = io.WriteString(w, `{"request_id":"video_alias_1"}`)
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "xai-video", Type: "xai", BaseURL: server.URL + "/v1", APIKey: "key", Models: []string{"video-public"},
+		ModelAliases: map[string]string{"video-public": "grok-imagine-video"}, Capabilities: []string{"video"},
+	}}}).(*Router)
+	video, _, err := router.CreateVideo(t.Context(), modules.RequestContext{}, openai.VideoCreateRequest{Model: "video-public", Prompt: "a cat"}, nil)
+	if err != nil || video.Model != "video-public" || video.Size != "1280x720" || calls != 1 {
+		t.Fatalf("video=%+v calls=%d err=%v", video, calls, err)
+	}
+	client := NewXAI(server.URL, "key", false)
+	for _, request := range []openai.VideoCreateRequest{
+		{Model: "m", Prompt: "x", Size: "1792x1024"},
+		{Model: "m", Prompt: "x", InputReference: &openai.VideoInputReference{FileID: "file_1"}},
+		{Model: "m", Prompt: "x", InputReference: &openai.VideoInputReference{ImageURL: "http://images.example/a.png"}},
+	} {
+		if _, err := client.CreateVideo(t.Context(), request); err == nil || calls != 1 {
+			t.Fatalf("request=%+v err=%v calls=%d", request, err, calls)
+		}
+	}
+}
+
+func TestXAIVideoRejectsInvalidTerminalResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"status":"done","video":{"url":"https://videos.example/a.mp4","duration":4},"model":"grok","progress":100}`)
+	}))
+	defer server.Close()
+	client := NewXAI(server.URL+"/v1", "key", false)
+	if _, err := client.RetrieveVideo(t.Context(), "video_1"); err == nil {
+		t.Fatal("completed response without exact provider cost was accepted")
 	}
 }
 
