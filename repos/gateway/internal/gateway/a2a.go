@@ -17,6 +17,8 @@ import (
 
 const a2aProtocolVersion = "1.0"
 
+var a2aInputModes = []string{"text/plain", "image/jpeg", "image/png", "image/gif", "image/webp"}
+
 type a2aPart struct {
 	Text      *string         `json:"text,omitempty"`
 	Raw       *string         `json:"raw,omitempty"`
@@ -134,11 +136,11 @@ func (h Handler) A2AAgentCard(w http.ResponseWriter, r *http.Request) {
 			"description": "Gateway virtual key", "scheme": "Bearer",
 		}}},
 		"securityRequirements": []any{map[string]any{"schemes": map[string]any{"bearer": map[string]any{"list": []string{}}}}},
-		"defaultInputModes":    []string{"text/plain"},
+		"defaultInputModes":    a2aInputModes,
 		"defaultOutputModes":   []string{"text/plain"},
 		"skills": []any{map[string]any{
 			"id": profile.ID, "name": profile.Name, "description": description,
-			"inputModes": []string{"text/plain"}, "outputModes": []string{"text/plain"}, "tags": tags,
+			"inputModes": a2aInputModes, "outputModes": []string{"text/plain"}, "tags": tags,
 		}},
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -194,7 +196,7 @@ func (h Handler) A2AJSONRPC(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request a2aRequest, profile AgentProfile) {
-	if request.Params.Message.MessageID == "" || len(request.Params.Message.MessageID) > 128 || request.Params.Message.Role != "ROLE_USER" || len(request.Params.Message.Parts) == 0 ||
+	if request.Params.Message.MessageID == "" || len(request.Params.Message.MessageID) > 128 || request.Params.Message.Role != "ROLE_USER" || len(request.Params.Message.Parts) == 0 || len(request.Params.Message.Parts) > 1024 ||
 		(request.Params.Message.ContextID != "" && !validFileToken(request.Params.Message.ContextID, 128)) {
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32602, "Invalid parameters")
 		return
@@ -273,11 +275,12 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 	}
 	content := make([]any, 0, len(request.Params.Message.Parts))
 	for _, part := range request.Params.Message.Parts {
-		if part.Text == nil || part.Raw != nil || part.URL != nil || len(part.Data) != 0 || (part.MediaType != "" && part.MediaType != "text/plain") || part.Filename != "" {
+		inputPart, ok := a2aInputPart(part)
+		if !ok {
 			h.writeA2AError(w, request.ID, http.StatusBadRequest, -32005, "Content type is not supported")
 			return
 		}
-		content = append(content, map[string]any{"type": "input_text", "text": *part.Text})
+		content = append(content, inputPart)
 	}
 
 	capture := newA2AResponseCapture()
@@ -449,14 +452,14 @@ func a2aResponseInput(history []a2aMessage, latest []any) []any {
 	for _, message := range history {
 		content := make([]any, 0, len(message.Parts))
 		for _, part := range message.Parts {
-			if part.Text == nil {
+			inputPart, ok := a2aInputPart(part)
+			if !ok {
 				continue
 			}
-			typeName := "input_text"
 			if message.Role == "ROLE_AGENT" {
-				typeName = "output_text"
+				inputPart["type"] = "output_text"
 			}
-			content = append(content, map[string]any{"type": typeName, "text": *part.Text})
+			content = append(content, inputPart)
 		}
 		role := "user"
 		if message.Role == "ROLE_AGENT" {
@@ -465,6 +468,20 @@ func a2aResponseInput(history []a2aMessage, latest []any) []any {
 		input = append(input, map[string]any{"role": role, "content": content})
 	}
 	return append(input, map[string]any{"role": "user", "content": latest})
+}
+
+func a2aInputPart(part a2aPart) (map[string]any, bool) {
+	if part.Text != nil && part.Raw == nil && part.URL == nil && len(part.Data) == 0 && (part.MediaType == "" || part.MediaType == "text/plain") && part.Filename == "" {
+		return map[string]any{"type": "input_text", "text": *part.Text}, true
+	}
+	if part.Text != nil || part.Raw == nil || part.URL != nil || len(part.Data) != 0 || part.Filename != "" {
+		return nil, false
+	}
+	dataURL := "data:" + part.MediaType + ";base64," + *part.Raw
+	if _, err := openai.ParseDataImageURL(dataURL); err != nil {
+		return nil, false
+	}
+	return map[string]any{"type": "input_image", "image_url": dataURL}, true
 }
 
 func (h Handler) getA2ATask(w http.ResponseWriter, r *http.Request, request a2aRequest, profile AgentProfile) {
@@ -752,7 +769,8 @@ func validStoredA2ATask(task a2aTask) bool {
 			return false
 		}
 		for _, part := range message.Parts {
-			if part.Text == nil || part.Raw != nil || part.URL != nil || len(part.Data) != 0 || (part.MediaType != "" && part.MediaType != "text/plain") || part.Filename != "" {
+			_, valid := a2aInputPart(part)
+			if !valid || message.Role == "ROLE_AGENT" && part.Text == nil {
 				return false
 			}
 		}

@@ -160,7 +160,7 @@ func TestA2AAgentCardDeclaresOnlyImplementedCapabilities(t *testing.T) {
 	request.Header.Set("X-Forwarded-Proto", "https")
 	router.ServeHTTP(response, request)
 	body := response.Body.String()
-	for _, expected := range []string{`"url":"https://gateway.example/a2a/research"`, `"protocolBinding":"JSONRPC"`, `"protocolVersion":"1.0"`, `"tenant":"research"`, `"streaming":false`, `"pushNotifications":false`, `"httpAuthSecurityScheme"`, `"schemes":{"bearer":{"list":[]}}`} {
+	for _, expected := range []string{`"url":"https://gateway.example/a2a/research"`, `"protocolBinding":"JSONRPC"`, `"protocolVersion":"1.0"`, `"tenant":"research"`, `"streaming":false`, `"pushNotifications":false`, `"httpAuthSecurityScheme"`, `"schemes":{"bearer":{"list":[]}}`, `"image/png"`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("card missing %s: %s", expected, body)
 		}
@@ -197,6 +197,55 @@ func TestA2ASendMessageUsesResponsesPolicyAndBillingPath(t *testing.T) {
 	}
 	if billing.calls != 1 {
 		t.Fatalf("billing preflight calls=%d", billing.calls)
+	}
+}
+
+func TestA2ASendMessageAcceptsBoundedInlineImages(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	router, llm, billing := a2aTestHandlerWithTasks(t, store)
+	body := `{"jsonrpc":"2.0","id":"rpc-image","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"client-image","role":"ROLE_USER","parts":[{"text":"describe"},{"raw":"iVBORw0KGgo=","mediaType":"image/png"}]}}}`
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || billing.calls != 1 {
+		t.Fatalf("status=%d billing=%d body=%s", response.Code, billing.calls, response.Body.String())
+	}
+	input := llm.request.ResponseRequest.Input.([]any)
+	parts := input[0].(map[string]any)["content"].([]any)
+	if len(parts) != 2 {
+		t.Fatalf("input=%#v", input)
+	}
+	image := parts[1].(map[string]any)
+	if image["type"] != "input_image" || image["image_url"] != "data:image/png;base64,iVBORw0KGgo=" {
+		t.Fatalf("input=%#v", input)
+	}
+	var envelope struct {
+		Result struct {
+			Task a2aTask `json:"task"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(response.Body.Bytes(), &envelope) != nil {
+		t.Fatal("decode task")
+	}
+	stored := store.tasks[envelope.Result.Task.ID]
+	decoded, err := decodeA2ATask(stored.Payload)
+	if err != nil || decoded.History[0].Parts[1].Raw == nil || *decoded.History[0].Parts[1].Raw != "iVBORw0KGgo=" {
+		t.Fatalf("stored task=%+v err=%v", decoded, err)
+	}
+}
+
+func TestA2ARejectsMalformedInlineImageBeforeBilling(t *testing.T) {
+	router, _, billing := a2aTestHandler(t)
+	body := `{"jsonrpc":"2.0","id":"rpc-image","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"client-image","role":"ROLE_USER","parts":[{"raw":"bm90LWEtcG5n","mediaType":"image/png"}]}}}`
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":-32005`) || billing.calls != 0 {
+		t.Fatalf("status=%d billing=%d body=%s", response.Code, billing.calls, response.Body.String())
 	}
 }
 

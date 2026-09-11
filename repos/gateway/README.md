@@ -47,8 +47,10 @@ shared Responses authentication, model authorization, quota, guardrail,
 routing and billing path. With durable task and background-response storage,
 `returnImmediately=true` returns an owner-scoped submitted or working task;
 `GetTask` reconciles completion and `CancelTask` cancels pending execution.
-Agent cards advertise only `text/plain`; streaming, push notifications,
-extended cards and non-text parts fail with explicit protocol errors.
+Text and bounded inline JPEG, PNG, GIF and WebP inputs reuse the Responses
+media validation, scan, token reserve and billing path. Streaming, push
+notifications, extended cards and other media parts fail with explicit
+protocol errors.
 
 Gateway-level module:
 
