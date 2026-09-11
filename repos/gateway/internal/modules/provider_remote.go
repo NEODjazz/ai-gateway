@@ -174,6 +174,13 @@ func requestImageAttachments(req *RequestContext) ([]openai.ImageAttachment, err
 		return nil, err
 	}
 	attachments = append(attachments, responseAttachments...)
+	responseAudio, err := openai.ResponseAudioAttachments(req.ResponseRequest.Input)
+	if err != nil {
+		return nil, err
+	}
+	for _, audio := range responseAudio {
+		attachments = append(attachments, openai.ImageAttachment{MediaType: audio.MediaType, Data: audio.Data})
+	}
 	if req.ModerationRequest != nil {
 		moderationAttachments, err := openai.ModerationImageAttachments(req.ModerationRequest.Input)
 		if err != nil {

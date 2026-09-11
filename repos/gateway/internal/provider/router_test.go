@@ -1679,8 +1679,11 @@ func TestResponsesCatalogRequirementsIncludeToolsStructuredOutputAndStream(t *te
 	required := requiredResponseCapabilities(openai.ResponseRequest{
 		Tools: []openai.ResponseTool{{Type: "function", Name: "lookup"}},
 		Text:  map[string]any{"format": map[string]any{"type": "json_object"}},
+		Input: []any{map[string]any{"type": "input_audio", "input_audio": map[string]any{
+			"data": "UklGRgAAAABXQVZF", "format": "wav",
+		}}},
 	}, true)
-	if strings.Join(required, ",") != "responses,stream,tools,structured_output" {
+	if strings.Join(required, ",") != "responses,stream,tools,structured_output,audio" {
 		t.Fatalf("unexpected Responses capabilities: %v", required)
 	}
 }

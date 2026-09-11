@@ -109,6 +109,16 @@ func TestImageVariationProjectsAttachmentToAV(t *testing.T) {
 	}
 }
 
+func TestResponseAudioProjectsAttachmentToAV(t *testing.T) {
+	request := RequestContext{ResponseRequest: &openai.ResponseRequest{Input: []any{map[string]any{
+		"type": "input_audio", "input_audio": map[string]any{"data": "UklGRgAAAABXQVZF", "format": "wav"},
+	}}}}
+	attachments, err := requestImageAttachments(&request)
+	if err != nil || len(attachments) != 1 || attachments[0].MediaType != "audio/wav" || attachments[0].Data != "UklGRgAAAABXQVZF" {
+		t.Fatalf("attachments=%+v err=%v", attachments, err)
+	}
+}
+
 func TestAudioTranscriptionProjectsFilesToAVAndHintsToDLP(t *testing.T) {
 	file := openai.AudioAttachment{Filename: "sample.wav", MediaType: "audio/wav", Data: "UklGRi4uLi5XQVZFZGF0YQ=="}
 	request := openai.AudioTranscriptionRequest{Model: "audio", File: file, Prompt: "private speaker", Keywords: []string{"private company", "private person"}, KnownSpeakerNames: []string{"Jane"}, KnownSpeakerReferences: []openai.AudioAttachment{{Filename: "reference.wav", MediaType: file.MediaType, Data: file.Data}}}

@@ -2710,6 +2710,9 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 	if openai.HasResponseImages(request) {
 		required = append(required, "vision")
 	}
+	if openai.HasResponseAudio(request) {
+		required = append(required, "audio")
+	}
 	return required
 }
 

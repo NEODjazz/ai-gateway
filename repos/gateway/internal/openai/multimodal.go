@@ -16,6 +16,8 @@ const (
 
 var ErrInvalidImage = errors.New("invalid image input")
 
+const MaxResponseAudioAttachments = 8
+
 type ImageAttachment struct {
 	MediaType string `json:"media_type"`
 	Data      string `json:"data_base64"`
@@ -42,6 +44,65 @@ func ResponseImageAttachments(input any) ([]ImageAttachment, error) {
 		return nil, err
 	}
 	return validateAttachmentLimits(attachments)
+}
+
+func ResponseAudioAttachments(input any) ([]AudioAttachment, error) {
+	var attachments []AudioAttachment
+	var total int
+	var walk func(any) error
+	walk = func(value any) error {
+		switch typed := value.(type) {
+		case []any:
+			for _, item := range typed {
+				if err := walk(item); err != nil {
+					return err
+				}
+			}
+		case map[string]any:
+			typeName, _ := typed["type"].(string)
+			if typeName == "input_audio" {
+				audio, ok := typed["input_audio"].(map[string]any)
+				if !ok {
+					return ErrInvalidAudio
+				}
+				data, dataOK := audio["data"].(string)
+				format, formatOK := audio["format"].(string)
+				mediaType, filename := "", ""
+				switch format {
+				case "wav":
+					mediaType, filename = "audio/wav", "input.wav"
+				case "mp3":
+					mediaType, filename = "audio/mpeg", "input.mp3"
+				}
+				attachment := AudioAttachment{Filename: filename, MediaType: mediaType, Data: data}
+				if !dataOK || !formatOK || ValidateAudioAttachment(attachment) != nil || len(attachments) >= MaxResponseAudioAttachments {
+					return ErrInvalidAudio
+				}
+				decoded, _ := base64.StdEncoding.DecodeString(data)
+				if total > MaxAudioBytes-len(decoded) {
+					return ErrInvalidAudio
+				}
+				total += len(decoded)
+				attachments = append(attachments, attachment)
+				return nil
+			}
+			for _, nested := range typed {
+				if err := walk(nested); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk(input); err != nil {
+		return nil, err
+	}
+	return attachments, nil
+}
+
+func HasResponseAudio(request ResponseRequest) bool {
+	attachments, err := ResponseAudioAttachments(request.Input)
+	return err == nil && len(attachments) > 0
 }
 
 func imageAttachments(value any) ([]ImageAttachment, error) {

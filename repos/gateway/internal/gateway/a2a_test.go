@@ -210,7 +210,7 @@ func TestA2AAgentCardDeclaresOnlyImplementedCapabilities(t *testing.T) {
 	request.Header.Set("X-Forwarded-Proto", "https")
 	router.ServeHTTP(response, request)
 	body := response.Body.String()
-	for _, expected := range []string{`"url":"https://gateway.example/a2a/research"`, `"protocolBinding":"JSONRPC"`, `"protocolVersion":"1.0"`, `"tenant":"research"`, `"streaming":false`, `"pushNotifications":false`, `"extendedAgentCard":true`, `"httpAuthSecurityScheme"`, `"schemes":{"bearer":{"list":[]}}`, `"image/png"`} {
+	for _, expected := range []string{`"url":"https://gateway.example/a2a/research"`, `"protocolBinding":"JSONRPC"`, `"protocolVersion":"1.0"`, `"tenant":"research"`, `"streaming":false`, `"pushNotifications":false`, `"extendedAgentCard":true`, `"httpAuthSecurityScheme"`, `"schemes":{"bearer":{"list":[]}}`, `"image/png"`, `"audio/wav"`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("card missing %s: %s", expected, body)
 		}
@@ -402,6 +402,45 @@ func TestA2ASendMessageRejectsRemoteImageBeforeNetworkWithoutAuthorization(t *te
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestA2ASendMessageAcceptsValidatedInlineAudio(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	registry := NewAgentRegistry()
+	if _, err := registry.PutToolPolicy("safe", ToolPolicy{Name: "Safe", AllowedTools: []string{"weather"}, MaxToolCalls: 2, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.PutAgentProfile("research", AgentProfile{Name: "Research", Description: "Answers questions", Model: "test-model", ToolPolicyID: "safe", MaxIterations: 3, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	llm := &a2aTestProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"test-model"}}, &lifecycleBillingModule{}}), llm).
+		WithAgentRegistry(registry).
+		WithA2ATaskStore(store, A2ATaskRuntimeConfig{OwnerQuota: 10, TTL: time.Hour}))
+	body := `{"jsonrpc":"2.0","id":"audio","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"client-audio","role":"ROLE_USER","parts":[{"raw":"UklGRgAAAABXQVZF","mediaType":"audio/wav","filename":"sample.wav"}]}}}`
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	input := llm.request.ResponseRequest.Input.([]any)
+	audio := input[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if audio["type"] != "input_audio" || audio["input_audio"].(map[string]any)["format"] != "wav" {
+		t.Fatalf("audio input=%#v", input)
+	}
+
+	invalid := strings.Replace(body, "UklGRgAAAABXQVZF", "aW52YWxpZA==", 1)
+	badRequest := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(invalid))
+	badRequest.Header.Set("A2A-Version", "1.0")
+	badRequest.Header.Set("Authorization", "Bearer key")
+	bad := httptest.NewRecorder()
+	handler.ServeHTTP(bad, badRequest)
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status=%d body=%s", bad.Code, bad.Body.String())
 	}
 }
 

@@ -555,6 +555,14 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
+	if _, err := openai.ResponseImageAttachments(request.Input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
+		return
+	}
+	if _, err := openai.ResponseAudioAttachments(request.Input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_audio", err.Error())
+		return
+	}
 
 	reqCtx := modules.RequestContext{
 		APIKey:          bearerToken(r.Header.Get("Authorization")),
@@ -590,6 +598,10 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 	}
 	if _, err := openai.ResponseImageAttachments(reqCtx.ResponseRequest.Input); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
+		return
+	}
+	if _, err := openai.ResponseAudioAttachments(reqCtx.ResponseRequest.Input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_audio", err.Error())
 		return
 	}
 	toolIdentifiers, validTools := responseToolIdentifiers(request.Tools)
