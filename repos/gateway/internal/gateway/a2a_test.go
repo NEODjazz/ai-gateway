@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -17,7 +18,14 @@ import (
 	"ai-gateway-gateway/internal/provider"
 )
 
-type a2aTestProvider struct{ request modules.RequestContext }
+type a2aTestProvider struct {
+	request           modules.RequestContext
+	response          openai.ResponseResponse
+	retrieved         openai.ResponseResponse
+	canceled          openai.ResponseResponse
+	retrieveCalls     int
+	cancellationCalls int
+}
 
 type a2aMemoryTaskStore struct {
 	mu        sync.Mutex
@@ -100,6 +108,9 @@ func (*a2aTestProvider) StreamChatCompletions(context.Context, modules.RequestCo
 }
 func (p *a2aTestProvider) Responses(_ context.Context, request modules.RequestContext) (openai.ResponseResponse, error) {
 	p.request = request
+	if p.response.ID != "" {
+		return p.response, nil
+	}
 	return openai.ResponseResponse{ID: "resp_agent", Model: request.ResponseRequest.Model, Status: "completed", OutputText: "hello from agent"}, nil
 }
 func (*a2aTestProvider) StreamResponses(context.Context, modules.RequestContext, provider.ResponseStreamWriter) (openai.ResponseResponse, bool, error) {
@@ -107,6 +118,17 @@ func (*a2aTestProvider) StreamResponses(context.Context, modules.RequestContext,
 }
 func (*a2aTestProvider) Models() []openai.Model {
 	return []openai.Model{{ID: "test-model", Object: "model"}}
+}
+func (*a2aTestProvider) ResolveResponseResource(context.Context, modules.RequestContext, string) (string, error) {
+	return "test-model", nil
+}
+func (p *a2aTestProvider) RetrieveResponse(context.Context, modules.RequestContext, string) (openai.ResponseResponse, error) {
+	p.retrieveCalls++
+	return p.retrieved, nil
+}
+func (p *a2aTestProvider) CancelResponse(context.Context, modules.RequestContext, string) (openai.ResponseResponse, error) {
+	p.cancellationCalls++
+	return p.canceled, nil
 }
 
 func a2aTestHandler(t *testing.T) (http.Handler, *a2aTestProvider, *lifecycleBillingModule) {
@@ -270,6 +292,129 @@ func TestA2ACompletedTaskLifecycleUsesDurableOwnerScope(t *testing.T) {
 	router.ServeHTTP(response, get)
 	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "Task access is not allowed") {
 		t.Fatalf("model authorization status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestA2AReturnImmediatelyPersistsAndMaterializesBackgroundTask(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	router, llm, billing := a2aTestHandlerWithTasks(t, store)
+	llm.response = openai.ResponseResponse{ID: "resp_background", Model: "test-model", Status: "queued"}
+
+	send := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"send","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"client-message","role":"ROLE_USER","parts":[{"text":"hello"}]},"configuration":{"returnImmediately":true}}}`))
+	send.Header.Set("A2A-Version", "1.0")
+	send.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, send)
+	var sent struct {
+		Result struct {
+			Task a2aTask `json:"task"`
+		} `json:"result"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &sent) != nil {
+		t.Fatalf("send status=%d body=%s", response.Code, response.Body.String())
+	}
+	if sent.Result.Task.Status.State != "TASK_STATE_SUBMITTED" || len(sent.Result.Task.History) != 1 || len(sent.Result.Task.Artifacts) != 0 {
+		t.Fatalf("unexpected submitted task: %+v", sent.Result.Task)
+	}
+	if strings.Contains(response.Body.String(), "backgroundResponseId") || strings.Contains(response.Body.String(), "resp_background") {
+		t.Fatalf("internal response binding leaked: %s", response.Body.String())
+	}
+	if llm.request.ResponseRequest == nil || !llm.request.ResponseRequest.Background || llm.request.ResponseRequest.Store == nil || !*llm.request.ResponseRequest.Store || billing.calls != 1 {
+		t.Fatalf("request=%+v billing=%d", llm.request.ResponseRequest, billing.calls)
+	}
+	stored := store.tasks[sent.Result.Task.ID]
+	_, backgroundID, err := decodeA2AStoredTask(stored.Payload)
+	if err != nil || backgroundID != "resp_background" {
+		t.Fatalf("background binding=%q err=%v payload=%s", backgroundID, err, stored.Payload)
+	}
+
+	llm.retrieved = openai.ResponseResponse{ID: "resp_background", Model: "test-model", Status: "completed", OutputText: "done"}
+	get := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"get","method":"GetTask","params":{"tenant":"research","id":"`+sent.Result.Task.ID+`"}}`))
+	get.Header.Set("A2A-Version", "1.0")
+	get.Header.Set("Authorization", "Bearer key")
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, get)
+	var got struct {
+		Result a2aTask `json:"result"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &got) != nil {
+		t.Fatalf("get status=%d body=%s", response.Code, response.Body.String())
+	}
+	if got.Result.Status.State != "TASK_STATE_COMPLETED" || len(got.Result.History) != 2 || len(got.Result.Artifacts) != 1 || *got.Result.Artifacts[0].Parts[0].Text != "done" {
+		t.Fatalf("unexpected completed task: %+v", got.Result)
+	}
+	if llm.retrieveCalls != 1 || billing.calls != 1 {
+		t.Fatalf("retrieve=%d billing=%d", llm.retrieveCalls, billing.calls)
+	}
+	_, backgroundID, err = decodeA2AStoredTask(store.tasks[sent.Result.Task.ID].Payload)
+	if err != nil || backgroundID != "" {
+		t.Fatalf("terminal binding=%q err=%v", backgroundID, err)
+	}
+}
+
+func TestA2ABackgroundTaskStorageFailureCancelsExecution(t *testing.T) {
+	tasks := make(map[string]a2astate.Task, 10)
+	for index := 0; index < 10; index++ {
+		tasks[strconv.Itoa(index)] = a2astate.Task{}
+	}
+	store := &a2aMemoryTaskStore{tasks: tasks}
+	router, llm, billing := a2aTestHandlerWithTasks(t, store)
+	llm.response = openai.ResponseResponse{ID: "resp_orphan", Model: "test-model", Status: "queued"}
+	llm.canceled = openai.ResponseResponse{ID: "resp_orphan", Model: "test-model", Status: "cancelled"}
+
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"send","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"client-message","role":"ROLE_USER","parts":[{"text":"hello"}]},"configuration":{"returnImmediately":true}}}`))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusTooManyRequests || !strings.Contains(response.Body.String(), "Task quota exceeded") || llm.cancellationCalls != 1 || billing.calls != 1 {
+		t.Fatalf("status=%d cancellations=%d billing=%d body=%s", response.Code, llm.cancellationCalls, billing.calls, response.Body.String())
+	}
+}
+
+func TestMaterializeA2ABackgroundTaskMapsTerminalFailure(t *testing.T) {
+	text := "hello"
+	task := a2aTask{
+		ID: "task", ContextID: "context", Status: a2aTaskStatus{State: "TASK_STATE_SUBMITTED"},
+		History: []a2aMessage{{MessageID: "message", ContextID: "context", TaskID: "task", Role: "ROLE_USER", Parts: []a2aPart{{Text: &text}}}},
+	}
+	failed := materializeA2ABackgroundTask(task, openai.ResponseResponse{ID: "resp", Status: "failed"})
+	if failed.Status.State != "TASK_STATE_FAILED" || len(failed.History) != 1 || len(failed.Artifacts) != 0 {
+		t.Fatalf("failed task: %+v", failed)
+	}
+}
+
+func TestA2ACancelBackgroundTaskPersistsTerminalState(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	router, llm, billing := a2aTestHandlerWithTasks(t, store)
+	llm.response = openai.ResponseResponse{ID: "resp_cancel", Model: "test-model", Status: "in_progress"}
+	llm.canceled = openai.ResponseResponse{ID: "resp_cancel", Model: "test-model", Status: "cancelled"}
+
+	call := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+		request.Header.Set("A2A-Version", "1.0")
+		request.Header.Set("Authorization", "Bearer key")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	created := call(`{"jsonrpc":"2.0","id":"send","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"client-message","role":"ROLE_USER","parts":[{"text":"hello"}]},"configuration":{"returnImmediately":true}}}`)
+	var sent struct {
+		Result struct {
+			Task a2aTask `json:"task"`
+		} `json:"result"`
+	}
+	if created.Code != http.StatusOK || json.Unmarshal(created.Body.Bytes(), &sent) != nil || sent.Result.Task.Status.State != "TASK_STATE_WORKING" {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+	}
+	canceled := call(`{"jsonrpc":"2.0","id":"cancel","method":"CancelTask","params":{"tenant":"research","id":"` + sent.Result.Task.ID + `"}}`)
+	if canceled.Code != http.StatusOK || !strings.Contains(canceled.Body.String(), `"state":"TASK_STATE_CANCELED"`) || llm.cancellationCalls != 1 || billing.calls != 1 {
+		t.Fatalf("cancel status=%d calls=%d billing=%d body=%s", canceled.Code, llm.cancellationCalls, billing.calls, canceled.Body.String())
+	}
+	stored := store.tasks[sent.Result.Task.ID]
+	decoded, backgroundID, err := decodeA2AStoredTask(stored.Payload)
+	if err != nil || decoded.Status.State != "TASK_STATE_CANCELED" || backgroundID != "" {
+		t.Fatalf("stored=%+v binding=%q err=%v", decoded, backgroundID, err)
 	}
 }
 

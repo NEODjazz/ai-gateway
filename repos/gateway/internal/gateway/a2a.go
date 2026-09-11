@@ -12,6 +12,7 @@ import (
 	"ai-gateway-gateway/internal/a2astate"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
+	"ai-gateway-gateway/internal/provider"
 )
 
 const a2aProtocolVersion = "1.0"
@@ -78,6 +79,11 @@ type a2aTask struct {
 	Status    a2aTaskStatus `json:"status"`
 	Artifacts []a2aArtifact `json:"artifacts,omitempty"`
 	History   []a2aMessage  `json:"history,omitempty"`
+}
+
+type a2aStoredTask struct {
+	Task                 a2aTask `json:"task"`
+	BackgroundResponseID string  `json:"backgroundResponseId,omitempty"`
 }
 
 func (h Handler) WithA2ATaskStore(store a2astate.Store, config A2ATaskRuntimeConfig) Handler {
@@ -198,9 +204,20 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32602, "Invalid parameters")
 		return
 	}
-	if request.Params.Configuration.ReturnImmediately != nil && *request.Params.Configuration.ReturnImmediately {
-		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32004, "This operation is not supported")
-		return
+	returnImmediately := request.Params.Configuration.ReturnImmediately != nil && *request.Params.Configuration.ReturnImmediately
+	if returnImmediately {
+		if h.a2aTasks == nil || h.a2aTaskConfig.OwnerQuota < 1 || h.a2aTaskConfig.TTL <= 0 {
+			h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Asynchronous task execution is not supported")
+			return
+		}
+		if _, ok := h.provider.(provider.ResponseResourceProvider); !ok {
+			h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Asynchronous task execution is not supported")
+			return
+		}
+		if _, ok := h.provider.(provider.ResponseCancellationProvider); !ok {
+			h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Asynchronous task execution is not supported")
+			return
+		}
 	}
 	if h.a2aTasks != nil && (h.a2aTaskConfig.OwnerQuota < 1 || h.a2aTaskConfig.TTL <= 0) {
 		h.writeA2AError(w, request.ID, http.StatusServiceUnavailable, -32603, "Task storage is unavailable")
@@ -271,8 +288,40 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		input = a2aResponseInput(existing.History, content)
 	}
 	responseRequest := openai.ResponseRequest{Model: model, Input: input}
+	if returnImmediately {
+		store := true
+		responseRequest.Store = &store
+		responseRequest.Background = true
+	}
 	var storageErr error
 	h.serveResponsesAs(capture, r, responseRequest, "a2a", func(response openai.ResponseResponse, reqCtx modules.RequestContext) any {
+		if returnImmediately {
+			task := newPendingA2ATask(request, existing, continuation, response.Status)
+			backgroundResponseID := response.ID
+			if response.Status != "queued" && response.Status != "in_progress" {
+				task = materializeA2ABackgroundTask(task, response)
+				backgroundResponseID = ""
+			}
+			payload, err := encodeA2AStoredTask(task, backgroundResponseID)
+			if err == nil && continuation {
+				_, err = h.a2aTasks.UpdateA2ATask(r.Context(), a2astate.Task{
+					ID: task.ID, OwnerKey: fileOwnerKey(reqCtx), AgentID: profile.ID, Model: stored.Model, ContextID: task.ContextID,
+					State: task.Status.State, Payload: payload,
+				}, stored.UpdatedAt, h.a2aTaskConfig.TTL)
+			} else if err == nil {
+				_, err = h.a2aTasks.CreateA2ATask(r.Context(), a2astate.Task{
+					ID: task.ID, OwnerKey: fileOwnerKey(reqCtx), AgentID: profile.ID, Model: profile.Model, ContextID: task.ContextID,
+					State: task.Status.State, Payload: payload,
+				}, h.a2aTaskConfig.OwnerQuota, h.a2aTaskConfig.TTL)
+			}
+			storageErr = err
+			if err != nil {
+				if canceler, ok := h.provider.(provider.ResponseCancellationProvider); ok {
+					_, _ = canceler.CancelResponse(r.Context(), reqCtx, response.ID)
+				}
+			}
+			return a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: map[string]any{"task": task}}
+		}
 		messageID := response.ID
 		if messageID == "" || len(messageID) > 128 || continuation && a2aHistoryContainsMessage(existing.History, messageID) {
 			messageID = newA2AID("msg")
@@ -340,6 +389,31 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		return
 	}
 	copyA2AResponse(w, capture, request.ID)
+}
+
+func newPendingA2ATask(request a2aRequest, existing a2aTask, continuation bool, responseStatus string) a2aTask {
+	contextID := request.Params.Message.ContextID
+	if contextID == "" {
+		contextID = newA2AID("ctx")
+	}
+	taskID := request.Params.Message.TaskID
+	if taskID == "" {
+		taskID = newA2AID("task")
+	}
+	request.Params.Message.ContextID = contextID
+	request.Params.Message.TaskID = taskID
+	state := "TASK_STATE_SUBMITTED"
+	if responseStatus == "in_progress" {
+		state = "TASK_STATE_WORKING"
+	}
+	task := a2aTask{ID: taskID, ContextID: contextID, Status: a2aTaskStatus{State: state, Timestamp: time.Now().UTC().Format(time.RFC3339Nano)}}
+	if continuation {
+		task.Artifacts = append([]a2aArtifact(nil), existing.Artifacts...)
+		task.History = append(append([]a2aMessage(nil), existing.History...), request.Params.Message)
+	} else {
+		task.History = []a2aMessage{request.Params.Message}
+	}
+	return task
 }
 
 func (h Handler) authenticateA2AContinuation(w http.ResponseWriter, r *http.Request, rpcID json.RawMessage) (modules.RequestContext, bool) {
@@ -410,13 +484,47 @@ func (h Handler) getA2ATask(w http.ResponseWriter, r *http.Request, request a2aR
 	if !h.authorizeA2ATaskModel(w, request.ID, reqCtx, task.Model) {
 		return
 	}
-	decoded, err := decodeA2ATask(task.Payload)
+	decoded, backgroundResponseID, err := decodeA2AStoredTask(task.Payload)
 	if err != nil || decoded.ID != task.ID || decoded.ContextID != task.ContextID || decoded.Status.State != task.State {
 		if err == nil {
 			err = a2astate.ErrInvalid
 		}
 		h.writeA2ATaskStoreError(w, request.ID, err)
 		return
+	}
+	if backgroundResponseID != "" && a2aTaskPending(decoded.Status.State) {
+		resourceProvider := h.provider.(provider.ResponseResourceProvider)
+		responseModel, resolveErr := resourceProvider.ResolveResponseResource(r.Context(), reqCtx, backgroundResponseID)
+		if resolveErr != nil || responseModel != task.Model {
+			h.writeA2AError(w, request.ID, http.StatusBadGateway, -32603, "Task status is temporarily unavailable")
+			return
+		}
+		response, retrieveErr := resourceProvider.RetrieveResponse(r.Context(), reqCtx, backgroundResponseID)
+		if retrieveErr != nil {
+			h.writeA2AError(w, request.ID, http.StatusBadGateway, -32603, "Task status is temporarily unavailable")
+			return
+		}
+		updated := materializeA2ABackgroundTask(decoded, response)
+		if updated.Status.State != decoded.Status.State || a2aTaskTerminal(updated.Status.State) {
+			persistedResponseID := backgroundResponseID
+			if a2aTaskTerminal(updated.Status.State) {
+				persistedResponseID = ""
+			}
+			payload, encodeErr := encodeA2AStoredTask(updated, persistedResponseID)
+			if encodeErr != nil {
+				h.writeA2ATaskStoreError(w, request.ID, encodeErr)
+				return
+			}
+			_, updateErr := h.a2aTasks.UpdateA2ATask(r.Context(), a2astate.Task{
+				ID: task.ID, OwnerKey: task.OwnerKey, AgentID: task.AgentID, Model: task.Model, ContextID: task.ContextID,
+				State: updated.Status.State, Payload: payload,
+			}, task.UpdatedAt, h.a2aTaskConfig.TTL)
+			if updateErr != nil {
+				h.writeA2ATaskStoreError(w, request.ID, updateErr)
+				return
+			}
+			decoded = updated
+		}
 	}
 	trimA2AHistory(&decoded, request.Params.HistoryLength)
 	writeJSON(w, http.StatusOK, a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: decoded})
@@ -496,6 +604,49 @@ func (h Handler) cancelA2ATask(w http.ResponseWriter, r *http.Request, request a
 	if !h.authorizeA2ATaskModel(w, request.ID, reqCtx, task.Model) {
 		return
 	}
+	decoded, backgroundResponseID, err := decodeA2AStoredTask(task.Payload)
+	if err != nil || decoded.ID != task.ID || decoded.ContextID != task.ContextID || decoded.Status.State != task.State {
+		if err == nil {
+			err = a2astate.ErrInvalid
+		}
+		h.writeA2ATaskStoreError(w, request.ID, err)
+		return
+	}
+	if backgroundResponseID != "" && a2aTaskPending(decoded.Status.State) {
+		canceler, ok := h.provider.(provider.ResponseCancellationProvider)
+		if !ok {
+			h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Task cancellation is not supported")
+			return
+		}
+		responseModel, resolveErr := canceler.ResolveResponseResource(r.Context(), reqCtx, backgroundResponseID)
+		if resolveErr != nil || responseModel != task.Model {
+			h.writeA2AError(w, request.ID, http.StatusBadGateway, -32603, "Task cancellation failed")
+			return
+		}
+		response, cancelErr := canceler.CancelResponse(r.Context(), reqCtx, backgroundResponseID)
+		if cancelErr != nil {
+			h.writeA2AError(w, request.ID, http.StatusBadGateway, -32603, "Task cancellation failed")
+			return
+		}
+		updated := materializeA2ABackgroundTask(decoded, response)
+		if a2aTaskPending(updated.Status.State) {
+			updated.Status = a2aTaskStatus{State: "TASK_STATE_CANCELED", Timestamp: time.Now().UTC().Format(time.RFC3339Nano)}
+		}
+		payload, encodeErr := encodeA2AStoredTask(updated, "")
+		if encodeErr != nil {
+			h.writeA2ATaskStoreError(w, request.ID, encodeErr)
+			return
+		}
+		if _, updateErr := h.a2aTasks.UpdateA2ATask(r.Context(), a2astate.Task{
+			ID: task.ID, OwnerKey: task.OwnerKey, AgentID: task.AgentID, Model: task.Model, ContextID: task.ContextID,
+			State: updated.Status.State, Payload: payload,
+		}, task.UpdatedAt, h.a2aTaskConfig.TTL); updateErr != nil {
+			h.writeA2ATaskStoreError(w, request.ID, updateErr)
+			return
+		}
+		writeJSON(w, http.StatusOK, a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: updated})
+		return
+	}
 	h.writeA2AError(w, request.ID, http.StatusBadRequest, -32002, "Task cannot be canceled")
 }
 
@@ -540,12 +691,42 @@ func (h Handler) writeA2ATaskStoreError(w http.ResponseWriter, id json.RawMessag
 }
 
 func decodeA2ATask(payload []byte) (a2aTask, error) {
-	var task a2aTask
-	if len(payload) == 0 || len(payload) > a2astate.MaxPayloadBytes || json.Unmarshal(payload, &task) != nil ||
-		!validFileToken(task.ID, 128) || !validFileToken(task.ContextID, 128) || !validA2ATaskState(task.Status.State) || !validStoredA2ATask(task) {
-		return a2aTask{}, a2astate.ErrInvalid
+	task, _, err := decodeA2AStoredTask(payload)
+	return task, err
+}
+
+func decodeA2AStoredTask(payload []byte) (a2aTask, string, error) {
+	if len(payload) == 0 || len(payload) > a2astate.MaxPayloadBytes {
+		return a2aTask{}, "", a2astate.ErrInvalid
 	}
-	return task, nil
+	var task a2aTask
+	backgroundResponseID := ""
+	var stored a2aStoredTask
+	if json.Unmarshal(payload, &stored) == nil && stored.Task.ID != "" {
+		task = stored.Task
+		backgroundResponseID = stored.BackgroundResponseID
+	} else if json.Unmarshal(payload, &task) != nil {
+		return a2aTask{}, "", a2astate.ErrInvalid
+	}
+	if !validFileToken(task.ID, 128) || !validFileToken(task.ContextID, 128) || !validA2ATaskState(task.Status.State) || !validStoredA2ATask(task) {
+		return a2aTask{}, "", a2astate.ErrInvalid
+	}
+	pending := a2aTaskPending(task.Status.State)
+	if backgroundResponseID != "" && (!pending || !validLifecycleToken(backgroundResponseID)) || backgroundResponseID == "" && pending {
+		return a2aTask{}, "", a2astate.ErrInvalid
+	}
+	return task, backgroundResponseID, nil
+}
+
+func encodeA2AStoredTask(task a2aTask, backgroundResponseID string) ([]byte, error) {
+	if !validStoredA2ATask(task) || backgroundResponseID != "" && !validLifecycleToken(backgroundResponseID) {
+		return nil, a2astate.ErrInvalid
+	}
+	payload, err := json.Marshal(a2aStoredTask{Task: task, BackgroundResponseID: backgroundResponseID})
+	if err != nil || len(payload) > a2astate.MaxPayloadBytes {
+		return nil, a2astate.ErrInvalid
+	}
+	return payload, nil
 }
 
 func validStoredA2ATask(task a2aTask) bool {
@@ -554,7 +735,16 @@ func validStoredA2ATask(task a2aTask) bool {
 			return false
 		}
 	}
-	if len(task.History) < 2 || len(task.Artifacts) < 1 {
+	switch {
+	case a2aTaskPending(task.Status.State):
+		if len(task.History) < 1 || len(task.Artifacts) > 0 {
+			return false
+		}
+	case task.Status.State == "TASK_STATE_COMPLETED":
+		if len(task.History) < 2 || len(task.Artifacts) < 1 {
+			return false
+		}
+	case len(task.History) < 1:
 		return false
 	}
 	for _, message := range task.History {
@@ -578,6 +768,38 @@ func validStoredA2ATask(task a2aTask) bool {
 		}
 	}
 	return true
+}
+
+func a2aTaskPending(state string) bool {
+	return state == "TASK_STATE_SUBMITTED" || state == "TASK_STATE_WORKING"
+}
+
+func a2aTaskTerminal(state string) bool {
+	return state == "TASK_STATE_COMPLETED" || state == "TASK_STATE_FAILED" || state == "TASK_STATE_CANCELED"
+}
+
+func materializeA2ABackgroundTask(task a2aTask, response openai.ResponseResponse) a2aTask {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	switch response.Status {
+	case "queued":
+		task.Status = a2aTaskStatus{State: "TASK_STATE_SUBMITTED", Timestamp: now}
+	case "in_progress":
+		task.Status = a2aTaskStatus{State: "TASK_STATE_WORKING", Timestamp: now}
+	case "completed", "":
+		messageID := response.ID
+		if messageID == "" || len(messageID) > 128 || a2aHistoryContainsMessage(task.History, messageID) {
+			messageID = newA2AID("msg")
+		}
+		message := a2aMessage{MessageID: messageID, ContextID: task.ContextID, TaskID: task.ID, Role: "ROLE_AGENT", Parts: []a2aPart{{Text: responseOutputText(response)}}}
+		task.History = append(task.History, message)
+		task.Artifacts = append(task.Artifacts, a2aArtifact{ArtifactID: newA2AID("artifact"), Parts: message.Parts})
+		task.Status = a2aTaskStatus{State: "TASK_STATE_COMPLETED", Timestamp: now}
+	case "cancelled", "canceled":
+		task.Status = a2aTaskStatus{State: "TASK_STATE_CANCELED", Timestamp: now}
+	default:
+		task.Status = a2aTaskStatus{State: "TASK_STATE_FAILED", Timestamp: now}
+	}
+	return task
 }
 
 func validA2AHistoryLength(length *int) bool {

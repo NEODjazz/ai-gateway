@@ -40,13 +40,15 @@ permission examples, see [MCP integration](../../docs/mcp.md).
 - `PUT /admin/v1/policy-attachments/{id}`
 - `DELETE /admin/v1/policy-attachments/{id}`
 
-A2A 1.0 direct discovery and synchronous `SendMessage` are available for
+A2A 1.0 direct discovery and synchronous or durable asynchronous `SendMessage` are available for
 enabled agent profiles that do not reference an instruction template. The
 profile ID is carried as the declared interface tenant. Execution uses the
 shared Responses authentication, model authorization, quota, guardrail,
-routing and billing path. Agent cards advertise only `text/plain`; task
-continuation, streaming, push notifications, extended cards and non-text parts
-fail with explicit protocol errors.
+routing and billing path. With durable task and background-response storage,
+`returnImmediately=true` returns an owner-scoped submitted or working task;
+`GetTask` reconciles completion and `CancelTask` cancels pending execution.
+Agent cards advertise only `text/plain`; streaming, push notifications,
+extended cards and non-text parts fail with explicit protocol errors.
 
 Gateway-level module:
 

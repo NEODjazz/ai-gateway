@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.220
+  version: 0.1.221
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -43,7 +43,7 @@ paths:
       operationId: getA2AAgentCard
       tags: [A2A]
       summary: Discover one enabled executable agent profile
-      description: Returns an A2A 1.0 Agent Card for direct discovery. The card advertises synchronous text-only JSON-RPC execution and bearer authentication; streaming, push notifications and extended cards are not advertised.
+      description: Returns an A2A 1.0 Agent Card for direct discovery. The card advertises text-only JSON-RPC execution and bearer authentication; streaming, push notifications and extended cards are not advertised.
       security: []
       parameters:
         - {name: agent, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
@@ -58,8 +58,8 @@ paths:
     post:
       operationId: callA2AAgent
       tags: [A2A]
-      summary: Execute synchronous A2A messages and task lifecycle operations
-      description: Implements A2A 1.0 SendMessage, GetTask, ListTasks and CancelTask. New messages pass through the same authentication, model authorization, rate limit, guardrail, routing and billing pipeline as Responses. When durable task storage is configured, SendMessage creates or continues an owner-scoped completed task using optimistic concurrency. Streaming, binary/data parts and push notifications return explicit protocol errors.
+      summary: Execute A2A messages and task lifecycle operations
+      description: Implements A2A 1.0 SendMessage, GetTask, ListTasks and CancelTask. New messages pass through the same authentication, model authorization, rate limit, guardrail, routing and billing pipeline as Responses. When durable task storage is configured, SendMessage creates or continues an owner-scoped task using optimistic concurrency. Setting returnImmediately=true uses durable background Responses execution; GetTask reconciles pending execution and CancelTask cancels it. Streaming, binary/data parts and push notifications return explicit protocol errors.
       security: [{bearerAuth: []}]
       parameters:
         - {name: agent, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
@@ -3487,7 +3487,7 @@ components:
               additionalProperties: false
               properties:
                 acceptedOutputModes: {type: array, items: {type: string, const: text/plain}}
-                returnImmediately: {type: boolean}
+                returnImmediately: {type: boolean, description: Return an owner-scoped submitted or working task while durable background execution continues}
     A2AJSONRPCResponse:
       type: object
       additionalProperties: false
