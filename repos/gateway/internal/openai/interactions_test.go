@@ -14,11 +14,11 @@ func TestInteractionRequestMapsSupportedResponseSemantics(t *testing.T) {
 		Provider: "deployment", Model: "model", Input: "hello", SystemInstruction: "be concise",
 		Tools:                 []ResponseTool{{Type: "function", Name: "weather", Parameters: map[string]any{"type": "object"}}},
 		ResponseFormat:        map[string]any{"type": "json_schema", "name": "answer", "schema": map[string]any{"type": "object"}},
-		PreviousInteractionID: "resp_previous", Store: &store,
+		PreviousInteractionID: "resp_previous", Store: &store, Stream: true,
 		GenerationConfig: InteractionGenerationConfig{MaxOutputTokens: &maxTokens, Temperature: &temperature, TopP: &topP},
 	}
 	response, message := request.ResponseRequest()
-	if message != "" || response.Provider != "deployment" || response.Model != "model" || response.Input != "hello" || response.Instructions != "be concise" || response.PreviousResponse != "resp_previous" || response.Store == nil || *response.Store || response.MaxOutputTokens == nil || *response.MaxOutputTokens != 42 || response.Temperature == nil || *response.Temperature != 0.5 || response.TopP == nil || *response.TopP != 0.8 || len(response.Tools) != 1 {
+	if message != "" || response.Provider != "deployment" || response.Model != "model" || response.Input != "hello" || response.Instructions != "be concise" || response.PreviousResponse != "resp_previous" || response.Store == nil || *response.Store || !response.Stream || response.MaxOutputTokens == nil || *response.MaxOutputTokens != 42 || response.Temperature == nil || *response.Temperature != 0.5 || response.TopP == nil || *response.TopP != 0.8 || len(response.Tools) != 1 {
 		t.Fatalf("response=%+v message=%q", response, message)
 	}
 	text, ok := response.Text.(map[string]any)
@@ -44,7 +44,7 @@ func TestInteractionRequestRejectsUnsupportedOrInvalidSemantics(t *testing.T) {
 	tests := []InteractionRequest{
 		{Agent: "research", Input: "hello"},
 		{Model: "model"},
-		{Model: "model", Input: "hello", Stream: true},
+		{Model: "model", Input: "hello", Stream: true, Background: true},
 		{Model: "model", Input: "hello", GenerationConfig: InteractionGenerationConfig{Seed: &seed}},
 		{Model: "model", Input: "hello", GenerationConfig: InteractionGenerationConfig{StopSequences: []string{"stop"}}},
 		{Model: "model", Input: "hello", GenerationConfig: InteractionGenerationConfig{ThinkingLevel: "high"}},

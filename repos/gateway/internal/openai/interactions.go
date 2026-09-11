@@ -51,9 +51,6 @@ func (r InteractionRequest) ResponseRequest() (ResponseRequest, string) {
 	default:
 		return ResponseRequest{}, "input must be a string or a non-empty array"
 	}
-	if r.Stream {
-		return ResponseRequest{}, "streaming interactions are not supported"
-	}
 	if r.GenerationConfig.Seed != nil {
 		return ResponseRequest{}, "generation_config.seed is not supported"
 	}
@@ -85,7 +82,7 @@ func (r InteractionRequest) ResponseRequest() (ResponseRequest, string) {
 	}
 	result := ResponseRequest{
 		Provider: r.Provider, Model: r.Model, Input: r.Input, Instructions: r.SystemInstruction,
-		Tools: r.Tools, Text: text, PreviousResponse: r.PreviousInteractionID, Store: store, Background: r.Background,
+		Tools: r.Tools, Text: text, PreviousResponse: r.PreviousInteractionID, Store: store, Stream: r.Stream, Background: r.Background,
 		MaxOutputTokens: r.GenerationConfig.MaxOutputTokens, Temperature: r.GenerationConfig.Temperature,
 		TopP: r.GenerationConfig.TopP,
 	}

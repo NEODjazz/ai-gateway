@@ -13,7 +13,7 @@ Gateway реализует OpenAI-compatible endpoints:
 | `POST /v1/responses` | Responses, continuity, function tools и MCP passthrough |
 | `POST /v1/responses/input_tokens` | Native-подсчет полного Responses input без generation billing lifecycle |
 | `POST /v1/responses/compact` | Native compaction с авторизацией модели и учетом фактического usage |
-| `POST /v1/interactions` | Синхронное взаимодействие через Responses policy/routing с отдельной billing attribution |
+| `POST /v1/interactions` | Синхронное, incremental SSE или durable background взаимодействие через Responses policy/routing с отдельной billing attribution |
 | `POST /model/{model}/converse` | Native Converse request через общий Chat policy/routing и отдельную billing attribution |
 | `GET /v1/responses/{id}` | Чтение сохраненного Response владельцем credential |
 | `DELETE /v1/responses/{id}` | Удаление сохраненного Response и ownership binding |

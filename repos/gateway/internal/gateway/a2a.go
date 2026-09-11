@@ -318,7 +318,7 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		}
 		storageErr = err
 		return a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: map[string]any{"task": task}}
-	})
+	}, nil)
 	if storageErr != nil {
 		copyA2AHeaders(w, capture.header)
 		status := http.StatusServiceUnavailable

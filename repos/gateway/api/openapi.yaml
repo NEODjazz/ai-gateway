@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.213
+  version: 0.1.214
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1246,7 +1246,7 @@ paths:
       operationId: createInteraction
       tags: [Inference]
       summary: Create a model interaction
-      description: Converts a model interaction to the existing Responses execution pipeline. Supports synchronous and durable background execution, string or step-array input, system instructions, function tools, structured response formats, continuity, storage selection, and bounded generation settings. Background execution defaults to store=true and rejects an explicit store=false. Streaming, agents, MCP tools, seed, stop sequences, and thinking level are rejected before provider execution.
+      description: Converts a model interaction to the existing Responses execution pipeline. Supports synchronous, incremental SSE, and durable background execution; string or step-array input; system instructions; function tools; structured response formats; continuity; storage selection; and bounded generation settings. Background execution defaults to store=true and rejects an explicit store=false. Agents, MCP tools, seed, stop sequences, and thinking level are rejected before provider execution. Streaming background execution is rejected.
       requestBody:
         required: true
         content:
@@ -1255,7 +1255,7 @@ paths:
               $ref: '#/components/schemas/InteractionRequest'
       responses:
         '200':
-          description: Completed, queued, failed, or incomplete interaction
+          description: Completed, queued, failed, or incomplete interaction JSON, or named interaction SSE events when stream=true
           headers:
             X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
             X-Request-ID: {$ref: '#/components/headers/XRequestID'}
@@ -1263,6 +1263,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InteractionResponse'
+            text/event-stream:
+              schema:
+                type: string
+                description: Named interaction and step events terminated by a named done event containing `[DONE]`.
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
@@ -5611,7 +5615,7 @@ components:
         response_format: {}
         previous_interaction_id: {type: string}
         store: {type: boolean}
-        stream: {type: boolean, default: false, description: Must be false.}
+        stream: {type: boolean, default: false, description: Streams named interaction and step SSE events. Cannot be combined with background=true.}
         background: {type: boolean, default: false, description: Runs durably when true; store defaults to true and an explicit false is rejected.}
         generation_config: {$ref: '#/components/schemas/InteractionGenerationConfig'}
     InteractionResponseContent:

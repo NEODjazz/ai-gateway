@@ -21,6 +21,16 @@ type interactionRequestProvider struct {
 	request *openai.ResponseRequest
 }
 
+type bufferedInteractionProvider struct{ chatProvider }
+
+func (*bufferedInteractionProvider) Responses(_ context.Context, request modules.RequestContext) (openai.ResponseResponse, error) {
+	return openai.ResponseResponse{
+		ID: "interaction_buffered", Object: "response", Model: request.Request.Model, Status: "completed",
+		Output: []openai.ResponseOutputItem{{ID: "message", Type: "message", Role: "assistant", Content: []openai.ResponseOutputContent{{Type: "refusal", Refusal: "declined"}}}},
+		Usage:  openai.ResponseUsage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3},
+	}, nil
+}
+
 func (p *interactionRequestProvider) Responses(_ context.Context, request modules.RequestContext) (openai.ResponseResponse, error) {
 	p.request = request.ResponseRequest
 	return openai.ResponseResponse{ID: "interaction_queued", Model: request.Request.Model, Status: "queued"}, nil
@@ -66,12 +76,56 @@ func TestInteractionsUsesResponsesPolicyRoutingAndBilling(t *testing.T) {
 }
 
 func TestInteractionsRejectsUnsupportedModesBeforeExecution(t *testing.T) {
-	for _, field := range []string{`"stream":true`, `"background":true,"store":false`, `"agent":"research"`, `"generation_config":{"seed":1}`, `"unknown":true`} {
+	for _, field := range []string{`"stream":true,"background":true`, `"background":true,"store":false`, `"agent":"research"`, `"generation_config":{"seed":1}`, `"unknown":true`} {
 		response := httptest.NewRecorder()
 		Handler{}.Interactions(response, httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"model":"model","input":"hello",`+field+`}`)))
 		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_request"`) {
 			t.Fatalf("field=%s status=%d body=%s", field, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestInteractionsStreamsIncrementalStepsAndSettlesUsage(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_stream\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"upstream\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"message\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n")
+		_, _ = fmt.Fprint(w, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"item_id\":\"message\",\"delta\":\"hello\"}\n\n")
+		_, _ = fmt.Fprint(w, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"message\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}}\n\n")
+		_, _ = fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_stream\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"upstream\",\"output\":[{\"id\":\"message\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}],\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n")
+	}))
+	defer upstream.Close()
+	recorder := &statelessUsageRecorder{}
+	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "deployment", Type: "openai-compatible", BaseURL: upstream.URL, Models: []string{"public"}, ModelAliases: map[string]string{"public": "upstream"}, Stream: true, Capabilities: []string{"responses", "stream"}}}, Modules: modules.NewPipeline([]modules.Module{recorder})})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"public"}}}}), router))
+	request := httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"provider":"deployment","model":"public","input":"hello","stream":true}`))
+	request.Header.Set("Authorization", "Bearer gateway-test-key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	for _, expected := range []string{"event: interaction.created", "event: step.start", `"type":"model_output"`, "event: step.delta", `"text":"hello"`, "event: step.stop", "event: interaction.completed", `"total_tokens":3`, "event: done\ndata: [DONE]"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("missing %q in stream: %s", expected, body)
+		}
+	}
+	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "text/event-stream") || strings.Contains(body, "response.output_text") || len(recorder.totals) != 1 || recorder.totals[0] != 3 {
+		t.Fatalf("status=%d headers=%v totals=%v body=%s", response.Code, response.Header(), recorder.totals, body)
+	}
+}
+
+func TestInteractionsSynthesizesStreamForBufferedProvider(t *testing.T) {
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"model"}}}), &bufferedInteractionProvider{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"model":"model","input":"hello","stream":true}`))
+	response := httptest.NewRecorder()
+	handler.Interactions(response, request)
+	body := response.Body.String()
+	for _, expected := range []string{"event: interaction.created", "event: step.start", `"type":"model_output"`, "event: step.delta", `"text":"declined"`, "event: step.stop", "event: interaction.completed", `"total_tokens":3`, "event: done\ndata: [DONE]"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("missing %q in stream: %s", expected, body)
+		}
+	}
+	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("status=%d headers=%v body=%s", response.Code, response.Header(), body)
 	}
 }
 
