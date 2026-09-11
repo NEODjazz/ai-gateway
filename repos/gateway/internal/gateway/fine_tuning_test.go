@@ -70,6 +70,17 @@ func (s *memoryFineTuningStore) UpdateFineTuningRecord(_ context.Context, owner 
 	return record, nil
 }
 
+func (s *memoryFineTuningStore) FindFineTuningRecordByModel(_ context.Context, owner, model string) (finetunestate.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, record := range s.records {
+		if record.OwnerKey == owner && record.Job.FineTunedModel != nil && *record.Job.FineTunedModel == model {
+			return record, nil
+		}
+	}
+	return finetunestate.Record{}, finetunestate.ErrNotFound
+}
+
 type gatewayFineTuningProvider struct {
 	*batchProvider
 	mu          sync.Mutex
@@ -124,6 +135,11 @@ func (p *gatewayFineTuningProvider) ListFineTuningEvents(_ context.Context, bind
 func (p *gatewayFineTuningProvider) ListFineTuningCheckpoints(_ context.Context, binding provider.FineTuningBinding, id string, _ provider.FineTuningListOptions) (openai.FineTuningCheckpointList, error) {
 	p.record("checkpoints", binding)
 	return openai.FineTuningCheckpointList{Object: "list", Data: []openai.FineTuningCheckpoint{{ID: "ftckpt_1", Object: "fine_tuning.job.checkpoint", FineTuningJobID: id, FineTunedModel: "model-a:checkpoint"}}}, nil
+}
+
+func (p *gatewayFineTuningProvider) DeleteFineTunedModel(_ context.Context, binding provider.FineTuningBinding, model string) (openai.ModelDeletion, error) {
+	p.record("delete_model", binding)
+	return openai.ModelDeletion{ID: model, Object: "model", Deleted: true}, nil
 }
 
 func fineTuningTestHandler(store *memoryFineTuningStore, files *memoryFileStore, runtime *gatewayFineTuningProvider, allowed ...string) http.Handler {
@@ -236,5 +252,41 @@ func TestFineTuningRejectsUnknownJSONAndUnsupportedQuery(t *testing.T) {
 	var payload map[string]any
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeleteFineTunedModelUsesOwnedPinnedJob(t *testing.T) {
+	model := "ft:model-a:owner:suffix:1"
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	store := &memoryFineTuningStore{records: map[string]finetunestate.Record{
+		"ftjob_1": {OwnerKey: owner, Binding: provider.FineTuningBinding{Endpoint: "primary", Model: "model-a", Deployment: "deployment-hash"}, Job: openai.FineTuningJob{ID: "ftjob_1", FineTunedModel: &model}},
+	}}
+	runtime := &gatewayFineTuningProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+	handler := fineTuningTestHandler(store, &memoryFileStore{files: map[string]filestate.File{}}, runtime, "model-a")
+	response := fineTuningRequest(t, handler, http.MethodDelete, "/v1/models/"+model, "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"deleted":true`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.lastBinding.Deployment != "deployment-hash" || runtime.actions[len(runtime.actions)-1] != "delete_model" {
+		t.Fatalf("binding=%+v actions=%v", runtime.lastBinding, runtime.actions)
+	}
+}
+
+func TestDeleteFineTunedModelHidesForeignAndInvalidModels(t *testing.T) {
+	foreignModel := "ft:model-a:foreign:1"
+	store := &memoryFineTuningStore{records: map[string]finetunestate.Record{
+		"ftjob_foreign": {OwnerKey: "foreign", Job: openai.FineTuningJob{ID: "ftjob_foreign", FineTunedModel: &foreignModel}},
+	}}
+	handler := fineTuningTestHandler(store, &memoryFileStore{files: map[string]filestate.File{}}, &gatewayFineTuningProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}, "model-a")
+	for _, test := range []struct {
+		path   string
+		status int
+	}{{"/v1/models/" + foreignModel, http.StatusNotFound}, {"/v1/models/bad%2Fmodel", http.StatusBadRequest}, {"/v1/models/ft:model?query=1", http.StatusBadRequest}} {
+		response := fineTuningRequest(t, handler, http.MethodDelete, test.path, "")
+		if response.Code != test.status {
+			t.Fatalf("path=%s status=%d body=%s", test.path, response.Code, response.Body.String())
+		}
 	}
 }

@@ -52,6 +52,7 @@ type FineTuningProvider interface {
 	ResumeFineTuningJob(context.Context, FineTuningBinding, string) (openai.FineTuningJob, error)
 	ListFineTuningEvents(context.Context, FineTuningBinding, string, FineTuningListOptions) (openai.FineTuningEventList, error)
 	ListFineTuningCheckpoints(context.Context, FineTuningBinding, string, FineTuningListOptions) (openai.FineTuningCheckpointList, error)
+	DeleteFineTunedModel(context.Context, FineTuningBinding, string) (openai.ModelDeletion, error)
 }
 
 type ResponseResourceResolver interface {

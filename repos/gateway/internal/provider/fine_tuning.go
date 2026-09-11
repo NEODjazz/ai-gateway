@@ -27,6 +27,7 @@ type FineTuningClient interface {
 	ResumeFineTuningJob(context.Context, string) (openai.FineTuningJob, error)
 	ListFineTuningEvents(context.Context, string, FineTuningListOptions) (openai.FineTuningEventList, error)
 	ListFineTuningCheckpoints(context.Context, string, FineTuningListOptions) (openai.FineTuningCheckpointList, error)
+	DeleteFineTunedModel(context.Context, string) (openai.ModelDeletion, error)
 }
 
 func (p OpenAICompatible) CreateFineTuningJob(ctx context.Context, input openai.FineTuningCreateRequest) (openai.FineTuningJob, error) {
@@ -88,6 +89,31 @@ func (p OpenAICompatible) ListFineTuningCheckpoints(ctx context.Context, id stri
 		err = validateFineTuningCheckpointPage(result, id)
 	}
 	return result, err
+}
+
+func (p OpenAICompatible) DeleteFineTunedModel(ctx context.Context, model string) (openai.ModelDeletion, error) {
+	var result openai.ModelDeletion
+	if !validFineTunedModelID(model) {
+		return result, &Error{Class: FailureClientRequest, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "model", Err: errors.New("invalid fine-tuned model ID")}
+	}
+	err := p.fineTuningRequest(ctx, http.MethodDelete, "models/"+url.PathEscape(model), nil, nil, &result)
+	if err == nil && (result.ID != model || result.Object != "model" || !result.Deleted) {
+		err = errors.New("invalid upstream model deletion")
+	}
+	return result, err
+}
+
+func validFineTunedModelID(model string) bool {
+	if len(model) == 0 || len(model) > 256 {
+		return false
+	}
+	for _, c := range model {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.' || c == ':' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (p OpenAICompatible) fineTuningJobAction(ctx context.Context, method, id, action string) (openai.FineTuningJob, error) {

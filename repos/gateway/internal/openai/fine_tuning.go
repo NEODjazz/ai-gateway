@@ -71,3 +71,9 @@ type FineTuningCheckpointList struct {
 	Data    []FineTuningCheckpoint `json:"data"`
 	HasMore bool                   `json:"has_more"`
 }
+
+type ModelDeletion struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Deleted bool   `json:"deleted"`
+}

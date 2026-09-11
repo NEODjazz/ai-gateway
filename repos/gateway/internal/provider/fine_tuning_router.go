@@ -112,3 +112,9 @@ func (r Router) ListFineTuningCheckpoints(ctx context.Context, binding FineTunin
 		return client.ListFineTuningCheckpoints(ctx, id, options)
 	})
 }
+
+func (r Router) DeleteFineTunedModel(ctx context.Context, binding FineTuningBinding, model string) (openai.ModelDeletion, error) {
+	return callFineTuningLifecycle(r, ctx, binding, "fine_tuning.model.delete", func(ctx context.Context, client FineTuningClient) (openai.ModelDeletion, error) {
+		return client.DeleteFineTunedModel(ctx, model)
+	})
+}

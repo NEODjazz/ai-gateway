@@ -35,6 +35,8 @@ func TestPostgresFineTuningOwnershipLifecycleIntegration(t *testing.T) {
 	}
 	job := created.Job
 	job.Status = "running"
+	model := "ft:model:owner:suffix:1"
+	job.FineTunedModel = &model
 	updated, err := store.UpdateFineTuningRecord(t.Context(), record.OwnerKey, job)
 	if err != nil || updated.Job.Status != "running" || updated.UpdatedAt.Before(updated.CreatedAt) {
 		t.Fatalf("updated=%+v err=%v", updated, err)
@@ -42,6 +44,13 @@ func TestPostgresFineTuningOwnershipLifecycleIntegration(t *testing.T) {
 	page, next, err := store.ListFineTuningRecords(t.Context(), record.OwnerKey, 1, "")
 	if err != nil || len(page) != 1 || next != "" || page[0].Job.ID != record.Job.ID {
 		t.Fatalf("page=%+v next=%q err=%v", page, next, err)
+	}
+	found, err := store.FindFineTuningRecordByModel(t.Context(), record.OwnerKey, model)
+	if err != nil || found.Job.ID != record.Job.ID {
+		t.Fatalf("found=%+v err=%v", found, err)
+	}
+	if _, err := store.FindFineTuningRecordByModel(t.Context(), "owner-b", model); !errors.Is(err, finetunestate.ErrNotFound) {
+		t.Fatalf("cross-owner model lookup err=%v", err)
 	}
 }
 

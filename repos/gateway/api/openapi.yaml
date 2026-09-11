@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.233
+  version: 0.1.234
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1291,6 +1291,27 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '502':
           $ref: '#/components/responses/ModuleFailed'
+    delete:
+      operationId: deleteFineTunedModel
+      tags: [Fine-tuning]
+      summary: Delete an owned fine-tuned model from its pinned deployment
+      description: Resolves the model through the authenticated owner's durable fine-tuning job record. The stored deployment binding prevents deletion from being sent to a different provider deployment.
+      parameters:
+        - name: model
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9_.:-]+$'}
+      responses:
+        '200':
+          description: Deleted fine-tuned model
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ModelDeletion'}
+        default:
+          description: Authentication, ownership, validation, provider, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /v1/chat/completions:
     post:
       operationId: createChatCompletion
@@ -3880,6 +3901,14 @@ components:
           propertyNames: {minLength: 1, maxLength: 64}
           additionalProperties: {type: string, maxLength: 512}
         method: {type: object}
+    ModelDeletion:
+      type: object
+      additionalProperties: false
+      required: [id, object, deleted]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 256}
+        object: {type: string, const: model}
+        deleted: {type: boolean, const: true}
     FineTuningJob:
       type: object
       additionalProperties: false

@@ -30,4 +30,5 @@ type Store interface {
 	GetFineTuningRecord(context.Context, string, string) (Record, error)
 	ListFineTuningRecords(context.Context, string, int, string) ([]Record, string, error)
 	UpdateFineTuningRecord(context.Context, string, openai.FineTuningJob) (Record, error)
+	FindFineTuningRecordByModel(context.Context, string, string) (Record, error)
 }

@@ -159,3 +159,21 @@ func (s *PostgresStore) UpdateFineTuningRecord(ctx context.Context, owner string
 	}
 	return s.GetFineTuningRecord(ctx, owner, job.ID)
 }
+
+func (s *PostgresStore) FindFineTuningRecordByModel(ctx context.Context, owner, model string) (finetunestate.Record, error) {
+	if s == nil || s.pool == nil {
+		return finetunestate.Record{}, finetunestate.ErrUnavailable
+	}
+	if owner == "" || model == "" || len(model) > 256 {
+		return finetunestate.Record{}, finetunestate.ErrInvalid
+	}
+	var id string
+	err := s.pool.QueryRow(ctx, `SELECT job_id FROM gateway_fine_tuning_jobs WHERE owner_key=$1 AND snapshot->>'fine_tuned_model'=$2 ORDER BY created_at DESC,job_id DESC LIMIT 1`, owner, model).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return finetunestate.Record{}, finetunestate.ErrNotFound
+	}
+	if err != nil {
+		return finetunestate.Record{}, err
+	}
+	return s.GetFineTuningRecord(ctx, owner, id)
+}

@@ -39,6 +39,8 @@ func TestOpenAICompatibleFineTuningLifecycle(t *testing.T) {
 			w.Write([]byte(`{"object":"list","data":[{"id":"ftevent_1","object":"fine_tuning.job.event","created_at":1,"level":"info","message":"queued"}],"has_more":false}`))
 		case "/v1/fine_tuning/jobs/ftjob_123/checkpoints":
 			w.Write([]byte(`{"object":"list","data":[{"id":"ftckpt_1","object":"fine_tuning.job.checkpoint","created_at":1,"fine_tuned_model_checkpoint":"model:step-1","fine_tuning_job_id":"ftjob_123","metrics":{},"step_number":1}],"has_more":false}`))
+		case "/v1/models/ft:model:owner:suffix:1":
+			w.Write([]byte(`{"id":"ft:model:owner:suffix:1","object":"model","deleted":true}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -74,6 +76,10 @@ func TestOpenAICompatibleFineTuningLifecycle(t *testing.T) {
 	checkpoints, err := client.ListFineTuningCheckpoints(context.Background(), "ftjob_123", FineTuningListOptions{})
 	if err != nil || len(checkpoints.Data) != 1 || checkpoints.Data[0].StepNumber != 1 {
 		t.Fatalf("checkpoints=%+v err=%v", checkpoints, err)
+	}
+	deleted, err := client.DeleteFineTunedModel(context.Background(), "ft:model:owner:suffix:1")
+	if err != nil || !deleted.Deleted {
+		t.Fatalf("deleted=%+v err=%v", deleted, err)
 	}
 }
 
@@ -113,6 +119,9 @@ func TestFineTuningTransportRejectsInvalidInputsAndResponses(t *testing.T) {
 	}
 	if _, err := client.ListFineTuningJobs(context.Background(), FineTuningListOptions{Limit: 101}); err == nil {
 		t.Fatal("invalid pagination accepted")
+	}
+	if _, err := client.DeleteFineTunedModel(context.Background(), "bad/model"); err == nil {
+		t.Fatal("invalid model ID accepted")
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"object":"fine_tuning.job","id":"ftjob_1","model":"m","training_file":"f","status":"mystery"}`))

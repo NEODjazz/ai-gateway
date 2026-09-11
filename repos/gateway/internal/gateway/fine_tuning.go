@@ -178,6 +178,47 @@ func (h Handler) ListFineTuningEvents(w http.ResponseWriter, r *http.Request) {
 func (h Handler) ListFineTuningCheckpoints(w http.ResponseWriter, r *http.Request) {
 	h.fineTuningSubresources(w, r, true)
 }
+
+func (h Handler) DeleteFineTunedModel(w http.ResponseWriter, r *http.Request) {
+	if r.URL.RawQuery != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "query parameters are not supported")
+		return
+	}
+	owner, ok := h.fineTuningOwner(w, r)
+	if !ok {
+		return
+	}
+	model := r.PathValue("model")
+	if !validFineTunedModelID(model) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "fine-tuned model ID is invalid")
+		return
+	}
+	record, err := h.fineTuning.FindFineTuningRecordByModel(r.Context(), owner, model)
+	if err != nil {
+		writeFineTuningStoreError(w, err)
+		return
+	}
+	deleted, err := h.provider.(provider.FineTuningProvider).DeleteFineTunedModel(r.Context(), record.Binding, model)
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, deleted)
+}
+
+func validFineTunedModelID(model string) bool {
+	if len(model) == 0 || len(model) > 256 {
+		return false
+	}
+	for _, c := range model {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.' || c == ':' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func (h Handler) fineTuningSubresources(w http.ResponseWriter, r *http.Request, checkpoints bool) {
 	owner, ok := h.fineTuningOwner(w, r)
 	if !ok {
