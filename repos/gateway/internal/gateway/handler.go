@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/a2astate"
+	"ai-gateway-gateway/internal/assistantstate"
 	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/batchstate"
 	"ai-gateway-gateway/internal/filestate"
@@ -46,6 +47,8 @@ type Handler struct {
 	agents            *AgentRegistry
 	a2aTasks          a2astate.Store
 	a2aTaskConfig     A2ATaskRuntimeConfig
+	assistants        assistantstate.Store
+	assistantConfig   AssistantRuntimeConfig
 	a2aSubscriptions  chan struct{}
 	a2aHTTPClient     httpDoer
 	a2aPushJobs       asyncstate.Store

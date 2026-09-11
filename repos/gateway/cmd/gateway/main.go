@@ -153,6 +153,7 @@ func main() {
 			WithVideoStore(providerControlStore).
 			WithSkillStore(providerControlStore).
 			WithVectorStore(providerControlStore, gateway.VectorStoreRuntimeConfig{OwnerQuota: cfg.VectorStores.OwnerQuota, FileQuota: cfg.VectorStores.FileQuota})
+		handler = handler.WithAssistantStore(providerControlStore, gateway.AssistantRuntimeConfig{OwnerQuota: cfg.Assistants.OwnerQuota})
 		handler, err = handler.WithA2APushNotifications(providerControlStore, []byte(cfg.Provider.CredentialKey))
 		if err != nil {
 			log.Fatal(err)

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.241
+  version: 0.1.242
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -16,6 +16,7 @@ servers:
 tags:
   - name: Inference
   - name: Models
+  - name: Assistants
   - name: A2A
   - name: Virtual keys
   - name: Identity
@@ -40,6 +41,73 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /v1/assistants:
+    post:
+      operationId: createAssistant
+      tags: [Assistants]
+      summary: Create an owner-isolated assistant definition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AssistantCreateRequest'}
+      responses:
+        '200':
+          description: Created assistant
+          content: {application/json: {schema: {$ref: '#/components/schemas/Assistant'}}}
+        '400': {description: Invalid definition or unowned tool resource}
+        '401': {description: Invalid gateway credential}
+        '403': {description: Model or tool is not allowed}
+        '429': {description: Assistant owner quota exceeded}
+        '503': {description: Durable assistant storage unavailable}
+    get:
+      operationId: listAssistants
+      tags: [Assistants]
+      summary: List assistant definitions owned by the caller
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {name: after, in: query, schema: {type: string, maxLength: 128}}
+      responses:
+        '200':
+          description: Owner-filtered assistant page
+          content: {application/json: {schema: {$ref: '#/components/schemas/AssistantList'}}}
+        '401': {description: Invalid gateway credential}
+        '503': {description: Durable assistant storage unavailable}
+  /v1/assistants/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, maxLength: 128}}
+    get:
+      operationId: getAssistant
+      tags: [Assistants]
+      summary: Retrieve an owned assistant definition
+      responses:
+        '200':
+          description: Assistant definition
+          content: {application/json: {schema: {$ref: '#/components/schemas/Assistant'}}}
+        '404': {description: Assistant is absent or belongs to another owner}
+    post:
+      operationId: updateAssistant
+      tags: [Assistants]
+      summary: Update an owned assistant definition
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AssistantUpdateRequest'}}}
+      responses:
+        '200':
+          description: Updated assistant
+          content: {application/json: {schema: {$ref: '#/components/schemas/Assistant'}}}
+        '400': {description: Invalid update or unowned tool resource}
+        '404': {description: Assistant is absent or belongs to another owner}
+        '409': {description: Assistant was modified concurrently}
+    delete:
+      operationId: deleteAssistant
+      tags: [Assistants]
+      summary: Delete an owned assistant definition
+      responses:
+        '200':
+          description: Assistant deletion result
+          content: {application/json: {schema: {$ref: '#/components/schemas/AssistantDeletion'}}}
+        '404': {description: Assistant is absent or belongs to another owner}
   /v1/realtime:
     get:
       operationId: openRealtimeSession
@@ -3765,6 +3833,73 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    AssistantTool:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: {type: string, enum: [code_interpreter, file_search, function]}
+        function:
+          type: object
+          additionalProperties: false
+          required: [name]
+          properties:
+            name: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$'}
+            description: {type: string, maxLength: 1024}
+            parameters: {type: object, additionalProperties: true}
+            strict: {type: boolean}
+    AssistantDefinition:
+      type: object
+      properties:
+        model: {type: string, minLength: 1, maxLength: 256}
+        name: {type: [string, 'null'], maxLength: 256}
+        description: {type: [string, 'null'], maxLength: 512}
+        instructions: {type: [string, 'null'], maxLength: 262144}
+        tools: {type: array, maxItems: 128, items: {$ref: '#/components/schemas/AssistantTool'}}
+        tool_resources: {type: [object, 'null'], additionalProperties: true}
+        metadata: {type: object, maxProperties: 16, additionalProperties: {type: string, maxLength: 512}}
+        temperature: {type: [number, 'null'], minimum: 0, maximum: 2}
+        top_p: {type: [number, 'null'], minimum: 0, maximum: 1}
+        response_format: {}
+    AssistantCreateRequest:
+      allOf:
+        - {$ref: '#/components/schemas/AssistantDefinition'}
+        - type: object
+          required: [model]
+      unevaluatedProperties: false
+    AssistantUpdateRequest:
+      allOf:
+        - {$ref: '#/components/schemas/AssistantDefinition'}
+        - type: object
+          minProperties: 1
+      unevaluatedProperties: false
+    Assistant:
+      allOf:
+        - {$ref: '#/components/schemas/AssistantDefinition'}
+        - type: object
+          required: [id, object, created_at, model, name, description, instructions, tools, metadata]
+          properties:
+            id: {type: string}
+            object: {type: string, const: assistant}
+            created_at: {type: integer}
+    AssistantList:
+      type: object
+      additionalProperties: false
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, items: {$ref: '#/components/schemas/Assistant'}}
+        has_more: {type: boolean}
+        first_id: {type: string}
+        last_id: {type: string}
+    AssistantDeletion:
+      type: object
+      additionalProperties: false
+      required: [id, object, deleted]
+      properties:
+        id: {type: string}
+        object: {type: string, const: assistant.deleted}
+        deleted: {type: boolean, const: true}
     A2APart:
       type: object
       additionalProperties: false

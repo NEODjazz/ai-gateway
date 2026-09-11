@@ -52,6 +52,9 @@ gateway:
     ownerQuota: 1000
     # Maximum files attached to one vector store.
     fileQuota: 10000
+  assistants:
+    # Maximum durable assistant definitions per credential-and-user owner.
+    ownerQuota: 1000
   a2aTasks:
     # Maximum retained tasks per credential-and-user owner.
     ownerQuota: 1000
