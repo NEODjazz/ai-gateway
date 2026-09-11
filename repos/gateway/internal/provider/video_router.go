@@ -89,6 +89,9 @@ func (r Router) RemixVideo(ctx context.Context, identity modules.RequestContext,
 	if err != nil {
 		return openai.Video{}, VideoBinding{}, err
 	}
+	if !supportsCatalogCapabilities(r.catalog.Current(ctx), endpoint, binding.Model, "video", "video_remix") {
+		return openai.Video{}, VideoBinding{}, videoParameterError("remix", errors.New("video remix is not enabled for the selected deployment"))
+	}
 	release, err := r.acquireEndpoint(ctx, endpoint, 0)
 	if err != nil {
 		return openai.Video{}, VideoBinding{}, err

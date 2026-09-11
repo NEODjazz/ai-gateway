@@ -240,7 +240,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "deepseek", capabilities: []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}},
 		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}},
 		{providerType: "mistral", capabilities: []string{"chat", "audio_transcription", "audio_speech", "tools", "structured_output", "vision", "assistant_prefill"}},
-		{providerType: "xai", capabilities: []string{"chat", "video", "video_extension"}},
+		{providerType: "xai", capabilities: []string{"chat", "video", "video_remix", "video_extension"}},
 		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "background_responses", "audio_translation", "tools", "structured_output", "mcp", "vision", "web_search", "audio", "file_input"}},
 	}
 	for _, test := range tests {
@@ -312,7 +312,7 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Equal(profilesByType["deepseek"].Operations, []string{"chat", "responses", "stream"}) || !slices.Equal(profilesByType["deepseek"].Capabilities, []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}) {
 		t.Fatalf("deepseek profile=%+v", profilesByType["deepseek"])
 	}
-	if !slices.Equal(profilesByType["xai"].Operations, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_extension", "stream"}) || !slices.Equal(profilesByType["xai"].Capabilities, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_extension", "stream", "tools", "structured_output", "vision", "web_search"}) {
+	if !slices.Equal(profilesByType["xai"].Operations, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_remix", "video_extension", "stream"}) || !slices.Equal(profilesByType["xai"].Capabilities, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_remix", "video_extension", "stream", "tools", "structured_output", "vision", "web_search"}) {
 		t.Fatalf("xai profile=%+v", profilesByType["xai"])
 	}
 	if !slices.Equal(profilesByType["openrouter"].Operations, []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream"}) || !slices.Equal(profilesByType["openrouter"].Capabilities, []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}) {

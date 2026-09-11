@@ -87,14 +87,14 @@ func TestOpenAICompatibleVideoLifecycle(t *testing.T) {
 
 func TestVideoRouterPinsSelectedDeployment(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/videos" && r.URL.Path != "/v1/videos/video_123" {
+		if r.URL.Path != "/v1/videos" && r.URL.Path != "/v1/videos/video_123" && r.URL.Path != "/v1/videos/video_123/remix" {
 			http.NotFound(w, r)
 			return
 		}
 		_, _ = io.WriteString(w, videoFixture)
 	}))
 	defer server.Close()
-	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "video-primary", Type: "openai", BaseURL: server.URL + "/v1", Models: []string{"public-video"}, ModelAliases: map[string]string{"public-video": "video-model"}, Capabilities: []string{"video"}}}})
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "video-primary", Type: "openai", BaseURL: server.URL + "/v1", Models: []string{"public-video"}, ModelAliases: map[string]string{"public-video": "video-model"}, Capabilities: []string{"video", "video_remix"}}}})
 	runtime, ok := router.(VideoProvider)
 	if !ok {
 		t.Fatal("router does not expose video lifecycle")
@@ -109,6 +109,9 @@ func TestVideoRouterPinsSelectedDeployment(t *testing.T) {
 	}
 	if retrieved, err := runtime.RetrieveVideo(t.Context(), binding, created.ID); err != nil || retrieved.Model != "public-video" {
 		t.Fatalf("retrieved=%+v err=%v", retrieved, err)
+	}
+	if remixed, _, err := runtime.RemixVideo(t.Context(), modules.RequestContext{}, binding, created.ID, openai.VideoRemixRequest{Prompt: "remix"}, nil); err != nil || remixed.Model != "public-video" {
+		t.Fatalf("remixed=%+v err=%v", remixed, err)
 	}
 	binding.Deployment = strings.Repeat("0", 64)
 	if _, err := runtime.RetrieveVideo(t.Context(), binding, created.ID); !errors.Is(err, ErrVideoDeploymentChanged) {
@@ -146,6 +149,9 @@ func TestVideoRouterRequiresExplicitExtensionCapability(t *testing.T) {
 	created, binding, err := withoutExtension.CreateVideo(t.Context(), modules.RequestContext{}, openai.VideoCreateRequest{Model: "public-video", Prompt: "source"}, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, _, err = withoutExtension.RemixVideo(t.Context(), modules.RequestContext{}, binding, created.ID, openai.VideoRemixRequest{Prompt: "remix"}, nil); err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("remix without capability error=%v", err)
 	}
 	if _, _, err = withoutExtensionAPI.ExtendVideo(t.Context(), modules.RequestContext{}, binding, created.ID, openai.VideoExtendRequest{Prompt: "continue"}, nil); err == nil || !strings.Contains(err.Error(), "not enabled") {
 		t.Fatalf("extension without capability error=%v", err)
