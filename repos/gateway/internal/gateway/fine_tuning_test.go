@@ -236,6 +236,25 @@ func TestFineTuningCancelsUpstreamJobWhenPersistenceFails(t *testing.T) {
 	}
 }
 
+func TestFineTuningCreateFailsClosedWhenBillingIsConfigured(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	files := &memoryFileStore{files: map[string]filestate.File{"file_train": {ID: "file_train", OwnerKey: owner, Purpose: "fine-tune"}}}
+	runtime := &gatewayFineTuningProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+	store := &memoryFineTuningStore{records: map[string]finetunestate.Record{}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}, &lifecycleBillingModule{}}), runtime).
+		WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 4 << 20}).
+		WithFineTuningStore(store))
+	response := fineTuningRequest(t, handler, http.MethodPost, "/v1/fine_tuning/jobs", `{"model":"model-a","training_file":"file_train"}`)
+	if response.Code != http.StatusNotImplemented || !strings.Contains(response.Body.String(), "fine_tuning_billing_unsupported") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if len(runtime.actions) != 0 || len(store.records) != 0 {
+		t.Fatalf("provider actions=%v records=%v", runtime.actions, store.records)
+	}
+}
+
 func TestFineTuningRejectsUnknownJSONAndUnsupportedQuery(t *testing.T) {
 	files := &memoryFileStore{files: map[string]filestate.File{}}
 	handler := fineTuningTestHandler(&memoryFineTuningStore{records: map[string]finetunestate.Record{}}, files, &gatewayFineTuningProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}, "model-a")

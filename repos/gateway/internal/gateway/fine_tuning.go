@@ -38,6 +38,10 @@ func (h Handler) CreateFineTuningJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "fine_tuning_unavailable", "fine-tuning storage is unavailable")
 		return
 	}
+	if h.pipeline.HasModule("billing") {
+		writeError(w, http.StatusNotImplemented, "fine_tuning_billing_unsupported", "fine-tuning creation requires training-token billing support")
+		return
+	}
 	if !h.authorizeBatchModel(w, identity, input.Model) {
 		return
 	}

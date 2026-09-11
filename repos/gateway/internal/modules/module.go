@@ -102,6 +102,15 @@ func NewPipelineWithObserver(modules []Module, observer ModuleObserver) Pipeline
 	return Pipeline{modules: modules, observer: observer}
 }
 
+func (p Pipeline) HasModule(name string) bool {
+	for _, module := range p.modules {
+		if module.Name() == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (p Pipeline) Run(ctx context.Context, req *RequestContext) error {
 	return p.runPre(ctx, req, false)
 }
