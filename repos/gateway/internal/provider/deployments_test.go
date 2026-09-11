@@ -222,7 +222,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 	}{
 		{providerType: "ollama", capabilities: []string{"chat", "tools", "structured_output", "vision"}},
 		{providerType: "anthropic", capabilities: []string{"chat", "tools", "structured_output", "vision", "web_search", "web_fetch", "prompt_cache", "assistant_prefill"}},
-		{providerType: "gemini", capabilities: []string{"chat", "image_generation", "image_edit", "tools", "structured_output", "vision"}},
+		{providerType: "gemini", capabilities: []string{"chat", "image_generation", "image_edit", "image_variation", "tools", "structured_output", "vision"}},
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
 		{providerType: "bedrock", capabilities: []string{"chat", "tools"}},
 		{providerType: "groq", capabilities: []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}},
@@ -283,7 +283,7 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Contains(profilesByType["anthropic"].Operations, "count_tokens") || !slices.Contains(profilesByType["gemini"].Operations, "count_tokens") || !slices.Equal(profilesByType["gemini"].AuthTypes, []string{"api_key", "gcp_adc"}) || !slices.Equal(profilesByType["azure-openai"].AuthTypes, []string{"api_key", "entra"}) {
 		t.Fatalf("native count/auth profiles are incomplete: anthropic=%+v gemini=%+v azure=%+v", profilesByType["anthropic"], profilesByType["gemini"], profilesByType["azure-openai"])
 	}
-	if !slices.Contains(profilesByType["gemini"].Operations, "image_generation") || !slices.Contains(profilesByType["gemini"].Capabilities, "image_generation") || !slices.Contains(profilesByType["gemini"].Operations, "image_edit") || !slices.Contains(profilesByType["gemini"].Capabilities, "image_edit") {
+	if !slices.Contains(profilesByType["gemini"].Operations, "image_generation") || !slices.Contains(profilesByType["gemini"].Capabilities, "image_generation") || !slices.Contains(profilesByType["gemini"].Operations, "image_edit") || !slices.Contains(profilesByType["gemini"].Capabilities, "image_edit") || !slices.Contains(profilesByType["gemini"].Operations, "image_variation") || !slices.Contains(profilesByType["gemini"].Capabilities, "image_variation") {
 		t.Fatalf("Gemini profile is missing native image operations: %+v", profilesByType["gemini"])
 	}
 	for _, providerType := range []string{"anthropic", "gemini", "bedrock"} {

@@ -108,6 +108,61 @@ func TestGeminiImageEditRejectsUnsupportedParametersBeforeNetwork(t *testing.T) 
 	}
 }
 
+func TestGeminiImageVariationContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body geminiRequest
+		if r.Method != http.MethodPost || r.URL.Path != "/v1beta/models/gemini-image:generateContent" || json.NewDecoder(r.Body).Decode(&body) != nil || len(body.Contents) != 1 || len(body.Contents[0].Parts) != 2 {
+			t.Fatalf("unexpected request: %s %s body=%+v", r.Method, r.URL.String(), body)
+		}
+		parts := body.Contents[0].Parts
+		if !strings.Contains(parts[0].Text, "variation") || parts[1].InlineData == nil || parts[1].InlineData.MIMEType != "image/png" || parts[1].InlineData.Data != editAttachment().Data || len(body.Generation.ResponseModalities) != 1 || body.Generation.ResponseModalities[0] != "IMAGE" {
+			t.Fatalf("request=%+v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/webp","data":"aW1hZ2U="}}]}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":3,"totalTokenCount":7}}`)
+	}))
+	defer server.Close()
+	n := 1
+	response, err := NewGemini(server.URL, "secret", false).CreateImageVariation(t.Context(), openai.ImageVariationRequest{Model: "models/gemini-image", Image: editAttachment(), N: &n, ResponseFormat: "b64_json"})
+	if err != nil || len(response.Data) != 1 || response.Data[0].MediaType != "image/webp" || response.Usage == nil || response.Usage.TotalTokens != 7 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGeminiImageVariationRejectsUnsupportedParametersBeforeNetwork(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	two := 2
+	gif := openai.ImageAttachment{MediaType: "image/gif", Data: "R0lGODlhZml4dHVyZQ=="}
+	tests := []struct {
+		name    string
+		request openai.ImageVariationRequest
+		param   string
+	}{
+		{"gif", openai.ImageVariationRequest{Image: gif}, "image"},
+		{"n", openai.ImageVariationRequest{N: &two}, "n"},
+		{"response format", openai.ImageVariationRequest{ResponseFormat: "url"}, "response_format"},
+		{"size", openai.ImageVariationRequest{Size: "1024x1024"}, "size"},
+		{"user", openai.ImageVariationRequest{User: "user"}, "user"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.request.Model = "image"
+			if test.request.Image.Data == "" {
+				test.request.Image = editAttachment()
+			}
+			_, err := NewGemini(server.URL, "secret", false).CreateImageVariation(t.Context(), test.request)
+			var providerErr *Error
+			if !errors.As(err, &providerErr) || providerErr.UpstreamCode != "unsupported_parameter" || providerErr.Param != test.param {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+	if calls != 0 {
+		t.Fatalf("network calls=%d", calls)
+	}
+}
+
 func TestGeminiImageGenerationOmitsAutomaticImageConfigValues(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -243,6 +298,25 @@ func TestRouterRoutesNativeGeminiImageEditWithAlias(t *testing.T) {
 	}}}).(*Router)
 	request := openai.ImageEditRequest{Model: "public-image", Prompt: "edit", Images: []openai.ImageAttachment{editAttachment()}}
 	response, err := router.EditImage(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, ImageEditRequest: &request})
+	if err != nil || len(response.Data) != 1 || response.Usage == nil || response.Usage.TotalTokens != 4 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestRouterRoutesNativeGeminiImageVariationWithAlias(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models/upstream-image:generateContent" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":2,"totalTokenCount":4}}`)
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "gemini-images", Type: "gemini", BaseURL: server.URL, APIKey: "secret", Models: []string{"public-image"},
+		ModelAliases: map[string]string{"public-image": "upstream-image"}, Capabilities: []string{"image_variation"},
+	}}}).(*Router)
+	request := openai.ImageVariationRequest{Model: "public-image", Image: editAttachment()}
+	response, err := router.CreateImageVariation(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, ImageVariationRequest: &request})
 	if err != nil || len(response.Data) != 1 || response.Usage == nil || response.Usage.TotalTokens != 4 {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}

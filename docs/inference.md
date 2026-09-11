@@ -190,6 +190,11 @@ Azure и native Gemini deployments. Gemini transport передает prompt и 
 и принимает ровно один base64 image result. Mask editing, URL output, несколько
 результатов и параметры без точного native эквивалента отклоняются до сети.
 
+`POST /v1/images/variations` также поддерживает native Gemini через image-to-image
+GenerateContent: один проверенный PNG/JPEG/WebP input преобразуется в один inline
+base64 result. Gateway задает нейтральную variation instruction; URL output,
+несколько результатов, exact size и user metadata отклоняются до upstream.
+
 Ответ ограничен 64 MiB, содержит ровно запрошенное число результатов и для
 каждого результата допускает ровно один источник: HTTP(S) URL без credentials
 либо корректный base64 размером до 20 MiB после декодирования. Token usage

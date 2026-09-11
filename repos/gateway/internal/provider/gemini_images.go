@@ -16,6 +16,7 @@ import (
 
 func (Gemini) SupportsImageGeneration() bool { return true }
 func (Gemini) SupportsImageEdit() bool       { return true }
+func (Gemini) SupportsImageVariation() bool  { return true }
 
 func (g Gemini) GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
 	if err := validateGeminiImageRequest(request); err != nil {
@@ -50,6 +51,20 @@ func (g Gemini) EditImage(ctx context.Context, request openai.ImageEditRequest) 
 	}
 	body := geminiRequest{
 		Contents:   []geminiContent{{Parts: parts}},
+		Generation: geminiGeneration{ResponseModalities: []string{"IMAGE"}},
+	}
+	return g.executeImageRequest(ctx, request.Model, body, request.GenerationRequest())
+}
+
+func (g Gemini) CreateImageVariation(ctx context.Context, request openai.ImageVariationRequest) (openai.ImageGenerationResponse, error) {
+	if err := validateGeminiImageVariationRequest(request); err != nil {
+		return openai.ImageGenerationResponse{}, err
+	}
+	body := geminiRequest{
+		Contents: []geminiContent{{Parts: []geminiPart{
+			{Text: "Create a distinct variation of the provided image while preserving its main subject."},
+			{InlineData: &geminiInlineData{MIMEType: request.Image.MediaType, Data: request.Image.Data}},
+		}}},
 		Generation: geminiGeneration{ResponseModalities: []string{"IMAGE"}},
 	}
 	return g.executeImageRequest(ctx, request.Model, body, request.GenerationRequest())
@@ -120,6 +135,28 @@ func validateGeminiImageEditRequest(request openai.ImageEditRequest) error {
 		if unsupported.set {
 			return geminiInvalid(unsupported.name)
 		}
+	}
+	return nil
+}
+
+func validateGeminiImageVariationRequest(request openai.ImageVariationRequest) error {
+	if message := request.Validate(); message != "" {
+		return &Error{Class: FailureClientRequest, Provider: "gemini", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	if !oneOfOrEmptyImageValue(request.Image.MediaType, "image/png", "image/jpeg", "image/webp") {
+		return geminiInvalid("image")
+	}
+	if request.N != nil && *request.N != 1 {
+		return geminiInvalid("n")
+	}
+	if request.ResponseFormat != "" && request.ResponseFormat != "b64_json" {
+		return geminiInvalid("response_format")
+	}
+	if request.Size != "" {
+		return geminiInvalid("size")
+	}
+	if request.User != "" {
+		return geminiInvalid("user")
 	}
 	return nil
 }
