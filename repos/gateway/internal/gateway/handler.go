@@ -26,6 +26,7 @@ import (
 	"ai-gateway-gateway/internal/publichttp"
 	"ai-gateway-gateway/internal/skillstate"
 	"ai-gateway-gateway/internal/vectorstate"
+	"ai-gateway-gateway/internal/videostate"
 )
 
 type Handler struct {
@@ -57,6 +58,7 @@ type Handler struct {
 	fileConfig        FileRuntimeConfig
 	batches           batchstate.Store
 	fineTuning        finetunestate.Store
+	videos            videostate.Store
 	batchJobs         asyncstate.Store
 	skills            skillstate.Store
 	vectorStores      vectorstate.Store
