@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"ai-gateway-gateway/internal/config"
@@ -79,6 +80,68 @@ func TestRouterRoutesNativeGeminiAudioTranscription(t *testing.T) {
 	request := openai.AudioTranscriptionRequest{Model: "public", File: transcriptionAttachment()}
 	response, err := router.TranscribeAudio(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "public"}, AudioTranscriptionRequest: &request})
 	if err != nil || response.Usage == nil || response.Usage.TotalTokens != 3 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGeminiAudioTranslationContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body geminiRequest
+		if r.URL.Path != "/v1beta/models/gemini-translate:generateContent" || json.NewDecoder(r.Body).Decode(&body) != nil {
+			t.Fatalf("request=%s body=%+v", r.URL.String(), body)
+		}
+		if len(body.Contents) != 1 || len(body.Contents[0].Parts) != 2 || !strings.Contains(body.Contents[0].Parts[0].Text, "into English") || body.Generation.AudioTranscription != nil || body.Contents[0].Parts[1].InlineData == nil {
+			t.Fatalf("body=%+v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"text":"Good morning"}]}}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2,"totalTokenCount":10}}`)
+	}))
+	defer server.Close()
+	response, err := NewGemini(server.URL, "secret", false).TranslateAudio(t.Context(), openai.AudioTranscriptionRequest{Model: "gemini-translate", File: transcriptionAttachment(), Language: "en", Prompt: "formal names"})
+	if err != nil || response.Text != "Good morning" || response.Usage == nil || response.Usage.TotalTokens != 10 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGeminiAudioTranslationRejectsTranscriptionOnlyParametersBeforeNetwork(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	tests := []struct {
+		name, param string
+		mutate      func(*openai.AudioTranscriptionRequest)
+	}{
+		{"language", "language", func(r *openai.AudioTranscriptionRequest) { r.Language = "fr" }},
+		{"languages", "languages", func(r *openai.AudioTranscriptionRequest) { r.Languages = []string{"fr"} }},
+		{"keywords", "keywords", func(r *openai.AudioTranscriptionRequest) { r.Keywords = []string{"Acme"} }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := openai.AudioTranscriptionRequest{Model: "model", File: transcriptionAttachment()}
+			test.mutate(&request)
+			_, err := NewGemini(server.URL, "secret", false).TranslateAudio(t.Context(), request)
+			var providerErr *Error
+			if !errors.As(err, &providerErr) || providerErr.UpstreamCode != "unsupported_parameter" || providerErr.Param != test.param {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+	if calls != 0 {
+		t.Fatalf("calls=%d", calls)
+	}
+}
+
+func TestRouterRoutesNativeGeminiAudioTranslation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models/upstream:generateContent" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"text":"hello"}]}}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`)
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "gemini-translation", Type: "gemini", BaseURL: server.URL, Models: []string{"public"}, ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"audio_translation"}}}}).(*Router)
+	request := openai.AudioTranscriptionRequest{Model: "public", File: transcriptionAttachment()}
+	response, err := router.TranslateAudio(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "public"}, AudioTranscriptionRequest: &request})
+	if err != nil || response.Text != "hello" || response.Usage == nil || response.Usage.TotalTokens != 3 {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }

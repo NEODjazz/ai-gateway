@@ -279,6 +279,13 @@ transcription-only deployment не выбирается для перевода.
 upstream call. Для учета применяется проверенная длительность контейнера и
 минимум десять оплачиваемых секунд.
 
+Native Gemini adapter отправляет WAV, MP3/MPEG, OGG, FLAC или WebM как bounded
+inline input в GenerateContent и явно просит английский перевод. Поддерживаются
+`prompt`, `temperature` и JSON response envelope; параметры транскрипции,
+включая исходный язык кроме `en`, списки языков, vocabulary, timestamps,
+chunking и speaker references, отклоняются до upstream call. Учет фиксирует
+точные token counters из ответа Gemini.
+
 Compatible и Azure adapters передают `prompt`, `temperature` и JSON response
 format. Они отклоняют transcription-only параметры до сетевого вызова. Поскольку
 translation response может не содержать token usage, gateway принимает только

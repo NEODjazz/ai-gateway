@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.217
+  version: 0.1.218
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -462,7 +462,7 @@ paths:
       operationId: translateAudio
       tags: [Inference]
       summary: Translate uploaded speech to English through an explicitly capable deployment
-      description: Uses the same bounded multipart, authorization, access policy, DLP/AV, RPM/TPM, retry and duration-billing lifecycle as transcription. Native Groq, compatible and Azure adapters accept prompt, temperature and structured JSON response controls; compatible transports require reliable container duration metadata before execution.
+      description: Uses the same bounded multipart, authorization, access policy, DLP/AV, RPM/TPM, retry and billing lifecycle as transcription. Native Gemini accepts inline WAV/MP3/MPEG/OGG/FLAC/WebM input plus prompt and temperature, translates to English, returns exact token usage, and rejects transcription-only controls before upstream execution. Native Groq, compatible and Azure adapters use duration settlement; compatible transports require reliable container duration metadata before execution.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -471,7 +471,7 @@ paths:
             schema: {$ref: '#/components/schemas/AudioTranscriptionRequest'}
       responses:
         '200':
-          description: English translation with exact duration usage
+          description: English translation with exact token or duration usage
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AudioTranscriptionResponse'}
