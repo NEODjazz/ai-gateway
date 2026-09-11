@@ -22,13 +22,16 @@ type httpDoer interface {
 }
 
 func countA2ARemoteParts(parts []a2aPart) (int, error) {
-	count := 0
+	count, files := 0, 0
 	for _, part := range parts {
 		if part.URL == nil {
 			continue
 		}
 		count++
-		if count > openai.MaxImageAttachments || part.Text != nil || part.Raw != nil || len(part.Data) != 0 || !validA2AFilename(part.Filename) || !supportedA2ARemoteType(part.MediaType) {
+		if part.MediaType == "application/pdf" {
+			files++
+		}
+		if count > openai.MaxImageAttachments || files > openai.MaxResponseFileAttachments || part.Text != nil || part.Raw != nil || len(part.Data) != 0 || !validA2AFilename(part.Filename) || !supportedA2ARemoteType(part.MediaType) {
 			return 0, errors.New("invalid remote media part")
 		}
 		parsed, err := url.Parse(*part.URL)
@@ -43,7 +46,7 @@ func (h Handler) resolveA2ARemoteParts(ctx context.Context, parts []a2aPart) err
 	if h.a2aHTTPClient == nil {
 		return errA2ARemoteUnavailable
 	}
-	imageTotal, audioTotal, remoteTotal := 0, 0, 0
+	imageTotal, audioTotal, fileTotal, remoteTotal := 0, 0, 0, 0
 	for index := range parts {
 		part := &parts[index]
 		if part.URL == nil {
@@ -53,19 +56,22 @@ func (h Handler) resolveA2ARemoteParts(ctx context.Context, parts []a2aPart) err
 		if err != nil {
 			return errors.New("invalid remote media URL")
 		}
-		request.Header.Set("Accept", "image/jpeg, image/png, image/gif, image/webp, audio/wav, audio/mpeg")
+		request.Header.Set("Accept", "image/jpeg, image/png, image/gif, image/webp, audio/wav, audio/mpeg, application/pdf")
 		response, err := h.a2aHTTPClient.Do(request)
 		if err != nil {
 			return fmt.Errorf("%w: %v", errA2ARemoteUnavailable, err)
 		}
-		data, mediaType, readErr := readA2ARemoteContent(response, part.MediaType, openai.MaxTotalImageBytes-imageTotal, openai.MaxAudioBytes-audioTotal, openai.MaxInferenceBodyBytes-remoteTotal)
+		data, mediaType, readErr := readA2ARemoteContent(response, part.MediaType, openai.MaxTotalImageBytes-imageTotal, openai.MaxAudioBytes-audioTotal, openai.MaxResponseFileBytes-fileTotal, openai.MaxInferenceBodyBytes-remoteTotal)
 		if readErr != nil {
 			return readErr
 		}
-		if strings.HasPrefix(mediaType, "image/") {
+		switch {
+		case strings.HasPrefix(mediaType, "image/"):
 			imageTotal += len(data)
-		} else {
+		case strings.HasPrefix(mediaType, "audio/"):
 			audioTotal += len(data)
+		case mediaType == "application/pdf":
+			fileTotal += len(data)
 		}
 		remoteTotal += len(data)
 		encoded := base64.StdEncoding.EncodeToString(data)
@@ -80,10 +86,10 @@ func (h Handler) resolveA2ARemoteParts(ctx context.Context, parts []a2aPart) err
 }
 
 func readA2ARemoteImage(response *http.Response, requestedType string, remaining int) ([]byte, string, error) {
-	return readA2ARemoteContent(response, requestedType, remaining, 0, remaining)
+	return readA2ARemoteContent(response, requestedType, remaining, 0, 0, remaining)
 }
 
-func readA2ARemoteContent(response *http.Response, requestedType string, imageRemaining, audioRemaining, totalRemaining int) ([]byte, string, error) {
+func readA2ARemoteContent(response *http.Response, requestedType string, imageRemaining, audioRemaining, fileRemaining, totalRemaining int) ([]byte, string, error) {
 	if response == nil || response.Body == nil {
 		return nil, "", errA2ARemoteUnavailable
 	}
@@ -98,6 +104,8 @@ func readA2ARemoteContent(response *http.Response, requestedType string, imageRe
 	limit, remaining := openai.MaxImageBytes, imageRemaining
 	if strings.HasPrefix(mediaType, "audio/") {
 		limit, remaining = openai.MaxAudioBytes, audioRemaining
+	} else if mediaType == "application/pdf" {
+		limit, remaining = openai.MaxResponseFileBytes, fileRemaining
 	}
 	if remaining < limit {
 		limit = remaining
@@ -128,7 +136,7 @@ func supportedA2AImageType(mediaType string) bool {
 }
 
 func supportedA2ARemoteType(mediaType string) bool {
-	return supportedA2AImageType(mediaType) || mediaType == "audio/wav" || mediaType == "audio/mpeg"
+	return supportedA2AImageType(mediaType) || mediaType == "audio/wav" || mediaType == "audio/mpeg" || mediaType == "application/pdf"
 }
 
 func validA2AFilename(filename string) bool {

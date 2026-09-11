@@ -510,6 +510,55 @@ func TestA2ASendMessageFetchesValidatedRemoteAudio(t *testing.T) {
 	}
 }
 
+func TestA2ASendMessageFetchesValidatedRemotePDF(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	registry := NewAgentRegistry()
+	if _, err := registry.PutToolPolicy("safe", ToolPolicy{Name: "Safe", AllowedTools: []string{"weather"}, MaxToolCalls: 2, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.PutAgentProfile("research", AgentProfile{Name: "Research", Model: "test-model", ToolPolicyID: "safe", MaxIterations: 3, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	llm := &a2aTestProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"test-model"}}, &lifecycleBillingModule{}}), llm).
+		WithAgentRegistry(registry).
+		WithA2ATaskStore(store, A2ATaskRuntimeConfig{OwnerQuota: 10, TTL: time.Hour})
+	fetches := 0
+	handler.a2aHTTPClient = a2aHTTPDoerFunc(func(request *http.Request) (*http.Response, error) {
+		fetches++
+		if request.Header.Get("Authorization") != "" || !strings.Contains(request.Header.Get("Accept"), "application/pdf") {
+			t.Fatalf("unsafe remote request: headers=%v", request.Header)
+		}
+		body := "%PDF-1.7\ncontent"
+		if strings.Contains(request.URL.Path, "invalid") {
+			body = "not-pdf"
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/pdf"}}, Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
+	})
+	send := func(messageID, remoteURL string) *httptest.ResponseRecorder {
+		body := `{"jsonrpc":"2.0","id":"pdf","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"` + messageID + `","role":"ROLE_USER","parts":[{"url":"` + remoteURL + `","mediaType":"application/pdf","filename":"report.pdf"}]}}}`
+		request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+		request.Header.Set("A2A-Version", "1.0")
+		request.Header.Set("Authorization", "Bearer key")
+		response := httptest.NewRecorder()
+		Routes(handler).ServeHTTP(response, request)
+		return response
+	}
+	response := send("remote-pdf", "https://media.example/report.pdf")
+	if response.Code != http.StatusOK || fetches != 1 {
+		t.Fatalf("status=%d fetches=%d body=%s", response.Code, fetches, response.Body.String())
+	}
+	input := llm.request.ResponseRequest.Input.([]any)
+	file := input[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if file["type"] != "input_file" || file["file_data"] != "data:application/pdf;base64,JVBERi0xLjcKY29udGVudA==" {
+		t.Fatalf("file input=%#v", input)
+	}
+	invalid := send("invalid-pdf", "https://media.example/invalid.pdf")
+	if invalid.Code != http.StatusBadRequest || fetches != 2 {
+		t.Fatalf("invalid status=%d fetches=%d body=%s", invalid.Code, fetches, invalid.Body.String())
+	}
+}
+
 func TestA2ARemoteImageValidationAndLimits(t *testing.T) {
 	invalid := []a2aPart{
 		{URL: a2aStringPointer("http://media.example/image.png"), MediaType: "image/png"},
@@ -529,16 +578,23 @@ func TestA2ARemoteImageValidationAndLimits(t *testing.T) {
 	if _, err := countA2ARemoteParts(parts); err == nil {
 		t.Fatal("accepted too many remote images")
 	}
+	files := make([]a2aPart, openai.MaxResponseFileAttachments+1)
+	for index := range files {
+		files[index] = a2aPart{URL: a2aStringPointer("https://media.example/document.pdf"), MediaType: "application/pdf"}
+	}
+	if _, err := countA2ARemoteParts(files); err == nil {
+		t.Fatal("accepted too many remote files")
+	}
 	response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"image/jpeg"}}, Body: io.NopCloser(strings.NewReader("\xff\xd8\xff"))}
 	if _, _, err := readA2ARemoteImage(response, "image/png", openai.MaxTotalImageBytes); err == nil {
 		t.Fatal("accepted mismatched response content type")
 	}
 	audioResponse := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"audio/wav"}}, Body: io.NopCloser(strings.NewReader("RIFF\x00\x00\x00\x00WAVE"))}
-	if data, mediaType, err := readA2ARemoteContent(audioResponse, "audio/wav", openai.MaxTotalImageBytes, openai.MaxAudioBytes, openai.MaxInferenceBodyBytes); err != nil || len(data) != 12 || mediaType != "audio/wav" {
+	if data, mediaType, err := readA2ARemoteContent(audioResponse, "audio/wav", openai.MaxTotalImageBytes, openai.MaxAudioBytes, openai.MaxResponseFileBytes, openai.MaxInferenceBodyBytes); err != nil || len(data) != 12 || mediaType != "audio/wav" {
 		t.Fatalf("remote audio data=%q media_type=%q err=%v", data, mediaType, err)
 	}
 	overLimit := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"audio/wav"}}, Body: io.NopCloser(strings.NewReader("RIFF\x00\x00\x00\x00WAVE"))}
-	if _, _, err := readA2ARemoteContent(overLimit, "audio/wav", openai.MaxTotalImageBytes, openai.MaxAudioBytes, 8); err == nil {
+	if _, _, err := readA2ARemoteContent(overLimit, "audio/wav", openai.MaxTotalImageBytes, openai.MaxAudioBytes, openai.MaxResponseFileBytes, 8); err == nil {
 		t.Fatal("accepted remote media above the combined request limit")
 	}
 }
