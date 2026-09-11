@@ -245,6 +245,28 @@ func TestRealtimeBillingTracksContextUsesUniqueExecutionsAndSettlesUsage(t *test
 	}
 }
 
+func TestRealtimeBillingSettlesClientCancellationAndIgnoresLateDone(t *testing.T) {
+	billing := &realtimeBillingModule{}
+	tracker := newRealtimeBillingTracker(modules.NewPipeline([]modules.Module{billing}), modules.RequestContext{Metadata: map[string]string{}}, "model", nil)
+	if err := tracker.ClientEvent(t.Context(), []byte(`{"type":"response.create"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.ProviderEvent(t.Context(), []byte(`{"type":"response.created","response":{"id":"resp_1"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.ClientEvent(t.Context(), []byte(`{"type":"response.cancel","response_id":"resp_1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.ProviderEvent(t.Context(), []byte(`{"type":"response.done","response":{"id":"resp_1","status":"cancelled","usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}}`)); err != nil {
+		t.Fatalf("late cancellation terminal event was not idempotent: %v", err)
+	}
+	tracker.Close(t.Context(), errors.New("closed"))
+	events := billing.snapshot()
+	if len(events) != 2 || events[0].phase != "reserve" || events[1].phase != "cancel" || events[1].requestID != events[0].requestID {
+		t.Fatalf("billing lifecycle=%+v", events)
+	}
+}
+
 func TestRealtimeBillingBoundsPendingResponsesAndRejectsInvalidUsage(t *testing.T) {
 	billing := &realtimeBillingModule{}
 	tracker := newRealtimeBillingTracker(modules.NewPipeline([]modules.Module{billing}), modules.RequestContext{Metadata: map[string]string{}}, "model", nil)

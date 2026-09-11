@@ -45,7 +45,7 @@ paths:
       operationId: openRealtimeSession
       tags: [Inference]
       summary: Open a bounded bidirectional Realtime session
-      description: Authenticates the gateway credential, authorizes the public model, selects one Realtime-capable deployment, and proxies text WebSocket events without exposing provider credentials. Text-bearing client events pass the effective input policy before delivery. Each response is rate-limited and settled independently. Output-policy deployments buffer up to 8 MiB until the complete response passes the configured scan. Each event is limited to 4 MiB and each provider connection to 30 minutes.
+      description: Authenticates the gateway credential, authorizes the public model, selects one Realtime-capable deployment, and proxies text WebSocket events without exposing provider credentials. Text-bearing client events pass the effective input policy before delivery. Each response is rate-limited and settled independently, including immediate idempotent settlement of client cancellation. Output-policy deployments buffer up to 8 MiB until the complete response passes the configured scan. Each event is limited to 4 MiB and each provider connection to 30 minutes.
       parameters:
         - {name: model, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 256}}
       responses:

@@ -18,6 +18,7 @@ import (
 const maxRealtimePendingResponses = 16
 const maxRealtimeConversationItems = 1024
 const maxRealtimeDLPProjectionBytes = 64 << 10
+const maxRealtimeCancelledResponses = 64
 
 type realtimeBillingTracker struct {
 	pipeline modules.Pipeline
@@ -34,6 +35,8 @@ type realtimeBillingTracker struct {
 	unnamedItems       int
 	pending            []*realtimeBillingEntry
 	byResponse         map[string]*realtimeBillingEntry
+	cancelledResponses map[string]struct{}
+	cancelledOrder     []string
 	closed             bool
 }
 
@@ -41,15 +44,17 @@ type realtimeBillingEntry struct {
 	request       modules.RequestContext
 	clientEventID string
 	responseID    string
+	settling      bool
 }
 
 type realtimeEventEnvelope struct {
-	Type     string          `json:"type"`
-	EventID  string          `json:"event_id"`
-	ItemID   string          `json:"item_id"`
-	Item     json.RawMessage `json:"item"`
-	Session  json.RawMessage `json:"session"`
-	Response json.RawMessage `json:"response"`
+	Type       string          `json:"type"`
+	EventID    string          `json:"event_id"`
+	ItemID     string          `json:"item_id"`
+	Item       json.RawMessage `json:"item"`
+	Session    json.RawMessage `json:"session"`
+	Response   json.RawMessage `json:"response"`
+	ResponseID string          `json:"response_id"`
 }
 
 func newRealtimeBillingTracker(pipeline modules.Pipeline, template modules.RequestContext, model string, admit func(context.Context, int) error) *realtimeBillingTracker {
@@ -57,6 +62,7 @@ func newRealtimeBillingTracker(pipeline modules.Pipeline, template modules.Reque
 	return &realtimeBillingTracker{
 		pipeline: pipeline, template: template, model: model, enabled: billing || admit != nil, billing: billing, admit: admit,
 		conversationItems: map[string]int{}, byResponse: map[string]*realtimeBillingEntry{},
+		cancelledResponses: map[string]struct{}{},
 	}
 }
 
@@ -82,6 +88,8 @@ func (t *realtimeBillingTracker) ClientEvent(ctx context.Context, payload []byte
 		t.deleteConversationItem(event.ItemID)
 	case "response.create":
 		return t.reserveResponse(ctx, event)
+	case "response.cancel":
+		return t.cancelResponse(ctx, event.ResponseID, errors.New("realtime response cancelled by client"))
 	}
 	return nil
 }
@@ -262,8 +270,16 @@ func (t *realtimeBillingTracker) commitResponse(ctx context.Context, response js
 	t.mu.Lock()
 	entry := t.byResponse[responseID]
 	if entry == nil {
+		if _, cancelled := t.cancelledResponses[responseID]; cancelled {
+			t.mu.Unlock()
+			return nil
+		}
 		t.mu.Unlock()
 		return errors.New("realtime response.done has no reserved request")
+	}
+	if entry.settling {
+		t.mu.Unlock()
+		return nil
 	}
 	t.removePendingLocked(entry)
 	t.mu.Unlock()
@@ -276,6 +292,64 @@ func (t *realtimeBillingTracker) commitResponse(ctx context.Context, response js
 		return err
 	}
 	return nil
+}
+
+func (t *realtimeBillingTracker) cancelResponse(ctx context.Context, responseID string, cause error) error {
+	if !t.billing {
+		return nil
+	}
+	if len(responseID) > 256 {
+		return errors.New("realtime response ID is too long")
+	}
+	t.mu.Lock()
+	var entry *realtimeBillingEntry
+	if responseID != "" {
+		entry = t.byResponse[responseID]
+	} else {
+		for index := len(t.pending) - 1; index >= 0; index-- {
+			if t.pending[index].responseID != "" {
+				entry = t.pending[index]
+				responseID = entry.responseID
+				break
+			}
+		}
+	}
+	if entry == nil {
+		t.mu.Unlock()
+		return nil
+	}
+	if entry.settling {
+		t.mu.Unlock()
+		return nil
+	}
+	entry.settling = true
+	t.mu.Unlock()
+	if err := t.pipeline.RunBillingLifecycle(ctx, &entry.request, "cancel", cause); err != nil {
+		t.mu.Lock()
+		entry.settling = false
+		t.mu.Unlock()
+		return err
+	}
+	t.mu.Lock()
+	t.removePendingLocked(entry)
+	t.markCancelledLocked(responseID)
+	t.mu.Unlock()
+	return nil
+}
+
+func (t *realtimeBillingTracker) markCancelledLocked(responseID string) {
+	if responseID == "" {
+		return
+	}
+	if _, found := t.cancelledResponses[responseID]; found {
+		return
+	}
+	if len(t.cancelledOrder) >= maxRealtimeCancelledResponses {
+		delete(t.cancelledResponses, t.cancelledOrder[0])
+		t.cancelledOrder = t.cancelledOrder[1:]
+	}
+	t.cancelledResponses[responseID] = struct{}{}
+	t.cancelledOrder = append(t.cancelledOrder, responseID)
 }
 
 func (t *realtimeBillingTracker) cancelClientEvent(ctx context.Context, eventID string, cause error) error {
