@@ -149,7 +149,7 @@ modules, billing reserve и сетевого вызова.
 ## Capabilities
 
 Поддерживаемые значения: `chat`, `responses`, `embeddings`, `rerank`, `stream`,
-`tools`, `structured_output`, `mcp`, `vision`, `web_search`. Gateway выводит требования из
+`tools`, `structured_output`, `mcp`, `vision`, `web_search`, `ocr`. Gateway выводит требования из
 request и исключает несовместимые deployments до provider call.
 
 Legacy endpoint без capabilities сохраняет совместимость с базовыми chat,
@@ -159,6 +159,13 @@ responses и embeddings flows, но не является неявным opt-in 
 `POST /v1/moderations` принимает одиночный текст, batch строк либо массив `text`/`image_url` частей. Пустые, смешанные и неизвестные вложенные формы отклоняются до provider call. Запрос проходит общие authentication, access, TPM, guardrail, retry и billing стадии. Routing требует явную deployment и model capability `moderation`; при отсутствии model используется `omni-moderation-latest`. Provider response ограничен по размеру и проверяется на число результатов, диапазон scores, одинаковые category keys, допустимые input types и согласованность общего `flagged`. Так как публичный ответ не содержит token usage, billing commit использует консервативную оценку входного текста и помечает usage как estimated. При включенном AV remote image URL отклоняется fail-closed, поскольку gateway не загружает внешний контент от имени scanner; проверенные data image URL передаются scanner как bounded attachment.
 
 `POST /v1/ocr` принимает HTTPS/data URL либо `document: {"type":"file","file_id":"file_..."}`. Ссылка на файл разрешается только внутри пары authenticated credential и user, затем содержимое проверяется по MIME, сигнатуре и лимиту 16 MiB и преобразуется во внутренний data URL до DLP/AV и provider pipeline. Отсутствующий или чужой файл возвращает одинаковый `404`; неподдерживаемый либо поврежденный файл не передается provider adapter.
+
+Native Gemini OCR принимает inline PDF, PNG, JPEG и WebP, включая уже
+разрешенные owner-scoped file references. Adapter запрашивает schema-constrained
+массив страниц с Markdown, проверяет уникальность и точное совпадение выбранных
+page indices и фиксирует фактически возвращенное число страниц. Remote URLs,
+image extraction, confidence/blocks, header/footer и annotation controls
+отклоняются до upstream call. Native Mistral сохраняет расширенный OCR contract.
 
 `/v1/skills` и `/v1/skills/{id}/versions` публикуют capability-gated lifecycle для native Anthropic deployment. Multipart packages ограничены 32 MiB, ответы — 8 MiB, а произвольные provider paths не проксируются. Custom skill после создания атомарно связывается с хешированным credential+user owner key и исходным deployment. List скрывает custom skills других владельцев; чтение shared read-only sources разрешено, а workspace-specific plugin resources скрываются. При сбое ownership claim gateway компенсирует создание upstream delete-запросом и возвращает fail-closed ошибку.
 
@@ -315,7 +322,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `azure-openai` | Native Azure OpenAI URL, API version, API key, static Entra token, AKS workload federation or refreshable ambient managed identity |
 | `anthropic` | Преобразование chat/tools/vision в native Messages API |
 | `ollama` | Native chat/stream/embeddings и provider completions JSON/SSE для строкового prompt; native `top_k`, `min_p`, log probabilities и reasoning history/output |
-| `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output, text embeddings, audio transcription/translation; Interactions text-to-speech; API key or GCP workload identity |
+| `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output, text embeddings, audio transcription/translation and schema-constrained OCR; Interactions text-to-speech; API key or GCP workload identity |
 | `mistral` | Native Chat JSON/SSE and embeddings wire contract; FIM completions; Bearer API key |
 | `voyage` | Native text embeddings and rerank; Bearer API key |
 | `bedrock` | Native Converse chat/tools and JSON Schema output; bearer mode for compatible private endpoints or AWS SigV4 with explicit credentials, environment keys, bounded shared credentials profiles, regional web-identity STS, ECS/EKS container roles and EC2 IMDSv2 instance roles |

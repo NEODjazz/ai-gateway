@@ -36,7 +36,7 @@ func (r Router) OCR(ctx context.Context, req modules.RequestContext) (openai.OCR
 			continue
 		}
 		client, ok := endpoint.Provider.(OCRClient)
-		if !ok || endpoint.Type != "mistral" {
+		if !ok || (endpoint.Type != "mistral" && endpoint.Type != "gemini") {
 			continue
 		}
 		progress.enter(endpoint)

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.219
+  version: 0.1.220
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -876,7 +876,7 @@ paths:
       operationId: createOCR
       tags: [Inference]
       summary: Extract text and structured content from a document or image
-      description: Routes to an explicitly OCR-capable native deployment. Applies strict document, page-selection and annotation validation, model authorization, RPM/TPM admission, bounded provider response validation, retries and exact processed-page settlement. Inline PDF and image data, including owner-scoped file references, are projected to configured antivirus scanning; annotation prompts are projected to text policy modules.
+      description: Routes to an explicitly OCR-capable native deployment. Applies strict document, page-selection and annotation validation, model authorization, RPM/TPM admission, bounded provider response validation, retries and exact processed-page settlement. Native Gemini accepts bounded inline PDF, PNG, JPEG and WebP data, requests schema-constrained page Markdown, verifies selected page indices and rejects unsupported remote documents and extraction controls before upstream execution. Inline data, including owner-scoped file references, is projected to configured antivirus scanning; annotation prompts are projected to text policy modules.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
