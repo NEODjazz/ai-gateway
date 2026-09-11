@@ -64,6 +64,7 @@ type Handler struct {
 	fileConfig        FileRuntimeConfig
 	batches           batchstate.Store
 	fineTuning        finetunestate.Store
+	fineTuningJobs    asyncstate.Store
 	videos            videostate.Store
 	videoJobs         asyncstate.Store
 	batchJobs         asyncstate.Store

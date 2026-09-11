@@ -9,7 +9,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/finetunestate"
 	"ai-gateway-gateway/internal/modules"
@@ -20,7 +22,91 @@ import (
 type memoryFineTuningStore struct {
 	mu        sync.Mutex
 	records   map[string]finetunestate.Record
+	jobs      map[string]asyncstate.Job
 	createErr error
+}
+
+func (s *memoryFineTuningStore) CreateFineTuningRecordWithJob(_ context.Context, record finetunestate.Record, _ int, job asyncstate.Job) (finetunestate.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.createErr != nil {
+		return finetunestate.Record{}, s.createErr
+	}
+	if _, found := s.records[record.Job.ID]; found {
+		return finetunestate.Record{}, finetunestate.ErrConflict
+	}
+	if s.jobs == nil {
+		s.jobs = map[string]asyncstate.Job{}
+	}
+	key := job.Kind + "/" + job.ResourceID
+	if _, found := s.jobs[key]; found {
+		return finetunestate.Record{}, asyncstate.ErrConflict
+	}
+	s.records[record.Job.ID] = record
+	s.jobs[key] = job
+	return record, nil
+}
+
+func (s *memoryFineTuningStore) EnqueueAsyncJob(_ context.Context, job asyncstate.Job) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.jobs == nil {
+		s.jobs = map[string]asyncstate.Job{}
+	}
+	key := job.Kind + "/" + job.ResourceID
+	if _, found := s.jobs[key]; found {
+		return false, nil
+	}
+	s.jobs[key] = job
+	return true, nil
+}
+func (s *memoryFineTuningStore) HasAsyncJob(_ context.Context, kind, resourceID, owner string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job, found := s.jobs[kind+"/"+resourceID]
+	return found && job.OwnerKey == owner, nil
+}
+func (s *memoryFineTuningStore) ClaimAsyncJobs(_ context.Context, kind string, limit int, _ time.Duration) ([]asyncstate.Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([]asyncstate.Job, 0, limit)
+	for key, job := range s.jobs {
+		if job.Kind != kind || !job.LeaseUntil.IsZero() {
+			continue
+		}
+		job.Attempts++
+		job.LeaseGeneration++
+		job.LeaseUntil = time.Now().Add(time.Minute)
+		s.jobs[key] = job
+		result = append(result, job)
+		if len(result) == limit {
+			break
+		}
+	}
+	return result, nil
+}
+func (s *memoryFineTuningStore) RetryAsyncJob(_ context.Context, kind, resourceID string, generation int64, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := kind + "/" + resourceID
+	job, found := s.jobs[key]
+	if !found || job.LeaseGeneration != generation {
+		return asyncstate.ErrLeaseLost
+	}
+	job.LeaseUntil = time.Time{}
+	s.jobs[key] = job
+	return nil
+}
+func (s *memoryFineTuningStore) CompleteAsyncJob(_ context.Context, kind, resourceID string, generation int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := kind + "/" + resourceID
+	job, found := s.jobs[key]
+	if !found || job.LeaseGeneration != generation {
+		return asyncstate.ErrLeaseLost
+	}
+	delete(s.jobs, key)
+	return nil
 }
 
 type fineTuningBillingModule struct {
@@ -112,9 +198,11 @@ func (s *memoryFineTuningStore) FindFineTuningRecordByModel(_ context.Context, o
 
 type gatewayFineTuningProvider struct {
 	*batchProvider
-	mu          sync.Mutex
-	actions     []string
-	lastBinding provider.FineTuningBinding
+	mu             sync.Mutex
+	actions        []string
+	lastBinding    provider.FineTuningBinding
+	retrieveStatus string
+	trainedTokens  *int64
 }
 
 func (p *gatewayFineTuningProvider) job(status string) openai.FineTuningJob {
@@ -145,7 +233,13 @@ func (p *gatewayFineTuningProvider) CreateFineTuningJob(ctx context.Context, ide
 
 func (p *gatewayFineTuningProvider) RetrieveFineTuningJob(_ context.Context, binding provider.FineTuningBinding, _ string) (openai.FineTuningJob, error) {
 	p.record("retrieve", binding)
-	return p.job("running"), nil
+	status := p.retrieveStatus
+	if status == "" {
+		status = "running"
+	}
+	job := p.job(status)
+	job.TrainedTokens = p.trainedTokens
+	return job, nil
 }
 
 func (p *gatewayFineTuningProvider) CancelFineTuningJob(_ context.Context, binding provider.FineTuningBinding, _ string) (openai.FineTuningJob, error) {
@@ -288,9 +382,24 @@ func TestFineTuningCreateUsesTrainingTokenBillingLifecycle(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	runtime.mu.Lock()
-	defer runtime.mu.Unlock()
-	if len(runtime.actions) != 1 || len(store.records) != 1 || len(billing.phases) != 2 || billing.phases[0] != "reserve" || billing.phases[1] != "commit" || billing.trainingTokens[0] <= 1 || billing.trainingTokens[0] != billing.trainingTokens[1] || billing.apiTypes[0] != "fine_tuning" {
+	if len(runtime.actions) != 1 || len(store.records) != 1 || len(store.jobs) != 1 || len(billing.phases) != 1 || billing.phases[0] != "reserve" || billing.trainingTokens[0] <= 1 || billing.apiTypes[0] != "fine_tuning" {
+		runtime.mu.Unlock()
 		t.Fatalf("provider actions=%v records=%v", runtime.actions, store.records)
+	}
+	runtime.mu.Unlock()
+	runtime.retrieveStatus = "succeeded"
+	pending := fineTuningRequest(t, handler, http.MethodGet, "/v1/fine_tuning/jobs/ftjob_1", "")
+	if pending.Code != http.StatusOK || !strings.Contains(pending.Body.String(), `"status":"validating_files"`) || len(billing.phases) != 1 {
+		t.Fatalf("pending status=%d phases=%v body=%s", pending.Code, billing.phases, pending.Body.String())
+	}
+	runtime.retrieveStatus = "running"
+	if processed, err := NewHandler(auth, runtime).WithResourceBillingPipeline(providerModules).WithFineTuningStore(store).ProcessFineTuningSettlements(t.Context()); err != nil || processed != 1 || len(billing.phases) != 1 {
+		t.Fatalf("running settlement processed=%d phases=%v err=%v", processed, billing.phases, err)
+	}
+	exact := int64(17)
+	runtime.retrieveStatus, runtime.trainedTokens = "succeeded", &exact
+	if processed, err := NewHandler(auth, runtime).WithResourceBillingPipeline(providerModules).WithFineTuningStore(store).ProcessFineTuningSettlements(t.Context()); err != nil || processed != 1 || len(billing.phases) != 2 || billing.phases[1] != "commit" || billing.trainingTokens[1] != int(exact) || len(store.jobs) != 0 {
+		t.Fatalf("completed settlement processed=%d phases=%v tokens=%v jobs=%v err=%v", processed, billing.phases, billing.trainingTokens, store.jobs, err)
 	}
 }
 
@@ -318,6 +427,24 @@ func TestFineTuningTrainingTokenEstimate(t *testing.T) {
 				t.Fatalf("estimate=%d err=%v", got, err)
 			}
 		})
+	}
+}
+
+func TestFineTuningFailedJobCancelsDurableBillingReserve(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	files := &memoryFileStore{files: map[string]filestate.File{"file_train": {ID: "file_train", OwnerKey: owner, Purpose: "fine-tune", Content: []byte(`{"messages":[]}`)}}}
+	runtime := &gatewayFineTuningProvider{batchProvider: &batchProvider{models: []string{"model-a"}}, retrieveStatus: "failed"}
+	store := &memoryFineTuningStore{records: map[string]finetunestate.Record{}}
+	billing := &fineTuningBillingModule{}
+	auth := modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}})
+	pipeline := modules.NewPipeline([]modules.Module{billing})
+	handler := Routes(NewHandler(auth, runtime).WithResourceBillingPipeline(pipeline).
+		WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 4 << 20}).WithFineTuningStore(store))
+	response := fineTuningRequest(t, handler, http.MethodPost, "/v1/fine_tuning/jobs", `{"model":"model-a","training_file":"file_train"}`)
+	processor := NewHandler(auth, runtime).WithResourceBillingPipeline(pipeline).WithFineTuningStore(store)
+	processed, err := processor.ProcessFineTuningSettlements(t.Context())
+	if response.Code != http.StatusOK || err != nil || processed != 1 || len(billing.phases) != 2 || billing.phases[1] != "cancel" || len(store.jobs) != 0 || store.records["ftjob_1"].Job.Status != "failed" {
+		t.Fatalf("status=%d processed=%d phases=%v jobs=%v record=%+v err=%v", response.Code, processed, billing.phases, store.jobs, store.records["ftjob_1"], err)
 	}
 }
 
@@ -350,14 +477,16 @@ func TestFineTuningBillingFailuresDoNotLeaveActiveProviderJobs(t *testing.T) {
 	})
 
 	t.Run("commit", func(t *testing.T) {
-		runtime := &gatewayFineTuningProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+		runtime := &gatewayFineTuningProvider{batchProvider: &batchProvider{models: []string{"model-a"}}, retrieveStatus: "succeeded"}
 		billing := &fineTuningBillingModule{commitErr: errors.New("billing unavailable")}
 		store := &memoryFineTuningStore{records: map[string]finetunestate.Record{}}
 		handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}, billing}), runtime).
 			WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 4 << 20}).
 			WithFineTuningStore(store))
 		response := fineTuningRequest(t, handler, http.MethodPost, "/v1/fine_tuning/jobs", `{"model":"model-a","training_file":"file_train"}`)
-		if response.Code != http.StatusServiceUnavailable || len(runtime.actions) != 2 || runtime.actions[0] != "create" || runtime.actions[1] != "cancel" || len(billing.phases) != 3 || billing.phases[2] != "cancel" || store.records["ftjob_1"].Job.Status != "cancelled" {
+		gateway := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}}), runtime).WithResourceBillingPipeline(modules.NewPipeline([]modules.Module{billing})).WithFineTuningStore(store)
+		processed, err := gateway.ProcessFineTuningSettlements(t.Context())
+		if response.Code != http.StatusOK || processed != 1 || err == nil || len(runtime.actions) != 2 || runtime.actions[0] != "create" || runtime.actions[1] != "retrieve" || len(billing.phases) != 2 || billing.phases[1] != "commit" || len(store.jobs) != 1 {
 			t.Fatalf("status=%d actions=%v phases=%v record=%+v body=%s", response.Code, runtime.actions, billing.phases, store.records["ftjob_1"], response.Body.String())
 		}
 	})

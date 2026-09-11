@@ -180,6 +180,7 @@ func main() {
 	}
 	var a2aPushWorkerDone <-chan struct{}
 	var batchWorkerDone <-chan struct{}
+	var fineTuningWorkerDone <-chan struct{}
 	var videoWorkerDone <-chan struct{}
 	if providerControlStore != nil {
 		done := make(chan struct{})
@@ -193,6 +194,12 @@ func main() {
 		go func() {
 			defer close(batchDone)
 			gateway.RunBatchWorker(appCtx, handler)
+		}()
+		fineTuningDone := make(chan struct{})
+		fineTuningWorkerDone = fineTuningDone
+		go func() {
+			defer close(fineTuningDone)
+			gateway.RunFineTuningSettlementWorker(appCtx, handler)
 		}()
 		videoDone := make(chan struct{})
 		videoWorkerDone = videoDone
@@ -245,6 +252,13 @@ func main() {
 		case <-batchWorkerDone:
 		case <-shutdownCtx.Done():
 			log.Printf("batch worker shutdown timed out")
+		}
+	}
+	if fineTuningWorkerDone != nil {
+		select {
+		case <-fineTuningWorkerDone:
+		case <-shutdownCtx.Done():
+			log.Printf("fine-tuning settlement worker shutdown timed out")
 		}
 	}
 	if videoWorkerDone != nil {

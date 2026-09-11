@@ -261,6 +261,10 @@ func TestRemoteBillingUsesOnlyTrainingTokensForFineTuning(t *testing.T) {
 	if request.APIType != "fine_tuning" || request.InputTokens != 0 || request.OutputTokens != 0 || request.TotalTokens != 0 || request.TrainingTokens != 2500 || !request.UsageEstimated {
 		t.Fatalf("request=%+v", request)
 	}
+	req.Metadata["gateway.fine_tuning_usage_exact"] = "true"
+	if exact := billingRequest(&req); exact.UsageEstimated || exact.TrainingTokens != 2500 {
+		t.Fatalf("exact request=%+v", exact)
+	}
 }
 
 func TestRemoteBillingUsesOnlyDurationForVideo(t *testing.T) {

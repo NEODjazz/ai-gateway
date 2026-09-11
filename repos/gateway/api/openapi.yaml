@@ -1175,7 +1175,7 @@ paths:
       operationId: createFineTuningJob
       tags: [Fine-tuning]
       summary: Create a fine-tuning job from owner-scoped files
-      description: Validates model access and owner-scoped training and validation files with purpose=fine-tune before selecting a capable deployment. Before provider submission, the gateway reserves budget using an estimated training-token count derived from the training file and explicit supervised n_epochs. The estimate is settled only after the deployment binding and latest job snapshot are stored durably. Provider creation is cancelled when persistence or billing settlement fails.
+      description: Validates model access and owner-scoped training and validation files with purpose=fine-tune before selecting a capable deployment. Before provider submission, the gateway reserves budget using an estimated training-token count derived from the training file and explicit supervised n_epochs. The job snapshot and settlement record are stored atomically. A leased background worker commits successful jobs using provider-reported trained_tokens when available, cancels failed or cancelled jobs, and retries safely across process restarts.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -1217,6 +1217,7 @@ paths:
       operationId: getFineTuningJob
       tags: [Fine-tuning]
       summary: Refresh and retrieve an owned fine-tuning job from its pinned deployment
+      description: A terminal provider state is published only after its durable billing settlement completes; while settlement is pending, the last nonterminal gateway snapshot is returned.
       security: [{bearerAuth: []}]
       parameters:
         - {$ref: '#/components/parameters/FineTuningJobID'}

@@ -6,12 +6,24 @@ import (
 	"errors"
 	"time"
 
+	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/finetunestate"
 	"ai-gateway-gateway/internal/openai"
 	"github.com/jackc/pgx/v5"
 )
 
 func (s *PostgresStore) CreateFineTuningRecord(ctx context.Context, record finetunestate.Record, ownerQuota int) (finetunestate.Record, error) {
+	return s.createFineTuningRecord(ctx, record, ownerQuota, nil)
+}
+
+func (s *PostgresStore) CreateFineTuningRecordWithJob(ctx context.Context, record finetunestate.Record, ownerQuota int, job asyncstate.Job) (finetunestate.Record, error) {
+	if !asyncstate.Valid(job) || job.ResourceID != record.Job.ID || job.OwnerKey != record.OwnerKey || job.EndpointID != record.Binding.Endpoint {
+		return finetunestate.Record{}, finetunestate.ErrInvalid
+	}
+	return s.createFineTuningRecord(ctx, record, ownerQuota, &job)
+}
+
+func (s *PostgresStore) createFineTuningRecord(ctx context.Context, record finetunestate.Record, ownerQuota int, job *asyncstate.Job) (finetunestate.Record, error) {
 	if s == nil || s.pool == nil {
 		return finetunestate.Record{}, finetunestate.ErrUnavailable
 	}
@@ -40,6 +52,16 @@ func (s *PostgresStore) CreateFineTuningRecord(ctx context.Context, record finet
 	}
 	if command.RowsAffected() != 1 {
 		return finetunestate.Record{}, finetunestate.ErrConflict
+	}
+	if job != nil {
+		command, err = tx.Exec(ctx, `INSERT INTO gateway_async_jobs (kind,resource_id,owner_key,endpoint_id,execution_id,payload,available_at)
+			VALUES ($1,$2,$3,$4,$5,$6,now()) ON CONFLICT DO NOTHING`, job.Kind, job.ResourceID, job.OwnerKey, job.EndpointID, job.ExecutionID, job.Payload)
+		if err != nil {
+			return finetunestate.Record{}, err
+		}
+		if command.RowsAffected() != 1 {
+			return finetunestate.Record{}, asyncstate.ErrConflict
+		}
 	}
 	created, err := getFineTuningRecord(ctx, tx, record.OwnerKey, record.Job.ID)
 	if err != nil {

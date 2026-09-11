@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/finetunestate"
 	"ai-gateway-gateway/internal/modules"
@@ -17,9 +21,31 @@ import (
 )
 
 const fineTuningOwnerQuota = 1000
+const fineTuningSettlementJobKind = "fine_tuning.settlement.v1"
+const fineTuningSettlementBatchSize = 10
+const fineTuningSettlementLease = time.Minute
+
+type fineTuningSettlementJob struct {
+	RequestID       string            `json:"request_id"`
+	SessionID       string            `json:"session_id,omitempty"`
+	CredentialID    string            `json:"credential_id"`
+	CredentialAlias string            `json:"credential_alias,omitempty"`
+	UserID          string            `json:"user_id,omitempty"`
+	TeamID          string            `json:"team_id,omitempty"`
+	OrganizationID  string            `json:"organization_id,omitempty"`
+	Roles           []string          `json:"roles,omitempty"`
+	Tags            []string          `json:"tags,omitempty"`
+	Provider        string            `json:"provider,omitempty"`
+	Model           string            `json:"model"`
+	TrainingTokens  int               `json:"training_tokens"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+}
 
 func (h Handler) WithFineTuningStore(store finetunestate.Store) Handler {
 	h.fineTuning = store
+	if jobs, ok := store.(asyncstate.Store); ok {
+		h.fineTuningJobs = jobs
+	}
 	return h
 }
 
@@ -38,6 +64,10 @@ func (h Handler) CreateFineTuningJob(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.fineTuning == nil || h.files == nil {
 		writeError(w, http.StatusServiceUnavailable, "fine_tuning_unavailable", "fine-tuning storage is unavailable")
+		return
+	}
+	if h.resourceBillingPipeline().HasModule("billing") && h.fineTuningJobs == nil {
+		writeError(w, http.StatusServiceUnavailable, "fine_tuning_unavailable", "durable fine-tuning settlement storage is unavailable")
 		return
 	}
 	if !h.authorizeBatchModel(w, identity, input.Model) {
@@ -84,7 +114,8 @@ func (h Handler) CreateFineTuningJob(w http.ResponseWriter, r *http.Request) {
 		writeProviderFailure(w, err)
 		return
 	}
-	created, err := h.fineTuning.CreateFineTuningRecord(r.Context(), finetunestate.Record{OwnerKey: owner, Binding: binding, Job: job}, fineTuningOwnerQuota)
+	record := finetunestate.Record{OwnerKey: owner, Binding: binding, Job: job}
+	created, err := h.createFineTuningRecord(r.Context(), record, billingRequest, billingReserved)
 	if err != nil {
 		compensation, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 		_, _ = runtime.CancelFineTuningJob(compensation, binding, job.ID)
@@ -94,19 +125,6 @@ func (h Handler) CreateFineTuningJob(w http.ResponseWriter, r *http.Request) {
 		}
 		writeFineTuningStoreError(w, err)
 		return
-	}
-	if billingReserved {
-		if err = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &billingRequest, "commit", nil); err != nil {
-			compensation, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
-			cancelled, cancelErr := runtime.CancelFineTuningJob(compensation, binding, job.ID)
-			cancel()
-			if cancelErr == nil {
-				_, _ = h.fineTuning.UpdateFineTuningRecord(r.Context(), owner, cancelled)
-			}
-			_ = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &billingRequest, "cancel", err)
-			writeFineTuningBillingFailure(w, err)
-			return
-		}
 	}
 	writeJSON(w, http.StatusOK, created.Job)
 }
@@ -168,6 +186,147 @@ func fineTuningTrainingTokenEstimate(content []byte, method json.RawMessage) (in
 		return 0, errors.New("training data token estimate exceeds the supported billing range")
 	}
 	return tokens * epochs, nil
+}
+
+func newFineTuningSettlementJob(request modules.RequestContext) fineTuningSettlementJob {
+	return fineTuningSettlementJob{
+		RequestID: request.RequestID, SessionID: request.SessionID, CredentialID: request.CredentialID,
+		CredentialAlias: request.CredentialAlias, UserID: request.UserID, TeamID: request.TeamID,
+		OrganizationID: request.OrganizationID, Roles: append([]string(nil), request.Roles...),
+		Tags: append([]string(nil), request.Tags...), Provider: request.Request.Provider,
+		Model: request.Request.Model, TrainingTokens: request.TrainingTokens,
+		Metadata: fineTuningSettlementMetadata(request.Metadata),
+	}
+}
+
+func fineTuningSettlementMetadata(metadata map[string]string) map[string]string {
+	result := make(map[string]string)
+	for key, value := range metadata {
+		if key == "gateway.api_type" || key == "gateway.fine_tuning_usage_exact" || strings.HasPrefix(key, "provider.") || strings.HasPrefix(key, "model_catalog.") || strings.HasPrefix(key, "billing.") {
+			result[key] = value
+		}
+	}
+	return result
+}
+
+func (job fineTuningSettlementJob) requestContext() modules.RequestContext {
+	return modules.RequestContext{
+		RequestID: job.RequestID, SessionID: job.SessionID, CredentialID: job.CredentialID,
+		CredentialAlias: job.CredentialAlias, UserID: job.UserID, TeamID: job.TeamID,
+		OrganizationID: job.OrganizationID, Roles: append([]string(nil), job.Roles...),
+		Tags: append([]string(nil), job.Tags...), TrainingTokens: job.TrainingTokens,
+		Request: openai.ChatCompletionRequest{Provider: job.Provider, Model: job.Model}, Metadata: fineTuningSettlementMetadata(job.Metadata),
+	}
+}
+
+func (h Handler) createFineTuningRecord(ctx context.Context, record finetunestate.Record, request modules.RequestContext, reserved bool) (finetunestate.Record, error) {
+	if !reserved {
+		return h.fineTuning.CreateFineTuningRecord(ctx, record, fineTuningOwnerQuota)
+	}
+	outbox, ok := h.fineTuning.(finetunestate.AtomicOutboxStore)
+	if !ok || h.fineTuningJobs == nil {
+		return finetunestate.Record{}, finetunestate.ErrUnavailable
+	}
+	payload, err := json.Marshal(newFineTuningSettlementJob(request))
+	if err != nil {
+		return finetunestate.Record{}, finetunestate.ErrInvalid
+	}
+	job := asyncstate.Job{Kind: fineTuningSettlementJobKind, ResourceID: record.Job.ID, OwnerKey: record.OwnerKey, EndpointID: record.Binding.Endpoint, ExecutionID: request.RequestID, Payload: payload}
+	return outbox.CreateFineTuningRecordWithJob(ctx, record, fineTuningOwnerQuota, job)
+}
+
+func (h Handler) ProcessFineTuningSettlements(ctx context.Context) (int, error) {
+	if h.fineTuningJobs == nil || h.fineTuning == nil {
+		return 0, finetunestate.ErrUnavailable
+	}
+	jobs, err := h.fineTuningJobs.ClaimAsyncJobs(ctx, fineTuningSettlementJobKind, fineTuningSettlementBatchSize, fineTuningSettlementLease)
+	if err != nil {
+		return 0, err
+	}
+	var failures []error
+	for _, job := range jobs {
+		if err := h.processFineTuningSettlement(ctx, job); err != nil {
+			failures = append(failures, fmt.Errorf("fine-tuning %s: %w", job.ResourceID, err))
+		}
+	}
+	return len(jobs), errors.Join(failures...)
+}
+
+func (h Handler) processFineTuningSettlement(ctx context.Context, claimed asyncstate.Job) error {
+	var job fineTuningSettlementJob
+	if json.Unmarshal(claimed.Payload, &job) != nil || job.RequestID != claimed.ExecutionID || job.CredentialID == "" || job.Model == "" || job.TrainingTokens < 1 {
+		return h.retryFineTuningSettlement(ctx, claimed, errors.New("invalid durable settlement payload"))
+	}
+	record, err := h.fineTuning.GetFineTuningRecord(ctx, claimed.OwnerKey, claimed.ResourceID)
+	if err != nil {
+		return h.retryFineTuningSettlement(ctx, claimed, err)
+	}
+	runtime, ok := h.provider.(provider.FineTuningProvider)
+	if !ok {
+		return h.retryFineTuningSettlement(ctx, claimed, errors.New("fine-tuning provider is unavailable"))
+	}
+	current, err := runtime.RetrieveFineTuningJob(ctx, record.Binding, record.Job.ID)
+	if err != nil {
+		return h.retryFineTuningSettlement(ctx, claimed, err)
+	}
+	if !fineTuningTerminal(current.Status) {
+		if _, err := h.fineTuning.UpdateFineTuningRecord(ctx, claimed.OwnerKey, current); err != nil {
+			return h.retryFineTuningSettlement(ctx, claimed, err)
+		}
+		return h.retryFineTuningSettlement(ctx, claimed, nil)
+	}
+	request := job.requestContext()
+	if current.Status == "succeeded" {
+		if current.TrainedTokens != nil && *current.TrainedTokens > 0 && *current.TrainedTokens <= 1_000_000_000 {
+			request.TrainingTokens = int(*current.TrainedTokens)
+			if request.Metadata == nil {
+				request.Metadata = map[string]string{}
+			}
+			request.Metadata["gateway.fine_tuning_usage_exact"] = "true"
+		}
+		if err := h.resourceBillingPipeline().RunBillingLifecycle(ctx, &request, "commit", nil); err != nil {
+			return h.retryFineTuningSettlement(ctx, claimed, err)
+		}
+	} else {
+		if err := h.resourceBillingPipeline().RunBillingLifecycle(ctx, &request, "cancel", errors.New("fine-tuning job "+current.Status)); err != nil {
+			return h.retryFineTuningSettlement(ctx, claimed, err)
+		}
+	}
+	if _, err := h.fineTuning.UpdateFineTuningRecord(ctx, claimed.OwnerKey, current); err != nil {
+		return h.retryFineTuningSettlement(ctx, claimed, err)
+	}
+	return h.fineTuningJobs.CompleteAsyncJob(ctx, claimed.Kind, claimed.ResourceID, claimed.LeaseGeneration)
+}
+
+func fineTuningTerminal(status string) bool {
+	return status == "succeeded" || status == "failed" || status == "cancelled"
+}
+
+func (h Handler) fineTuningSettlementPending(ctx context.Context, owner, id string) (bool, error) {
+	if h.fineTuningJobs == nil {
+		return false, nil
+	}
+	return h.fineTuningJobs.HasAsyncJob(ctx, fineTuningSettlementJobKind, id, owner)
+}
+
+func (h Handler) retryFineTuningSettlement(ctx context.Context, job asyncstate.Job, cause error) error {
+	retryErr := h.fineTuningJobs.RetryAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration, videoSettlementRetry(job.Attempts))
+	return errors.Join(cause, retryErr)
+}
+
+func RunFineTuningSettlementWorker(ctx context.Context, handler Handler) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		if _, err := handler.ProcessFineTuningSettlements(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("fine-tuning settlement processing failed: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func writeFineTuningBillingFailure(w http.ResponseWriter, err error) {
@@ -239,6 +398,17 @@ func (h Handler) fineTuningJobAction(w http.ResponseWriter, r *http.Request, act
 	if err != nil {
 		writeProviderFailure(w, err)
 		return
+	}
+	if fineTuningTerminal(job.Status) {
+		pending, pendingErr := h.fineTuningSettlementPending(r.Context(), owner, job.ID)
+		if pendingErr != nil {
+			writeFineTuningStoreError(w, pendingErr)
+			return
+		}
+		if pending {
+			writeJSON(w, http.StatusOK, record.Job)
+			return
+		}
 	}
 	updated, err := h.fineTuning.UpdateFineTuningRecord(r.Context(), owner, job)
 	if err != nil {
@@ -333,6 +503,10 @@ func (h Handler) fineTuningOwner(w http.ResponseWriter, r *http.Request) (string
 	}
 	if h.fineTuning == nil {
 		writeError(w, http.StatusServiceUnavailable, "fine_tuning_unavailable", "fine-tuning storage is unavailable")
+		return "", false
+	}
+	if h.resourceBillingPipeline().HasModule("billing") && h.fineTuningJobs == nil {
+		writeError(w, http.StatusServiceUnavailable, "fine_tuning_unavailable", "durable fine-tuning settlement storage is unavailable")
 		return "", false
 	}
 	if _, ok := h.provider.(provider.FineTuningProvider); !ok {

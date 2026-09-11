@@ -223,7 +223,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.PromptTokensEstimated = 0
 		request.OutputTokens = 0
 		if request.APIType == "fine_tuning" {
-			request.UsageEstimated = true
+			request.UsageEstimated = metadataValue(req.Metadata, "gateway.fine_tuning_usage_exact") != "true"
 		}
 	} else if request.APIType == "realtime" && req.Usage != nil {
 		// Realtime supplies an explicit reserve or provider-reported usage.

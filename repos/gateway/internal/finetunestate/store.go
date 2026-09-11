@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 )
@@ -31,4 +32,12 @@ type Store interface {
 	ListFineTuningRecords(context.Context, string, int, string) ([]Record, string, error)
 	UpdateFineTuningRecord(context.Context, string, openai.FineTuningJob) (Record, error)
 	FindFineTuningRecordByModel(context.Context, string, string) (Record, error)
+}
+
+// AtomicOutboxStore persists a fine-tuning job and its billing settlement job
+// in one transaction. Implementations must leave neither record behind when
+// either insert fails.
+type AtomicOutboxStore interface {
+	Store
+	CreateFineTuningRecordWithJob(context.Context, Record, int, asyncstate.Job) (Record, error)
 }
