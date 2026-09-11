@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/vectorstate"
 )
@@ -286,7 +287,11 @@ func TestVectorStoreFileHTTPLifecyclePaginationAndIsolation(t *testing.T) {
 		stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: owner, Name: "docs", Status: "completed"}},
 		files:  map[string]vectorstate.File{}, availableFiles: map[string]int64{"file_one": 11, "file_two": 22},
 	}
+	contents := &memoryFileStore{files: map[string]filestate.File{
+		"file_one": {ID: "file_one", OwnerKey: owner, Filename: "one.md", Purpose: "assistants", ContentType: "text/markdown", Bytes: 11, Content: []byte("first chunk")},
+	}}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}}), modelsProvider{}).
+		WithFileStore(contents, FileRuntimeConfig{MaxBytes: 1024, OwnerQuotaBytes: 4096}).
 		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 2, ByteQuota: 100}))
 	for _, fileID := range []string{"file_one", "file_two"} {
 		body := `{"file_id":"` + fileID + `"}`
@@ -317,14 +322,22 @@ func TestVectorStoreFileHTTPLifecyclePaginationAndIsolation(t *testing.T) {
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"region":"us"`) || !strings.Contains(got.Body.String(), `"priority":3.5`) || !strings.Contains(got.Body.String(), `"active":false`) {
 		t.Fatalf("updated get status=%d body=%s", got.Code, got.Body.String())
 	}
+	content := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_one/content", "")
+	if content.Code != http.StatusOK || !strings.Contains(content.Body.String(), `"filename":"one.md"`) || !strings.Contains(content.Body.String(), `"text":"first chunk"`) || !strings.Contains(content.Body.String(), `"priority":3.5`) {
+		t.Fatalf("content status=%d body=%s", content.Code, content.Body.String())
+	}
 	parent := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned", "")
 	if parent.Code != http.StatusOK || !strings.Contains(parent.Body.String(), `"usage_bytes":33`) || !strings.Contains(parent.Body.String(), `"completed":2`) || !strings.Contains(parent.Body.String(), `"total":2`) {
 		t.Fatalf("parent totals status=%d body=%s", parent.Code, parent.Body.String())
 	}
 	other := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "other"}}), modelsProvider{}).
+		WithFileStore(contents, FileRuntimeConfig{MaxBytes: 1024, OwnerQuotaBytes: 4096}).
 		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 2, ByteQuota: 100}))
 	if response := callVectorStore(other, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_one", ""); response.Code != http.StatusNotFound {
 		t.Fatalf("cross-owner get status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := callVectorStore(other, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_one/content", ""); response.Code != http.StatusNotFound {
+		t.Fatalf("cross-owner content status=%d body=%s", response.Code, response.Body.String())
 	}
 	if response := callVectorStore(other, http.MethodPost, "/v1/vector_stores/vs_owned/files/file_one", `{"attributes":{}}`); response.Code != http.StatusNotFound {
 		t.Fatalf("cross-owner update status=%d body=%s", response.Code, response.Body.String())
@@ -335,6 +348,49 @@ func TestVectorStoreFileHTTPLifecyclePaginationAndIsolation(t *testing.T) {
 	}
 	if response := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_one", ""); response.Code != http.StatusNotFound {
 		t.Fatalf("deleted get status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestVectorStoreFileContentRejectsUnavailableAndUnsearchableFiles(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	store := &memoryVectorStore{
+		stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: owner, Name: "docs", Status: "completed"}},
+		files: map[string]vectorstate.File{
+			"vs_owned/binary":  {VectorStoreID: "vs_owned", FileID: "binary", OwnerKey: owner, Status: "completed"},
+			"vs_owned/empty":   {VectorStoreID: "vs_owned", FileID: "empty", OwnerKey: owner, Status: "completed"},
+			"vs_owned/missing": {VectorStoreID: "vs_owned", FileID: "missing", OwnerKey: owner, Status: "completed"},
+			"vs_owned/large":   {VectorStoreID: "vs_owned", FileID: "large", OwnerKey: owner, Status: "completed"},
+		},
+	}
+	files := &memoryFileStore{files: map[string]filestate.File{
+		"binary": {ID: "binary", OwnerKey: owner, Filename: "binary.bin", Purpose: "assistants", ContentType: "application/octet-stream", Content: []byte{1, 2, 3}},
+		"empty":  {ID: "empty", OwnerKey: owner, Filename: "empty.txt", Purpose: "assistants", ContentType: "text/plain", Content: []byte(" \n\t")},
+		"large":  {ID: "large", OwnerKey: owner, Filename: "large.txt", Purpose: "assistants", ContentType: "text/plain", Bytes: maxVectorSearchBytes + 1, Content: []byte("must not be loaded")},
+	}}
+	pipeline := modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}})
+	configured := Routes(NewHandler(pipeline, modelsProvider{}).
+		WithFileStore(files, FileRuntimeConfig{MaxBytes: maxVectorSearchBytes, OwnerQuotaBytes: maxVectorSearchBytes}).
+		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10, ByteQuota: maxVectorSearchBytes}))
+	for _, test := range []struct {
+		fileID string
+		code   int
+	}{
+		{"binary", http.StatusUnprocessableEntity},
+		{"empty", http.StatusUnprocessableEntity},
+		{"missing", http.StatusUnprocessableEntity},
+		{"large", http.StatusUnprocessableEntity},
+	} {
+		response := callVectorStore(configured, http.MethodGet, "/v1/vector_stores/vs_owned/files/"+test.fileID+"/content", "")
+		if response.Code != test.code {
+			t.Fatalf("file=%s status=%d body=%s", test.fileID, response.Code, response.Body.String())
+		}
+	}
+
+	unavailable := Routes(NewHandler(pipeline, modelsProvider{}).
+		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10, ByteQuota: maxVectorSearchBytes}))
+	response := callVectorStore(unavailable, http.MethodGet, "/v1/vector_stores/vs_owned/files/binary/content", "")
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unavailable status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

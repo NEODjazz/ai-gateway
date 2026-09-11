@@ -1733,6 +1733,12 @@ Expired source files do not consume either limit.
 `POST /v1/vector_stores/{id}/files/{file_id}` atomically replaces the complete
 attribute map for an owned attachment; an empty object clears it.
 
+`GET /v1/vector_stores/{id}/files/{file_id}/content` verifies the owner-scoped
+attachment before reading the source file. It returns at most 100 Unicode-safe
+text chunks from up to 1 MiB of `purpose=assistants` UTF-8 text, Markdown, CSV,
+or JSON content. Missing source content, unsupported media, invalid UTF-8, NUL
+bytes, empty text, and larger files fail without exposing another owner's file.
+
 `POST /v1/vector_stores/{id}/search` provides bounded semantic retrieval for an
 owned store. It accepts an explicit authorized embedding model and optional
 attribute filters. The original string map requires every key and value to match.

@@ -108,6 +108,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/v1/vector_stores/{id}/files/{file_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetVectorStoreFile) }},
 	{RouteContract{http.MethodPost, "/v1/vector_stores/{id}/files/{file_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateVectorStoreFile) }},
 	{RouteContract{http.MethodDelete, "/v1/vector_stores/{id}/files/{file_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteVectorStoreFile) }},
+	{RouteContract{http.MethodGet, "/v1/vector_stores/{id}/files/{file_id}/content"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetVectorStoreFileContent) }},
 	{RouteContract{http.MethodPost, "/v1/vector_stores/{id}/search"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SearchVectorStore) }},
 	{RouteContract{http.MethodPost, "/v1/skills"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateSkill) }},
 	{RouteContract{http.MethodGet, "/v1/skills"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListSkills) }},

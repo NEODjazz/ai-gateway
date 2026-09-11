@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"ai-gateway-gateway/internal/vectorstate"
 )
@@ -15,6 +17,13 @@ type attachVectorStoreFileRequest struct {
 
 type updateVectorStoreFileRequest struct {
 	Attributes *map[string]any `json:"attributes"`
+}
+
+type vectorStoreFileContent struct {
+	FileID     string             `json:"file_id"`
+	Filename   string             `json:"filename"`
+	Attributes map[string]any     `json:"attributes"`
+	Content    []vectorSearchText `json:"content"`
 }
 
 func (h Handler) AttachVectorStoreFile(w http.ResponseWriter, r *http.Request) {
@@ -117,6 +126,60 @@ func (h Handler) UpdateVectorStoreFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, publicVectorStoreFile(file))
+}
+
+func (h Handler) GetVectorStoreFileContent(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.authorizeOwnedStorageOperation(w, r, "vector_store_files")
+	if !ok || !h.vectorStoreFileStorageAvailable(w) || !validateVectorStoreFilePath(w, r, false) {
+		return
+	}
+	fileID := r.PathValue("file_id")
+	if !validFileToken(fileID, 128) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "file ID is invalid")
+		return
+	}
+	owner := fileOwnerKey(req)
+	attached, err := h.vectorStores.GetVectorStoreFile(r.Context(), owner, r.PathValue("id"), fileID)
+	if err != nil {
+		writeVectorStoreFileError(w, err)
+		return
+	}
+	if h.files == nil {
+		writeError(w, http.StatusServiceUnavailable, "vector_store_unavailable", "vector store file content is unavailable")
+		return
+	}
+	file, err := h.files.Get(r.Context(), owner, fileID, false)
+	if err != nil {
+		writeVectorSearchError(w, err)
+		return
+	}
+	if file.Purpose != "assistants" || !supportedVectorSearchContentType(file.ContentType) || file.Bytes > maxVectorSearchBytes {
+		writeVectorSearchError(w, errVectorSearchUnsupportedFile)
+		return
+	}
+	file, err = h.files.Get(r.Context(), owner, fileID, true)
+	if err != nil {
+		writeVectorSearchError(w, err)
+		return
+	}
+	if !utf8.Valid(file.Content) || strings.IndexByte(string(file.Content), 0) >= 0 || len(file.Content) > maxVectorSearchBytes {
+		writeVectorSearchError(w, errVectorSearchUnsupportedFile)
+		return
+	}
+	texts := splitVectorSearchText(string(file.Content))
+	if len(texts) == 0 {
+		writeVectorSearchError(w, errVectorSearchEmpty)
+		return
+	}
+	if len(texts) > maxVectorSearchChunks {
+		writeVectorSearchError(w, errVectorSearchTooLarge)
+		return
+	}
+	content := make([]vectorSearchText, len(texts))
+	for index, text := range texts {
+		content[index] = vectorSearchText{Type: "text", Text: text}
+	}
+	writeJSON(w, http.StatusOK, vectorStoreFileContent{FileID: fileID, Filename: file.Filename, Attributes: normalizedVectorStoreAttributes(attached.Attributes), Content: content})
 }
 
 func (h Handler) DeleteVectorStoreFile(w http.ResponseWriter, r *http.Request) {
