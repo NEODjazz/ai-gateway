@@ -17,7 +17,7 @@ import (
 
 const a2aProtocolVersion = "1.0"
 
-var a2aInputModes = []string{"text/plain", "image/jpeg", "image/png", "image/gif", "image/webp"}
+var a2aInputModes = []string{"text/plain", "application/json", "image/jpeg", "image/png", "image/gif", "image/webp"}
 
 type a2aPart struct {
 	Text      *string         `json:"text,omitempty"`
@@ -516,6 +516,13 @@ func a2aResponseInput(history []a2aMessage, latest []any) []any {
 func a2aInputPart(part a2aPart) (map[string]any, bool) {
 	if part.Text != nil && part.Raw == nil && part.URL == nil && len(part.Data) == 0 && (part.MediaType == "" || part.MediaType == "text/plain") && part.Filename == "" {
 		return map[string]any{"type": "input_text", "text": *part.Text}, true
+	}
+	if part.Text == nil && part.Raw == nil && part.URL == nil && len(part.Data) != 0 && part.Filename == "" && (part.MediaType == "" || part.MediaType == "application/json") {
+		var canonical bytes.Buffer
+		if json.Compact(&canonical, part.Data) != nil {
+			return nil, false
+		}
+		return map[string]any{"type": "input_text", "text": canonical.String()}, true
 	}
 	if part.Text != nil || part.Raw == nil || part.URL != nil || len(part.Data) != 0 || part.Filename != "" {
 		return nil, false

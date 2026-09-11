@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.224
+  version: 0.1.225
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -43,7 +43,7 @@ paths:
       operationId: getA2AAgentCard
       tags: [A2A]
       summary: Discover one enabled executable agent profile
-      description: Returns an A2A 1.0 Agent Card for direct discovery. The card advertises text and bounded inline image inputs, text output, bearer authentication, authenticated extended-card retrieval and streaming when durable task storage is configured; push notifications are not advertised.
+      description: Returns an A2A 1.0 Agent Card for direct discovery. The card advertises text, structured JSON data and bounded inline image inputs, text output, bearer authentication, authenticated extended-card retrieval and streaming when durable task storage is configured; push notifications are not advertised.
       security: []
       parameters:
         - {name: agent, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
@@ -59,7 +59,7 @@ paths:
       operationId: callA2AAgent
       tags: [A2A]
       summary: Execute A2A messages and task lifecycle operations
-      description: Implements A2A 1.0 SendMessage, SendStreamingMessage, GetTask, ListTasks, CancelTask and authenticated GetExtendedAgentCard. New messages pass through the same authentication, model authorization, rate limit, guardrail, routing and billing pipeline as Responses. Text and bounded inline JPEG, PNG, GIF and WebP parts are accepted. When durable task storage is configured, SendMessage creates or continues an owner-scoped task using optimistic concurrency. Setting returnImmediately=true uses durable background Responses execution; GetTask reconciles pending execution and CancelTask cancels it. SendStreamingMessage emits an ordered task, artifact-update and terminal-status SSE lifecycle. Remote URL, other media/data parts and push notifications return explicit protocol errors.
+      description: Implements A2A 1.0 SendMessage, SendStreamingMessage, GetTask, ListTasks, CancelTask and authenticated GetExtendedAgentCard. New messages pass through the same authentication, model authorization, rate limit, guardrail, routing and billing pipeline as Responses. Text, structured JSON data and bounded inline JPEG, PNG, GIF and WebP parts are accepted. When durable task storage is configured, SendMessage creates or continues an owner-scoped task using optimistic concurrency. Setting returnImmediately=true uses durable background Responses execution; GetTask reconciles pending execution and CancelTask cancels it. SendStreamingMessage emits an ordered task, artifact-update and terminal-status SSE lifecycle. Remote URL, other media parts and push notifications return explicit protocol errors.
       security: [{bearerAuth: []}]
       parameters:
         - {name: agent, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}

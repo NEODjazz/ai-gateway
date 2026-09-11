@@ -47,7 +47,7 @@ shared Responses authentication, model authorization, quota, guardrail,
 routing and billing path. With durable task and background-response storage,
 `returnImmediately=true` returns an owner-scoped submitted or working task;
 `GetTask` reconciles completion and `CancelTask` cancels pending execution.
-Text and bounded inline JPEG, PNG, GIF and WebP inputs reuse the Responses
+Text, structured JSON data and bounded inline JPEG, PNG, GIF and WebP inputs reuse the Responses
 media validation, scan, token reserve and billing path. Stream resubscription,
 push notifications and other media parts fail with explicit protocol errors.
 `GetExtendedAgentCard` returns the current card only after bearer

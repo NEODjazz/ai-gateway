@@ -318,6 +318,24 @@ func TestA2ASendMessageAcceptsBoundedInlineImages(t *testing.T) {
 	}
 }
 
+func TestA2ASendMessageAcceptsStructuredDataThroughPolicyPath(t *testing.T) {
+	router, llm, billing := a2aTestHandler(t)
+	body := `{"jsonrpc":"2.0","id":"rpc-data","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"client-data","role":"ROLE_USER","parts":[{"data":{"city":"Paris","days":2},"mediaType":"application/json"}]}}}`
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || billing.calls != 1 || llm.request.ResponseRequest == nil {
+		t.Fatalf("status=%d billing=%d request=%+v body=%s", response.Code, billing.calls, llm.request.ResponseRequest, response.Body.String())
+	}
+	input := llm.request.ResponseRequest.Input.([]any)
+	part := input[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if part["type"] != "input_text" || part["text"] != `{"city":"Paris","days":2}` {
+		t.Fatalf("canonical data part=%+v", part)
+	}
+}
+
 func TestA2ASendStreamingMessagePersistsOrderedTaskLifecycle(t *testing.T) {
 	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
 	router, llm, billing := a2aTestHandlerWithTasks(t, store)
