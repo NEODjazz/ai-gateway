@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"ai-gateway-gateway/internal/publichttp"
 )
 
 func TestStreamableHTTPInitializationListAndCall(t *testing.T) {
@@ -105,11 +107,11 @@ func TestClientRejectsUnsafeEndpointsAndAddresses(t *testing.T) {
 		}
 	}
 	for _, address := range []string{"127.0.0.1", "10.0.0.1", "169.254.1.1", "::1", "fc00::1"} {
-		if publicIP(net.ParseIP(address)) {
+		if publichttp.PublicIP(net.ParseIP(address)) {
 			t.Fatalf("accepted non-public address %s", address)
 		}
 	}
-	if !publicIP(net.ParseIP("203.0.113.10")) {
+	if !publichttp.PublicIP(net.ParseIP("8.8.8.8")) {
 		t.Fatal("public address rejected")
 	}
 	for _, session := range []string{"", "has space", "line\nbreak", strings.Repeat("x", 1025)} {

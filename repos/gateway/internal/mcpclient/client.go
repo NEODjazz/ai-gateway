@@ -4,18 +4,18 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"ai-gateway-gateway/internal/publichttp"
 )
 
 const (
@@ -69,33 +69,7 @@ func New(endpoint string) (*Client, error) {
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, errors.New("MCP endpoint must be an HTTPS URL without credentials, query, or fragment")
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-	transport.DialContext = publicDialContext
-	return &Client{endpoint: parsed, http: &http.Client{Transport: transport, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
-}
-
-func publicDialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		return nil, err
-	}
-	addresses, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil || len(addresses) == 0 {
-		return nil, fmt.Errorf("resolve MCP host: %w", err)
-	}
-	for _, address := range addresses {
-		if !publicIP(address.IP) {
-			return nil, errors.New("MCP host resolves to a non-public address")
-		}
-	}
-	dialer := net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-	return dialer.DialContext(ctx, network, net.JoinHostPort(addresses[0].IP.String(), port))
-}
-
-func publicIP(ip net.IP) bool {
-	return ip != nil && !ip.IsUnspecified() && !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsMulticast()
+	return &Client{endpoint: parsed, http: publichttp.NewClient(30 * time.Second)}, nil
 }
 
 func (c *Client) Initialize(ctx context.Context) error {
