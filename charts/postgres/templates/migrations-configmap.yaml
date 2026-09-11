@@ -5,6 +5,36 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  029_gateway_assistant_runs.sql: |
+    CREATE TABLE IF NOT EXISTS gateway_assistant_runs (
+        id TEXT NOT NULL, thread_id TEXT NOT NULL, owner_key TEXT NOT NULL, status TEXT NOT NULL,
+        snapshot JSONB NOT NULL, revision BIGINT NOT NULL DEFAULT 1, retain_until TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (length(id) BETWEEN 1 AND 128), CHECK (length(thread_id) BETWEEN 1 AND 128),
+        CHECK (length(owner_key) BETWEEN 1 AND 256),
+        CHECK (status IN ('queued','in_progress','requires_action','cancelling','completed','failed','cancelled','expired','incomplete')),
+        CHECK (jsonb_typeof(snapshot) = 'object'), CHECK (octet_length(snapshot::text) BETWEEN 2 AND 2097152),
+        CHECK (revision > 0), CHECK (retain_until > created_at), PRIMARY KEY (owner_key,thread_id,id),
+        FOREIGN KEY (owner_key,thread_id) REFERENCES gateway_assistant_threads(owner_key,id) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS gateway_assistant_runs_one_active_idx
+        ON gateway_assistant_runs (owner_key,thread_id)
+        WHERE status IN ('queued','in_progress','requires_action','cancelling');
+    CREATE INDEX IF NOT EXISTS gateway_assistant_runs_thread_created_idx
+        ON gateway_assistant_runs (owner_key,thread_id,created_at DESC,id DESC);
+    CREATE TABLE IF NOT EXISTS gateway_assistant_run_steps (
+        id TEXT NOT NULL, run_id TEXT NOT NULL, thread_id TEXT NOT NULL, owner_key TEXT NOT NULL,
+        status TEXT NOT NULL, snapshot JSONB NOT NULL, revision BIGINT NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (length(id) BETWEEN 1 AND 128), CHECK (length(run_id) BETWEEN 1 AND 128),
+        CHECK (length(thread_id) BETWEEN 1 AND 128), CHECK (length(owner_key) BETWEEN 1 AND 256),
+        CHECK (status IN ('in_progress','completed','failed','cancelled','expired')),
+        CHECK (jsonb_typeof(snapshot) = 'object'), CHECK (octet_length(snapshot::text) BETWEEN 2 AND 2097152),
+        CHECK (revision > 0), PRIMARY KEY (owner_key,thread_id,run_id,id),
+        FOREIGN KEY (owner_key,thread_id,run_id) REFERENCES gateway_assistant_runs(owner_key,thread_id,id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS gateway_assistant_run_steps_run_created_idx
+        ON gateway_assistant_run_steps (owner_key,thread_id,run_id,created_at DESC,id DESC);
   028_gateway_assistant_threads.sql: |
     CREATE TABLE IF NOT EXISTS gateway_assistant_threads (
         id TEXT NOT NULL, owner_key TEXT NOT NULL, snapshot JSONB NOT NULL,
