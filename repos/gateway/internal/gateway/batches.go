@@ -90,7 +90,11 @@ func (h Handler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	batchID := "batch_" + newExecutionID()
-	batch := batchstate.Batch{ID: batchID, OwnerKey: owner, InputFileID: request.InputFileID, Endpoint: request.Endpoint, CompletionWindow: request.CompletionWindow, Status: "queued", Metadata: metadata, Identity: identityPayload, Total: len(items), ExpiresAt: time.Now().UTC().Add(24 * time.Hour)}
+	var outputExpirySeconds int64
+	if request.OutputExpiresAfter != nil {
+		outputExpirySeconds = request.OutputExpiresAfter.Seconds
+	}
+	batch := batchstate.Batch{ID: batchID, OwnerKey: owner, InputFileID: request.InputFileID, Endpoint: request.Endpoint, CompletionWindow: request.CompletionWindow, OutputExpirySeconds: outputExpirySeconds, Status: "queued", Metadata: metadata, Identity: identityPayload, Total: len(items), ExpiresAt: time.Now().UTC().Add(24 * time.Hour)}
 	jobs := make([]asyncstate.Job, len(items))
 	for index := range items {
 		items[index].BatchID = batchID
@@ -695,7 +699,7 @@ func (h Handler) storeBatchResults(ctx context.Context, batch batchstate.Batch, 
 		content.WriteByte('\n')
 	}
 	id := "file_" + strings.TrimPrefix(batch.ID, "batch_") + "_" + kind
-	file := filestate.File{ID: id, OwnerKey: batch.OwnerKey, Filename: batch.ID + "_" + kind + ".jsonl", Purpose: "batch_output", ContentType: "application/jsonl", Bytes: int64(content.Len()), Content: content.Bytes()}
+	file := filestate.File{ID: id, OwnerKey: batch.OwnerKey, Filename: batch.ID + "_" + kind + ".jsonl", Purpose: "batch_output", ContentType: "application/jsonl", Bytes: int64(content.Len()), Content: content.Bytes(), ExpiresAfterSeconds: batch.OutputExpirySeconds}
 	_, err := h.files.Create(ctx, file, h.fileConfig.OwnerQuotaBytes)
 	if errors.Is(err, filestate.ErrConflict) {
 		existing, getErr := h.files.Get(ctx, batch.OwnerKey, id, true)

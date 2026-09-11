@@ -274,7 +274,7 @@ func TestBatchLifecycleExecutesMixedModelsWithDistinctBillingIDs(t *testing.T) {
 	files.files["file_input"] = filestate.File{ID: "file_input", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(payload)), Content: payload}
 	h := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), provider).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
 	routes := Routes(h)
-	request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_input","endpoint":"/v1/chat/completions","completion_window":"24h"}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_input","endpoint":"/v1/chat/completions","completion_window":"24h","output_expires_after":{"anchor":"created_at","seconds":3600}}`))
 	request.Header.Set("Authorization", "Bearer key")
 	response := httptest.NewRecorder()
 	routes.ServeHTTP(response, request)
@@ -308,6 +308,9 @@ func TestBatchLifecycleExecutesMixedModelsWithDistinctBillingIDs(t *testing.T) {
 	if !strings.Contains(string(output.Content), `"custom_id":"a"`) || !strings.Contains(string(output.Content), `"custom_id":"b"`) {
 		t.Fatalf("output=%s", output.Content)
 	}
+	if output.ExpiresAt == nil || output.ExpiresAt.Sub(output.CreatedAt) != time.Hour {
+		t.Fatalf("output expiry=%v created=%v", output.ExpiresAt, output.CreatedAt)
+	}
 	provider.mu.Lock()
 	executions := append([]string(nil), provider.executions...)
 	provider.mu.Unlock()
@@ -335,6 +338,20 @@ func TestBatchRejectsInvalidJSONLAndCrossOwnerInput(t *testing.T) {
 		if response.Code != test.status {
 			t.Fatalf("file=%s status=%d body=%s", test.id, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestBatchRejectsInvalidOutputExpiration(t *testing.T) {
+	files := &memoryFileStore{files: map[string]filestate.File{}}
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	files.files["file_input"] = filestate.File{ID: "file_input", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: 3, Content: []byte("{}\n")}
+	routes := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), &batchProvider{models: []string{"model-a"}}).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(newMemoryBatchStore(), newMemoryBatchStore()))
+	request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_input","endpoint":"/v1/chat/completions","completion_window":"24h","output_expires_after":{"anchor":"created_at","seconds":3599}}`))
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	routes.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "output_expires_after") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

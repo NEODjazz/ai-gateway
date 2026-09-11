@@ -19,28 +19,29 @@ var (
 const MaxIdentityBytes = 16 << 10
 
 type Batch struct {
-	ID               string
-	OwnerKey         string
-	InputFileID      string
-	Endpoint         string
-	CompletionWindow string
-	Status           string
-	Metadata         []byte
-	Identity         []byte
-	Total            int
-	Completed        int
-	Failed           int
-	OutputFileID     string
-	ErrorFileID      string
-	CreatedAt        time.Time
-	InProgressAt     *time.Time
-	ExpiresAt        time.Time
-	FinalizingAt     *time.Time
-	CompletedAt      *time.Time
-	FailedAt         *time.Time
-	ExpiredAt        *time.Time
-	CancellingAt     *time.Time
-	CancelledAt      *time.Time
+	ID                  string
+	OwnerKey            string
+	InputFileID         string
+	Endpoint            string
+	CompletionWindow    string
+	OutputExpirySeconds int64
+	Status              string
+	Metadata            []byte
+	Identity            []byte
+	Total               int
+	Completed           int
+	Failed              int
+	OutputFileID        string
+	ErrorFileID         string
+	CreatedAt           time.Time
+	InProgressAt        *time.Time
+	ExpiresAt           time.Time
+	FinalizingAt        *time.Time
+	CompletedAt         *time.Time
+	FailedAt            *time.Time
+	ExpiredAt           *time.Time
+	CancellingAt        *time.Time
+	CancelledAt         *time.Time
 }
 
 type Item struct {

@@ -34,9 +34,9 @@ func (s *PostgresStore) CreateBatch(ctx context.Context, batch batchstate.Batch,
 		return batchstate.Batch{}, batchstate.ErrQuotaExceeded
 	}
 	command, err := tx.Exec(ctx, `INSERT INTO gateway_batches
-		(id,owner_key,input_file_id,endpoint,completion_window,status,metadata,identity,total,expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`,
-		batch.ID, batch.OwnerKey, batch.InputFileID, batch.Endpoint, batch.CompletionWindow, batch.Status, batch.Metadata, batch.Identity, batch.Total, batch.ExpiresAt)
+		(id,owner_key,input_file_id,endpoint,completion_window,output_expiry_seconds,status,metadata,identity,total,expires_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
+		batch.ID, batch.OwnerKey, batch.InputFileID, batch.Endpoint, batch.CompletionWindow, batch.OutputExpirySeconds, batch.Status, batch.Metadata, batch.Identity, batch.Total, batch.ExpiresAt)
 	if err != nil {
 		return batchstate.Batch{}, err
 	}
@@ -95,7 +95,7 @@ func stringOrdinal(value int) string {
 
 func validBatch(batch batchstate.Batch) bool {
 	return validA2AStorageToken(batch.ID, 128) && batch.OwnerKey != "" && len(batch.OwnerKey) <= 256 && validA2AStorageToken(batch.InputFileID, 128) &&
-		batch.CompletionWindow == "24h" && batch.Status == "queued" && batch.Total >= 1 && batch.Total <= 50000 && len(batch.Metadata) > 0 && json.Valid(batch.Metadata) && len(batch.Identity) > 0 && len(batch.Identity) <= batchstate.MaxIdentityBytes && json.Valid(batch.Identity) && batch.ExpiresAt.After(time.Now())
+		batch.CompletionWindow == "24h" && (batch.OutputExpirySeconds == 0 || batch.OutputExpirySeconds >= 3600 && batch.OutputExpirySeconds <= 2592000) && batch.Status == "queued" && batch.Total >= 1 && batch.Total <= 50000 && len(batch.Metadata) > 0 && json.Valid(batch.Metadata) && len(batch.Identity) > 0 && len(batch.Identity) <= batchstate.MaxIdentityBytes && json.Valid(batch.Identity) && batch.ExpiresAt.After(time.Now())
 }
 
 func validBatchItem(batch batchstate.Batch, item batchstate.Item) bool {
@@ -117,7 +117,7 @@ type batchQuerier interface {
 }
 
 func getBatch(ctx context.Context, q batchQuerier, owner, id string) (batchstate.Batch, error) {
-	b, err := scanBatch(q.QueryRow(ctx, `SELECT id,owner_key,input_file_id,endpoint,completion_window,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at FROM gateway_batches WHERE owner_key=$1 AND id=$2`, owner, id))
+	b, err := scanBatch(q.QueryRow(ctx, `SELECT id,owner_key,input_file_id,endpoint,completion_window,output_expiry_seconds,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at FROM gateway_batches WHERE owner_key=$1 AND id=$2`, owner, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return batchstate.Batch{}, batchstate.ErrNotFound
 	}
@@ -128,7 +128,7 @@ type batchScanner interface{ Scan(...any) error }
 
 func scanBatch(row batchScanner) (batchstate.Batch, error) {
 	var b batchstate.Batch
-	err := row.Scan(&b.ID, &b.OwnerKey, &b.InputFileID, &b.Endpoint, &b.CompletionWindow, &b.Status, &b.Metadata, &b.Identity, &b.Total, &b.Completed, &b.Failed, &b.OutputFileID, &b.ErrorFileID, &b.CreatedAt, &b.InProgressAt, &b.ExpiresAt, &b.FinalizingAt, &b.CompletedAt, &b.FailedAt, &b.ExpiredAt, &b.CancellingAt, &b.CancelledAt)
+	err := row.Scan(&b.ID, &b.OwnerKey, &b.InputFileID, &b.Endpoint, &b.CompletionWindow, &b.OutputExpirySeconds, &b.Status, &b.Metadata, &b.Identity, &b.Total, &b.Completed, &b.Failed, &b.OutputFileID, &b.ErrorFileID, &b.CreatedAt, &b.InProgressAt, &b.ExpiresAt, &b.FinalizingAt, &b.CompletedAt, &b.FailedAt, &b.ExpiredAt, &b.CancellingAt, &b.CancelledAt)
 	return b, err
 }
 
@@ -152,7 +152,7 @@ func (s *PostgresStore) ListBatches(ctx context.Context, owner string, limit int
 		}
 		cursorTime = &created
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id,owner_key,input_file_id,endpoint,completion_window,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at FROM gateway_batches WHERE owner_key=$1 AND ($2::timestamptz IS NULL OR (created_at,id)<($2::timestamptz,$3)) ORDER BY created_at DESC,id DESC LIMIT $4`, owner, cursorTime, cursorID, limit+1)
+	rows, err := s.pool.Query(ctx, `SELECT id,owner_key,input_file_id,endpoint,completion_window,output_expiry_seconds,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at FROM gateway_batches WHERE owner_key=$1 AND ($2::timestamptz IS NULL OR (created_at,id)<($2::timestamptz,$3)) ORDER BY created_at DESC,id DESC LIMIT $4`, owner, cursorTime, cursorID, limit+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -199,7 +199,7 @@ func (s *PostgresStore) StartBatch(ctx context.Context, owner, id string) (batch
 	if s == nil || s.pool == nil {
 		return batchstate.Batch{}, batchstate.ErrUnavailable
 	}
-	b, err := scanBatch(s.pool.QueryRow(ctx, `UPDATE gateway_batches SET status='in_progress',in_progress_at=COALESCE(in_progress_at,now()) WHERE owner_key=$1 AND id=$2 AND status IN ('queued','in_progress') RETURNING id,owner_key,input_file_id,endpoint,completion_window,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at`, owner, id))
+	b, err := scanBatch(s.pool.QueryRow(ctx, `UPDATE gateway_batches SET status='in_progress',in_progress_at=COALESCE(in_progress_at,now()) WHERE owner_key=$1 AND id=$2 AND status IN ('queued','in_progress') RETURNING id,owner_key,input_file_id,endpoint,completion_window,output_expiry_seconds,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at`, owner, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		if _, getErr := s.GetBatch(ctx, owner, id); getErr != nil {
 			return batchstate.Batch{}, getErr
@@ -255,7 +255,7 @@ func (s *PostgresStore) FinishBatchItem(ctx context.Context, item batchstate.Ite
 		return batchstate.Batch{}, err
 	}
 	status := `CASE WHEN completed+$3+failed+$4=total THEN 'finalizing' ELSE 'in_progress' END`
-	query := `UPDATE gateway_batches SET completed=completed+$3,failed=failed+$4,status=` + status + `,in_progress_at=COALESCE(in_progress_at,now()),finalizing_at=CASE WHEN completed+$3+failed+$4=total THEN now() ELSE finalizing_at END WHERE owner_key=$1 AND id=$2 AND status IN ('queued','in_progress') RETURNING id,owner_key,input_file_id,endpoint,completion_window,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at`
+	query := `UPDATE gateway_batches SET completed=completed+$3,failed=failed+$4,status=` + status + `,in_progress_at=COALESCE(in_progress_at,now()),finalizing_at=CASE WHEN completed+$3+failed+$4=total THEN now() ELSE finalizing_at END WHERE owner_key=$1 AND id=$2 AND status IN ('queued','in_progress') RETURNING id,owner_key,input_file_id,endpoint,completion_window,output_expiry_seconds,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at`
 	b, err = scanBatch(tx.QueryRow(ctx, query, item.OwnerKey, item.BatchID, completedDelta, failedDelta))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return batchstate.Batch{}, batchstate.ErrConflict
@@ -291,7 +291,7 @@ func (s *PostgresStore) ListBatchResults(ctx context.Context, owner, batchID str
 }
 
 func (s *PostgresStore) CancelBatch(ctx context.Context, owner, id string) (batchstate.Batch, error) {
-	b, err := scanBatch(s.pool.QueryRow(ctx, `UPDATE gateway_batches SET status='cancelled',cancelling_at=COALESCE(cancelling_at,now()),cancelled_at=now() WHERE owner_key=$1 AND id=$2 AND status IN ('queued','in_progress') RETURNING id,owner_key,input_file_id,endpoint,completion_window,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at`, owner, id))
+	b, err := scanBatch(s.pool.QueryRow(ctx, `UPDATE gateway_batches SET status='cancelled',cancelling_at=COALESCE(cancelling_at,now()),cancelled_at=now() WHERE owner_key=$1 AND id=$2 AND status IN ('queued','in_progress') RETURNING id,owner_key,input_file_id,endpoint,completion_window,output_expiry_seconds,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at`, owner, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, getErr := s.GetBatch(ctx, owner, id)
 		if getErr != nil {
@@ -306,7 +306,7 @@ func (s *PostgresStore) ExpireBatch(ctx context.Context, owner, id string) (batc
 	if s == nil || s.pool == nil {
 		return batchstate.Batch{}, batchstate.ErrUnavailable
 	}
-	b, err := scanBatch(s.pool.QueryRow(ctx, `UPDATE gateway_batches SET status='expired',expired_at=now() WHERE owner_key=$1 AND id=$2 AND expires_at<=now() AND status IN ('queued','in_progress','finalizing') RETURNING id,owner_key,input_file_id,endpoint,completion_window,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at`, owner, id))
+	b, err := scanBatch(s.pool.QueryRow(ctx, `UPDATE gateway_batches SET status='expired',expired_at=now() WHERE owner_key=$1 AND id=$2 AND expires_at<=now() AND status IN ('queued','in_progress','finalizing') RETURNING id,owner_key,input_file_id,endpoint,completion_window,output_expiry_seconds,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at`, owner, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, getErr := s.GetBatch(ctx, owner, id)
 		if getErr != nil {
@@ -318,7 +318,7 @@ func (s *PostgresStore) ExpireBatch(ctx context.Context, owner, id string) (batc
 }
 
 func (s *PostgresStore) FinalizeBatch(ctx context.Context, owner, id, outputID, errorID string) (batchstate.Batch, error) {
-	b, err := scanBatch(s.pool.QueryRow(ctx, `UPDATE gateway_batches SET status='completed',output_file_id=$3,error_file_id=$4,completed_at=now() WHERE owner_key=$1 AND id=$2 AND status='finalizing' RETURNING id,owner_key,input_file_id,endpoint,completion_window,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at`, owner, id, outputID, errorID))
+	b, err := scanBatch(s.pool.QueryRow(ctx, `UPDATE gateway_batches SET status='completed',output_file_id=$3,error_file_id=$4,completed_at=now() WHERE owner_key=$1 AND id=$2 AND status='finalizing' RETURNING id,owner_key,input_file_id,endpoint,completion_window,output_expiry_seconds,status,metadata,identity,total,completed,failed,output_file_id,error_file_id,created_at,in_progress_at,expires_at,finalizing_at,completed_at,failed_at,expired_at,cancelling_at,cancelled_at`, owner, id, outputID, errorID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, getErr := s.GetBatch(ctx, owner, id)
 		if getErr != nil {

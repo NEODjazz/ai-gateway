@@ -8,10 +8,16 @@ const (
 )
 
 type BatchCreateRequest struct {
-	InputFileID      string            `json:"input_file_id"`
-	Endpoint         string            `json:"endpoint"`
-	CompletionWindow string            `json:"completion_window"`
-	Metadata         map[string]string `json:"metadata,omitempty"`
+	InputFileID        string                 `json:"input_file_id"`
+	Endpoint           string                 `json:"endpoint"`
+	CompletionWindow   string                 `json:"completion_window"`
+	Metadata           map[string]string      `json:"metadata,omitempty"`
+	OutputExpiresAfter *BatchOutputExpiration `json:"output_expires_after,omitempty"`
+}
+
+type BatchOutputExpiration struct {
+	Anchor  string `json:"anchor"`
+	Seconds int64  `json:"seconds"`
 }
 
 func (r BatchCreateRequest) Validate() string {
@@ -25,6 +31,9 @@ func (r BatchCreateRequest) Validate() string {
 	}
 	if r.CompletionWindow != BatchCompletionWindow {
 		return "completion_window must be 24h"
+	}
+	if r.OutputExpiresAfter != nil && (r.OutputExpiresAfter.Anchor != "created_at" || r.OutputExpiresAfter.Seconds < 3600 || r.OutputExpiresAfter.Seconds > 2592000) {
+		return "output_expires_after requires anchor=created_at and seconds between 3600 and 2592000"
 	}
 	if len(r.Metadata) > 16 {
 		return "metadata cannot contain more than 16 entries"

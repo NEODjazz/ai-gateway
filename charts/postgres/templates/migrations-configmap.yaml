@@ -5,6 +5,10 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  024_gateway_batch_output_expiration.sql: |
+    ALTER TABLE gateway_batches
+        ADD COLUMN IF NOT EXISTS output_expiry_seconds BIGINT NOT NULL DEFAULT 0
+        CHECK (output_expiry_seconds = 0 OR output_expiry_seconds BETWEEN 3600 AND 2592000);
   023_gateway_file_expiration.sql: |
     ALTER TABLE gateway_files
         ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
