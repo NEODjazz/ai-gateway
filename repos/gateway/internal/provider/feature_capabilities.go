@@ -28,6 +28,8 @@ func (Gemini) SupportsStructuredOutput() bool { return true }
 func (Cohere) SupportsTools() bool            { return true }
 func (Cohere) SupportsStructuredOutput() bool { return true }
 
+func (Bedrock) SupportsPromptCache() bool { return true }
+
 // Mistral embeds the compatible adapter but rejects these optional request
 // fields in its native parameter validator.
 func (Mistral) SupportsMCP() bool         { return false }

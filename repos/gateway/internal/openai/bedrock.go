@@ -65,12 +65,18 @@ type BedrockMessage struct {
 
 type BedrockContentBlock struct {
 	Text             *string                  `json:"text,omitempty"`
+	CachePoint       *BedrockCachePoint       `json:"cachePoint,omitempty"`
 	Image            *BedrockImage            `json:"image,omitempty"`
 	Document         *BedrockDocument         `json:"document,omitempty"`
 	ToolUse          *BedrockToolUse          `json:"toolUse,omitempty"`
 	ToolResult       *BedrockToolResult       `json:"toolResult,omitempty"`
 	CitationsContent *BedrockCitationsContent `json:"citationsContent,omitempty"`
 	ReasoningContent *BedrockReasoningContent `json:"reasoningContent,omitempty"`
+}
+
+type BedrockCachePoint struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 type BedrockReasoningContent struct {
@@ -186,7 +192,8 @@ type BedrockSpecificToolChoice struct {
 }
 
 type BedrockTool struct {
-	Spec BedrockToolSpec `json:"toolSpec"`
+	Spec       *BedrockToolSpec   `json:"toolSpec,omitempty"`
+	CachePoint *BedrockCachePoint `json:"cachePoint,omitempty"`
 }
 
 type BedrockToolSpec struct {
@@ -270,18 +277,35 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 			return request, errors.New("performanceConfig.latency must be standard or optimized")
 		}
 	}
+	if len(r.System) > 128 {
+		return request, errors.New("system must contain at most 128 blocks")
+	}
 	for _, block := range r.System {
-		if block.Text == nil || strings.TrimSpace(*block.Text) == "" || block.Image != nil || block.Document != nil || block.ToolUse != nil || block.ToolResult != nil || block.CitationsContent != nil || block.ReasoningContent != nil {
-			return request, errors.New("system supports non-empty text blocks only")
+		if block.Text != nil && block.CachePoint == nil && block.Image == nil && block.Document == nil && block.ToolUse == nil && block.ToolResult == nil && block.CitationsContent == nil && block.ReasoningContent == nil && strings.TrimSpace(*block.Text) != "" {
+			request.Messages = append(request.Messages, Message{Role: "system", Content: *block.Text})
+			continue
 		}
-		request.Messages = append(request.Messages, Message{Role: "system", Content: *block.Text})
+		if block.CachePoint != nil && block.Text == nil && block.Image == nil && block.Document == nil && block.ToolUse == nil && block.ToolResult == nil && block.CitationsContent == nil && block.ReasoningContent == nil && len(request.Messages) > 0 && request.Messages[len(request.Messages)-1].Role == "system" {
+			breakpoint, err := bedrockPromptCacheBreakpoint(block.CachePoint)
+			if err != nil {
+				return request, err
+			}
+			previous := &request.Messages[len(request.Messages)-1]
+			text, ok := previous.Content.(string)
+			if !ok {
+				return request, errors.New("cachePoint must immediately follow a system text block")
+			}
+			previous.Content = []any{map[string]any{"type": "text", "text": text, "prompt_cache_breakpoint": promptCacheBreakpointMap(breakpoint)}}
+			continue
+		}
+		return request, errors.New("system supports text and following cachePoint blocks only")
 	}
 	seenToolUses := make(map[string]bool)
 	for _, message := range r.Messages {
 		if (message.Role != "user" && message.Role != "assistant") || len(message.Content) == 0 || len(message.Content) > 128 {
 			return request, errors.New("messages require user or assistant role and content")
 		}
-		textBlocks, imageBlocks, documentBlocks, toolUseBlocks, toolResultBlocks, reasoningBlocks := 0, 0, 0, 0, 0, 0
+		textBlocks, imageBlocks, documentBlocks, toolUseBlocks, toolResultBlocks, reasoningBlocks, cachePointBlocks := 0, 0, 0, 0, 0, 0, 0
 		var texts []string
 		chat := Message{Role: message.Role}
 		var content []any
@@ -295,6 +319,22 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 				}
 				texts = append(texts, *block.Text)
 				content = append(content, map[string]any{"type": "text", "text": *block.Text})
+			}
+			if block.CachePoint != nil {
+				fields++
+				cachePointBlocks++
+				breakpoint, err := bedrockPromptCacheBreakpoint(block.CachePoint)
+				if err != nil {
+					return request, err
+				}
+				if blockIndex == 0 || message.Content[blockIndex-1].Text == nil || len(content) == 0 {
+					return request, errors.New("cachePoint must immediately follow a text block")
+				}
+				previous, ok := content[len(content)-1].(map[string]any)
+				if !ok || previous["type"] != "text" || previous["prompt_cache_breakpoint"] != nil {
+					return request, errors.New("cachePoint must immediately follow a text block")
+				}
+				previous["prompt_cache_breakpoint"] = promptCacheBreakpointMap(breakpoint)
 			}
 			if block.Image != nil {
 				fields++
@@ -382,11 +422,11 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 			}
 		}
 		if toolResultBlocks > 0 {
-			if message.Role != "user" || toolResultBlocks != 1 || textBlocks != 0 || imageBlocks != 0 || documentBlocks != 0 || toolUseBlocks != 0 || reasoningBlocks != 0 || len(message.Content) != 1 {
+			if message.Role != "user" || toolResultBlocks != 1 || textBlocks != 0 || imageBlocks != 0 || documentBlocks != 0 || toolUseBlocks != 0 || reasoningBlocks != 0 || cachePointBlocks != 0 || len(message.Content) != 1 {
 				return request, errors.New("toolResult must be the only block in a user message")
 			}
 			result := message.Content[0].ToolResult
-			if result.ID == "" || !seenToolUses[result.ID] || len(result.Content) != 1 || result.Content[0].Text == nil || *result.Content[0].Text == "" || result.Content[0].Image != nil || result.Content[0].Document != nil || result.Content[0].ToolUse != nil || result.Content[0].ToolResult != nil || result.Content[0].CitationsContent != nil || result.Content[0].ReasoningContent != nil {
+			if result.ID == "" || !seenToolUses[result.ID] || len(result.Content) != 1 || result.Content[0].Text == nil || *result.Content[0].Text == "" || result.Content[0].CachePoint != nil || result.Content[0].Image != nil || result.Content[0].Document != nil || result.Content[0].ToolUse != nil || result.Content[0].ToolResult != nil || result.Content[0].CitationsContent != nil || result.Content[0].ReasoningContent != nil {
 				return request, errors.New("invalid toolResult block")
 			}
 			request.Messages = append(request.Messages, Message{Role: "tool", ToolCallID: result.ID, Content: *result.Content[0].Text})
@@ -395,7 +435,7 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		if documentBlocks > 0 && (documentBlocks > maxBedrockDocuments || textBlocks == 0) {
 			return request, errors.New("documents require accompanying text and at most five documents per message")
 		}
-		if imageBlocks > 0 || documentBlocks > 0 {
+		if imageBlocks > 0 || documentBlocks > 0 || cachePointBlocks > 0 {
 			chat.Content = content
 		} else if len(texts) > 0 {
 			chat.Content = strings.Join(texts, "")
@@ -417,12 +457,23 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 		}
 		seen := make(map[string]bool)
 		for _, tool := range r.ToolConfig.Tools {
-			spec := tool.Spec
-			if !ValidBedrockToolName(spec.Name) || spec.InputSchema.JSON == nil || seen[spec.Name] {
+			if tool.Spec != nil && tool.CachePoint == nil {
+				spec := tool.Spec
+				if !ValidBedrockToolName(spec.Name) || spec.InputSchema.JSON == nil || seen[spec.Name] {
+					return request, errors.New("invalid tool specification")
+				}
+				seen[spec.Name] = true
+				request.Tools = append(request.Tools, Tool{Type: "function", Function: FunctionDefinition{Name: spec.Name, Description: spec.Description, Parameters: spec.InputSchema.JSON}})
+				continue
+			}
+			if tool.CachePoint == nil || tool.Spec != nil || len(request.Tools) == 0 || request.Tools[len(request.Tools)-1].Function.PromptCacheBreakpoint != nil {
 				return request, errors.New("invalid tool specification")
 			}
-			seen[spec.Name] = true
-			request.Tools = append(request.Tools, Tool{Type: "function", Function: FunctionDefinition{Name: spec.Name, Description: spec.Description, Parameters: spec.InputSchema.JSON}})
+			breakpoint, err := bedrockPromptCacheBreakpoint(tool.CachePoint)
+			if err != nil {
+				return request, err
+			}
+			request.Tools[len(request.Tools)-1].Function.PromptCacheBreakpoint = breakpoint
 		}
 		if choice := r.ToolConfig.ToolChoice; choice != nil {
 			members := 0
@@ -446,7 +497,25 @@ func (r BedrockConverseRequest) ChatRequest(model, provider string) (ChatComplet
 			}
 		}
 	}
+	if _, message := ChatRequestPromptCacheBreakpoints(request); message != "" {
+		return request, errors.New(message)
+	}
 	return request, nil
+}
+
+func bedrockPromptCacheBreakpoint(cachePoint *BedrockCachePoint) (*PromptCacheBreakpoint, error) {
+	if cachePoint == nil || cachePoint.Type != "default" || cachePoint.TTL != "" && cachePoint.TTL != "5m" && cachePoint.TTL != "1h" {
+		return nil, errors.New("cachePoint requires type=default and optional ttl=5m or 1h")
+	}
+	return &PromptCacheBreakpoint{Mode: "explicit", TTL: cachePoint.TTL}, nil
+}
+
+func promptCacheBreakpointMap(breakpoint *PromptCacheBreakpoint) map[string]any {
+	result := map[string]any{"mode": breakpoint.Mode}
+	if breakpoint.TTL != "" {
+		result["ttl"] = breakpoint.TTL
+	}
+	return result
 }
 
 const MaxBedrockAdditionalModelRequestFieldsBytes = 64 << 10

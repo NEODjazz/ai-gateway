@@ -19,7 +19,7 @@ func TestBedrockConverseMapsToolHistoryAndConfiguration(t *testing.T) {
 			{Role: "user", Content: []BedrockContentBlock{{ToolResult: &BedrockToolResult{ID: "call_1", Content: []BedrockContentBlock{{Text: stringPointer("sunny")}}}}}},
 		},
 		InferenceConfig: BedrockInferenceConfig{MaxTokens: &maxTokens},
-		ToolConfig:      &BedrockToolConfig{Tools: []BedrockTool{{Spec: BedrockToolSpec{Name: "weather", InputSchema: BedrockToolInputSchema{JSON: map[string]any{"type": "object"}}}}}},
+		ToolConfig:      &BedrockToolConfig{Tools: []BedrockTool{{Spec: &BedrockToolSpec{Name: "weather", InputSchema: BedrockToolInputSchema{JSON: map[string]any{"type": "object"}}}}}},
 		ServiceTier:     &BedrockServiceTier{Type: "priority"},
 	}
 	chat, err := request.ChatRequest("public", "deployment")
@@ -29,7 +29,7 @@ func TestBedrockConverseMapsToolHistoryAndConfiguration(t *testing.T) {
 }
 
 func TestBedrockConverseMapsToolChoice(t *testing.T) {
-	tool := BedrockTool{Spec: BedrockToolSpec{Name: "weather", InputSchema: BedrockToolInputSchema{JSON: map[string]any{"type": "object"}}}}
+	tool := BedrockTool{Spec: &BedrockToolSpec{Name: "weather", InputSchema: BedrockToolInputSchema{JSON: map[string]any{"type": "object"}}}}
 	for name, choice := range map[string]*BedrockToolChoice{
 		"auto":  {Auto: &struct{}{}},
 		"any":   {Any: &struct{}{}},
@@ -50,9 +50,53 @@ func TestBedrockConverseMapsToolChoice(t *testing.T) {
 			t.Fatalf("invalid tool choice accepted: %+v", choice)
 		}
 	}
-	request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("weather")}}}}, ToolConfig: &BedrockToolConfig{Tools: []BedrockTool{{Spec: BedrockToolSpec{Name: "bad name", InputSchema: BedrockToolInputSchema{JSON: map[string]any{}}}}}}}
+	request := BedrockConverseRequest{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: stringPointer("weather")}}}}, ToolConfig: &BedrockToolConfig{Tools: []BedrockTool{{Spec: &BedrockToolSpec{Name: "bad name", InputSchema: BedrockToolInputSchema{JSON: map[string]any{}}}}}}}
 	if _, err := request.ChatRequest("model", ""); err == nil {
 		t.Fatal("invalid Bedrock tool name accepted")
+	}
+}
+
+func TestBedrockConverseMapsNativePromptCachePoints(t *testing.T) {
+	request := BedrockConverseRequest{
+		System: []BedrockContentBlock{{Text: stringPointer("rules")}, {CachePoint: &BedrockCachePoint{Type: "default", TTL: "1h"}}},
+		Messages: []BedrockMessage{
+			{Role: "user", Content: []BedrockContentBlock{
+				{Text: stringPointer("question")},
+				{CachePoint: &BedrockCachePoint{Type: "default", TTL: "5m"}},
+			}},
+		},
+		ToolConfig: &BedrockToolConfig{Tools: []BedrockTool{
+			{Spec: &BedrockToolSpec{Name: "lookup", InputSchema: BedrockToolInputSchema{JSON: map[string]any{"type": "object"}}}},
+			{CachePoint: &BedrockCachePoint{Type: "default"}},
+		}},
+	}
+	chat, err := request.ChatRequest("model", "bedrock")
+	if err != nil || len(chat.Messages) != 2 || len(chat.Tools) != 1 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	systemPart := chat.Messages[0].Content.([]any)[0].(map[string]any)
+	messagePart := chat.Messages[1].Content.([]any)[0].(map[string]any)
+	if systemPart["prompt_cache_breakpoint"].(map[string]any)["ttl"] != "1h" || messagePart["prompt_cache_breakpoint"].(map[string]any)["ttl"] != "5m" || chat.Tools[0].Function.PromptCacheBreakpoint == nil {
+		t.Fatalf("chat=%+v", chat)
+	}
+}
+
+func TestBedrockConverseRejectsInvalidNativeCachePoints(t *testing.T) {
+	text := stringPointer("question")
+	fivePoints := []BedrockContentBlock{{Text: text}}
+	for range 5 {
+		fivePoints = append(fivePoints, BedrockContentBlock{CachePoint: &BedrockCachePoint{Type: "default"}}, BedrockContentBlock{Text: text})
+	}
+	for _, request := range []BedrockConverseRequest{
+		{System: []BedrockContentBlock{{CachePoint: &BedrockCachePoint{Type: "default"}}}, Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: text}}}}},
+		{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: text}, {CachePoint: &BedrockCachePoint{Type: "future"}}}}}},
+		{Messages: []BedrockMessage{{Role: "assistant", Content: []BedrockContentBlock{{Text: text}, {ToolUse: &BedrockToolUse{ID: "call", Name: "lookup", Input: map[string]any{}}}, {CachePoint: &BedrockCachePoint{Type: "default"}}}}}},
+		{Messages: []BedrockMessage{{Role: "user", Content: fivePoints}}},
+		{Messages: []BedrockMessage{{Role: "user", Content: []BedrockContentBlock{{Text: text}}}}, ToolConfig: &BedrockToolConfig{Tools: []BedrockTool{{CachePoint: &BedrockCachePoint{Type: "default"}}}}},
+	} {
+		if _, err := request.ChatRequest("model", "bedrock"); err == nil {
+			t.Fatalf("invalid cache point accepted: %+v", request)
+		}
 	}
 }
 

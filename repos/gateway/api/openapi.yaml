@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.258
+  version: 0.1.259
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -5082,6 +5082,13 @@ components:
               name: {type: string, minLength: 1}
               description: {type: string}
               input_schema: {type: object, additionalProperties: true}
+              cache_control:
+                type: object
+                additionalProperties: false
+                required: [type]
+                properties:
+                  type: {type: string, const: ephemeral}
+                  ttl: {type: string, enum: [5m, 1h]}
         tool_choice:
           type: object
           additionalProperties: false
@@ -5120,12 +5127,8 @@ components:
           items: {$ref: '#/components/schemas/BedrockMessage'}
         system:
           type: array
-          items:
-            type: object
-            additionalProperties: false
-            required: [text]
-            properties:
-              text: {type: string, minLength: 1}
+          maxItems: 128
+          items: {$ref: '#/components/schemas/BedrockSystemContentBlock'}
         inferenceConfig: {$ref: '#/components/schemas/BedrockInferenceConfig'}
         toolConfig: {$ref: '#/components/schemas/BedrockToolConfig'}
         serviceTier:
@@ -5215,6 +5218,7 @@ components:
       additionalProperties: false
       oneOf:
         - required: [text]
+        - required: [cachePoint]
         - required: [image]
         - required: [document]
         - required: [toolUse]
@@ -5223,6 +5227,7 @@ components:
         - required: [reasoningContent]
       properties:
         text: {type: string, minLength: 1}
+        cachePoint: {$ref: '#/components/schemas/BedrockCachePoint'}
         image:
           type: object
           additionalProperties: false
@@ -5278,6 +5283,22 @@ components:
           readOnly: true
         reasoningContent:
           $ref: '#/components/schemas/BedrockReasoningContent'
+    BedrockSystemContentBlock:
+      type: object
+      additionalProperties: false
+      oneOf:
+        - required: [text]
+        - required: [cachePoint]
+      properties:
+        text: {type: string, minLength: 1}
+        cachePoint: {$ref: '#/components/schemas/BedrockCachePoint'}
+    BedrockCachePoint:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: {type: string, const: default}
+        ttl: {type: string, enum: [5m, 1h]}
     BedrockReasoningContent:
       type: object
       additionalProperties: false
@@ -5382,7 +5403,9 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [toolSpec]
+            oneOf:
+              - required: [toolSpec]
+              - required: [cachePoint]
             properties:
               toolSpec:
                 type: object
@@ -5397,6 +5420,7 @@ components:
                     required: [json]
                     properties:
                       json: {}
+              cachePoint: {$ref: '#/components/schemas/BedrockCachePoint'}
         toolChoice:
           $ref: '#/components/schemas/BedrockToolChoice'
     BedrockToolChoice:

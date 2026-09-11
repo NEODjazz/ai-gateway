@@ -110,6 +110,18 @@ func TestBedrockConverseAcceptsBoundedNativeImage(t *testing.T) {
 	}
 }
 
+func TestBedrockConverseAcceptsNativePromptCachePoints(t *testing.T) {
+	upstream := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	body := `{"system":[{"text":"rules"},{"cachePoint":{"type":"default","ttl":"1h"}}],"messages":[{"role":"user","content":[{"text":"question"},{"cachePoint":{"type":"default","ttl":"5m"}}]}],"toolConfig":{"tools":[{"toolSpec":{"name":"lookup","inputSchema":{"json":{"type":"object"}}}},{"cachePoint":{"type":"default"}}]}}`
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/model/converse", strings.NewReader(body)))
+	count, validation := openai.ChatRequestPromptCacheBreakpoints(upstream.request.Request)
+	if response.Code != http.StatusOK || validation != "" || count != 3 {
+		t.Fatalf("status=%d body=%s count=%d validation=%q request=%+v", response.Code, response.Body.String(), count, validation, upstream.request.Request)
+	}
+}
+
 func TestBedrockConverseAcceptsBoundedNativeDocument(t *testing.T) {
 	upstream := &chatProvider{}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))

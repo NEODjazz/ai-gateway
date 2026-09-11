@@ -83,6 +83,50 @@ func TestBedrockInvokeMapsAnthropicMessagesAndUsage(t *testing.T) {
 	}
 }
 
+func TestBedrockInvokeForwardsPromptCacheBreakpoints(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		message := body["messages"].([]any)[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+		tool := body["tools"].([]any)[0].(map[string]any)
+		if message["cache_control"].(map[string]any)["ttl"] != "1h" || tool["cache_control"].(map[string]any)["type"] != "ephemeral" {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"msg_1","type":"message","role":"assistant","model":"model","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":1}}`)
+	}))
+	defer server.Close()
+	maxTokens := 8
+	request := openai.ChatCompletionRequest{
+		Model: "model", BedrockInvoke: true, MaxTokens: &maxTokens,
+		Messages: []openai.Message{{Role: "user", Content: []any{map[string]any{"type": "text", "text": "cached", "prompt_cache_breakpoint": map[string]any{"mode": "explicit", "ttl": "1h"}}}}},
+		Tools:    []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}, PromptCacheBreakpoint: &openai.PromptCacheBreakpoint{Mode: "explicit"}}}},
+	}
+	if _, err := NewBedrock(server.URL, "key").ChatCompletions(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBedrockConverseMapsPromptCacheBreakpoints(t *testing.T) {
+	request := openai.ChatCompletionRequest{
+		Model: "model",
+		Messages: []openai.Message{
+			{Role: "system", Content: []any{map[string]any{"type": "text", "text": "rules", "prompt_cache_breakpoint": map[string]any{"mode": "explicit", "ttl": "1h"}}}},
+			{Role: "user", Content: []any{map[string]any{"type": "text", "text": "question", "prompt_cache_breakpoint": map[string]any{"mode": "explicit", "ttl": "5m"}}}},
+		},
+		Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}, PromptCacheBreakpoint: &openai.PromptCacheBreakpoint{Mode: "explicit"}}}},
+	}
+	converted, err := bedrockChatRequest(request)
+	if err != nil || len(converted.System) != 2 || converted.System[1].CachePoint == nil || converted.System[1].CachePoint.TTL != "1h" || len(converted.Messages[0].Content) != 2 || converted.Messages[0].Content[1].CachePoint == nil || converted.Messages[0].Content[1].CachePoint.TTL != "5m" || converted.ToolConfig == nil || len(converted.ToolConfig.Tools) != 2 || converted.ToolConfig.Tools[0].Spec == nil || converted.ToolConfig.Tools[1].CachePoint == nil {
+		t.Fatalf("request=%+v err=%v", converted, err)
+	}
+	encoded, err := json.Marshal(converted)
+	if err != nil || !strings.Contains(string(encoded), `"system":[{"text":"rules"},{"cachePoint":{"type":"default","ttl":"1h"}}]`) || !strings.Contains(string(encoded), `"tools":[{"toolSpec"`) || !strings.Contains(string(encoded), `{"cachePoint":{"type":"default"}}`) {
+		t.Fatalf("json=%s err=%v", encoded, err)
+	}
+}
+
 func TestBedrockInvokeRejectsMalformedResponses(t *testing.T) {
 	responses := []string{
 		`{"id":"msg_1","type":"message","role":"assistant","content":[],"stop_reason":"end_turn"}`,

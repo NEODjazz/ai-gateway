@@ -229,7 +229,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "anthropic", capabilities: []string{"chat", "tools", "structured_output", "vision", "web_search", "web_fetch", "prompt_cache", "assistant_prefill"}},
 		{providerType: "gemini", capabilities: []string{"chat", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision"}},
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
-		{providerType: "bedrock", capabilities: []string{"chat", "tools", "bedrock_invoke"}},
+		{providerType: "bedrock", capabilities: []string{"chat", "tools", "prompt_cache", "bedrock_invoke"}},
 		{providerType: "groq", capabilities: []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}},
 		{providerType: "deepseek", capabilities: []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}},
 		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}},
@@ -282,7 +282,7 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Contains(profilesByType["mistral"].Operations, "audio_transcription") || !slices.Contains(profilesByType["mistral"].Capabilities, "audio_transcription") {
 		t.Fatalf("mistral profile is missing native transcription: %+v", profilesByType["mistral"])
 	}
-	if !slices.Equal(profilesByType["bedrock"].Operations, []string{"chat", "count_tokens", "stream", "bedrock_invoke"}) || !slices.Equal(profilesByType["bedrock"].Capabilities, []string{"chat", "stream", "bedrock_invoke", "tools", "vision"}) || !slices.Equal(profilesByType["bedrock"].AuthTypes, []string{"bearer", "aws_sigv4"}) {
+	if !slices.Equal(profilesByType["bedrock"].Operations, []string{"chat", "count_tokens", "stream", "bedrock_invoke"}) || !slices.Equal(profilesByType["bedrock"].Capabilities, []string{"chat", "stream", "bedrock_invoke", "tools", "vision", "prompt_cache"}) || !slices.Equal(profilesByType["bedrock"].AuthTypes, []string{"bearer", "aws_sigv4"}) {
 		t.Fatalf("bedrock profile=%+v", profilesByType["bedrock"])
 	}
 	if !slices.Contains(profilesByType["anthropic"].Operations, "count_tokens") || !slices.Contains(profilesByType["gemini"].Operations, "count_tokens") || !slices.Equal(profilesByType["gemini"].AuthTypes, []string{"api_key", "gcp_adc"}) || !slices.Equal(profilesByType["azure-openai"].AuthTypes, []string{"api_key", "entra"}) {

@@ -31,12 +31,18 @@ type Bedrock struct {
 
 type bedrockContentBlock struct {
 	Text             string                   `json:"text,omitempty"`
+	CachePoint       *bedrockCachePoint       `json:"cachePoint,omitempty"`
 	Image            *bedrockImage            `json:"image,omitempty"`
 	Document         *bedrockDocument         `json:"document,omitempty"`
 	ToolUse          *bedrockToolUse          `json:"toolUse,omitempty"`
 	ToolResult       *bedrockToolResult       `json:"toolResult,omitempty"`
 	CitationsContent *bedrockCitationsContent `json:"citationsContent,omitempty"`
 	ReasoningContent *bedrockReasoningContent `json:"reasoningContent,omitempty"`
+}
+
+type bedrockCachePoint struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 type bedrockReasoningContent struct {
@@ -136,7 +142,8 @@ type bedrockToolSpec struct {
 }
 
 type bedrockTool struct {
-	Spec bedrockToolSpec `json:"toolSpec"`
+	Spec       *bedrockToolSpec   `json:"toolSpec,omitempty"`
+	CachePoint *bedrockCachePoint `json:"cachePoint,omitempty"`
 }
 
 type bedrockRequest struct {
@@ -293,7 +300,7 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 	if err := rejectLegacyFunctionCalling("bedrock", request); err != nil {
 		return result, err
 	}
-	if err := validateChatPromptCacheBreakpoints("bedrock", request, false); err != nil {
+	if err := validateChatPromptCacheBreakpoints("bedrock", request, true); err != nil {
 		return result, err
 	}
 	if err := rejectChatMessageRefusals("bedrock", request.Messages); err != nil {
@@ -405,7 +412,18 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 			if text == "" || len(message.ToolCalls) > 0 || message.ToolCallID != "" {
 				return result, bedrockInvalid("messages")
 			}
-			result.System = append(result.System, bedrockContentBlock{Text: text})
+			content, err := bedrockInputContent(message.Content, nil)
+			if err != nil {
+				return result, err
+			}
+			for _, block := range content {
+				validText := block.Text != "" && block.CachePoint == nil
+				validCachePoint := block.Text == "" && block.CachePoint != nil
+				if (!validText && !validCachePoint) || block.Image != nil || block.Document != nil || block.ToolUse != nil || block.ToolResult != nil || block.CitationsContent != nil || block.ReasoningContent != nil {
+					return result, bedrockInvalid("messages")
+				}
+			}
+			result.System = append(result.System, content...)
 		case "user", "assistant":
 			content := make([]bedrockContentBlock, 0, 1+len(message.ToolCalls))
 			messageContent, err := bedrockInputContent(message.Content, message.NativeContent)
@@ -481,7 +499,7 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 		seen := make(map[string]bool)
 		for _, tool := range request.Tools {
 			function := tool.Function
-			if tool.Type != "function" || !openai.ValidBedrockToolName(function.Name) || seen[function.Name] || function.Strict != nil || function.PromptCacheBreakpoint != nil {
+			if tool.Type != "function" || !openai.ValidBedrockToolName(function.Name) || seen[function.Name] || function.Strict != nil {
 				return result, bedrockInvalid("tools")
 			}
 			seen[function.Name] = true
@@ -490,7 +508,10 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 			if spec.InputSchema.JSON == nil {
 				spec.InputSchema.JSON = map[string]any{"type": "object"}
 			}
-			result.ToolConfig.Tools = append(result.ToolConfig.Tools, bedrockTool{Spec: spec})
+			result.ToolConfig.Tools = append(result.ToolConfig.Tools, bedrockTool{Spec: &spec})
+			if function.PromptCacheBreakpoint != nil {
+				result.ToolConfig.Tools = append(result.ToolConfig.Tools, bedrockTool{CachePoint: bedrockCachePointFromBreakpoint(function.PromptCacheBreakpoint)})
+			}
 		}
 		choice, err := bedrockChatToolChoice(request.ToolChoice, seen)
 		if err != nil {
@@ -553,10 +574,23 @@ func bedrockInputContent(value any, native []json.RawMessage) ([]bedrockContentB
 		switch typeName {
 		case "text":
 			text, ok := part["text"].(string)
-			if !ok || text == "" || len(part) != 2 {
+			_, hasBreakpoint := part["prompt_cache_breakpoint"]
+			expectedFields := 2
+			if hasBreakpoint {
+				expectedFields++
+			}
+			if !ok || text == "" || len(part) != expectedFields {
 				return nil, bedrockInvalid("messages.content")
 			}
 			result = append(result, bedrockContentBlock{Text: text})
+			if hasBreakpoint {
+				breakpoint, ok := part["prompt_cache_breakpoint"].(map[string]any)
+				if !ok {
+					return nil, bedrockInvalid("messages.content")
+				}
+				ttl, _ := breakpoint["ttl"].(string)
+				result = append(result, bedrockContentBlock{CachePoint: &bedrockCachePoint{Type: "default", TTL: ttl}})
+			}
 		case "image_url":
 			imageValue, ok := part["image_url"].(map[string]any)
 			if !ok || len(part) != 2 || len(imageValue) != 1 {
@@ -590,6 +624,13 @@ func bedrockInputContent(value any, native []json.RawMessage) ([]bedrockContentB
 		}
 	}
 	return result, nil
+}
+
+func bedrockCachePointFromBreakpoint(breakpoint *openai.PromptCacheBreakpoint) *bedrockCachePoint {
+	if !openai.ValidPromptCacheBreakpoint(breakpoint) {
+		return nil
+	}
+	return &bedrockCachePoint{Type: "default", TTL: breakpoint.TTL}
 }
 
 func (b Bedrock) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
@@ -863,7 +904,7 @@ func bedrockToChat(response bedrockResponse, model string) (openai.ChatCompletio
 			}
 			message.Reasoning = append(message.Reasoning, converted)
 		}
-		if block.Image != nil || block.Document != nil || block.ToolResult != nil || fields != 1 {
+		if block.CachePoint != nil || block.Image != nil || block.Document != nil || block.ToolResult != nil || fields != 1 {
 			return result, errors.New("invalid Bedrock output content block")
 		}
 	}

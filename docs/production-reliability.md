@@ -64,6 +64,11 @@ availability classes; retries and fallback stop once an output delta is exposed.
 Provider-reported cache-read and cache-write input tokens are included in prompt
 and total usage before quota settlement and billing, while the native Converse
 response preserves the provider's split counters.
+Explicit Bedrock prompt-cache checkpoints require the deployment's
+`prompt_cache` capability. The gateway accepts at most four checkpoints, maps
+only validated system, message and tool boundaries, and includes checkpoint TTL
+and placement in exact-cache identity. Native cache points allow the provider's
+default five-minute TTL or an explicit five-minute or one-hour TTL.
 
 Chat cache identity also includes validated provider-native message blocks, their
 reserved input size, Bedrock service tier, latency selection and requested
