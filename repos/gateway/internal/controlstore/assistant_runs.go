@@ -225,6 +225,85 @@ func (s *PostgresStore) UpdateRunStep(ctx context.Context, record assistantstate
 	return value, err
 }
 
+func (s *PostgresStore) CompleteRun(ctx context.Context, run assistantstate.RunRecord, expectedStatus string, expectedRevision int64, step assistantstate.RunStepRecord, message *assistantstate.MessageRecord, messageQuota, stepQuota int) (assistantstate.RunRecord, assistantstate.RunStepRecord, *assistantstate.MessageRecord, error) {
+	if s == nil || s.pool == nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrUnavailable
+	}
+	validSource := expectedStatus == "queued" || expectedStatus == "in_progress"
+	if !validSource || expectedRevision < 1 || run.Status != "completed" || !validAssistantRun(run) || step.Status != "completed" || !validAssistantRunStep(step) || step.RunID != run.ID || step.ThreadID != run.ThreadID || step.OwnerKey != run.OwnerKey || messageQuota < 1 || messageQuota > 1_000_000 || stepQuota < 1 || stepQuota > 100_000 {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrInvalid
+	}
+	if message != nil && (message.ID == "" || len(message.ID) > 128 || message.ThreadID != run.ThreadID || message.OwnerKey != run.OwnerKey || !validAssistantMessageSnapshot(message.Snapshot)) {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrInvalid
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var parent bool
+	if err = tx.QueryRow(ctx, `SELECT true FROM gateway_assistant_threads WHERE owner_key=$1 AND id=$2 FOR UPDATE`, run.OwnerKey, run.ThreadID).Scan(&parent); errors.Is(err, pgx.ErrNoRows) {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrNotFound
+	} else if err != nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, err
+	}
+	var currentStatus string
+	var currentRevision int64
+	if err = tx.QueryRow(ctx, `SELECT status,revision FROM gateway_assistant_runs WHERE owner_key=$1 AND thread_id=$2 AND id=$3 FOR UPDATE`, run.OwnerKey, run.ThreadID, run.ID).Scan(&currentStatus, &currentRevision); errors.Is(err, pgx.ErrNoRows) {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrNotFound
+	} else if err != nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, err
+	}
+	if currentStatus != expectedStatus || currentRevision != expectedRevision {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrConflict
+	}
+	var stepCount int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM gateway_assistant_run_steps WHERE owner_key=$1 AND thread_id=$2 AND run_id=$3`, run.OwnerKey, run.ThreadID, run.ID).Scan(&stepCount); err != nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, err
+	}
+	if stepCount >= stepQuota {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrQuotaExceeded
+	}
+	if message != nil {
+		var messageCount int
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM gateway_assistant_messages WHERE owner_key=$1 AND thread_id=$2`, run.OwnerKey, run.ThreadID).Scan(&messageCount); err != nil {
+			return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, err
+		}
+		if messageCount >= messageQuota {
+			return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrQuotaExceeded
+		}
+	}
+	completedRun, err := scanAssistantRun(tx.QueryRow(ctx, `UPDATE gateway_assistant_runs SET status='completed',snapshot=$4::jsonb,revision=revision+1,updated_at=now() WHERE owner_key=$1 AND thread_id=$2 AND id=$3 AND status=$5 AND revision=$6 RETURNING id,thread_id,owner_key,status,snapshot,revision,retain_until,created_at,updated_at`, run.OwnerKey, run.ThreadID, run.ID, run.Snapshot, expectedStatus, expectedRevision))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrConflict
+	}
+	if err != nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, err
+	}
+	completedStep, err := scanAssistantRunStep(tx.QueryRow(ctx, `INSERT INTO gateway_assistant_run_steps (id,run_id,thread_id,owner_key,status,snapshot) VALUES ($1,$2,$3,$4,'completed',$5::jsonb) ON CONFLICT DO NOTHING RETURNING id,run_id,thread_id,owner_key,status,snapshot,revision,created_at,updated_at`, step.ID, step.RunID, step.ThreadID, step.OwnerKey, step.Snapshot))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrConflict
+	}
+	if err != nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, err
+	}
+	var completedMessage *assistantstate.MessageRecord
+	if message != nil {
+		created, createErr := scanAssistantMessage(tx.QueryRow(ctx, `INSERT INTO gateway_assistant_messages (id,thread_id,owner_key,snapshot) VALUES ($1,$2,$3,$4::jsonb) ON CONFLICT DO NOTHING RETURNING id,thread_id,owner_key,snapshot,revision,created_at,updated_at`, message.ID, message.ThreadID, message.OwnerKey, message.Snapshot))
+		if errors.Is(createErr, pgx.ErrNoRows) {
+			return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrConflict
+		}
+		if createErr != nil {
+			return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, createErr
+		}
+		completedMessage = &created
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, err
+	}
+	return completedRun, completedStep, completedMessage, nil
+}
+
 func validAssistantRun(record assistantstate.RunRecord) bool {
 	return validA2AStorageToken(record.ID, 128) && validA2AStorageToken(record.ThreadID, 128) && record.OwnerKey != "" && len(record.OwnerKey) <= 256 && assistantstate.ValidRunStatus(record.Status) && validAssistantJSONSnapshot(record.Snapshot, assistantstate.MaxRunSnapshotBytes) && record.RetainUntil.After(time.Now())
 }

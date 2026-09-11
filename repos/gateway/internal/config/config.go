@@ -50,6 +50,7 @@ type AssistantConfig struct {
 	ThreadOwnerQuota   int
 	MessageThreadQuota int
 	RunOwnerQuota      int
+	RunStepQuota       int
 	RunRetention       time.Duration
 }
 
@@ -199,6 +200,7 @@ func Load() Config {
 	assistantThreadOwnerQuota := envInt("ASSISTANT_THREAD_OWNER_QUOTA", 10000)
 	assistantMessageThreadQuota := envInt("ASSISTANT_MESSAGE_THREAD_QUOTA", 100000)
 	assistantRunOwnerQuota := envInt("ASSISTANT_RUN_OWNER_QUOTA", 10000)
+	assistantRunStepQuota := envInt("ASSISTANT_RUN_STEP_QUOTA", 10000)
 	assistantRunRetentionSeconds := envInt("ASSISTANT_RUN_RETENTION_SECONDS", 2_592_000)
 	a2aTaskOwnerQuota := envInt("A2A_TASK_OWNER_QUOTA", 1000)
 	a2aTaskTTLSeconds := envInt("A2A_TASK_TTL_SECONDS", 2_592_000)
@@ -252,6 +254,9 @@ func Load() Config {
 	}
 	if assistantRunOwnerQuota < 1 || assistantRunOwnerQuota > 100000 {
 		assistantErr = errors.Join(assistantErr, errors.New("assistant run owner quota must be between 1 and 100000"))
+	}
+	if assistantRunStepQuota < 1 || assistantRunStepQuota > 100000 {
+		assistantErr = errors.Join(assistantErr, errors.New("assistant run step quota must be between 1 and 100000"))
 	}
 	if assistantRunRetentionSeconds < 60 || assistantRunRetentionSeconds > 31_536_000 {
 		assistantErr = errors.Join(assistantErr, errors.New("assistant run retention must be between 60 and 31536000 seconds"))
@@ -331,6 +336,7 @@ func Load() Config {
 		Assistants: AssistantConfig{
 			OwnerQuota: assistantOwnerQuota, ThreadOwnerQuota: assistantThreadOwnerQuota,
 			MessageThreadQuota: assistantMessageThreadQuota, RunOwnerQuota: assistantRunOwnerQuota,
+			RunStepQuota: assistantRunStepQuota,
 			RunRetention: time.Duration(assistantRunRetentionSeconds) * time.Second,
 		},
 		A2ATasks: A2ATaskConfig{

@@ -23,6 +23,7 @@ type AssistantRuntimeConfig struct {
 	ThreadOwnerQuota   int
 	MessageThreadQuota int
 	RunOwnerQuota      int
+	RunStepQuota       int
 	RunRetention       time.Duration
 }
 

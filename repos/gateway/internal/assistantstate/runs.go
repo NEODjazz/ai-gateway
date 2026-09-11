@@ -48,6 +48,7 @@ type RunStore interface {
 	ListRunSteps(context.Context, string, string, string, RunPageOptions) ([]RunStepRecord, string, error)
 	GetRunStep(context.Context, string, string, string, string) (RunStepRecord, error)
 	UpdateRunStep(context.Context, RunStepRecord, string, int64) (RunStepRecord, error)
+	CompleteRun(context.Context, RunRecord, string, int64, RunStepRecord, *MessageRecord, int, int) (RunRecord, RunStepRecord, *MessageRecord, error)
 }
 
 func ActiveRunStatus(status string) bool {

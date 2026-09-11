@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.247
+  version: 0.1.248
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -303,6 +303,35 @@ paths:
         '409': {description: Run is not waiting for tool outputs or changed concurrently}
         '429': {description: 'TPM, RPM, deployment quota, provider quota, or budget exceeded'}
         '503': {description: Durable background job storage unavailable}
+  /v1/threads/{thread_id}/runs/{run_id}/steps:
+    parameters:
+      - {name: thread_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+      - {name: run_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+    get:
+      operationId: listAssistantRunSteps
+      tags: [Assistants]
+      summary: List durable steps for an owned run
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
+        - {name: after, in: query, schema: {type: string, maxLength: 128}}
+        - {name: before, in: query, schema: {type: string, maxLength: 128}}
+      responses:
+        '200': {description: Owner-filtered run-step page, content: {application/json: {schema: {$ref: '#/components/schemas/AssistantRunStepList'}}}}
+        '400': {description: Invalid or conflicting pagination controls}
+        '404': {description: 'Thread, run, or pagination boundary is absent for this owner'}
+  /v1/threads/{thread_id}/runs/{run_id}/steps/{step_id}:
+    parameters:
+      - {name: thread_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+      - {name: run_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+      - {name: step_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+    get:
+      operationId: getAssistantRunStep
+      tags: [Assistants]
+      summary: Retrieve a durable step from an owned run
+      responses:
+        '200': {description: Run step, content: {application/json: {schema: {$ref: '#/components/schemas/AssistantRunStep'}}}}
+        '404': {description: 'Thread, run, or step is absent for this owner'}
   /v1/realtime:
     get:
       operationId: openRealtimeSession
@@ -4318,6 +4347,39 @@ components:
       properties:
         object: {type: string, const: list}
         data: {type: array, items: {$ref: '#/components/schemas/AssistantRun'}}
+        has_more: {type: boolean}
+        first_id: {type: string}
+        last_id: {type: string}
+    AssistantRunStep:
+      type: object
+      additionalProperties: false
+      required: [id, object, created_at, thread_id, run_id, status, type, step_details]
+      properties:
+        id: {type: string}
+        object: {type: string, const: thread.run.step}
+        created_at: {type: integer}
+        thread_id: {type: string}
+        run_id: {type: string}
+        status: {type: string, enum: [in_progress, completed, failed, cancelled, expired]}
+        type: {type: string, enum: [message_creation]}
+        step_details:
+          type: object
+          additionalProperties: false
+          required: [type]
+          properties:
+            type: {type: string, enum: [message_creation]}
+            message_creation:
+              type: object
+              additionalProperties: false
+              required: [message_id]
+              properties: {message_id: {type: string}}
+    AssistantRunStepList:
+      type: object
+      additionalProperties: false
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, items: {$ref: '#/components/schemas/AssistantRunStep'}}
         has_more: {type: boolean}
         first_id: {type: string}
         last_id: {type: string}

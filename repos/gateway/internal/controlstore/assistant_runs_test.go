@@ -124,6 +124,48 @@ func TestPostgresAssistantRunRetentionBoundsOwnerHistoryIntegration(t *testing.T
 	}
 }
 
+func TestPostgresAssistantRunCompletionIsAtomicIntegration(t *testing.T) {
+	store := prepareAssistantRunStore(t)
+	thread, err := store.CreateThread(t.Context(), assistantstate.ThreadRecord{ID: "thread_complete", OwnerKey: "owner", Snapshot: []byte(`{}`)}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.CreateRun(t.Context(), assistantstate.RunRecord{ID: "run_complete", ThreadID: thread.ID, OwnerKey: thread.OwnerKey, Status: "queued", Snapshot: []byte(`{"response_id":"resp"}`), RetainUntil: time.Now().Add(time.Hour)}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Status = "completed"
+	run.Snapshot = []byte(`{"response_id":"resp","done":true}`)
+	step := assistantstate.RunStepRecord{ID: "step_complete", RunID: run.ID, ThreadID: thread.ID, OwnerKey: thread.OwnerKey, Status: "completed", Snapshot: []byte(`{"type":"message_creation"}`)}
+	message := &assistantstate.MessageRecord{ID: "msg_complete", ThreadID: thread.ID, OwnerKey: thread.OwnerKey, Snapshot: []byte(`{"role":"assistant","content":[{"type":"text"}]}`)}
+	completed, completedStep, completedMessage, err := store.CompleteRun(t.Context(), run, "queued", run.Revision, step, message, 1, 1)
+	if err != nil || completed.Status != "completed" || completedStep.ID != step.ID || completedMessage == nil || completedMessage.ID != message.ID {
+		t.Fatalf("run=%+v step=%+v message=%+v err=%v", completed, completedStep, completedMessage, err)
+	}
+	if _, _, _, err = store.CompleteRun(t.Context(), run, "queued", run.Revision, step, message, 1, 1); !errors.Is(err, assistantstate.ErrConflict) {
+		t.Fatalf("stale completion err=%v", err)
+	}
+
+	second, err := store.CreateRun(t.Context(), assistantstate.RunRecord{ID: "run_rollback", ThreadID: thread.ID, OwnerKey: thread.OwnerKey, Status: "queued", Snapshot: []byte(`{}`), RetainUntil: time.Now().Add(time.Hour)}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.Status = "completed"
+	rollbackStep := assistantstate.RunStepRecord{ID: "step_rollback", RunID: second.ID, ThreadID: thread.ID, OwnerKey: thread.OwnerKey, Status: "completed", Snapshot: []byte(`{}`)}
+	rollbackMessage := &assistantstate.MessageRecord{ID: "msg_rollback", ThreadID: thread.ID, OwnerKey: thread.OwnerKey, Snapshot: []byte(`{}`)}
+	if _, _, _, err = store.CompleteRun(t.Context(), second, "queued", second.Revision, rollbackStep, rollbackMessage, 1, 1); !errors.Is(err, assistantstate.ErrQuotaExceeded) {
+		t.Fatalf("quota completion err=%v", err)
+	}
+	persisted, err := store.GetRun(t.Context(), thread.OwnerKey, thread.ID, second.ID)
+	if err != nil || persisted.Status != "queued" {
+		t.Fatalf("rollback run=%+v err=%v", persisted, err)
+	}
+	steps, _, err := store.ListRunSteps(t.Context(), thread.OwnerKey, thread.ID, second.ID, assistantstate.RunPageOptions{Limit: 10, Order: "asc"})
+	if err != nil || len(steps) != 0 {
+		t.Fatalf("rollback steps=%+v err=%v", steps, err)
+	}
+}
+
 func prepareAssistantRunStore(t *testing.T) *PostgresStore {
 	t.Helper()
 	store := prepareAssistantThreadStore(t)

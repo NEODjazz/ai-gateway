@@ -68,6 +68,20 @@ type assistantRunToolOutput struct {
 	Output     string `json:"output"`
 }
 
+type assistantRunStepSnapshot struct {
+	Type        string                  `json:"type"`
+	StepDetails assistantRunStepDetails `json:"step_details"`
+}
+
+type assistantRunStepDetails struct {
+	Type            string                       `json:"type"`
+	MessageCreation *assistantRunMessageCreation `json:"message_creation,omitempty"`
+}
+
+type assistantRunMessageCreation struct {
+	MessageID string `json:"message_id"`
+}
+
 func (h Handler) CreateAssistantRun(w http.ResponseWriter, r *http.Request) {
 	identity, threadID, ok := h.assistantRunCollection(w, r)
 	if !ok {
@@ -180,7 +194,11 @@ func (h Handler) CreateAssistantRun(w http.ResponseWriter, r *http.Request) {
 		}, h.assistantConfig.RunOwnerQuota)
 		if createErr == nil {
 			if targetStatus != "queued" {
-				record, createErr = h.transitionAssistantRun(r, record, targetStatus)
+				if targetStatus == "completed" {
+					record, createErr = h.completeAssistantRun(r, record, response)
+				} else {
+					record, createErr = h.transitionAssistantRun(r, record, targetStatus)
+				}
 			}
 		}
 		storageErr = createErr
@@ -400,7 +418,11 @@ func (h Handler) SubmitAssistantRunToolOutputs(w http.ResponseWriter, r *http.Re
 		record.Status = "queued"
 		record, storageErr = h.assistantRuns.TransitionRun(r.Context(), record, source, record.Revision)
 		if storageErr == nil && target != "queued" {
-			record, storageErr = h.transitionAssistantRun(r, record, target)
+			if target == "completed" {
+				record, storageErr = h.completeAssistantRun(r, record, response)
+			} else {
+				record, storageErr = h.transitionAssistantRun(r, record, target)
+			}
 		}
 		if storageErr != nil {
 			if canceler, supported := h.provider.(provider.ResponseCancellationProvider); supported && response.ID != "" {
@@ -469,7 +491,136 @@ func (h Handler) reconcileAssistantRun(r *http.Request, identity modules.Request
 	snapshot.LastError, snapshot.IncompleteDetails = response.Error, response.IncompleteDetails
 	snapshot.RequiredAction = action
 	record.Snapshot, _ = json.Marshal(snapshot)
+	if status == "completed" {
+		return h.completeAssistantRun(r, record, response)
+	}
 	return h.transitionAssistantRun(r, record, status)
+}
+
+func (h Handler) completeAssistantRun(r *http.Request, record assistantstate.RunRecord, response openai.ResponseResponse) (assistantstate.RunRecord, error) {
+	snapshot, err := decodeAssistantRun(record)
+	if err != nil {
+		return record, err
+	}
+	stepID, ok := newAssistantResourceID("step_")
+	if !ok {
+		return record, assistantstate.ErrUnavailable
+	}
+	var message *assistantstate.MessageRecord
+	messageID := ""
+	text := *responseOutputText(response)
+	if text != "" {
+		if !validAssistantMessageText(text) {
+			snapshot.LastError = &openai.ResponseError{Code: "output_too_large", Message: "provider output exceeds the assistant message limit"}
+			record.Snapshot, _ = json.Marshal(snapshot)
+			return h.transitionAssistantRun(r, record, "failed")
+		}
+		messageID, ok = newAssistantResourceID("msg_")
+		if !ok {
+			return record, assistantstate.ErrUnavailable
+		}
+		messageSnapshot := assistantMessageSnapshot{
+			Role: "assistant", Content: []assistantMessageContent{{Type: "text", Text: &assistantMessageText{Value: text, Annotations: []any{}}}},
+			Attachments: []assistantMessageAttachment{}, Metadata: map[string]string{}, AssistantID: snapshot.AssistantID, RunID: record.ID,
+		}
+		payload, marshalErr := json.Marshal(messageSnapshot)
+		if marshalErr != nil || len(payload) > assistantstate.MaxMessageSnapshotBytes {
+			return record, assistantstate.ErrInvalid
+		}
+		message = &assistantstate.MessageRecord{ID: messageID, ThreadID: record.ThreadID, OwnerKey: record.OwnerKey, Snapshot: payload}
+	}
+	stepSnapshot := assistantRunStepSnapshot{Type: "message_creation", StepDetails: assistantRunStepDetails{Type: "message_creation"}}
+	if messageID != "" {
+		stepSnapshot.StepDetails.MessageCreation = &assistantRunMessageCreation{MessageID: messageID}
+	}
+	stepPayload, err := json.Marshal(stepSnapshot)
+	if err != nil {
+		return record, assistantstate.ErrInvalid
+	}
+	step := assistantstate.RunStepRecord{ID: stepID, RunID: record.ID, ThreadID: record.ThreadID, OwnerKey: record.OwnerKey, Status: "completed", Snapshot: stepPayload}
+	source := record.Status
+	record.Status = "completed"
+	completed, _, _, err := h.assistantRuns.CompleteRun(r.Context(), record, source, record.Revision, step, message, h.assistantConfig.MessageThreadQuota, h.assistantConfig.RunStepQuota)
+	if errors.Is(err, assistantstate.ErrConflict) {
+		current, getErr := h.assistantRuns.GetRun(r.Context(), record.OwnerKey, record.ThreadID, record.ID)
+		if getErr == nil && current.Status == "completed" {
+			return current, nil
+		}
+	}
+	return completed, err
+}
+
+func (h Handler) ListAssistantRunSteps(w http.ResponseWriter, r *http.Request) {
+	identity, threadID, ok := h.assistantRunCollection(w, r)
+	if !ok {
+		return
+	}
+	runID := r.PathValue("run_id")
+	if !validFileToken(runID, 128) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "run ID is invalid")
+		return
+	}
+	options, ok := assistantRunPageOptions(w, r)
+	if !ok {
+		return
+	}
+	records, next, err := h.assistantRuns.ListRunSteps(r.Context(), fileOwnerKey(identity), threadID, runID, options)
+	if err != nil {
+		writeAssistantRunError(w, err)
+		return
+	}
+	data := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		value, decodeErr := publicAssistantRunStep(record)
+		if decodeErr != nil {
+			writeAssistantRunError(w, decodeErr)
+			return
+		}
+		data = append(data, value)
+	}
+	result := map[string]any{"object": "list", "data": data, "has_more": next != ""}
+	if len(records) > 0 {
+		result["first_id"], result["last_id"] = records[0].ID, records[len(records)-1].ID
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h Handler) GetAssistantRunStep(w http.ResponseWriter, r *http.Request) {
+	identity, threadID, runID, ok := h.assistantRunResource(w, r)
+	if !ok {
+		return
+	}
+	stepID := r.PathValue("step_id")
+	if !validFileToken(stepID, 128) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "run step ID is invalid")
+		return
+	}
+	record, err := h.assistantRuns.GetRunStep(r.Context(), fileOwnerKey(identity), threadID, runID, stepID)
+	if err != nil {
+		writeAssistantRunError(w, err)
+		return
+	}
+	value, err := publicAssistantRunStep(record)
+	if err != nil {
+		writeAssistantRunError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func publicAssistantRunStep(record assistantstate.RunStepRecord) (map[string]any, error) {
+	var snapshot assistantRunStepSnapshot
+	if json.Unmarshal(record.Snapshot, &snapshot) != nil || snapshot.Type == "" || snapshot.StepDetails.Type == "" {
+		return nil, assistantstate.ErrUnavailable
+	}
+	payload, _ := json.Marshal(snapshot)
+	var result map[string]any
+	if json.Unmarshal(payload, &result) != nil {
+		return nil, assistantstate.ErrUnavailable
+	}
+	result["id"], result["object"], result["created_at"] = record.ID, "thread.run.step", record.CreatedAt.Unix()
+	result["thread_id"], result["run_id"], result["status"] = record.ThreadID, record.RunID, record.Status
+	return result, nil
 }
 
 func (h Handler) transitionAssistantRun(r *http.Request, record assistantstate.RunRecord, target string) (assistantstate.RunRecord, error) {
@@ -624,7 +775,7 @@ func (h Handler) assistantRunResource(w http.ResponseWriter, r *http.Request) (m
 }
 
 func (h Handler) assistantRunStorageAvailable(w http.ResponseWriter) bool {
-	if h.assistants == nil || h.assistantThreads == nil || h.assistantRuns == nil || h.assistantConfig.RunOwnerQuota < 1 || h.assistantConfig.RunRetention <= 0 {
+	if h.assistants == nil || h.assistantThreads == nil || h.assistantRuns == nil || h.assistantConfig.RunOwnerQuota < 1 || h.assistantConfig.RunStepQuota < 1 || h.assistantConfig.RunRetention <= 0 {
 		writeError(w, http.StatusServiceUnavailable, "assistant_run_storage_unavailable", "assistant run storage is unavailable")
 		return false
 	}

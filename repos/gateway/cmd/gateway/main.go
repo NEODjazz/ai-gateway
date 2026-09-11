@@ -156,6 +156,7 @@ func main() {
 		handler = handler.WithAssistantStore(providerControlStore, gateway.AssistantRuntimeConfig{
 			OwnerQuota: cfg.Assistants.OwnerQuota, ThreadOwnerQuota: cfg.Assistants.ThreadOwnerQuota,
 			MessageThreadQuota: cfg.Assistants.MessageThreadQuota, RunOwnerQuota: cfg.Assistants.RunOwnerQuota,
+			RunStepQuota: cfg.Assistants.RunStepQuota,
 			RunRetention: cfg.Assistants.RunRetention,
 		})
 		handler, err = handler.WithA2APushNotifications(providerControlStore, []byte(cfg.Provider.CredentialKey))

@@ -41,6 +41,8 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/v1/threads/{thread_id}/runs/{run_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetAssistantRun) }},
 	{RouteContract{http.MethodPost, "/v1/threads/{thread_id}/runs/{run_id}/cancel"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CancelAssistantRun) }},
 	{RouteContract{http.MethodPost, "/v1/threads/{thread_id}/runs/{run_id}/submit_tool_outputs"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SubmitAssistantRunToolOutputs) }},
+	{RouteContract{http.MethodGet, "/v1/threads/{thread_id}/runs/{run_id}/steps"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListAssistantRunSteps) }},
+	{RouteContract{http.MethodGet, "/v1/threads/{thread_id}/runs/{run_id}/steps/{step_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetAssistantRunStep) }},
 	{RouteContract{http.MethodDelete, "/v1/models/{model}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteFineTunedModel) }},
 	{RouteContract{http.MethodGet, "/a2a/{agent}/.well-known/agent-card.json"}, func(h Handler) http.Handler { return http.HandlerFunc(h.A2AAgentCard) }},
 	{RouteContract{http.MethodPost, "/a2a/{agent}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.A2AJSONRPC) }},

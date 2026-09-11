@@ -20,6 +20,7 @@ import (
 type memoryAssistantRunStore struct {
 	*memoryAssistantThreadStore
 	runs             map[string]assistantstate.RunRecord
+	steps            map[string]assistantstate.RunStepRecord
 	transitionCalls  int
 	lastTransitionTo string
 }
@@ -113,14 +114,77 @@ func (s *memoryAssistantRunStore) TransitionRun(_ context.Context, record assist
 func (*memoryAssistantRunStore) CreateRunStep(context.Context, assistantstate.RunStepRecord, int) (assistantstate.RunStepRecord, error) {
 	return assistantstate.RunStepRecord{}, assistantstate.ErrUnavailable
 }
-func (*memoryAssistantRunStore) ListRunSteps(context.Context, string, string, string, assistantstate.RunPageOptions) ([]assistantstate.RunStepRecord, string, error) {
-	return nil, "", assistantstate.ErrUnavailable
+func (s *memoryAssistantRunStore) ListRunSteps(_ context.Context, owner, threadID, runID string, options assistantstate.RunPageOptions) ([]assistantstate.RunStepRecord, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, found := s.runs[owner+"/"+threadID+"/"+runID]; !found {
+		return nil, "", assistantstate.ErrNotFound
+	}
+	var values []assistantstate.RunStepRecord
+	for _, step := range s.steps {
+		if step.OwnerKey == owner && step.ThreadID == threadID && step.RunID == runID {
+			values = append(values, step)
+		}
+	}
+	sort.Slice(values, func(i, j int) bool {
+		if options.Order == "asc" {
+			return values[i].CreatedAt.Before(values[j].CreatedAt)
+		}
+		return values[i].CreatedAt.After(values[j].CreatedAt)
+	})
+	return values, "", nil
 }
-func (*memoryAssistantRunStore) GetRunStep(context.Context, string, string, string, string) (assistantstate.RunStepRecord, error) {
-	return assistantstate.RunStepRecord{}, assistantstate.ErrUnavailable
+func (s *memoryAssistantRunStore) GetRunStep(_ context.Context, owner, threadID, runID, id string) (assistantstate.RunStepRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	step, found := s.steps[owner+"/"+threadID+"/"+runID+"/"+id]
+	if !found {
+		return assistantstate.RunStepRecord{}, assistantstate.ErrNotFound
+	}
+	return step, nil
 }
 func (*memoryAssistantRunStore) UpdateRunStep(context.Context, assistantstate.RunStepRecord, string, int64) (assistantstate.RunStepRecord, error) {
 	return assistantstate.RunStepRecord{}, assistantstate.ErrUnavailable
+}
+func (s *memoryAssistantRunStore) CompleteRun(_ context.Context, run assistantstate.RunRecord, expectedStatus string, expectedRevision int64, step assistantstate.RunStepRecord, message *assistantstate.MessageRecord, messageQuota, stepQuota int) (assistantstate.RunRecord, assistantstate.RunStepRecord, *assistantstate.MessageRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := run.OwnerKey + "/" + run.ThreadID + "/" + run.ID
+	current, found := s.runs[key]
+	if !found {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrNotFound
+	}
+	if current.Status != expectedStatus || current.Revision != expectedRevision {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrConflict
+	}
+	stepCount, messageCount := 0, 0
+	for _, existing := range s.steps {
+		if existing.OwnerKey == run.OwnerKey && existing.ThreadID == run.ThreadID && existing.RunID == run.ID {
+			stepCount++
+		}
+	}
+	for _, existing := range s.messages {
+		if existing.OwnerKey == run.OwnerKey && existing.ThreadID == run.ThreadID {
+			messageCount++
+		}
+	}
+	if stepCount >= stepQuota || message != nil && messageCount >= messageQuota {
+		return assistantstate.RunRecord{}, assistantstate.RunStepRecord{}, nil, assistantstate.ErrQuotaExceeded
+	}
+	run.Revision++
+	run.UpdatedAt = current.UpdatedAt.Add(time.Second)
+	step.Revision = 1
+	step.CreatedAt, step.UpdatedAt = run.UpdatedAt, run.UpdatedAt
+	s.runs[key] = run
+	s.steps[run.OwnerKey+"/"+run.ThreadID+"/"+run.ID+"/"+step.ID] = step
+	if message == nil {
+		return run, step, nil, nil
+	}
+	created := *message
+	created.Revision = 1
+	created.CreatedAt, created.UpdatedAt = run.UpdatedAt, run.UpdatedAt
+	s.messages[created.OwnerKey+"/"+created.ThreadID+"/"+created.ID] = created
+	return run, step, &created, nil
 }
 
 type assistantRunProvider struct {
@@ -178,11 +242,11 @@ func newAssistantRunTestHandler(t *testing.T, user string, provider *assistantRu
 		memoryAssistantStore: &memoryAssistantStore{records: map[string]assistantstate.Record{}},
 		threads:              map[string]assistantstate.ThreadRecord{}, messages: map[string]assistantstate.MessageRecord{},
 	}
-	store := &memoryAssistantRunStore{memoryAssistantThreadStore: base, runs: map[string]assistantstate.RunRecord{}}
+	store := &memoryAssistantRunStore{memoryAssistantThreadStore: base, runs: map[string]assistantstate.RunRecord{}, steps: map[string]assistantstate.RunStepRecord{}}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&assistantAuthModule{user: user}}), provider).
 		WithAssistantStore(store, AssistantRuntimeConfig{
 			OwnerQuota: 10, ThreadOwnerQuota: 10, MessageThreadQuota: 100,
-			RunOwnerQuota: 10, RunRetention: time.Hour,
+			RunOwnerQuota: 10, RunStepQuota: 10, RunRetention: time.Hour,
 		}))
 	return store, handler
 }
@@ -232,7 +296,7 @@ func TestAssistantRunActiveConflictCancellationAndOwnerIsolation(t *testing.T) {
 		t.Fatalf("conflict status=%d body=%s", conflict.Code, conflict.Body.String())
 	}
 	other := Routes(NewHandler(modules.NewPipeline([]modules.Module{&assistantAuthModule{user: "user-b"}}), provider).
-		WithAssistantStore(store, AssistantRuntimeConfig{OwnerQuota: 10, ThreadOwnerQuota: 10, MessageThreadQuota: 100, RunOwnerQuota: 10, RunRetention: time.Hour}))
+		WithAssistantStore(store, AssistantRuntimeConfig{OwnerQuota: 10, ThreadOwnerQuota: 10, MessageThreadQuota: 100, RunOwnerQuota: 10, RunStepQuota: 10, RunRetention: time.Hour}))
 	if hidden := assistantRequest(t, other, http.MethodGet, "/v1/threads/"+threadID+"/runs/"+runID, ""); hidden.Code != http.StatusNotFound {
 		t.Fatalf("cross-owner status=%d body=%s", hidden.Code, hidden.Body.String())
 	}
@@ -287,6 +351,39 @@ func TestAssistantRunRejectsMalformedProviderToolCalls(t *testing.T) {
 	}
 	if _, err := assistantRunAction(response); !errors.Is(err, errAssistantRunProviderPayload) {
 		t.Fatalf("duplicate call err=%v", err)
+	}
+}
+
+func TestAssistantRunCompletionAtomicallyCreatesMessageAndStep(t *testing.T) {
+	provider := &assistantRunProvider{created: openai.ResponseResponse{ID: "resp_answer", Model: "model-a", Status: "queued"}}
+	_, handler := newAssistantRunTestHandler(t, "user", provider)
+	assistantID := responseString(t, assistantRequest(t, handler, http.MethodPost, "/v1/assistants", `{"model":"model-a"}`), "id")
+	threadID := responseString(t, assistantRequest(t, handler, http.MethodPost, "/v1/threads", `{"messages":[{"role":"user","content":"question"}]}`), "id")
+	runID := responseString(t, assistantRequest(t, handler, http.MethodPost, "/v1/threads/"+threadID+"/runs", `{"assistant_id":"`+assistantID+`"}`), "id")
+	provider.retrieved = openai.ResponseResponse{ID: "resp_answer", Model: "model-a", Status: "completed", OutputText: "answer"}
+	provider.settled = true
+	completed := assistantRequest(t, handler, http.MethodGet, "/v1/threads/"+threadID+"/runs/"+runID, "")
+	if completed.Code != http.StatusOK || !strings.Contains(completed.Body.String(), `"status":"completed"`) {
+		t.Fatalf("complete status=%d body=%s", completed.Code, completed.Body.String())
+	}
+	messages := assistantRequest(t, handler, http.MethodGet, "/v1/threads/"+threadID+"/messages?order=asc&limit=10", "")
+	if messages.Code != http.StatusOK || !strings.Contains(messages.Body.String(), `"value":"answer"`) || !strings.Contains(messages.Body.String(), `"assistant_id":"`+assistantID+`"`) || !strings.Contains(messages.Body.String(), `"run_id":"`+runID+`"`) {
+		t.Fatalf("messages status=%d body=%s", messages.Code, messages.Body.String())
+	}
+	steps := assistantRequest(t, handler, http.MethodGet, "/v1/threads/"+threadID+"/runs/"+runID+"/steps?order=asc&limit=10", "")
+	if steps.Code != http.StatusOK || !strings.Contains(steps.Body.String(), `"type":"message_creation"`) {
+		t.Fatalf("steps status=%d body=%s", steps.Code, steps.Body.String())
+	}
+	var page struct {
+		Data []map[string]any `json:"data"`
+	}
+	if json.Unmarshal(steps.Body.Bytes(), &page) != nil || len(page.Data) != 1 {
+		t.Fatalf("step page=%s", steps.Body.String())
+	}
+	stepID, _ := page.Data[0]["id"].(string)
+	step := assistantRequest(t, handler, http.MethodGet, "/v1/threads/"+threadID+"/runs/"+runID+"/steps/"+stepID, "")
+	if step.Code != http.StatusOK || !strings.Contains(step.Body.String(), `"object":"thread.run.step"`) {
+		t.Fatalf("step status=%d body=%s", step.Code, step.Body.String())
 	}
 }
 

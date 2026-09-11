@@ -20,6 +20,8 @@ type assistantMessageSnapshot struct {
 	Content     []assistantMessageContent    `json:"content"`
 	Attachments []assistantMessageAttachment `json:"attachments"`
 	Metadata    map[string]string            `json:"metadata"`
+	AssistantID string                       `json:"assistant_id,omitempty"`
+	RunID       string                       `json:"run_id,omitempty"`
 }
 
 type assistantMessageContent struct {
@@ -419,6 +421,12 @@ func publicAssistantMessage(record assistantstate.MessageRecord) (map[string]any
 	}
 	result["id"], result["object"], result["created_at"], result["thread_id"] = record.ID, "thread.message", record.CreatedAt.Unix(), record.ThreadID
 	result["assistant_id"], result["run_id"] = nil, nil
+	if snapshot.AssistantID != "" {
+		result["assistant_id"] = snapshot.AssistantID
+	}
+	if snapshot.RunID != "" {
+		result["run_id"] = snapshot.RunID
+	}
 	return result, nil
 }
 
