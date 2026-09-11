@@ -50,8 +50,10 @@ routing and billing path. With durable task and background-response storage,
 Text, structured JSON data, bounded inline images and HTTPS image references reuse the Responses
 media validation, scan, token reserve and billing path. Remote images are fetched only after
 credential and model authorization, through the public-network transport, and stored as validated
-inline bytes. `SendMessage` push callbacks use an encrypted PostgreSQL outbox, wait for background
-billing settlement, and retry failed HTTPS delivery without losing the task transition. The callback
+inline bytes. `SendMessage` push callbacks and the A2A create/get/list/delete configuration methods
+support multiple owner-isolated callbacks per task. Callback URLs, tokens and authentication credentials
+are encrypted in PostgreSQL; each configuration has an independent durable outbox job. Delivery waits for background
+billing settlement and retries failed HTTPS requests without losing the task transition. The callback
 transport rejects redirects and non-public destinations. Push configuration on streaming messages
 and other media parts fail with explicit protocol errors.
 `GetExtendedAgentCard` returns the current card only after bearer

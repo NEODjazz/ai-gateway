@@ -23,6 +23,15 @@ type a2aPushTestStore struct {
 	job       *asyncstate.Job
 	retry     time.Duration
 	completed bool
+	configs   map[string]a2astate.PushConfig
+}
+
+func (s *a2aPushTestStore) putPushConfig(config a2astate.PushConfig) {
+	if s.configs == nil {
+		s.configs = map[string]a2astate.PushConfig{}
+	}
+	config.CreatedAt, config.UpdatedAt = time.Now().UTC(), time.Now().UTC()
+	s.configs[config.TaskID+":"+config.ID] = config
 }
 
 func (s *a2aPushTestStore) CreateA2ATaskWithJob(ctx context.Context, task a2astate.Task, quota int, ttl time.Duration, job asyncstate.Job) (a2astate.Task, error) {
@@ -41,6 +50,65 @@ func (s *a2aPushTestStore) UpdateA2ATaskWithJob(ctx context.Context, task a2asta
 		s.job = &copy
 	}
 	return updated, err
+}
+
+func (s *a2aPushTestStore) CreateA2ATaskWithPushConfig(ctx context.Context, task a2astate.Task, config a2astate.PushConfig, quota, configQuota int, ttl time.Duration, job asyncstate.Job) (a2astate.Task, error) {
+	created, err := s.CreateA2ATask(ctx, task, quota, ttl)
+	if err == nil {
+		s.putPushConfig(config)
+		copy := job
+		s.job = &copy
+	}
+	return created, err
+}
+
+func (s *a2aPushTestStore) UpdateA2ATaskWithPushConfig(ctx context.Context, task a2astate.Task, config a2astate.PushConfig, expected time.Time, _ int, ttl time.Duration, job asyncstate.Job) (a2astate.Task, error) {
+	updated, err := s.UpdateA2ATask(ctx, task, expected, ttl)
+	if err == nil {
+		s.putPushConfig(config)
+		copy := job
+		s.job = &copy
+	}
+	return updated, err
+}
+
+func (s *a2aPushTestStore) CreateA2APushConfig(_ context.Context, config a2astate.PushConfig, _ int, job asyncstate.Job) (a2astate.PushConfig, error) {
+	key := config.TaskID + ":" + config.ID
+	if _, exists := s.configs[key]; exists {
+		return a2astate.PushConfig{}, a2astate.ErrConflict
+	}
+	s.putPushConfig(config)
+	copy := job
+	s.job = &copy
+	return s.configs[key], nil
+}
+
+func (s *a2aPushTestStore) GetA2APushConfig(_ context.Context, owner, agent, taskID, id string) (a2astate.PushConfig, error) {
+	config, ok := s.configs[taskID+":"+id]
+	if !ok || config.OwnerKey != owner || config.AgentID != agent {
+		return a2astate.PushConfig{}, a2astate.ErrNotFound
+	}
+	return config, nil
+}
+
+func (s *a2aPushTestStore) ListA2APushConfigs(_ context.Context, owner, agent, taskID string, _ int, _ string) ([]a2astate.PushConfig, string, int, error) {
+	var configs []a2astate.PushConfig
+	for _, config := range s.configs {
+		if config.OwnerKey == owner && config.AgentID == agent && config.TaskID == taskID {
+			configs = append(configs, config)
+		}
+	}
+	return configs, "", len(configs), nil
+}
+
+func (s *a2aPushTestStore) DeleteA2APushConfig(_ context.Context, owner, agent, taskID, id string) error {
+	key := taskID + ":" + id
+	config, ok := s.configs[key]
+	if !ok || config.OwnerKey != owner || config.AgentID != agent {
+		return a2astate.ErrNotFound
+	}
+	delete(s.configs, key)
+	return nil
 }
 
 func (s *a2aPushTestStore) EnqueueAsyncJob(context.Context, asyncstate.Job) (bool, error) {
@@ -143,10 +211,11 @@ func TestA2APushFailureKeepsDurableJobForRetry(t *testing.T) {
 	task := a2aTask{ID: "task_retry", ContextID: "context", Status: a2aTaskStatus{State: "TASK_STATE_COMPLETED"}, History: []a2aMessage{{MessageID: "m", ContextID: "context", TaskID: "task_retry", Role: "ROLE_USER", Parts: []a2aPart{{Text: a2aStringPointer("hello")}}}}, Artifacts: []a2aArtifact{{ArtifactID: "artifact", Parts: []a2aPart{{Text: a2aStringPointer("done")}}}}}
 	payload, _ := json.Marshal(task)
 	stored, _ := store.CreateA2ATask(t.Context(), a2astate.Task{ID: task.ID, OwnerKey: "credential:credential", AgentID: "research", Model: "test-model", ContextID: task.ContextID, State: task.Status.State, Payload: payload}, 10, time.Hour)
-	job, err := handler.newA2APushJob(modules.RequestContext{CredentialID: "credential", RequestID: "exec_retry"}, stored, a2aPushConfig{URL: "https://client.example/hook"})
+	config, job, err := handler.newA2APushConfigAndJob(modules.RequestContext{CredentialID: "credential", RequestID: "exec_retry"}, stored, a2aPushConfig{URL: "https://client.example/hook"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	store.putPushConfig(config)
 	store.job = &job
 	if count, err := handler.ProcessA2APushNotifications(t.Context()); err == nil || count != 1 || store.job == nil || store.retry != time.Second || store.completed {
 		t.Fatalf("count=%d retry=%s completed=%t job=%+v err=%v", count, store.retry, store.completed, store.job, err)
@@ -201,12 +270,63 @@ func TestA2APushValidationAndVaultBinding(t *testing.T) {
 	store := &a2aPushTestStore{a2aMemoryTaskStore: &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}}
 	handler, _, _ := newA2APushTestHandler(t, store)
 	task := a2astate.Task{ID: "task", OwnerKey: "owner", AgentID: "research"}
-	job, err := handler.newA2APushJob(modules.RequestContext{CredentialID: "credential", RequestID: "execution"}, task, a2aPushConfig{URL: "https://client.example/hook"})
+	_, job, err := handler.newA2APushConfigAndJob(modules.RequestContext{CredentialID: "credential", RequestID: "execution"}, task, a2aPushConfig{URL: "https://client.example/hook"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	job.OwnerKey = "other-owner"
 	if _, err := handler.decodeA2APushJob(job); err == nil {
 		t.Fatal("encrypted job decrypted in a different owner scope")
+	}
+}
+
+func TestA2APushConfigurationManagementLifecycle(t *testing.T) {
+	store := &a2aPushTestStore{a2aMemoryTaskStore: &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}}
+	handler, _, _ := newA2APushTestHandler(t, store)
+	call := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+		request.Header.Set("A2A-Version", "1.0")
+		request.Header.Set("Authorization", "Bearer key")
+		response := httptest.NewRecorder()
+		Routes(handler).ServeHTTP(response, request)
+		return response
+	}
+	createdTask := call(`{"jsonrpc":"2.0","id":"send","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"client","role":"ROLE_USER","parts":[{"text":"hello"}]}}}`)
+	var sent struct {
+		Result struct {
+			Task a2aTask `json:"task"`
+		} `json:"result"`
+	}
+	if createdTask.Code != http.StatusOK || json.Unmarshal(createdTask.Body.Bytes(), &sent) != nil || sent.Result.Task.ID == "" {
+		t.Fatalf("create task status=%d body=%s", createdTask.Code, createdTask.Body.String())
+	}
+	taskID := sent.Result.Task.ID
+	created := call(`{"jsonrpc":"2.0","id":"create","method":"CreateTaskPushNotificationConfig","params":{"tenant":"research","taskId":"` + taskID + `","id":"config-a","url":"https://client.example/hook","token":"secret"}}`)
+	if created.Code != http.StatusOK || !strings.Contains(created.Body.String(), `"id":"config-a"`) || !strings.Contains(created.Body.String(), `"createdAt"`) || store.job == nil {
+		t.Fatalf("create config status=%d job=%+v body=%s", created.Code, store.job, created.Body.String())
+	}
+	persisted := store.configs[taskID+":config-a"]
+	if strings.Contains(string(persisted.Payload), "client.example") || strings.Contains(string(persisted.Payload), "secret") {
+		t.Fatalf("push config was stored in plaintext: %s", persisted.Payload)
+	}
+	if _, err := store.GetA2APushConfig(t.Context(), "other-owner", "research", taskID, "config-a"); !errors.Is(err, a2astate.ErrNotFound) {
+		t.Fatalf("cross-owner config read error=%v", err)
+	}
+	for _, body := range []string{
+		`{"jsonrpc":"2.0","id":"get","method":"GetTaskPushNotificationConfig","params":{"tenant":"research","taskId":"` + taskID + `","id":"config-a"}}`,
+		`{"jsonrpc":"2.0","id":"list","method":"ListTaskPushNotificationConfigs","params":{"tenant":"research","taskId":"` + taskID + `","pageSize":10}}`,
+	} {
+		response := call(body)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "https://client.example/hook") || !strings.Contains(response.Body.String(), "secret") {
+			t.Fatalf("management status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	deleted := call(`{"jsonrpc":"2.0","id":"delete","method":"DeleteTaskPushNotificationConfig","params":{"tenant":"research","taskId":"` + taskID + `","id":"config-a"}}`)
+	if deleted.Code != http.StatusOK || len(store.configs) != 0 {
+		t.Fatalf("delete status=%d configs=%d body=%s", deleted.Code, len(store.configs), deleted.Body.String())
+	}
+	missing := call(`{"jsonrpc":"2.0","id":"get","method":"GetTaskPushNotificationConfig","params":{"tenant":"research","taskId":"` + taskID + `","id":"config-a"}}`)
+	if missing.Code != http.StatusNotFound || !strings.Contains(missing.Body.String(), `"code":-32001`) {
+		t.Fatalf("missing status=%d body=%s", missing.Code, missing.Body.String())
 	}
 }

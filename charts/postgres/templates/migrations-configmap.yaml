@@ -5,6 +5,24 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  021_gateway_a2a_push_configs.sql: |
+    CREATE TABLE IF NOT EXISTS gateway_a2a_push_configs (
+        id TEXT NOT NULL,
+        task_id TEXT NOT NULL REFERENCES gateway_a2a_tasks(id) ON DELETE CASCADE,
+        owner_key TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        payload BYTEA NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (task_id, id),
+        CHECK (length(id) BETWEEN 1 AND 128),
+        CHECK (length(task_id) BETWEEN 1 AND 128),
+        CHECK (length(owner_key) BETWEEN 1 AND 256),
+        CHECK (length(agent_id) BETWEEN 1 AND 128),
+        CHECK (octet_length(payload) BETWEEN 1 AND 16384)
+    );
+    CREATE INDEX IF NOT EXISTS gateway_a2a_push_configs_owner_task_created_idx
+        ON gateway_a2a_push_configs (owner_key, agent_id, task_id, created_at DESC, id DESC);
   020_gateway_a2a_tasks.sql: |
     CREATE TABLE IF NOT EXISTS gateway_a2a_tasks (
         id TEXT PRIMARY KEY,

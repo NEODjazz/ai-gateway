@@ -46,6 +46,7 @@ type Handler struct {
 	a2aSubscriptions  chan struct{}
 	a2aHTTPClient     httpDoer
 	a2aPushJobs       asyncstate.Store
+	a2aPushConfigs    a2astate.AtomicOutboxStore
 	a2aPushVault      *a2aPushVault
 	mcp               *MCPRegistry
 	mcpRuntime        MCPRuntimeFactory

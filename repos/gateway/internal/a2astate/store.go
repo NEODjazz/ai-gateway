@@ -9,6 +9,7 @@ import (
 )
 
 const MaxPayloadBytes = 2 << 20
+const MaxPushConfigPayloadBytes = 16 << 10
 
 var ErrNotFound = errors.New("A2A task not found")
 var ErrConflict = errors.New("A2A task already exists")
@@ -27,6 +28,16 @@ type Task struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	ExpiresAt time.Time
+}
+
+type PushConfig struct {
+	ID        string
+	TaskID    string
+	OwnerKey  string
+	AgentID   string
+	Payload   []byte
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type ListOptions struct {
@@ -52,4 +63,10 @@ type AtomicOutboxStore interface {
 	Store
 	CreateA2ATaskWithJob(context.Context, Task, int, time.Duration, asyncstate.Job) (Task, error)
 	UpdateA2ATaskWithJob(context.Context, Task, time.Time, time.Duration, asyncstate.Job) (Task, error)
+	CreateA2ATaskWithPushConfig(context.Context, Task, PushConfig, int, int, time.Duration, asyncstate.Job) (Task, error)
+	UpdateA2ATaskWithPushConfig(context.Context, Task, PushConfig, time.Time, int, time.Duration, asyncstate.Job) (Task, error)
+	CreateA2APushConfig(context.Context, PushConfig, int, asyncstate.Job) (PushConfig, error)
+	GetA2APushConfig(context.Context, string, string, string, string) (PushConfig, error)
+	ListA2APushConfigs(context.Context, string, string, string, int, string) ([]PushConfig, string, int, error)
+	DeleteA2APushConfig(context.Context, string, string, string, string) error
 }

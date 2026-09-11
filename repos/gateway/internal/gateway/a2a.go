@@ -44,16 +44,20 @@ type a2aRequest struct {
 	ID      json.RawMessage `json:"id"`
 	Method  string          `json:"method"`
 	Params  struct {
-		Tenant               string     `json:"tenant"`
-		ID                   string     `json:"id"`
-		ContextID            string     `json:"contextId,omitempty"`
-		Status               string     `json:"status,omitempty"`
-		PageSize             int        `json:"pageSize,omitempty"`
-		PageToken            string     `json:"pageToken,omitempty"`
-		HistoryLength        *int       `json:"historyLength,omitempty"`
-		IncludeArtifacts     bool       `json:"includeArtifacts,omitempty"`
-		StatusTimestampAfter string     `json:"statusTimestampAfter,omitempty"`
-		Message              a2aMessage `json:"message"`
+		Tenant               string                 `json:"tenant"`
+		ID                   string                 `json:"id"`
+		TaskID               string                 `json:"taskId,omitempty"`
+		URL                  string                 `json:"url,omitempty"`
+		Token                string                 `json:"token,omitempty"`
+		Authentication       *a2aPushAuthentication `json:"authentication,omitempty"`
+		ContextID            string                 `json:"contextId,omitempty"`
+		Status               string                 `json:"status,omitempty"`
+		PageSize             int                    `json:"pageSize,omitempty"`
+		PageToken            string                 `json:"pageToken,omitempty"`
+		HistoryLength        *int                   `json:"historyLength,omitempty"`
+		IncludeArtifacts     bool                   `json:"includeArtifacts,omitempty"`
+		StatusTimestampAfter string                 `json:"statusTimestampAfter,omitempty"`
+		Message              a2aMessage             `json:"message"`
 		Configuration        struct {
 			AcceptedOutputModes    []string       `json:"acceptedOutputModes,omitempty"`
 			ReturnImmediately      *bool          `json:"returnImmediately,omitempty"`
@@ -196,7 +200,7 @@ func (h Handler) A2AJSONRPC(w http.ResponseWriter, r *http.Request) {
 		h.writeA2AError(w, request.ID, http.StatusNotFound, -32601, "Method not found")
 		return
 	}
-	if request.Method != "SendMessage" && request.Method != "SendStreamingMessage" && request.Method != "SubscribeToTask" && request.Method != "GetTask" && request.Method != "ListTasks" && request.Method != "CancelTask" && request.Method != "GetExtendedAgentCard" {
+	if request.Method != "SendMessage" && request.Method != "SendStreamingMessage" && request.Method != "SubscribeToTask" && request.Method != "GetTask" && request.Method != "ListTasks" && request.Method != "CancelTask" && request.Method != "GetExtendedAgentCard" && request.Method != "CreateTaskPushNotificationConfig" && request.Method != "GetTaskPushNotificationConfig" && request.Method != "ListTaskPushNotificationConfigs" && request.Method != "DeleteTaskPushNotificationConfig" {
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32601, "Method not found")
 		return
 	}
@@ -219,6 +223,14 @@ func (h Handler) A2AJSONRPC(w http.ResponseWriter, r *http.Request) {
 		h.cancelA2ATask(w, r, request, profile)
 	case "GetExtendedAgentCard":
 		h.getA2AExtendedAgentCard(w, r, request, profile)
+	case "CreateTaskPushNotificationConfig":
+		h.createA2APushConfig(w, r, request, profile)
+	case "GetTaskPushNotificationConfig":
+		h.getA2APushConfig(w, r, request, profile)
+	case "ListTaskPushNotificationConfigs":
+		h.listA2APushConfigs(w, r, request, profile)
+	case "DeleteTaskPushNotificationConfig":
+		h.deleteA2APushConfig(w, r, request, profile)
 	default:
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32601, "Method not found")
 	}
@@ -288,7 +300,7 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 			h.writeA2AError(w, request.ID, http.StatusBadRequest, -32003, "Push notifications are not supported for streaming messages")
 			return
 		}
-		if _, ok := h.a2aTasks.(a2astate.AtomicOutboxStore); !ok || h.a2aPushJobs == nil || h.a2aPushVault == nil {
+		if h.a2aPushConfigs == nil || h.a2aPushJobs == nil || h.a2aPushVault == nil {
 			h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32003, "Push notifications are not supported")
 			return
 		}
@@ -341,13 +353,13 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 			h.writeA2ATaskStoreError(w, request.ID, err)
 			return
 		}
-		if h.a2aPushJobs != nil {
-			pendingPush, pushErr := h.a2aPushJobs.HasAsyncJob(r.Context(), a2aPushJobKind, stored.ID, stored.OwnerKey)
+		if h.a2aPushConfigs != nil {
+			_, _, pushCount, pushErr := h.a2aPushConfigs.ListA2APushConfigs(r.Context(), stored.OwnerKey, profile.ID, stored.ID, 1, "")
 			if pushErr != nil {
 				h.writeA2AError(w, request.ID, http.StatusServiceUnavailable, -32603, "Task notification status is unavailable")
 				return
 			}
-			if pendingPush {
+			if pushCount > 0 {
 				h.writeA2AError(w, request.ID, http.StatusConflict, -32602, "Task notification is pending")
 				return
 			}

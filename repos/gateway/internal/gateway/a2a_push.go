@@ -22,7 +22,10 @@ import (
 	"ai-gateway-gateway/internal/modules"
 )
 
-const a2aPushJobKind = "a2a-push"
+const (
+	a2aPushJobKind     = "a2a-push"
+	a2aPushConfigQuota = 16
+)
 
 type a2aPushAuthentication struct {
 	Schemes     []string `json:"schemes"`
@@ -37,12 +40,13 @@ type a2aPushConfig struct {
 }
 
 type a2aPushJobSecret struct {
-	Config         a2aPushConfig `json:"config"`
-	CredentialID   string        `json:"credential_id"`
-	UserID         string        `json:"user_id,omitempty"`
-	TeamID         string        `json:"team_id,omitempty"`
-	OrganizationID string        `json:"organization_id,omitempty"`
-	RequestID      string        `json:"request_id"`
+	TaskID         string `json:"task_id"`
+	ConfigID       string `json:"config_id"`
+	CredentialID   string `json:"credential_id"`
+	UserID         string `json:"user_id,omitempty"`
+	TeamID         string `json:"team_id,omitempty"`
+	OrganizationID string `json:"organization_id,omitempty"`
+	RequestID      string `json:"request_id"`
 }
 
 type a2aPushJobPayload struct {
@@ -72,14 +76,15 @@ func (h Handler) WithA2APushNotifications(store asyncstate.Store, key []byte) (H
 	if store == nil {
 		return h, errors.New("A2A push job store is unavailable")
 	}
-	if _, ok := h.a2aTasks.(a2astate.AtomicOutboxStore); !ok {
+	pushStore, ok := h.a2aTasks.(a2astate.AtomicOutboxStore)
+	if !ok {
 		return h, errors.New("A2A push requires atomic task outbox storage")
 	}
 	vault, err := newA2APushVault(key)
 	if err != nil {
 		return h, err
 	}
-	h.a2aPushJobs, h.a2aPushVault = store, vault
+	h.a2aPushJobs, h.a2aPushConfigs, h.a2aPushVault = store, pushStore, vault
 	return h, nil
 }
 
@@ -113,38 +118,76 @@ func validA2AHeaderValue(value string) bool {
 	return true
 }
 
-func (h Handler) newA2APushJob(req modules.RequestContext, task a2astate.Task, config a2aPushConfig) (asyncstate.Job, error) {
+func (h Handler) newA2APushConfigAndJob(req modules.RequestContext, task a2astate.Task, config a2aPushConfig) (a2astate.PushConfig, asyncstate.Job, error) {
 	if config.ID == "" {
 		config.ID = newA2AID("push")
 	}
-	secret := a2aPushJobSecret{Config: config, CredentialID: req.CredentialID, UserID: req.UserID, TeamID: req.TeamID, OrganizationID: req.OrganizationID, RequestID: req.RequestID}
+	record, err := h.encryptA2APushConfig(task.OwnerKey, task.AgentID, task.ID, config)
+	if err != nil {
+		return a2astate.PushConfig{}, asyncstate.Job{}, err
+	}
+	secret := a2aPushJobSecret{TaskID: task.ID, ConfigID: config.ID, CredentialID: req.CredentialID, UserID: req.UserID, TeamID: req.TeamID, OrganizationID: req.OrganizationID, RequestID: req.RequestID}
 	plaintext, err := json.Marshal(secret)
 	if err != nil {
-		return asyncstate.Job{}, err
+		return a2astate.PushConfig{}, asyncstate.Job{}, err
 	}
 	nonce := make([]byte, h.a2aPushVault.aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return asyncstate.Job{}, err
+		return a2astate.PushConfig{}, asyncstate.Job{}, err
 	}
-	aad := []byte(task.OwnerKey + "\x00" + task.ID)
+	resourceID := task.ID + ":" + config.ID
+	aad := []byte(task.OwnerKey + "\x00" + resourceID)
 	payload, err := json.Marshal(a2aPushJobPayload{Nonce: nonce, Ciphertext: h.a2aPushVault.aead.Seal(nil, nonce, plaintext, aad)})
 	if err != nil {
-		return asyncstate.Job{}, err
+		return a2astate.PushConfig{}, asyncstate.Job{}, err
 	}
-	return asyncstate.Job{Kind: a2aPushJobKind, ResourceID: task.ID, OwnerKey: task.OwnerKey, EndpointID: task.AgentID, ExecutionID: newA2AID("push-exec"), Payload: payload}, nil
+	return record, asyncstate.Job{Kind: a2aPushJobKind, ResourceID: resourceID, OwnerKey: task.OwnerKey, EndpointID: task.AgentID, ExecutionID: newA2AID("push-exec"), Payload: payload}, nil
+}
+
+func (h Handler) encryptA2APushConfig(owner, agent, taskID string, config a2aPushConfig) (a2astate.PushConfig, error) {
+	plaintext, err := json.Marshal(config)
+	if err != nil {
+		return a2astate.PushConfig{}, err
+	}
+	nonce := make([]byte, h.a2aPushVault.aead.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return a2astate.PushConfig{}, err
+	}
+	aad := []byte(owner + "\x00" + taskID + "\x00" + config.ID)
+	payload, err := json.Marshal(a2aPushJobPayload{Nonce: nonce, Ciphertext: h.a2aPushVault.aead.Seal(nil, nonce, plaintext, aad)})
+	if err != nil || len(payload) > a2astate.MaxPushConfigPayloadBytes {
+		return a2astate.PushConfig{}, a2astate.ErrInvalid
+	}
+	return a2astate.PushConfig{ID: config.ID, TaskID: taskID, OwnerKey: owner, AgentID: agent, Payload: payload}, nil
+}
+
+func (h Handler) decryptA2APushConfig(record a2astate.PushConfig) (a2aPushConfig, error) {
+	var payload a2aPushJobPayload
+	if json.Unmarshal(record.Payload, &payload) != nil || len(payload.Nonce) != h.a2aPushVault.aead.NonceSize() || len(payload.Ciphertext) == 0 {
+		return a2aPushConfig{}, a2astate.ErrInvalid
+	}
+	plaintext, err := h.a2aPushVault.aead.Open(nil, payload.Nonce, payload.Ciphertext, []byte(record.OwnerKey+"\x00"+record.TaskID+"\x00"+record.ID))
+	if err != nil {
+		return a2aPushConfig{}, a2astate.ErrInvalid
+	}
+	var config a2aPushConfig
+	if json.Unmarshal(plaintext, &config) != nil || config.ID != record.ID || config.validate() != nil {
+		return a2aPushConfig{}, a2astate.ErrInvalid
+	}
+	return config, nil
 }
 
 func (h Handler) saveA2ATask(ctx context.Context, req modules.RequestContext, task a2astate.Task, continuation bool, expected time.Time, push *a2aPushConfig) error {
 	if push != nil {
-		job, err := h.newA2APushJob(req, task, *push)
+		config, job, err := h.newA2APushConfigAndJob(req, task, *push)
 		if err != nil {
 			return err
 		}
-		store := h.a2aTasks.(a2astate.AtomicOutboxStore)
+		store := h.a2aPushConfigs
 		if continuation {
-			_, err = store.UpdateA2ATaskWithJob(ctx, task, expected, h.a2aTaskConfig.TTL, job)
+			_, err = store.UpdateA2ATaskWithPushConfig(ctx, task, config, expected, a2aPushConfigQuota, h.a2aTaskConfig.TTL, job)
 		} else {
-			_, err = store.CreateA2ATaskWithJob(ctx, task, h.a2aTaskConfig.OwnerQuota, h.a2aTaskConfig.TTL, job)
+			_, err = store.CreateA2ATaskWithPushConfig(ctx, task, config, h.a2aTaskConfig.OwnerQuota, a2aPushConfigQuota, h.a2aTaskConfig.TTL, job)
 		}
 		return err
 	}
@@ -166,7 +209,7 @@ func (h Handler) decodeA2APushJob(job asyncstate.Job) (a2aPushJobSecret, error) 
 		return a2aPushJobSecret{}, errors.New("decrypt A2A push job")
 	}
 	var secret a2aPushJobSecret
-	if json.Unmarshal(plaintext, &secret) != nil || secret.CredentialID == "" || !validLifecycleToken(secret.RequestID) || secret.Config.validate() != nil {
+	if json.Unmarshal(plaintext, &secret) != nil || secret.CredentialID == "" || !validLifecycleToken(secret.RequestID) || !validFileToken(secret.TaskID, 128) || !validFileToken(secret.ConfigID, 128) || job.ResourceID != secret.TaskID+":"+secret.ConfigID {
 		return a2aPushJobSecret{}, errors.New("invalid A2A push job secret")
 	}
 	return secret, nil
@@ -196,7 +239,18 @@ func (h Handler) processA2APushNotification(ctx context.Context, job asyncstate.
 	if err != nil {
 		return err
 	}
-	stored, err := h.a2aTasks.GetA2ATask(ctx, job.OwnerKey, job.EndpointID, job.ResourceID)
+	record, err := h.a2aPushConfigs.GetA2APushConfig(ctx, job.OwnerKey, job.EndpointID, secret.TaskID, secret.ConfigID)
+	if errors.Is(err, a2astate.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	config, err := h.decryptA2APushConfig(record)
+	if err != nil {
+		return err
+	}
+	stored, err := h.a2aTasks.GetA2ATask(ctx, job.OwnerKey, job.EndpointID, secret.TaskID)
 	if errors.Is(err, a2astate.ErrNotFound) {
 		return nil
 	}
@@ -221,16 +275,16 @@ func (h Handler) processA2APushNotification(ctx context.Context, job asyncstate.
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, secret.Config.URL, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, config.URL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	request.Header.Set("Content-Type", "application/a2a+json")
-	if secret.Config.Token != "" {
-		request.Header.Set("X-A2A-Notification-Token", secret.Config.Token)
+	if config.Token != "" {
+		request.Header.Set("X-A2A-Notification-Token", config.Token)
 	}
-	if secret.Config.Authentication != nil {
-		request.Header.Set("Authorization", secret.Config.Authentication.Schemes[0]+" "+secret.Config.Authentication.Credentials)
+	if config.Authentication != nil {
+		request.Header.Set("Authorization", config.Authentication.Schemes[0]+" "+config.Authentication.Credentials)
 	}
 	response, err := h.a2aHTTPClient.Do(request)
 	if err != nil {
@@ -241,7 +295,7 @@ func (h Handler) processA2APushNotification(ctx context.Context, job asyncstate.
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("A2A push endpoint returned status %d", response.StatusCode)
 	}
-	return nil
+	return h.a2aPushConfigs.DeleteA2APushConfig(ctx, job.OwnerKey, job.EndpointID, secret.TaskID, secret.ConfigID)
 }
 
 func a2aPushRetry(attempt int) time.Duration {

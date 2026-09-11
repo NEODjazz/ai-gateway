@@ -11,10 +11,18 @@ import (
 )
 
 func (s *PostgresStore) CreateA2ATaskWithJob(ctx context.Context, task a2astate.Task, ownerQuota int, ttl time.Duration, job asyncstate.Job) (a2astate.Task, error) {
+	return s.createA2ATaskWithOutbox(ctx, task, nil, ownerQuota, 0, ttl, job)
+}
+
+func (s *PostgresStore) CreateA2ATaskWithPushConfig(ctx context.Context, task a2astate.Task, config a2astate.PushConfig, ownerQuota, configQuota int, ttl time.Duration, job asyncstate.Job) (a2astate.Task, error) {
+	return s.createA2ATaskWithOutbox(ctx, task, &config, ownerQuota, configQuota, ttl, job)
+}
+
+func (s *PostgresStore) createA2ATaskWithOutbox(ctx context.Context, task a2astate.Task, config *a2astate.PushConfig, ownerQuota, configQuota int, ttl time.Duration, job asyncstate.Job) (a2astate.Task, error) {
 	if s == nil || s.pool == nil {
 		return a2astate.Task{}, a2astate.ErrUnavailable
 	}
-	if !validA2ATask(task) || ownerQuota < 1 || ownerQuota > 100000 || ttl < time.Second || ttl > 365*24*time.Hour || !validA2AOutboxJob(task, job) {
+	if !validA2ATask(task) || ownerQuota < 1 || ownerQuota > 100000 || ttl < time.Second || ttl > 365*24*time.Hour || !validA2AOutboxJob(task, job, config) || config != nil && (configQuota < 1 || configQuota > 100) {
 		return a2astate.Task{}, a2astate.ErrInvalid
 	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -47,6 +55,11 @@ func (s *PostgresStore) CreateA2ATaskWithJob(ctx context.Context, task a2astate.
 	if command.RowsAffected() != 1 {
 		return a2astate.Task{}, a2astate.ErrConflict
 	}
+	if config != nil {
+		if err := insertA2APushConfig(ctx, tx, *config, configQuota); err != nil {
+			return a2astate.Task{}, err
+		}
+	}
 	if err := insertA2AOutboxJob(ctx, tx, job); err != nil {
 		return a2astate.Task{}, err
 	}
@@ -61,10 +74,18 @@ func (s *PostgresStore) CreateA2ATaskWithJob(ctx context.Context, task a2astate.
 }
 
 func (s *PostgresStore) UpdateA2ATaskWithJob(ctx context.Context, task a2astate.Task, expectedUpdatedAt time.Time, ttl time.Duration, job asyncstate.Job) (a2astate.Task, error) {
+	return s.updateA2ATaskWithOutbox(ctx, task, nil, expectedUpdatedAt, 0, ttl, job)
+}
+
+func (s *PostgresStore) UpdateA2ATaskWithPushConfig(ctx context.Context, task a2astate.Task, config a2astate.PushConfig, expectedUpdatedAt time.Time, configQuota int, ttl time.Duration, job asyncstate.Job) (a2astate.Task, error) {
+	return s.updateA2ATaskWithOutbox(ctx, task, &config, expectedUpdatedAt, configQuota, ttl, job)
+}
+
+func (s *PostgresStore) updateA2ATaskWithOutbox(ctx context.Context, task a2astate.Task, config *a2astate.PushConfig, expectedUpdatedAt time.Time, configQuota int, ttl time.Duration, job asyncstate.Job) (a2astate.Task, error) {
 	if s == nil || s.pool == nil {
 		return a2astate.Task{}, a2astate.ErrUnavailable
 	}
-	if !validA2ATask(task) || expectedUpdatedAt.IsZero() || ttl < time.Second || ttl > 365*24*time.Hour || !validA2AOutboxJob(task, job) {
+	if !validA2ATask(task) || expectedUpdatedAt.IsZero() || ttl < time.Second || ttl > 365*24*time.Hour || !validA2AOutboxJob(task, job, config) || config != nil && (configQuota < 1 || configQuota > 100) {
 		return a2astate.Task{}, a2astate.ErrInvalid
 	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -72,6 +93,11 @@ func (s *PostgresStore) UpdateA2ATaskWithJob(ctx context.Context, task a2astate.
 		return a2astate.Task{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if config != nil {
+		if err := insertA2APushConfig(ctx, tx, *config, configQuota); err != nil {
+			return a2astate.Task{}, err
+		}
+	}
 	updated, err := scanA2ATask(tx.QueryRow(ctx, `UPDATE gateway_a2a_tasks SET state=$5,payload=$6,
 		updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond'),expires_at=GREATEST(expires_at,clock_timestamp()+make_interval(secs=>$8))
 		WHERE id=$1 AND owner_key=$2 AND agent_id=$3 AND model=$4 AND context_id=$7 AND updated_at=$9 AND expires_at>now()
@@ -98,8 +124,19 @@ func (s *PostgresStore) UpdateA2ATaskWithJob(ctx context.Context, task a2astate.
 	return updated, nil
 }
 
-func validA2AOutboxJob(task a2astate.Task, job asyncstate.Job) bool {
-	return asyncstate.Valid(job) && job.ResourceID == task.ID && job.OwnerKey == task.OwnerKey && job.EndpointID == task.AgentID
+func validA2AOutboxJob(task a2astate.Task, job asyncstate.Job, configs ...*a2astate.PushConfig) bool {
+	var config *a2astate.PushConfig
+	if len(configs) > 0 {
+		config = configs[0]
+	}
+	resourceID := task.ID
+	if config != nil {
+		resourceID = task.ID + ":" + config.ID
+		if !validA2APushConfig(*config) || config.TaskID != task.ID || config.OwnerKey != task.OwnerKey || config.AgentID != task.AgentID {
+			return false
+		}
+	}
+	return asyncstate.Valid(job) && job.ResourceID == resourceID && job.OwnerKey == task.OwnerKey && job.EndpointID == task.AgentID
 }
 
 func insertA2AOutboxJob(ctx context.Context, tx pgx.Tx, job asyncstate.Job) error {
