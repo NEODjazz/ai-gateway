@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -34,6 +35,7 @@ func (XAI) SupportsWebSearch() bool          { return true }
 func (XAI) SupportsImageGeneration() bool    { return true }
 func (XAI) SupportsImageEdit() bool          { return true }
 func (XAI) SupportsAudioTranscription() bool { return true }
+func (XAI) SupportsAudioSpeech() bool        { return true }
 
 func (x XAI) ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest) (int, error) {
 	return x.compatible.ReserveTranslationAudioMilliseconds(request)
@@ -135,6 +137,67 @@ func decodeXAITranscriptionResponse(reader io.Reader) (openai.AudioTranscription
 		return openai.AudioTranscriptionResponse{}, errors.New(message)
 	}
 	return result, nil
+}
+
+func (x XAI) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
+	if message := request.Validate(); message != "" {
+		return openai.AudioSpeechResponse{}, xaiParameterError("", message)
+	}
+	if request.Speed != nil && (*request.Speed < 0.7 || *request.Speed > 1.5) {
+		return openai.AudioSpeechResponse{}, xaiParameterError("speed", "speed must be between 0.7 and 1.5")
+	}
+	if request.ResponseFormat != "" && request.ResponseFormat != "mp3" && request.ResponseFormat != "wav" && request.ResponseFormat != "pcm" {
+		return openai.AudioSpeechResponse{}, xaiParameterError("response_format", "response_format must be mp3, wav, or pcm")
+	}
+	if err := rejectParameters("xai", parameterCheck{"instructions", request.Instructions != ""}); err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
+	language := request.Language
+	if language == "" {
+		language = "auto"
+	}
+	type outputFormat struct {
+		Codec string `json:"codec"`
+	}
+	body := struct {
+		Text         string        `json:"text"`
+		VoiceID      string        `json:"voice_id"`
+		Language     string        `json:"language"`
+		OutputFormat *outputFormat `json:"output_format,omitempty"`
+		Speed        *float64      `json:"speed,omitempty"`
+	}{Text: request.Input, VoiceID: request.Voice, Language: language, Speed: request.Speed}
+	if request.ResponseFormat != "" {
+		body.OutputFormat = &outputFormat{Codec: request.ResponseFormat}
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(x.compatible.baseURL, "tts"), bytes.NewReader(payload))
+	if err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	if x.compatible.apiKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+x.compatible.apiKey)
+	}
+	response, err := x.compatible.client.Do(httpRequest)
+	if err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return openai.AudioSpeechResponse{}, responseStatusError("xai", response)
+	}
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(response.Header.Get("Content-Type")))
+	if err != nil || mediaType != request.ExpectedContentType() {
+		return openai.AudioSpeechResponse{}, errors.New("audio speech response has an unsupported content type")
+	}
+	data, err := readAudioSpeechResponse(response.Body)
+	if err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
+	return openai.AudioSpeechResponse{Data: data, ContentType: mediaType, Model: request.Model}, nil
 }
 
 func (x XAI) GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {

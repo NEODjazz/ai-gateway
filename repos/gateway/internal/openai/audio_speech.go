@@ -12,6 +12,7 @@ type AudioSpeechRequest struct {
 	Model          string   `json:"model"`
 	Input          string   `json:"input"`
 	Voice          string   `json:"voice"`
+	Language       string   `json:"language,omitempty"`
 	Instructions   string   `json:"instructions,omitempty"`
 	ResponseFormat string   `json:"response_format,omitempty"`
 	Speed          *float64 `json:"speed,omitempty"`
@@ -37,6 +38,9 @@ func (r AudioSpeechRequest) Validate() string {
 	if strings.TrimSpace(r.Voice) == "" || len(r.Voice) > 128 {
 		return "voice is required and must contain at most 128 bytes"
 	}
+	if r.Language != "" && !strings.EqualFold(r.Language, "auto") && !audioLanguagePattern.MatchString(r.Language) {
+		return "language must be auto or a BCP-47 language code"
+	}
 	if len(r.Instructions) > 16<<10 {
 		return "instructions exceed the 16 KiB limit"
 	}
@@ -60,8 +64,9 @@ func AudioSpeechReserveTokens(r AudioSpeechRequest) int {
 	return ReserveTokens(EstimateContextTokens(struct {
 		Input        string
 		Voice        string
+		Language     string
 		Instructions string
-	}{r.Input, r.Voice, r.Instructions}), 0)
+	}{r.Input, r.Voice, r.Language, r.Instructions}), 0)
 }
 
 func (r AudioSpeechRequest) ExpectedContentType() string {

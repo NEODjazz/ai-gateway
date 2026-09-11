@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +34,17 @@ func TestOpenAICompatibleAudioSpeechContract(t *testing.T) {
 	response, err := NewOpenAICompatible(server.URL+"/v1", "secret", false).GenerateSpeech(t.Context(), request)
 	if err != nil || response.ContentType != "audio/mpeg" || !bytes.Equal(response.Data, []byte("ID3audio")) {
 		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestOpenAICompatibleAudioSpeechRejectsLanguageBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	_, err := NewOpenAICompatible(server.URL, "", false).GenerateSpeech(t.Context(), openai.AudioSpeechRequest{Model: "tts", Input: "hello", Voice: "alloy", Language: "en"})
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Param != "language" || failure.UpstreamCode != "unsupported_parameter" || called {
+		t.Fatalf("err=%v called=%v", err, called)
 	}
 }
 

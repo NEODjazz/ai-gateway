@@ -7,7 +7,7 @@ import (
 
 func TestAudioSpeechRequestValidationAndAccounting(t *testing.T) {
 	speed := 1.25
-	request := AudioSpeechRequest{Model: "tts", Input: "Привет 👋", Voice: "alloy", Instructions: "Speak clearly", ResponseFormat: "wav", Speed: &speed, StreamFormat: "audio"}
+	request := AudioSpeechRequest{Model: "tts", Input: "Привет 👋", Voice: "alloy", Language: "ru", Instructions: "Speak clearly", ResponseFormat: "wav", Speed: &speed, StreamFormat: "audio"}
 	if message := request.Validate(); message != "" {
 		t.Fatal(message)
 	}
@@ -27,6 +27,7 @@ func TestAudioSpeechRequestRejectsUnsupportedInput(t *testing.T) {
 		{Model: "tts", Input: "hello", Voice: "alloy", StreamFormat: "sse"},
 		{Model: "tts", Input: "hello", Voice: "alloy", Speed: &tooSlow},
 		{Model: "tts", Input: "hello", Voice: "alloy", Speed: &tooFast},
+		{Model: "tts", Input: "hello", Voice: "alloy", Language: "not a language"},
 		{Model: "tts", Input: strings.Repeat("x", MaxSpeechInputCharacters+1), Voice: "alloy"},
 	} {
 		if request.Validate() == "" {

@@ -25,6 +25,7 @@ var _ ImageGenerationClient = XAI{}
 var _ ImageEditClient = XAI{}
 var _ AudioTranscriptionClient = XAI{}
 var _ AudioTranscriptionDurationReserver = XAI{}
+var _ AudioSpeechClient = XAI{}
 var _ responseRetrieveClient = XAI{}
 var _ responseInputItemsClient = XAI{}
 var _ responseDeleteClient = XAI{}
@@ -384,6 +385,73 @@ func TestXAITranscriptionRejectsUnsupportedParametersAndInvalidResponse(t *testi
 	}
 	if _, err := client.TranscribeAudio(t.Context(), base); err == nil || calls != 1 {
 		t.Fatalf("invalid response err=%v calls=%d", err, calls)
+	}
+}
+
+func TestXAISpeechContractAndRouting(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/tts" || r.Header.Get("Authorization") != "Bearer xai-key" || r.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("unexpected request: %s %s headers=%v", r.Method, r.URL.Path, r.Header)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		format, ok := body["output_format"].(map[string]any)
+		if !ok || body["text"] != "hello" || body["voice_id"] != "eve" || body["language"] != "en" || body["model"] != nil || body["speed"] != 1.25 || format["codec"] != "wav" {
+			t.Fatalf("body=%#v", body)
+		}
+		w.Header().Set("Content-Type", "audio/wav; rate=24000")
+		_, _ = w.Write([]byte("RIFFaudio"))
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "xai-voice", Type: "xai", BaseURL: server.URL + "/v1", APIKey: "xai-key",
+		Models: []string{"speech"}, ModelAliases: map[string]string{"speech": "ignored-by-native-tts"}, Capabilities: []string{"audio_speech"},
+	}}}).(*Router)
+	speed := 1.25
+	request := openai.AudioSpeechRequest{Model: "speech", Input: "hello", Voice: "eve", Language: "en", ResponseFormat: "wav", Speed: &speed, StreamFormat: "audio"}
+	response, err := router.GenerateSpeech(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model, Messages: []openai.Message{{Role: "user", Content: request.Input}}}, AudioSpeechRequest: &request})
+	if err != nil || string(response.Data) != "RIFFaudio" || response.ContentType != "audio/wav" || response.Model != "ignored-by-native-tts" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestXAISpeechDefaultsLanguageAndRejectsUnsupportedParameters(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["language"] != "auto" || body["output_format"] != nil {
+			t.Fatalf("body=%#v err=%v", body, err)
+		}
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("audio"))
+	}))
+	defer server.Close()
+	client := NewXAI(server.URL, "key", false)
+	base := openai.AudioSpeechRequest{Model: "speech", Input: "hello", Voice: "eve"}
+	tooFast := 1.51
+	for _, test := range []struct {
+		name, param, code string
+		apply             func(*openai.AudioSpeechRequest)
+	}{
+		{name: "instructions", param: "instructions", code: "unsupported_parameter", apply: func(r *openai.AudioSpeechRequest) { r.Instructions = "whisper" }},
+		{name: "format", param: "response_format", code: "invalid_request", apply: func(r *openai.AudioSpeechRequest) { r.ResponseFormat = "opus" }},
+		{name: "speed", param: "speed", code: "invalid_request", apply: func(r *openai.AudioSpeechRequest) { r.Speed = &tooFast }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := base
+			test.apply(&request)
+			_, err := client.GenerateSpeech(t.Context(), request)
+			if !xaiFailure(err, test.param, test.code) || calls != 0 {
+				t.Fatalf("err=%v calls=%d", err, calls)
+			}
+		})
+	}
+	response, err := client.GenerateSpeech(t.Context(), base)
+	if err != nil || string(response.Data) != "audio" || calls != 1 {
+		t.Fatalf("response=%+v err=%v calls=%d", response, err, calls)
 	}
 }
 

@@ -57,6 +57,7 @@ func (g Gemini) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRe
 		return openai.AudioSpeechResponse{}, &Error{Class: FailureClientRequest, Provider: "gemini", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
 	if err := rejectParameters("gemini",
+		parameterCheck{"language", request.Language != ""},
 		parameterCheck{"speed", request.Speed != nil},
 		parameterCheck{"response_format", request.ResponseFormat == "aac" || request.ResponseFormat == "flac"},
 	); err != nil {

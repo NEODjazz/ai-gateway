@@ -21,6 +21,9 @@ func (p OpenAICompatible) GenerateSpeech(ctx context.Context, request openai.Aud
 	if message := request.Validate(); message != "" {
 		return openai.AudioSpeechResponse{}, &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
+	if err := rejectParameters(p.providerName(), parameterCheck{"language", request.Language != ""}); err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
 	payload, err := json.Marshal(struct {
 		Model          string   `json:"model"`
 		Input          string   `json:"input"`

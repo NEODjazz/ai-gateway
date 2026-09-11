@@ -89,6 +89,7 @@ func (p Mistral) GenerateSpeech(ctx context.Context, request openai.AudioSpeechR
 		return openai.AudioSpeechResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
 	if err := rejectParameters("mistral",
+		parameterCheck{"language", request.Language != ""},
 		parameterCheck{"instructions", request.Instructions != ""},
 		parameterCheck{"speed", request.Speed != nil},
 		parameterCheck{"stream_format", request.StreamFormat != ""},
