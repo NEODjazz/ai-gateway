@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 	"ai-gateway-gateway/internal/videostate"
@@ -57,6 +58,42 @@ func TestPostgresVideoOwnershipLifecycleIntegration(t *testing.T) {
 	}
 	if _, err = store.GetVideoRecord(t.Context(), record.OwnerKey, record.Video.ID); !errors.Is(err, videostate.ErrNotFound) {
 		t.Fatalf("deleted err=%v", err)
+	}
+}
+
+func TestPostgresVideoAndSettlementJobAreAtomicIntegration(t *testing.T) {
+	dsn := requiredPostgresTestDSN(t)
+	store, err := NewPostgresStore(t.Context(), dsn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.Close)
+	_, err = store.pool.Exec(t.Context(), `CREATE TABLE gateway_video_jobs (video_id TEXT NOT NULL,owner_key TEXT NOT NULL,endpoint TEXT NOT NULL,model TEXT NOT NULL,deployment TEXT NOT NULL,snapshot JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(owner_key,video_id))`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepareAsyncJobTable(t, store)
+	record := videostate.Record{OwnerKey: "owner-a", Binding: provider.VideoBinding{Endpoint: "video", Model: "public-video", Deployment: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}, Video: openai.Video{ID: "video_atomic", Object: "video", Model: "public-video", Status: "queued", Seconds: "4"}}
+	job := asyncstate.Job{Kind: "video.settlement.v1", ResourceID: record.Video.ID, OwnerKey: record.OwnerKey, EndpointID: record.Binding.Endpoint, ExecutionID: "exec-video", Payload: []byte(`{"request_id":"exec-video"}`)}
+	created, err := store.CreateVideoRecordWithJob(t.Context(), record, 1, job)
+	if err != nil || created.Video.ID != record.Video.ID {
+		t.Fatalf("created=%+v err=%v", created, err)
+	}
+	if found, err := store.HasAsyncJob(t.Context(), job.Kind, job.ResourceID, job.OwnerKey); err != nil || !found {
+		t.Fatalf("job found=%t err=%v", found, err)
+	}
+
+	conflict := record
+	conflict.OwnerKey = "owner-b"
+	conflict.Video.ID = "video_rollback"
+	conflictJob := job
+	conflictJob.ResourceID = conflict.Video.ID
+	conflictJob.OwnerKey = conflict.OwnerKey
+	if _, err := store.CreateVideoRecordWithJob(t.Context(), conflict, 1, conflictJob); !errors.Is(err, asyncstate.ErrConflict) {
+		t.Fatalf("conflict err=%v", err)
+	}
+	if _, err := store.GetVideoRecord(t.Context(), conflict.OwnerKey, conflict.Video.ID); !errors.Is(err, videostate.ErrNotFound) {
+		t.Fatalf("video insert was not rolled back: %v", err)
 	}
 }
 

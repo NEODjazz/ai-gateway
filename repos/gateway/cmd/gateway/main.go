@@ -140,7 +140,7 @@ func main() {
 			return providerControlStore.Ping(ctx)
 		}
 	}
-	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithGuardrailMonitor(guardrailMonitor).WithCacheDiagnostics(gateway.CacheRuntimeConfig{ExactTTLSeconds: cfg.Cache.TTLSeconds, ExactMaxBytes: cfg.Cache.MaxBytes, SemanticTTLSeconds: cfg.Cache.Semantic.TTLSeconds, SemanticMaxEntries: cfg.Cache.Semantic.MaxEntries, SemanticMaxBytes: cfg.Cache.Semantic.MaxBytes}).WithLoggingRegistry(loggingRegistry).WithAgentRegistry(agentRegistry).WithMCPRegistry(mcpRegistry).WithAccessRegistry(accessRegistry).WithAdminState(adminState)
+	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithResourceBillingPipeline(providerPipeline).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithGuardrailMonitor(guardrailMonitor).WithCacheDiagnostics(gateway.CacheRuntimeConfig{ExactTTLSeconds: cfg.Cache.TTLSeconds, ExactMaxBytes: cfg.Cache.MaxBytes, SemanticTTLSeconds: cfg.Cache.Semantic.TTLSeconds, SemanticMaxEntries: cfg.Cache.Semantic.MaxEntries, SemanticMaxBytes: cfg.Cache.Semantic.MaxBytes}).WithLoggingRegistry(loggingRegistry).WithAgentRegistry(agentRegistry).WithMCPRegistry(mcpRegistry).WithAccessRegistry(accessRegistry).WithAdminState(adminState)
 	if providerControlStore != nil {
 		handler = handler.WithMCPCallStore(providerControlStore).
 			WithA2ATaskStore(providerControlStore, gateway.A2ATaskRuntimeConfig{
@@ -180,6 +180,7 @@ func main() {
 	}
 	var a2aPushWorkerDone <-chan struct{}
 	var batchWorkerDone <-chan struct{}
+	var videoWorkerDone <-chan struct{}
 	if providerControlStore != nil {
 		done := make(chan struct{})
 		a2aPushWorkerDone = done
@@ -192,6 +193,12 @@ func main() {
 		go func() {
 			defer close(batchDone)
 			gateway.RunBatchWorker(appCtx, handler)
+		}()
+		videoDone := make(chan struct{})
+		videoWorkerDone = videoDone
+		go func() {
+			defer close(videoDone)
+			gateway.RunVideoSettlementWorker(appCtx, handler)
 		}()
 	}
 	server := &http.Server{
@@ -238,6 +245,13 @@ func main() {
 		case <-batchWorkerDone:
 		case <-shutdownCtx.Done():
 			log.Printf("batch worker shutdown timed out")
+		}
+	}
+	if videoWorkerDone != nil {
+		select {
+		case <-videoWorkerDone:
+		case <-shutdownCtx.Done():
+			log.Printf("video settlement worker shutdown timed out")
 		}
 	}
 	if err := shutdownTelemetry(shutdownCtx); err != nil {

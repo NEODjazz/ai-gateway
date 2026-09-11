@@ -32,6 +32,7 @@ import (
 
 type Handler struct {
 	pipeline          modules.Pipeline
+	resourceBilling   modules.Pipeline
 	provider          provider.Provider
 	rateLimits        RateLimitStore
 	metrics           *Metrics
@@ -64,6 +65,7 @@ type Handler struct {
 	batches           batchstate.Store
 	fineTuning        finetunestate.Store
 	videos            videostate.Store
+	videoJobs         asyncstate.Store
 	batchJobs         asyncstate.Store
 	skills            skillstate.Store
 	vectorStores      vectorstate.Store
@@ -82,6 +84,13 @@ type Handler struct {
 func (h Handler) WithBatchStore(store batchstate.Store, jobs asyncstate.Store) Handler {
 	h.batches = store
 	h.batchJobs = jobs
+	return h
+}
+
+// WithResourceBillingPipeline configures billing for owned resource APIs whose
+// authentication pipeline is intentionally separate from provider modules.
+func (h Handler) WithResourceBillingPipeline(pipeline modules.Pipeline) Handler {
+	h.resourceBilling = pipeline
 	return h
 }
 

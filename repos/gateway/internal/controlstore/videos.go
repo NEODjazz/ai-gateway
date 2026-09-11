@@ -6,12 +6,24 @@ import (
 	"errors"
 	"time"
 
+	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/videostate"
 	"github.com/jackc/pgx/v5"
 )
 
 func (s *PostgresStore) CreateVideoRecord(ctx context.Context, record videostate.Record, ownerQuota int) (videostate.Record, error) {
+	return s.createVideoRecord(ctx, record, ownerQuota, nil)
+}
+
+func (s *PostgresStore) CreateVideoRecordWithJob(ctx context.Context, record videostate.Record, ownerQuota int, job asyncstate.Job) (videostate.Record, error) {
+	if !asyncstate.Valid(job) || job.ResourceID != record.Video.ID || job.OwnerKey != record.OwnerKey || job.EndpointID != record.Binding.Endpoint {
+		return videostate.Record{}, videostate.ErrInvalid
+	}
+	return s.createVideoRecord(ctx, record, ownerQuota, &job)
+}
+
+func (s *PostgresStore) createVideoRecord(ctx context.Context, record videostate.Record, ownerQuota int, job *asyncstate.Job) (videostate.Record, error) {
 	if s == nil || s.pool == nil {
 		return videostate.Record{}, videostate.ErrUnavailable
 	}
@@ -40,6 +52,16 @@ func (s *PostgresStore) CreateVideoRecord(ctx context.Context, record videostate
 	}
 	if command.RowsAffected() != 1 {
 		return videostate.Record{}, videostate.ErrConflict
+	}
+	if job != nil {
+		command, err = tx.Exec(ctx, `INSERT INTO gateway_async_jobs (kind,resource_id,owner_key,endpoint_id,execution_id,payload,available_at)
+			VALUES ($1,$2,$3,$4,$5,$6,now()) ON CONFLICT DO NOTHING`, job.Kind, job.ResourceID, job.OwnerKey, job.EndpointID, job.ExecutionID, job.Payload)
+		if err != nil {
+			return videostate.Record{}, err
+		}
+		if command.RowsAffected() != 1 {
+			return videostate.Record{}, asyncstate.ErrConflict
+		}
 	}
 	created, err := getVideoRecord(ctx, tx, record.OwnerKey, record.Video.ID)
 	if err != nil {

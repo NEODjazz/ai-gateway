@@ -2,12 +2,17 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
@@ -16,10 +21,39 @@ import (
 
 const videoOwnerQuota = 1000
 const maxGatewayVideoContentBytes = 512 << 20
+const videoSettlementJobKind = "video.settlement.v1"
+const videoSettlementBatchSize = 10
+const videoSettlementLease = time.Minute
+
+type videoSettlementJob struct {
+	RequestID       string            `json:"request_id"`
+	SessionID       string            `json:"session_id,omitempty"`
+	CredentialID    string            `json:"credential_id"`
+	CredentialAlias string            `json:"credential_alias,omitempty"`
+	UserID          string            `json:"user_id,omitempty"`
+	TeamID          string            `json:"team_id,omitempty"`
+	OrganizationID  string            `json:"organization_id,omitempty"`
+	Roles           []string          `json:"roles,omitempty"`
+	Tags            []string          `json:"tags,omitempty"`
+	Provider        string            `json:"provider,omitempty"`
+	Model           string            `json:"model"`
+	VideoSeconds    int               `json:"video_seconds"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+}
 
 func (h Handler) WithVideoStore(store videostate.Store) Handler {
 	h.videos = store
+	if jobs, ok := store.(asyncstate.Store); ok {
+		h.videoJobs = jobs
+	}
 	return h
+}
+
+func (h Handler) videoBillingPipeline() modules.Pipeline {
+	if h.resourceBilling.HasModule("billing") {
+		return h.resourceBilling
+	}
+	return h.pipeline
 }
 
 func (h Handler) CreateVideo(w http.ResponseWriter, r *http.Request) {
@@ -37,6 +71,10 @@ func (h Handler) CreateVideo(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.videos == nil {
 		writeError(w, http.StatusServiceUnavailable, "video_unavailable", "video storage is unavailable")
+		return
+	}
+	if h.videoBillingPipeline().HasModule("billing") && h.videoJobs == nil {
+		writeError(w, http.StatusServiceUnavailable, "video_unavailable", "durable video settlement storage is unavailable")
 		return
 	}
 	if input.Model == "" || len(input.Model) > 256 || len(input.Prompt) < 1 || len(input.Prompt) > 32000 {
@@ -66,8 +104,8 @@ func (h Handler) CreateVideo(w http.ResponseWriter, r *http.Request) {
 	video, binding, err := runtime.CreateVideo(r.Context(), identity, input, func(ctx context.Context, request *modules.RequestContext) error {
 		billingRequest = *request
 		billingRequest.VideoSeconds = videoSeconds
-		billingErr = h.pipeline.RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
-		billingReserved = billingErr == nil && h.pipeline.HasModule("billing")
+		billingErr = h.videoBillingPipeline().RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
+		billingReserved = billingErr == nil && h.videoBillingPipeline().HasModule("billing")
 		return billingErr
 	})
 	if err != nil {
@@ -81,7 +119,8 @@ func (h Handler) CreateVideo(w http.ResponseWriter, r *http.Request) {
 		writeProviderFailure(w, err)
 		return
 	}
-	created, err := h.videos.CreateVideoRecord(r.Context(), videostate.Record{OwnerKey: fileOwnerKey(identity), Binding: binding, Video: video}, videoOwnerQuota)
+	record := videostate.Record{OwnerKey: fileOwnerKey(identity), Binding: binding, Video: video}
+	created, err := h.createVideoRecord(r.Context(), record, billingRequest, billingReserved)
 	if err != nil {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 		_, _ = runtime.DeleteVideo(ctx, binding, video.ID)
@@ -91,21 +130,6 @@ func (h Handler) CreateVideo(w http.ResponseWriter, r *http.Request) {
 		}
 		writeVideoStoreError(w, err)
 		return
-	}
-	if billingReserved {
-		if billingRequest.Metadata == nil {
-			billingRequest.Metadata = map[string]string{}
-		}
-		billingRequest.Metadata["gateway.video_usage_exact"] = "true"
-		if err = h.pipeline.RunBillingLifecycle(r.Context(), &billingRequest, "commit", nil); err != nil {
-			compensation, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
-			_, _ = runtime.DeleteVideo(compensation, binding, video.ID)
-			_ = h.videos.DeleteVideoRecord(compensation, fileOwnerKey(identity), video.ID)
-			cancel()
-			h.cancelVideoBilling(r.Context(), &billingRequest, err)
-			writeVideoBillingFailure(w, err)
-			return
-		}
 	}
 	writeJSON(w, http.StatusOK, created.Video)
 }
@@ -169,6 +193,17 @@ func (h Handler) DeleteVideo(w http.ResponseWriter, r *http.Request) {
 	record, ok := h.videoRecord(w, r, owner)
 	if !ok {
 		return
+	}
+	if h.videoJobs != nil {
+		pending, err := h.videoJobs.HasAsyncJob(r.Context(), videoSettlementJobKind, record.Video.ID, owner)
+		if err != nil {
+			writeVideoStoreError(w, err)
+			return
+		}
+		if pending {
+			writeError(w, http.StatusConflict, "video_settlement_pending", "video billing settlement is pending")
+			return
+		}
 	}
 	deleted, err := runtime.DeleteVideo(r.Context(), record.Binding, record.Video.ID)
 	if err != nil {
@@ -245,8 +280,8 @@ func (h Handler) RemixVideo(w http.ResponseWriter, r *http.Request) {
 	video, binding, err := runtime.RemixVideo(r.Context(), identity, record.Binding, record.Video.ID, input, func(ctx context.Context, request *modules.RequestContext) error {
 		billingRequest = *request
 		billingRequest.VideoSeconds = videoSeconds
-		billingErr = h.pipeline.RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
-		billingReserved = billingErr == nil && h.pipeline.HasModule("billing")
+		billingErr = h.videoBillingPipeline().RunBillingLifecycle(ctx, &billingRequest, "reserve", nil)
+		billingReserved = billingErr == nil && h.videoBillingPipeline().HasModule("billing")
 		return billingErr
 	})
 	if err != nil {
@@ -260,7 +295,8 @@ func (h Handler) RemixVideo(w http.ResponseWriter, r *http.Request) {
 		writeProviderFailure(w, err)
 		return
 	}
-	created, err := h.videos.CreateVideoRecord(r.Context(), videostate.Record{OwnerKey: owner, Binding: binding, Video: video}, videoOwnerQuota)
+	record = videostate.Record{OwnerKey: owner, Binding: binding, Video: video}
+	created, err := h.createVideoRecord(r.Context(), record, billingRequest, billingReserved)
 	if err != nil {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 		_, _ = runtime.DeleteVideo(ctx, binding, video.ID)
@@ -271,22 +307,144 @@ func (h Handler) RemixVideo(w http.ResponseWriter, r *http.Request) {
 		writeVideoStoreError(w, err)
 		return
 	}
-	if billingReserved {
-		if billingRequest.Metadata == nil {
-			billingRequest.Metadata = map[string]string{}
-		}
-		billingRequest.Metadata["gateway.video_usage_exact"] = "true"
-		if err = h.pipeline.RunBillingLifecycle(r.Context(), &billingRequest, "commit", nil); err != nil {
-			compensation, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
-			_, _ = runtime.DeleteVideo(compensation, binding, video.ID)
-			_ = h.videos.DeleteVideoRecord(compensation, owner, video.ID)
-			cancel()
-			h.cancelVideoBilling(r.Context(), &billingRequest, err)
-			writeVideoBillingFailure(w, err)
-			return
+	writeJSON(w, http.StatusOK, created.Video)
+}
+
+func videoSettlementMetadata(metadata map[string]string) map[string]string {
+	result := make(map[string]string)
+	for key, value := range metadata {
+		if key == "gateway.api_type" || strings.HasPrefix(key, "provider.") || strings.HasPrefix(key, "model_catalog.") || strings.HasPrefix(key, "billing.") {
+			result[key] = value
 		}
 	}
-	writeJSON(w, http.StatusOK, created.Video)
+	return result
+}
+
+func newVideoSettlementJob(request modules.RequestContext) videoSettlementJob {
+	return videoSettlementJob{
+		RequestID: request.RequestID, SessionID: request.SessionID, CredentialID: request.CredentialID,
+		CredentialAlias: request.CredentialAlias, UserID: request.UserID, TeamID: request.TeamID,
+		OrganizationID: request.OrganizationID, Roles: append([]string(nil), request.Roles...),
+		Tags: append([]string(nil), request.Tags...), Provider: request.Request.Provider,
+		Model: request.Request.Model, VideoSeconds: request.VideoSeconds,
+		Metadata: videoSettlementMetadata(request.Metadata),
+	}
+}
+
+func (job videoSettlementJob) requestContext() modules.RequestContext {
+	return modules.RequestContext{
+		RequestID: job.RequestID, SessionID: job.SessionID, CredentialID: job.CredentialID,
+		CredentialAlias: job.CredentialAlias, UserID: job.UserID, TeamID: job.TeamID,
+		OrganizationID: job.OrganizationID, Roles: append([]string(nil), job.Roles...),
+		Tags: append([]string(nil), job.Tags...), VideoSeconds: job.VideoSeconds,
+		Request: openai.ChatCompletionRequest{Provider: job.Provider, Model: job.Model}, Metadata: videoSettlementMetadata(job.Metadata),
+	}
+}
+
+func (h Handler) createVideoRecord(ctx context.Context, record videostate.Record, request modules.RequestContext, reserved bool) (videostate.Record, error) {
+	if !reserved {
+		return h.videos.CreateVideoRecord(ctx, record, videoOwnerQuota)
+	}
+	outbox, ok := h.videos.(videostate.AtomicOutboxStore)
+	if !ok || h.videoJobs == nil {
+		return videostate.Record{}, videostate.ErrUnavailable
+	}
+	payload, err := json.Marshal(newVideoSettlementJob(request))
+	if err != nil {
+		return videostate.Record{}, videostate.ErrInvalid
+	}
+	job := asyncstate.Job{Kind: videoSettlementJobKind, ResourceID: record.Video.ID, OwnerKey: record.OwnerKey, EndpointID: record.Binding.Endpoint, ExecutionID: request.RequestID, Payload: payload}
+	return outbox.CreateVideoRecordWithJob(ctx, record, videoOwnerQuota, job)
+}
+
+func (h Handler) ProcessVideoSettlements(ctx context.Context) (int, error) {
+	if h.videoJobs == nil || h.videos == nil {
+		return 0, videostate.ErrUnavailable
+	}
+	jobs, err := h.videoJobs.ClaimAsyncJobs(ctx, videoSettlementJobKind, videoSettlementBatchSize, videoSettlementLease)
+	if err != nil {
+		return 0, err
+	}
+	var failures []error
+	for _, job := range jobs {
+		if err := h.processVideoSettlement(ctx, job); err != nil {
+			failures = append(failures, fmt.Errorf("video %s: %w", job.ResourceID, err))
+		}
+	}
+	return len(jobs), errors.Join(failures...)
+}
+
+func (h Handler) processVideoSettlement(ctx context.Context, claimed asyncstate.Job) error {
+	var job videoSettlementJob
+	if json.Unmarshal(claimed.Payload, &job) != nil || job.RequestID != claimed.ExecutionID || job.CredentialID == "" || job.Model == "" || job.VideoSeconds < 1 {
+		return h.retryVideoSettlement(ctx, claimed)
+	}
+	record, err := h.videos.GetVideoRecord(ctx, claimed.OwnerKey, claimed.ResourceID)
+	if err != nil {
+		return h.retryVideoSettlement(ctx, claimed)
+	}
+	runtime, ok := h.provider.(provider.VideoProvider)
+	if !ok {
+		return h.retryVideoSettlement(ctx, claimed)
+	}
+	video, err := runtime.RetrieveVideo(ctx, record.Binding, record.Video.ID)
+	if err != nil {
+		return h.retryVideoSettlement(ctx, claimed)
+	}
+	if video.Status == "queued" || video.Status == "in_progress" {
+		if _, err := h.videos.UpdateVideoRecord(ctx, claimed.OwnerKey, video); err != nil {
+			return h.retryVideoSettlement(ctx, claimed)
+		}
+		return h.retryVideoSettlement(ctx, claimed)
+	}
+	request := job.requestContext()
+	switch video.Status {
+	case "completed":
+		if request.Metadata == nil {
+			request.Metadata = map[string]string{}
+		}
+		request.Metadata["gateway.video_usage_exact"] = "true"
+		if err := h.videoBillingPipeline().RunBillingLifecycle(ctx, &request, "commit", nil); err != nil {
+			return h.retryVideoSettlement(ctx, claimed)
+		}
+	case "failed", "cancelled", "expired":
+		if err := h.videoBillingPipeline().RunBillingLifecycle(ctx, &request, "cancel", errors.New("video generation "+video.Status)); err != nil {
+			return h.retryVideoSettlement(ctx, claimed)
+		}
+	default:
+		return h.retryVideoSettlement(ctx, claimed)
+	}
+	if _, err := h.videos.UpdateVideoRecord(ctx, claimed.OwnerKey, video); err != nil {
+		return h.retryVideoSettlement(ctx, claimed)
+	}
+	return h.videoJobs.CompleteAsyncJob(ctx, claimed.Kind, claimed.ResourceID, claimed.LeaseGeneration)
+}
+
+func (h Handler) retryVideoSettlement(ctx context.Context, job asyncstate.Job) error {
+	return h.videoJobs.RetryAsyncJob(ctx, job.Kind, job.ResourceID, job.LeaseGeneration, videoSettlementRetry(job.Attempts))
+}
+
+func videoSettlementRetry(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := time.Second << min(attempt-1, 6)
+	return min(delay, time.Minute)
+}
+
+func RunVideoSettlementWorker(ctx context.Context, handler Handler) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		if _, err := handler.ProcessVideoSettlements(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("video settlement processing failed: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func billableVideoSeconds(raw string, defaultValue bool) (int, error) {
@@ -303,7 +461,7 @@ func billableVideoSeconds(raw string, defaultValue bool) (int, error) {
 func (h Handler) cancelVideoBilling(ctx context.Context, request *modules.RequestContext, cause error) {
 	compensation, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	_ = h.pipeline.RunBillingLifecycle(compensation, request, "cancel", cause)
+	_ = h.videoBillingPipeline().RunBillingLifecycle(compensation, request, "cancel", cause)
 }
 
 func writeVideoBillingFailure(w http.ResponseWriter, err error) {
@@ -321,6 +479,10 @@ func (h Handler) videoOwner(w http.ResponseWriter, r *http.Request) (string, pro
 	}
 	if h.videos == nil {
 		writeError(w, http.StatusServiceUnavailable, "video_unavailable", "video storage is unavailable")
+		return "", nil, modules.RequestContext{}, false
+	}
+	if h.videoBillingPipeline().HasModule("billing") && h.videoJobs == nil {
+		writeError(w, http.StatusServiceUnavailable, "video_unavailable", "durable video settlement storage is unavailable")
 		return "", nil, modules.RequestContext{}, false
 	}
 	runtime, ok := h.provider.(provider.VideoProvider)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 )
@@ -31,4 +32,11 @@ type Store interface {
 	ListVideoRecords(context.Context, string, int, string) ([]Record, string, error)
 	UpdateVideoRecord(context.Context, string, openai.Video) (Record, error)
 	DeleteVideoRecord(context.Context, string, string) error
+}
+
+// AtomicOutboxStore persists a video and its settlement job in one transaction.
+// Implementations must leave neither record behind when either insert fails.
+type AtomicOutboxStore interface {
+	Store
+	CreateVideoRecordWithJob(context.Context, Record, int, asyncstate.Job) (Record, error)
 }

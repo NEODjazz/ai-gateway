@@ -8,9 +8,11 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
@@ -18,12 +20,19 @@ import (
 )
 
 type memoryVideoStore struct {
+	mu        sync.Mutex
 	records   map[string]videostate.Record
+	jobs      map[string]asyncstate.Job
 	createErr error
 }
 
 func videoStoreKey(owner, id string) string { return owner + "/" + id }
 func (s *memoryVideoStore) CreateVideoRecord(_ context.Context, record videostate.Record, quota int) (videostate.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.createVideoRecord(record, quota)
+}
+func (s *memoryVideoStore) createVideoRecord(record videostate.Record, quota int) (videostate.Record, error) {
 	if s.createErr != nil {
 		return videostate.Record{}, s.createErr
 	}
@@ -44,7 +53,27 @@ func (s *memoryVideoStore) CreateVideoRecord(_ context.Context, record videostat
 	s.records[key] = record
 	return record, nil
 }
+func (s *memoryVideoStore) CreateVideoRecordWithJob(_ context.Context, record videostate.Record, quota int, job asyncstate.Job) (videostate.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	created, err := s.createVideoRecord(record, quota)
+	if err != nil {
+		return videostate.Record{}, err
+	}
+	if s.jobs == nil {
+		s.jobs = map[string]asyncstate.Job{}
+	}
+	key := job.Kind + "/" + job.ResourceID
+	if _, found := s.jobs[key]; found {
+		delete(s.records, videoStoreKey(record.OwnerKey, record.Video.ID))
+		return videostate.Record{}, asyncstate.ErrConflict
+	}
+	s.jobs[key] = job
+	return created, nil
+}
 func (s *memoryVideoStore) GetVideoRecord(_ context.Context, owner, id string) (videostate.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	record, found := s.records[videoStoreKey(owner, id)]
 	if !found {
 		return videostate.Record{}, videostate.ErrNotFound
@@ -52,6 +81,8 @@ func (s *memoryVideoStore) GetVideoRecord(_ context.Context, owner, id string) (
 	return record, nil
 }
 func (s *memoryVideoStore) ListVideoRecords(_ context.Context, owner string, limit int, _ string) ([]videostate.Record, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	result := []videostate.Record{}
 	for _, record := range s.records {
 		if record.OwnerKey == owner {
@@ -64,6 +95,8 @@ func (s *memoryVideoStore) ListVideoRecords(_ context.Context, owner string, lim
 	return result, "", nil
 }
 func (s *memoryVideoStore) UpdateVideoRecord(_ context.Context, owner string, video openai.Video) (videostate.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	key := videoStoreKey(owner, video.ID)
 	record, found := s.records[key]
 	if !found {
@@ -74,6 +107,8 @@ func (s *memoryVideoStore) UpdateVideoRecord(_ context.Context, owner string, vi
 	return record, nil
 }
 func (s *memoryVideoStore) DeleteVideoRecord(_ context.Context, owner, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	key := videoStoreKey(owner, id)
 	if _, found := s.records[key]; !found {
 		return videostate.ErrNotFound
@@ -82,10 +117,73 @@ func (s *memoryVideoStore) DeleteVideoRecord(_ context.Context, owner, id string
 	return nil
 }
 
+func (s *memoryVideoStore) EnqueueAsyncJob(_ context.Context, job asyncstate.Job) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.jobs == nil {
+		s.jobs = map[string]asyncstate.Job{}
+	}
+	key := job.Kind + "/" + job.ResourceID
+	if _, found := s.jobs[key]; found {
+		return false, nil
+	}
+	s.jobs[key] = job
+	return true, nil
+}
+func (s *memoryVideoStore) HasAsyncJob(_ context.Context, kind, resourceID, owner string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job, found := s.jobs[kind+"/"+resourceID]
+	return found && job.OwnerKey == owner, nil
+}
+func (s *memoryVideoStore) ClaimAsyncJobs(_ context.Context, kind string, limit int, _ time.Duration) ([]asyncstate.Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([]asyncstate.Job, 0, limit)
+	for key, job := range s.jobs {
+		if job.Kind != kind || !job.LeaseUntil.IsZero() {
+			continue
+		}
+		job.Attempts++
+		job.LeaseGeneration++
+		job.LeaseUntil = time.Now().Add(time.Minute)
+		s.jobs[key] = job
+		result = append(result, job)
+		if len(result) == limit {
+			break
+		}
+	}
+	return result, nil
+}
+func (s *memoryVideoStore) RetryAsyncJob(_ context.Context, kind, resourceID string, generation int64, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := kind + "/" + resourceID
+	job, found := s.jobs[key]
+	if !found || job.LeaseGeneration != generation {
+		return asyncstate.ErrLeaseLost
+	}
+	job.LeaseUntil = time.Time{}
+	s.jobs[key] = job
+	return nil
+}
+func (s *memoryVideoStore) CompleteAsyncJob(_ context.Context, kind, resourceID string, generation int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := kind + "/" + resourceID
+	job, found := s.jobs[key]
+	if !found || job.LeaseGeneration != generation {
+		return asyncstate.ErrLeaseLost
+	}
+	delete(s.jobs, key)
+	return nil
+}
+
 type gatewayVideoProvider struct {
 	*batchProvider
-	actions []string
-	nextID  int
+	actions        []string
+	nextID         int
+	retrieveStatus string
 }
 
 type videoBillingModule struct {
@@ -132,7 +230,11 @@ func (p *gatewayVideoProvider) CreateVideo(ctx context.Context, identity modules
 }
 func (p *gatewayVideoProvider) RetrieveVideo(_ context.Context, _ provider.VideoBinding, id string) (openai.Video, error) {
 	p.actions = append(p.actions, "retrieve")
-	return openai.Video{ID: id, Object: "video", Model: "model-a", Status: "completed", Seconds: "4", Size: "720x1280"}, nil
+	status := p.retrieveStatus
+	if status == "" {
+		status = "completed"
+	}
+	return openai.Video{ID: id, Object: "video", Model: "model-a", Status: status, Seconds: "4", Size: "720x1280"}, nil
 }
 func (p *gatewayVideoProvider) DeleteVideo(_ context.Context, _ provider.VideoBinding, id string) (openai.VideoDeletion, error) {
 	p.actions = append(p.actions, "delete")
@@ -147,11 +249,14 @@ func (p *gatewayVideoProvider) RemixVideo(ctx context.Context, identity modules.
 }
 
 func videoTestHandler(store videostate.Store, runtime *gatewayVideoProvider, billing modules.Module) http.Handler {
+	return Routes(videoTestGateway(store, runtime, billing))
+}
+func videoTestGateway(store videostate.Store, runtime *gatewayVideoProvider, billing modules.Module) Handler {
 	mods := []modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}}
 	if billing != nil {
 		mods = append(mods, billing)
 	}
-	return Routes(NewHandler(modules.NewPipeline(mods), runtime).WithVideoStore(store))
+	return NewHandler(modules.NewPipeline(mods), runtime).WithVideoStore(store)
 }
 func videoRequest(t *testing.T, handler http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -202,10 +307,66 @@ func TestVideoCreationCompensatesPersistenceFailure(t *testing.T) {
 func TestVideoCreationUsesDurationBillingLifecycle(t *testing.T) {
 	runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
 	billing := &videoBillingModule{}
-	handler := videoTestHandler(&memoryVideoStore{records: map[string]videostate.Record{}}, runtime, billing)
-	response := videoRequest(t, handler, http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat","seconds":"8"}`)
+	store := &memoryVideoStore{records: map[string]videostate.Record{}}
+	gateway := videoTestGateway(store, runtime, billing)
+	response := videoRequest(t, Routes(gateway), http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat","seconds":"8"}`)
+	if processed, err := gateway.ProcessVideoSettlements(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
 	if response.Code != http.StatusOK || strings.Join(billing.phases, ",") != "reserve,commit" || len(billing.seconds) != 2 || billing.seconds[0] != 8 || billing.seconds[1] != 8 || !billing.estimated[0] || billing.estimated[1] {
 		t.Fatalf("status=%d phases=%v seconds=%v estimated=%v body=%s", response.Code, billing.phases, billing.seconds, billing.estimated, response.Body.String())
+	}
+}
+
+func TestVideoBillingUsesProductionResourcePipeline(t *testing.T) {
+	store := &memoryVideoStore{records: map[string]videostate.Record{}}
+	runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+	billing := &videoBillingModule{}
+	auth := modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}})
+	providerModules := modules.NewPipeline([]modules.Module{billing})
+	gateway := NewHandler(auth, runtime).WithResourceBillingPipeline(providerModules).WithVideoStore(store)
+	response := videoRequest(t, Routes(gateway), http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat"}`)
+	if processed, err := gateway.ProcessVideoSettlements(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	if response.Code != http.StatusOK || strings.Join(billing.phases, ",") != "reserve,commit" {
+		t.Fatalf("status=%d phases=%v body=%s", response.Code, billing.phases, response.Body.String())
+	}
+}
+
+func TestVideoSettlementWaitsForTerminalStateAndCancelsFailures(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		status     string
+		wantPhases string
+		wantJobs   int
+	}{
+		{name: "pending", status: "in_progress", wantPhases: "reserve", wantJobs: 1},
+		{name: "failed", status: "failed", wantPhases: "reserve,cancel", wantJobs: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &memoryVideoStore{records: map[string]videostate.Record{}}
+			runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}, retrieveStatus: test.status}
+			billing := &videoBillingModule{}
+			gateway := videoTestGateway(store, runtime, billing)
+			response := videoRequest(t, Routes(gateway), http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat","seconds":"4"}`)
+			processed, err := gateway.ProcessVideoSettlements(t.Context())
+			if err != nil || processed != 1 || response.Code != http.StatusOK || strings.Join(billing.phases, ",") != test.wantPhases || len(store.jobs) != test.wantJobs {
+				t.Fatalf("status=%d processed=%d err=%v phases=%v jobs=%d", response.Code, processed, err, billing.phases, len(store.jobs))
+			}
+		})
+	}
+}
+
+func TestVideoDeleteWaitsForDurableSettlement(t *testing.T) {
+	store := &memoryVideoStore{records: map[string]videostate.Record{}}
+	runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+	billing := &videoBillingModule{}
+	gateway := videoTestGateway(store, runtime, billing)
+	created := videoRequest(t, Routes(gateway), http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat"}`)
+	deleted := videoRequest(t, Routes(gateway), http.MethodDelete, "/v1/videos/video_1", "")
+	if created.Code != http.StatusOK || deleted.Code != http.StatusConflict || !strings.Contains(deleted.Body.String(), "video_settlement_pending") || strings.Join(runtime.actions, ",") != "create" {
+		t.Fatalf("create=%d delete=%d actions=%v body=%s", created.Code, deleted.Code, runtime.actions, deleted.Body.String())
 	}
 }
 
@@ -220,13 +381,14 @@ func TestVideoBillingFailuresCompensateProviderAndOwnership(t *testing.T) {
 		}
 	})
 
-	t.Run("commit", func(t *testing.T) {
+	t.Run("commit is retried durably", func(t *testing.T) {
 		runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
 		billing := &videoBillingModule{commitErr: errors.New("billing unavailable")}
 		store := &memoryVideoStore{records: map[string]videostate.Record{}}
-		handler := videoTestHandler(store, runtime, billing)
-		response := videoRequest(t, handler, http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat"}`)
-		if response.Code != http.StatusServiceUnavailable || strings.Join(runtime.actions, ",") != "create,delete" || strings.Join(billing.phases, ",") != "reserve,commit,cancel" || len(store.records) != 0 {
+		gateway := videoTestGateway(store, runtime, billing)
+		response := videoRequest(t, Routes(gateway), http.MethodPost, "/v1/videos", `{"model":"model-a","prompt":"a cat"}`)
+		processed, err := gateway.ProcessVideoSettlements(t.Context())
+		if response.Code != http.StatusOK || processed != 1 || err != nil || strings.Join(runtime.actions, ",") != "create,retrieve" || strings.Join(billing.phases, ",") != "reserve,commit" || len(store.records) != 1 || len(store.jobs) != 1 {
 			t.Fatalf("status=%d actions=%v phases=%v records=%v body=%s", response.Code, runtime.actions, billing.phases, store.records, response.Body.String())
 		}
 	})
@@ -238,8 +400,11 @@ func TestVideoRemixUsesSourceDurationForBilling(t *testing.T) {
 	store := &memoryVideoStore{records: map[string]videostate.Record{videoStoreKey(owner, "video_source"): {OwnerKey: owner, Binding: provider.VideoBinding{Endpoint: "video", Model: "model-a", Deployment: strings.Repeat("a", 64)}, Video: openai.Video{ID: "video_source", Model: "model-a", Seconds: "12"}}}}
 	runtime := &gatewayVideoProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
 	billing := &videoBillingModule{}
-	handler := videoTestHandler(store, runtime, billing)
-	response := videoRequest(t, handler, http.MethodPost, "/v1/videos/video_source/remix", `{"prompt":"take a bow"}`)
+	gateway := videoTestGateway(store, runtime, billing)
+	response := videoRequest(t, Routes(gateway), http.MethodPost, "/v1/videos/video_source/remix", `{"prompt":"take a bow"}`)
+	if processed, err := gateway.ProcessVideoSettlements(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
 	if response.Code != http.StatusOK || strings.Join(billing.phases, ",") != "reserve,commit" || billing.seconds[0] != 12 || billing.seconds[1] != 12 {
 		t.Fatalf("status=%d phases=%v seconds=%v body=%s", response.Code, billing.phases, billing.seconds, response.Body.String())
 	}
