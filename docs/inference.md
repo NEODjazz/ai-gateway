@@ -1723,3 +1723,7 @@ pagination accepts `after` and a limit from 1 to 100. Expiry uses the PostgreSQL
 clock and supports only `last_active_at` with 1 to 365 days. File ingestion and
 vector search are separate operations and are not reported as available by this
 metadata lifecycle.
+
+Attaching a file applies both the atomic per-store file-count limit and the
+overflow-safe aggregate byte limit configured by `VECTOR_STORE_FILE_QUOTA` and
+`VECTOR_STORE_BYTE_QUOTA`. Expired source files do not consume either limit.

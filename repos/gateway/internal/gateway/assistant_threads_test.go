@@ -313,7 +313,7 @@ func TestAssistantThreadResourcesMustBeOwned(t *testing.T) {
 	store := &memoryAssistantThreadStore{memoryAssistantStore: &memoryAssistantStore{records: map[string]assistantstate.Record{}}, threads: map[string]assistantstate.ThreadRecord{}}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&assistantAuthModule{user: "user"}}), nil).
 		WithFileStore(files, FileRuntimeConfig{MaxBytes: 1024, OwnerQuotaBytes: 4096}).
-		WithVectorStore(vectors, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10}).
+		WithVectorStore(vectors, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10, ByteQuota: 1024}).
 		WithAssistantStore(store, AssistantRuntimeConfig{OwnerQuota: 10, ThreadOwnerQuota: 10}))
 	valid := `{"tool_resources":{"code_interpreter":{"file_ids":["file_owned"]},"file_search":{"vector_store_ids":["vs_owned"]}}}`
 	if response := assistantRequest(t, handler, http.MethodPost, "/v1/threads", valid); response.Code != http.StatusOK {

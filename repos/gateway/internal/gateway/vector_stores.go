@@ -16,6 +16,7 @@ import (
 type VectorStoreRuntimeConfig struct {
 	OwnerQuota int
 	FileQuota  int
+	ByteQuota  int64
 }
 
 type vectorStoreRequest struct {

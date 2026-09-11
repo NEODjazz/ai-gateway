@@ -22,7 +22,7 @@ type memoryVectorStore struct {
 	availableFiles map[string]int64
 }
 
-func (s *memoryVectorStore) AttachVectorStoreFile(_ context.Context, owner, storeID, fileID string, quota int) (vectorstate.File, error) {
+func (s *memoryVectorStore) AttachVectorStoreFile(_ context.Context, owner, storeID, fileID string, quota int, byteQuota int64) (vectorstate.File, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	store, ok := s.stores[storeID]
@@ -37,14 +37,18 @@ func (s *memoryVectorStore) AttachVectorStoreFile(_ context.Context, owner, stor
 	if _, ok := s.files[key]; ok {
 		return vectorstate.File{}, vectorstate.ErrConflict
 	}
-	count := 0
+	count, usedBytes := 0, int64(0)
 	for _, file := range s.files {
 		if file.OwnerKey == owner && file.VectorStoreID == storeID {
 			count++
+			usedBytes += file.Bytes
 		}
 	}
 	if count >= quota {
 		return vectorstate.File{}, vectorstate.ErrFileQuotaExceeded
+	}
+	if usedBytes < 0 || bytes < 0 || usedBytes > byteQuota || bytes > byteQuota-usedBytes {
+		return vectorstate.File{}, vectorstate.ErrByteQuotaExceeded
 	}
 	file := vectorstate.File{VectorStoreID: storeID, FileID: fileID, OwnerKey: owner, Status: "completed", Bytes: bytes, CreatedAt: time.Unix(200+int64(count), 0).UTC()}
 	s.files[key] = file
@@ -270,7 +274,7 @@ func TestVectorStoreFileHTTPLifecyclePaginationAndIsolation(t *testing.T) {
 		files:  map[string]vectorstate.File{}, availableFiles: map[string]int64{"file_one": 11, "file_two": 22},
 	}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}}), modelsProvider{}).
-		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 2}))
+		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 2, ByteQuota: 100}))
 	for _, fileID := range []string{"file_one", "file_two"} {
 		response := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files", `{"file_id":"`+fileID+`"}`)
 		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"object":"vector_store.file"`) || !strings.Contains(response.Body.String(), fileID) {
@@ -290,7 +294,7 @@ func TestVectorStoreFileHTTPLifecyclePaginationAndIsolation(t *testing.T) {
 		t.Fatalf("parent totals status=%d body=%s", parent.Code, parent.Body.String())
 	}
 	other := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "other"}}), modelsProvider{}).
-		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 2}))
+		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 2, ByteQuota: 100}))
 	if response := callVectorStore(other, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_one", ""); response.Code != http.StatusNotFound {
 		t.Fatalf("cross-owner get status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -310,7 +314,7 @@ func TestVectorStoreFilesRejectInvalidMissingDuplicateAndQuota(t *testing.T) {
 		files:  map[string]vectorstate.File{}, availableFiles: map[string]int64{"file_one": 1, "file_two": 2},
 	}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}}), modelsProvider{}).
-		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 1}))
+		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 1, ByteQuota: 100}))
 	for _, test := range []struct {
 		path, body string
 		code       int
@@ -333,6 +337,16 @@ func TestVectorStoreFilesRejectInvalidMissingDuplicateAndQuota(t *testing.T) {
 	}
 	if response := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files", `{"file_id":"file_two"}`); response.Code != http.StatusTooManyRequests {
 		t.Fatalf("quota status=%d body=%s", response.Code, response.Body.String())
+	}
+	byteStore := &memoryVectorStore{
+		stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: owner, Name: "docs", Status: "completed"}},
+		files:  map[string]vectorstate.File{}, availableFiles: map[string]int64{"file_two": 2},
+	}
+	byteHandler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}}), modelsProvider{}).
+		WithVectorStore(byteStore, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 2, ByteQuota: 1}))
+	response := callVectorStore(byteHandler, http.MethodPost, "/v1/vector_stores/vs_owned/files", `{"file_id":"file_two"}`)
+	if response.Code != http.StatusTooManyRequests || !strings.Contains(response.Body.String(), `"code":"vector_store_byte_quota_exceeded"`) {
+		t.Fatalf("byte quota status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

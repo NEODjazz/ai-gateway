@@ -162,11 +162,11 @@ func (s *PostgresStore) DeleteVectorStore(ctx context.Context, owner, id string)
 	return nil
 }
 
-func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vectorStoreID, fileID string, quota int) (vectorstate.File, error) {
+func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vectorStoreID, fileID string, quota int, byteQuota int64) (vectorstate.File, error) {
 	if s == nil || s.pool == nil {
 		return vectorstate.File{}, vectorstate.ErrUnavailable
 	}
-	if owner == "" || vectorStoreID == "" || fileID == "" || quota < 1 {
+	if owner == "" || vectorStoreID == "" || fileID == "" || quota < 1 || byteQuota < 1 {
 		return vectorstate.File{}, vectorstate.ErrInvalid
 	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -199,6 +199,13 @@ func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vector
 	}
 	if count >= quota {
 		return vectorstate.File{}, vectorstate.ErrFileQuotaExceeded
+	}
+	var usedBytes int64
+	if err = tx.QueryRow(ctx, `SELECT COALESCE(sum(f.bytes),0) FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2`, owner, vectorStoreID).Scan(&usedBytes); err != nil {
+		return vectorstate.File{}, err
+	}
+	if usedBytes < 0 || bytes < 0 || usedBytes > byteQuota || bytes > byteQuota-usedBytes {
+		return vectorstate.File{}, vectorstate.ErrByteQuotaExceeded
 	}
 	command, err := tx.Exec(ctx, `INSERT INTO gateway_vector_store_files (vector_store_id,file_id,owner_key) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, vectorStoreID, fileID, owner)
 	if err != nil {

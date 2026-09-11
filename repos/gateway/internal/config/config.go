@@ -43,6 +43,7 @@ type FileConfig struct {
 type VectorStoreConfig struct {
 	OwnerQuota int
 	FileQuota  int
+	ByteQuota  int64
 }
 
 type AssistantConfig struct {
@@ -196,6 +197,7 @@ func Load() Config {
 	fileOwnerQuotaBytes := envInt64("FILE_OWNER_QUOTA_BYTES", 1<<30)
 	vectorStoreOwnerQuota := envInt("VECTOR_STORE_OWNER_QUOTA", 1000)
 	vectorStoreFileQuota := envInt("VECTOR_STORE_FILE_QUOTA", 10000)
+	vectorStoreByteQuota := envInt64("VECTOR_STORE_BYTE_QUOTA", 1<<30)
 	assistantOwnerQuota := envInt("ASSISTANT_OWNER_QUOTA", 1000)
 	assistantThreadOwnerQuota := envInt("ASSISTANT_THREAD_OWNER_QUOTA", 10000)
 	assistantMessageThreadQuota := envInt("ASSISTANT_MESSAGE_THREAD_QUOTA", 100000)
@@ -242,6 +244,9 @@ func Load() Config {
 	}
 	if vectorStoreFileQuota < 1 || vectorStoreFileQuota > 100000 {
 		vectorStoreErr = errors.Join(vectorStoreErr, errors.New("vector store file quota must be between 1 and 100000"))
+	}
+	if vectorStoreByteQuota < 1 || vectorStoreByteQuota > 1<<40 {
+		vectorStoreErr = errors.Join(vectorStoreErr, errors.New("vector store byte quota must be between 1 and 1099511627776"))
 	}
 	if assistantOwnerQuota < 1 || assistantOwnerQuota > 100000 {
 		assistantErr = errors.New("assistant owner quota must be between 1 and 100000")
@@ -332,7 +337,7 @@ func Load() Config {
 			TTL:      time.Duration(guardrailMonitorTTLSeconds) * time.Second,
 		},
 		Files:        FileConfig{MaxBytes: fileMaxBytes, OwnerQuotaBytes: fileOwnerQuotaBytes},
-		VectorStores: VectorStoreConfig{OwnerQuota: vectorStoreOwnerQuota, FileQuota: vectorStoreFileQuota},
+		VectorStores: VectorStoreConfig{OwnerQuota: vectorStoreOwnerQuota, FileQuota: vectorStoreFileQuota, ByteQuota: vectorStoreByteQuota},
 		Assistants: AssistantConfig{
 			OwnerQuota: assistantOwnerQuota, ThreadOwnerQuota: assistantThreadOwnerQuota,
 			MessageThreadQuota: assistantMessageThreadQuota, RunOwnerQuota: assistantRunOwnerQuota,

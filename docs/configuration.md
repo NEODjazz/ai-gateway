@@ -164,6 +164,8 @@ secret. Это не клиентские Bearer-токены; auth management и
 | `FILE_MAX_BYTES` | `33554432` | Максимальный размер одного multipart-файла; верхняя граница конфигурации 512 MiB |
 | `FILE_OWNER_QUOTA_BYTES` | `1073741824` | Суммарная PostgreSQL-квота для пары credential/user; должна быть не меньше `FILE_MAX_BYTES` |
 | `VECTOR_STORE_OWNER_QUOTA` | `1000` | Максимальное число неистекших vector stores для пары credential/user; допустимо от 1 до 100000 |
+| `VECTOR_STORE_FILE_QUOTA` | `10000` | Максимальное число файлов в одном vector store; допустимо от 1 до 100000 |
+| `VECTOR_STORE_BYTE_QUOTA` | `1073741824` | Атомарная квота суммарного размера активных файлов одного vector store; допустимо до 1 TiB |
 | `ASSISTANT_OWNER_QUOTA` | `1000` | Максимальное число assistant definitions для пары credential/user; допустимо от 1 до 100000 |
 | `ASSISTANT_THREAD_OWNER_QUOTA` | `10000` | Максимальное число assistant threads для пары credential/user; допустимо от 1 до 1000000 |
 | `ASSISTANT_MESSAGE_THREAD_QUOTA` | `100000` | Максимальное число сообщений в одном assistant thread; допустимо от 1 до 1000000 |

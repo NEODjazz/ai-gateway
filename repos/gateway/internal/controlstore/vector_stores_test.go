@@ -94,22 +94,22 @@ func TestPostgresVectorStoreFileLifecycleIsolationAndQuotaIntegration(t *testing
 	if _, err = pool.Exec(ctx, `UPDATE gateway_files SET expires_at=now()-interval '1 second' WHERE owner_key=$1 AND id='file_vector_expired'`, owner); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_expired", 2); !errors.Is(err, vectorstate.ErrFileNotFound) {
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_expired", 2, 100); !errors.Is(err, vectorstate.ErrFileNotFound) {
 		t.Fatalf("expired file error=%v", err)
 	}
-	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "missing", 2); !errors.Is(err, vectorstate.ErrFileNotFound) {
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "missing", 2, 100); !errors.Is(err, vectorstate.ErrFileNotFound) {
 		t.Fatalf("missing file error=%v", err)
 	}
 	for _, id := range []string{"file_vector_a", "file_vector_b"} {
-		attached, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_files", id, 2)
+		attached, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_files", id, 2, 100)
 		if attachErr != nil || attached.Status != "completed" || attached.Bytes != 1 {
 			t.Fatalf("attached=%+v err=%v", attached, attachErr)
 		}
 	}
-	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_a", 2); !errors.Is(err, vectorstate.ErrConflict) {
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_a", 2, 100); !errors.Is(err, vectorstate.ErrConflict) {
 		t.Fatalf("duplicate error=%v", err)
 	}
-	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_c", 2); !errors.Is(err, vectorstate.ErrFileQuotaExceeded) {
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_c", 2, 100); !errors.Is(err, vectorstate.ErrFileQuotaExceeded) {
 		t.Fatalf("quota error=%v", err)
 	}
 	if _, err = store.GetVectorStoreFile(ctx, owner+"/other", "vs_files", "file_vector_a"); !errors.Is(err, vectorstate.ErrFileNotFound) {
@@ -144,7 +144,7 @@ func TestPostgresVectorStoreFileLifecycleIsolationAndQuotaIntegration(t *testing
 		go func() {
 			defer workers.Done()
 			<-start
-			_, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_files_concurrent", fileID, 1)
+			_, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_files_concurrent", fileID, 1, 100)
 			results <- attachErr
 		}()
 	}
@@ -164,6 +164,38 @@ func TestPostgresVectorStoreFileLifecycleIsolationAndQuotaIntegration(t *testing
 	}
 	if succeeded != 1 || rejected != 1 {
 		t.Fatalf("concurrent attach succeeded=%d rejected=%d", succeeded, rejected)
+	}
+	if _, err = store.CreateVectorStore(ctx, vectorstate.VectorStore{ID: "vs_bytes_concurrent", OwnerKey: owner, Name: "bytes", Metadata: map[string]string{}}, 3); err != nil {
+		t.Fatal(err)
+	}
+	start = make(chan struct{})
+	results = make(chan error, 2)
+	workers = sync.WaitGroup{}
+	for _, fileID := range []string{"file_vector_a", "file_vector_c"} {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			_, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_bytes_concurrent", fileID, 2, 1)
+			results <- attachErr
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	succeeded, rejected = 0, 0
+	for result := range results {
+		switch {
+		case result == nil:
+			succeeded++
+		case errors.Is(result, vectorstate.ErrByteQuotaExceeded):
+			rejected++
+		default:
+			t.Fatalf("unexpected concurrent byte attach result: %v", result)
+		}
+	}
+	if succeeded != 1 || rejected != 1 {
+		t.Fatalf("concurrent byte attach succeeded=%d rejected=%d", succeeded, rejected)
 	}
 }
 

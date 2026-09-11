@@ -25,7 +25,7 @@ func (h Handler) AttachVectorStoreFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "file_id is invalid")
 		return
 	}
-	file, err := h.vectorStores.AttachVectorStoreFile(r.Context(), fileOwnerKey(req), r.PathValue("id"), input.FileID, h.vectorStoreConfig.FileQuota)
+	file, err := h.vectorStores.AttachVectorStoreFile(r.Context(), fileOwnerKey(req), r.PathValue("id"), input.FileID, h.vectorStoreConfig.FileQuota, h.vectorStoreConfig.ByteQuota)
 	if err != nil {
 		writeVectorStoreFileError(w, err)
 		return
@@ -113,7 +113,7 @@ func (h Handler) getVectorStoreFile(w http.ResponseWriter, r *http.Request, dele
 }
 
 func (h Handler) vectorStoreFileStorageAvailable(w http.ResponseWriter) bool {
-	if h.vectorStores == nil || h.vectorStoreConfig.FileQuota < 1 {
+	if h.vectorStores == nil || h.vectorStoreConfig.FileQuota < 1 || h.vectorStoreConfig.ByteQuota < 1 {
 		writeError(w, http.StatusServiceUnavailable, "vector_store_unavailable", "vector store file storage is unavailable")
 		return false
 	}
@@ -148,6 +148,8 @@ func writeVectorStoreFileError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "vector_store_file_not_found", "vector store file not found")
 	case errors.Is(err, vectorstate.ErrFileQuotaExceeded):
 		writeError(w, http.StatusTooManyRequests, "vector_store_file_quota_exceeded", "vector store file quota exceeded")
+	case errors.Is(err, vectorstate.ErrByteQuotaExceeded):
+		writeError(w, http.StatusTooManyRequests, "vector_store_byte_quota_exceeded", "vector store byte quota exceeded")
 	case errors.Is(err, vectorstate.ErrConflict):
 		writeError(w, http.StatusConflict, "vector_store_file_conflict", "file is already attached to the vector store")
 	case errors.Is(err, vectorstate.ErrInvalid):

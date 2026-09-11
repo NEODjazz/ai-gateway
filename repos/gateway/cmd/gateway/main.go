@@ -152,7 +152,7 @@ func main() {
 			WithFineTuningStore(providerControlStore).
 			WithVideoStore(providerControlStore).
 			WithSkillStore(providerControlStore).
-			WithVectorStore(providerControlStore, gateway.VectorStoreRuntimeConfig{OwnerQuota: cfg.VectorStores.OwnerQuota, FileQuota: cfg.VectorStores.FileQuota})
+			WithVectorStore(providerControlStore, gateway.VectorStoreRuntimeConfig{OwnerQuota: cfg.VectorStores.OwnerQuota, FileQuota: cfg.VectorStores.FileQuota, ByteQuota: cfg.VectorStores.ByteQuota})
 		handler = handler.WithAssistantStore(providerControlStore, gateway.AssistantRuntimeConfig{
 			OwnerQuota: cfg.Assistants.OwnerQuota, ThreadOwnerQuota: cfg.Assistants.ThreadOwnerQuota,
 			MessageThreadQuota: cfg.Assistants.MessageThreadQuota, RunOwnerQuota: cfg.Assistants.RunOwnerQuota,

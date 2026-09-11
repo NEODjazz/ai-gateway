@@ -133,6 +133,7 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("FILE_OWNER_QUOTA_BYTES", "8192")
 	t.Setenv("VECTOR_STORE_OWNER_QUOTA", "25")
 	t.Setenv("VECTOR_STORE_FILE_QUOTA", "250")
+	t.Setenv("VECTOR_STORE_BYTE_QUOTA", "16384")
 	t.Setenv("ASSISTANT_OWNER_QUOTA", "125")
 	t.Setenv("ASSISTANT_THREAD_OWNER_QUOTA", "1250")
 	t.Setenv("ASSISTANT_MESSAGE_THREAD_QUOTA", "12500")
@@ -155,7 +156,7 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	if cfg.Files.MaxBytes != 2048 || cfg.Files.OwnerQuotaBytes != 8192 {
 		t.Fatalf("unexpected file config: %+v", cfg.Files)
 	}
-	if cfg.VectorStores.OwnerQuota != 25 || cfg.VectorStores.FileQuota != 250 {
+	if cfg.VectorStores.OwnerQuota != 25 || cfg.VectorStores.FileQuota != 250 || cfg.VectorStores.ByteQuota != 16384 {
 		t.Fatalf("unexpected vector store config: %+v", cfg.VectorStores)
 	}
 	if cfg.Assistants.OwnerQuota != 125 || cfg.Assistants.ThreadOwnerQuota != 1250 || cfg.Assistants.MessageThreadQuota != 12500 || cfg.Assistants.RunOwnerQuota != 125 || cfg.Assistants.RunStepQuota != 250 || cfg.Assistants.RunRetention != 2*time.Hour {
@@ -204,11 +205,12 @@ func TestLoadRejectsUnsafeFileLimits(t *testing.T) {
 }
 
 func TestLoadRejectsUnsafeVectorStoreQuota(t *testing.T) {
-	for _, test := range []struct{ owner, files string }{{"0", "1"}, {"100001", "1"}, {"1", "0"}, {"1", "100001"}} {
+	for _, test := range []struct{ owner, files, bytes string }{{"0", "1", "1"}, {"100001", "1", "1"}, {"1", "0", "1"}, {"1", "100001", "1"}, {"1", "1", "0"}, {"1", "1", "1099511627777"}} {
 		t.Setenv("VECTOR_STORE_OWNER_QUOTA", test.owner)
 		t.Setenv("VECTOR_STORE_FILE_QUOTA", test.files)
+		t.Setenv("VECTOR_STORE_BYTE_QUOTA", test.bytes)
 		if cfg := Load(); cfg.InitErr == nil {
-			t.Fatalf("unsafe vector store quota accepted: owner=%s files=%s", test.owner, test.files)
+			t.Fatalf("unsafe vector store quota accepted: owner=%s files=%s bytes=%s", test.owner, test.files, test.bytes)
 		}
 	}
 }

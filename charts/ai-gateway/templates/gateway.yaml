@@ -88,6 +88,8 @@ spec:
               value: {{ include "ai-gateway.integerString" .Values.gateway.vectorStores.ownerQuota | quote }}
             - name: VECTOR_STORE_FILE_QUOTA
               value: {{ include "ai-gateway.integerString" .Values.gateway.vectorStores.fileQuota | quote }}
+            - name: VECTOR_STORE_BYTE_QUOTA
+              value: {{ include "ai-gateway.integerString" .Values.gateway.vectorStores.byteQuota | quote }}
             - name: ASSISTANT_OWNER_QUOTA
               value: {{ include "ai-gateway.integerString" .Values.gateway.assistants.ownerQuota | quote }}
             - name: ASSISTANT_THREAD_OWNER_QUOTA

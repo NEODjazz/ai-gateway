@@ -226,7 +226,7 @@ func TestAssistantToolResourcesRequireOwnedFilesAndVectorStores(t *testing.T) {
 	store := &memoryAssistantStore{records: map[string]assistantstate.Record{}}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&assistantAuthModule{user: "user"}}), nil).
 		WithFileStore(files, FileRuntimeConfig{MaxBytes: 1024, OwnerQuotaBytes: 4096}).
-		WithVectorStore(vectors, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10}).
+		WithVectorStore(vectors, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10, ByteQuota: 1024}).
 		WithAssistantStore(store, AssistantRuntimeConfig{OwnerQuota: 10}))
 
 	valid := `{"model":"model-a","tools":[{"type":"code_interpreter"},{"type":"file_search"}],"tool_resources":{"code_interpreter":{"file_ids":["file_owned"]},"file_search":{"vector_store_ids":["vs_owned"]}}}`
