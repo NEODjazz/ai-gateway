@@ -591,3 +591,12 @@ and pod `ai-gateway-gateway-7f9d8bdc5c-8tm5n` became Ready with zero restarts.
 The live OpenAPI 0.1.322 contract exposes Image Edit streaming controls and both
 event schemas; live multipart validation rejected `partial_images` without
 `stream=true` before authentication or provider execution.
+
+Source `5f583f6` adds bounded Audio Transcription SSE streaming with strict
+delta/segment/done lifecycle validation, pre-first-event fallback and exact
+terminal usage settlement. Rancher Desktop built
+`ai-gateway-gateway:gaps-5f583f6`; Helm revision 423 completed successfully,
+and pod `ai-gateway-gateway-85d76b6c66-wf5jj` became Ready with zero restarts.
+The live OpenAPI 0.1.323 contract exposes the transcription stream flag and all
+three event schemas; live multipart validation rejected streaming Audio
+Translation with `invalid_request` before authentication or provider execution.
