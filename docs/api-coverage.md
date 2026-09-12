@@ -20,7 +20,7 @@ availability is not inferred from these tests.
 | Family | Current implementation | Remaining work |
 | --- | --- | --- |
 | Models | Authenticated list and single-model retrieval filtered by credential, access-group and tag policy; hidden and absent models share the same not-found response | Provider-side deletion is intentionally outside the gateway control plane |
-| Chat completions | JSON, tools, structured output, vision input, SSE, generation controls, bounded multi-choice with aggregate reserve; native Cohere v2 text, structured JSON/SSE, generation controls and JSON/SSE function tools/history; native Anthropic web search with citations and actual search usage, domain-allowlisted web fetch with citations, content limits and cache exclusion, and model-specific deprecated top-k sampling | Additional controls and model-specific policy |
+| Chat completions | JSON, tools, structured output, vision input, SSE, generation controls, bounded multi-choice with aggregate reserve; native Cohere v2 text, structured JSON/SSE, generation controls and JSON/SSE function tools/history; native Anthropic web search with citations and actual search usage, domain-allowlisted web fetch with citations, content limits and cache exclusion, and model-specific deprecated top-k sampling; native Together preserves reasoning output/history aliases and exposes exact model-specific reasoning-effort values | Additional controls and model-specific policy |
 | Responses | Create, indexed SSE assembly, scoped deployment affinity, function tools, MCP passthrough, bounded inline PDF input with explicit deployment capability and scanner projection, stateless reasoning history, native input-token count, owned retrieve/delete/cancel/input-items, durable background settlement, generation options and metadata | Remaining provider-specific parameters and counters |
 | Response compaction | Native compact contract, bounded opaque output, model authorization and usage settlement | Additional provider-native compact request options as demand is confirmed |
 | Embeddings | String/list and bounded token-ID input, exact token-ID accounting, float/base64 output, compatible adapters and native Gemini, Ollama, Cohere v2 and Voyage adapters | Additional provider compatibility |
@@ -189,6 +189,11 @@ availability is not inferred from these tests.
   `/v1/images/generations`. It accepts missing token usage only for this
   explicitly unit-accounted adapter, preserves estimated token provenance, and
   validates bounded output, exact count, ordered indices, model and object.
+- `2cef05e`: Native Together Chat preserves `reasoning` in JSON and SSE as the
+  public `reasoning_content` field, maps preserved history back to the native
+  alias, and accepts only the documented reasoning-effort values for three exact
+  upstream model IDs. The capability profile publishes these model-specific
+  overrides separately from provider-wide options.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control

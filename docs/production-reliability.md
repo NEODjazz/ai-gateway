@@ -1718,3 +1718,22 @@ same image ID. Live liveness and readiness returned 204, OpenAPI reported
 0.1.382, and an unauthenticated image-generation request returned 401 before
 deployment selection. No provider credential or external inference was used by
 the smoke checks.
+
+Source `2cef05e` adds model-specific Together Chat reasoning. The adapter
+preserves the native `reasoning` field in bounded JSON and SSE responses, maps
+unchanged assistant reasoning history back to the provider alias, rejects
+conflicting, non-string or oversized values, and admits `reasoning_effort` only
+for three exact upstream model IDs with their validated value sets. Provider
+capability profiles expose these overrides separately from provider-wide Chat
+options. OpenAPI 0.1.383 and its schema regression publish the new profile.
+Vet, build, the full Go suite and the full race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:together-reasoning-2cef05e` with image
+ID `sha256:ba896bd8e0e49685c87106f5a8de93c66997dee5dc88293c6ae1cce997ffa8b3`.
+Gateway Helm revision 489 completed successfully. Pod
+`ai-gateway-gateway-6fb9684b67-d6k4g` became Ready with zero restarts and the
+same image ID. Live liveness and readiness returned 204, and the served OpenAPI
+reported 0.1.383 with the exact model-specific profile schema. An
+unauthenticated Chat request with `reasoning_effort` returned 401 before
+deployment selection. No provider credential or external inference was used by
+the smoke checks.
