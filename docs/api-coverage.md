@@ -71,7 +71,7 @@ availability is not inferred from these tests.
 | Model tokenization | Context estimate including tool schemas; native Anthropic, Gemini and Bedrock counter APIs | Exact model tokenizers/counters with versioned provenance |
 | Catalog synchronization | Versioned catalog and hot update; xAI discovery atomically merges the separately published text and embedding catalogs | Validated upstream sync for additional providers, rollback and price provenance |
 | Arbitrary passthrough | Not implemented | Explicit route allowlists, identity isolation and accounting |
-| Parameter policy | Strict unknown-field decoding; native adapter rejection; generation control validation; machine-readable per-adapter Chat and Responses option support plus accepted values for `reasoning_effort`, `logprobs` and `service_tier`, all derived from runtime validators and locked by exact profile regression matrices | Model-specific overrides and equivalent matrices for other API families |
+| Parameter policy | Strict unknown-field decoding; native adapter rejection; generation control validation; machine-readable per-adapter Chat, Responses, Embeddings and Rerank support, including accepted values and input/document forms, all derived from runtime validators and locked by profile regressions | Model-specific overrides and equivalent matrices for other API families |
 | Provider and deployment quotas | Atomic fixed-window RPM/TPM across inference, token-count, shadow and owned response lifecycle calls; provider totals shared by all linked deployments; bounded memory mode and shared Redis counters; quota-aware fallback | Additional quota dimensions only when backed by an upstream contract |
 
 ## Completed increments
@@ -101,6 +101,13 @@ availability is not inferred from these tests.
 - `dd16398`: machine-readable Responses option, reasoning-effort and service-tier
   profiles for every managed provider type, derived from runtime validation and
   locked by an exact regression matrix.
+- `ac6f769`: Demo Embeddings rejects the unsupported `user` option instead of
+  silently discarding it.
+- `70a73d1`: compatible, OpenRouter, Cohere and Voyage Rerank checks are exposed
+  as side-effect-free adapter validators while preserving wire behavior.
+- `2e5d04c`: machine-readable Embeddings input/value and Rerank document/control
+  profiles derived from adapter validators, with operation/profile consistency
+  regressions.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control
