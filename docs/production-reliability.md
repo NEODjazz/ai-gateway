@@ -1177,3 +1177,12 @@ the `document_text` capability. A valid text document with title, context and
 citations passed structural validation and reached authentication; a
 whitespace-only document returned 400 before authentication. These smoke checks
 used no credential and performed no external inference.
+
+Source `d31886a` resolves owner-scoped `user_data` file references for native
+Messages PDF and plain-text documents. Authentication establishes credential and
+user ownership before the file is read; resolved content then enters DLP,
+anonymization, TPM, billing and capability routing. Token counting runs the same
+policy without a billing lifecycle. Durable batch creation stores resolved bytes
+within the 4 MiB line bound, so expiry or deletion cannot change queued input.
+Foreign, expired, malformed and unsupported files fail closed without revealing
+which condition occurred. Full Go tests, race tests, vet and build passed.

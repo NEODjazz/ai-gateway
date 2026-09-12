@@ -144,7 +144,7 @@ func TestOpenAPIMessagesAdvertisesBoundedDocuments(t *testing.T) {
 		t.Fatalf("MessagesDocumentBlock is incomplete: %#v", block)
 	}
 	source := block.Properties["source"].Value
-	if len(source.OneOf) != 2 || source.OneOf[0].Value == nil || source.OneOf[1].Value == nil {
+	if len(source.OneOf) != 3 || source.OneOf[0].Value == nil || source.OneOf[1].Value == nil || source.OneOf[2].Value == nil {
 		t.Fatalf("MessagesDocumentBlock source is incomplete: %#v", source)
 	}
 	pdf, text := source.OneOf[0].Value, source.OneOf[1].Value
@@ -154,6 +154,10 @@ func TestOpenAPIMessagesAdvertisesBoundedDocuments(t *testing.T) {
 	textData := text.Properties["data"].Value
 	if text.Properties["media_type"] == nil || text.Properties["media_type"].Value == nil || text.Properties["media_type"].Value.Const != "text/plain" || textData == nil || textData.MinLength != 1 || textData.MaxLength == nil || *textData.MaxLength != 262144 {
 		t.Fatalf("MessagesDocumentBlock text source is incomplete: %#v", text)
+	}
+	file := source.OneOf[2].Value
+	if file.Properties["type"] == nil || file.Properties["type"].Value == nil || file.Properties["type"].Value.Const != "file" || file.Properties["file_id"] == nil || file.Properties["file_id"].Value == nil || file.Properties["file_id"].Value.MaxLength == nil || *file.Properties["file_id"].Value.MaxLength != 128 {
+		t.Fatalf("MessagesDocumentBlock file source is incomplete: %#v", file)
 	}
 	citations := block.Properties["citations"].Value
 	if citations.Properties["enabled"] == nil || citations.Properties["enabled"].Value == nil || citations.Properties["enabled"].Value.Const != true {

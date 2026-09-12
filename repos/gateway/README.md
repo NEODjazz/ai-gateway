@@ -282,7 +282,10 @@ validation, attachment policy scanning and `file_input` capability routing.
 Plain text is limited to 262,144 Unicode characters per document and 1,048,576
 characters per request and requires `document_text`. Both forms enter DLP and
 anonymization, TPM and billing admission, bypass response caches, and survive
-native token counting and durable Messages batches. A document
+native token counting and durable Messages batches. A document source may also
+reference an owner-scoped Files object with `purpose=user_data`. Stored PDF and
+plain text are resolved after authentication and before policy or accounting;
+durable batches persist the resolved content rather than a mutable reference. A document
 may set `citations: {"enabled": true}`; routing then also requires
 `document_citations`. The setting is forwarded by generation, token counting
 and durable batches, participates in exact-cache identity and disables semantic

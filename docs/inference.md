@@ -704,6 +704,13 @@ characters per document and 1,048,576 characters per request and requires
 `document_text`. Both forms enter DLP and anonymization, conservative TPM and
 billing admission, response-cache exclusion, native generation, token counting
 and durable Messages batches.
+A document may use `source: {"type":"file","file_id":"file_..."}` for an
+owner-scoped Files object with `purpose=user_data`. The gateway resolves stored
+PDF or UTF-8 plain text after authentication and before DLP, anonymization, TPM
+and billing reserve. Missing, expired, foreign, malformed and unsupported files
+share one unavailable error. Count-tokens runs policy without generation billing.
+Batch creation stores an immutable resolved snapshot and enforces its 4 MiB
+per-line limit, so later file deletion cannot change an accepted job.
 A document may request native citations with `citations: {"enabled": true}`.
 The setting is preserved by generation, token counting and durable Messages
 batches, requires the explicit `document_citations` deployment capability,
@@ -717,7 +724,7 @@ provider execution, contribute to TPM and budget admission, and are preserved
 by generation, token counting and durable batches. Requests require the
 `document_metadata` deployment capability, include metadata in exact-cache
 identity and bypass semantic cache reuse.
-URL/file-reference documents, URL images and text after tool_use are not supported. Ordinary client
+URL documents, URL images and text after tool_use are not supported. Ordinary client
 `tool_result` blocks may set `is_error=true`; the flag is preserved by native
 generation, token counting and durable batches. Such requests require the
 `tool_result_error` deployment capability, include the flag in exact-cache

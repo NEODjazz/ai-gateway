@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.359
+  version: 0.1.360
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -7035,7 +7035,13 @@ components:
                 type: {type: string, const: text}
                 media_type: {type: string, const: text/plain}
                 data: {type: string, minLength: 1, maxLength: 262144, description: Inline UTF-8 plain text. Whitespace-only data is rejected.}
-      description: Inline user PDF or plain-text input. At most five documents are accepted per request. PDF input has a 16 MiB decoded aggregate limit, requires file_input capability and enters attachment policy scanning. Plain text has a 262144-character per-document and 1048576-character aggregate limit and requires document_text capability. Both forms enter content policy, TPM and billing admission, bypass response caches and are preserved by generation, native token counting and durable batches. Optional title and context enter DLP and anonymization, token accounting and capability routing. Optional citations are preserved across the same paths and require document_citations capability. Within one request, citations must be enabled for every document or omitted from every document.
+            - type: object
+              additionalProperties: false
+              required: [type, file_id]
+              properties:
+                type: {type: string, const: file}
+                file_id: {type: string, pattern: '^file_[A-Za-z0-9_-]+$', maxLength: 128, description: Owner-scoped file with purpose user_data containing PDF or UTF-8 plain text.}
+      description: Inline or owner-scoped stored PDF/plain-text input. At most five documents are accepted per request. PDF input has a 16 MiB decoded aggregate limit, requires file_input capability and enters attachment policy scanning. Plain text has a 262144-character per-document and 1048576-character aggregate limit and requires document_text capability. A file reference is resolved after authentication and before content policy, TPM and billing admission; another owner's, expired, unsupported or malformed file is indistinguishable from an unavailable file. Durable batches snapshot resolved content during creation and retain the 4 MiB resolved-line limit. All forms bypass response caches and are preserved by generation and native token counting. Optional title and context enter DLP and anonymization, token accounting and capability routing. Optional citations are preserved across the same paths and require document_citations capability. Within one request, citations must be enabled for every document or omitted from every document.
     MessagesRequest:
       type: object
       additionalProperties: false
