@@ -785,3 +785,18 @@ Helm revision 436 completed successfully, and pod
 `ai-gateway-gateway-85cfbd6db7-lskq9` became Ready with zero restarts. Its live
 endpoint served OpenAPI 0.1.336 with `/v1/messages` in the batch endpoint enum,
 and an unauthenticated request using it reached authentication with 401.
+
+Source `c54324c` adds native skill execution to non-streaming Messages and
+durable Messages batches. Custom references are resolved by the authenticated
+credential and user, pin execution to their creation deployment, and fail closed
+for foreign ownership or mixed deployments. Skill and code-execution identifiers
+pass tool ACLs, the container reference contributes to TPM reserve, and exact
+provider code-execution counts settle as billing tool requests. Stateful execution
+bypasses exact and semantic caches.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-c54324c` with image ID
+`sha256:2abe2e186fba26c4e83ad301eb2b2b4b4489b214c422e6cd12d49548511f91f1`.
+Helm revision 437 completed successfully, and pod
+`ai-gateway-gateway-5498c4b48c-v6hjz` became Ready with zero restarts. Its live
+endpoint served OpenAPI 0.1.337. A structurally valid native skill request through
+the local ingress reached authentication and returned 401.
