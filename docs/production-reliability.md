@@ -511,3 +511,11 @@ all eight implementing adapter types. Rancher Desktop built
 pod `ai-gateway-gateway-774bf574ff-b4mxz` became Ready with zero restarts. The
 live endpoint returned the exact regression-locked control sets for compatible,
 Azure, OpenRouter, Gemini, Mistral, Groq and xAI transports.
+
+Source `9323119` adds execution-validator-derived OCR profiles with document
+form isolation. Rancher Desktop built `ai-gateway-gateway:gaps-9323119`; Helm
+revision 411 completed successfully, and pod
+`ai-gateway-gateway-585bbd56cf-f97sn` became Ready with zero restarts. The live
+endpoint confirmed Mistral HTTPS/inline PDF and image inputs with all extraction
+controls, and Gemini inline-only PDF/image inputs with page selection and
+Markdown table output.
