@@ -118,6 +118,18 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	}
 }
 
+func TestExplicitZeroMessagesOutputHasNoDefaultReserve(t *testing.T) {
+	zero := 0
+	request := ChatCompletionRequest{AllowZeroMaxTokens: true, MaxTokens: &zero, Messages: []Message{{Role: "user", Content: "cache this"}}}
+	if ChatOutputReserve(request) != 0 || ChatReserveTokens(request) != ChatInputTokens(request) {
+		t.Fatalf("zero output reserve was expanded: output=%d total=%d input=%d", ChatOutputReserve(request), ChatReserveTokens(request), ChatInputTokens(request))
+	}
+	request.AllowZeroMaxTokens = false
+	if ChatOutputReserve(request) != DefaultOutputTokenReserve {
+		t.Fatal("ordinary chat lost its default reserve")
+	}
+}
+
 func TestImageEstimationDoesNotTokenizeBase64(t *testing.T) {
 	makeInput := func(n int) any {
 		return []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64," + strings.Repeat("a", n)}}}

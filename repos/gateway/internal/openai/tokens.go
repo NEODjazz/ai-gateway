@@ -19,6 +19,9 @@ func ChatOutputLimit(r ChatCompletionRequest) int {
 // ChatOutputReserve accounts for the maximum output of every requested choice.
 func ChatOutputReserve(r ChatCompletionRequest) int {
 	output := ChatOutputLimit(r)
+	if output == 0 && r.AllowZeroMaxTokens && r.MaxTokens != nil && *r.MaxTokens == 0 {
+		return 0
+	}
 	if output == 0 {
 		output = DefaultOutputTokenReserve
 	}
@@ -33,7 +36,11 @@ func ChatOutputReserve(r ChatCompletionRequest) int {
 }
 
 func ChatReserveTokens(r ChatCompletionRequest) int {
-	return ReserveTokens(ChatInputTokens(r), ChatOutputReserve(r))
+	input, output := ChatInputTokens(r), ChatOutputReserve(r)
+	if output == 0 && r.AllowZeroMaxTokens {
+		return input
+	}
+	return ReserveTokens(input, output)
 }
 
 func ResponseOutputLimit(r ResponseRequest) int {

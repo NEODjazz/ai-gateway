@@ -143,6 +143,7 @@ func (request messagesRequest) chat() (openai.ChatCompletionRequest, error) {
 
 func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatCompletionRequest, error) {
 	result := openai.ChatCompletionRequest{Model: request.Model, MaxTokens: &request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP, Stream: request.Stream}
+	result.AllowZeroMaxTokens = request.MaxTokens == 0
 	result.TopK = request.TopK
 	if thinking := request.Thinking; thinking != nil {
 		switch thinking.Type {
@@ -230,8 +231,8 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		result.Stop = request.StopSequences
 		result.RequireMatchedStop = true
 	}
-	if strings.TrimSpace(request.Model) == "" || request.MaxTokens <= 0 || len(request.Messages) == 0 || len(request.Messages) > 10000 {
-		return result, errors.New("model, positive max_tokens and 1–10000 messages are required")
+	if strings.TrimSpace(request.Model) == "" || request.MaxTokens < 0 || len(request.Messages) == 0 || len(request.Messages) > 10000 {
+		return result, errors.New("model, non-negative max_tokens and 1–10000 messages are required")
 	}
 	if request.Temperature != nil && (*request.Temperature < 0 || *request.Temperature > 1) {
 		return result, errors.New("temperature must be between 0 and 1")

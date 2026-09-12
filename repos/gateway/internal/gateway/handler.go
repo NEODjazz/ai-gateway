@@ -288,7 +288,8 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		return
 	}
 
-	if (request.MaxTokens != nil && *request.MaxTokens <= 0) || (request.MaxCompletionTokens != nil && *request.MaxCompletionTokens <= 0) {
+	invalidMaxTokens := request.MaxTokens != nil && (*request.MaxTokens < 0 || *request.MaxTokens == 0 && !request.AllowZeroMaxTokens)
+	if invalidMaxTokens || (request.MaxCompletionTokens != nil && *request.MaxCompletionTokens <= 0) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "output token limit must be positive")
 		return
 	}

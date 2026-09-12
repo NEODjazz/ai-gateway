@@ -23,6 +23,15 @@ func TestBillingReserveIncludesModernCapAndToolSchema(t *testing.T) {
 	}
 }
 
+func TestBillingPreservesExplicitZeroMessagesOutputReserve(t *testing.T) {
+	zero := 0
+	req := RequestContext{Metadata: map[string]string{"gateway.api_type": "messages"}, Request: openai.ChatCompletionRequest{AllowZeroMaxTokens: true, MaxTokens: &zero, Messages: []openai.Message{{Role: "user", Content: "cache this"}}}}
+	reserved := billingRequest(&req)
+	if reserved.APIType != "messages" || reserved.OutputTokens != 0 || reserved.TotalTokens != reserved.InputTokens || reserved.InputTokens != openai.ChatInputTokens(req.Request) {
+		t.Fatalf("explicit zero output reserve changed: %+v", reserved)
+	}
+}
+
 func TestLocalBillingUsesImageGenerationUsage(t *testing.T) {
 	response := openai.ImageGenerationResponse{Usage: &openai.ImageUsage{InputTokens: 3, OutputTokens: 9, TotalTokens: 12}}
 	req := RequestContext{ImageGenerationResponse: &response}

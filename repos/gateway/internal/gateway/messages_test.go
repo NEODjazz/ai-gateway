@@ -54,6 +54,26 @@ func TestMessagesConvertsToolsAndResponse(t *testing.T) {
 	}
 }
 
+func TestMessagesAcceptsExplicitZeroMaxTokens(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg-cache", Model: "model", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: ""}, FinishReason: "length"}}, Usage: openai.Usage{PromptTokens: 5, CompletionTokens: 0, TotalTokens: 5}}}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":0,"messages":[{"role":"user","content":"cache this"}]}`, "")
+	if response.Code != http.StatusOK || upstream.calls != 1 || upstream.request.Request.MaxTokens == nil || *upstream.request.Request.MaxTokens != 0 || !upstream.request.Request.AllowZeroMaxTokens {
+		t.Fatalf("status=%d body=%s calls=%d request=%+v", response.Code, response.Body.String(), upstream.calls, upstream.request.Request)
+	}
+	negative := nativeMessageCall(handler, `{"model":"model","max_tokens":-1,"messages":[{"role":"user","content":"invalid"}]}`, "")
+	if negative.Code != http.StatusBadRequest || upstream.calls != 1 {
+		t.Fatalf("negative max_tokens accepted: status=%d calls=%d body=%s", negative.Code, upstream.calls, negative.Body.String())
+	}
+	chatRequest := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model","max_tokens":0,"messages":[{"role":"user","content":"invalid"}]}`))
+	chatRequest.Header.Set("content-type", "application/json")
+	chatResponse := httptest.NewRecorder()
+	handler.ServeHTTP(chatResponse, chatRequest)
+	if chatResponse.Code != http.StatusBadRequest || upstream.calls != 1 {
+		t.Fatalf("ordinary Chat accepted zero max_tokens: status=%d calls=%d body=%s", chatResponse.Code, upstream.calls, chatResponse.Body.String())
+	}
+}
+
 func TestMessagesConvertsMetadataOutputConfigAndUsageDetails(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{
 		ID: "message", Model: "model", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: `{"ok":true}`}, FinishReason: "stop"}},
@@ -445,7 +465,6 @@ func TestMessagesRejectsUnsupportedInputBeforeInference(t *testing.T) {
 		`{"model":"m","max_tokens":10,"messages":[{"role":"assistant","content":"   "}]}`,
 		`{"model":"m","max_tokens":10,"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call","name":"lookup","input":{}}]}]}`,
 		`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"unknown","content":"x"}]}]}`,
-		`{"model":"m","max_tokens":0,"messages":[{"role":"user","content":"hi"}]}`,
 		`{"model":"m","max_tokens":10,"messages":[]} {}`,
 		`{"model":"m","max_tokens":10,"metadata":{"user_id":"ok","extra":"no"},"messages":[{"role":"user","content":"hi"}]}`,
 		`{"model":"m","max_tokens":10,"metadata":{"user_id":"` + strings.Repeat("я", 513) + `"},"messages":[{"role":"user","content":"hi"}]}`,

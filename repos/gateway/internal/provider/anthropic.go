@@ -444,6 +444,10 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 	if request.AnthropicThinking != nil {
 		thinking = &anthropicThinking{Type: request.AnthropicThinking.Type, BudgetTokens: request.AnthropicThinking.BudgetTokens, Display: request.AnthropicThinking.Display}
 	}
+	maxTokens := requestMaxTokens(request.MaxTokens, request.MaxCompletionTokens)
+	if request.AllowZeroMaxTokens && request.MaxTokens != nil && *request.MaxTokens == 0 {
+		maxTokens = 0
+	}
 	return anthropicRequest{
 		StopSequences: stop,
 		Model:         request.Model,
@@ -451,7 +455,7 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		Messages:      messages,
 		Tools:         tools,
 		ToolChoice:    anthropicParallelChoice(toolChoice, request.ParallelToolCalls),
-		MaxTokens:     requestMaxTokens(request.MaxTokens, request.MaxCompletionTokens),
+		MaxTokens:     maxTokens,
 		Stream:        stream,
 		Temperature:   request.Temperature,
 		TopP:          request.TopP,

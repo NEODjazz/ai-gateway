@@ -12,6 +12,8 @@ import (
 type ChatCompletionRequest struct {
 	// RequireMatchedStop is an internal protocol requirement, never client JSON.
 	RequireMatchedStop bool `json:"-"`
+	// AllowZeroMaxTokens permits the native Messages cache-population contract.
+	AllowZeroMaxTokens bool `json:"-"`
 	// BedrockInvoke selects the validated Anthropic Messages dialect of InvokeModel.
 	BedrockInvoke bool `json:"-"`
 	// NativeInputTokens reserves provider-native context omitted from the public Chat wire shape.

@@ -27,6 +27,18 @@ func TestAnthropicMapsMaxCompletionTokensToMaxTokens(t *testing.T) {
 	}
 }
 
+func TestAnthropicPreservesExplicitZeroMaxTokens(t *testing.T) {
+	zero := 0
+	request := anthropicChatRequest(openai.ChatCompletionRequest{AllowZeroMaxTokens: true, MaxTokens: &zero}, false)
+	if request.MaxTokens != 0 {
+		t.Fatalf("max_tokens=%d", request.MaxTokens)
+	}
+	ordinary := anthropicChatRequest(openai.ChatCompletionRequest{MaxTokens: &zero}, false)
+	if ordinary.MaxTokens != defaultAnthropicMaxTokens {
+		t.Fatalf("ordinary zero unexpectedly bypassed default: %d", ordinary.MaxTokens)
+	}
+}
+
 func TestAnthropicThinkingWireAndCapability(t *testing.T) {
 	budget := 2048
 	request := anthropicChatRequest(openai.ChatCompletionRequest{AnthropicThinking: &openai.AnthropicThinkingConfig{Type: "enabled", BudgetTokens: &budget, Display: "summarized"}}, false)
