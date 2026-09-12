@@ -618,3 +618,12 @@ base64 audio output with content type and usage. SSE requests are rejected befor
 provider execution. Batch creation now reserves enough output capacity for a bounded
 result line per item, while an oversized provider result becomes a terminal
 `batch_result_too_large` error instead of leaving the batch stuck in finalization.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-6fe2c2f` with image ID
+`sha256:7862e79770800fd6f2b0fe85875a1e4621e01cfd6742990c84d461e59699d014`.
+Helm revision 425 completed successfully, and pod
+`ai-gateway-gateway-6b57c49967-xcwg9` became Ready with zero restarts. The live
+OpenAPI 0.1.325 contract lists `/v1/audio/speech` in the accepted batch
+endpoints. An unauthenticated request using that endpoint reached authentication
+with 401, while an unknown batch endpoint was rejected by request validation
+with 400.
