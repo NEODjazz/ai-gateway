@@ -115,7 +115,7 @@ func TestOpenAPIDoesNotExposeInternalServiceContracts(t *testing.T) {
 func TestDocumentedRouteMethodsAreSupported(t *testing.T) {
 	for _, route := range gateway.DocumentedRoutes() {
 		switch route.Method {
-		case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete:
+		case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 		default:
 			t.Errorf("unsupported documented method %q", route.Method)
 		}

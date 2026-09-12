@@ -19,14 +19,35 @@ type directoryClientStub struct {
 	memberUser  string
 	deletedTeam string
 	deletedUser string
+	user        *DirectoryUser
+	findAttr    string
+	findValue   string
 }
 
 func (c *directoryClientStub) ListUsers(_ context.Context, _ ManagementAudit, _ string, offset, limit int) ([]DirectoryUser, int, error) {
 	c.userOffset, c.userLimit = offset, limit
 	return []DirectoryUser{{ID: "user-1", Status: "active"}}, 7, nil
 }
+func (c *directoryClientStub) GetUser(_ context.Context, _ ManagementAudit, id string) (DirectoryUser, error) {
+	if c.user != nil && c.user.ID == id {
+		return *c.user, nil
+	}
+	return DirectoryUser{ID: id, Email: "user@example.test", Status: "active"}, nil
+}
+func (c *directoryClientStub) FindUser(_ context.Context, _ ManagementAudit, attribute, value string) (DirectoryUser, bool, error) {
+	c.findAttr, c.findValue = attribute, value
+	if c.user == nil {
+		return DirectoryUser{}, false, nil
+	}
+	return *c.user, true, nil
+}
+func (c *directoryClientStub) CreateUser(_ context.Context, _ ManagementAudit, user DirectoryUser) (DirectoryUser, error) {
+	c.user = &user
+	return user, nil
+}
 func (c *directoryClientStub) PutUser(_ context.Context, _ ManagementAudit, id string, user DirectoryUser) (DirectoryUser, error) {
 	user.ID = id
+	c.user = &user
 	return user, nil
 }
 func (c *directoryClientStub) ListTeams(_ context.Context, _ ManagementAudit, teamID string, _, _ int) ([]DirectoryTeam, int, error) {

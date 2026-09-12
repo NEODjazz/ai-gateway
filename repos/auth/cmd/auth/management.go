@@ -235,6 +235,59 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 		}
 		writeManagementJSON(w, http.StatusOK, map[string]any{"data": users, "total": total})
 	}))
+	mux.HandleFunc("GET /internal/v1/users/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		user, err := module.GetDirectoryUser(r.Context(), r.PathValue("id"))
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid user", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, modules.ErrDirectoryNotFound) {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, user)
+	}))
+	mux.HandleFunc("GET /internal/v1/users:lookup", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		user, found, err := module.FindDirectoryUser(r.Context(), r.URL.Query().Get("attribute"), r.URL.Query().Get("value"))
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid user lookup", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !found {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, user)
+	}))
+	mux.HandleFunc("POST /internal/v1/users", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		var user modules.DirectoryUser
+		if !decodeManagementJSON(w, r, &user) {
+			return
+		}
+		saved, err := module.CreateDirectoryUser(r.Context(), user)
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid user", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, modules.ErrDirectoryConflict) {
+			http.Error(w, "user already exists", http.StatusConflict)
+			return
+		}
+		if err != nil {
+			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		logManagementAction(r, "user.create", saved.ID)
+		writeManagementJSON(w, http.StatusCreated, saved)
+	}))
 	mux.HandleFunc("PUT /internal/v1/users/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		var user modules.DirectoryUser
 		if !decodeManagementJSON(w, r, &user) {
@@ -244,6 +297,10 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 		saved, err := module.PutDirectoryUser(r.Context(), user)
 		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
 			http.Error(w, "invalid user", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, modules.ErrDirectoryConflict) {
+			http.Error(w, "user already exists", http.StatusConflict)
 			return
 		}
 		if err != nil {

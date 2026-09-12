@@ -15,14 +15,15 @@ import (
 )
 
 type DirectoryUser struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email,omitempty"`
-	Name      string    `json:"name,omitempty"`
-	Status    string    `json:"status"`
-	Roles     []string  `json:"roles,omitempty"`
-	TeamIDs   []string  `json:"team_ids,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         string    `json:"id"`
+	ExternalID string    `json:"external_id,omitempty"`
+	Email      string    `json:"email,omitempty"`
+	Name       string    `json:"name,omitempty"`
+	Status     string    `json:"status"`
+	Roles      []string  `json:"roles,omitempty"`
+	TeamIDs    []string  `json:"team_ids,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 type DirectoryTeam struct {
 	ID          string    `json:"id"`
@@ -43,6 +44,9 @@ type TeamMembership struct {
 
 type IdentityDirectoryClient interface {
 	ListUsers(context.Context, ManagementAudit, string, int, int) ([]DirectoryUser, int, error)
+	GetUser(context.Context, ManagementAudit, string) (DirectoryUser, error)
+	FindUser(context.Context, ManagementAudit, string, string) (DirectoryUser, bool, error)
+	CreateUser(context.Context, ManagementAudit, DirectoryUser) (DirectoryUser, error)
 	PutUser(context.Context, ManagementAudit, string, DirectoryUser) (DirectoryUser, error)
 	ListTeams(context.Context, ManagementAudit, string, int, int) ([]DirectoryTeam, int, error)
 	PutTeam(context.Context, ManagementAudit, string, DirectoryTeam) (DirectoryTeam, error)
@@ -66,6 +70,21 @@ func (c *RemoteManagementClient) ListUsers(ctx context.Context, audit Management
 		Total int             `json:"total"`
 	}](ctx, c, http.MethodGet, "/internal/v1/users?"+q.Encode(), audit, struct{}{})
 	return result.Data, result.Total, err
+}
+func (c *RemoteManagementClient) GetUser(ctx context.Context, audit ManagementAudit, id string) (DirectoryUser, error) {
+	return managementCall[struct{}, DirectoryUser](ctx, c, http.MethodGet, "/internal/v1/users/"+url.PathEscape(id), audit, struct{}{})
+}
+func (c *RemoteManagementClient) FindUser(ctx context.Context, audit ManagementAudit, attribute, value string) (DirectoryUser, bool, error) {
+	query := url.Values{"attribute": {attribute}, "value": {value}}
+	user, err := managementCall[struct{}, DirectoryUser](ctx, c, http.MethodGet, "/internal/v1/users:lookup?"+query.Encode(), audit, struct{}{})
+	var managementErr *ManagementError
+	if errors.As(err, &managementErr) && managementErr.Status == http.StatusNotFound {
+		return DirectoryUser{}, false, nil
+	}
+	return user, err == nil, err
+}
+func (c *RemoteManagementClient) CreateUser(ctx context.Context, audit ManagementAudit, user DirectoryUser) (DirectoryUser, error) {
+	return managementCall[DirectoryUser, DirectoryUser](ctx, c, http.MethodPost, "/internal/v1/users", audit, user)
 }
 func (c *RemoteManagementClient) PutUser(ctx context.Context, audit ManagementAudit, id string, user DirectoryUser) (DirectoryUser, error) {
 	return managementCall[DirectoryUser, DirectoryUser](ctx, c, http.MethodPut, "/internal/v1/users/"+url.PathEscape(id), audit, user)

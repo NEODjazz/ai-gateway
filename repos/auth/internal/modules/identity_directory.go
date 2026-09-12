@@ -6,17 +6,21 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type DirectoryUser struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email,omitempty"`
-	Name      string    `json:"name,omitempty"`
-	Status    string    `json:"status"`
-	Roles     []string  `json:"roles,omitempty"`
-	TeamIDs   []string  `json:"team_ids,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         string    `json:"id"`
+	ExternalID string    `json:"external_id,omitempty"`
+	Email      string    `json:"email,omitempty"`
+	Name       string    `json:"name,omitempty"`
+	Status     string    `json:"status"`
+	Roles      []string  `json:"roles,omitempty"`
+	TeamIDs    []string  `json:"team_ids,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type DirectoryTeam struct {
@@ -37,7 +41,11 @@ type TeamMembership struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-var ErrInvalidDirectoryEntry = errors.New("invalid identity directory entry")
+var (
+	ErrInvalidDirectoryEntry = errors.New("invalid identity directory entry")
+	ErrDirectoryConflict     = errors.New("identity directory entry already exists")
+	ErrDirectoryNotFound     = errors.New("identity directory entry not found")
+)
 
 func (m AuthModule) ListDirectoryUsers(ctx context.Context, teamID string, offset, limit int) ([]DirectoryUser, int, error) {
 	store, err := m.directoryStore()
@@ -55,11 +63,51 @@ func (m AuthModule) PutDirectoryUser(ctx context.Context, user DirectoryUser) (D
 	if err != nil {
 		return DirectoryUser{}, err
 	}
-	user.ID, user.Email, user.Name = strings.TrimSpace(user.ID), strings.TrimSpace(user.Email), strings.TrimSpace(user.Name)
-	if !validDirectoryID(user.ID) || len(user.Email) > 320 || len(user.Name) > 256 || !validDirectoryStatus(user.Status) || !validPolicyStrings(user.Roles) {
+	user.ID, user.ExternalID, user.Email, user.Name = strings.TrimSpace(user.ID), strings.TrimSpace(user.ExternalID), strings.TrimSpace(user.Email), strings.TrimSpace(user.Name)
+	if !validDirectoryID(user.ID) || len(user.ExternalID) > 256 || len(user.Email) > 320 || len(user.Name) > 256 || !validDirectoryStatus(user.Status) || !validPolicyStrings(user.Roles) {
 		return DirectoryUser{}, ErrInvalidDirectoryEntry
 	}
-	return store.PutUser(ctx, user)
+	saved, err := store.PutUser(ctx, user)
+	if isUniqueViolation(err) {
+		return DirectoryUser{}, ErrDirectoryConflict
+	}
+	return saved, err
+}
+
+func (m AuthModule) CreateDirectoryUser(ctx context.Context, user DirectoryUser) (DirectoryUser, error) {
+	store, err := m.directoryStore()
+	if err != nil {
+		return DirectoryUser{}, err
+	}
+	user.ID, user.ExternalID, user.Email, user.Name = strings.TrimSpace(user.ID), strings.TrimSpace(user.ExternalID), strings.TrimSpace(user.Email), strings.TrimSpace(user.Name)
+	if !validDirectoryID(user.ID) || len(user.ExternalID) > 256 || len(user.Email) > 320 || len(user.Name) > 256 || !validDirectoryStatus(user.Status) || !validPolicyStrings(user.Roles) {
+		return DirectoryUser{}, ErrInvalidDirectoryEntry
+	}
+	return store.CreateUser(ctx, user)
+}
+
+func (m AuthModule) GetDirectoryUser(ctx context.Context, id string) (DirectoryUser, error) {
+	store, err := m.directoryStore()
+	if err != nil {
+		return DirectoryUser{}, err
+	}
+	id = strings.TrimSpace(id)
+	if !validDirectoryID(id) {
+		return DirectoryUser{}, ErrInvalidDirectoryEntry
+	}
+	return store.GetUser(ctx, id)
+}
+
+func (m AuthModule) FindDirectoryUser(ctx context.Context, attribute, value string) (DirectoryUser, bool, error) {
+	store, err := m.directoryStore()
+	if err != nil {
+		return DirectoryUser{}, false, err
+	}
+	attribute, value = strings.TrimSpace(attribute), strings.TrimSpace(value)
+	if (attribute != "userName" && attribute != "externalId") || value == "" || len(value) > 320 {
+		return DirectoryUser{}, false, ErrInvalidDirectoryEntry
+	}
+	return store.FindUser(ctx, attribute, value)
 }
 
 func (m AuthModule) ListDirectoryTeams(ctx context.Context, teamID string, offset, limit int) ([]DirectoryTeam, int, error) {
@@ -139,6 +187,9 @@ func (m AuthModule) teamMembershipStore() (teamMembershipStore, error) {
 
 type identityDirectoryStore interface {
 	ListUsers(context.Context, string, int, int) ([]DirectoryUser, int, error)
+	GetUser(context.Context, string) (DirectoryUser, error)
+	FindUser(context.Context, string, string) (DirectoryUser, bool, error)
+	CreateUser(context.Context, DirectoryUser) (DirectoryUser, error)
 	PutUser(context.Context, DirectoryUser) (DirectoryUser, error)
 	ListTeams(context.Context, string, int, int) ([]DirectoryTeam, int, error)
 	PutTeam(context.Context, DirectoryTeam) (DirectoryTeam, error)
@@ -171,10 +222,10 @@ func validDirectoryID(value string) bool {
 func validDirectoryStatus(value string) bool { return value == "active" || value == "disabled" }
 
 func (s *PostgresVirtualKeyStore) ListUsers(ctx context.Context, teamID string, offset, limit int) ([]DirectoryUser, int, error) {
-	rows, err := s.pool.Query(ctx, `SELECT u.id,COALESCE(u.email,''),u.name,u.status,u.roles,
+	rows, err := s.pool.Query(ctx, `SELECT u.id,u.external_id,COALESCE(u.email,''),u.name,u.status,u.roles,
 		COALESCE(array_agg(m.team_id ORDER BY m.team_id) FILTER (WHERE m.team_id IS NOT NULL),'{}'),u.created_at,u.updated_at
 		FROM users u LEFT JOIN auth_team_memberships m ON m.user_id=u.id
-		WHERE ($1='' OR m.team_id=$1) GROUP BY u.id,u.email,u.name,u.status,u.roles,u.created_at,u.updated_at
+		WHERE ($1='' OR m.team_id=$1) GROUP BY u.id,u.external_id,u.email,u.name,u.status,u.roles,u.created_at,u.updated_at
 		ORDER BY u.created_at DESC,u.id OFFSET $2 LIMIT $3`, teamID, offset, limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list directory users: %w", err)
@@ -183,7 +234,7 @@ func (s *PostgresVirtualKeyStore) ListUsers(ctx context.Context, teamID string, 
 	result := make([]DirectoryUser, 0)
 	for rows.Next() {
 		var user DirectoryUser
-		if err := rows.Scan(&user.ID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.TeamIDs, &user.CreatedAt, &user.UpdatedAt); err != nil {
+		if err := rows.Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.TeamIDs, &user.CreatedAt, &user.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
 		result = append(result, user)
@@ -198,10 +249,54 @@ func (s *PostgresVirtualKeyStore) ListUsers(ctx context.Context, teamID string, 
 	return result, total, nil
 }
 
+func (s *PostgresVirtualKeyStore) GetUser(ctx context.Context, id string) (DirectoryUser, error) {
+	var user DirectoryUser
+	err := s.pool.QueryRow(ctx, `SELECT id,external_id,COALESCE(email,''),name,status,roles,created_at,updated_at FROM users WHERE id=$1`, id).
+		Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.CreatedAt, &user.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DirectoryUser{}, ErrDirectoryNotFound
+	}
+	return user, err
+}
+
+func (s *PostgresVirtualKeyStore) FindUser(ctx context.Context, attribute, value string) (DirectoryUser, bool, error) {
+	query := `SELECT id,external_id,COALESCE(email,''),name,status,roles,created_at,updated_at FROM users WHERE external_id=$1`
+	switch attribute {
+	case "userName":
+		query = `SELECT id,external_id,COALESCE(email,''),name,status,roles,created_at,updated_at FROM users WHERE lower(email)=$1`
+		value = strings.ToLower(value)
+	case "externalId":
+	default:
+		return DirectoryUser{}, false, ErrInvalidDirectoryEntry
+	}
+	var user DirectoryUser
+	err := s.pool.QueryRow(ctx, query, value).
+		Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.CreatedAt, &user.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DirectoryUser{}, false, nil
+	}
+	return user, err == nil, err
+}
+
+func (s *PostgresVirtualKeyStore) CreateUser(ctx context.Context, user DirectoryUser) (DirectoryUser, error) {
+	err := s.pool.QueryRow(ctx, `INSERT INTO users(id,external_id,email,name,status,roles) VALUES($1,$2,NULLIF($3,''),$4,$5,$6)
+		ON CONFLICT DO NOTHING RETURNING id,external_id,COALESCE(email,''),name,status,roles,created_at,updated_at`, user.ID, user.ExternalID, user.Email, user.Name, user.Status, nonNilStrings(user.Roles)).
+		Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.CreatedAt, &user.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DirectoryUser{}, ErrDirectoryConflict
+	}
+	return user, err
+}
+
+func isUniqueViolation(err error) bool {
+	var postgresErr *pgconn.PgError
+	return errors.As(err, &postgresErr) && postgresErr.Code == "23505"
+}
+
 func (s *PostgresVirtualKeyStore) PutUser(ctx context.Context, user DirectoryUser) (DirectoryUser, error) {
-	err := s.pool.QueryRow(ctx, `INSERT INTO users(id,email,name,status,roles) VALUES($1,NULLIF($2,''),$3,$4,$5)
-		ON CONFLICT(id) DO UPDATE SET email=EXCLUDED.email,name=EXCLUDED.name,status=EXCLUDED.status,roles=EXCLUDED.roles,updated_at=now()
-		RETURNING id,COALESCE(email,''),name,status,roles,created_at,updated_at`, user.ID, user.Email, user.Name, user.Status, nonNilStrings(user.Roles)).Scan(&user.ID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.CreatedAt, &user.UpdatedAt)
+	err := s.pool.QueryRow(ctx, `INSERT INTO users(id,external_id,email,name,status,roles) VALUES($1,$2,NULLIF($3,''),$4,$5,$6)
+		ON CONFLICT(id) DO UPDATE SET external_id=EXCLUDED.external_id,email=EXCLUDED.email,name=EXCLUDED.name,status=EXCLUDED.status,roles=EXCLUDED.roles,updated_at=now()
+		RETURNING id,external_id,COALESCE(email,''),name,status,roles,created_at,updated_at`, user.ID, user.ExternalID, user.Email, user.Name, user.Status, nonNilStrings(user.Roles)).Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.CreatedAt, &user.UpdatedAt)
 	return user, err
 }
 

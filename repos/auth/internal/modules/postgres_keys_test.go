@@ -26,7 +26,7 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql", "005_virtual_key_metadata.sql", "006_identity_directory.sql", "007_organizations.sql", "008_virtual_key_ownership.sql", "009_virtual_key_access_groups.sql"} {
+	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql", "005_virtual_key_metadata.sql", "006_identity_directory.sql", "007_organizations.sql", "008_virtual_key_ownership.sql", "009_virtual_key_access_groups.sql", "010_scim_users.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
 			t.Fatal(err)
@@ -47,6 +47,7 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
 	oldID, newID, expiredID, organizationKeyID, memberKeyID := "key-old-"+suffix, "key-new-"+suffix, "key-expired-"+suffix, "key-org-"+suffix, "key-member-"+suffix
 	directoryUserID, directoryTeamID, organizationID, otherOrganizationID := "user-"+suffix, "team-"+suffix, "org-"+suffix, "org-other-"+suffix
+	scimUserID := "scim-user-" + suffix
 	t.Cleanup(func() {
 		ids := []string{newID, oldID, expiredID, organizationKeyID, memberKeyID}
 		_, _ = pool.Exec(context.Background(), `UPDATE auth_virtual_keys SET rotated_from_id=NULL,rotated_to_id=NULL WHERE id = ANY($1)`, ids)
@@ -55,11 +56,29 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_organizations WHERE id = ANY($1)`, []string{organizationID, otherOrganizationID})
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_team_memberships WHERE team_id=$1`, directoryTeamID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM auth_teams WHERE id=$1`, directoryTeamID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, directoryUserID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = ANY($1)`, []string{directoryUserID, scimUserID, scimUserID + "-duplicate"})
 	})
 	user, err := store.PutUser(ctx, DirectoryUser{ID: directoryUserID, Email: "owner@example.test", Name: "Owner", Status: "active", Roles: []string{"developer"}})
 	if err != nil || user.Name != "Owner" {
 		t.Fatalf("put user failed: user=%+v err=%v", user, err)
+	}
+	scimUser, err := store.CreateUser(ctx, DirectoryUser{ID: scimUserID, ExternalID: "employee-" + suffix, Email: "scim@example.test", Name: "Provisioned", Status: "active"})
+	if err != nil || scimUser.ExternalID == "" {
+		t.Fatalf("create provisioned user failed: user=%+v err=%v", scimUser, err)
+	}
+	if loaded, err := store.GetUser(ctx, scimUserID); err != nil || loaded.ExternalID != scimUser.ExternalID {
+		t.Fatalf("get provisioned user failed: user=%+v err=%v", loaded, err)
+	}
+	if found, ok, err := store.FindUser(ctx, "userName", "SCIM@example.test"); err != nil || !ok || found.ID != scimUserID {
+		t.Fatalf("find provisioned user failed: user=%+v found=%v err=%v", found, ok, err)
+	}
+	if _, err := store.CreateUser(ctx, scimUser); !errors.Is(err, ErrDirectoryConflict) {
+		t.Fatalf("expected provisioned user conflict, got %v", err)
+	}
+	duplicate := scimUser
+	duplicate.ID, duplicate.ExternalID = scimUserID+"-duplicate", "employee-duplicate-"+suffix
+	if _, err := store.CreateUser(ctx, duplicate); !errors.Is(err, ErrDirectoryConflict) {
+		t.Fatalf("expected username uniqueness conflict, got %v", err)
 	}
 	team, err := store.PutTeam(ctx, DirectoryTeam{ID: directoryTeamID, Name: "Platform", Status: "active"})
 	if err != nil || team.Name != "Platform" {
