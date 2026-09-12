@@ -109,16 +109,17 @@ func TestGenerateRequestMapsInlineAudio(t *testing.T) {
 
 func TestGenerateRequestMapsAdditionalInlineAudioFormats(t *testing.T) {
 	tests := []struct {
-		mediaType string
-		data      []byte
+		mediaType, wantMediaType string
+		data                     []byte
 	}{
-		{"audio/flac", []byte("fLaCpayload")},
-		{"audio/ogg", []byte("OggSpayload")},
-		{"audio/opus", []byte("OggSpayload")},
-		{"audio/aiff", []byte("FORM\x00\x00\x00\x00AIFFpayload")},
-		{"audio/aac", []byte("\xff\xf1\x50\x80\x00\x1f\xfc")},
-		{"audio/webm", []byte("\x1a\x45\xdf\xa3payload")},
-		{"audio/m4a", []byte("\x00\x00\x00\x18ftypisom")},
+		{"audio/mp3", "audio/mpeg", []byte("ID3payload")},
+		{"audio/flac", "audio/flac", []byte("fLaCpayload")},
+		{"audio/ogg", "audio/ogg", []byte("OggSpayload")},
+		{"audio/opus", "audio/opus", []byte("OggSpayload")},
+		{"audio/aiff", "audio/aiff", []byte("FORM\x00\x00\x00\x00AIFFpayload")},
+		{"audio/aac", "audio/aac", []byte("\xff\xf1\x50\x80\x00\x1f\xfc")},
+		{"audio/webm", "audio/webm", []byte("\x1a\x45\xdf\xa3payload")},
+		{"audio/m4a", "audio/m4a", []byte("\x00\x00\x00\x18ftypisom")},
 	}
 	for _, test := range tests {
 		t.Run(test.mediaType, func(t *testing.T) {
@@ -132,7 +133,7 @@ func TestGenerateRequestMapsAdditionalInlineAudioFormats(t *testing.T) {
 				t.Fatal(err)
 			}
 			attachments, err := openai.ChatAudioAttachments(chat.Messages)
-			if err != nil || len(attachments) != 1 || attachments[0].MediaType != test.mediaType {
+			if err != nil || len(attachments) != 1 || attachments[0].MediaType != test.wantMediaType {
 				t.Fatalf("attachments=%+v err=%v", attachments, err)
 			}
 			if chat.NativeInputTokens == 0 && openai.ChatInputTokens(chat) == 0 {

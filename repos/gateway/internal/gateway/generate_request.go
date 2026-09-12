@@ -279,7 +279,7 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 				switch part.InlineData.MIMEType {
 				case "audio/wav":
 					format, filename = "wav", "input.wav"
-				case "audio/mpeg":
+				case "audio/mpeg", "audio/mp3":
 					format, filename = "mp3", "input.mp3"
 				case "audio/flac":
 					format, filename = "flac", "input.flac"
