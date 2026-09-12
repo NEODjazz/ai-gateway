@@ -700,6 +700,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedAudioSpeechOptions(t *t
 		"gemini":     {"instructions", "response_format", "stream_format"},
 		"mistral":    {"response_format"},
 		"groq":       {"response_format", "speed"},
+		"together":   {"language", "response_format", "stream_format"},
 		"xai":        {"language", "response_format", "speed", "stream_format"},
 	}
 	streaming := map[string]bool{"openai": true, "openai-compatible": true, "azure-openai": true}

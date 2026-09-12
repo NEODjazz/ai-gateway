@@ -31,6 +31,10 @@ func (Together) SupportsResponses() bool        { return false }
 func (Together) SupportsTools() bool            { return true }
 func (Together) SupportsStructuredOutput() bool { return true }
 func (Together) SupportsVision() bool           { return true }
+func (Together) SupportsAudioSpeech() bool      { return true }
+func (Together) SupportsAudioSpeechStreaming() bool {
+	return false
+}
 
 func (t Together) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := rejectParameters("together",
@@ -96,6 +100,48 @@ func (t Together) Embeddings(ctx context.Context, request openai.EmbeddingReques
 		return openai.EmbeddingResponse{}, err
 	}
 	return t.compatible.Embeddings(ctx, request)
+}
+
+func (Together) ValidateAudioSpeechParameters(request openai.AudioSpeechRequest) error {
+	if message := request.Validate(); message != "" {
+		return &Error{Class: FailureClientRequest, Provider: "together", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	return rejectParameters("together",
+		parameterCheck{"language", request.Language != "" && (strings.EqualFold(request.Language, "auto") || request.Language != strings.ToLower(request.Language))},
+		parameterCheck{"instructions", request.Instructions != ""},
+		parameterCheck{"response_format", request.ResponseFormat != "" && request.ResponseFormat != "mp3" && request.ResponseFormat != "wav" && request.ResponseFormat != "pcm"},
+		parameterCheck{"speed", request.Speed != nil},
+		parameterCheck{"stream_format", request.StreamFormat == "sse"},
+	)
+}
+
+func (t Together) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
+	if err := t.ValidateAudioSpeechParameters(request); err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
+	responseFormat := request.ResponseFormat
+	if responseFormat == "" {
+		responseFormat = "mp3"
+	} else if responseFormat == "pcm" {
+		responseFormat = "raw"
+	}
+	payload, err := json.Marshal(struct {
+		Model          string `json:"model"`
+		Input          string `json:"input"`
+		Voice          string `json:"voice"`
+		Language       string `json:"language,omitempty"`
+		ResponseFormat string `json:"response_format"`
+		Stream         bool   `json:"stream"`
+	}{request.Model, request.Input, request.Voice, request.Language, responseFormat, false})
+	if err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
+	response, err := t.compatible.sendBufferedSpeech(ctx, request, payload)
+	if err != nil {
+		return openai.AudioSpeechResponse{}, err
+	}
+	response.ContentType = request.ExpectedContentType()
+	return response, nil
 }
 
 func (Together) ValidateRerankParameters(request openai.RerankRequest) error {

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -86,7 +87,7 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 		if profile.Type != "together" {
 			continue
 		}
-		if !slices.Equal(profile.Operations, []string{"chat", "completions", "embeddings", "rerank", "stream"}) || !slices.Equal(profile.Capabilities, []string{"chat", "completions", "embeddings", "rerank", "stream", "tools", "structured_output", "vision"}) || len(profile.AuthTypes) != 0 {
+		if !slices.Equal(profile.Operations, []string{"chat", "completions", "embeddings", "rerank", "audio_speech", "stream"}) || !slices.Equal(profile.Capabilities, []string{"chat", "completions", "embeddings", "rerank", "audio_speech", "stream", "tools", "structured_output", "vision"}) || len(profile.AuthTypes) != 0 {
 			t.Fatalf("profile=%+v", profile)
 		}
 		if slices.Contains(profile.ChatParameters.SupportedOptions, "store") || slices.Contains(profile.ChatParameters.SupportedOptions, "metadata") || slices.Contains(profile.ChatParameters.SupportedOptions, "service_tier") || slices.Contains(profile.ChatParameters.SupportedOptions, "prediction") || slices.Contains(profile.ChatParameters.SupportedOptions, "logprobs") || slices.Contains(profile.ChatParameters.SupportedOptions, "logit_bias") || len(profile.ChatParameters.Logprobs) != 0 {
@@ -95,6 +96,79 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 		return
 	}
 	t.Fatal("Together capability profile is missing")
+}
+
+func TestTogetherAudioSpeechContract(t *testing.T) {
+	tests := []struct {
+		name          string
+		request       openai.AudioSpeechRequest
+		wantFormat    string
+		wantMediaType string
+	}{
+		{name: "default mp3", request: openai.AudioSpeechRequest{Model: "speech", Input: "hello", Voice: "voice"}, wantFormat: "mp3", wantMediaType: "audio/mpeg"},
+		{name: "raw pcm with language", request: openai.AudioSpeechRequest{Model: "speech", Input: "hello", Voice: "voice", Language: "en-us", ResponseFormat: "pcm", StreamFormat: "audio"}, wantFormat: "raw", wantMediaType: "application/octet-stream"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/audio/speech" || r.Header.Get("Authorization") != "Bearer together-key" {
+					t.Fatalf("method=%s path=%s authorization=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+				}
+				var body struct {
+					Model          string `json:"model"`
+					Input          string `json:"input"`
+					Voice          string `json:"voice"`
+					Language       string `json:"language"`
+					ResponseFormat string `json:"response_format"`
+					Stream         bool   `json:"stream"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if body.Model != test.request.Model || body.Input != test.request.Input || body.Voice != test.request.Voice || body.Language != test.request.Language || body.ResponseFormat != test.wantFormat || body.Stream {
+					t.Fatalf("body=%+v", body)
+				}
+				w.Header().Set("Content-Type", "application/octet-stream")
+				_, _ = w.Write([]byte("audio"))
+			}))
+			defer server.Close()
+
+			response, err := NewTogether(server.URL, "together-key", false).GenerateSpeech(t.Context(), test.request)
+			if err != nil || string(response.Data) != "audio" || response.Model != test.request.Model || response.ContentType != test.wantMediaType {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+		})
+	}
+}
+
+func TestTogetherAudioSpeechRejectsUnsupportedParametersBeforeHTTP(t *testing.T) {
+	speed := 1.0
+	tests := []struct {
+		param string
+		apply func(*openai.AudioSpeechRequest)
+	}{
+		{param: "language", apply: func(r *openai.AudioSpeechRequest) { r.Language = "auto" }},
+		{param: "language", apply: func(r *openai.AudioSpeechRequest) { r.Language = "en-US" }},
+		{param: "instructions", apply: func(r *openai.AudioSpeechRequest) { r.Instructions = "warmly" }},
+		{param: "response_format", apply: func(r *openai.AudioSpeechRequest) { r.ResponseFormat = "opus" }},
+		{param: "speed", apply: func(r *openai.AudioSpeechRequest) { r.Speed = &speed }},
+		{param: "stream_format", apply: func(r *openai.AudioSpeechRequest) { r.StreamFormat = "sse" }},
+	}
+	for _, test := range tests {
+		t.Run(test.param, func(t *testing.T) {
+			called := false
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+			defer server.Close()
+			request := openai.AudioSpeechRequest{Model: "speech", Input: "hello", Voice: "voice"}
+			test.apply(&request)
+
+			_, err := NewTogether(server.URL, "key", false).GenerateSpeech(t.Context(), request)
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Param != test.param || failure.UpstreamCode != "unsupported_parameter" || called {
+				t.Fatalf("err=%v called=%v", err, called)
+			}
+		})
+	}
 }
 
 func TestTogetherRejectsIgnoredParameterBeforeHTTP(t *testing.T) {
