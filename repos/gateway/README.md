@@ -287,6 +287,11 @@ and durable batches, participates in exact-cache identity and disables semantic
 cache reuse. When a request has multiple documents, citations must be enabled
 for all of them or omitted from all of them. `enabled: false` and mixed requests
 are rejected before provider execution.
+Documents may also include a non-empty `title` of at most 512 characters and
+`context` of at most 8192 characters. Both fields enter DLP scanning and
+anonymization, contribute to token admission, survive native token counting and
+durable batches, and require `document_metadata` routing. Exact-cache identity
+includes the metadata and semantic cache reuse is disabled.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.

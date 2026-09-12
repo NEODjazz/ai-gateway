@@ -708,6 +708,12 @@ participates in exact-cache identity and bypasses semantic cache reuse. Omission
 leaves citations disabled. Citations must be enabled for every document in a
 request or omitted from every document; `enabled: false` and mixed requests are
 rejected before provider execution.
+Optional document `title` and `context` are limited to 512 and 8192 Unicode
+characters respectively. They enter DLP scanning and anonymization before
+provider execution, contribute to TPM and budget admission, and are preserved
+by generation, token counting and durable batches. Requests require the
+`document_metadata` deployment capability, include metadata in exact-cache
+identity and bypass semantic cache reuse.
 URL/file-reference documents, URL images and text after tool_use are not supported. Ordinary client
 `tool_result` blocks may set `is_error=true`; the flag is preserved by native
 generation, token counting and durable batches. Such requests require the

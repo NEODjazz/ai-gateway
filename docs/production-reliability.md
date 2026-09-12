@@ -1139,3 +1139,11 @@ the complete message list. A failed tool result can no longer stop discovery
 before a later cited document, so routing requires both `tool_result_error` and
 `document_citations` when both semantics are present. The focused regression
 test and full Go tests, race tests, vet and build passed.
+
+Source `48ad345` adds bounded PDF title and context metadata to native Messages.
+The fields are projected to DLP, transformed by anonymization, counted during
+admission, preserved by native generation, token counting and durable batches,
+and isolated by an explicit `document_metadata` capability. Exact cache keys
+include the metadata and semantic cache reuse is disabled. Full Go tests, race
+tests, vet and build passed, along with all 166 UI tests, UI type checking and
+the production UI build.

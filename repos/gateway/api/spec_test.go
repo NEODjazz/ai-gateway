@@ -140,7 +140,7 @@ func TestOpenAPIMessagesAdvertisesFailedToolResults(t *testing.T) {
 func TestOpenAPIMessagesAdvertisesBoundedPDFDocuments(t *testing.T) {
 	document := loadDocument(t)
 	block := document.Components.Schemas["MessagesDocumentBlock"].Value
-	if block == nil || block.Properties["source"] == nil || block.Properties["source"].Value == nil || block.Properties["citations"] == nil || block.Properties["citations"].Value == nil {
+	if block == nil || block.Properties["source"] == nil || block.Properties["source"].Value == nil || block.Properties["citations"] == nil || block.Properties["citations"].Value == nil || block.Properties["title"] == nil || block.Properties["context"] == nil {
 		t.Fatalf("MessagesDocumentBlock is incomplete: %#v", block)
 	}
 	source := block.Properties["source"].Value
@@ -150,6 +150,10 @@ func TestOpenAPIMessagesAdvertisesBoundedPDFDocuments(t *testing.T) {
 	citations := block.Properties["citations"].Value
 	if citations.Properties["enabled"] == nil || citations.Properties["enabled"].Value == nil || citations.Properties["enabled"].Value.Const != true {
 		t.Fatalf("MessagesDocumentBlock citations are incomplete: %#v", citations)
+	}
+	title, context := block.Properties["title"].Value, block.Properties["context"].Value
+	if title == nil || title.MinLength != 1 || title.MaxLength == nil || *title.MaxLength != 512 || context == nil || context.MinLength != 1 || context.MaxLength == nil || *context.MaxLength != 8192 {
+		t.Fatalf("MessagesDocumentBlock metadata bounds are incomplete: title=%#v context=%#v", title, context)
 	}
 }
 
