@@ -1077,3 +1077,12 @@ semantic response caching is disabled. Existing successful tool results keep
 their previous wire shape and exact-cache identity. Full Go tests, race tests,
 vet and build passed; all 166 UI tests, type checking and the production bundle
 build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-82aa5a2` with image ID
+`sha256:19d73dfda853a2ed089dbb626f137fac32fcae3fb7f15d31a6a3fff3740d976d`.
+Gateway Helm revision 455 completed successfully, and pod
+`ai-gateway-gateway-565d997459-rqc48` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.354 exposes the failed tool-result schema and
+capability. A valid `is_error: true` continuation passed structural validation
+and reached authentication; a string-valued flag returned 400. These smoke
+checks used no credential and performed no external inference.
