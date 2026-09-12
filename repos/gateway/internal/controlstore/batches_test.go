@@ -36,6 +36,16 @@ func TestPostgresBatchLifecycleIsAtomicAndOwnerIsolatedIntegration(t *testing.T)
 	if _, err = store.GetBatch(t.Context(), "owner-b", batch.ID); !errors.Is(err, batchstate.ErrNotFound) {
 		t.Fatalf("cross-owner error=%v", err)
 	}
+	listedItems, err := store.ListBatchItems(t.Context(), batch.OwnerKey, batch.ID)
+	if err != nil || len(listedItems) != 2 || listedItems[0].Ordinal != 0 || listedItems[0].CustomID != "one" || listedItems[1].Ordinal != 1 || listedItems[1].CustomID != "two" {
+		t.Fatalf("items=%+v err=%v", listedItems, err)
+	}
+	if _, err = store.ListBatchItems(t.Context(), "owner-b", batch.ID); !errors.Is(err, batchstate.ErrNotFound) {
+		t.Fatalf("cross-owner items error=%v", err)
+	}
+	if _, err = store.DeleteBatch(t.Context(), batch.OwnerKey, batch.ID); !errors.Is(err, batchstate.ErrConflict) {
+		t.Fatalf("queued delete error=%v", err)
+	}
 	claimed, err := store.ClaimAsyncJobs(t.Context(), batchJobKindForTest, 10, time.Minute)
 	if err != nil || len(claimed) != 2 {
 		t.Fatalf("claimed=%d err=%v", len(claimed), err)
@@ -57,6 +67,19 @@ func TestPostgresBatchLifecycleIsAtomicAndOwnerIsolatedIntegration(t *testing.T)
 	completed, err := store.FinalizeBatch(t.Context(), batch.OwnerKey, batch.ID, "file_output", "file_errors")
 	if err != nil || completed.Status != "completed" || completed.OutputFileID != "file_output" {
 		t.Fatalf("completed=%+v err=%v", completed, err)
+	}
+	deleted, err := store.DeleteBatch(t.Context(), batch.OwnerKey, batch.ID)
+	if err != nil || deleted.Status != "completed" {
+		t.Fatalf("deleted=%+v err=%v", deleted, err)
+	}
+	if _, err = store.GetBatch(t.Context(), batch.OwnerKey, batch.ID); !errors.Is(err, batchstate.ErrNotFound) {
+		t.Fatalf("batch survived delete: %v", err)
+	}
+	for _, job := range jobs {
+		exists, existsErr := store.HasAsyncJob(t.Context(), job.Kind, job.ResourceID, job.OwnerKey)
+		if existsErr != nil || exists {
+			t.Fatalf("job %q survived delete: exists=%v err=%v", job.ResourceID, exists, existsErr)
+		}
 	}
 }
 

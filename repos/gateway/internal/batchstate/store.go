@@ -62,10 +62,12 @@ type Store interface {
 	GetBatch(context.Context, string, string) (Batch, error)
 	ListBatches(context.Context, string, int, string) ([]Batch, string, error)
 	GetBatchItem(context.Context, string, string, int) (Item, error)
+	ListBatchItems(context.Context, string, string) ([]Item, error)
 	StartBatch(context.Context, string, string) (Batch, error)
 	FinishBatchItem(context.Context, Item, bool) (Batch, error)
 	ListBatchResults(context.Context, string, string, bool) ([]Item, error)
 	CancelBatch(context.Context, string, string) (Batch, error)
+	DeleteBatch(context.Context, string, string) (Batch, error)
 	ExpireBatch(context.Context, string, string) (Batch, error)
 	FinalizeBatch(context.Context, string, string, string, string) (Batch, error)
 }

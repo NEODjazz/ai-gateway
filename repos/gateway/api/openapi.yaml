@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.363
+  version: 0.1.364
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1000,6 +1000,90 @@ paths:
                     properties:
                       type: {type: string}
                       message: {type: string}
+  /v1/messages/batches:
+    post:
+      operationId: createMessagesBatch
+      tags: [Batches]
+      summary: Create a durable native Messages batch
+      description: Accepts 1 to 50000 native Messages requests, validates every model, tool and resolved document or image before persistence, and atomically stores immutable request snapshots with durable execution jobs. Each item uses the normal policy, quota, routing and billing lifecycle with its own execution ID. Streaming items are rejected. A request item is limited to 4 MiB after owner-scoped file and bounded HTTPS references are resolved.
+      security:
+        - nativeAPIKey: []
+        - bearerAuth: []
+      parameters: [{$ref: '#/components/parameters/MessagesVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/MessagesBatchCreateRequest'}}}
+      responses:
+        '200': {description: Queued native Messages batch, content: {application/json: {schema: {$ref: '#/components/schemas/MessagesBatch'}}}}
+        default: {description: 'Authentication, validation, authorization, quota, or durable storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    get:
+      operationId: listMessagesBatches
+      tags: [Batches]
+      summary: List native Messages batches owned by the authenticated credential and user
+      security:
+        - nativeAPIKey: []
+        - bearerAuth: []
+      parameters:
+        - {$ref: '#/components/parameters/MessagesVersion'}
+        - {name: after_id, in: query, schema: {type: string, minLength: 10, maxLength: 128, pattern: '^msgbatch_[A-Za-z0-9_.-]+$'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200': {description: Cursor page of owned native Messages batches, content: {application/json: {schema: {$ref: '#/components/schemas/MessagesBatchList'}}}}
+        default: {description: 'Authentication, validation, or durable storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/messages/batches/{message_batch_id}:
+    parameters:
+      - {$ref: '#/components/parameters/MessagesVersion'}
+      - {$ref: '#/components/parameters/MessageBatchID'}
+    get:
+      operationId: getMessagesBatch
+      tags: [Batches]
+      summary: Retrieve an owned native Messages batch
+      security:
+        - nativeAPIKey: []
+        - bearerAuth: []
+      responses:
+        '200': {description: Current batch state and authoritative request counts, content: {application/json: {schema: {$ref: '#/components/schemas/MessagesBatch'}}}}
+        default: {description: 'Authentication, ownership, validation, or durable storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    delete:
+      operationId: deleteMessagesBatch
+      tags: [Batches]
+      summary: Delete an owned ended native Messages batch
+      description: Deletes a completed, failed, expired or cancelled batch, its immutable request and result rows, and any remaining durable item jobs in one transaction. Active batches return a lifecycle conflict.
+      security:
+        - nativeAPIKey: []
+        - bearerAuth: []
+      responses:
+        '200': {description: Deleted batch identifier, content: {application/json: {schema: {$ref: '#/components/schemas/MessagesBatchDeletion'}}}}
+        default: {description: 'Authentication, ownership, lifecycle conflict, validation, or durable storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/messages/batches/{message_batch_id}/cancel:
+    post:
+      operationId: cancelMessagesBatch
+      tags: [Batches]
+      summary: Cancel an owned queued or running native Messages batch
+      security:
+        - nativeAPIKey: []
+        - bearerAuth: []
+      parameters:
+        - {$ref: '#/components/parameters/MessagesVersion'}
+        - {$ref: '#/components/parameters/MessageBatchID'}
+      responses:
+        '200': {description: Cancelled native Messages batch, content: {application/json: {schema: {$ref: '#/components/schemas/MessagesBatch'}}}}
+        default: {description: 'Authentication, ownership, lifecycle conflict, validation, or durable storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/messages/batches/{message_batch_id}/results:
+    get:
+      operationId: getMessagesBatchResults
+      tags: [Batches]
+      summary: Stream ordered native Messages batch results
+      description: Returns one succeeded, errored, canceled or expired JSON object per original request, in input order. Results become available only after the batch ends.
+      security:
+        - nativeAPIKey: []
+        - bearerAuth: []
+      parameters:
+        - {$ref: '#/components/parameters/MessagesVersion'}
+        - {$ref: '#/components/parameters/MessageBatchID'}
+      responses:
+        '200': {description: Newline-delimited native Messages batch results, content: {application/x-ndjson: {schema: {type: string}}}}
+        default: {description: 'Authentication, ownership, lifecycle conflict, validation, or durable storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /v1/images/generations:
     post:
       operationId: generateImage
@@ -4597,6 +4681,16 @@ components:
         type: string
         maxLength: 128
   parameters:
+    MessagesVersion:
+      name: anthropic-version
+      in: header
+      required: true
+      schema: {type: string, enum: ['2023-06-01']}
+    MessageBatchID:
+      name: message_batch_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 10, maxLength: 128, pattern: '^msgbatch_[A-Za-z0-9_.-]+$'}
     FineTuningJobID:
       name: id
       in: path
@@ -5705,6 +5799,64 @@ components:
         first_id: {type: string}
         last_id: {type: string}
         has_more: {type: boolean}
+    MessagesBatchCreateItem:
+      type: object
+      additionalProperties: false
+      required: [custom_id, params]
+      properties:
+        custom_id: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$'}
+        params: {$ref: '#/components/schemas/MessagesRequest'}
+    MessagesBatchCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [requests]
+      properties:
+        requests:
+          type: array
+          minItems: 1
+          maxItems: 50000
+          items: {$ref: '#/components/schemas/MessagesBatchCreateItem'}
+    MessagesBatchRequestCounts:
+      type: object
+      additionalProperties: false
+      required: [processing, succeeded, errored, canceled, expired]
+      properties:
+        processing: {type: integer, minimum: 0, maximum: 50000}
+        succeeded: {type: integer, minimum: 0, maximum: 50000}
+        errored: {type: integer, minimum: 0, maximum: 50000}
+        canceled: {type: integer, minimum: 0, maximum: 50000}
+        expired: {type: integer, minimum: 0, maximum: 50000}
+    MessagesBatch:
+      type: object
+      additionalProperties: false
+      required: [id, type, processing_status, request_counts, created_at, expires_at, ended_at, cancel_initiated_at, archived_at, results_url]
+      properties:
+        id: {type: string, pattern: '^msgbatch_[A-Za-z0-9_.-]+$'}
+        type: {type: string, const: message_batch}
+        processing_status: {type: string, enum: [in_progress, ended]}
+        request_counts: {$ref: '#/components/schemas/MessagesBatchRequestCounts'}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        ended_at: {type: [string, 'null'], format: date-time}
+        cancel_initiated_at: {type: [string, 'null'], format: date-time}
+        archived_at: {type: [string, 'null'], format: date-time}
+        results_url: {type: [string, 'null']}
+    MessagesBatchList:
+      type: object
+      additionalProperties: false
+      required: [data, has_more]
+      properties:
+        data: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/MessagesBatch'}}
+        first_id: {type: string, pattern: '^msgbatch_[A-Za-z0-9_.-]+$'}
+        last_id: {type: string, pattern: '^msgbatch_[A-Za-z0-9_.-]+$'}
+        has_more: {type: boolean}
+    MessagesBatchDeletion:
+      type: object
+      additionalProperties: false
+      required: [id, type]
+      properties:
+        id: {type: string, pattern: '^msgbatch_[A-Za-z0-9_.-]+$'}
+        type: {type: string, const: message_batch_deleted}
     FileObject:
       type: object
       additionalProperties: false

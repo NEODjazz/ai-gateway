@@ -54,7 +54,7 @@ func (s *memoryBatchStore) GetBatch(_ context.Context, owner, id string) (batchs
 	}
 	return b, nil
 }
-func (s *memoryBatchStore) ListBatches(_ context.Context, owner string, limit int, _ string) ([]batchstate.Batch, string, error) {
+func (s *memoryBatchStore) ListBatches(_ context.Context, owner string, limit int, after string) ([]batchstate.Batch, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []batchstate.Batch
@@ -64,6 +64,13 @@ func (s *memoryBatchStore) ListBatches(_ context.Context, owner string, limit in
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if after != "" {
+		index := sort.Search(len(out), func(index int) bool { return out[index].ID >= after })
+		if index == len(out) || out[index].ID != after {
+			return nil, "", batchstate.ErrNotFound
+		}
+		out = out[index+1:]
+	}
 	if len(out) > limit {
 		next := out[limit-1].ID
 		return out[:limit], next, nil
@@ -78,6 +85,19 @@ func (s *memoryBatchStore) GetBatchItem(_ context.Context, owner, id string, ord
 		return batchstate.Item{}, batchstate.ErrNotFound
 	}
 	return item, nil
+}
+func (s *memoryBatchStore) ListBatchItems(_ context.Context, owner, id string) ([]batchstate.Item, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if batch, ok := s.batches[id]; !ok || batch.OwnerKey != owner {
+		return nil, batchstate.ErrNotFound
+	}
+	items := make([]batchstate.Item, 0, len(s.items[id]))
+	for _, item := range s.items[id] {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Ordinal < items[j].Ordinal })
+	return items, nil
 }
 func (s *memoryBatchStore) StartBatch(_ context.Context, owner, id string) (batchstate.Batch, error) {
 	s.mu.Lock()
@@ -154,6 +174,27 @@ func (s *memoryBatchStore) CancelBatch(_ context.Context, owner, id string) (bat
 	b.Status = "cancelled"
 	b.CancelledAt = &now
 	s.batches[id] = b
+	return b, nil
+}
+func (s *memoryBatchStore) DeleteBatch(_ context.Context, owner, id string) (batchstate.Batch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.batches[id]
+	if !ok || b.OwnerKey != owner {
+		return batchstate.Batch{}, batchstate.ErrNotFound
+	}
+	switch b.Status {
+	case "completed", "failed", "expired", "cancelled":
+	default:
+		return batchstate.Batch{}, batchstate.ErrConflict
+	}
+	delete(s.batches, id)
+	delete(s.items, id)
+	for key := range s.jobs {
+		if strings.HasPrefix(key, id+":") {
+			delete(s.jobs, key)
+		}
+	}
 	return b, nil
 }
 func (s *memoryBatchStore) ExpireBatch(_ context.Context, owner, id string) (batchstate.Batch, error) {

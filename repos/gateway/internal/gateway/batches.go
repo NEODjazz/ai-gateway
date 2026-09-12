@@ -83,6 +83,22 @@ func (h Handler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_batch_file", "batch contains too many requests for the configured output file limit")
 		return
 	}
+	created, err := h.persistBatch(r.Context(), identity, request, items, "batch_")
+	if err != nil {
+		if errors.Is(err, errBatchIdentityInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		} else {
+			writeBatchStoreError(w, err)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, publicBatch(created))
+}
+
+var errBatchIdentityInvalid = errors.New("batch identity is too large")
+
+func (h Handler) persistBatch(ctx context.Context, identity modules.RequestContext, request openai.BatchCreateRequest, items []batchstate.Item, idPrefix string) (batchstate.Batch, error) {
+	owner := fileOwnerKey(identity)
 	if request.Metadata == nil {
 		request.Metadata = map[string]string{}
 	}
@@ -92,10 +108,9 @@ func (h Handler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 	identity.Metadata = map[string]string{"gateway.api_type": "batch"}
 	identityPayload, err := json.Marshal(identity)
 	if err != nil || len(identityPayload) > batchstate.MaxIdentityBytes {
-		writeError(w, http.StatusBadRequest, "invalid_request", "batch identity is too large")
-		return
+		return batchstate.Batch{}, errBatchIdentityInvalid
 	}
-	batchID := "batch_" + newExecutionID()
+	batchID := idPrefix + newExecutionID()
 	var outputExpirySeconds int64
 	if request.OutputExpiresAfter != nil {
 		outputExpirySeconds = request.OutputExpiresAfter.Seconds
@@ -111,12 +126,7 @@ func (h Handler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 		payload, _ := json.Marshal(batchJob{Ordinal: index})
 		jobs[index] = asyncstate.Job{Kind: batchJobKind, ResourceID: batchID + ":" + strconv.Itoa(index), OwnerKey: owner, EndpointID: "gateway", ExecutionID: items[index].ExecutionID, Payload: payload}
 	}
-	created, err := h.batches.CreateBatch(r.Context(), batch, items, jobs, batchOwnerQuota)
-	if err != nil {
-		writeBatchStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, publicBatch(created))
+	return h.batches.CreateBatch(ctx, batch, items, jobs, batchOwnerQuota)
 }
 
 var errBatchResponseWritten = errors.New("batch response already written")

@@ -188,6 +188,37 @@ func (s *PostgresStore) GetBatchItem(ctx context.Context, owner, batchID string,
 	return item, err
 }
 
+func (s *PostgresStore) ListBatchItems(ctx context.Context, owner, batchID string) ([]batchstate.Item, error) {
+	if s == nil || s.pool == nil {
+		return nil, batchstate.ErrUnavailable
+	}
+	if owner == "" || !validA2AStorageToken(batchID, 128) {
+		return nil, batchstate.ErrInvalid
+	}
+	rows, err := s.pool.Query(ctx, `SELECT batch_id,owner_key,ordinal,custom_id,url,body,identity,state,execution_id,result FROM gateway_batch_items WHERE owner_key=$1 AND batch_id=$2 ORDER BY ordinal`, owner, batchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []batchstate.Item
+	for rows.Next() {
+		var item batchstate.Item
+		if err := scanBatchItem(rows, &item); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		if _, err := s.GetBatch(ctx, owner, batchID); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
 func scanBatchItem(row batchScanner, item *batchstate.Item) error {
 	var result []byte
 	err := row.Scan(&item.BatchID, &item.OwnerKey, &item.Ordinal, &item.CustomID, &item.URL, &item.Body, &item.Identity, &item.State, &item.ExecutionID, &result)
@@ -300,6 +331,43 @@ func (s *PostgresStore) CancelBatch(ctx context.Context, owner, id string) (batc
 		return existing, batchstate.ErrConflict
 	}
 	return b, err
+}
+
+func (s *PostgresStore) DeleteBatch(ctx context.Context, owner, id string) (batchstate.Batch, error) {
+	if s == nil || s.pool == nil {
+		return batchstate.Batch{}, batchstate.ErrUnavailable
+	}
+	if owner == "" || !validA2AStorageToken(id, 128) {
+		return batchstate.Batch{}, batchstate.ErrInvalid
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return batchstate.Batch{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	batch, err := getBatch(ctx, tx, owner, id)
+	if err != nil {
+		return batchstate.Batch{}, err
+	}
+	switch batch.Status {
+	case "completed", "failed", "expired", "cancelled":
+	default:
+		return batchstate.Batch{}, batchstate.ErrConflict
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM gateway_async_jobs WHERE owner_key=$1 AND split_part(resource_id,':',1)=$2`, owner, id); err != nil {
+		return batchstate.Batch{}, err
+	}
+	command, err := tx.Exec(ctx, `DELETE FROM gateway_batches WHERE owner_key=$1 AND id=$2`, owner, id)
+	if err != nil {
+		return batchstate.Batch{}, err
+	}
+	if command.RowsAffected() != 1 {
+		return batchstate.Batch{}, batchstate.ErrNotFound
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return batchstate.Batch{}, err
+	}
+	return batch, nil
 }
 
 func (s *PostgresStore) ExpireBatch(ctx context.Context, owner, id string) (batchstate.Batch, error) {
