@@ -641,3 +641,9 @@ Helm revision 426 completed successfully, and pod
 OpenAPI 0.1.326 contract lists `/v1/responses/compact` in the accepted batch
 endpoints. An unauthenticated request using that endpoint reached authentication
 with 401, while a misspelled endpoint failed request validation with 400.
+
+Source `d567cba` adds OCR to durable JSONL batch execution. Owner-scoped file
+references are resolved and signature-validated before queueing, and the resolved
+inline document is processed by the usual OCR content-policy and provider lifecycle.
+The regressions cover cross-owner denial, page reservation, TPM admission,
+independent execution identity and usage-bearing output.
