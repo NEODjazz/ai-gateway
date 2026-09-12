@@ -1195,3 +1195,12 @@ same digest. Live OpenAPI 0.1.360 exposes the owner-scoped file source. A
 well-formed reference passed request validation and reached authentication;
 an invalid identifier returned 400 before authentication or storage access.
 These smoke checks used no credential and performed no external inference.
+
+Source `1084ddb` adds bounded HTTPS PDF documents to native Messages. URLs are
+fetched only after authentication through the public-address HTTP transport,
+without client credentials, environment proxies or redirects. The transport
+requires TLS 1.2 or newer, checks all resolved addresses, has a 15-second timeout
+and reads at most 16 MiB. MIME and PDF signature validation complete before DLP,
+TPM, billing or provider execution. Token counting uses the same path without
+generation billing, and durable batch creation stores immutable resolved bytes.
+Focused regressions and the full Go tests, race tests, vet and build passed.

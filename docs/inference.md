@@ -711,6 +711,16 @@ and billing reserve. Missing, expired, foreign, malformed and unsupported files
 share one unavailable error. Count-tokens runs policy without generation billing.
 Batch creation stores an immutable resolved snapshot and enforces its 4 MiB
 per-line limit, so later file deletion cannot change an accepted job.
+A PDF document may instead use
+`source: {"type":"url","url":"https://documents.example/report.pdf"}`. The
+gateway fetches it after authentication without forwarding client credentials,
+accepts only `application/pdf`, applies the same 16 MiB bound and PDF signature
+validation, and resolves it before DLP, TPM and billing. Fetches require a public
+HTTPS destination, TLS 1.2 or newer, do not use environment proxies or follow
+redirects, reject credentials and fragments, re-check resolved IP addresses and
+time out after 15 seconds. Token counting uses the same resolved content without
+generation billing. Batch creation stores the downloaded bytes, so later URL
+changes or failures cannot alter an accepted job.
 A document may request native citations with `citations: {"enabled": true}`.
 The setting is preserved by generation, token counting and durable Messages
 batches, requires the explicit `document_citations` deployment capability,
@@ -724,7 +734,7 @@ provider execution, contribute to TPM and budget admission, and are preserved
 by generation, token counting and durable batches. Requests require the
 `document_metadata` deployment capability, include metadata in exact-cache
 identity and bypass semantic cache reuse.
-URL documents, URL images and text after tool_use are not supported. Ordinary client
+URL images and text after tool_use are not supported. Ordinary client
 `tool_result` blocks may set `is_error=true`; the flag is preserved by native
 generation, token counting and durable batches. Such requests require the
 `tool_result_error` deployment capability, include the flag in exact-cache
