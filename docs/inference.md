@@ -23,6 +23,7 @@ Gateway реализует OpenAI-compatible endpoints:
 | `POST /v1/rerank` | Query/documents ranking |
 | `POST /v1/audio/transcriptions` | Транскрипция проверенного multipart audio с token или duration billing |
 | `POST /v1/audio/translations` | Перевод речи на английский через deployment с явной capability |
+| `GET /v1/realtime?model=...` | Ограниченная WebSocket-сессия для text и capability-isolated audio событий |
 | `POST /v1/files` | Durable multipart upload с owner quota |
 | `GET /v1/files` | Cursor-список файлов текущих credential и user |
 | `GET /v1/files/{id}` | Метаданные своего файла |
@@ -556,6 +557,30 @@ weighted selection and model fallback are disabled because the ID is owned by
 the upstream deployment that created it.
 If request anonymization replaces any prompt value, audio generation stops before
 the upstream call because binary speech cannot be deanonymized consistently.
+
+## Realtime audio
+
+`GET /v1/realtime?model=...` открывает WebSocket только после проверки Bearer
+credential, model policy и выбора deployment с capability `realtime`. Text-only
+сессии требуют только `realtime`. События `input_audio_buffer.*` и настройка
+input audio дополнительно требуют `audio_input`; audio output и transcript
+события требуют `audio`. Это не позволяет text-only deployment молча принимать
+или возвращать бинарные данные.
+
+Поддерживаются legacy-форматы `pcm16`, `g711_ulaw`, `g711_alaw` и их текущие
+эквиваленты `audio/pcm` с частотой 24000 Hz, `audio/pcmu`, `audio/pcma`.
+`input_audio_buffer.append` принимает непустой strict base64 до 15 MiB decoded
+данных на событие. Gateway хранит только счетчик накопленного объёма с пределом
+1 GiB на сессию, передаёт каждый chunk настроенному AV scanner и не отправляет
+отклонённый chunk провайдеру. `clear` обнуляет неподтверждённый буфер, а manual
+или server-VAD commit добавляет консервативную оценку audio tokens в conversation
+context до следующего TPM и budget reserve. Удаление связанного conversation item
+снимает эти tokens из последующих резервов.
+
+Provider audio deltas проверяются как strict base64 до передачи клиенту. Точный
+`response.done.usage` заменяет резерв при billing commit и сохраняет cached,
+text и audio token details. WebSocket event ограничен 20 MiB плюс 64 KiB JSON
+overhead, pending responses — 16, conversation items — 1024, а сессия — 30 минут.
 
 `n` принимает от 1 до 128 choices для OpenAI-compatible adapter. TPM и budget
 reserve умножают per-choice output limit (включая default reserve) на `n` с

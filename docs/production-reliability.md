@@ -1378,3 +1378,15 @@ server-request handling changes no public schema. An MCP discovery request with
 an invalid smoke key returned 401 before registry or upstream access. No
 credential was stored and no external MCP call or model inference was
 performed.
+
+Source `6f200c6` adds capability-isolated Realtime audio over the existing
+bounded WebSocket transport. Input append/commit/clear supports PCM16 at 24 kHz
+and G.711 mu-law/A-law, validates strict base64 with a 15 MiB decoded per-event
+limit, tracks at most 1 GiB of buffered bytes without retaining raw audio and
+runs configured AV policy before provider delivery. Manual and server-VAD
+commits add a duration-derived audio-token estimate to response TPM and budget
+reserve; item deletion removes that context. Output audio requires its own
+deployment capability and malformed deltas fail closed. Exact terminal usage
+preserves cached, text and audio token details. Focused regressions, the full Go
+suite, full race suite, vet and build passed. OpenAPI 0.1.368 records these
+bounds and capability requirements.

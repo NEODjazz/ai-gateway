@@ -18,7 +18,7 @@ RS256/ES256. HS256 и built-in demo/static keys предназначены дл�
 | --- | --- | --- |
 | Auth | Bearer token | Prompt/provider response |
 | DLP | `request_id`, text projection | Bearer, identity, полный context |
-| AV | `request_id`, text, validated image attachments | Bearer, identity |
+| AV | `request_id`, text, validated image and Realtime audio attachments | Bearer, identity |
 | Anonymizer | Maskable text fields | Bearer, identity, image URL/base64 |
 | Billing | Identity fingerprint, route metadata, counters/pricing | Prompt, response, raw provider error |
 
@@ -42,7 +42,9 @@ Policy attachment может ограничивать DLP/AV по team, opaque k
 public model и tags. Dimensions соединяются AND, значения внутри dimension —
 OR, поддержан только trailing `*`. Policies primary и всех допустимых fallback
 targets объединяются консервативно. Missing/disabled required policy, content
-rejection и AV failure для image request закрывают запрос.
+rejection и AV failure для binary request закрывают запрос. Realtime input audio
+проходит AV до помещения decoded-byte count в session buffer и до отправки
+события провайдеру; raw audio не сохраняется в gateway state.
 
 Guardrail Monitor сохраняет только bounded metadata: request ID, policy,
 module, source, outcome, duration и timestamp. Submitted text и raw scanner

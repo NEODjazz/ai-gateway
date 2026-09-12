@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.367
+  version: 0.1.368
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -578,7 +578,7 @@ paths:
       operationId: openRealtimeSession
       tags: [Inference]
       summary: Open a bounded bidirectional Realtime session
-      description: Authenticates the gateway credential, authorizes the public model, selects one Realtime-capable deployment, and proxies text WebSocket events without exposing provider credentials. Text-bearing client events pass the effective input policy before delivery. Each response is rate-limited and settled independently, including immediate idempotent settlement of client cancellation. Output-policy deployments buffer up to 8 MiB until the complete response passes the configured scan. Each event is limited to 4 MiB and each provider connection to 30 minutes.
+      description: Authenticates the gateway credential, authorizes the public model, selects one Realtime-capable deployment, and proxies bounded WebSocket events without exposing provider credentials. Text-bearing client events pass the effective input policy before delivery. Input audio requires the deployment capability audio_input; output audio requires audio. PCM16/24 kHz, G.711 mu-law and G.711 A-law input buffers support append, commit and clear, with a 15 MiB decoded limit per append, a 1 GiB session counter limit, optional AV scanning and conservative TPM reserve before each response. Provider audio deltas require strict base64 and exact terminal usage preserves text, audio and cached token details. Each response is rate-limited and settled independently, including immediate idempotent settlement of client cancellation. Output-policy deployments buffer up to 8 MiB until the complete response passes the configured scan. Each WebSocket event is limited to 20 MiB plus 64 KiB of envelope overhead and each provider connection to 30 minutes.
       parameters:
         - {name: model, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 256}}
       responses:
