@@ -20,7 +20,7 @@ import (
 
 const a2aProtocolVersion = "1.0"
 
-var a2aInputModes = []string{"text/plain", "text/markdown", "text/csv", "application/json", "image/jpeg", "image/png", "image/gif", "image/webp", "audio/wav", "audio/mpeg", "application/pdf"}
+var a2aInputModes = []string{"text/plain", "text/markdown", "text/csv", "application/json", "image/jpeg", "image/png", "image/gif", "image/webp", "audio/wav", "audio/mpeg", "video/mp4", "video/webm", "application/pdf"}
 var errA2ATaskStatusUnavailable = errors.New("A2A task status is temporarily unavailable")
 
 type a2aPart struct {
@@ -626,6 +626,14 @@ func a2aInputPart(part a2aPart) (map[string]any, bool) {
 			return nil, false
 		}
 		return map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": *part.Raw, "format": format}}, true
+	}
+	if part.MediaType == "video/mp4" || part.MediaType == "video/webm" {
+		format := strings.TrimPrefix(part.MediaType, "video/")
+		input := map[string]any{"type": "input_video", "input_video": map[string]any{"data": *part.Raw, "format": format}}
+		if _, err := openai.ChatVideoAttachments([]openai.Message{{Role: "user", Content: []any{input}}}); err != nil {
+			return nil, false
+		}
+		return input, true
 	}
 	if part.MediaType == "application/pdf" {
 		filename := part.Filename

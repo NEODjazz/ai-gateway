@@ -211,7 +211,7 @@ func TestA2AAgentCardDeclaresOnlyImplementedCapabilities(t *testing.T) {
 	request.Header.Set("X-Forwarded-Proto", "https")
 	router.ServeHTTP(response, request)
 	body := response.Body.String()
-	for _, expected := range []string{`"url":"https://gateway.example/a2a/research"`, `"protocolBinding":"JSONRPC"`, `"protocolVersion":"1.0"`, `"tenant":"research"`, `"streaming":false`, `"pushNotifications":false`, `"extendedAgentCard":true`, `"httpAuthSecurityScheme"`, `"schemes":{"bearer":{"list":[]}}`, `"image/png"`, `"audio/wav"`} {
+	for _, expected := range []string{`"url":"https://gateway.example/a2a/research"`, `"protocolBinding":"JSONRPC"`, `"protocolVersion":"1.0"`, `"tenant":"research"`, `"streaming":false`, `"pushNotifications":false`, `"extendedAgentCard":true`, `"httpAuthSecurityScheme"`, `"schemes":{"bearer":{"list":[]}}`, `"image/png"`, `"audio/wav"`, `"video/mp4"`, `"video/webm"`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("card missing %s: %s", expected, body)
 		}
@@ -588,6 +588,43 @@ func TestA2ASendMessageFetchesValidatedRemoteAudio(t *testing.T) {
 	}
 }
 
+func TestA2ASendMessageFetchesValidatedRemoteVideo(t *testing.T) {
+	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
+	registry := NewAgentRegistry()
+	if _, err := registry.PutToolPolicy("safe", ToolPolicy{Name: "Safe", AllowedTools: []string{"weather"}, MaxToolCalls: 2, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.PutAgentProfile("research", AgentProfile{Name: "Research", Model: "test-model", ToolPolicyID: "safe", MaxIterations: 3, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	llm := &a2aTestProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"test-model"}}, &lifecycleBillingModule{}}), llm).
+		WithAgentRegistry(registry).
+		WithA2ATaskStore(store, A2ATaskRuntimeConfig{OwnerQuota: 10, TTL: time.Hour})
+	fetches := 0
+	handler.a2aHTTPClient = a2aHTTPDoerFunc(func(request *http.Request) (*http.Response, error) {
+		fetches++
+		if request.URL.String() != "https://media.example/clip.webm" || request.Header.Get("Authorization") != "" || !strings.Contains(request.Header.Get("Accept"), "video/webm") {
+			t.Fatalf("unsafe remote request: url=%s headers=%v", request.URL, request.Header)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"video/webm"}}, Body: io.NopCloser(strings.NewReader("\x1a\x45\xdf\xa3payload")), Request: request}, nil
+	})
+	body := `{"jsonrpc":"2.0","id":"remote-video","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"remote-video","role":"ROLE_USER","parts":[{"url":"https://media.example/clip.webm","mediaType":"video/webm","filename":"clip.webm"}]}}}`
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || fetches != 1 {
+		t.Fatalf("status=%d fetches=%d body=%s", response.Code, fetches, response.Body.String())
+	}
+	input := llm.request.ResponseRequest.Input.([]any)
+	video := input[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if video["type"] != "input_video" || video["input_video"].(map[string]any)["format"] != "webm" {
+		t.Fatalf("video input=%#v", input)
+	}
+}
+
 func TestA2ASendMessageFetchesValidatedRemotePDF(t *testing.T) {
 	store := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
 	registry := NewAgentRegistry()
@@ -675,12 +712,16 @@ func TestA2ARemoteImageValidationAndLimits(t *testing.T) {
 		t.Fatal("accepted mismatched response content type")
 	}
 	audioResponse := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"audio/wav"}}, Body: io.NopCloser(strings.NewReader("RIFF\x00\x00\x00\x00WAVE"))}
-	if data, mediaType, err := readA2ARemoteContent(audioResponse, "audio/wav", openai.MaxTotalImageBytes, openai.MaxAudioBytes, openai.MaxResponseFileBytes, openai.MaxInferenceBodyBytes); err != nil || len(data) != 12 || mediaType != "audio/wav" {
+	if data, mediaType, err := readA2ARemoteContent(audioResponse, "audio/wav", openai.MaxTotalImageBytes, openai.MaxAudioBytes, openai.MaxChatVideoBytes, openai.MaxResponseFileBytes, openai.MaxInferenceBodyBytes); err != nil || len(data) != 12 || mediaType != "audio/wav" {
 		t.Fatalf("remote audio data=%q media_type=%q err=%v", data, mediaType, err)
 	}
 	overLimit := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"audio/wav"}}, Body: io.NopCloser(strings.NewReader("RIFF\x00\x00\x00\x00WAVE"))}
-	if _, _, err := readA2ARemoteContent(overLimit, "audio/wav", openai.MaxTotalImageBytes, openai.MaxAudioBytes, openai.MaxResponseFileBytes, 8); err == nil {
+	if _, _, err := readA2ARemoteContent(overLimit, "audio/wav", openai.MaxTotalImageBytes, openai.MaxAudioBytes, openai.MaxChatVideoBytes, openai.MaxResponseFileBytes, 8); err == nil {
 		t.Fatal("accepted remote media above the combined request limit")
+	}
+	videoResponse := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"video/mp4"}}, Body: io.NopCloser(strings.NewReader("\x00\x00\x00\x18ftypisom"))}
+	if data, mediaType, err := readA2ARemoteContent(videoResponse, "video/mp4", openai.MaxTotalImageBytes, openai.MaxAudioBytes, openai.MaxChatVideoBytes, openai.MaxResponseFileBytes, openai.MaxInferenceBodyBytes); err != nil || len(data) != 12 || mediaType != "video/mp4" {
+		t.Fatalf("remote video data=%q media_type=%q err=%v", data, mediaType, err)
 	}
 }
 
@@ -699,6 +740,25 @@ func TestA2ASendMessageAcceptsStructuredDataThroughPolicyPath(t *testing.T) {
 	part := input[0].(map[string]any)["content"].([]any)[0].(map[string]any)
 	if part["type"] != "input_text" || part["text"] != `{"city":"Paris","days":2}` {
 		t.Fatalf("canonical data part=%+v", part)
+	}
+}
+
+func TestA2ASendMessageAcceptsInlineVideoThroughPolicyPath(t *testing.T) {
+	router, llm, billing := a2aTestHandler(t)
+	video := base64.StdEncoding.EncodeToString([]byte("\x00\x00\x00\x18ftypisom"))
+	body := `{"jsonrpc":"2.0","id":"rpc-video","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"client-video","role":"ROLE_USER","parts":[{"raw":"` + video + `","mediaType":"video/mp4","filename":"clip.mp4"}]}}}`
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(body))
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || billing.calls != 1 || llm.request.ResponseRequest == nil {
+		t.Fatalf("status=%d billing=%d request=%+v body=%s", response.Code, billing.calls, llm.request.ResponseRequest, response.Body.String())
+	}
+	input := llm.request.ResponseRequest.Input.([]any)
+	part := input[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if part["type"] != "input_video" || part["input_video"].(map[string]any)["format"] != "mp4" {
+		t.Fatalf("video part=%+v", part)
 	}
 }
 

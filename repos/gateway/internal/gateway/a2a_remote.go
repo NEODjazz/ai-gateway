@@ -22,7 +22,7 @@ type httpDoer interface {
 }
 
 func countA2ARemoteParts(parts []a2aPart) (int, error) {
-	count, files := 0, 0
+	count, files, videos := 0, 0, 0
 	for _, part := range parts {
 		if (part.Raw != nil || part.URL != nil) && (part.MediaType == "application/pdf" || supportedA2ATextDocumentType(part.MediaType)) {
 			files++
@@ -32,6 +32,12 @@ func countA2ARemoteParts(parts []a2aPart) (int, error) {
 		}
 		if part.URL == nil {
 			continue
+		}
+		if supportedA2AVideoType(part.MediaType) {
+			videos++
+			if videos > openai.MaxChatVideoAttachments {
+				return 0, errors.New("invalid remote media part")
+			}
 		}
 		count++
 		if count > openai.MaxImageAttachments || part.Text != nil || part.Raw != nil || len(part.Data) != 0 || !validA2AFilename(part.Filename) || !supportedA2ARemoteType(part.MediaType) {
@@ -49,7 +55,7 @@ func (h Handler) resolveA2ARemoteParts(ctx context.Context, parts []a2aPart) err
 	if h.a2aHTTPClient == nil {
 		return errA2ARemoteUnavailable
 	}
-	imageTotal, audioTotal, fileTotal, remoteTotal := 0, 0, 0, 0
+	imageTotal, audioTotal, videoTotal, fileTotal, remoteTotal := 0, 0, 0, 0, 0
 	for index := range parts {
 		part := &parts[index]
 		if part.URL == nil {
@@ -59,12 +65,12 @@ func (h Handler) resolveA2ARemoteParts(ctx context.Context, parts []a2aPart) err
 		if err != nil {
 			return errors.New("invalid remote media URL")
 		}
-		request.Header.Set("Accept", "image/jpeg, image/png, image/gif, image/webp, audio/wav, audio/mpeg, application/pdf, text/plain, text/markdown, text/csv")
+		request.Header.Set("Accept", "image/jpeg, image/png, image/gif, image/webp, audio/wav, audio/mpeg, video/mp4, video/webm, application/pdf, text/plain, text/markdown, text/csv")
 		response, err := h.a2aHTTPClient.Do(request)
 		if err != nil {
 			return fmt.Errorf("%w: %v", errA2ARemoteUnavailable, err)
 		}
-		data, mediaType, readErr := readA2ARemoteContent(response, part.MediaType, openai.MaxTotalImageBytes-imageTotal, openai.MaxAudioBytes-audioTotal, openai.MaxResponseFileBytes-fileTotal, openai.MaxInferenceBodyBytes-remoteTotal)
+		data, mediaType, readErr := readA2ARemoteContent(response, part.MediaType, openai.MaxTotalImageBytes-imageTotal, openai.MaxAudioBytes-audioTotal, openai.MaxChatVideoBytes-videoTotal, openai.MaxResponseFileBytes-fileTotal, openai.MaxInferenceBodyBytes-remoteTotal)
 		if readErr != nil {
 			return readErr
 		}
@@ -73,6 +79,8 @@ func (h Handler) resolveA2ARemoteParts(ctx context.Context, parts []a2aPart) err
 			imageTotal += len(data)
 		case strings.HasPrefix(mediaType, "audio/"):
 			audioTotal += len(data)
+		case strings.HasPrefix(mediaType, "video/"):
+			videoTotal += len(data)
 		case mediaType == "application/pdf" || supportedA2ATextDocumentType(mediaType):
 			fileTotal += len(data)
 		}
@@ -89,10 +97,10 @@ func (h Handler) resolveA2ARemoteParts(ctx context.Context, parts []a2aPart) err
 }
 
 func readA2ARemoteImage(response *http.Response, requestedType string, remaining int) ([]byte, string, error) {
-	return readA2ARemoteContent(response, requestedType, remaining, 0, 0, remaining)
+	return readA2ARemoteContent(response, requestedType, remaining, 0, 0, 0, remaining)
 }
 
-func readA2ARemoteContent(response *http.Response, requestedType string, imageRemaining, audioRemaining, fileRemaining, totalRemaining int) ([]byte, string, error) {
+func readA2ARemoteContent(response *http.Response, requestedType string, imageRemaining, audioRemaining, videoRemaining, fileRemaining, totalRemaining int) ([]byte, string, error) {
 	if response == nil || response.Body == nil {
 		return nil, "", errA2ARemoteUnavailable
 	}
@@ -107,6 +115,8 @@ func readA2ARemoteContent(response *http.Response, requestedType string, imageRe
 	limit, remaining := openai.MaxImageBytes, imageRemaining
 	if strings.HasPrefix(mediaType, "audio/") {
 		limit, remaining = openai.MaxAudioBytes, audioRemaining
+	} else if strings.HasPrefix(mediaType, "video/") {
+		limit, remaining = openai.MaxChatVideoBytes, videoRemaining
 	} else if mediaType == "application/pdf" || supportedA2ATextDocumentType(mediaType) {
 		limit, remaining = openai.MaxResponseFileBytes, fileRemaining
 	}
@@ -139,7 +149,11 @@ func supportedA2AImageType(mediaType string) bool {
 }
 
 func supportedA2ARemoteType(mediaType string) bool {
-	return supportedA2AImageType(mediaType) || mediaType == "audio/wav" || mediaType == "audio/mpeg" || mediaType == "application/pdf" || supportedA2ATextDocumentType(mediaType)
+	return supportedA2AImageType(mediaType) || mediaType == "audio/wav" || mediaType == "audio/mpeg" || supportedA2AVideoType(mediaType) || mediaType == "application/pdf" || supportedA2ATextDocumentType(mediaType)
+}
+
+func supportedA2AVideoType(mediaType string) bool {
+	return mediaType == "video/mp4" || mediaType == "video/webm"
 }
 
 func supportedA2ATextDocumentType(mediaType string) bool {
