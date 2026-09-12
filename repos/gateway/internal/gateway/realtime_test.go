@@ -417,6 +417,34 @@ func TestRealtimeInputDLPRejectsTextBeforeProvider(t *testing.T) {
 	}
 }
 
+func TestRealtimeInputTranscriptionFailsBeforeProvider(t *testing.T) {
+	var upstreamEvents atomic.Int32
+	upstream := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
+		var event string
+		if websocket.Message.Receive(connection, &event) == nil {
+			upstreamEvents.Add(1)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "realtime", Type: "openai", BaseURL: upstream.URL, Models: []string{"model"}, Capabilities: []string{"realtime", "audio_input"},
+	}}})
+	gateway := httptest.NewServer(Routes(NewHandler(modules.NewPipeline([]modules.Module{realtimeAuthModule{allowedModels: []string{"model"}}}), router)))
+	t.Cleanup(gateway.Close)
+
+	connection := dialGatewayRealtime(t, gateway.URL, "/v1/realtime?model=model", "gateway-key")
+	if err := websocket.Message.Send(connection, `{"type":"session.update","session":{"audio":{"input":{"transcription":{"model":"transcribe-model"}}}}}`); err != nil {
+		t.Fatal(err)
+	}
+	var event string
+	if err := websocket.Message.Receive(connection, &event); err != nil || !strings.Contains(event, `"code":"unsupported_feature"`) || !strings.Contains(event, "input transcription is not supported") {
+		t.Fatalf("event=%s err=%v", event, err)
+	}
+	if upstreamEvents.Load() != 0 {
+		t.Fatal("unbillable input transcription configuration reached the provider")
+	}
+}
+
 func TestRealtimeAudioLifecycleScansAndAccountsCommittedInput(t *testing.T) {
 	billing := &realtimeBillingModule{}
 	av := &realtimeAVModule{}
@@ -530,6 +558,18 @@ func TestRealtimeAudioRejectsUnsupportedInvalidAndUnsafeEvents(t *testing.T) {
 	}
 	if err := withAudio.ClientEvent(t.Context(), []byte(`{"type":"input_audio_buffer.commit"}`)); err == nil || !strings.Contains(err.Error(), "buffer is empty") {
 		t.Fatalf("empty commit error=%v", err)
+	}
+	for _, payload := range []string{
+		`{"type":"session.update","session":{"type":"transcription"}}`,
+		`{"type":"session.update","session":{"input_audio_transcription":{"model":"whisper"}}}`,
+		`{"type":"session.update","session":{"audio":{"input":{"transcription":{}}}}}`,
+	} {
+		if err := withAudio.ClientEvent(t.Context(), []byte(payload)); err == nil || !strings.Contains(err.Error(), "input transcription is not supported") {
+			t.Fatalf("transcription payload=%s error=%v", payload, err)
+		}
+	}
+	if err := withAudio.ProviderEvent(t.Context(), []byte(`{"type":"conversation.item.input_audio_transcription.completed","item_id":"audio","usage":{"type":"tokens","input_tokens":1,"output_tokens":1,"total_tokens":2}}`)); err == nil || !strings.Contains(err.Error(), "input transcription is not supported") {
+		t.Fatalf("unaccounted provider transcription error=%v", err)
 	}
 
 	rejectingAV := &realtimeAVModule{reject: true}

@@ -143,6 +143,8 @@ func sendRealtimeGatewayError(client *websocket.Conn, cause error) error {
 		code, message = "budget_exceeded", "budget exceeded"
 	} else if errors.Is(cause, modules.ErrBillingConflict) {
 		code, message = "billing_conflict", "billing lifecycle conflict"
+	} else if errors.Is(cause, errRealtimeInputTranscriptionUnsupported) {
+		code, message = "unsupported_feature", errRealtimeInputTranscriptionUnsupported.Error()
 	} else {
 		var credentialLimit *realtimeRateLimitError
 		var providerLimit *provider.ProviderQuotaError

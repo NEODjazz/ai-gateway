@@ -24,6 +24,8 @@ const maxRealtimeCancelledResponses = 64
 const maxRealtimeAudioAppendBytes = 15 << 20
 const maxRealtimeAudioBufferBytes = 1 << 30
 
+var errRealtimeInputTranscriptionUnsupported = errors.New("realtime input transcription is not supported")
+
 type realtimeBillingTracker struct {
 	pipeline modules.Pipeline
 	template modules.RequestContext
@@ -110,6 +112,13 @@ func (t *realtimeBillingTracker) ClientEvent(ctx context.Context, payload []byte
 func (t *realtimeBillingTracker) handleClientAudioEvent(ctx context.Context, event realtimeEventEnvelope) error {
 	switch event.Type {
 	case "session.update":
+		transcriptionConfigured, transcriptionErr := realtimeSessionUsesTranscription(event.Session)
+		if transcriptionErr != nil {
+			return transcriptionErr
+		}
+		if transcriptionConfigured {
+			return errRealtimeInputTranscriptionUnsupported
+		}
 		inputFormat, inputConfigured, outputConfigured, err := realtimeSessionAudioConfig(event.Session)
 		if err != nil {
 			return err
@@ -220,6 +229,9 @@ func (t *realtimeBillingTracker) handleProviderAudioEvent(event realtimeEventEnv
 		t.mu.Lock()
 		t.audioBufferBytes = 0
 		t.mu.Unlock()
+	case "conversation.item.input_audio_transcription.delta", "conversation.item.input_audio_transcription.completed", "conversation.item.input_audio_transcription.failed", "conversation.item.input_audio_transcription.segment",
+		"conversation.item.audio_transcription.delta", "conversation.item.audio_transcription.completed", "conversation.item.audio_transcription.failed", "conversation.item.audio_transcription.segment":
+		return errRealtimeInputTranscriptionUnsupported
 	}
 	return nil
 }
@@ -336,6 +348,46 @@ func realtimeSessionAudioConfig(raw json.RawMessage) (string, bool, bool, error)
 		}
 	}
 	return inputFormat, inputConfigured, outputConfigured, nil
+}
+
+func realtimeSessionUsesTranscription(raw json.RawMessage) (bool, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false, nil
+	}
+	var session struct {
+		Type               string          `json:"type"`
+		InputTranscription json.RawMessage `json:"input_audio_transcription"`
+		Audio              json.RawMessage `json:"audio"`
+	}
+	if json.Unmarshal(raw, &session) != nil {
+		return false, errors.New("invalid realtime session configuration")
+	}
+	if session.Type == "transcription" || realtimeJSONConfigured(session.InputTranscription) {
+		return true, nil
+	}
+	if !realtimeJSONConfigured(session.Audio) {
+		return false, nil
+	}
+	var audio struct {
+		Input json.RawMessage `json:"input"`
+	}
+	if json.Unmarshal(session.Audio, &audio) != nil {
+		return false, errors.New("invalid realtime audio configuration")
+	}
+	if !realtimeJSONConfigured(audio.Input) {
+		return false, nil
+	}
+	var input struct {
+		Transcription json.RawMessage `json:"transcription"`
+	}
+	if json.Unmarshal(audio.Input, &input) != nil {
+		return false, errors.New("invalid realtime input audio configuration")
+	}
+	return realtimeJSONConfigured(input.Transcription), nil
+}
+
+func realtimeJSONConfigured(raw json.RawMessage) bool {
+	return len(raw) > 0 && string(raw) != "null"
 }
 
 func parseRealtimeAudioFormat(raw json.RawMessage) (string, bool, error) {
