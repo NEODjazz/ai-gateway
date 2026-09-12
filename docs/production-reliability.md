@@ -1186,3 +1186,12 @@ policy without a billing lifecycle. Durable batch creation stores resolved bytes
 within the 4 MiB line bound, so expiry or deletion cannot change queued input.
 Foreign, expired, malformed and unsupported files fail closed without revealing
 which condition occurred. Full Go tests, race tests, vet and build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-987d3ea` with image ID
+`sha256:5b5b3c9ba40f2ddf78f19d6537b70e77d452711d8d67569da4b66d4920eb0bc5`.
+Gateway Helm revision 461 completed successfully, and pod
+`ai-gateway-gateway-85c95dd9f6-xmqgx` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.360 exposes the owner-scoped file source. A
+well-formed reference passed request validation and reached authentication;
+an invalid identifier returned 400 before authentication or storage access.
+These smoke checks used no credential and performed no external inference.
