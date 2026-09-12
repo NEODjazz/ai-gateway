@@ -901,3 +901,11 @@ continuation through JSON and SSE. Mixed server-tool and computer-tool turns,
 image and error results, upstream streaming, token counting and durable batch
 admission use the same bounded representation. Full Go test, race, vet and build
 checks and all 166 UI tests completed successfully.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-89c92e3` with image ID
+`sha256:aa28aba0e947bf16c2fca4a7dd6bfa34b38f7ee19ebc43fa7627db15fe5f74c1`.
+Gateway Helm revision 444 completed successfully, and pod
+`ai-gateway-gateway-cd6b96986-jxmz8` became Ready with zero restarts and the
+same image digest. Its live endpoint served OpenAPI 0.1.344 with the current
+computer toolset and all 17 fixed member configs. A structurally valid request
+with a disabled `zoom` member reached authentication and returned 401.
