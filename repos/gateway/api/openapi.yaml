@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.339
+  version: 0.1.340
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -6986,7 +6986,7 @@ components:
                   - type: array
                     minItems: 1
                     items: {type: object}
-                    description: Supports text, image, tool_use, tool_result, thinking and redacted_thinking blocks. Thinking history is accepted only for assistant messages and routed only to an adapter with an explicit signed-reasoning contract.
+                    description: Supports text, image, tool_use, tool_result, thinking, redacted_thinking and bounded native server-tool continuation blocks. Thinking history is accepted only for assistant messages and routed only to an adapter with an explicit signed-reasoning contract.
         tools:
           type: array
           items:
@@ -6998,6 +6998,7 @@ components:
                   name: {type: string, minLength: 1}
                   description: {type: string}
                   input_schema: {type: object, additionalProperties: true}
+                  defer_loading: {type: boolean, default: false, description: Requires one tool_search_tool_regex_20251119 or tool_search_tool_bm25_20251119 server tool and cannot be combined with cache_control.}
                   cache_control:
                     type: object
                     additionalProperties: false
@@ -7011,6 +7012,18 @@ components:
                 properties:
                   type: {type: string, const: code_execution_20250825}
                   name: {type: string, const: code_execution}
+              - type: object
+                additionalProperties: false
+                required: [type, name]
+                properties:
+                  type: {type: string, const: tool_search_tool_regex_20251119}
+                  name: {type: string, const: tool_search_tool_regex}
+              - type: object
+                additionalProperties: false
+                required: [type, name]
+                properties:
+                  type: {type: string, const: tool_search_tool_bm25_20251119}
+                  name: {type: string, const: tool_search_tool_bm25}
               - type: object
                 additionalProperties: false
                 required: [type, name]
@@ -7071,7 +7084,7 @@ components:
         content:
           type: array
           items: {type: object}
-          description: Text, tool, signed thinking and redacted thinking content blocks returned in provider order.
+          description: Text, function tool, native server-tool results, signed thinking and redacted thinking content blocks returned in provider order.
         stop_reason: {type: string, enum: [end_turn, max_tokens, tool_use, refusal, stop_sequence, pause_turn]}
         stop_sequence: {type: [string, 'null']}
         container:
@@ -7145,7 +7158,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -9563,7 +9576,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

@@ -696,7 +696,7 @@ Compatibility is partial. Unsupported top-level fields and block fields fail
 with a native invalid_request_error. Thinking blocks are accepted only in
 assistant history, must precede text/tool blocks, retain their provider signature,
 and have a 1 MiB aggregate payload limit. Adapters without an explicit reasoning
-block contract reject them before upstream execution. Server tools, documents,
+block contract reject them before upstream execution. Documents,
 URL images, top_k, text after tool_use and is_error=true tool results are not supported.
 All tool-use history requires matching results. Opaque provider tool metadata
 that cannot be represented in Messages produces an explicit conversion error.
@@ -738,6 +738,17 @@ The same request shape is accepted in durable `/v1/messages` batches and is
 revalidated when the item executes, including durable container ownership and
 affinity. Streaming with skills remains rejected until native SSE execution state
 can be preserved end to end.
+
+Messages supports one native regex or BM25 tool-search server tool per request.
+Function tools may set `defer_loading=true` only when tool search is present and
+cannot combine it with a prompt-cache breakpoint. Requests require the explicit
+`tool_search` deployment capability and `tool_search` tool grant, include the
+native configuration and continuation blocks in TPM reserve, and bypass exact
+and semantic caches. Bounded `server_tool_use` and `tool_search_tool_result`
+blocks retain provider order across a later assistant-history turn. Tool search
+does not create a separate usage unit; its input and output remain part of token
+billing. Messages streaming uses the existing bounded buffered conversion so
+policy checks finish before native SSE is emitted.
 
 Regressions cover request/response conversion, native and fallback SSE, stream
 failure, model/tool authorization, TPM, unknown input, response-size bounds and

@@ -204,6 +204,11 @@ caching for the request. The native `/v1/messages` route accepts the bounded
 validated server-tool result blocks in provider order. Streaming requests use a
 bounded buffered response so output policy checks complete before the gateway
 emits native SSE events.
+The route also accepts one `tool_search_tool_regex_20251119` or
+`tool_search_tool_bm25_20251119` server tool. Function tools can opt into
+`defer_loading`; the gateway requires explicit deployment capability and tool
+authorization, counts native continuation context, preserves bounded result
+blocks, and excludes these requests from response caches.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.
