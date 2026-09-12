@@ -185,6 +185,11 @@ redirects, проверяют public IP при каждом DNS resolve и ог�
 response, SSE event и tool pages. Реестр не возвращает credential после
 сохранения. Успешный protocol client и его MCP session переиспользуются между
 gateway requests в пределах одного процесса.
+Legacy SSE отвечает на server-initiated `ping` пустым result. Остальные
+server requests получают JSON-RPC `-32601`, поскольку gateway не объявляет
+sampling, roots или elicitation capabilities. Pending server requests ограничены
+восемью элементами; переполнение, неверный request ID или ошибка ответного POST
+закрывают session через общий failure path. Notifications принимаются без ответа.
 Pool ограничен 64 записями, применяет sliding TTL 10 минут и LRU eviction.
 Ключ включает SHA-256 от transport, endpoint и server credential, поэтому
 смена transport, ротация или удаление credential не переиспользуют прежнюю
@@ -206,6 +211,6 @@ session. Transport или protocol failure немедленно инвалиди
 Из `repos/gateway` запустите
 `go test ./api ./internal/gateway ./internal/mcpclient ./internal/provider`.
 Проверки покрывают API-контракты, ACL, состояние toolsets, безопасные metadata,
-зависимости удаления и routing. Они не подтверждают доступность внешнего MCP
+зависимости удаления, routing и server-request lifecycle. Они не подтверждают доступность внешнего MCP
 или поддержку remote MCP конкретным провайдером — это отдельный интеграционный
 тест с тестовым сервером и ограниченным инструментом.

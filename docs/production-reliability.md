@@ -1359,3 +1359,12 @@ Streamable HTTP and legacy HTTP+SSE transports. An MCP discovery request with
 an invalid smoke key returned 401 before registry or upstream access. No
 credential was stored and no external MCP call or model inference was
 performed.
+
+Source `ab3f47e` adds bounded server-request handling to legacy MCP SSE sessions.
+The client answers `ping`, returns JSON-RPC method-not-found for capabilities it
+did not advertise, consumes notifications without corrupting the next event and
+limits pending requests to eight. IDs are restricted to bounded JSON-RPC string
+or number values. Response delivery uses the configured credential and a
+30-second cancellable deadline; failure enters the existing session invalidation
+path. End-to-end and bound regressions, the full Go suite, full race suite, vet
+and build passed.

@@ -61,6 +61,9 @@ Streamable HTTP и legacy HTTP+SSE используют один credential scop
 SSE объявленный message endpoint обязан оставаться на исходном HTTPS origin;
 размер каждого события ограничен, а stream закрывается при invalidation,
 истечении TTL и eviction из runtime pool.
+Server-initiated requests проходят очередь максимум из восьми элементов.
+Gateway отвечает только на `ping`; необъявленные privileged capabilities
+получают `method not found` и не запускают model, filesystem или user workflow.
 
 Полная модель разрешений и ограничения: [MCP](mcp.md).
 
