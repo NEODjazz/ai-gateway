@@ -105,7 +105,12 @@ public-cloud Entra authority. Для endpoint с suffix `.openai.azure.us` ил�
 `.cognitiveservices.azure.us` gateway автоматически использует authority
 `https://login.microsoftonline.us` и resource
 `https://cognitiveservices.azure.us/` как для federation, так и для managed
-identity. Другие неизвестные host suffix не меняют identity endpoints.
+identity. Для endpoint с suffix `.openai.azure.cn` или
+`.cognitiveservices.azure.cn` используются China authority
+`https://login.chinacloudapi.cn` и resource
+`https://cognitiveservices.azure.cn/`. Выбор sovereign cloud выполняется только
+по полному host suffix; другие и похожие внешние домены остаются на public-cloud
+defaults.
 `AZURE_CLIENT_ID` также выбирает
 user-assigned managed identity. Разрешены только loopback и link-local identity
 endpoints; redirects и некорректные/просроченные ответы отклоняются. Временный
