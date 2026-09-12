@@ -102,6 +102,9 @@ NIM's top-level `usage.reasoning_tokens` is normalized to public
 `completion_tokens_details.reasoning_tokens` in JSON and SSE. Negative,
 fractional, null, conflicting or greater-than-completion values fail before the
 response enters billing and observability.
+NVIDIA NIM exposes the output cap as native `max_tokens`; the adapter maps
+public `max_completion_tokens` to that field for JSON and SSE. Both public names
+retain the shared mutually-exclusive validation and common TPM/budget reserve.
 
 Provider type `together` sends Rerank requests to the native `/v1/rerank`
 endpoint with bearer authentication. It accepts text and object documents,

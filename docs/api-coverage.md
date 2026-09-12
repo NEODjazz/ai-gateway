@@ -217,6 +217,8 @@ availability is not inferred from these tests.
 - `e888f1f`: Native NVIDIA NIM Chat maps the provider's top-level reasoning
   token count into public completion-token details for JSON and SSE and rejects
   malformed or inconsistent counters.
+- `ebd6e9c`: Native NVIDIA NIM Chat maps public `max_completion_tokens` to the
+  provider's native `max_tokens` field in JSON and SSE.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control

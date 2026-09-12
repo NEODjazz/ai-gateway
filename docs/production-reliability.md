@@ -1862,3 +1862,19 @@ image. Live liveness and readiness returned 204, the served OpenAPI reported
 0.1.391, and an unauthenticated DeepSeek reasoning request returned 401 before
 deployment selection. No provider credential or external inference was used by
 the smoke checks.
+
+Source `ebd6e9c` maps public `max_completion_tokens` to NVIDIA NIM's native
+`max_tokens` field for JSON and SSE. The shared request boundary still rejects
+both public limit names together, and TPM plus billing reserve continue to use
+their common effective output cap. Exact-wire provider regressions, OpenAPI
+validation, vet, build, the full Go suite and the full race suite passed.
+OpenAPI 0.1.392 documents the mapping.
+
+Rancher Desktop built `ai-gateway-gateway:nvidia-token-limit-ebd6e9c` with
+image ID `sha256:84e537cbfb46b5347e8dc4d5918ddf9a92a704d81a0fa278aceed2ca70d069dc`.
+Gateway Helm revision 497 completed successfully. Pod
+`ai-gateway-gateway-55f877b94c-r8xwz` became Ready with zero restarts on that
+image. Live liveness and readiness returned 204, the served OpenAPI reported
+0.1.392, and an unauthenticated request carrying `max_completion_tokens`
+returned 401 before deployment selection. No provider credential or external
+inference was used by the smoke checks.
