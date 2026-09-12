@@ -20,13 +20,16 @@ type TokenCountClient interface {
 	CountTokens(context.Context, TokenCountRequest) (TokenCountResult, error)
 }
 type TokenCountRequest struct {
-	Model                 string
-	Messages              []openai.Message
-	Tools                 []openai.Tool
-	ToolChoice            any
-	ParallelToolCalls     *bool
-	ChatGenerationOptions openai.ChatGenerationOptions
-	ResponseFormat        *openai.ResponseFormat
+	Model                  string
+	Messages               []openai.Message
+	Tools                  []openai.Tool
+	ToolChoice             any
+	ParallelToolCalls      *bool
+	ChatGenerationOptions  openai.ChatGenerationOptions
+	ResponseFormat         *openai.ResponseFormat
+	AnthropicSkills        []openai.AnthropicSkillReference
+	AnthropicContainerID   string
+	AnthropicCodeExecution bool
 }
 type TokenCountResult struct {
 	InputTokens int
@@ -35,7 +38,7 @@ type TokenCountResult struct {
 }
 
 func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (TokenCountResult, error) {
-	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat}
+	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat, AnthropicSkills: request.AnthropicSkills, AnthropicContainerID: request.AnthropicContainerID, AnthropicCodeExecution: request.AnthropicCodeExecution}
 	if err := validateTokenCountRequest(chat); err != nil {
 		return TokenCountResult{}, err
 	}
@@ -50,7 +53,8 @@ func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (
 		Tools        []anthropicTool        `json:"tools,omitempty"`
 		ToolChoice   map[string]any         `json:"tool_choice,omitempty"`
 		OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
-	}{native.Model, native.System, native.Messages, native.Tools, native.ToolChoice, native.OutputConfig})
+		Container    *anthropicContainer    `json:"container,omitempty"`
+	}{native.Model, native.System, native.Messages, native.Tools, native.ToolChoice, native.OutputConfig, native.Container})
 	if err != nil {
 		return TokenCountResult{}, err
 	}
@@ -68,6 +72,9 @@ func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (
 		return TokenCountResult{}, err
 	}
 	p.setHeaders(req)
+	if len(request.AnthropicSkills) > 0 {
+		req.Header.Set("anthropic-beta", "skills-2025-10-02")
+	}
 	client := *p.client
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := client.Do(req)

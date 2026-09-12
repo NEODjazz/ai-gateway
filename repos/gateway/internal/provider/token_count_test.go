@@ -81,6 +81,34 @@ func TestAnthropicCountTokensIncludesNativeContext(t *testing.T) {
 		t.Fatalf("count: %+v %v", result, err)
 	}
 }
+
+func TestAnthropicCountTokensIncludesSkillExecutionContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("anthropic-beta") != "skills-2025-10-02" {
+			t.Errorf("missing skills beta header: %v", r.Header)
+		}
+		var body struct {
+			Container *anthropicContainer `json:"container"`
+			Tools     []anthropicTool     `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Container == nil || body.Container.ID != "container_1" || len(body.Container.Skills) != 1 || body.Container.Skills[0].SkillID != "skill_1" || len(body.Tools) != 1 || body.Tools[0].Type != "code_execution_20250825" {
+			t.Errorf("skill execution context lost: %+v", body)
+		}
+		_, _ = w.Write([]byte(`{"input_tokens":37}`))
+	}))
+	defer server.Close()
+	result, err := NewAnthropic(server.URL, "", false).CountTokens(t.Context(), TokenCountRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "count"}},
+		AnthropicSkills:      []openai.AnthropicSkillReference{{Type: "custom", SkillID: "skill_1", Version: "v1"}},
+		AnthropicContainerID: "container_1", AnthropicCodeExecution: true,
+	})
+	if err != nil || result.InputTokens != 37 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
 func TestAnthropicCounterRejectsMalformedCounts(t *testing.T) {
 	for _, payload := range []string{`{}`, `{"input_tokens":null}`, `{"input_tokens":-1}`, `{"input_tokens":1.5}`, `{"input_tokens":9223372036854775808}`, `{"input_tokens":1} {}`, strings.Repeat(" ", (64<<10)+1)} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(payload)) }))

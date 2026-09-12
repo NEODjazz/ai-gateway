@@ -17,6 +17,7 @@ type messagesCountRequest struct {
 	Tools        []messagesTool        `json:"tools,omitempty"`
 	ToolChoice   *messagesToolChoice   `json:"tool_choice,omitempty"`
 	OutputConfig *messagesOutputConfig `json:"output_config,omitempty"`
+	Container    *messagesContainer    `json:"container,omitempty"`
 }
 
 func (h Handler) CountMessageTokens(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +36,7 @@ func (h Handler) CountMessageTokens(w http.ResponseWriter, r *http.Request) {
 	if !decodeInferenceRequest(output, r, &native) {
 		return
 	}
-	request, err := (messagesRequest{Model: native.Model, MaxTokens: 1, Messages: native.Messages, System: native.System, Tools: native.Tools, ToolChoice: native.ToolChoice, OutputConfig: native.OutputConfig}).chatContext(true)
+	request, err := (messagesRequest{Model: native.Model, MaxTokens: 1, Messages: native.Messages, System: native.System, Tools: native.Tools, ToolChoice: native.ToolChoice, OutputConfig: native.OutputConfig, Container: native.Container}).chatContext(true)
 	if err != nil {
 		writeError(output, 400, "invalid_request", err.Error())
 		return
@@ -74,12 +75,20 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 	if !h.prepareAccessGroups(w, &req) {
 		return 0, false
 	}
+	if err := h.bindSkillExecution(r.Context(), &req); err != nil {
+		writeSkillExecutionError(w, err)
+		return 0, false
+	}
 	if _, err := openai.ChatImageAttachments(req.Request.Messages); err != nil {
 		writeError(w, 400, "invalid_image", err.Error())
 		return 0, false
 	}
 	request = req.Request
 	tools, valid := chatToolIdentifiers(request.Tools, nil)
+	tools = append(tools, skillExecutionIdentifiers(request.AnthropicSkills)...)
+	if request.AnthropicCodeExecution {
+		tools = append(tools, "code_execution")
+	}
 	if !h.authorizeTools(w, req, tools, valid) || !h.authorizeAccess(w, r.Context(), req, request.Model, openai.ChatInputTokens(request)) {
 		return 0, false
 	}

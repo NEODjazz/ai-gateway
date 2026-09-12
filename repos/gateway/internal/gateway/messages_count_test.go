@@ -8,10 +8,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/provider"
+	"ai-gateway-gateway/internal/skillstate"
 )
 
 type countPolicy struct {
@@ -110,11 +112,13 @@ func TestCountEndpointRejectsGenerationParameters(t *testing.T) {
 
 type countProviderSpy struct {
 	chatProvider
-	calls int
+	calls   int
+	request modules.RequestContext
 }
 
-func (p *countProviderSpy) CountTokens(context.Context, modules.RequestContext) (provider.TokenCountResult, error) {
+func (p *countProviderSpy) CountTokens(_ context.Context, request modules.RequestContext) (provider.TokenCountResult, error) {
 	p.calls++
+	p.request = request
 	return provider.TokenCountResult{InputTokens: 10}, nil
 }
 func TestCountEndpointEnforcesToolACLAndSharedRPM(t *testing.T) {
@@ -132,6 +136,25 @@ func TestCountEndpointEnforcesToolACLAndSharedRPM(t *testing.T) {
 	}
 	if counter.calls != 1 {
 		t.Fatal("limited count reached provider")
+	}
+}
+
+func TestCountEndpointIncludesOwnedSkillExecutionContext(t *testing.T) {
+	owner := skillOwnerKey(modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"})
+	store := &memorySkillStore{
+		items: map[string]skillstate.Ownership{
+			"skill_owned": {SkillID: "skill_owned", OwnerKey: owner, EndpointID: "skills-endpoint"},
+		},
+		executions: map[string]skillstate.Execution{
+			"container_1": {ContainerID: "container_1", OwnerKey: owner, EndpointID: "skills-endpoint", ExpiresAt: time.Now().Add(time.Hour)},
+		},
+	}
+	counter := &countProviderSpy{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"skill:skill_owned", "code_execution"}}}}), counter).WithSkillStore(store))
+	response := countEndpointCall(handler, `{"model":"m","container":{"id":"container_1","skills":[{"type":"custom","skill_id":"skill_owned","version":"v1"}]},"tools":[{"type":"code_execution_20250825","name":"code_execution"}],"messages":[{"role":"user","content":"count this"}]}`, "gateway-test-key")
+	request := counter.request.Request
+	if response.Code != http.StatusOK || counter.calls != 1 || request.Provider != "skills-endpoint" || request.AnthropicContainerID != "container_1" || len(request.AnthropicSkills) != 1 || !request.AnthropicCodeExecution || request.NativeInputTokens == 0 {
+		t.Fatalf("status=%d body=%s calls=%d request=%+v", response.Code, response.Body.String(), counter.calls, request)
 	}
 }
 
