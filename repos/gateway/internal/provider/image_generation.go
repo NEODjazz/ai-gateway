@@ -243,6 +243,14 @@ func validateImageGenerationResponseCount(response openai.ImageGenerationRespons
 }
 
 func validateImageGenerationResponseCountWithProviderCost(response openai.ImageGenerationResponse, request openai.ImageGenerationRequest, exactCount, allowProviderCost bool) error {
+	return validateImageGenerationResponsePolicy(response, request, exactCount, allowProviderCost, false)
+}
+
+func validateImageGenerationUnitResponse(response openai.ImageGenerationResponse, request openai.ImageGenerationRequest) error {
+	return validateImageGenerationResponsePolicy(response, request, true, false, true)
+}
+
+func validateImageGenerationResponsePolicy(response openai.ImageGenerationResponse, request openai.ImageGenerationRequest, exactCount, allowProviderCost, allowMissingUsage bool) error {
 	if response.Created < 0 || !oneOfOrEmptyImageValue(response.Background, "auto", "transparent", "opaque") || !oneOfOrEmptyImageValue(response.OutputFormat, "png", "webp", "jpeg", "svg") || !oneOfOrEmptyImageValue(response.Quality, "auto", "low", "medium", "high", "xhigh", "max") || !oneOfOrEmptyImageValue(response.Size, "auto", "256x256", "512x512", "1024x1024", "1536x1024", "1024x1536", "1792x1024", "1024x1792") {
 		return errors.New("provider returned invalid image metadata")
 	}
@@ -277,6 +285,9 @@ func validateImageGenerationResponseCountWithProviderCost(response openai.ImageG
 	}
 	usage := response.Usage
 	if usage == nil {
+		if allowMissingUsage {
+			return nil
+		}
 		return errors.New("provider returned invalid or missing image usage")
 	}
 	validTokens := usage.InputTokens >= 0 && usage.OutputTokens >= 0 && usage.TotalTokens >= 0 && usage.InputTokens <= int(^uint(0)>>1)-usage.OutputTokens && usage.TotalTokens == usage.InputTokens+usage.OutputTokens

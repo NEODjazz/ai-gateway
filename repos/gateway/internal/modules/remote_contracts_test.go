@@ -445,6 +445,11 @@ func TestImageGenerationBillingReserveAndSettlement(t *testing.T) {
 	if settled.InputTokens != 0 || settled.OutputTokens != 0 || settled.TotalTokens != 0 || settled.UsageEstimated {
 		t.Fatalf("provider-reported zero usage must remain exact: %+v", settled)
 	}
+	req.ImageGenerationResponse = &openai.ImageGenerationResponse{Data: []openai.ImageData{{URL: "https://example.test/one"}, {URL: "https://example.test/two"}}}
+	settled = billingRequest(req)
+	if settled.OutputImages != 2 || !settled.UsageEstimated {
+		t.Fatalf("unit-priced image response must preserve exact output count and estimated token state: %+v", settled)
+	}
 }
 
 func TestImageEditBillingReserveAndSettlement(t *testing.T) {

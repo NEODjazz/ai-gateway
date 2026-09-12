@@ -43,6 +43,120 @@ func (Together) SupportsAudioTranscriptionStreaming() bool {
 	return false
 }
 func (Together) SupportsAudioTranslation() bool { return true }
+func (Together) SupportsImageGeneration() bool  { return true }
+func (Together) UsesImageUnitUsage() bool       { return true }
+
+func (Together) ValidateImageGenerationParameters(request openai.ImageGenerationRequest) error {
+	if message := request.Validate(); message != "" {
+		return &Error{Class: FailureClientRequest, Provider: "together", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	if request.N != nil && *request.N > 4 {
+		return &Error{Class: FailureClientRequest, Provider: "together", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New("n must be between 1 and 4 for together")}
+	}
+	return rejectParameters("together",
+		parameterCheck{"quality", request.Quality != ""},
+		parameterCheck{"style", request.Style != ""},
+		parameterCheck{"user", request.User != ""},
+		parameterCheck{"background", request.Background != ""},
+		parameterCheck{"output_format", request.OutputFormat != "" && request.OutputFormat != "jpeg" && request.OutputFormat != "png"},
+		parameterCheck{"output_compression", request.OutputCompression != nil},
+		parameterCheck{"resolution", request.Resolution != ""},
+		parameterCheck{"aspect_ratio", request.AspectRatio != ""},
+		parameterCheck{"stream", request.Stream},
+		parameterCheck{"partial_images", request.PartialImages != nil},
+	)
+}
+
+func (t Together) GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
+	if err := t.ValidateImageGenerationParameters(request); err != nil {
+		return openai.ImageGenerationResponse{}, err
+	}
+	responseFormat := request.ResponseFormat
+	if responseFormat == "b64_json" {
+		responseFormat = "base64"
+	}
+	var width, height *int
+	if request.Size != "" && request.Size != "auto" {
+		widthText, heightText, _ := strings.Cut(request.Size, "x")
+		widthValue, widthErr := strconv.Atoi(widthText)
+		heightValue, heightErr := strconv.Atoi(heightText)
+		if widthErr != nil || heightErr != nil {
+			return openai.ImageGenerationResponse{}, rejectParameters("together", parameterCheck{"size", true})
+		}
+		width, height = &widthValue, &heightValue
+	}
+	body, err := json.Marshal(struct {
+		Model          string `json:"model"`
+		Prompt         string `json:"prompt"`
+		N              *int   `json:"n,omitempty"`
+		Width          *int   `json:"width,omitempty"`
+		Height         *int   `json:"height,omitempty"`
+		ResponseFormat string `json:"response_format,omitempty"`
+		OutputFormat   string `json:"output_format,omitempty"`
+		Seed           *int64 `json:"seed,omitempty"`
+	}{request.Model, request.Prompt, request.N, width, height, responseFormat, request.OutputFormat, request.Seed})
+	if err != nil {
+		return openai.ImageGenerationResponse{}, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(t.compatible.baseURL, "images/generations"), bytes.NewReader(body))
+	if err != nil {
+		return openai.ImageGenerationResponse{}, err
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	if t.compatible.apiKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+t.compatible.apiKey)
+	}
+	response, err := t.compatible.client.Do(httpRequest)
+	if err != nil {
+		return openai.ImageGenerationResponse{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return openai.ImageGenerationResponse{}, responseStatusError("together", response)
+	}
+	return decodeTogetherImageResponse(response.Body, request)
+}
+
+func decodeTogetherImageResponse(reader io.Reader, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
+	payload, err := io.ReadAll(io.LimitReader(reader, maxImageGenerationResponseBytes+1))
+	if err != nil || len(payload) > maxImageGenerationResponseBytes {
+		return openai.ImageGenerationResponse{}, errors.New("together image response exceeds limit")
+	}
+	var wire struct {
+		ID     string `json:"id"`
+		Model  string `json:"model"`
+		Object string `json:"object"`
+		Data   []struct {
+			Index   int    `json:"index"`
+			B64JSON string `json:"b64_json"`
+			URL     string `json:"url"`
+		} `json:"data"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	if err := decoder.Decode(&wire); err != nil {
+		return openai.ImageGenerationResponse{}, errors.New("together image response must be an object")
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return openai.ImageGenerationResponse{}, errors.New("invalid trailing together image response data")
+	}
+	if strings.TrimSpace(wire.ID) == "" || wire.Model != request.Model || wire.Object != "list" {
+		return openai.ImageGenerationResponse{}, errors.New("together returned invalid image metadata")
+	}
+	result := openai.ImageGenerationResponse{Data: make([]openai.ImageData, len(wire.Data))}
+	for index, image := range wire.Data {
+		if image.Index != index {
+			return openai.ImageGenerationResponse{}, errors.New("together returned invalid image indices")
+		}
+		if request.ResponseFormat == "b64_json" && image.B64JSON == "" || request.ResponseFormat == "url" && image.URL == "" {
+			return openai.ImageGenerationResponse{}, errors.New("together returned an unexpected image response format")
+		}
+		result.Data[index] = openai.ImageData{B64JSON: image.B64JSON, URL: image.URL}
+	}
+	if err := validateImageGenerationUnitResponse(result, request); err != nil {
+		return openai.ImageGenerationResponse{}, err
+	}
+	return result, nil
+}
 
 func (t Together) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := rejectParameters("together",

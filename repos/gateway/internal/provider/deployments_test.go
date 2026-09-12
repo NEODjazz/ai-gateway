@@ -621,6 +621,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedImageGenerationOptions(
 		"openai": all, "openai-compatible": all, "azure-openai": all,
 		"openrouter": {"n", "quality", "size", "user", "background", "output_format", "output_compression", "resolution", "aspect_ratio", "seed"},
 		"gemini":     {"n", "response_format", "resolution", "aspect_ratio"},
+		"together":   {"n", "response_format", "size", "output_format", "seed"},
 		"xai":        {"n", "quality", "response_format", "resolution", "aspect_ratio"},
 	}
 	for _, profile := range ManagedProviderCapabilityProfiles() {

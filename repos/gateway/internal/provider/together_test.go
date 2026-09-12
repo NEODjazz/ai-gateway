@@ -90,7 +90,7 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 		if profile.Type != "together" {
 			continue
 		}
-		if !slices.Equal(profile.Operations, []string{"chat", "completions", "embeddings", "rerank", "audio_transcription", "audio_translation", "audio_speech", "stream"}) || !slices.Equal(profile.Capabilities, []string{"chat", "completions", "embeddings", "rerank", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "vision"}) || len(profile.AuthTypes) != 0 {
+		if !slices.Equal(profile.Operations, []string{"chat", "completions", "embeddings", "rerank", "image_generation", "audio_transcription", "audio_translation", "audio_speech", "stream"}) || !slices.Equal(profile.Capabilities, []string{"chat", "completions", "embeddings", "rerank", "image_generation", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "vision"}) || len(profile.AuthTypes) != 0 {
 			t.Fatalf("profile=%+v", profile)
 		}
 		if slices.Contains(profile.ChatParameters.SupportedOptions, "store") || slices.Contains(profile.ChatParameters.SupportedOptions, "metadata") || slices.Contains(profile.ChatParameters.SupportedOptions, "service_tier") || slices.Contains(profile.ChatParameters.SupportedOptions, "prediction") || slices.Contains(profile.ChatParameters.SupportedOptions, "logprobs") || slices.Contains(profile.ChatParameters.SupportedOptions, "logit_bias") || len(profile.ChatParameters.Logprobs) != 0 {
@@ -99,6 +99,87 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 		return
 	}
 	t.Fatal("Together capability profile is missing")
+}
+
+func TestTogetherImageGenerationContract(t *testing.T) {
+	n := 2
+	seed := int64(42)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/images/generations" || r.Header.Get("Authorization") != "Bearer together-key" {
+			t.Fatalf("method=%s path=%s authorization=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["model"] != "image-model" || body["prompt"] != "draw" || body["n"] != float64(2) || body["width"] != float64(1536) || body["height"] != float64(1024) || body["response_format"] != "base64" || body["output_format"] != "png" || body["seed"] != float64(42) {
+			t.Fatalf("body=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"image-id","model":"image-model","object":"list","data":[{"index":0,"b64_json":"b25l"},{"index":1,"b64_json":"dHdv"}]}`)
+	}))
+	defer server.Close()
+
+	request := openai.ImageGenerationRequest{Model: "image-model", Prompt: "draw", N: &n, Size: "1536x1024", ResponseFormat: "b64_json", OutputFormat: "png", Seed: &seed}
+	response, err := NewTogether(server.URL, "together-key", false).GenerateImage(t.Context(), request)
+	if err != nil || len(response.Data) != 2 || response.Data[0].B64JSON != "b25l" || response.Usage != nil {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "together-images", Type: "together", BaseURL: server.URL, APIKey: "together-key", Models: []string{"image-model"}, Capabilities: []string{"image_generation"}}}}).(*Router)
+	routed, err := router.GenerateImage(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, ImageGenerationRequest: &request})
+	if err != nil || len(routed.Data) != 2 || routed.Usage != nil {
+		t.Fatalf("routed=%+v err=%v", routed, err)
+	}
+}
+
+func TestTogetherImageGenerationRejectsUnsupportedParametersBeforeHTTP(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	five := 5
+	compression := 50
+	partial := 1
+	for _, request := range []openai.ImageGenerationRequest{
+		{Model: "image", Prompt: "draw", N: &five},
+		{Model: "image", Prompt: "draw", Quality: "high"},
+		{Model: "image", Prompt: "draw", Style: "vivid"},
+		{Model: "image", Prompt: "draw", User: "user"},
+		{Model: "image", Prompt: "draw", Background: "opaque"},
+		{Model: "image", Prompt: "draw", OutputFormat: "webp"},
+		{Model: "image", Prompt: "draw", OutputCompression: &compression},
+		{Model: "image", Prompt: "draw", Resolution: "2K"},
+		{Model: "image", Prompt: "draw", AspectRatio: "1:1"},
+		{Model: "image", Prompt: "draw", Stream: true},
+		{Model: "image", Prompt: "draw", Stream: true, PartialImages: &partial},
+	} {
+		if _, err := NewTogether(server.URL, "key", false).GenerateImage(t.Context(), request); err == nil {
+			t.Fatalf("accepted request=%+v", request)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("upstream calls=%d", calls)
+	}
+}
+
+func TestTogetherImageGenerationRejectsMalformedResponses(t *testing.T) {
+	n := 2
+	request := openai.ImageGenerationRequest{Model: "image", Prompt: "draw", N: &n}
+	for name, body := range map[string]string{
+		"missing id":       `{"model":"image","object":"list","data":[{"index":0,"url":"https://example.test/1"},{"index":1,"url":"https://example.test/2"}]}`,
+		"wrong model":      `{"id":"id","model":"other","object":"list","data":[{"index":0,"url":"https://example.test/1"},{"index":1,"url":"https://example.test/2"}]}`,
+		"wrong object":     `{"id":"id","model":"image","object":"image","data":[{"index":0,"url":"https://example.test/1"},{"index":1,"url":"https://example.test/2"}]}`,
+		"wrong index":      `{"id":"id","model":"image","object":"list","data":[{"index":1,"url":"https://example.test/1"},{"index":0,"url":"https://example.test/2"}]}`,
+		"wrong count":      `{"id":"id","model":"image","object":"list","data":[{"index":0,"url":"https://example.test/1"}]}`,
+		"ambiguous data":   `{"id":"id","model":"image","object":"list","data":[{"index":0,"url":"https://example.test/1","b64_json":"b25l"},{"index":1,"url":"https://example.test/2"}]}`,
+		"invalid base64":   `{"id":"id","model":"image","object":"list","data":[{"index":0,"b64_json":"%%%"},{"index":1,"b64_json":"dHdv"}]}`,
+		"trailing payload": `{"id":"id","model":"image","object":"list","data":[{"index":0,"url":"https://example.test/1"},{"index":1,"url":"https://example.test/2"}]} {}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeTogetherImageResponse(strings.NewReader(body), request); err == nil {
+				t.Fatal("malformed response accepted")
+			}
+		})
+	}
 }
 
 func TestTogetherAudioTranscriptionContract(t *testing.T) {

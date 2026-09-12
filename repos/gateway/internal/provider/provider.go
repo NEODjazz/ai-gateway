@@ -227,6 +227,10 @@ type ImageGenerationClient interface {
 	GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error)
 }
 
+type imageUnitUsageClient interface {
+	UsesImageUnitUsage() bool
+}
+
 type StreamingImageGenerationProvider interface {
 	StreamGenerateImage(ctx context.Context, req modules.RequestContext, write ImageGenerationStreamWriter) (openai.ImageGenerationResponse, bool, error)
 }
@@ -1469,7 +1473,11 @@ func (r Router) GenerateImage(ctx context.Context, req modules.RequestContext) (
 		setAttemptMetadata(&attemptCtx, started, err)
 		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
-			if validationErr := validateImageGenerationResponse(response, *attemptCtx.ImageGenerationRequest); validationErr != nil {
+			validationErr := validateImageGenerationResponse(response, *attemptCtx.ImageGenerationRequest)
+			if unitClient, ok := client.(imageUnitUsageClient); ok && unitClient.UsesImageUnitUsage() {
+				validationErr = validateImageGenerationUnitResponse(response, *attemptCtx.ImageGenerationRequest)
+			}
+			if validationErr != nil {
 				err = validationErr
 			} else {
 				attemptCtx.ImageGenerationResponse = &response
