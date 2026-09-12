@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.303
+  version: 0.1.304
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9307,7 +9307,7 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters, completion_parameters]
+      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, cohere, mistral, voyage, bedrock, groq, deepseek, xai, opensandbox]}
         operations:
@@ -9335,6 +9335,8 @@ components:
           $ref: '#/components/schemas/ProviderRerankParameterPolicy'
         completion_parameters:
           $ref: '#/components/schemas/ProviderCompletionParameterPolicy'
+        moderation_parameters:
+          $ref: '#/components/schemas/ProviderModerationParameterPolicy'
     ProviderChatParameterPolicy:
       type: object
       additionalProperties: false
@@ -9426,6 +9428,19 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, enum: [text, text_array, token_array, token_batch]}
+    ProviderModerationParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [supported_options, input_forms]
+      properties:
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [metadata]}
+        input_forms:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [text, text_array, content_parts]}
     ProviderCredentialCreateInput:
       type: object
       additionalProperties: false

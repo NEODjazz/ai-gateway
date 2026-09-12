@@ -506,6 +506,28 @@ func TestManagedProviderCapabilityProfilesExposeValidatedCompletionOptions(t *te
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeValidatedModerationOptions(t *testing.T) {
+	profiles := ManagedProviderCapabilityProfiles()
+	for _, profile := range profiles {
+		hasOperation := slices.Contains(profile.Operations, "moderation")
+		if hasOperation != (len(profile.ModerationParameters.InputForms) > 0) {
+			t.Errorf("%s moderation profile does not match operations: %+v", profile.Type, profile.ModerationParameters)
+		}
+		if !hasOperation {
+			continue
+		}
+		if profile.Type == "mistral" {
+			if !slices.Equal(profile.ModerationParameters.SupportedOptions, []string{"metadata"}) || !slices.Equal(profile.ModerationParameters.InputForms, []string{"text", "text_array"}) {
+				t.Errorf("mistral moderation parameters=%+v", profile.ModerationParameters)
+			}
+			continue
+		}
+		if len(profile.ModerationParameters.SupportedOptions) != 0 || !slices.Equal(profile.ModerationParameters.InputForms, []string{"text", "text_array", "content_parts"}) {
+			t.Errorf("%s moderation parameters=%+v", profile.Type, profile.ModerationParameters)
+		}
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

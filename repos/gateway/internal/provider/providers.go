@@ -36,6 +36,7 @@ type ProviderCapabilityProfile struct {
 	EmbeddingParameters  ProviderEmbeddingParameterPolicy  `json:"embedding_parameters"`
 	RerankParameters     ProviderRerankParameterPolicy     `json:"rerank_parameters"`
 	CompletionParameters ProviderCompletionParameterPolicy `json:"completion_parameters"`
+	ModerationParameters ProviderModerationParameterPolicy `json:"moderation_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -67,6 +68,11 @@ type ProviderRerankParameterPolicy struct {
 type ProviderCompletionParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 	PromptForms      []string `json:"prompt_forms"`
+}
+
+type ProviderModerationParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
+	InputForms       []string `json:"input_forms"`
 }
 
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai", "opensandbox"}
@@ -324,9 +330,36 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			EmbeddingParameters:  managedProviderEmbeddingParameterPolicy(client, slicesContain(operations, "embeddings")),
 			RerankParameters:     managedProviderRerankParameterPolicy(client, slicesContain(operations, "rerank")),
 			CompletionParameters: managedProviderCompletionParameterPolicy(client, slicesContain(operations, "completions")),
+			ModerationParameters: managedProviderModerationParameterPolicy(client, slicesContain(operations, "moderation")),
 		})
 	}
 	return profiles
+}
+
+func managedProviderModerationParameterPolicy(client Client, supported bool) ProviderModerationParameterPolicy {
+	policy := ProviderModerationParameterPolicy{SupportedOptions: []string{}, InputForms: []string{}}
+	moderationClient, ok := client.(ModerationClient)
+	if !supported || !ok {
+		return policy
+	}
+	for _, probe := range []struct {
+		name  string
+		input any
+	}{
+		{"text", "test"},
+		{"text_array", []string{"test"}},
+		{"content_parts", []any{map[string]any{"type": "text", "text": "test"}, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.test/image.png"}}}},
+	} {
+		request := openai.ModerationRequest{Model: "model", Input: probe.input}
+		if _, err := openai.InspectModerationInput(request.Input); err == nil && validateModerationAdapter(moderationClient, request) == nil {
+			policy.InputForms = append(policy.InputForms, probe.name)
+		}
+	}
+	request := openai.ModerationRequest{Model: "model", Input: "test", Metadata: map[string]string{"trace": "probe"}}
+	if validateModerationAdapter(moderationClient, request) == nil {
+		policy.SupportedOptions = append(policy.SupportedOptions, "metadata")
+	}
+	return policy
 }
 
 func managedProviderCompletionParameterPolicy(client Client, supported bool) ProviderCompletionParameterPolicy {
