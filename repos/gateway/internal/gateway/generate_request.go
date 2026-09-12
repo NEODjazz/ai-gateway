@@ -11,8 +11,9 @@ import (
 )
 
 type generateRequest struct {
-	Contents []generateContent `json:"contents"`
-	System   *generateContent  `json:"systemInstruction,omitempty"`
+	Contents []generateContent            `json:"contents"`
+	System   *generateContent             `json:"systemInstruction,omitempty"`
+	Safety   []openai.GeminiSafetySetting `json:"safetySettings,omitempty"`
 	Tools    []struct {
 		Functions []generateFunction `json:"functionDeclarations"`
 	} `json:"tools,omitempty"`
@@ -80,6 +81,13 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 	}
 	if strings.TrimSpace(model) == "" || len(r.Contents) == 0 || len(r.Contents) > 10000 {
 		return fail("contents")
+	}
+	if err := openai.ValidateGeminiSafetySettings(r.Safety); err != nil {
+		return fail("safetySettings")
+	}
+	if len(r.Safety) > 0 {
+		result.GeminiSafetySettings = append([]openai.GeminiSafetySetting(nil), r.Safety...)
+		result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(r.Safety))
 	}
 	if n := r.Generation.CandidateCount; n != nil && *n != 1 {
 		return fail("candidateCount")

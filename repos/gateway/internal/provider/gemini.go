@@ -152,13 +152,14 @@ type geminiResponseCandidate struct {
 	LogprobsResult *geminiLogprobsResult `json:"logprobsResult"`
 }
 type geminiRequest struct {
-	Contents    []geminiContent  `json:"contents"`
-	System      *geminiContent   `json:"systemInstruction,omitempty"`
-	Tools       []geminiTool     `json:"tools,omitempty"`
-	ToolConfig  map[string]any   `json:"toolConfig,omitempty"`
-	Generation  geminiGeneration `json:"generationConfig"`
-	ServiceTier string           `json:"serviceTier,omitempty"`
-	Store       *bool            `json:"store,omitempty"`
+	Contents    []geminiContent              `json:"contents"`
+	System      *geminiContent               `json:"systemInstruction,omitempty"`
+	Tools       []geminiTool                 `json:"tools,omitempty"`
+	ToolConfig  map[string]any               `json:"toolConfig,omitempty"`
+	Generation  geminiGeneration             `json:"generationConfig"`
+	ServiceTier string                       `json:"serviceTier,omitempty"`
+	Store       *bool                        `json:"store,omitempty"`
+	Safety      []openai.GeminiSafetySetting `json:"safetySettings,omitempty"`
 }
 type geminiResponse struct {
 	ID             string                    `json:"responseId"`
@@ -200,7 +201,10 @@ func (g Gemini) Responses(context.Context, openai.ResponseRequest) (openai.Respo
 }
 
 func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, error) {
-	result := geminiRequest{}
+	result := geminiRequest{Safety: append([]openai.GeminiSafetySetting(nil), request.GeminiSafetySettings...)}
+	if err := openai.ValidateGeminiSafetySettings(request.GeminiSafetySettings); err != nil {
+		return result, geminiInvalid("safety_settings")
+	}
 	if err := validateChatMessagePrefix("gemini", request.Messages, false); err != nil {
 		return result, err
 	}

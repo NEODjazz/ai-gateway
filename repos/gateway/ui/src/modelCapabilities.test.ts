@@ -10,6 +10,7 @@ describe("modelCapabilityOptions", () => {
       "interactions",
       "interaction_agents",
       "interaction_environment_reuse",
+      "gemini_safety_settings",
       "background_responses",
       "background_interactions",
       "embeddings",

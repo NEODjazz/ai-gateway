@@ -64,6 +64,15 @@ func TestGeminiNativeChatAndToolSignatures(t *testing.T) {
 	}
 }
 
+func TestGeminiForwardsValidatedSafetySettings(t *testing.T) {
+	request := geminiTestChat()
+	request.GeminiSafetySettings = []openai.GeminiSafetySetting{{Category: "HARM_CATEGORY_HATE_SPEECH", Threshold: "BLOCK_MEDIUM_AND_ABOVE"}}
+	native, err := geminiChatRequest(request)
+	if err != nil || len(native.Safety) != 1 || native.Safety[0] != request.GeminiSafetySettings[0] {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+}
+
 func TestGeminiPreservesThoughtPartsAndHistory(t *testing.T) {
 	index := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

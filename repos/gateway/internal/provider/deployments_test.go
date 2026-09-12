@@ -178,6 +178,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"background_interactions"},
 		{"interaction_agents"},
 		{"interaction_environment_reuse"},
+		{"gemini_safety_settings"},
 		{"interactions", "interaction_environment_reuse"},
 		{"file_input"},
 		{"bedrock_invoke"},
@@ -192,6 +193,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		nil,
 		{},
 		{"chat"},
+		{"chat", "gemini_safety_settings"},
 		{"responses", "stream"},
 		{"chat", "tools", "structured_output", "vision"},
 		{"responses", "tools", "mcp"},
@@ -243,7 +245,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 	}{
 		{providerType: "ollama", capabilities: []string{"chat", "tools", "structured_output", "vision"}},
 		{providerType: "anthropic", capabilities: []string{"chat", "tools", "structured_output", "vision", "web_search", "web_fetch", "prompt_cache", "assistant_prefill"}},
-		{providerType: "gemini", capabilities: []string{"chat", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision"}},
+		{providerType: "gemini", capabilities: []string{"chat", "gemini_safety_settings", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision"}},
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
 		{providerType: "bedrock", capabilities: []string{"chat", "tools", "prompt_cache", "bedrock_invoke"}},
 		{providerType: "groq", capabilities: []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}},
@@ -310,6 +312,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	}
 	if !slices.Contains(profilesByType["gemini"].Operations, "image_generation") || !slices.Contains(profilesByType["gemini"].Capabilities, "image_generation") || !slices.Contains(profilesByType["gemini"].Operations, "image_edit") || !slices.Contains(profilesByType["gemini"].Capabilities, "image_edit") || !slices.Contains(profilesByType["gemini"].Operations, "image_variation") || !slices.Contains(profilesByType["gemini"].Capabilities, "image_variation") {
 		t.Fatalf("Gemini profile is missing native image operations: %+v", profilesByType["gemini"])
+	}
+	if !slices.Contains(profilesByType["gemini"].Capabilities, "gemini_safety_settings") {
+		t.Fatalf("Gemini profile is missing native safety settings: %+v", profilesByType["gemini"])
 	}
 	if !slices.Contains(profilesByType["gemini"].Operations, "interactions") || slices.Contains(profilesByType["openai"].Operations, "interactions") {
 		t.Fatalf("native interaction profiles are incorrect: gemini=%+v openai=%+v", profilesByType["gemini"], profilesByType["openai"])

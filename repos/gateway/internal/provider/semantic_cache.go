@@ -235,6 +235,9 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if request.BedrockGuardrailConfig != nil {
 		return "", "", false
 	}
+	if len(request.GeminiSafetySettings) > 0 {
+		return "", "", false
+	}
 	if len(request.BedrockAdditionalModelRequestFields) > 0 {
 		return "", "", false
 	}

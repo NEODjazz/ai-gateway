@@ -802,8 +802,11 @@ complete JSON objects. Frame and tool accumulation have separate 32 MiB limits.
 Stream failures emit a redacted native error without a successful finish reason.
 
 Regression tests cover conversion, JSON/SSE, authorization, quotas, native usage
-and billing, bounded stream accumulation and disconnects. Native safety settings,
-cached content, grounding/server tools and file/audio parts remain unsupported.
+and billing, bounded stream accumulation and disconnects. `safetySettings` accepts
+one validated threshold per supported harm category, requires an explicit
+`gemini_safety_settings` deployment capability, contributes to input TPM reserve
+and bypasses exact and semantic response caches. Cached content, grounding/server
+tools and file/audio parts remain unsupported.
 
 
 ### Native GenerateContent token counting

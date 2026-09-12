@@ -21,3 +21,20 @@ func TestGeminiPartSignatureMarkersAreBoundedAndValidated(t *testing.T) {
 		}
 	}
 }
+
+func TestGeminiSafetySettingsAreBoundedAndUnique(t *testing.T) {
+	valid := []GeminiSafetySetting{{Category: "HARM_CATEGORY_HARASSMENT", Threshold: "BLOCK_ONLY_HIGH"}}
+	if err := ValidateGeminiSafetySettings(valid); err != nil {
+		t.Fatal(err)
+	}
+	for _, settings := range [][]GeminiSafetySetting{
+		{{Category: "UNKNOWN", Threshold: "OFF"}},
+		{{Category: "HARM_CATEGORY_HARASSMENT", Threshold: "UNKNOWN"}},
+		{{Category: "HARM_CATEGORY_HARASSMENT", Threshold: "OFF"}, {Category: "HARM_CATEGORY_HARASSMENT", Threshold: "BLOCK_ONLY_HIGH"}},
+		{{Category: "HARM_CATEGORY_HARASSMENT", Threshold: "OFF"}, {Category: "HARM_CATEGORY_HATE_SPEECH", Threshold: "OFF"}, {Category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", Threshold: "OFF"}, {Category: "HARM_CATEGORY_DANGEROUS_CONTENT", Threshold: "OFF"}, {Category: "HARM_CATEGORY_CIVIC_INTEGRITY", Threshold: "OFF"}, {Category: "HARM_CATEGORY_JAILBREAK", Threshold: "OFF"}, {Category: "HARM_CATEGORY_HARASSMENT", Threshold: "BLOCK_ONLY_HIGH"}},
+	} {
+		if err := ValidateGeminiSafetySettings(settings); err == nil {
+			t.Fatalf("invalid settings accepted: %+v", settings)
+		}
+	}
+}

@@ -56,3 +56,18 @@ func TestBedrockInvokeStructuredOutputRequiresBothCapabilities(t *testing.T) {
 		t.Fatal("InvokeModel deployment with both feature capabilities rejected")
 	}
 }
+
+func TestNativeIngressRequiresExplicitCapabilities(t *testing.T) {
+	request := openai.ChatCompletionRequest{GeminiSafetySettings: []openai.GeminiSafetySetting{{Category: "HARM_CATEGORY_HARASSMENT", Threshold: "BLOCK_ONLY_HIGH"}}}
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,gemini_safety_settings" {
+		t.Fatalf("required capabilities=%q", got)
+	}
+	endpoint := Endpoint{Capabilities: []string{"chat"}}
+	if endpoint.supportsCapabilities(requiredChatCapabilities(request, false)...) {
+		t.Fatal("deployment without native safety capability accepted")
+	}
+	endpoint.Capabilities = append(endpoint.Capabilities, "gemini_safety_settings")
+	if !endpoint.supportsCapabilities(requiredChatCapabilities(request, false)...) {
+		t.Fatal("deployment with native safety capability rejected")
+	}
+}

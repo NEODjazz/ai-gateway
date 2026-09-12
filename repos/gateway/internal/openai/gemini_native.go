@@ -6,6 +6,30 @@ import (
 	"errors"
 )
 
+func ValidateGeminiSafetySettings(settings []GeminiSafetySetting) error {
+	if len(settings) > 6 {
+		return errors.New("Gemini safety settings exceed limit")
+	}
+	seen := make(map[string]bool, len(settings))
+	for _, setting := range settings {
+		switch setting.Category {
+		case "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT", "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_CIVIC_INTEGRITY", "HARM_CATEGORY_JAILBREAK":
+		default:
+			return errors.New("invalid Gemini safety category")
+		}
+		switch setting.Threshold {
+		case "HARM_BLOCK_THRESHOLD_UNSPECIFIED", "BLOCK_LOW_AND_ABOVE", "BLOCK_MEDIUM_AND_ABOVE", "BLOCK_ONLY_HIGH", "BLOCK_NONE", "OFF":
+		default:
+			return errors.New("invalid Gemini safety threshold")
+		}
+		if seen[setting.Category] {
+			return errors.New("duplicate Gemini safety category")
+		}
+		seen[setting.Category] = true
+	}
+	return nil
+}
+
 const geminiPartSignatureMarker = "gemini_part_signature"
 
 type GeminiPartSignature struct {

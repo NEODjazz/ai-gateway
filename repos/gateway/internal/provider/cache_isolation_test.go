@@ -115,6 +115,18 @@ func TestBedrockGuardrailBypassesResponseCaches(t *testing.T) {
 	}
 }
 
+func TestGeminiSafetySettingsBypassResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, GeminiSafetySettings: []openai.GeminiSafetySetting{{Category: "HARM_CATEGORY_HARASSMENT", Threshold: "BLOCK_ONLY_HIGH"}},
+	}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache enabled for provider safety settings")
+	}
+	if _, _, eligible := semanticRequest(request, Endpoint{Name: "endpoint"}); eligible {
+		t.Fatal("semantic cache enabled for provider safety settings")
+	}
+}
+
 func TestMemoryCacheAndAffinityBounded(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1, 0)

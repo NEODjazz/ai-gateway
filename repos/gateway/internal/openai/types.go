@@ -16,6 +16,8 @@ type ChatCompletionRequest struct {
 	BedrockInvoke bool `json:"-"`
 	// NativeInputTokens reserves provider-native context omitted from the public Chat wire shape.
 	NativeInputTokens int `json:"-"`
+	// GeminiSafetySettings contains validated native safety controls.
+	GeminiSafetySettings []GeminiSafetySetting `json:"-"`
 	// Bedrock native controls cannot be supplied through the public Chat wire shape.
 	BedrockServiceTier                       string                  `json:"-"`
 	BedrockPerformanceLatency                string                  `json:"-"`
@@ -41,6 +43,11 @@ type ChatCompletionRequest struct {
 	TopP                *float64              `json:"top_p,omitempty"`
 	Stop                any                   `json:"stop,omitempty"`
 	Seed                *int64                `json:"seed,omitempty"`
+}
+
+type GeminiSafetySetting struct {
+	Category  string `json:"category"`
+	Threshold string `json:"threshold"`
 }
 
 type ChatStreamOptions struct {

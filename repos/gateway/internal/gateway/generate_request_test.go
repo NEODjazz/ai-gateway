@@ -12,7 +12,7 @@ import (
 
 func TestGenerateRequestConvertsNativeContextAndConfig(t *testing.T) {
 	var native generateRequest
-	raw := `{"systemInstruction":{"parts":[{"text":"Be concise"}]},"contents":[{"role":"user","parts":[{"text":"Describe"},{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}]}],"tools":[{"functionDeclarations":[{"name":"weather","parameters":{"type":"OBJECT","properties":{"city":{"type":"STRING"}},"required":["city"]}}]}],"toolConfig":{"functionCallingConfig":{"mode":"ANY","allowedFunctionNames":["weather"]}},"generationConfig":{"maxOutputTokens":50,"temperature":0.2,"topP":0.9,"topK":12,"seed":7,"presencePenalty":0.3,"frequencyPenalty":-0.2,"responseLogprobs":true,"logprobs":5,"responseModalities":["TEXT"],"stopSequences":[" END "],"candidateCount":1,"responseMimeType":"application/json","responseSchema":{"type":"OBJECT","properties":{"answer":{"type":"STRING"}}}}}`
+	raw := `{"systemInstruction":{"parts":[{"text":"Be concise"}]},"contents":[{"role":"user","parts":[{"text":"Describe"},{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}]}],"safetySettings":[{"category":"HARM_CATEGORY_HARASSMENT","threshold":"BLOCK_ONLY_HIGH"}],"tools":[{"functionDeclarations":[{"name":"weather","parameters":{"type":"OBJECT","properties":{"city":{"type":"STRING"}},"required":["city"]}}]}],"toolConfig":{"functionCallingConfig":{"mode":"ANY","allowedFunctionNames":["weather"]}},"generationConfig":{"maxOutputTokens":50,"temperature":0.2,"topP":0.9,"topK":12,"seed":7,"presencePenalty":0.3,"frequencyPenalty":-0.2,"responseLogprobs":true,"logprobs":5,"responseModalities":["TEXT"],"stopSequences":[" END "],"candidateCount":1,"responseMimeType":"application/json","responseSchema":{"type":"OBJECT","properties":{"answer":{"type":"STRING"}}}}}`
 	if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
 		t.Fatal(err)
 	}
@@ -20,7 +20,7 @@ func TestGenerateRequestConvertsNativeContextAndConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chat.Model != "public-model" || !chat.Stream || *chat.MaxCompletionTokens != 50 || *chat.Seed != 7 || chat.TopK == nil || *chat.TopK != 12 || chat.PresencePenalty == nil || *chat.PresencePenalty != 0.3 || chat.FrequencyPenalty == nil || *chat.FrequencyPenalty != -0.2 || chat.Logprobs == nil || !*chat.Logprobs || chat.TopLogprobs == nil || *chat.TopLogprobs != 5 || chat.N != nil || chat.Modalities != nil || len(chat.Messages) != 2 || chat.Messages[0].Role != "system" {
+	if chat.Model != "public-model" || !chat.Stream || *chat.MaxCompletionTokens != 50 || *chat.Seed != 7 || chat.TopK == nil || *chat.TopK != 12 || chat.PresencePenalty == nil || *chat.PresencePenalty != 0.3 || chat.FrequencyPenalty == nil || *chat.FrequencyPenalty != -0.2 || chat.Logprobs == nil || !*chat.Logprobs || chat.TopLogprobs == nil || *chat.TopLogprobs != 5 || chat.N != nil || chat.Modalities != nil || len(chat.Messages) != 2 || chat.Messages[0].Role != "system" || len(chat.GeminiSafetySettings) != 1 || chat.GeminiSafetySettings[0].Threshold != "BLOCK_ONLY_HIGH" || chat.NativeInputTokens == 0 {
 		t.Fatalf("context/config: %+v", chat)
 	}
 	schema := chat.Tools[0].Function.Parameters.(map[string]any)
@@ -108,7 +108,8 @@ func TestGenerateTextPartSignatureRoundTrip(t *testing.T) {
 }
 func TestGenerateRequestRejectsUnsupportedFieldsAndUnions(t *testing.T) {
 	for _, raw := range []string{
-		`{"contents":[{"parts":[{"text":"hi"}]}],"safetySettings":[]}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"safetySettings":[{"category":"HARM_CATEGORY_HARASSMENT","threshold":"INVALID"}]}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"safetySettings":[{"category":"HARM_CATEGORY_HARASSMENT","threshold":"OFF"},{"category":"HARM_CATEGORY_HARASSMENT","threshold":"BLOCK_ONLY_HIGH"}]}`,
 		`{"contents":[{"parts":[{"text":"hi","inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}]}]}`,
 		`{"contents":[{"parts":[{"text":"hi","thoughtSignature":"signature"}]}]}`,
 		`{"contents":[{"parts":[{"text":"private","thought":true}]}]}`,
