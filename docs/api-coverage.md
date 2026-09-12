@@ -25,7 +25,7 @@ availability is not inferred from these tests.
 | Response compaction | Native compact contract, bounded opaque output, model authorization and usage settlement | Additional provider-native compact request options as demand is confirmed |
 | Embeddings | String/list and bounded token-ID input, exact token-ID accounting, float/base64 output, compatible adapters and native Gemini, Ollama, Cohere v2 and Voyage adapters | Additional provider compatibility |
 | Rerank | Query/documents, compatible adapter, native Cohere v2 and Voyage adapters; exact provider token usage | Additional provider-specific request and usage matrices |
-| Text completions | Compatible adapters accept string/list and token-ID prompts; Ollama text generation and Mistral FIM accept native string prompts; legacy response normalization, bounded JSON, incremental SSE and buffered fallback | Additional native provider adapters and provider-specific prompt forms |
+| Text completions | Compatible adapters accept string/list and token-ID prompts; Ollama text generation and Mistral FIM accept native string prompts; legacy response normalization, bounded JSON, incremental SSE and buffered fallback; managed capability profiles expose adapter-specific prompt forms and validated controls | Additional native provider adapters and model-specific controls |
 | Messages | Inbound `/v1/messages` JSON/SSE over the shared Chat pipeline; outbound Anthropic adapter; explicit prompt-cache controls; opaque user metadata; output effort and JSON Schema format; capacity-tier selection and assigned-tier reporting; signed and redacted thinking blocks with history round-trip; thinking-token usage details; native web-search server tool, citations and usage; capability-gated assistant prefill | Additional server tools |
 | Anthropic token counting | Native Anthropic, Gemini and Bedrock counters behind `/v1/messages/count_tokens` with authorization, policy, input quotas and bounded transport | Advanced native content blocks and additional provider counters |
 | GenerateContent | Native inbound JSON/SSE and context token counting through shared policy; outbound Gemini chat/tools/vision with API-key or GCE/GKE workload authentication; capability-gated per-category native safety thresholds; native Google Search grounding with validated citations, preserved search entry metadata, actual search-request billing and cache bypass; bounded signature-validated inline WAV/MP3 input with AV projection, explicit capability routing and cache bypass | Cached content, additional grounding/server tools, file parts, additional audio formats and native options |
@@ -71,7 +71,7 @@ availability is not inferred from these tests.
 | Model tokenization | Context estimate including tool schemas; native Anthropic, Gemini and Bedrock counter APIs | Exact model tokenizers/counters with versioned provenance |
 | Catalog synchronization | Versioned catalog and hot update; xAI discovery atomically merges the separately published text and embedding catalogs | Validated upstream sync for additional providers, rollback and price provenance |
 | Arbitrary passthrough | Not implemented | Explicit route allowlists, identity isolation and accounting |
-| Parameter policy | Strict unknown-field decoding; native adapter rejection; generation control validation; machine-readable per-adapter Chat, Responses, Embeddings and Rerank support, including accepted values and input/document forms, all derived from runtime validators and locked by profile regressions | Model-specific overrides and equivalent matrices for other API families |
+| Parameter policy | Strict unknown-field decoding; native adapter rejection; generation control validation; machine-readable per-adapter Chat, Completions, Responses, Embeddings and Rerank support, including accepted values and input/document/prompt forms, all derived from runtime validators and locked by profile regressions | Model-specific overrides and equivalent matrices for other API families |
 | Provider and deployment quotas | Atomic fixed-window RPM/TPM across inference, token-count, shadow and owned response lifecycle calls; provider totals shared by all linked deployments; bounded memory mode and shared Redis counters; quota-aware fallback | Additional quota dimensions only when backed by an upstream contract |
 
 ## Completed increments
@@ -108,6 +108,9 @@ availability is not inferred from these tests.
 - `2e5d04c`: machine-readable Embeddings input/value and Rerank document/control
   profiles derived from adapter validators, with operation/profile consistency
   regressions.
+- `d71eade`: legacy Completions is an explicit managed operation with
+  validator-derived prompt-form and generation-control profiles for every
+  implementing adapter.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control
