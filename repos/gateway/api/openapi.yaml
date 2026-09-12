@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.283
+  version: 0.1.284
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -41,6 +41,57 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /auth/sso/config:
+    get:
+      operationId: getBrowserSSOConfig
+      tags: [Identity]
+      summary: Discover whether browser SSO is enabled
+      security: []
+      responses:
+        '200':
+          description: Safe browser sign-in configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, start_url]
+                properties:
+                  enabled: {type: boolean}
+                  start_url: {type: string, const: /auth/sso/start}
+  /auth/sso/start:
+    get:
+      operationId: startBrowserSSO
+      tags: [Identity]
+      summary: Start an authorization-code browser sign-in
+      description: Creates encrypted five-minute state and PKCE verifier cookies and redirects to the configured identity provider. No bearer credential is exposed to browser JavaScript.
+      security: []
+      responses:
+        '302': {description: Redirect to the identity provider authorization endpoint}
+        '404': {description: Browser SSO is disabled}
+  /auth/sso/callback:
+    get:
+      operationId: completeBrowserSSO
+      tags: [Identity]
+      summary: Complete browser sign-in
+      description: Validates encrypted state, exchanges the one-time code with PKCE, authorizes the returned bearer credential through the gateway auth pipeline, and creates an encrypted HttpOnly Strict same-site session cookie with a bounded lifetime.
+      security: []
+      parameters:
+        - {name: state, in: query, required: true, schema: {type: string}}
+        - {name: code, in: query, required: true, schema: {type: string}}
+        - {name: error, in: query, schema: {type: string}}
+      responses:
+        '302': {description: Redirect to the management console}
+        '400': {description: Invalid or expired callback state}
+        '401': {description: Identity-provider credential is not authorized}
+        '502': {description: Identity-provider token exchange failed}
+  /auth/sso/logout:
+    post:
+      operationId: endBrowserSSO
+      tags: [Identity]
+      summary: Clear the browser session cookie
+      security: []
+      responses:
+        '204': {description: Browser session cleared}
   /v1/assistants:
     post:
       operationId: createAssistant

@@ -39,7 +39,7 @@ describe("AuthProvider", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: { code: "unauthorized", message: "Invalid credential" } }), { status: 401 }));
     render(<AuthProvider><Consumer /></AuthProvider>);
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path) === "/admin/v1/session")).toBe(true));
     expect(screen.getByText("signed-out")).toBeInTheDocument();
     expect(sessionStorage.getItem("ai-gateway.admin-token")).toBeNull();
   });

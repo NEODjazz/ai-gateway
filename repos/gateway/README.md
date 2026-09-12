@@ -203,6 +203,15 @@ The console session endpoint validates the bearer credential through the normal
 auth pipeline and returns only safe identity/scope metadata plus explicit UI
 capabilities. It never echoes the bearer token or provider credentials.
 
+Browser SSO can use an OAuth 2.0 or OIDC authorization-code client whose access
+token is accepted by the configured auth service. Enable it with
+`ADMIN_SSO_ENABLED`, set the authorization and token URLs, client ID, exact
+callback URL and a random `ADMIN_SSO_SESSION_KEY` of at least 32 bytes. A client
+secret is optional for public PKCE clients. The gateway keeps the access token
+in an encrypted HttpOnly Strict same-site cookie, caps its lifetime at the
+shorter of the provider expiry and `ADMIN_SSO_SESSION_TTL_SECONDS`, and validates
+it through the normal auth pipeline before creating the browser session.
+
 The Playground uses the same authorized model list and inference endpoints as
 external clients. It supports incremental Chat Completions and Responses SSE,
 consumes the gateway's successful JSON fallback without replaying an inference,

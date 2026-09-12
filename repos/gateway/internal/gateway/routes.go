@@ -20,6 +20,10 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/healthz"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Health) }},
 	{RouteContract{http.MethodGet, "/readyz"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Ready) }},
 	{RouteContract{http.MethodGet, "/metrics"}, func(h Handler) http.Handler { return h.metrics }},
+	{RouteContract{http.MethodGet, "/auth/sso/config"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetBrowserSSOConfig) }},
+	{RouteContract{http.MethodGet, "/auth/sso/start"}, func(h Handler) http.Handler { return http.HandlerFunc(h.StartBrowserSSO) }},
+	{RouteContract{http.MethodGet, "/auth/sso/callback"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CompleteBrowserSSO) }},
+	{RouteContract{http.MethodPost, "/auth/sso/logout"}, func(h Handler) http.Handler { return http.HandlerFunc(h.EndBrowserSSO) }},
 	{RouteContract{http.MethodGet, "/v1/models"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Models) }},
 	{RouteContract{http.MethodGet, "/v1/models/{model}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetModel) }},
 	{RouteContract{http.MethodPost, "/v1/assistants"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateAssistant) }},
@@ -271,7 +275,7 @@ func Routes(handler Handler) http.Handler {
 	if handler.adminUI {
 		registerAdminUI(mux)
 	}
-	observed := observabilityMiddleware(handler.metrics, mux)
+	observed := observabilityMiddleware(handler.metrics, browserSSOAuthMiddleware(handler.browserSSO, mux))
 	return otelhttp.NewHandler(observed, "ai-gateway.http",
 		otelhttp.WithFilter(func(r *http.Request) bool {
 			return !isInfrastructurePath(r.URL.Path)

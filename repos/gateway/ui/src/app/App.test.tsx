@@ -14,10 +14,11 @@ function mockConsole(session = adminSession) {
 }
 
 describe("App", () => {
-  it("shows the token gate without authentication", () => {
+  it("shows the token gate without authentication", async () => {
     history.replaceState({}, "", "/ui/");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ enabled: false, start_url: "/auth/sso/start" }), { status: 200 }));
     render(<AuthProvider><App /></AuthProvider>);
-    expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Sign in" });
     expect(screen.getByLabelText("Gateway bearer token")).toHaveAttribute("type", "password");
   });
 
@@ -25,7 +26,7 @@ describe("App", () => {
     history.replaceState({}, "", "/ui/overview");
     mockConsole();
     render(<AuthProvider><App /></AuthProvider>);
-    await userEvent.type(screen.getByLabelText("Gateway bearer token"), "token");
+    await userEvent.type(await screen.findByLabelText("Gateway bearer token"), "token");
     await userEvent.click(screen.getByRole("button", { name: "Open console" }));
     const navigation = await screen.findByRole("navigation", { name: "Dashboard" });
     expect(within(navigation).queryByRole("button", { name: /Manage|Monitor|Access Control|AI Hub|Govern|System/ })).not.toBeInTheDocument();
@@ -39,7 +40,7 @@ describe("App", () => {
     history.replaceState({}, "", "/ui/providers");
     mockConsole(teamSession);
     render(<AuthProvider><App /></AuthProvider>);
-    await userEvent.type(screen.getByLabelText("Gateway bearer token"), "team-token");
+    await userEvent.type(await screen.findByLabelText("Gateway bearer token"), "team-token");
     await userEvent.click(screen.getByRole("button", { name: "Open console" }));
     const navigation = await screen.findByRole("navigation", { name: "Dashboard" });
     expect(within(navigation).getByRole("link", { name: "Playground" })).toBeInTheDocument();
@@ -52,13 +53,45 @@ describe("App", () => {
 
   it("rejects an invalid credential before opening the console", async () => {
     history.replaceState({}, "", "/ui/");
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: { code: "unauthorized", message: "Invalid credential" } }), { status: 401 }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input) === "/auth/sso/config"
+      ? new Response(JSON.stringify({ enabled: false, start_url: "/auth/sso/start" }), { status: 200 })
+      : new Response(JSON.stringify({ error: { code: "unauthorized", message: "Invalid credential" } }), { status: 401 }));
     render(<AuthProvider><App /></AuthProvider>);
-    await userEvent.type(screen.getByLabelText("Gateway bearer token"), "bad-token");
+    await userEvent.type(await screen.findByLabelText("Gateway bearer token"), "bad-token");
     await userEvent.click(screen.getByRole("button", { name: "Open console" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid credential");
     expect(screen.queryByRole("navigation", { name: "Dashboard" })).not.toBeInTheDocument();
     expect(sessionStorage.getItem("ai-gateway.admin-token")).toBeNull();
+  });
+
+  it("restores an encrypted browser SSO session without exposing a token", async () => {
+    history.replaceState({}, "", "/ui/");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input) === "/auth/sso/config") return new Response(JSON.stringify({ enabled: true, start_url: "/auth/sso/start" }), { status: 200 });
+      if (String(input) === "/admin/v1/session") return new Response(JSON.stringify(adminSession), { status: 200 });
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    });
+    render(<AuthProvider><App /></AuthProvider>);
+    expect(await screen.findByRole("navigation", { name: "Dashboard" })).toBeInTheDocument();
+    const sessionCall = fetchMock.mock.calls.find(([path]) => String(path) === "/admin/v1/session");
+    expect(new Headers(sessionCall?.[1]?.headers).get("Authorization")).toBeNull();
+    expect(sessionStorage.getItem("ai-gateway.admin-token")).toBe("browser-sso");
+    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(await screen.findByRole("link", { name: "Continue with SSO" })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([path]) => String(path) === "/admin/v1/session")).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/auth/sso/logout" && options?.method === "POST")).toBe(true);
+  });
+
+  it("offers browser SSO when enabled and no session exists", async () => {
+    history.replaceState({}, "", "/ui/");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input) === "/auth/sso/config") return new Response(JSON.stringify({ enabled: true, start_url: "/auth/sso/start" }), { status: 200 });
+      if (String(input) === "/auth/sso/logout") return new Response(null, { status: 204 });
+      return new Response(JSON.stringify({ error: { code: "unauthorized", message: "Invalid credential" } }), { status: 401 });
+    });
+    render(<AuthProvider><App /></AuthProvider>);
+    expect(await screen.findByRole("link", { name: "Continue with SSO" })).toHaveAttribute("href", "/auth/sso/start");
+    expect(screen.getByLabelText("Gateway bearer token")).toBeInTheDocument();
   });
 
   it("signs out from the shared layout", async () => {

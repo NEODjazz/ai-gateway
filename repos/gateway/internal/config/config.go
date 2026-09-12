@@ -75,6 +75,19 @@ type APIDocsConfig struct {
 
 type AdminUIConfig struct {
 	Enabled bool
+	SSO     BrowserSSOConfig
+}
+
+type BrowserSSOConfig struct {
+	Enabled          bool
+	AuthorizationURL string
+	TokenURL         string
+	ClientID         string
+	ClientSecret     string
+	RedirectURL      string
+	Scopes           []string
+	SessionKey       string
+	SessionTTL       time.Duration
 }
 
 type ManagementConfig struct {
@@ -331,7 +344,13 @@ func Load() Config {
 			Enabled:         envBool("API_DOCS_ENABLED", false),
 			TryItOutEnabled: envBool("API_DOCS_TRY_IT_OUT_ENABLED", false),
 		},
-		AdminUI: AdminUIConfig{Enabled: envBool("ADMIN_UI_ENABLED", true)},
+		AdminUI: AdminUIConfig{Enabled: envBool("ADMIN_UI_ENABLED", true), SSO: BrowserSSOConfig{
+			Enabled: envBool("ADMIN_SSO_ENABLED", false), AuthorizationURL: strings.TrimSpace(os.Getenv("ADMIN_SSO_AUTHORIZATION_URL")),
+			TokenURL: strings.TrimSpace(os.Getenv("ADMIN_SSO_TOKEN_URL")), ClientID: strings.TrimSpace(os.Getenv("ADMIN_SSO_CLIENT_ID")),
+			ClientSecret: os.Getenv("ADMIN_SSO_CLIENT_SECRET"), RedirectURL: strings.TrimSpace(os.Getenv("ADMIN_SSO_REDIRECT_URL")),
+			Scopes: strings.Fields(env("ADMIN_SSO_SCOPES", "openid profile email")), SessionKey: os.Getenv("ADMIN_SSO_SESSION_KEY"),
+			SessionTTL: time.Duration(envInt("ADMIN_SSO_SESSION_TTL_SECONDS", 28800)) * time.Second,
+		}},
 		Guardrails: GuardrailMonitorConfig{
 			Capacity: guardrailMonitorCapacity,
 			TTL:      time.Duration(guardrailMonitorTTLSeconds) * time.Second,

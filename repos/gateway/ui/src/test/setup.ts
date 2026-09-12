@@ -14,5 +14,6 @@ window.matchMedia = (query: string) => ({ matches: false, media: query, onchange
 afterEach(() => {
   cleanup();
   sessionStorage.clear();
+  history.replaceState({}, "", "/");
   vi.restoreAllMocks();
 });

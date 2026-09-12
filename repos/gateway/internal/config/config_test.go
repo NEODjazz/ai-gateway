@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -399,5 +400,21 @@ func TestLoadAdminUIConfiguration(t *testing.T) {
 	t.Setenv("ADMIN_UI_ENABLED", "false")
 	if cfg := Load(); cfg.AdminUI.Enabled {
 		t.Fatal("admin UI environment override was ignored")
+	}
+}
+
+func TestLoadBrowserSSOConfiguration(t *testing.T) {
+	t.Setenv("ADMIN_SSO_ENABLED", "true")
+	t.Setenv("ADMIN_SSO_AUTHORIZATION_URL", "https://identity.example/authorize")
+	t.Setenv("ADMIN_SSO_TOKEN_URL", "https://identity.example/token")
+	t.Setenv("ADMIN_SSO_CLIENT_ID", "gateway-console")
+	t.Setenv("ADMIN_SSO_CLIENT_SECRET", "write-only-secret")
+	t.Setenv("ADMIN_SSO_REDIRECT_URL", "https://gateway.example/auth/sso/callback")
+	t.Setenv("ADMIN_SSO_SCOPES", "openid profile groups")
+	t.Setenv("ADMIN_SSO_SESSION_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("ADMIN_SSO_SESSION_TTL_SECONDS", "3600")
+	config := Load().AdminUI.SSO
+	if !config.Enabled || config.AuthorizationURL != "https://identity.example/authorize" || config.TokenURL != "https://identity.example/token" || config.ClientID != "gateway-console" || config.ClientSecret != "write-only-secret" || config.RedirectURL != "https://gateway.example/auth/sso/callback" || strings.Join(config.Scopes, ",") != "openid,profile,groups" || config.SessionKey == "" || config.SessionTTL != time.Hour {
+		t.Fatal("unexpected browser SSO config")
 	}
 }

@@ -23,6 +23,17 @@ gateway:
   port: 8080
   adminUI:
     enabled: true
+    sso:
+      enabled: false
+      authorizationUrl: ""
+      tokenUrl: ""
+      clientId: ""
+      # Supply secrets through an encrypted values source or an existing Secret.
+      clientSecret: ""
+      redirectUrl: ""
+      scopes: "openid profile email"
+      sessionKey: ""
+      sessionTtlSeconds: 28800
   apiDocs:
     # Keep disabled on externally reachable production gateways unless needed.
     enabled: false

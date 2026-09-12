@@ -7,7 +7,7 @@ import { appRoutes, routeCapability } from "./routes";
 import { LoadingState } from "../components/AsyncState";
 
 export function App() {
-  const { token, session, restoreSession } = useAuth();
+  const { token, session, restoreSession, ssoChecking } = useAuth();
   const [checking, setChecking] = useState(Boolean(token && !session));
   useEffect(() => {
     let active = true;
@@ -17,7 +17,7 @@ export function App() {
     return () => { active = false; };
   }, [restoreSession, session, token]);
   const routes = useMemo(() => session ? appRoutes.filter((route) => session.capabilities.includes(routeCapability(route))) : [], [session]);
-  if (checking) return <main className="login-page"><section className="login-card"><h1>Validating session</h1><p>Checking the stored gateway credential…</p></section></main>;
+  if (checking || ssoChecking) return <main className="login-page"><section className="login-card"><h1>Validating session</h1><p>Checking the stored gateway credential…</p></section></main>;
   if (!token) return <LoginPage />;
   if (!session) return <LoginPage />;
   const landing = routes[0]?.path || "/api-reference";

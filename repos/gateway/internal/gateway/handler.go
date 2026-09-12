@@ -83,6 +83,7 @@ type Handler struct {
 	audit             AuditClient
 	apiDocs           apiDocsConfig
 	adminUI           bool
+	browserSSO        *BrowserSSO
 	adminState        *AdminStateRuntime
 }
 
@@ -122,6 +123,11 @@ func (h Handler) WithAPIDocs(tryItOutEnabled bool) Handler {
 // protected by the normal admin bearer authentication and RBAC pipeline.
 func (h Handler) WithAdminUI() Handler {
 	h.adminUI = true
+	return h
+}
+
+func (h Handler) WithBrowserSSO(sso *BrowserSSO) Handler {
+	h.browserSSO = sso
 	return h
 }
 

@@ -172,6 +172,20 @@ func main() {
 	if cfg.AdminUI.Enabled {
 		handler = handler.WithAdminUI()
 	}
+	if cfg.AdminUI.SSO.Enabled && !cfg.AdminUI.Enabled {
+		log.Fatal("browser SSO requires the admin UI")
+	}
+	if cfg.AdminUI.SSO.Enabled {
+		browserSSO, ssoErr := gateway.NewBrowserSSO(gateway.BrowserSSOConfig{
+			AuthorizationURL: cfg.AdminUI.SSO.AuthorizationURL, TokenURL: cfg.AdminUI.SSO.TokenURL,
+			ClientID: cfg.AdminUI.SSO.ClientID, ClientSecret: cfg.AdminUI.SSO.ClientSecret, RedirectURL: cfg.AdminUI.SSO.RedirectURL,
+			Scopes: cfg.AdminUI.SSO.Scopes, SessionKey: []byte(cfg.AdminUI.SSO.SessionKey), SessionTTL: cfg.AdminUI.SSO.SessionTTL,
+		})
+		if ssoErr != nil {
+			log.Fatal(ssoErr)
+		}
+		handler = handler.WithBrowserSSO(browserSSO)
+	}
 	if cfg.Management.AuthURL != "" && cfg.Management.Secret != "" {
 		authManagement := gateway.NewRemoteManagementClient(cfg.Management.AuthURL, cfg.Management.Secret)
 		handler = handler.WithManagement(authManagement).WithIdentityDirectory(authManagement).WithOrganizations(authManagement)

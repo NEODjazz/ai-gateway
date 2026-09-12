@@ -52,6 +52,32 @@ spec:
               value: ":8080"
             - name: ADMIN_UI_ENABLED
               value: {{ .Values.gateway.adminUI.enabled | quote }}
+            - name: ADMIN_SSO_ENABLED
+              value: {{ .Values.gateway.adminUI.sso.enabled | quote }}
+            - name: ADMIN_SSO_AUTHORIZATION_URL
+              value: {{ .Values.gateway.adminUI.sso.authorizationUrl | quote }}
+            - name: ADMIN_SSO_TOKEN_URL
+              value: {{ .Values.gateway.adminUI.sso.tokenUrl | quote }}
+            - name: ADMIN_SSO_CLIENT_ID
+              value: {{ .Values.gateway.adminUI.sso.clientId | quote }}
+            - name: ADMIN_SSO_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gateway.providerSecretName" . }}
+                  key: ADMIN_SSO_CLIENT_SECRET
+                  optional: true
+            - name: ADMIN_SSO_REDIRECT_URL
+              value: {{ .Values.gateway.adminUI.sso.redirectUrl | quote }}
+            - name: ADMIN_SSO_SCOPES
+              value: {{ .Values.gateway.adminUI.sso.scopes | quote }}
+            - name: ADMIN_SSO_SESSION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gateway.providerSecretName" . }}
+                  key: ADMIN_SSO_SESSION_KEY
+                  optional: true
+            - name: ADMIN_SSO_SESSION_TTL_SECONDS
+              value: {{ include "ai-gateway.integerString" .Values.gateway.adminUI.sso.sessionTtlSeconds | quote }}
             - name: API_DOCS_ENABLED
               value: {{ .Values.gateway.apiDocs.enabled | quote }}
             - name: API_DOCS_TRY_IT_OUT_ENABLED
