@@ -214,8 +214,9 @@ in an encrypted HttpOnly Strict same-site cookie, caps its lifetime at the
 shorter of the provider expiry and `ADMIN_SSO_SESSION_TTL_SECONDS`, and validates
 it through the normal auth pipeline before creating the browser session.
 
-SCIM 2.0 user and group provisioning is available under `/scim/v2`. Discovery
-exposes the implemented resources, exact `startIndex`/`count` pagination,
+SCIM 2.0 user and group provisioning is available under `/scim/v2`. The base
+path and discovery endpoints expose the implemented resources, exact
+`startIndex`/`count` pagination,
 server-side allowlisted sorting, supported exact-match filters, and the
 supported PATCH surface.
 Provisioning requires a gateway bearer credential with the global `admin` role;

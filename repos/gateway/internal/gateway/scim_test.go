@@ -61,6 +61,11 @@ func TestSCIMDiscoveryAndPaginationAreTruthful(t *testing.T) {
 	if config.Code != http.StatusOK || !strings.Contains(config.Body.String(), `"filter":{"maxResults":500,"supported":true}`) || !strings.Contains(config.Body.String(), `"patch":{"supported":true}`) || !strings.Contains(config.Body.String(), `"sort":{"supported":true}`) {
 		t.Fatalf("config status=%d body=%s", config.Code, config.Body.String())
 	}
+	base := httptest.NewRecorder()
+	router.ServeHTTP(base, httptest.NewRequest(http.MethodGet, "/scim/v2", nil))
+	if base.Code != http.StatusOK || base.Header().Get("Content-Type") != "application/scim+json" || !strings.Contains(base.Body.String(), `"totalResults":2`) || !strings.Contains(base.Body.String(), `"endpoint":"/Users"`) || !strings.Contains(base.Body.String(), `"endpoint":"/Groups"`) {
+		t.Fatalf("base status=%d body=%s", base.Code, base.Body.String())
+	}
 	resourceType := httptest.NewRecorder()
 	router.ServeHTTP(resourceType, httptest.NewRequest(http.MethodGet, "/scim/v2/ResourceTypes/Group", nil))
 	if resourceType.Code != http.StatusOK || !strings.Contains(resourceType.Body.String(), `"endpoint":"/Groups"`) || resourceType.Header().Get("Content-Type") != "application/scim+json" {

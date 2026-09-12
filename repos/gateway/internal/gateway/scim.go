@@ -86,10 +86,21 @@ func (h Handler) SCIMServiceProviderConfig(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+func (h Handler) SCIMBase(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeSCIM(w, r); !ok {
+		return
+	}
+	writeSCIMResourceTypes(w)
+}
+
 func (h Handler) SCIMResourceTypes(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.authorizeSCIM(w, r); !ok {
 		return
 	}
+	writeSCIMResourceTypes(w)
+}
+
+func writeSCIMResourceTypes(w http.ResponseWriter) {
 	resource, group := scimResourceType("User"), scimResourceType("Group")
 	writeSCIMJSON(w, http.StatusOK, scimListResponse([]any{resource, group}, 2, 1, 2))
 }

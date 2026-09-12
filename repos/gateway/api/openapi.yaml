@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.294
+  version: 0.1.295
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -100,6 +100,15 @@ paths:
       summary: Discover supported provisioning capabilities
       responses:
         '200': {description: Service provider configuration, content: {application/scim+json: {schema: {type: object, additionalProperties: true}}}}
+        '401': {description: Invalid bearer credential, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+        '403': {description: Global administrator role required, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+  /scim/v2:
+    get:
+      operationId: discoverSCIMResources
+      tags: [SCIM]
+      summary: Discover supported provisioning resource types from the SCIM base path
+      responses:
+        '200': {description: Supported resource types, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMListResponse'}}}}
         '401': {description: Invalid bearer credential, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
         '403': {description: Global administrator role required, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
   /scim/v2/ResourceTypes:

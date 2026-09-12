@@ -24,6 +24,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/auth/sso/start"}, func(h Handler) http.Handler { return http.HandlerFunc(h.StartBrowserSSO) }},
 	{RouteContract{http.MethodGet, "/auth/sso/callback"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CompleteBrowserSSO) }},
 	{RouteContract{http.MethodPost, "/auth/sso/logout"}, func(h Handler) http.Handler { return http.HandlerFunc(h.EndBrowserSSO) }},
+	{RouteContract{http.MethodGet, "/scim/v2"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SCIMBase) }},
 	{RouteContract{http.MethodGet, "/scim/v2/ServiceProviderConfig"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SCIMServiceProviderConfig) }},
 	{RouteContract{http.MethodGet, "/scim/v2/ResourceTypes"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SCIMResourceTypes) }},
 	{RouteContract{http.MethodGet, "/scim/v2/ResourceTypes/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SCIMResourceType) }},
