@@ -6063,9 +6063,9 @@ components:
           additionalProperties: false
           required: [mimeType, data]
           properties:
-            mimeType: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp, audio/wav, audio/mpeg]}
+            mimeType: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp, audio/wav, audio/mpeg, application/pdf]}
             data: {type: string, format: byte}
-          description: Inline images require vision. WAV and MP3 input require audio_input; all binary parts are bounded, signature-validated and projected to configured AV scanners.
+          description: Inline images require vision, WAV and MP3 require audio_input, and PDF requires file_input. All binary parts are bounded, signature-validated and projected to configured AV scanners.
         functionCall:
           type: object
           additionalProperties: false

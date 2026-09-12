@@ -125,6 +125,13 @@ func requestImageAttachments(req *RequestContext) ([]openai.ImageAttachment, err
 	for _, audio := range chatAudio {
 		attachments = append(attachments, openai.ImageAttachment{MediaType: audio.MediaType, Data: audio.Data})
 	}
+	chatFiles, err := openai.ChatFileAttachments(req.Request.Messages)
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range chatFiles {
+		attachments = append(attachments, openai.ImageAttachment{MediaType: file.MediaType, Data: file.Data})
+	}
 	if req.ImageEditRequest != nil {
 		attachments = append(attachments, req.ImageEditRequest.Images...)
 		if req.ImageEditRequest.Mask != nil {

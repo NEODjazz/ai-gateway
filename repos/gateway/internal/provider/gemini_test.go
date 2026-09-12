@@ -584,6 +584,20 @@ func TestGeminiInlineAudioPreservesPartOrder(t *testing.T) {
 	}
 }
 
+func TestGeminiInlinePDFPreservesPartOrder(t *testing.T) {
+	parts, err := geminiMessageParts([]any{
+		map[string]any{"type": "text", "text": "before"},
+		map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64,JVBERi0xLjcKY29udGVudA==", "filename": "report.pdf"},
+		map[string]any{"type": "text", "text": "after"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parts) != 3 || parts[0].Text != "before" || parts[1].InlineData == nil || parts[1].InlineData.MIMEType != "application/pdf" || parts[2].Text != "after" {
+		t.Fatalf("file content order lost: %+v", parts)
+	}
+}
+
 func TestGeminiUsageValidation(t *testing.T) {
 	for _, usage := range []geminiUsage{{Prompt: -1}, {Prompt: 1, Cached: 2}, {Prompt: 10, Candidates: 2, Thoughts: 3, Total: 12}} {
 		if _, err := geminiToChat(geminiResponse{Usage: &usage}, "test"); err == nil {

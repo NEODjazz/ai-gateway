@@ -247,6 +247,9 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if openai.HasChatAudioInput(request) {
 		return "", "", false
 	}
+	if openai.HasChatFileInput(request) {
+		return "", "", false
+	}
 	if req.CredentialID == "" || len(request.Messages) == 0 || len(request.Tools) > 0 || request.ToolChoice != nil || len(request.Functions) > 0 || request.FunctionCall != nil || openai.ChatHasLegacyFunctionHistory(request) || request.ResponseFormat != nil {
 		return "", "", false
 	}

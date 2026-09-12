@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -74,6 +75,40 @@ func TestGenerateRequestMapsInlineAudio(t *testing.T) {
 	native.Contents[0].Role = "model"
 	if _, err := native.chat("model", false); err == nil {
 		t.Fatal("model audio input accepted")
+	}
+}
+
+func TestGenerateRequestMapsInlinePDF(t *testing.T) {
+	data := base64.StdEncoding.EncodeToString([]byte("%PDF-1.7\ncontent"))
+	var native generateRequest
+	raw := `{"contents":[{"role":"user","parts":[{"text":"summarize"},{"inlineData":{"mimeType":"application/pdf","data":"` + data + `"}}]}]}`
+	if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachments, err := openai.ChatFileAttachments(chat.Messages)
+	if err != nil || len(attachments) != 1 || attachments[0].Data != data || attachments[0].Filename != "input.pdf" {
+		t.Fatalf("chat=%+v attachments=%+v err=%v", chat, attachments, err)
+	}
+	if openai.ChatInputTokens(chat) <= openai.ChatInputTokens(openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "summarize"}}}) {
+		t.Fatal("inline PDF omitted from token reserve")
+	}
+	native.Contents[0].Role = "model"
+	if _, err := native.chat("model", false); err == nil {
+		t.Fatal("model PDF input accepted")
+	}
+}
+
+func TestGenerateRequestRejectsMalformedInlinePDF(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"parts":[{"inlineData":{"mimeType":"application/pdf","data":"bm90IGEgcGRm"}}]}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := native.chat("model", false); err == nil {
+		t.Fatal("malformed PDF accepted")
 	}
 }
 func TestGenerateFunctionHistoryRoundTrip(t *testing.T) {

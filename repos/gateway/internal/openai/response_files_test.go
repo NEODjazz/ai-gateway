@@ -46,3 +46,23 @@ func TestResponseFileAttachmentsRejectUnsafeFormsAndLimits(t *testing.T) {
 		t.Fatal("accepted oversized file")
 	}
 }
+
+func TestChatFileAttachmentsRequireUserRoleAndGlobalLimits(t *testing.T) {
+	file := map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64," + base64.StdEncoding.EncodeToString([]byte("%PDF-1.7\ncontent")), "filename": "report.pdf"}
+	messages := []Message{{Role: "user", Content: []any{file}}}
+	attachments, err := ChatFileAttachments(messages)
+	if err != nil || len(attachments) != 1 || !HasChatFileInput(ChatCompletionRequest{Messages: messages}) {
+		t.Fatalf("attachments=%+v err=%v", attachments, err)
+	}
+	messages[0].Role = "assistant"
+	if _, err := ChatFileAttachments(messages); err == nil {
+		t.Fatal("assistant file input accepted")
+	}
+	many := make([]Message, MaxResponseFileAttachments+1)
+	for index := range many {
+		many[index] = Message{Role: "user", Content: []any{file}}
+	}
+	if _, err := ChatFileAttachments(many); err == nil {
+		t.Fatal("global chat file limit was not enforced")
+	}
+}

@@ -64,6 +64,7 @@ func (g Gemini) authorize(request *http.Request) error {
 func (Gemini) SupportsVision() bool     { return true }
 func (Gemini) SupportsWebSearch() bool  { return true }
 func (Gemini) SupportsAudioInput() bool { return true }
+func (Gemini) SupportsFileInput() bool  { return true }
 
 func (Gemini) SupportsResponses() bool { return false }
 
@@ -530,6 +531,12 @@ func geminiMessageParts(value any) ([]geminiPart, error) {
 				attachments, err := openai.ResponseAudioAttachments([]any{part})
 				if err != nil || len(attachments) != 1 {
 					return nil, openai.ErrInvalidAudio
+				}
+				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachments[0].MediaType, Data: attachments[0].Data}})
+			case "input_file":
+				attachments, err := openai.ResponseFileAttachments([]any{part})
+				if err != nil || len(attachments) != 1 {
+					return nil, openai.ErrInvalidFileInput
 				}
 				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachments[0].MediaType, Data: attachments[0].Data}})
 			default:

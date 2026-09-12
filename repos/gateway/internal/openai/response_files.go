@@ -3,6 +3,7 @@ package openai
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -83,5 +84,36 @@ func parseResponseFile(value map[string]any) (ResponseFileAttachment, []byte, er
 
 func HasResponseFiles(request ResponseRequest) bool {
 	attachments, err := ResponseFileAttachments(request.Input)
+	return err == nil && len(attachments) > 0
+}
+
+func ChatFileAttachments(messages []Message) ([]ResponseFileAttachment, error) {
+	attachments := make([]ResponseFileAttachment, 0)
+	total := 0
+	for _, message := range messages {
+		found, err := ResponseFileAttachments(message.Content)
+		if err != nil {
+			return nil, err
+		}
+		if len(found) > 0 && message.Role != "user" {
+			return nil, fmt.Errorf("%w: files are only accepted in user messages", ErrInvalidFileInput)
+		}
+		if len(attachments) > MaxResponseFileAttachments-len(found) {
+			return nil, ErrInvalidFileInput
+		}
+		for _, attachment := range found {
+			data, err := base64.StdEncoding.DecodeString(attachment.Data)
+			if err != nil || total > MaxResponseFileBytes-len(data) {
+				return nil, ErrInvalidFileInput
+			}
+			total += len(data)
+		}
+		attachments = append(attachments, found...)
+	}
+	return attachments, nil
+}
+
+func HasChatFileInput(request ChatCompletionRequest) bool {
+	attachments, err := ChatFileAttachments(request.Messages)
 	return err == nil && len(attachments) > 0
 }

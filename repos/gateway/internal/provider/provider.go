@@ -2682,6 +2682,9 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	if openai.HasChatAudioInput(request) {
 		required = append(required, "audio_input")
 	}
+	if openai.HasChatFileInput(request) {
+		required = append(required, "file_input")
+	}
 	if request.WebSearchOptions != nil {
 		required = append(required, "web_search")
 	}

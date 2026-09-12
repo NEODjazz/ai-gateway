@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
 
@@ -86,5 +87,34 @@ func TestInlineAudioRequiresExplicitCapability(t *testing.T) {
 	}
 	if !(Endpoint{Capabilities: []string{"chat", "audio_input"}}).supportsCapabilities(requiredChatCapabilities(request, false)...) {
 		t.Fatal("deployment with audio input capability rejected")
+	}
+}
+
+func TestInlineFileRequiresExplicitCapabilityAndBypassesCaches(t *testing.T) {
+	request := openai.ChatCompletionRequest{
+		Messages: []openai.Message{
+			{
+				Role: "user",
+				Content: []any{
+					map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64,JVBERi0xLjcKY29udGVudA==", "filename": "report.pdf"},
+				},
+			},
+		},
+	}
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,file_input" {
+		t.Fatalf("required capabilities=%s", got)
+	}
+	if (Endpoint{Capabilities: []string{"chat"}}).supportsCapabilities(requiredChatCapabilities(request, false)...) {
+		t.Fatal("deployment without file input capability accepted")
+	}
+	if !(Endpoint{Capabilities: []string{"chat", "file_input"}}).supportsCapabilities(requiredChatCapabilities(request, false)...) {
+		t.Fatal("deployment with file input capability rejected")
+	}
+	requestContext := modules.RequestContext{CredentialID: "credential", Request: request}
+	if providerCacheKey("chat", requestContext) != "" {
+		t.Fatal("exact cache enabled for inline file")
+	}
+	if _, _, ok := semanticRequest(requestContext, Endpoint{Name: "endpoint"}); ok {
+		t.Fatal("semantic cache enabled for inline file")
 	}
 }

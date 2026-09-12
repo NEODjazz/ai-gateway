@@ -249,6 +249,14 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 					parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": data}})
 					break
 				}
+				if part.InlineData.MIMEType == "application/pdf" {
+					file := map[string]any{"type": "input_file", "file_data": data, "filename": "input.pdf"}
+					if _, err := openai.ResponseFileAttachments([]any{file}); err != nil {
+						return result, err
+					}
+					parts = append(parts, file)
+					break
+				}
 				format, filename := "", ""
 				switch part.InlineData.MIMEType {
 				case "audio/wav":
@@ -321,6 +329,9 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 			}
 		}
 		flush()
+	}
+	if _, err := openai.ChatFileAttachments(result.Messages); err != nil {
+		return result, err
 	}
 	for _, tool := range r.Tools {
 		if (len(tool.Functions) == 0) == (tool.GoogleSearch == nil) {

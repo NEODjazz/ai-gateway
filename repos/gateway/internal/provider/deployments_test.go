@@ -325,6 +325,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Contains(profilesByType["gemini"].Capabilities, "audio_input") {
 		t.Fatalf("Gemini profile is missing native inline audio: %+v", profilesByType["gemini"])
 	}
+	if !slices.Contains(profilesByType["gemini"].Capabilities, "file_input") {
+		t.Fatalf("Gemini profile is missing native inline files: %+v", profilesByType["gemini"])
+	}
 	if !slices.Contains(profilesByType["gemini"].Operations, "interactions") || slices.Contains(profilesByType["openai"].Operations, "interactions") {
 		t.Fatalf("native interaction profiles are incorrect: gemini=%+v openai=%+v", profilesByType["gemini"], profilesByType["openai"])
 	}

@@ -575,7 +575,7 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 		client, ok := endpoint.Provider.(interface{ SupportsAudioInput() bool })
 		return ok && client.SupportsAudioInput()
 	case "file_input":
-		if endpoint.Type != "openai" && endpoint.Type != "openai-compatible" && endpoint.Type != "azure-openai" {
+		if endpoint.Type != "openai" && endpoint.Type != "openai-compatible" && endpoint.Type != "azure-openai" && endpoint.Type != "gemini" {
 			return false
 		}
 		client, ok := endpoint.Provider.(interface{ SupportsFileInput() bool })
