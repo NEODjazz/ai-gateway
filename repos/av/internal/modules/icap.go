@@ -38,6 +38,58 @@ func NewICAPClient(host string, port string, service string) ICAPClient {
 	}
 }
 
+// Ready verifies that the configured ICAP service accepts protocol requests
+// without sending user content through the scanner.
+func (c ICAPClient) Ready(ctx context.Context) error {
+	if strings.TrimSpace(c.Host) == "" {
+		return errors.New("ICAP_HOST is empty")
+	}
+	if strings.TrimSpace(c.Port) == "" {
+		return errors.New("ICAP_PORT is empty")
+	}
+	address := net.JoinHostPort(c.Host, c.Port)
+	dialer := c.Dial
+	if dialer == nil {
+		netDialer := &net.Dialer{Timeout: c.timeout()}
+		dialer = netDialer.DialContext
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, c.timeout())
+	defer cancel()
+	conn, err := dialer(dialCtx, "tcp", address)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(c.timeout()))
+	service := strings.TrimSpace(c.Service)
+	if service == "" {
+		service = "/av"
+	}
+	if !strings.HasPrefix(service, "/") {
+		service = "/" + service
+	}
+	request := "OPTIONS icap://" + address + service + " ICAP/1.0\r\nHost: " + address + "\r\nEncapsulated: null-body=0\r\n\r\n"
+	if _, err := conn.Write([]byte(request)); err != nil {
+		return err
+	}
+	reader := textproto.NewReader(bufio.NewReader(conn))
+	line, err := reader.ReadLine()
+	if err != nil {
+		return err
+	}
+	statusCode, err := parseICAPStatusCode(line)
+	if err != nil {
+		return err
+	}
+	if _, err := reader.ReadMIMEHeader(); err != nil {
+		return err
+	}
+	if statusCode < 200 || statusCode >= 300 {
+		return fmt.Errorf("icap service returned %s", line)
+	}
+	return nil
+}
+
 func (c ICAPClient) Scan(ctx context.Context, moduleName string, payload []byte) (ICAPScanResult, error) {
 	return c.ScanContent(ctx, moduleName, "text/plain; charset=utf-8", payload)
 }

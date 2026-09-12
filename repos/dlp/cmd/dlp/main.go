@@ -27,11 +27,19 @@ func main() {
 
 type contentScanner interface {
 	Scan(ctx context.Context, moduleName string, payload []byte) (modules.ICAPScanResult, error)
+	Ready(context.Context) error
 }
 
 func newHandler(client contentScanner) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if err := client.Ready(r.Context()); err != nil {
+			http.Error(w, "ICAP dependency is unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 

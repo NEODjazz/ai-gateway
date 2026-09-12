@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,7 @@ func main() {
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
+	http.HandleFunc("/readyz", readinessHandler(client))
 
 	http.HandleFunc("/scan", func(w http.ResponseWriter, r *http.Request) {
 		var req scanRequest
@@ -79,6 +81,20 @@ func main() {
 	addr := env("HTTP_ADDR", ":8085")
 	log.Printf("av listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, nil))
+}
+
+type readinessChecker interface {
+	Ready(context.Context) error
+}
+
+func readinessHandler(client readinessChecker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := client.Ready(r.Context()); err != nil {
+			http.Error(w, "ICAP dependency is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func writeScanError(w http.ResponseWriter, err error) {

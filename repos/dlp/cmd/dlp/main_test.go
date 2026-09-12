@@ -14,6 +14,7 @@ import (
 type fakeScanner struct {
 	calls int
 	err   error
+	ready error
 }
 
 func (s *fakeScanner) Scan(context.Context, string, []byte) (modules.ICAPScanResult, error) {
@@ -21,11 +22,31 @@ func (s *fakeScanner) Scan(context.Context, string, []byte) (modules.ICAPScanRes
 	return modules.ICAPScanResult{}, s.err
 }
 
+func (s *fakeScanner) Ready(context.Context) error { return s.ready }
+
 func TestDLPHealth(t *testing.T) {
 	response := httptest.NewRecorder()
 	newHandler(&fakeScanner{}).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("unexpected health status: %d", response.Code)
+	}
+}
+
+func TestDLPReadinessReflectsICAPDependency(t *testing.T) {
+	for name, test := range map[string]struct {
+		err    error
+		status int
+	}{
+		"ready":       {status: http.StatusNoContent},
+		"unavailable": {err: errors.New("connection refused"), status: http.StatusServiceUnavailable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			newHandler(&fakeScanner{ready: test.err}).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+			if response.Code != test.status || strings.Contains(response.Body.String(), "connection refused") {
+				t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 

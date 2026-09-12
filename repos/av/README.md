@@ -11,6 +11,7 @@ go run ./cmd/av
 ## Endpoints
 
 - `GET /healthz`
+- `GET /readyz`
 - `POST /scan`
 
 `POST /scan` accepts `request_id`, a text projection in `content`, and optional
@@ -30,7 +31,9 @@ AV_ICAP_TIMEOUT=5s
 ```
 
 `AV_ICAP_HOST` and `AV_ICAP_PORT` must identify a reachable ICAP server for
-non-empty scans. The service does not fail startup when they are empty; scan
-requests then fail with a dependency error. Generic `ICAP_*` variables are
+non-empty scans. `/healthz` reports process liveness. `/readyz` sends a
+content-free ICAP `OPTIONS` request and returns 503 while the configured service
+is unavailable. The service does not fail startup when settings are empty;
+readiness and scan requests then fail with a dependency error. Generic `ICAP_*` variables are
 accepted as fallbacks. `AV_ICAP_SERVICE` defaults to `/av` and
 `AV_ICAP_TIMEOUT` to `5s`.

@@ -51,7 +51,7 @@ spec:
             - name: {{ upper $component }}_ICAP_TIMEOUT
               value: {{ $config.icap.timeout | quote }}
           readinessProbe:
-            httpGet: {path: /healthz, port: http}
+            httpGet: {path: /readyz, port: http}
           livenessProbe:
             httpGet: {path: /healthz, port: http}
           resources:

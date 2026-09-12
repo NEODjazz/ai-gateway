@@ -57,8 +57,8 @@ flowchart LR
 | --- | --- | --- |
 | Gateway | `GET /healthz`, `GET /readyz`, `GET /metrics`, `/v1/*`, `/admin/v1/*` | OpenAI-compatible API, admin API, auth pipeline, provider routing, failover, SSE, orchestration provider-level modules, deanonymization |
 | Auth | `GET /healthz`, `GET /livez`, `GET /readyz`, `POST /authorize`, `/internal/v1/*` | PostgreSQL virtual keys с expiry/revoke/rotation, identity directory, переходный static fallback, legacy HS256 и OIDC JWKS RS256/ES256; заполняет identity и access policy |
-| DLP | `GET /healthz`, `POST /scan` | Извлекает текст запроса и отправляет его в настроенный ICAP-сервис через `REQMOD` |
-| AV | `GET /healthz`, `POST /scan` | HTTP-to-ICAP адаптер для текста и отдельных бинарных image attachments |
+| DLP | `GET /healthz`, `GET /readyz`, `POST /scan` | Извлекает текст запроса и отправляет его в настроенный ICAP-сервис через `REQMOD`; readiness проверяет ICAP через content-free `OPTIONS` |
+| AV | `GET /healthz`, `GET /readyz`, `POST /scan` | HTTP-to-ICAP адаптер для текста и отдельных бинарных image attachments; readiness проверяет ICAP через content-free `OPTIONS` |
 | Anonymizer | `GET /healthz`, `POST /anonymize` | Маскирует значения по настраиваемым RE2-правилам и возвращает преобразованный контент с placeholder map |
 | Billing | `GET /healthz`, `GET /livez`, `POST /usage`, `/internal/v1/*` | Резервирует budgets, собирает tokens и cost, ведёт request/audit logs и после ответа пишет usage event в ClickHouse; `/healthz` является readiness check |
 

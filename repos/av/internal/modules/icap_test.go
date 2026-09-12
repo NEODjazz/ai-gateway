@@ -29,6 +29,48 @@ func TestICAPNon2xxWithoutVirusSignalRemainsUpstreamError(t *testing.T) {
 	}
 }
 
+func TestICAPReadinessUsesContentFreeOptions(t *testing.T) {
+	requests := make(chan string, 1)
+	client := NewICAPClient("icap.test", "1344", "/av")
+	client.Dial = avICAPReadyTestDial("ICAP/1.0 204 No Content\r\nMethods: REQMOD\r\n\r\n", requests)
+	if err := client.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	request := <-requests
+	if !strings.HasPrefix(request, "OPTIONS icap://icap.test:1344/av ICAP/1.0\r\n") || strings.Contains(request, "REQMOD") {
+		t.Fatalf("unexpected readiness request: %q", request)
+	}
+
+	client.Dial = avICAPReadyTestDial("ICAP/1.0 503 Unavailable\r\n\r\n", make(chan string, 1))
+	if err := client.Ready(context.Background()); err == nil {
+		t.Fatal("non-successful ICAP readiness response was accepted")
+	}
+}
+
+func avICAPReadyTestDial(response string, requests chan<- string) func(context.Context, string, string) (net.Conn, error) {
+	return func(context.Context, string, string) (net.Conn, error) {
+		client, server := net.Pipe()
+		go func() {
+			defer server.Close()
+			reader := bufio.NewReader(server)
+			var request strings.Builder
+			for {
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					return
+				}
+				request.WriteString(line)
+				if line == "\r\n" {
+					break
+				}
+			}
+			requests <- request.String()
+			_, _ = io.WriteString(server, response)
+		}()
+		return client, nil
+	}
+}
+
 func avICAPTestDial(response string) func(context.Context, string, string) (net.Conn, error) {
 	return func(context.Context, string, string) (net.Conn, error) {
 		client, server := net.Pipe()

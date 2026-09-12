@@ -8,8 +8,8 @@
 | Auth | `/livez`, `/healthz` | `/readyz` | В durable/JWKS mode проверяет PostgreSQL migrations и JWKS |
 | Billing | `/livez` | `/healthz` | `/healthz` одновременно проверяет Billing, audit storage и migrations |
 | Anonymizer | `/healthz` | нет отдельного | ICAP не используется |
-| DLP | `/healthz` | нет отдельного | Health не выполняет ICAP probe |
-| AV | `/healthz` | нет отдельного | Health не выполняет ICAP probe |
+| DLP | `/healthz` | `/readyz` | Readiness выполняет content-free ICAP `OPTIONS` probe |
+| AV | `/healthz` | `/readyz` | Readiness выполняет content-free ICAP `OPTIONS` probe |
 
 Gateway `/metrics` экспортирует Prometheus text format. Dynamic request IDs,
 tenant IDs и неизвестные paths не используются как неограниченные labels.
