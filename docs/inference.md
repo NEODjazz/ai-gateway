@@ -724,10 +724,20 @@ code-execution counts settle `tool_requests` in billing, while the complete
 container reference contributes to TPM reserve. Exact and semantic caches are
 disabled because execution may create files or mutate managed container state.
 
+The `container.id` returned by a successful skill execution may be supplied with
+the same bounded skills list in a later request. The gateway persists the
+provider-reported expiry and deployment affinity in PostgreSQL, resolves it with
+the authenticated credential+user owner key, and rejects unknown, foreign or
+expired IDs before provider execution. Continuations remain pinned to the
+original deployment even when routing configuration changes. Each successful
+continuation refreshes only the provider-reported expiry for the same owner and
+deployment; identifier collisions fail closed. Expired bindings are removed in
+bounded batches during writes.
+
 The same request shape is accepted in durable `/v1/messages` batches and is
-revalidated when the item executes. Streaming with skills and `container.id`
-reuse are rejected explicitly until native SSE state and durable container
-ownership/affinity can be preserved end to end.
+revalidated when the item executes, including durable container ownership and
+affinity. Streaming with skills remains rejected until native SSE execution state
+can be preserved end to end.
 
 Regressions cover request/response conversion, native and fallback SSE, stream
 failure, model/tool authorization, TPM, unknown input, response-size bounds and
