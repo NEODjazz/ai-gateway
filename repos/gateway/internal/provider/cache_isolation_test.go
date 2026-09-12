@@ -318,3 +318,21 @@ func TestReasoningHistoryBypassesSemanticCache(t *testing.T) {
 		t.Fatal("semantic cache accepted signed reasoning history")
 	}
 }
+
+func TestProviderCacheKeySeparatesClientAPIContract(t *testing.T) {
+	base := modules.RequestContext{
+		CredentialID: "credential",
+		Request:      openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}},
+		Metadata:     map[string]string{"gateway.api_type": "chat"},
+	}
+	messages := base
+	messages.Metadata = map[string]string{"gateway.api_type": "messages"}
+	if providerCacheKey("chat", base) == providerCacheKey("chat", messages) {
+		t.Fatal("chat and Messages contracts share an exact-cache key")
+	}
+	baseScope, _, baseEligible := semanticRequest(base, Endpoint{Name: "endpoint"})
+	messagesScope, _, messagesEligible := semanticRequest(messages, Endpoint{Name: "endpoint"})
+	if !baseEligible || !messagesEligible || baseScope == messagesScope {
+		t.Fatal("chat and Messages contracts share a semantic-cache scope")
+	}
+}

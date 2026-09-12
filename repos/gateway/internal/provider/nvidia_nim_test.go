@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
+	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
 
@@ -85,7 +88,7 @@ func TestNVIDIANIMCapabilityProfileIsBounded(t *testing.T) {
 		if profile.Type != "nvidia-nim" {
 			continue
 		}
-		expectedOperations := []string{"chat", "completions", "responses", "embeddings", "stream"}
+		expectedOperations := []string{"chat", "completions", "responses", "count_tokens", "embeddings", "stream"}
 		expectedCapabilities := []string{"chat", "completions", "responses", "embeddings", "stream", "tools", "structured_output", "vision", "audio_input", "video_input"}
 		if !slices.Equal(profile.Operations, expectedOperations) || !slices.Equal(profile.Capabilities, expectedCapabilities) {
 			t.Fatalf("profile=%+v", profile)
@@ -94,6 +97,81 @@ func TestNVIDIANIMCapabilityProfileIsBounded(t *testing.T) {
 	}
 	t.Fatal("NVIDIA NIM capability profile is missing")
 }
+
+func TestNVIDIANIMNativeMessagesAndCountTokens(t *testing.T) {
+	var messagesCalls, chatCalls, countCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer nim-key" || r.Header.Get("X-API-Key") != "" {
+			t.Fatalf("headers=%v", r.Header)
+		}
+		if strings.HasPrefix(r.URL.Path, "/v1/messages") && r.Header.Get("Anthropic-Version") != "2023-06-01" {
+			t.Fatalf("native headers=%v", r.Header)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			chatCalls++
+			_, _ = fmt.Fprint(w, `{"id":"chat","model":"model","choices":[{"index":0,"message":{"role":"assistant","content":"compatible"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+		case "/v1/messages":
+			messagesCalls++
+			if body["max_tokens"] == nil || body["messages"] == nil {
+				t.Fatalf("native body=%#v", body)
+			}
+			if stream, _ := body["stream"].(bool); stream {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprint(w, "event: message_start\n"+`data: {"type":"message_start","message":{"id":"native-stream","model":"model","usage":{"input_tokens":2}}}`+"\n\n")
+				_, _ = fmt.Fprint(w, "event: content_block_delta\n"+`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"native"}}`+"\n\n")
+				_, _ = fmt.Fprint(w, "event: message_delta\n"+`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`+"\n\n")
+				_, _ = fmt.Fprint(w, "event: message_stop\n"+`data: {"type":"message_stop"}`+"\n\n")
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"id":"native","type":"message","role":"assistant","model":"model","content":[{"type":"text","text":"native"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":1}}`)
+		case "/v1/messages/count_tokens":
+			countCalls++
+			if _, exists := body["max_tokens"]; exists {
+				t.Fatalf("count body includes generation limit: %#v", body)
+			}
+			_, _ = fmt.Fprint(w, `{"input_tokens":7}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "nim", Type: "nvidia-nim", BaseURL: server.URL, APIKey: "nim-key", Models: []string{"model"}, Stream: true}}}).(*Router)
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	compatible, err := router.ChatCompletions(t.Context(), modules.RequestContext{Request: request})
+	if err != nil || compatible.Choices[0].Message.Content != "compatible" {
+		t.Fatalf("compatible=%+v err=%v", compatible, err)
+	}
+	native, err := router.ChatCompletions(t.Context(), modules.RequestContext{Request: request, Metadata: map[string]string{"gateway.api_type": "messages"}})
+	if err != nil || native.Choices[0].Message.Content != "native" || native.Usage.TotalTokens != 3 {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+	var chunks []string
+	request.Stream = true
+	streamedResponse, streamed, err := router.StreamChatCompletions(t.Context(), modules.RequestContext{Request: request, Metadata: map[string]string{"gateway.api_type": "messages"}}, func(payload string) error {
+		chunks = append(chunks, payload)
+		return nil
+	})
+	if err != nil || !streamed || streamedResponse.Usage.TotalTokens != 3 || !strings.Contains(strings.Join(chunks, ""), "native") {
+		t.Fatalf("streamed=%v response=%+v chunks=%q err=%v", streamed, streamedResponse, chunks, err)
+	}
+	result, err := router.CountTokens(t.Context(), modules.RequestContext{Request: request})
+	if err != nil || result.InputTokens != 7 || result.Source != "nvidia-nim" {
+		t.Fatalf("count=%+v err=%v", result, err)
+	}
+	if chatCalls != 1 || messagesCalls != 2 || countCalls != 1 {
+		t.Fatalf("chat=%d messages=%d count=%d", chatCalls, messagesCalls, countCalls)
+	}
+}
+
+var _ MessagesClient = NVIDIANIM{}
+var _ StreamingMessagesClient = NVIDIANIM{}
+var _ TokenCountClient = NVIDIANIM{}
 
 func TestNVIDIANIMRejectsUnsupportedServiceTierBeforeHTTP(t *testing.T) {
 	called := false

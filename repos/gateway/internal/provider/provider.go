@@ -342,6 +342,16 @@ type StreamingClient interface {
 	StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error)
 }
 
+// MessagesClient lets an adapter preserve a provider's native Messages wire
+// contract while the router keeps the shared chat policy and accounting path.
+type MessagesClient interface {
+	Messages(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error)
+}
+
+type StreamingMessagesClient interface {
+	StreamMessages(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error)
+}
+
 type StreamingResponseClient interface {
 	StreamResponses(ctx context.Context, request openai.ResponseRequest, write ResponseStreamWriter) (openai.ResponseResponse, error)
 }
@@ -749,7 +759,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			r.mirrorChat(ctx, req.RequestID, attemptCtx.Request, request.Model, requiredChatCapabilities(request, false)...)
 			mirrored = true
 		}
-		response, retries, err := r.callChat(ctx, endpoint, attemptCtx.Request)
+		response, retries, err := r.callChatForAPI(ctx, endpoint, attemptCtx.Request, req.Metadata["gateway.api_type"])
 		totalRetries += retries
 		setAttemptMetadata(&attemptCtx, started, err)
 		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
@@ -838,8 +848,18 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		if !progress.allows(endpoint) {
 			continue
 		}
-		streamingProvider, ok := endpoint.Provider.(StreamingClient)
-		if !ok {
+		var streamCall func(context.Context, openai.ChatCompletionRequest, ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error)
+		if req.Metadata["gateway.api_type"] == "messages" {
+			if messagesProvider, ok := endpoint.Provider.(StreamingMessagesClient); ok {
+				streamCall = messagesProvider.StreamMessages
+			}
+		}
+		if streamCall == nil {
+			if streamingProvider, ok := endpoint.Provider.(StreamingClient); ok {
+				streamCall = streamingProvider.StreamChatCompletions
+			}
+		}
+		if streamCall == nil {
 			continue
 		}
 		progress.enter(endpoint)
@@ -900,7 +920,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		for retry := 0; ; retry++ {
 			tracker := newStreamAttemptTracker(started)
 			providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "chat.stream")
-			response, err = streamingProvider.StreamChatCompletions(providerCtx, attemptCtx.Request, deanonymizingChatStreamWriter(attemptCtx.AnonymizationValues, tracker.chatWriter(write)))
+			response, err = streamCall(providerCtx, attemptCtx.Request, deanonymizingChatStreamWriter(attemptCtx.AnonymizationValues, tracker.chatWriter(write)))
 			finishProviderCall(err)
 			streamStarted, firstTokenLatency = tracker.state()
 			if err == nil || errors.Is(err, ErrStreamingUnsupported) || streamStarted || ctx.Err() != nil || retry >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
@@ -2471,6 +2491,10 @@ func chatResponseHasNativeContent(response openai.ChatCompletionResponse) bool {
 }
 
 func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, int, error) {
+	return r.callChatForAPI(ctx, endpoint, request, "")
+}
+
+func (r Router) callChatForAPI(ctx context.Context, endpoint Endpoint, request openai.ChatCompletionRequest, apiType string) (openai.ChatCompletionResponse, int, error) {
 	release, err := r.acquireEndpoint(ctx, endpoint, openai.ChatReserveTokens(request))
 	if err != nil {
 		return openai.ChatCompletionResponse{}, 0, err
@@ -2483,7 +2507,11 @@ func (r Router) callChat(ctx context.Context, endpoint Endpoint, request openai.
 	err = nil
 	for attempt := 0; attempt <= endpointMaxRetries(endpoint); attempt++ {
 		providerCtx, finishProviderCall := r.startProviderCall(ctx, endpoint, "chat")
-		response, err = endpoint.Provider.ChatCompletions(providerCtx, request)
+		if messagesProvider, ok := endpoint.Provider.(MessagesClient); apiType == "messages" && ok {
+			response, err = messagesProvider.Messages(providerCtx, request)
+		} else {
+			response, err = endpoint.Provider.ChatCompletions(providerCtx, request)
+		}
 		finishProviderCall(err)
 		if err == nil {
 			r.health.success(ctx, endpoint)

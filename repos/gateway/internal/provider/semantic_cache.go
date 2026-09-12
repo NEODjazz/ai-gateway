@@ -303,7 +303,7 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if err != nil {
 		return "", "", false
 	}
-	scopeHash := sha256.Sum256([]byte(cacheIsolationScope(req) + "\x00" + endpoint.Name + "\x00" + string(settingsJSON) + "\x00" + strings.Join(structure, "\x1e")))
+	scopeHash := sha256.Sum256([]byte(cacheIsolationScope(req) + "\x00" + endpoint.Name + "\x00" + req.Metadata["gateway.api_type"] + "\x00" + string(settingsJSON) + "\x00" + strings.Join(structure, "\x1e")))
 	return hex.EncodeToString(scopeHash[:]), strings.Join(parts, "\n"), true
 }
 

@@ -102,7 +102,7 @@ func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return TokenCountResult{}, responseStatusError("anthropic", response)
+		return TokenCountResult{}, responseStatusError(p.errorProvider, response)
 	}
 	payload, err := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
 	if err != nil {
@@ -131,7 +131,7 @@ func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (
 		value := *result.ContextManagement.OriginalInputTokens
 		original = &value
 	}
-	return TokenCountResult{InputTokens: *result.InputTokens, OriginalInputTokens: original, Model: request.Model, Source: "anthropic"}, nil
+	return TokenCountResult{InputTokens: *result.InputTokens, OriginalInputTokens: original, Model: request.Model, Source: p.errorProvider}, nil
 }
 
 func validateTokenCountRequest(request openai.ChatCompletionRequest) error {

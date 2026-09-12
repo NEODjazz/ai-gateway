@@ -10,12 +10,13 @@ import (
 // the NIM LLM runtime without advertising unrelated compatible API families.
 type NVIDIANIM struct {
 	compatible OpenAICompatible
+	messages   Anthropic
 }
 
 func NewNVIDIANIM(baseURL, apiKey string, stream bool) NVIDIANIM {
 	compatible := NewOpenAICompatible(baseURL, apiKey, stream)
 	compatible.errorProvider = "nvidia-nim"
-	return NVIDIANIM{compatible: compatible}
+	return NVIDIANIM{compatible: compatible, messages: newBearerAnthropic(baseURL, apiKey, stream, "nvidia-nim")}
 }
 
 func (NVIDIANIM) SupportsResponses() bool        { return true }
@@ -35,6 +36,18 @@ func (n NVIDIANIM) ChatCompletions(ctx context.Context, request openai.ChatCompl
 
 func (n NVIDIANIM) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	return n.compatible.StreamChatCompletions(ctx, request, write)
+}
+
+func (n NVIDIANIM) Messages(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	return n.messages.ChatCompletions(ctx, request)
+}
+
+func (n NVIDIANIM) StreamMessages(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+	return n.messages.StreamChatCompletions(ctx, request, write)
+}
+
+func (n NVIDIANIM) CountTokens(ctx context.Context, request TokenCountRequest) (TokenCountResult, error) {
+	return n.messages.CountTokens(ctx, request)
 }
 
 func (n NVIDIANIM) ValidateResponseParameters(request openai.ResponseRequest) error {

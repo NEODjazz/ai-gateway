@@ -105,7 +105,10 @@ func providerCacheKey(kind string, req modules.RequestContext) string {
 		kind = "chat-matched-stop"
 	}
 	if kind == "chat" {
-		value = chatCacheKeyValue(request)
+		value = struct {
+			Request any    `json:"request"`
+			APIType string `json:"api_type,omitempty"`
+		}{Request: chatCacheKeyValue(request), APIType: req.Metadata["gateway.api_type"]}
 	}
 	if kind == "responses" && req.ResponseRequest != nil {
 		responseRequest := *req.ResponseRequest
@@ -129,7 +132,7 @@ func providerCacheKey(kind string, req modules.RequestContext) string {
 	if err != nil {
 		return ""
 	}
-	sum := sha256.Sum256(append([]byte("v3\x00"+kind+"\x00"+tenant+"\x00"), body...))
+	sum := sha256.Sum256(append([]byte("v4\x00"+kind+"\x00"+tenant+"\x00"), body...))
 	return hex.EncodeToString(sum[:])
 }
 

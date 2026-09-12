@@ -23,6 +23,8 @@ type Anthropic struct {
 	baseURL        string
 	apiKey         string
 	upstreamStream bool
+	bearerAuth     bool
+	errorProvider  string
 	client         *http.Client
 }
 
@@ -218,8 +220,16 @@ func NewAnthropic(baseURL string, apiKey string, upstreamStream bool) Anthropic 
 		baseURL:        strings.TrimRight(baseURL, "/"),
 		apiKey:         apiKey,
 		upstreamStream: upstreamStream,
+		errorProvider:  "anthropic",
 		client:         newProviderHTTPClient(180 * time.Second),
 	}
+}
+
+func newBearerAnthropic(baseURL, apiKey string, upstreamStream bool, errorProvider string) Anthropic {
+	client := NewAnthropic(baseURL, apiKey, upstreamStream)
+	client.bearerAuth = true
+	client.errorProvider = errorProvider
+	return client
 }
 
 func (Anthropic) SupportsVision() bool          { return true }
@@ -353,7 +363,7 @@ func (p Anthropic) doMessages(ctx context.Context, request anthropicRequest, tar
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return responseStatusError("anthropic", resp)
+		return responseStatusError(p.errorProvider, resp)
 	}
 	return json.NewDecoder(resp.Body).Decode(target)
 }
@@ -379,7 +389,7 @@ func (p Anthropic) doMessagesStream(ctx context.Context, request anthropicReques
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
-		return nil, responseStatusError("anthropic", resp)
+		return nil, responseStatusError(p.errorProvider, resp)
 	}
 	return resp, nil
 }
@@ -405,7 +415,11 @@ func (p Anthropic) setHeaders(request *http.Request) {
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Anthropic-Version", "2023-06-01")
 	if p.apiKey != "" {
-		request.Header.Set("X-API-Key", p.apiKey)
+		if p.bearerAuth {
+			request.Header.Set("Authorization", "Bearer "+p.apiKey)
+		} else {
+			request.Header.Set("X-API-Key", p.apiKey)
+		}
 	}
 }
 
