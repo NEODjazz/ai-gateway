@@ -710,6 +710,25 @@ SSE final usage, and the internal response usage presented to billing settlement
 the total output-token charge remains unchanged.
 Token counting is a separate endpoint; background jobs are not supported.
 
+Non-streaming Messages requests may load 1–20 native skills with
+`container.skills`. Each reference has `type=anthropic|custom`, a bounded
+`skill_id`, and an optional pinned `version`. The request must also include the
+native `{type: code_execution_20250825, name: code_execution}` tool. Custom
+skills are resolved against the authenticated credential+user owner key before
+inference and bind the request to the deployment where the skill was created;
+custom skills from different deployments fail before provider execution.
+Authorization checks both `skill:<skill_id>` and `code_execution` tool grants.
+The container descriptor and code-execution result blocks returned by the
+provider are bounded and preserved, including `pause_turn`. Provider-reported
+code-execution counts settle `tool_requests` in billing, while the complete
+container reference contributes to TPM reserve. Exact and semantic caches are
+disabled because execution may create files or mutate managed container state.
+
+The same request shape is accepted in durable `/v1/messages` batches and is
+revalidated when the item executes. Streaming with skills and `container.id`
+reuse are rejected explicitly until native SSE state and durable container
+ownership/affinity can be preserved end to end.
+
 Regressions cover request/response conversion, native and fallback SSE, stream
 failure, model/tool authorization, TPM, unknown input, response-size bounds and
 reported usage reaching the accounting stage through Router. No live paid
