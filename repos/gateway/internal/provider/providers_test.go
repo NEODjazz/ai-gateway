@@ -69,6 +69,30 @@ func TestManagedGeminiWorkloadAuthentication(t *testing.T) {
 	}
 }
 
+func TestManagedOpenSandboxCapabilityAndAuthentication(t *testing.T) {
+	router := New(Config{}).(*Router)
+	managed, err := router.CreateProvider(ManagedProvider{ID: "sandbox", Type: "opensandbox", BaseURL: "https://sandbox.example", Enabled: true})
+	if err != nil || managed.AuthType != "api_key" {
+		t.Fatalf("provider=%+v err=%v", managed, err)
+	}
+	if _, err := router.CreateModelDeployment(ModelDeployment{ID: "sandbox-python", ProviderID: managed.ID, Models: []string{"code-interpreter"}, Capabilities: []string{"sandbox"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateProvider(ManagedProvider{ID: "invalid", Type: "opensandbox", BaseURL: "https://sandbox.example", AuthType: "bearer", Enabled: true}); !errors.Is(err, ErrInvalidProvider) {
+		t.Fatalf("invalid auth type accepted: %v", err)
+	}
+	profiles := ManagedProviderCapabilityProfiles()
+	found := false
+	for _, profile := range profiles {
+		if profile.Type == "opensandbox" {
+			found = slicesContain(profile.Operations, "sandbox") && len(profile.AuthTypes) == 1 && profile.AuthTypes[0] == "api_key"
+		}
+	}
+	if !found {
+		t.Fatal("sandbox capability profile is missing")
+	}
+}
+
 func TestManagedBedrockSigV4RejectsExistingBearerCredential(t *testing.T) {
 	router := New(Config{CredentialEncryptionKey: []byte("bedrock-update-test-key")}).(*Router)
 	if _, err := router.CreateProvider(ManagedProvider{ID: "aws", Type: "bedrock", BaseURL: "https://private.example", AuthType: "bearer", Enabled: true}); err != nil {

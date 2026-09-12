@@ -157,4 +157,27 @@ describe("ProvidersPage", () => {
     const created = calls.find((call) => call.path === "/admin/v1/providers" && call.method === "POST")!;
     expect(JSON.parse(created.body!)).toEqual({ id: "google-gemini", type: "gemini", base_url: "https://generativelanguage.googleapis.com", auth_type: "gcp_adc", rate_limit_rpm: 0, rate_limit_tpm: 0, enabled: true });
   });
+
+  it("configures a native sandbox endpoint with API key authentication", async () => {
+    const calls: Array<{ path: string; method?: string; body?: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input); calls.push({ path, method: options?.method, body: String(options?.body || "") });
+      if (path === "/admin/v1/providers" && options?.method === "POST") return json({ id: "sandbox-runtime", type: "opensandbox", base_url: "https://sandbox.example", auth_type: "api_key", enabled: true }, 201);
+      if (path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "opensandbox", auth_types: ["api_key"] }] });
+      return json({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ProvidersPage /></AuthProvider></MemoryRouter>);
+    await userEvent.click(await screen.findByRole("button", { name: "Create Provider" }));
+    const form = screen.getByRole("dialog", { name: "Create Provider" });
+    await userEvent.type(within(form).getByLabelText("ID"), "sandbox-runtime");
+    await userEvent.selectOptions(within(form).getByLabelText("Type"), "opensandbox");
+    await userEvent.type(within(form).getByLabelText("Base URL"), "https://sandbox.example");
+	await userEvent.selectOptions(within(form).getByLabelText("Authentication"), "api_key");
+    expect(within(form).getByLabelText("Authentication")).toHaveValue("api_key");
+    await userEvent.click(within(form).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.some((call) => call.path === "/admin/v1/providers" && call.method === "POST")).toBe(true));
+    const created = calls.find((call) => call.path === "/admin/v1/providers" && call.method === "POST")!;
+    expect(JSON.parse(created.body!)).toEqual({ id: "sandbox-runtime", type: "opensandbox", base_url: "https://sandbox.example", auth_type: "api_key", rate_limit_rpm: 0, rate_limit_tpm: 0, enabled: true });
+  });
 });

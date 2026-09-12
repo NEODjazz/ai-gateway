@@ -3063,6 +3063,8 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 		return NewDeepSeek(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "xai":
 		return NewXAI(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
+	case "opensandbox":
+		return NewOpenSandbox(endpoint.BaseURL, endpoint.APIKey)
 	case "demo":
 		return Demo{}
 	default:

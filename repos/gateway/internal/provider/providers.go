@@ -40,12 +40,12 @@ type ProviderChatParameterPolicy struct {
 	ServiceTier     []string `json:"service_tier"`
 }
 
-var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai"}
+var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai", "opensandbox"}
 
 var managedOperationCapabilities = []string{
 	"chat", "responses", "interactions", "count_tokens", "embeddings", "rerank", "moderation",
 	"image_generation", "image_edit", "image_variation",
-	"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "realtime", "stream", "bedrock_invoke",
+	"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "sandbox", "realtime", "stream", "bedrock_invoke",
 }
 
 var managedFeatureCapabilities = []string{
@@ -224,6 +224,15 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 		if input.AuthType == "bearer" {
 			input.Region = ""
 		}
+	} else if input.Type == "opensandbox" {
+		input.APIVersion = ""
+		input.Region = ""
+		if input.AuthType == "" {
+			input.AuthType = "api_key"
+		}
+		if input.AuthType != "api_key" {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
 	} else {
 		input.APIVersion = ""
 		input.AuthType = ""
@@ -334,6 +343,8 @@ func managedProviderAuthTypes(providerType string) []string {
 		return []string{"api_key", "gcp_adc"}
 	case "bedrock":
 		return []string{"bearer", "aws_sigv4"}
+	case "opensandbox":
+		return []string{"api_key"}
 	default:
 		return []string{}
 	}
