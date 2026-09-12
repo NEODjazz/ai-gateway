@@ -78,6 +78,10 @@ func TestMessagesPreservesPDFDocumentCitations(t *testing.T) {
 	if _, err := request.chat(); err == nil {
 		t.Fatal("disabled document citations accepted")
 	}
+	request.Messages[0].Content = json.RawMessage(`[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"citations":{"enabled":true}},{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="}}]`)
+	if _, err := request.chat(); err == nil || !strings.Contains(err.Error(), "every document") {
+		t.Fatalf("mixed document citations accepted: %v", err)
+	}
 }
 
 func TestMessagesAcceptsExplicitZeroMaxTokens(t *testing.T) {

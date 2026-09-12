@@ -295,6 +295,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		result.Messages = append(result.Messages, openai.Message{Role: "system", Content: content})
 	}
 	knownCalls := map[string]messagesKnownToolCall{}
+	documentCount, citedDocumentCount := 0, 0
 	for _, message := range request.Messages {
 		if message.Role != "user" && message.Role != "assistant" {
 			return result, errors.New("messages role must be user or assistant")
@@ -421,6 +422,10 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 				}
 				parts = append(parts, file)
 				converted.AnthropicDocumentCitations = append(converted.AnthropicDocumentCitations, block.Citations != nil)
+				documentCount++
+				if block.Citations != nil {
+					citedDocumentCount++
+				}
 			case "tool_use":
 				var block struct {
 					Type  string         `json:"type"`
@@ -465,6 +470,9 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 			}
 		}
 		flush()
+	}
+	if citedDocumentCount > 0 && citedDocumentCount != documentCount {
+		return result, errors.New("citations must be enabled for every document or omitted from every document")
 	}
 	if !allowPartial && request.Messages[len(request.Messages)-1].Role == "assistant" {
 		last := &result.Messages[len(result.Messages)-1]
