@@ -1241,3 +1241,12 @@ without generation billing. Durable batch creation stores immutable resolved
 bytes so expiry or deletion cannot change execution. Foreign and unavailable
 files remain indistinguishable. Focused regressions and the full Go tests, race
 tests, vet and build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-9e1fc26` with image ID
+`sha256:64ecd367d4fb1857af48fc389d444c2f31b5197bf555e52691c3619c3bdb04bf`.
+Gateway Helm revision 464 completed successfully, and pod
+`ai-gateway-gateway-84cd469fc7-l28ll` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.363 exposes the owner-scoped image file source. A
+well-formed reference reached authentication, while an invalid identifier
+returned 400 before authentication or file storage access. These smoke checks
+used no credential and performed no external inference.
