@@ -71,7 +71,7 @@ availability is not inferred from these tests.
 | Model tokenization | Context estimate including tool schemas; native Anthropic, Gemini and Bedrock counter APIs | Exact model tokenizers/counters with versioned provenance |
 | Catalog synchronization | Versioned catalog and hot update; xAI discovery atomically merges the separately published text and embedding catalogs | Validated upstream sync for additional providers, rollback and price provenance |
 | Arbitrary passthrough | Not implemented | Explicit route allowlists, identity isolation and accounting |
-| Parameter policy | Strict unknown-field decoding; native adapter rejection; generation control validation; machine-readable per-adapter accepted values for `reasoning_effort`, `logprobs` and `service_tier`, derived from runtime validators | Model-specific overrides and matrices for controls added to other API families |
+| Parameter policy | Strict unknown-field decoding; native adapter rejection; generation control validation; machine-readable per-adapter support for every `ChatGenerationOptions` field plus accepted values for `reasoning_effort`, `logprobs` and `service_tier`, all derived from runtime validators and locked by an exact profile regression matrix | Model-specific overrides and equivalent matrices for other API families |
 | Provider and deployment quotas | Atomic fixed-window RPM/TPM across inference, token-count, shadow and owned response lifecycle calls; provider totals shared by all linked deployments; bounded memory mode and shared Redis counters; quota-aware fallback | Additional quota dimensions only when backed by an upstream contract |
 
 ## Completed increments
@@ -92,6 +92,10 @@ availability is not inferred from these tests.
   shared tool authorization, token reserve and cache policy.
 - `23b3e2c`: native prompt-cache controls, TTL preservation, capability routing,
   token-count context and cache isolation.
+- `9d0a27b`: native Cohere rejects `web_fetch_options` before execution instead
+  of accepting and dropping the field.
+- `b15d413`: complete machine-readable Chat generation-option support profiles
+  for every managed provider type, derived from runtime adapter validation.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control
