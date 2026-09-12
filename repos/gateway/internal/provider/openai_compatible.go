@@ -216,6 +216,10 @@ func (p OpenAICompatible) mapChatParameters(request *openAICompatibleChatRequest
 		request.User = ""
 		request.Thinking = &deepSeekThinking{Type: "disabled"}
 	case "together":
+		if request.MaxCompletionTokens != nil {
+			request.MaxTokens = request.MaxCompletionTokens
+			request.MaxCompletionTokens = nil
+		}
 		if request.Logprobs != nil {
 			if *request.Logprobs {
 				value := 0
