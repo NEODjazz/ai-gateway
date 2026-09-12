@@ -353,7 +353,7 @@ func validDeploymentCapabilities(capabilities []string) bool {
 	if seen["bedrock_invoke"] && !seen["chat"] && !seen["responses"] {
 		return false
 	}
-	for _, capability := range []string{"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "gemini_code_execution"} {
+	for _, capability := range []string{"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "gemini_code_execution"} {
 		if seen[capability] && !seen["chat"] {
 			return false
 		}
@@ -391,7 +391,7 @@ func ValidModelCapability(capability string) bool {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "sandbox", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke", "gemini_code_execution":
+		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke", "gemini_code_execution":
 		return true
 	default:
 		return false
@@ -607,6 +607,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	case "thinking":
 		client, ok := endpoint.Provider.(interface{ SupportsThinking() bool })
 		return ok && client.SupportsThinking()
+	case "zero_output":
+		client, ok := endpoint.Provider.(interface{ SupportsZeroOutput() bool })
+		return ok && client.SupportsZeroOutput()
 	case "gemini_code_execution":
 		client, ok := endpoint.Provider.(interface{ SupportsCodeExecution() bool })
 		return endpoint.Type == "gemini" && ok && client.SupportsCodeExecution()

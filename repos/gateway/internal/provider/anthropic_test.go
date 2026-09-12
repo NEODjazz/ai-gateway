@@ -37,6 +37,13 @@ func TestAnthropicPreservesExplicitZeroMaxTokens(t *testing.T) {
 	if ordinary.MaxTokens != defaultAnthropicMaxTokens {
 		t.Fatalf("ordinary zero unexpectedly bypassed default: %d", ordinary.MaxTokens)
 	}
+	if got := strings.Join(requiredChatCapabilities(openai.ChatCompletionRequest{AllowZeroMaxTokens: true, MaxTokens: &zero}, false), ","); got != "chat,zero_output" {
+		t.Fatalf("capabilities=%q", got)
+	}
+	required := requiredChatCapabilities(openai.ChatCompletionRequest{AllowZeroMaxTokens: true, MaxTokens: &zero}, false)
+	if (Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat"}}).supportsCapabilities(required...) || !(Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat", "zero_output"}}).supportsCapabilities(required...) {
+		t.Fatal("zero output routing capability is not enforced")
+	}
 }
 
 func TestAnthropicThinkingWireAndCapability(t *testing.T) {

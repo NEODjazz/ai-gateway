@@ -28,6 +28,7 @@ func (Anthropic) SupportsTextEditorTool() bool   { return true }
 func (Anthropic) SupportsComputerToolset() bool  { return true }
 func (Anthropic) SupportsBrowserToolset() bool   { return true }
 func (Anthropic) SupportsThinking() bool         { return true }
+func (Anthropic) SupportsZeroOutput() bool       { return true }
 
 func (Gemini) SupportsTools() bool            { return true }
 func (Gemini) SupportsStructuredOutput() bool { return true }
