@@ -706,3 +706,10 @@ Helm revision 430 completed successfully, and pod
 `ai-gateway-gateway-f9b84445b-8t7dq` became Ready with zero restarts. The live
 endpoint served OpenAPI 0.1.330 with both transcription modes. A signature-valid
 WAV multipart request using `mode=SMART` reached authentication and returned 401.
+
+The shared audio multipart decoder and native Gemini transcription/translation
+adapter now accept signature-verifiable AIFF, AAC, Opus and M4A in addition to
+the previously supported containers. Generic Ogg and MP4 detector results are
+matched to their explicit file extensions only after container signature
+validation. Native aliases are normalized to documented MIME types before the
+provider call. Raw formats that require sample metadata remain rejected.

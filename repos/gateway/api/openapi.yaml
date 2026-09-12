@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.330
+  version: 0.1.331
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -8761,7 +8761,7 @@ components:
       additionalProperties: false
       required: [file, model]
       properties:
-        file: {type: string, format: binary, description: "FLAC, MP3, MP4, MPEG, MPGA, M4A, OGG, WAV or WebM audio up to 20 MiB"}
+        file: {type: string, format: binary, description: "AAC, AIFF, FLAC, MP3, MP4, MPEG, MPGA, M4A, OGG, Opus, WAV or WebM audio up to 20 MiB"}
         provider: {type: string, description: Optional exact deployment selector}
         model: {type: string, minLength: 1}
         language: {type: string, maxLength: 32}

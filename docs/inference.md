@@ -203,8 +203,9 @@ base64 result. Gateway задает нейтральную variation instruction
 несколько результатов, exact size и user metadata отклоняются до upstream.
 
 Native Gemini deployments с capability `audio_transcription` передают проверенный
-WAV/MP3/MPEG/OGG/FLAC/WebM input в GenerateContent transcription config. Language
-hints, custom vocabulary, prompt guidance, temperature и проверенный
+WAV/MP3/MPEG/AIFF/AAC/OGG/Opus/FLAC/M4A/WebM input в GenerateContent
+transcription config. Language hints, custom vocabulary, prompt guidance,
+temperature и проверенный
 `mode=VERBATIM|SMART` отображаются явно;
 provider token usage проходит общий exact settlement. Structured timestamps,
 diarization, chunking и known-speaker режимы отклоняются до upstream.
@@ -234,8 +235,9 @@ validator количества, URL/base64 и точного token usage.
 
 ### Audio transcription
 
-`POST /v1/audio/transcriptions` принимает один файл FLAC, MP3, MP4, MPEG, MPGA,
-M4A, OGG, WAV или WebM размером до 20 MiB для deployment и model с capability
+`POST /v1/audio/transcriptions` принимает один файл AAC, AIFF, FLAC, MP3, MP4,
+MPEG, MPGA, M4A, OGG, Opus, WAV или WebM размером до 20 MiB для deployment и
+model с capability
 `audio_transcription`. Gateway сверяет расширение, MIME type и сигнатуру файла,
 передает optional prompt и `keywords[]` в DLP, а аудиоданные — в AV. Подсказки
 `languages[]` и `keywords[]` ограничены по количеству и размеру. Стратегия
@@ -302,7 +304,8 @@ transcription-only deployment не выбирается для перевода.
 upstream call. Для учета применяется проверенная длительность контейнера и
 минимум десять оплачиваемых секунд.
 
-Native Gemini adapter отправляет WAV, MP3/MPEG, OGG, FLAC или WebM как bounded
+Native Gemini adapter отправляет WAV, MP3/MPEG, AIFF, AAC, OGG/Opus, FLAC, M4A
+или WebM как bounded
 inline input в GenerateContent и явно просит английский перевод. Поддерживаются
 `prompt`, `temperature` и JSON response envelope; параметры транскрипции,
 включая исходный язык кроме `en`, списки языков, vocabulary, timestamps,
