@@ -34,15 +34,37 @@ func (NVIDIANIM) SupportsAudioInput() bool       { return true }
 func (NVIDIANIM) SupportsVideoInput() bool       { return true }
 
 func (n NVIDIANIM) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if request.ReasoningEffort != "" {
+		allowed := map[string]bool{}
+		switch request.Model {
+		case "nvidia/nemotron-3-super-120b-a12b":
+			allowed = map[string]bool{"none": true, "low": true, "high": true}
+		case "nvidia/nemotron-3-ultra-550b-a55b":
+			allowed = map[string]bool{"none": true, "medium": true, "high": true}
+		}
+		if !allowed[request.ReasoningEffort] {
+			return &Error{Class: FailureClientRequest, Provider: "nvidia-nim", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "reasoning_effort", Err: errors.New("reasoning_effort is not supported for this NVIDIA NIM model or value")}
+		}
+	}
 	return n.compatible.ValidateChatParameters(request)
 }
 
 func (n NVIDIANIM) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	if err := n.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	return n.compatible.ChatCompletions(ctx, request)
 }
 
 func (n NVIDIANIM) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+	if err := n.ValidateChatParameters(request); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	return n.compatible.StreamChatCompletions(ctx, request, write)
+}
+
+func (NVIDIANIM) ManagedChatModelProbes() []string {
+	return []string{"nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b"}
 }
 
 func (n NVIDIANIM) Messages(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {

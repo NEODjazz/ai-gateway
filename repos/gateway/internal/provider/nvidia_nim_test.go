@@ -111,9 +111,70 @@ func TestNVIDIANIMCapabilityProfileIsBounded(t *testing.T) {
 		if !slices.Equal(profile.RerankParameters.SupportedOptions, []string{"top_n", "return_documents", "truncate"}) || !slices.Equal(profile.RerankParameters.DocumentForms, []string{"text"}) {
 			t.Fatalf("rerank profile=%+v", profile.RerankParameters)
 		}
+		if slices.Contains(profile.ChatParameters.SupportedOptions, "reasoning_effort") || len(profile.ChatParameters.ReasoningEffort) != 0 {
+			t.Fatalf("provider-wide reasoning profile=%+v", profile.ChatParameters)
+		}
+		expectedModels := []ProviderChatModelParameterPolicy{
+			{Model: "nvidia/nemotron-3-super-120b-a12b", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"none", "low", "high"}},
+			{Model: "nvidia/nemotron-3-ultra-550b-a55b", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"none", "medium", "high"}},
+		}
+		if !slices.EqualFunc(profile.ChatModelParameters, expectedModels, func(left, right ProviderChatModelParameterPolicy) bool {
+			return left.Model == right.Model && slices.Equal(left.SupportedOptions, right.SupportedOptions) && slices.Equal(left.ReasoningEffort, right.ReasoningEffort)
+		}) {
+			t.Fatalf("model profiles=%+v", profile.ChatModelParameters)
+		}
 		return
 	}
 	t.Fatal("NVIDIA NIM capability profile is missing")
+}
+
+func TestNVIDIANIMReasoningEffortPolicyAndWireContract(t *testing.T) {
+	for _, test := range []struct {
+		model string
+		value string
+		valid bool
+	}{
+		{"nvidia/nemotron-3-super-120b-a12b", "none", true},
+		{"nvidia/nemotron-3-super-120b-a12b", "low", true},
+		{"nvidia/nemotron-3-super-120b-a12b", "high", true},
+		{"nvidia/nemotron-3-super-120b-a12b", "medium", false},
+		{"nvidia/nemotron-3-ultra-550b-a55b", "none", true},
+		{"nvidia/nemotron-3-ultra-550b-a55b", "medium", true},
+		{"nvidia/nemotron-3-ultra-550b-a55b", "high", true},
+		{"nvidia/nemotron-3-ultra-550b-a55b", "low", false},
+		{"model", "high", false},
+	} {
+		err := (NVIDIANIM{}).ValidateChatParameters(openai.ChatCompletionRequest{
+			Model: test.model, Messages: []openai.Message{{Role: "user", Content: "question"}},
+			ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: test.value},
+		})
+		if (err == nil) != test.valid {
+			t.Fatalf("model=%s value=%s valid=%t err=%v", test.model, test.value, test.valid, err)
+		}
+	}
+
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["reasoning_effort"] != "medium" {
+			t.Fatalf("body=%#v err=%v", body, err)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"nvidia/nemotron-3-ultra-550b-a55b","choices":[{"index":0,"message":{"role":"assistant","content":"answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+	}))
+	defer server.Close()
+	client := NewNVIDIANIM(server.URL, "key", false)
+	request := openai.ChatCompletionRequest{
+		Model: "nvidia/nemotron-3-ultra-550b-a55b", Messages: []openai.Message{{Role: "user", Content: "question"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "medium"},
+	}
+	if _, err := client.ChatCompletions(t.Context(), request); err != nil || calls != 1 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+	request.Model = "unknown"
+	if _, err := client.ChatCompletions(t.Context(), request); err == nil || calls != 1 {
+		t.Fatalf("unsupported request reached upstream: calls=%d err=%v", calls, err)
+	}
 }
 
 func TestNVIDIANIMNativeMessagesAndCountTokens(t *testing.T) {
