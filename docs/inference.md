@@ -364,6 +364,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `groq` | Chat/stream, tools, structured output, vision, user attribution and service tiers |
 | `deepseek` | Chat/stream and Responses with provider-specific validation and reasoning history passthrough |
 | `cerebras` | Chat/stream with bearer authentication, model discovery, function tools, JSON Schema output, reasoning/logprobs/service-tier validation and normalized reasoning content; unsupported fields fail before upstream execution |
+| `nvidia-nim` | Chat/stream, legacy Completions, Responses and Embeddings with optional bearer authentication and model discovery; adapter capabilities are bounded to the documented LLM runtime APIs, with model-dependent multimodal input enabled per deployment |
 | `xai` | Chat/stream, Responses and Embeddings with bearer authentication, merged text/embedding model discovery, structured output, vision, web search, response compaction and owned retrieve/input-items/delete lifecycle; priority tier, bounded reasoning/logprobs validation, float/base64 vectors and exact embedding token usage |
 | `demo` | Локальный deterministic fallback для разработки |
 

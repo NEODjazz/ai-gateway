@@ -53,7 +53,7 @@ OpenAPI, а не в этом документе.
 общий предел для всех ссылающихся deployments; оба scope применяются атомарно.
 
 Поддерживаемые static adapter types: `demo`, `ollama`, `openai`,
-`openai-compatible`, `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`, `cerebras`. Capability задаётся явно для
+`openai-compatible`, `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`, `cerebras`, `nvidia-nim`. Capability задаётся явно для
 ограниченных endpoints. Используемые значения: `chat`, `responses`,
 `embeddings`, `rerank`, `stream`, `tools`, `structured_output`, `mcp`, `vision`,
 `web_search`, `realtime`, `audio`, `audio_input`.
@@ -82,13 +82,19 @@ Deployment — до Model Group. UI использует выбор из уже 
 принимает их IDs и возвращает `409` при удалении используемого ресурса. Managed
 Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`,
-`voyage`, `bedrock`, `groq`, `deepseek`, `cerebras` и `xai`.
+`voyage`, `bedrock`, `groq`, `deepseek`, `cerebras`, `nvidia-nim` и `xai`.
 
 `cerebras` использует bearer credential, обнаруживает модели через `/v1/models`
 и поддерживает Chat Completions с streaming, function tools, JSON Schema output,
 `reasoning_effort`, `logprobs`, `service_tier` и точным upstream usage. Нативное
 поле ответа `reasoning` преобразуется в публичное `reasoning_content`. Остальные
 неподтверждённые параметры отклоняются до отправки HTTP-запроса.
+
+`nvidia-nim` поддерживает self-hosted endpoints без upstream credential и
+hosted endpoints с bearer credential. Профиль публикует Chat Completions,
+legacy Completions, Responses create/stream, Embeddings и `/v1/models`
+discovery. Function tools, structured output и model-dependent image, audio и
+video input доступны только через явно выбранные deployment capabilities.
 
 `GET /admin/v1/provider-capabilities` возвращает для каждого типа отдельно
 реально реализованные операции адаптера, допустимые capabilities deployment,
