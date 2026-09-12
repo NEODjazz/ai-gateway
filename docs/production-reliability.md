@@ -817,3 +817,18 @@ binding table. Gateway Helm revision 438 completed successfully, and pod
 `ai-gateway-gateway-59cfc97cbf-dhltt` became Ready with zero restarts. Its live
 endpoint served OpenAPI 0.1.338. A structurally valid container continuation
 request through the local ingress reached authentication and returned 401.
+
+Source `5b57df0` extends native Messages token counting with skill execution
+context. The endpoint validates and authorizes skill references and managed code
+execution, resolves custom skill and reusable container ownership, pins the native
+counter to the recorded deployment, and sends the complete container and tool
+context upstream without opening a generation billing lifecycle. Gateway and
+provider wire regressions cover the effective request, ACLs, deployment binding
+and native capability header.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-5b57df0` with image ID
+`sha256:cb39069dc50a3f749b681b4ebe0a0d9818d3cd145cdb13d4b0e1d7d27451b0fe`.
+Gateway Helm revision 439 completed successfully, and pod
+`ai-gateway-gateway-56f97d58d6-w8xmh` became Ready with zero restarts. Its live
+endpoint served OpenAPI 0.1.339. A structurally valid skill-aware token-count
+request through the local ingress reached authentication and returned 401.
