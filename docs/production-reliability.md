@@ -431,3 +431,15 @@ The host ingress did not accept a connection on port 80 during this rollout, so
 application checks used the pod loopback endpoint. The Chat smoke request used a
 nonexistent model and did not perform paid inference. SCIM mutations were covered
 by HTTP regression tests and were not repeated against deployment data.
+
+### Embeddings and Rerank validator rollout
+
+Source `70a73d1` rejects the unsupported Demo Embeddings `user` parameter and
+exposes the existing compatible, OpenRouter, Cohere and Voyage Rerank parameter
+checks as side-effect-free adapter validators. Focused protocol and race tests,
+followed by the full gateway race suite, vet and build, passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-70a73d1`. Helm revision 400
+completed successfully with the stored release values, and pod
+`ai-gateway-gateway-5bb6f69d6b-bzhwd` became Ready with zero restarts on that
+image.
