@@ -1399,3 +1399,14 @@ same image ID. Live health returned 204 and OpenAPI 0.1.368 exposes the Realtime
 audio capability, lifecycle and size contract. A Realtime request with an
 invalid smoke key returned 401 before deployment selection or upstream access.
 The smoke checks performed no external inference and submitted no audio.
+
+Source `a4dcfe0` closes a provider-event cardinality bypass found during the
+post-rollout audit: zero-byte `input_audio_buffer.committed` events now consume
+the same 1024-item conversation bound as buffered commits. The focused gateway
+test, focused race test, full Go suite, vet and build passed. Rancher Desktop
+built `ai-gateway-gateway:gaps-a4dcfe0` with image ID
+`sha256:ba068744c0335a689051bfad3bdcf5eb91c6acb2aea83afd2a5d45785872483b`.
+Gateway Helm revision 472 completed successfully, and pod
+`ai-gateway-gateway-97bd8bdcd-977kt` became Ready with zero restarts and the
+same image ID. Live health returned 204, OpenAPI remained at 0.1.368, and an
+invalid Realtime smoke credential returned 401 before deployment selection.
