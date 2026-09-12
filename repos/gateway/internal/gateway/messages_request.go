@@ -48,17 +48,47 @@ type messagesInput struct {
 	Content json.RawMessage `json:"content"`
 }
 type messagesTool struct {
-	Type             string                            `json:"type,omitempty"`
-	Name             string                            `json:"name"`
-	Description      string                            `json:"description,omitempty"`
-	InputSchema      map[string]any                    `json:"input_schema,omitempty"`
-	CacheControl     *messagesCacheControl             `json:"cache_control,omitempty"`
-	MaxUses          *int                              `json:"max_uses,omitempty"`
-	UserLocation     *openai.ChatWebSearchUserLocation `json:"user_location,omitempty"`
-	AllowedDomains   []string                          `json:"allowed_domains,omitempty"`
-	MaxContentTokens int                               `json:"max_content_tokens,omitempty"`
-	Citations        *messagesCitations                `json:"citations,omitempty"`
-	DeferLoading     bool                              `json:"defer_loading,omitempty"`
+	Type              string                `json:"type,omitempty"`
+	Name              string                `json:"name"`
+	Description       string                `json:"description,omitempty"`
+	InputSchema       map[string]any        `json:"input_schema,omitempty"`
+	CacheControl      *messagesCacheControl `json:"cache_control,omitempty"`
+	MaxUses           *int                  `json:"max_uses,omitempty"`
+	UserLocation      *messagesUserLocation `json:"user_location,omitempty"`
+	AllowedDomains    []string              `json:"allowed_domains,omitempty"`
+	BlockedDomains    []string              `json:"blocked_domains,omitempty"`
+	AllowedCallers    []string              `json:"allowed_callers,omitempty"`
+	ResponseInclusion string                `json:"response_inclusion,omitempty"`
+	UseCache          *bool                 `json:"use_cache,omitempty"`
+	MaxContentTokens  int                   `json:"max_content_tokens,omitempty"`
+	Citations         *messagesCitations    `json:"citations,omitempty"`
+	DeferLoading      bool                  `json:"defer_loading,omitempty"`
+}
+
+type messagesUserLocation struct {
+	Type        string                                   `json:"type"`
+	City        string                                   `json:"city,omitempty"`
+	Country     string                                   `json:"country,omitempty"`
+	Region      string                                   `json:"region,omitempty"`
+	Timezone    string                                   `json:"timezone,omitempty"`
+	Approximate *openai.ChatWebSearchApproximateLocation `json:"approximate,omitempty"`
+}
+
+func (location *messagesUserLocation) chat() (*openai.ChatWebSearchUserLocation, bool) {
+	if location == nil {
+		return nil, true
+	}
+	flat := openai.ChatWebSearchApproximateLocation{City: location.City, Country: location.Country, Region: location.Region, Timezone: location.Timezone}
+	if location.Type != "approximate" || (location.Approximate != nil && (flat.City != "" || flat.Country != "" || flat.Region != "" || flat.Timezone != "")) {
+		return nil, false
+	}
+	if location.Approximate != nil {
+		flat = *location.Approximate
+	}
+	if flat.City == "" && flat.Country == "" && flat.Region == "" && flat.Timezone == "" {
+		return nil, false
+	}
+	return &openai.ChatWebSearchUserLocation{Type: "approximate", Approximate: &flat}, true
 }
 
 type messagesCitations struct {
@@ -335,7 +365,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		switch tool.Type {
 		case "tool_search_tool_regex_20251119", "tool_search_tool_bm25_20251119":
 			expectedName := strings.TrimSuffix(tool.Type, "_20251119")
-			if toolSearch || tool.Name != expectedName || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxUses != nil || tool.UserLocation != nil || len(tool.AllowedDomains) > 0 || tool.MaxContentTokens != 0 || tool.Citations != nil || tool.DeferLoading {
+			if toolSearch || tool.Name != expectedName || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxUses != nil || tool.UserLocation != nil || messagesToolHasNativeWebFields(tool) || tool.MaxContentTokens != 0 || tool.Citations != nil || tool.DeferLoading {
 				return result, errors.New("invalid or duplicate tool search tool")
 			}
 			toolSearch = true
@@ -343,30 +373,43 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		case "code_execution_20250825":
-			if result.AnthropicCodeExecution || tool.Name != "code_execution" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxUses != nil || tool.UserLocation != nil || len(tool.AllowedDomains) > 0 || tool.MaxContentTokens != 0 || tool.Citations != nil || tool.DeferLoading {
+			if result.AnthropicCodeExecution || tool.Name != "code_execution" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxUses != nil || tool.UserLocation != nil || messagesToolHasNativeWebFields(tool) || tool.MaxContentTokens != 0 || tool.Citations != nil || tool.DeferLoading {
 				return result, errors.New("invalid or duplicate code execution tool")
 			}
 			result.AnthropicCodeExecution = true
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
-		case "web_search_20250305":
-			if searchTool || tool.Name != "web_search" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || len(tool.AllowedDomains) > 0 || tool.MaxContentTokens != 0 || tool.Citations != nil {
+		case "web_search_20250305", "web_search_20260209", "web_search_20260318":
+			location, validLocation := tool.UserLocation.chat()
+			if searchTool || tool.Name != "web_search" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxContentTokens != 0 || tool.Citations != nil || tool.UseCache != nil || tool.DeferLoading || !validLocation {
 				return result, errors.New("invalid or duplicate web search tool")
 			}
+			if tool.ResponseInclusion != "" && tool.Type != "web_search_20260318" {
+				return result, errors.New("web search response_inclusion requires web_search_20260318")
+			}
 			searchTool = true
-			result.WebSearchOptions = &openai.ChatWebSearchOptions{MaxUses: tool.MaxUses, UserLocation: tool.UserLocation}
+			result.WebSearchOptions = &openai.ChatWebSearchOptions{MaxUses: tool.MaxUses, UserLocation: location, NativeType: tool.Type, AllowedDomains: append([]string(nil), tool.AllowedDomains...), BlockedDomains: append([]string(nil), tool.BlockedDomains...), AllowedCallers: append([]string(nil), tool.AllowedCallers...), ResponseInclusion: tool.ResponseInclusion}
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
-		case "web_fetch_20250910":
-			if fetchTool || tool.Name != "web_fetch" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.UserLocation != nil || (tool.Citations != nil && !tool.Citations.Enabled) {
+		case "web_fetch_20250910", "web_fetch_20260209", "web_fetch_20260309", "web_fetch_20260318":
+			if fetchTool || tool.Name != "web_fetch" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.UserLocation != nil || len(tool.BlockedDomains) > 0 || (tool.Citations != nil && !tool.Citations.Enabled) || tool.DeferLoading {
 				return result, errors.New("invalid or duplicate web fetch tool")
 			}
+			if tool.UseCache != nil && tool.Type != "web_fetch_20260309" && tool.Type != "web_fetch_20260318" {
+				return result, errors.New("web fetch use_cache requires web_fetch_20260309 or later")
+			}
+			if tool.ResponseInclusion != "" && tool.Type != "web_fetch_20260318" {
+				return result, errors.New("web fetch response_inclusion requires web_fetch_20260318")
+			}
 			fetchTool = true
-			result.WebFetchOptions = &openai.ChatWebFetchOptions{AllowedDomains: tool.AllowedDomains, MaxUses: tool.MaxUses, MaxContentTokens: tool.MaxContentTokens}
+			result.WebFetchOptions = &openai.ChatWebFetchOptions{AllowedDomains: tool.AllowedDomains, MaxUses: tool.MaxUses, MaxContentTokens: tool.MaxContentTokens, NativeType: tool.Type, AllowedCallers: append([]string(nil), tool.AllowedCallers...), UseCache: tool.UseCache, ResponseInclusion: tool.ResponseInclusion}
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		case "":
 		default:
 			return result, errors.New("unsupported server tool")
 		}
-		if tool.Name == "" || tool.InputSchema == nil || tool.MaxUses != nil || tool.UserLocation != nil || len(tool.AllowedDomains) > 0 || tool.MaxContentTokens != 0 || tool.Citations != nil {
+		if tool.Name == "" || tool.InputSchema == nil || tool.MaxUses != nil || tool.UserLocation != nil || messagesToolHasNativeWebFields(tool) || tool.MaxContentTokens != 0 || tool.Citations != nil {
 			return result, errors.New("function tools require name and input_schema")
 		}
 		var breakpoint *openai.PromptCacheBreakpoint
@@ -418,6 +461,10 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		}
 	}
 	return result, nil
+}
+
+func messagesToolHasNativeWebFields(tool messagesTool) bool {
+	return len(tool.AllowedDomains) > 0 || len(tool.BlockedDomains) > 0 || len(tool.AllowedCallers) > 0 || tool.ResponseInclusion != "" || tool.UseCache != nil
 }
 
 func messagesNativeAssistantContent(role string, blocks []json.RawMessage, knownCalls map[string]bool) (bool, []json.RawMessage, error) {

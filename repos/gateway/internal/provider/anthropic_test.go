@@ -262,6 +262,21 @@ func TestAnthropicMapsWebSearchAndBillsActualUsage(t *testing.T) {
 	}
 }
 
+func TestAnthropicMapsCurrentWebToolControls(t *testing.T) {
+	useCache := false
+	request := anthropicChatRequest(openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{
+		WebSearchOptions: &openai.ChatWebSearchOptions{NativeType: "web_search_20260318", AllowedDomains: []string{"example.com"}, AllowedCallers: []string{"direct"}, ResponseInclusion: "excluded"},
+		WebFetchOptions:  &openai.ChatWebFetchOptions{NativeType: "web_fetch_20260318", AllowedDomains: []string{"docs.example.com"}, MaxContentTokens: 1000, AllowedCallers: []string{"code_execution_20260521"}, UseCache: &useCache, ResponseInclusion: "full"},
+	}}, false)
+	if len(request.Tools) != 2 || request.Tools[0].Type != "web_search_20260318" || request.Tools[0].AllowedDomains[0] != "example.com" || request.Tools[0].AllowedCallers[0] != "direct" || request.Tools[0].ResponseInclusion != "excluded" {
+		t.Fatalf("search tool=%+v", request.Tools)
+	}
+	fetch := request.Tools[1]
+	if fetch.Type != "web_fetch_20260318" || fetch.UseCache == nil || *fetch.UseCache || fetch.AllowedCallers[0] != "code_execution_20260521" || fetch.ResponseInclusion != "full" {
+		t.Fatalf("fetch tool=%+v", fetch)
+	}
+}
+
 func TestAnthropicRejectsUnrepresentableSearchContextSize(t *testing.T) {
 	err := (Anthropic{}).ValidateChatParameters(openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{SearchContextSize: "high"}}})
 	var failure *Error

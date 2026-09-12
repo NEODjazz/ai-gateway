@@ -142,6 +142,34 @@ func TestMessagesConvertsBoundedNativeServerTools(t *testing.T) {
 	}
 }
 
+func TestMessagesConvertsCurrentWebToolControls(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}}}}
+	response := nativeMessageCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), `{"model":"model","max_tokens":20,"tools":[{"type":"web_search_20260318","name":"web_search","allowed_domains":["example.com"],"allowed_callers":["direct"],"response_inclusion":"excluded","user_location":{"type":"approximate","city":"Paris","country":"FR"}},{"type":"web_fetch_20260318","name":"web_fetch","allowed_domains":["docs.example.com"],"allowed_callers":["code_execution_20260521"],"use_cache":false,"response_inclusion":"full","max_content_tokens":1000,"citations":{"enabled":true}}],"messages":[{"role":"user","content":"research"}]}`, "")
+	request := upstream.request.Request
+	search, fetch := request.WebSearchOptions, request.WebFetchOptions
+	if response.Code != http.StatusOK || upstream.calls != 1 || search == nil || search.NativeType != "web_search_20260318" || search.UserLocation == nil || search.UserLocation.Approximate.City != "Paris" || len(search.AllowedDomains) != 1 || search.AllowedCallers[0] != "direct" || search.ResponseInclusion != "excluded" {
+		t.Fatalf("search conversion failed: status=%d body=%s search=%+v", response.Code, response.Body.String(), search)
+	}
+	if fetch == nil || fetch.NativeType != "web_fetch_20260318" || fetch.UseCache == nil || *fetch.UseCache || fetch.AllowedCallers[0] != "code_execution_20260521" || fetch.ResponseInclusion != "full" || request.NativeInputTokens == 0 {
+		t.Fatalf("fetch conversion failed: %+v tokens=%d", fetch, request.NativeInputTokens)
+	}
+}
+
+func TestMessagesRejectsVersionMismatchedWebToolControls(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"m","max_tokens":10,"tools":[{"type":"web_search_20260209","name":"web_search","response_inclusion":"excluded"}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"web_fetch_20260209","name":"web_fetch","allowed_domains":["example.com"],"max_content_tokens":1000,"use_cache":false}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"web_search_20260318","name":"web_search","allowed_domains":["a.example"],"blocked_domains":["b.example"]}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"web_search_20260318","name":"web_search","user_location":{"type":"approximate"}}],"messages":[{"role":"user","content":"hi"}]}`,
+	} {
+		upstream := &fallbackChatProvider{}
+		response := nativeMessageCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), body, "")
+		if response.Code != http.StatusBadRequest || upstream.calls != 0 {
+			t.Fatalf("response=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestMessagesConvertsToolSearchAndDeferredFunctions(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}}}}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))

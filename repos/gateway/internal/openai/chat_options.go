@@ -46,12 +46,21 @@ type ChatWebSearchOptions struct {
 	SearchContextSize string                     `json:"search_context_size,omitempty"`
 	UserLocation      *ChatWebSearchUserLocation `json:"user_location,omitempty"`
 	MaxUses           *int                       `json:"max_uses,omitempty"`
+	NativeType        string                     `json:"-"`
+	AllowedDomains    []string                   `json:"-"`
+	BlockedDomains    []string                   `json:"-"`
+	AllowedCallers    []string                   `json:"-"`
+	ResponseInclusion string                     `json:"-"`
 }
 
 type ChatWebFetchOptions struct {
-	AllowedDomains   []string `json:"allowed_domains"`
-	MaxUses          *int     `json:"max_uses,omitempty"`
-	MaxContentTokens int      `json:"max_content_tokens"`
+	AllowedDomains    []string `json:"allowed_domains"`
+	MaxUses           *int     `json:"max_uses,omitempty"`
+	MaxContentTokens  int      `json:"max_content_tokens"`
+	NativeType        string   `json:"-"`
+	AllowedCallers    []string `json:"-"`
+	UseCache          *bool    `json:"-"`
+	ResponseInclusion string   `json:"-"`
 }
 
 type ChatWebSearchUserLocation struct {
@@ -150,6 +159,18 @@ func (o ChatGenerationOptions) Validate() string {
 		if o.WebSearchOptions.MaxUses != nil && (*o.WebSearchOptions.MaxUses < 1 || *o.WebSearchOptions.MaxUses > WebSearchMaxUses) {
 			return "web_search_options.max_uses must be between 1 and 5"
 		}
+		if len(o.WebSearchOptions.AllowedDomains) > 0 && len(o.WebSearchOptions.BlockedDomains) > 0 {
+			return "web search allowed_domains and blocked_domains are mutually exclusive"
+		}
+		if !validNativeSearchDomains(o.WebSearchOptions.AllowedDomains) || !validNativeSearchDomains(o.WebSearchOptions.BlockedDomains) {
+			return "web search domains contain an invalid or duplicate value"
+		}
+		if !validNativeAllowedCallers(o.WebSearchOptions.AllowedCallers) {
+			return "web search allowed_callers contains an invalid or duplicate value"
+		}
+		if o.WebSearchOptions.ResponseInclusion != "" && o.WebSearchOptions.ResponseInclusion != "full" && o.WebSearchOptions.ResponseInclusion != "excluded" {
+			return "web search response_inclusion must be full or excluded"
+		}
 	}
 	if options := o.WebFetchOptions; options != nil {
 		if len(options.AllowedDomains) == 0 || len(options.AllowedDomains) > MaxSearchDomains {
@@ -167,6 +188,12 @@ func (o ChatGenerationOptions) Validate() string {
 		}
 		if options.MaxContentTokens < 1 || options.MaxContentTokens > WebFetchMaxContentTokens {
 			return "web_fetch_options.max_content_tokens must be between 1 and 100000"
+		}
+		if !validNativeAllowedCallers(options.AllowedCallers) {
+			return "web fetch allowed_callers contains an invalid or duplicate value"
+		}
+		if options.ResponseInclusion != "" && options.ResponseInclusion != "full" && options.ResponseInclusion != "excluded" {
+			return "web fetch response_inclusion must be full or excluded"
 		}
 	}
 	switch o.ReasoningEffort {
@@ -204,6 +231,39 @@ func (o ChatGenerationOptions) Validate() string {
 		}
 	}
 	return ""
+}
+
+func validNativeSearchDomains(domains []string) bool {
+	if len(domains) > MaxSearchDomains {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, domain := range domains {
+		if !validSearchDomain(domain) || seen[domain] {
+			return false
+		}
+		seen[domain] = true
+	}
+	return true
+}
+
+func validNativeAllowedCallers(callers []string) bool {
+	if len(callers) > 4 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, caller := range callers {
+		switch caller {
+		case "direct", "code_execution_20250825", "code_execution_20260120", "code_execution_20260521":
+		default:
+			return false
+		}
+		if seen[caller] {
+			return false
+		}
+		seen[caller] = true
+	}
+	return true
 }
 
 func finiteFloat(value float64) bool {

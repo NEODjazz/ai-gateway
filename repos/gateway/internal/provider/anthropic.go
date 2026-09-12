@@ -68,17 +68,21 @@ type anthropicMessage struct {
 }
 
 type anthropicTool struct {
-	Type             string                 `json:"type,omitempty"`
-	Name             string                 `json:"name"`
-	Description      string                 `json:"description,omitempty"`
-	InputSchema      any                    `json:"input_schema,omitempty"`
-	MaxUses          int                    `json:"max_uses,omitempty"`
-	UserLocation     *anthropicUserLocation `json:"user_location,omitempty"`
-	AllowedDomains   []string               `json:"allowed_domains,omitempty"`
-	Citations        *anthropicCitations    `json:"citations,omitempty"`
-	MaxContentTokens int                    `json:"max_content_tokens,omitempty"`
-	CacheControl     *anthropicCacheControl `json:"cache_control,omitempty"`
-	DeferLoading     bool                   `json:"defer_loading,omitempty"`
+	Type              string                 `json:"type,omitempty"`
+	Name              string                 `json:"name"`
+	Description       string                 `json:"description,omitempty"`
+	InputSchema       any                    `json:"input_schema,omitempty"`
+	MaxUses           int                    `json:"max_uses,omitempty"`
+	UserLocation      *anthropicUserLocation `json:"user_location,omitempty"`
+	AllowedDomains    []string               `json:"allowed_domains,omitempty"`
+	BlockedDomains    []string               `json:"blocked_domains,omitempty"`
+	AllowedCallers    []string               `json:"allowed_callers,omitempty"`
+	ResponseInclusion string                 `json:"response_inclusion,omitempty"`
+	UseCache          *bool                  `json:"use_cache,omitempty"`
+	Citations         *anthropicCitations    `json:"citations,omitempty"`
+	MaxContentTokens  int                    `json:"max_content_tokens,omitempty"`
+	CacheControl      *anthropicCacheControl `json:"cache_control,omitempty"`
+	DeferLoading      bool                   `json:"defer_loading,omitempty"`
 }
 
 type anthropicCitations struct {
@@ -428,13 +432,27 @@ func anthropicWebFetchTool(options *openai.ChatWebFetchOptions) anthropicTool {
 	if options.MaxUses != nil {
 		maxUses = *options.MaxUses
 	}
-	return anthropicTool{Type: "web_fetch_20250910", Name: "web_fetch", MaxUses: maxUses, AllowedDomains: append([]string(nil), options.AllowedDomains...), Citations: &anthropicCitations{Enabled: true}, MaxContentTokens: options.MaxContentTokens}
+	typeName := options.NativeType
+	if typeName == "" {
+		typeName = "web_fetch_20250910"
+	}
+	return anthropicTool{Type: typeName, Name: "web_fetch", MaxUses: maxUses, AllowedDomains: append([]string(nil), options.AllowedDomains...), AllowedCallers: append([]string(nil), options.AllowedCallers...), Citations: &anthropicCitations{Enabled: true}, MaxContentTokens: options.MaxContentTokens, UseCache: options.UseCache, ResponseInclusion: options.ResponseInclusion}
 }
 
 func anthropicWebSearchTool(options *openai.ChatWebSearchOptions) anthropicTool {
-	tool := anthropicTool{Type: "web_search_20250305", Name: "web_search", MaxUses: openai.WebSearchMaxUses}
+	typeName := "web_search_20250305"
+	if options != nil && options.NativeType != "" {
+		typeName = options.NativeType
+	}
+	tool := anthropicTool{Type: typeName, Name: "web_search", MaxUses: openai.WebSearchMaxUses}
 	if options != nil && options.MaxUses != nil {
 		tool.MaxUses = *options.MaxUses
+	}
+	if options != nil {
+		tool.AllowedDomains = append([]string(nil), options.AllowedDomains...)
+		tool.BlockedDomains = append([]string(nil), options.BlockedDomains...)
+		tool.AllowedCallers = append([]string(nil), options.AllowedCallers...)
+		tool.ResponseInclusion = options.ResponseInclusion
 	}
 	if options == nil || options.UserLocation == nil || options.UserLocation.Approximate == nil {
 		return tool
