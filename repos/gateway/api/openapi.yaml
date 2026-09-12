@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.343
+  version: 0.1.344
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -6898,6 +6898,12 @@ components:
         tool_choice: {$ref: '#/components/schemas/MessagesRequest/properties/tool_choice'}
         output_config: {$ref: '#/components/schemas/MessagesRequest/properties/output_config'}
         container: {$ref: '#/components/schemas/MessagesRequest/properties/container'}
+    MessagesToolsetMemberConfig:
+      type: object
+      additionalProperties: false
+      properties:
+        enabled: {type: boolean, default: true}
+        defer_loading: {type: boolean, default: false}
     MessagesRequest:
       type: object
       additionalProperties: false
@@ -6986,7 +6992,7 @@ components:
                   - type: array
                     minItems: 1
                     items: {type: object}
-                    description: Supports text, image, tool_use, tool_result, thinking, redacted_thinking and bounded native server-tool continuation blocks. Thinking history is accepted only for assistant messages and routed only to an adapter with an explicit signed-reasoning contract.
+                    description: Supports text, image, tool_use, tool_result, thinking, redacted_thinking and bounded native server-tool or client-toolset continuation blocks. Client-toolset calls and results retain their required toolset_name. Thinking history is accepted only for assistant messages and routed only to an adapter with an explicit signed-reasoning contract.
         tools:
           type: array
           items:
@@ -7024,6 +7030,42 @@ components:
                 properties:
                   type: {type: string, const: tool_search_tool_bm25_20251119}
                   name: {type: string, const: tool_search_tool_bm25}
+              - type: object
+                additionalProperties: false
+                required: [type]
+                properties:
+                  type: {type: string, const: computer_toolset_20260801}
+                  allowed_callers: {type: array, maxItems: 1, uniqueItems: true, items: {type: string, const: direct}}
+                  configs:
+                    type: object
+                    additionalProperties: false
+                    description: Per-member controls. Omitted members remain enabled and non-deferred. At least one member must remain enabled, and every enabled member must resolve to the same defer_loading value.
+                    properties:
+                      screenshot: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      zoom: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      left_click: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      right_click: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      middle_click: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      double_click: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      triple_click: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      left_click_drag: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      mouse_move: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      left_mouse_down: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      left_mouse_up: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      cursor_position: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      scroll: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      type: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      key: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      hold_key: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      wait: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                  cache_control:
+                    type: object
+                    additionalProperties: false
+                    required: [type]
+                    description: Cannot be combined with a deferred toolset.
+                    properties:
+                      type: {type: string, const: ephemeral}
+                      ttl: {type: string, enum: [5m, 1h]}
               - type: object
                 additionalProperties: false
                 required: [type, name]

@@ -775,6 +775,18 @@ response caches are disabled so a previously generated action is never replayed.
 The newer text editor accepts `max_characters` from 1 through 1,048,576. Deferred
 loading requires tool search and cannot share a prompt-cache breakpoint.
 
+The `computer_toolset_20260801` entry enables the current 17-member desktop
+interaction contract. It has no `name`; optional `configs` may enable or disable
+fixed members and may defer all enabled members together when a tool-search tool
+is present. `allowed_callers`, when supplied, is exactly `["direct"]`.
+Authorization evaluates every enabled member as `computer:<member>`. The
+`computer_toolset` deployment capability is required. Assistant `tool_use` and
+user `tool_result` blocks must echo `toolset_name: "computer"`; results accept
+bounded text and base64 image content, including explicit error results. These
+requests bypass response caches, and the gateway reserves 4,590 native input
+tokens for the full definition in TPM and budget admission while native token
+counting forwards the exact toolset entry upstream.
+
 Regressions cover request/response conversion, native and fallback SSE, stream
 failure, model/tool authorization, TPM, unknown input, response-size bounds and
 reported usage reaching the accounting stage through Router. No live paid

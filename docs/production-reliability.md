@@ -893,3 +893,11 @@ Gateway Helm revision 443 completed successfully, and pod
 endpoint served OpenAPI 0.1.343 with memory, bash and both text-editor contracts.
 A valid request containing all three current client-tool families reached
 authentication and returned 401.
+
+Source `89c92e3` adds the current computer client toolset with strict validation
+of all 17 fixed members, namespaced per-member authorization, capability-based
+routing, conservative native token reserve, cache exclusion and native
+continuation through JSON and SSE. Mixed server-tool and computer-tool turns,
+image and error results, upstream streaming, token counting and durable batch
+admission use the same bounded representation. Full Go test, race, vet and build
+checks and all 166 UI tests completed successfully.

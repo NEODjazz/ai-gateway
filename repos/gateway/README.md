@@ -221,6 +221,13 @@ Provider-defined client tools are accepted for memory (`memory_20250818`), bash
 executes returned operations and sends `tool_result`; the gateway validates
 versions and names, enforces per-tool ACLs and deployment capabilities, counts
 the definitions, and disables response caching for these requests.
+The current computer client toolset (`computer_toolset_20260801`) is also
+accepted without a synthetic name. Its 17 fixed members support strict
+`enabled` and `defer_loading` configs, `direct` caller restriction and prompt
+cache control. Tool ACLs use `computer:<member>` identities. Calls and results
+must round-trip `toolset_name: computer`; text, image and error results remain
+provider-native, and the gateway reserves the full toolset context before TPM
+and budget checks.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.
