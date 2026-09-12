@@ -653,9 +653,10 @@ func TestManagedProviderCapabilityProfilesExposeValidatedAudioSpeechOptions(t *t
 		"groq":       {"response_format", "speed"},
 		"xai":        {"language", "response_format", "speed", "stream_format"},
 	}
+	streaming := map[string]bool{"openai": true, "openai-compatible": true, "azure-openai": true}
 	for _, profile := range ManagedProviderCapabilityProfiles() {
 		want, listed := expected[profile.Type]
-		if slices.Contains(profile.Operations, "audio_speech") != listed || !slices.Equal(profile.AudioSpeechParameters.SupportedOptions, want) {
+		if slices.Contains(profile.Operations, "audio_speech") != listed || !slices.Equal(profile.AudioSpeechParameters.SupportedOptions, want) || profile.AudioSpeechParameters.SSESupported != streaming[profile.Type] {
 			t.Errorf("%s audio speech parameters=%v operation=%v", profile.Type, profile.AudioSpeechParameters.SupportedOptions, slices.Contains(profile.Operations, "audio_speech"))
 		}
 	}

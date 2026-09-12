@@ -1661,6 +1661,45 @@ func (h Handler) GenerateSpeech(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "provider_failed", "audio speech is not supported by the configured provider")
 		return
 	}
+	if request.StreamFormat == "sse" {
+		streamingProvider, supported := h.provider.(provider.StreamingAudioSpeechProvider)
+		if !supported {
+			writeError(w, http.StatusBadGateway, "streaming_unsupported", "SSE audio speech is not supported by the configured provider")
+			return
+		}
+		streamStarted := false
+		writeStreamPayload := func(payload string) error {
+			if !streamStarted {
+				writeStreamHeaders(w)
+				w.WriteHeader(http.StatusOK)
+				streamStarted = true
+			}
+			return writeSSEPayload(w, payload)
+		}
+		response, streamed, err := streamingProvider.StreamGenerateSpeech(r.Context(), reqCtx, writeStreamPayload)
+		if !streamed {
+			if err != nil {
+				writeProviderFailure(w, err)
+			} else {
+				writeError(w, http.StatusBadGateway, "streaming_unsupported", "SSE audio speech is not supported by the selected deployment policy")
+			}
+			return
+		}
+		if err != nil {
+			if streamStarted {
+				_ = writeStreamPayload(errorStreamPayload(err))
+				return
+			}
+			writeProviderFailure(w, err)
+			return
+		}
+		if sink, ok := w.(interface {
+			audioSpeechStreamResult(openai.AudioSpeechResponse)
+		}); ok {
+			sink.audioSpeechStreamResult(response)
+		}
+		return
+	}
 	response, err := audioProvider.GenerateSpeech(r.Context(), reqCtx)
 	if err != nil {
 		writeProviderFailure(w, err)

@@ -17,6 +17,12 @@ type Mistral struct {
 	OpenAICompatible
 }
 
+func (Mistral) SupportsAudioSpeechStreaming() bool { return false }
+
+func (Mistral) StreamGenerateSpeech(context.Context, openai.AudioSpeechRequest, AudioSpeechStreamWriter) (openai.AudioSpeechResponse, error) {
+	return openai.AudioSpeechResponse{}, ErrStreamingUnsupported
+}
+
 type mistralFIMRequest struct {
 	Model          string            `json:"model"`
 	Prompt         string            `json:"prompt"`

@@ -472,7 +472,14 @@ func billingRequest(req *RequestContext) UsageRequest {
 	if req.AudioSpeechResponse != nil {
 		request.Phase = "commit"
 		request.UpstreamModel = req.AudioSpeechResponse.Model
-		request.UsageEstimated = true
+		if usage := req.AudioSpeechResponse.Usage; usage != nil {
+			request.InputTokens = usage.InputTokens
+			request.OutputTokens = usage.OutputTokens
+			request.TotalTokens = usage.TotalTokens
+			request.UsageEstimated = false
+		} else {
+			request.UsageEstimated = true
+		}
 	}
 	if req.SearchResponse != nil {
 		request.Phase = "commit"

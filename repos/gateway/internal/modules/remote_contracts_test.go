@@ -332,6 +332,12 @@ func TestRemoteBillingSettlesAudioSpeechWithExactCharacters(t *testing.T) {
 	if commit.Phase != "commit" || commit.InputCharacters != 8 || commit.UpstreamModel != "tts-versioned" || !commit.UsageEstimated {
 		t.Fatalf("commit=%+v", commit)
 	}
+	usage := openai.AudioSpeechUsage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5}
+	req.AudioSpeechResponse = &openai.AudioSpeechResponse{ContentType: "audio/mpeg", Model: "tts-streamed", Usage: &usage}
+	commit = billingRequest(&req)
+	if commit.InputCharacters != 8 || commit.UpstreamModel != "tts-streamed" || commit.InputTokens != 3 || commit.OutputTokens != 2 || commit.TotalTokens != 5 || commit.UsageEstimated {
+		t.Fatalf("streaming commit=%+v", commit)
+	}
 }
 
 func TestRemoteBillingSettlesStandaloneSearchAsOneUnit(t *testing.T) {

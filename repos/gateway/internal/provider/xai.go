@@ -456,7 +456,7 @@ func (XAI) ValidateAudioSpeechParameters(request openai.AudioSpeechRequest) erro
 	if request.ResponseFormat != "" && request.ResponseFormat != "mp3" && request.ResponseFormat != "wav" && request.ResponseFormat != "pcm" {
 		return xaiParameterError("response_format", "response_format must be mp3, wav, or pcm")
 	}
-	return rejectParameters("xai", parameterCheck{"instructions", request.Instructions != ""})
+	return rejectParameters("xai", parameterCheck{"instructions", request.Instructions != ""}, parameterCheck{"stream_format", request.StreamFormat == "sse"})
 }
 
 func (x XAI) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {

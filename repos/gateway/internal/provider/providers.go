@@ -122,6 +122,7 @@ type ProviderAudioTranslationParameterPolicy struct {
 
 type ProviderAudioSpeechParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
+	SSESupported     bool     `json:"sse_supported"`
 }
 
 type ProviderOCRParameterPolicy struct {
@@ -690,6 +691,11 @@ func managedProviderAudioSpeechParameterPolicy(client Client, supported bool) Pr
 		if validator.ValidateAudioSpeechParameters(request) == nil {
 			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
 		}
+	}
+	if streaming, ok := client.(interface{ SupportsAudioSpeechStreaming() bool }); ok && streaming.SupportsAudioSpeechStreaming() {
+		request := baseline
+		request.StreamFormat = "sse"
+		policy.SSESupported = validator.ValidateAudioSpeechParameters(request) == nil
 	}
 	return policy
 }

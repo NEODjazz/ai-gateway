@@ -2,11 +2,14 @@ package provider
 
 import (
 	"bytes"
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"ai-gateway-gateway/internal/config"
@@ -34,6 +37,128 @@ func TestOpenAICompatibleAudioSpeechContract(t *testing.T) {
 	response, err := NewOpenAICompatible(server.URL+"/v1", "secret", false).GenerateSpeech(t.Context(), request)
 	if err != nil || response.ContentType != "audio/mpeg" || !bytes.Equal(response.Data, []byte("ID3audio")) {
 		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestOpenAICompatibleAudioSpeechSSEContract(t *testing.T) {
+	audio := base64.StdEncoding.EncodeToString([]byte("ID3audio"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["stream_format"] != "sse" || payload["model"] != "tts" {
+			t.Fatalf("payload=%v", payload)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"speech.audio.delta\",\"audio\":\""+audio+"\"}\n\ndata: {\"type\":\"speech.audio.done\",\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}\n\n")
+	}))
+	defer server.Close()
+	request := openai.AudioSpeechRequest{Model: "tts", Input: "hello", Voice: "alloy", ResponseFormat: "mp3", StreamFormat: "sse"}
+	var events []string
+	response, err := NewOpenAICompatible(server.URL, "", true).StreamGenerateSpeech(t.Context(), request, func(payload string) error {
+		events = append(events, payload)
+		return nil
+	})
+	if err != nil || len(events) != 2 || response.Model != "tts" || response.ContentType != "audio/mpeg" || response.Usage == nil || response.Usage.TotalTokens != 5 || len(response.Data) != 0 {
+		t.Fatalf("response=%+v events=%v err=%v", response, events, err)
+	}
+}
+
+func TestAudioSpeechSSERejectsInvalidLifecycle(t *testing.T) {
+	audio := base64.StdEncoding.EncodeToString([]byte("audio"))
+	for name, body := range map[string]string{
+		"missing done":   "data: {\"type\":\"speech.audio.delta\",\"audio\":\"" + audio + "\"}\n\n",
+		"invalid base64": "data: {\"type\":\"speech.audio.delta\",\"audio\":\"%%%\"}\n\n",
+		"done first":     "data: {\"type\":\"speech.audio.done\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}\n\n",
+		"invalid usage":  "data: {\"type\":\"speech.audio.delta\",\"audio\":\"" + audio + "\"}\n\ndata: {\"type\":\"speech.audio.done\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":3}}\n\n",
+		"after done":     "data: {\"type\":\"speech.audio.delta\",\"audio\":\"" + audio + "\"}\n\ndata: {\"type\":\"speech.audio.done\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}\n\ndata: {\"type\":\"speech.audio.delta\",\"audio\":\"" + audio + "\"}\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := streamAudioSpeech(strings.NewReader(body), func(string) error { return nil }); err == nil {
+				t.Fatal("invalid stream accepted")
+			}
+		})
+	}
+}
+
+type speechStreamLifecycleRecorder struct{ characters, tokens int }
+
+func (*speechStreamLifecycleRecorder) Name() string   { return "speech-stream-recorder" }
+func (*speechStreamLifecycleRecorder) Required() bool { return true }
+func (m *speechStreamLifecycleRecorder) Handle(_ context.Context, req *modules.RequestContext) error {
+	m.characters = req.AudioSpeechRequest.InputCharacters()
+	return nil
+}
+func (*speechStreamLifecycleRecorder) PostResponseEnabled() bool { return true }
+func (m *speechStreamLifecycleRecorder) HandlePostResponse(_ context.Context, req *modules.RequestContext) error {
+	if req.AudioSpeechResponse != nil && req.AudioSpeechResponse.Usage != nil {
+		m.tokens = req.AudioSpeechResponse.Usage.TotalTokens
+	}
+	return nil
+}
+
+func TestRouterAudioSpeechSSESettlesUsageAndStopsFallbackAfterData(t *testing.T) {
+	audio := base64.StdEncoding.EncodeToString([]byte("audio"))
+	secondCalls := 0
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"speech.audio.delta\",\"audio\":\""+audio+"\"}\n\ndata: {\"type\":\"speech.audio.done\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":3}}\n\n")
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"speech.audio.delta\",\"audio\":\""+audio+"\"}\n\ndata: {\"type\":\"speech.audio.done\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}\n\n")
+	}))
+	defer second.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{
+		{Name: "first", Type: "openai-compatible", BaseURL: first.URL, Stream: true, Priority: 1, Models: []string{"tts"}, Capabilities: []string{"audio_speech"}},
+		{Name: "second", Type: "openai-compatible", BaseURL: second.URL, Stream: true, Priority: 2, Models: []string{"tts"}, Capabilities: []string{"audio_speech"}},
+	}}).(*Router)
+	request := openai.AudioSpeechRequest{Model: "tts", Input: "hello", Voice: "alloy", StreamFormat: "sse"}
+	ctx := modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "tts", Messages: []openai.Message{{Role: "user", Content: "hello"}}}, AudioSpeechRequest: &request}
+	_, streamed, err := router.StreamGenerateSpeech(t.Context(), ctx, func(string) error { return nil })
+	if err == nil || !streamed || secondCalls != 0 {
+		t.Fatalf("streamed=%v second_calls=%d err=%v", streamed, secondCalls, err)
+	}
+
+	recorder := &speechStreamLifecycleRecorder{}
+	success := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"speech.audio.delta\",\"audio\":\""+audio+"\"}\n\ndata: {\"type\":\"speech.audio.done\",\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}\n\n")
+	}))
+	defer success.Close()
+	router = New(Config{Modules: modules.NewPipeline([]modules.Module{recorder}), Endpoints: []config.ProviderEndpointConfig{{Name: "success", Type: "openai-compatible", BaseURL: success.URL, Stream: true, Models: []string{"tts"}, Capabilities: []string{"audio_speech"}}}}).(*Router)
+	response, streamed, err := router.StreamGenerateSpeech(t.Context(), ctx, func(string) error { return nil })
+	if err != nil || !streamed || response.Usage == nil || recorder.characters != 5 || recorder.tokens != 5 {
+		t.Fatalf("response=%+v streamed=%v recorder=%+v err=%v", response, streamed, recorder, err)
+	}
+}
+
+func TestRouterAudioSpeechSSEFallsBackBeforeFirstEvent(t *testing.T) {
+	firstCalls, secondCalls := 0, 0
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		firstCalls++
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer first.Close()
+	audio := base64.StdEncoding.EncodeToString([]byte("audio"))
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"speech.audio.delta\",\"audio\":\""+audio+"\"}\n\ndata: {\"type\":\"speech.audio.done\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}\n\n")
+	}))
+	defer second.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{
+		{Name: "first", Type: "openai-compatible", BaseURL: first.URL, Stream: true, Priority: 1, Models: []string{"tts"}, Capabilities: []string{"audio_speech"}},
+		{Name: "second", Type: "openai-compatible", BaseURL: second.URL, Stream: true, Priority: 2, Models: []string{"tts"}, Capabilities: []string{"audio_speech"}},
+	}}).(*Router)
+	request := openai.AudioSpeechRequest{Model: "tts", Input: "hello", Voice: "alloy", StreamFormat: "sse"}
+	ctx := modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "tts", Messages: []openai.Message{{Role: "user", Content: "hello"}}}, AudioSpeechRequest: &request}
+	response, streamed, err := router.StreamGenerateSpeech(t.Context(), ctx, func(string) error { return nil })
+	if err != nil || !streamed || firstCalls != 1 || secondCalls != 1 || response.Usage == nil || response.Usage.TotalTokens != 2 {
+		t.Fatalf("response=%+v streamed=%v calls=%d/%d err=%v", response, streamed, firstCalls, secondCalls, err)
 	}
 }
 

@@ -298,6 +298,14 @@ type AudioSpeechClient interface {
 	GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error)
 }
 
+type StreamingAudioSpeechProvider interface {
+	StreamGenerateSpeech(ctx context.Context, req modules.RequestContext, write AudioSpeechStreamWriter) (openai.AudioSpeechResponse, bool, error)
+}
+
+type StreamingAudioSpeechClient interface {
+	StreamGenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest, write AudioSpeechStreamWriter) (openai.AudioSpeechResponse, error)
+}
+
 type SearchProvider interface {
 	Search(ctx context.Context, req modules.RequestContext) (openai.SearchResponse, error)
 }
@@ -327,6 +335,7 @@ type CompletionStreamWriter func(payload string) error
 type ResponseStreamWriter func(event string, payload string) error
 type ImageGenerationStreamWriter func(payload string) error
 type AudioTranscriptionStreamWriter func(payload string) error
+type AudioSpeechStreamWriter func(payload string) error
 
 type StreamingClient interface {
 	StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error)
@@ -2753,6 +2762,13 @@ func (t *streamAttemptTracker) imageWriter(write ImageGenerationStreamWriter) Im
 }
 
 func (t *streamAttemptTracker) audioTranscriptionWriter(write AudioTranscriptionStreamWriter) AudioTranscriptionStreamWriter {
+	return func(payload string) error {
+		t.beforeWrite()
+		return write(payload)
+	}
+}
+
+func (t *streamAttemptTracker) audioSpeechWriter(write AudioSpeechStreamWriter) AudioSpeechStreamWriter {
 	return func(payload string) error {
 		t.beforeWrite()
 		return write(payload)

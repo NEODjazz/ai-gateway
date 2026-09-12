@@ -17,6 +17,13 @@ func TestAudioSpeechRequestValidationAndAccounting(t *testing.T) {
 	if AudioSpeechReserveTokens(request) <= 0 || request.ExpectedContentType() != "audio/wav" {
 		t.Fatalf("reserve=%d content_type=%q", AudioSpeechReserveTokens(request), request.ExpectedContentType())
 	}
+	request.StreamFormat = "sse"
+	if message := request.Validate(); message != "" {
+		t.Fatal(message)
+	}
+	if message := (AudioSpeechUsage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5}).Validate(); message != "" {
+		t.Fatal(message)
+	}
 }
 
 func TestAudioSpeechRequestRejectsUnsupportedInput(t *testing.T) {
@@ -24,7 +31,7 @@ func TestAudioSpeechRequestRejectsUnsupportedInput(t *testing.T) {
 	for _, request := range []AudioSpeechRequest{
 		{},
 		{Model: "tts", Input: "hello", Voice: "alloy", ResponseFormat: "json"},
-		{Model: "tts", Input: "hello", Voice: "alloy", StreamFormat: "sse"},
+		{Model: "tts", Input: "hello", Voice: "alloy", StreamFormat: "events"},
 		{Model: "tts", Input: "hello", Voice: "alloy", Speed: &tooSlow},
 		{Model: "tts", Input: "hello", Voice: "alloy", Speed: &tooFast},
 		{Model: "tts", Input: "hello", Voice: "alloy", Language: "not a language"},
@@ -32,6 +39,11 @@ func TestAudioSpeechRequestRejectsUnsupportedInput(t *testing.T) {
 	} {
 		if request.Validate() == "" {
 			t.Fatalf("accepted invalid request: %+v", request)
+		}
+	}
+	for _, usage := range []AudioSpeechUsage{{}, {InputTokens: -1, TotalTokens: 1}, {InputTokens: int(^uint(0) >> 1), OutputTokens: 1, TotalTokens: 1}, {InputTokens: 1, OutputTokens: 1, TotalTokens: 3}} {
+		if usage.Validate() == "" {
+			t.Fatalf("accepted invalid usage: %+v", usage)
 		}
 	}
 }

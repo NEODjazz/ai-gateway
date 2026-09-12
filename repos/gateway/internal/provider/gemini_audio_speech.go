@@ -60,6 +60,7 @@ func (Gemini) ValidateAudioSpeechParameters(request openai.AudioSpeechRequest) e
 		parameterCheck{"language", request.Language != ""},
 		parameterCheck{"speed", request.Speed != nil},
 		parameterCheck{"response_format", request.ResponseFormat == "aac" || request.ResponseFormat == "flac"},
+		parameterCheck{"stream_format", request.StreamFormat == "sse"},
 	)
 }
 
