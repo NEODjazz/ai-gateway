@@ -82,6 +82,14 @@ token or billed-unit counters. Search units remain observable provider usage;
 token-based catalog pricing continues to use the existing bounded input estimate.
 
 The same provider type implements native text embeddings through `/v2/embed`.
+
+Provider type `together` sends Rerank requests to the native `/v1/rerank`
+endpoint with bearer authentication. It accepts text and object documents,
+`top_n`, and `return_documents`; unsupported chunking and rank-field controls
+fail before upstream execution. Responses are limited to 8 MiB, reject trailing
+JSON, and require non-negative provider token usage whose total exactly matches
+its input and output components. Missing or inconsistent usage fails the request
+before billing settlement can use an estimate.
 Requests require one of `search_document`, `search_query`, `classification` or
 `clustering` in `input_type` and accept at most 96 non-empty texts. Token-ID
 input and `user` are rejected before the upstream call. `dimensions` maps to
@@ -365,7 +373,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `deepseek` | Chat/stream and Responses with provider-specific validation and reasoning history passthrough |
 | `cerebras` | Chat/stream with bearer authentication, model discovery, function tools, JSON Schema output, reasoning/logprobs/service-tier validation and normalized reasoning content; unsupported fields fail before upstream execution |
 | `nvidia-nim` | Chat/stream, native Messages/stream and count-tokens, legacy Completions, Responses create/stream/retrieve/cancel and Embeddings with optional bearer authentication and model discovery; stored response lifecycle uses the original deployment ownership binding, Chat and Messages use isolated cache scopes, and model-dependent multimodal input is enabled per deployment |
-| `together` | Chat/stream, legacy Completions, Embeddings and model discovery with bearer authentication; tools, structured output and vision are capability-gated, while unsupported Responses and silently ignored Chat parameters fail before upstream execution |
+| `together` | Chat/stream, legacy Completions, Embeddings, native Rerank and model discovery with bearer authentication; Rerank requires exact provider usage, tools, structured output and vision are capability-gated, and unsupported Responses or silently ignored Chat parameters fail before upstream execution |
 | `xai` | Chat/stream, Responses and Embeddings with bearer authentication, merged text/embedding model discovery, structured output, vision, web search, response compaction and owned retrieve/input-items/delete lifecycle; priority tier, bounded reasoning/logprobs validation, float/base64 vectors and exact embedding token usage |
 | `demo` | Локальный deterministic fallback для разработки |
 
