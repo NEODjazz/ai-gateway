@@ -279,6 +279,13 @@ func (p *batchProvider) Search(_ context.Context, req modules.RequestContext) (o
 	return openai.SearchResponse{Object: "search", Model: model, Results: []openai.SearchResult{{Title: "Result", URL: "https://example.test/result"}}, Usage: openai.Usage{SearchRequests: req.SearchRequest.SearchUnits()}}, nil
 }
 
+func (p *batchProvider) GenerateImage(_ context.Context, req modules.RequestContext) (openai.ImageGenerationResponse, error) {
+	p.mu.Lock()
+	p.executions = append(p.executions, req.RequestID)
+	p.mu.Unlock()
+	return openai.ImageGenerationResponse{Created: 7, Data: []openai.ImageData{{URL: "https://images.example/result.png"}}, Usage: &openai.ImageUsage{InputTokens: 2, OutputTokens: 5, TotalTokens: 7}}, nil
+}
+
 func TestBatchLifecycleExecutesMixedModelsWithDistinctBillingIDs(t *testing.T) {
 	store := newMemoryBatchStore()
 	files := &memoryFileStore{files: map[string]filestate.File{}}
@@ -398,6 +405,40 @@ func TestBatchLifecycleExecutesSearchWithPerQueryAccounting(t *testing.T) {
 	}
 	output, err := files.Get(t.Context(), owner, batch.OutputFileID, true)
 	if err != nil || !strings.Contains(string(output.Content), `"object":"search"`) || !strings.Contains(string(output.Content), `https://example.test/result`) {
+		t.Fatalf("output=%s err=%v", output.Content, err)
+	}
+}
+
+func TestBatchLifecycleExecutesImageGenerationWithTokenSettlement(t *testing.T) {
+	store := newMemoryBatchStore()
+	files := &memoryFileStore{files: map[string]filestate.File{}}
+	runtime := &batchProvider{models: []string{"image-model"}}
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	payload := []byte("{\"custom_id\":\"image\",\"method\":\"POST\",\"url\":\"/v1/images/generations\",\"body\":{\"model\":\"image-model\",\"prompt\":\"draw a circle\",\"n\":1,\"response_format\":\"url\"}}\n")
+	files.files["file_image"] = filestate.File{ID: "file_image", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(payload)), Content: payload}
+	h := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), runtime).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
+	routes := Routes(h)
+	request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_image","endpoint":"/v1/images/generations","completion_window":"24h"}`))
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	routes.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	var created openai.Batch
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if processed, err := h.ProcessBatchItems(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	done := authorizedFileRequest(t, routes, http.MethodGet, "/v1/batches/"+created.ID)
+	var batch openai.Batch
+	if err := json.Unmarshal(done.Body.Bytes(), &batch); err != nil || done.Code != http.StatusOK || batch.RequestCounts.Completed != 1 {
+		t.Fatalf("status=%d batch=%+v err=%v", done.Code, batch, err)
+	}
+	output, err := files.Get(t.Context(), owner, batch.OutputFileID, true)
+	if err != nil || !strings.Contains(string(output.Content), `https://images.example/result.png`) || !strings.Contains(string(output.Content), `"total_tokens":7`) {
 		t.Fatalf("output=%s err=%v", output.Content, err)
 	}
 }

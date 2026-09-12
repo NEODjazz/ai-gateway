@@ -337,6 +337,16 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		}
 		model, _ = request.RoutingModel()
 		normalized = request
+	case "/v1/images/generations":
+		var request openai.ImageGenerationRequest
+		if err := decodeStrictJSON(body, &request); err != nil {
+			return nil, "", nil, err
+		}
+		if message := request.Validate(); message != "" {
+			return nil, "", nil, errors.New(message)
+		}
+		model = request.Model
+		normalized = request
 	default:
 		return nil, "", nil, errors.New("unsupported endpoint")
 	}
@@ -713,6 +723,23 @@ func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestCont
 			return 0, nil, errors.New("search unsupported")
 		}
 		response, err := client.Search(ctx, *req)
+		payload, _ := json.Marshal(response)
+		return http.StatusOK, payload, err
+	case "/v1/images/generations":
+		var value openai.ImageGenerationRequest
+		if err := json.Unmarshal(body, &value); err != nil {
+			return 0, nil, err
+		}
+		req.ImageGenerationRequest = &value
+		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model}
+		if !h.allowBatchRate(ctx, *req, estimateImageGenerationTokens(value)) {
+			return 0, nil, errBatchRateLimited
+		}
+		client, ok := h.provider.(provider.ImageGenerationProvider)
+		if !ok {
+			return 0, nil, errors.New("image generation unsupported")
+		}
+		response, err := client.GenerateImage(ctx, *req)
 		payload, _ := json.Marshal(response)
 		return http.StatusOK, payload, err
 	}
