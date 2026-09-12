@@ -27,14 +27,15 @@ type ManagedProvider struct {
 }
 
 type ProviderCapabilityProfile struct {
-	Type                string                           `json:"type"`
-	Operations          []string                         `json:"operations"`
-	Capabilities        []string                         `json:"capabilities"`
-	AuthTypes           []string                         `json:"auth_types"`
-	ChatParameters      ProviderChatParameterPolicy      `json:"chat_parameters"`
-	ResponseParameters  ProviderResponseParameterPolicy  `json:"response_parameters"`
-	EmbeddingParameters ProviderEmbeddingParameterPolicy `json:"embedding_parameters"`
-	RerankParameters    ProviderRerankParameterPolicy    `json:"rerank_parameters"`
+	Type                 string                            `json:"type"`
+	Operations           []string                          `json:"operations"`
+	Capabilities         []string                          `json:"capabilities"`
+	AuthTypes            []string                          `json:"auth_types"`
+	ChatParameters       ProviderChatParameterPolicy       `json:"chat_parameters"`
+	ResponseParameters   ProviderResponseParameterPolicy   `json:"response_parameters"`
+	EmbeddingParameters  ProviderEmbeddingParameterPolicy  `json:"embedding_parameters"`
+	RerankParameters     ProviderRerankParameterPolicy     `json:"rerank_parameters"`
+	CompletionParameters ProviderCompletionParameterPolicy `json:"completion_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -63,10 +64,15 @@ type ProviderRerankParameterPolicy struct {
 	DocumentForms    []string `json:"document_forms"`
 }
 
+type ProviderCompletionParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
+	PromptForms      []string `json:"prompt_forms"`
+}
+
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai", "opensandbox"}
 
 var managedOperationCapabilities = []string{
-	"chat", "responses", "interactions", "count_tokens", "embeddings", "rerank", "moderation",
+	"chat", "completions", "responses", "interactions", "count_tokens", "embeddings", "rerank", "moderation",
 	"image_generation", "image_edit", "image_variation",
 	"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "sandbox", "realtime", "stream", "bedrock_invoke",
 }
@@ -309,17 +315,66 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			}
 		}
 		profiles = append(profiles, ProviderCapabilityProfile{
-			Type:                providerType,
-			Operations:          operations,
-			Capabilities:        capabilities,
-			AuthTypes:           managedProviderAuthTypes(providerType),
-			ChatParameters:      managedProviderChatParameterPolicy(client, slicesContain(operations, "chat")),
-			ResponseParameters:  managedProviderResponseParameterPolicy(client, slicesContain(operations, "responses")),
-			EmbeddingParameters: managedProviderEmbeddingParameterPolicy(client, slicesContain(operations, "embeddings")),
-			RerankParameters:    managedProviderRerankParameterPolicy(client, slicesContain(operations, "rerank")),
+			Type:                 providerType,
+			Operations:           operations,
+			Capabilities:         capabilities,
+			AuthTypes:            managedProviderAuthTypes(providerType),
+			ChatParameters:       managedProviderChatParameterPolicy(client, slicesContain(operations, "chat")),
+			ResponseParameters:   managedProviderResponseParameterPolicy(client, slicesContain(operations, "responses")),
+			EmbeddingParameters:  managedProviderEmbeddingParameterPolicy(client, slicesContain(operations, "embeddings")),
+			RerankParameters:     managedProviderRerankParameterPolicy(client, slicesContain(operations, "rerank")),
+			CompletionParameters: managedProviderCompletionParameterPolicy(client, slicesContain(operations, "completions")),
 		})
 	}
 	return profiles
+}
+
+func managedProviderCompletionParameterPolicy(client Client, supported bool) ProviderCompletionParameterPolicy {
+	policy := ProviderCompletionParameterPolicy{SupportedOptions: []string{}, PromptForms: []string{}}
+	completionClient, ok := client.(CompletionClient)
+	if !supported || !ok {
+		return policy
+	}
+	baseline := openai.CompletionRequest{Model: "model", Prompt: "test"}
+	for _, probe := range []struct {
+		name   string
+		prompt any
+	}{{"text", "test"}, {"text_array", []string{"test"}}, {"token_array", []int{1}}, {"token_batch", [][]int{{1}}}} {
+		request := baseline
+		request.Prompt = probe.prompt
+		if validateCompletionAdapter(completionClient, request) == nil {
+			policy.PromptForms = append(policy.PromptForms, probe.name)
+		}
+	}
+	for _, probe := range []struct {
+		name  string
+		apply func(*openai.CompletionRequest)
+	}{
+		{"metadata", func(r *openai.CompletionRequest) { r.Metadata = map[string]string{"trace": "probe"} }},
+		{"best_of", func(r *openai.CompletionRequest) { value := 1; r.BestOf = &value }},
+		{"echo", func(r *openai.CompletionRequest) { value := true; r.Echo = &value }},
+		{"frequency_penalty", func(r *openai.CompletionRequest) { value := 0.5; r.FrequencyPenalty = &value }},
+		{"logit_bias", func(r *openai.CompletionRequest) { r.LogitBias = map[string]int{"1": 1} }},
+		{"logprobs", func(r *openai.CompletionRequest) { value := 1; r.Logprobs = &value }},
+		{"max_tokens", func(r *openai.CompletionRequest) { value := 16; r.MaxTokens = &value }},
+		{"min_tokens", func(r *openai.CompletionRequest) { value := 1; r.MinTokens = &value }},
+		{"n", func(r *openai.CompletionRequest) { value := 1; r.N = &value }},
+		{"presence_penalty", func(r *openai.CompletionRequest) { value := 0.5; r.PresencePenalty = &value }},
+		{"prompt_cache_key", func(r *openai.CompletionRequest) { r.PromptCacheKey = "probe" }},
+		{"seed", func(r *openai.CompletionRequest) { value := int64(1); r.Seed = &value }},
+		{"stop", func(r *openai.CompletionRequest) { r.Stop = []string{"stop"} }},
+		{"suffix", func(r *openai.CompletionRequest) { r.Suffix = "suffix" }},
+		{"temperature", func(r *openai.CompletionRequest) { value := 0.5; r.Temperature = &value }},
+		{"top_p", func(r *openai.CompletionRequest) { value := 0.5; r.TopP = &value }},
+		{"user", func(r *openai.CompletionRequest) { r.User = "probe" }},
+	} {
+		request := baseline
+		probe.apply(&request)
+		if validateCompletionAdapter(completionClient, request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	return policy
 }
 
 func managedProviderEmbeddingParameterPolicy(client Client, supported bool) ProviderEmbeddingParameterPolicy {

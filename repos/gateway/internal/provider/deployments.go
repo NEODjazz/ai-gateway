@@ -476,6 +476,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	switch capability {
 	case "chat", "responses":
 		return true
+	case "completions":
+		_, ok := endpoint.Provider.(CompletionClient)
+		return ok
 	case "interactions":
 		_, ok := endpoint.Provider.(InteractionClient)
 		return ok

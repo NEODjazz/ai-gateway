@@ -283,7 +283,7 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if got := byType["voyage"]; !slices.Equal(got, []string{"embeddings", "rerank"}) {
 		t.Fatalf("voyage operations=%v", got)
 	}
-	for _, operation := range []string{"chat", "responses", "embeddings", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "search", "container", "container_files", "container_network", "realtime", "stream"} {
+	for _, operation := range []string{"chat", "completions", "responses", "embeddings", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "search", "container", "container_files", "container_network", "realtime", "stream"} {
 		if !slices.Contains(byType["openai-compatible"], operation) {
 			t.Fatalf("openai-compatible missing %s: %v", operation, byType["openai-compatible"])
 		}
@@ -354,7 +354,7 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Equal(profilesByType["xai"].Operations, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_remix", "video_extension", "stream"}) || !slices.Equal(profilesByType["xai"].Capabilities, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_remix", "video_extension", "stream", "tools", "structured_output", "vision", "web_search"}) {
 		t.Fatalf("xai profile=%+v", profilesByType["xai"])
 	}
-	if !slices.Equal(profilesByType["openrouter"].Operations, []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream"}) || !slices.Equal(profilesByType["openrouter"].Capabilities, []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}) {
+	if !slices.Equal(profilesByType["openrouter"].Operations, []string{"chat", "completions", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream"}) || !slices.Equal(profilesByType["openrouter"].Capabilities, []string{"chat", "completions", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}) {
 		t.Fatalf("openrouter profile=%+v", profilesByType["openrouter"])
 	}
 }
@@ -479,6 +479,30 @@ func TestManagedProviderCapabilityProfilesExposeValidatedEmbeddingAndRerankOptio
 	}
 	if got := byType["cohere"].RerankParameters; !slices.Equal(got.SupportedOptions, []string{"top_n", "return_documents", "max_tokens_per_doc"}) || !slices.Equal(got.DocumentForms, []string{"text"}) {
 		t.Errorf("cohere rerank parameters=%+v", got)
+	}
+}
+
+func TestManagedProviderCapabilityProfilesExposeValidatedCompletionOptions(t *testing.T) {
+	profiles := ManagedProviderCapabilityProfiles()
+	byType := make(map[string]ProviderCapabilityProfile, len(profiles))
+	for _, profile := range profiles {
+		byType[profile.Type] = profile
+		if slices.Contains(profile.Operations, "completions") != (len(profile.CompletionParameters.PromptForms) > 0) {
+			t.Errorf("%s completion profile does not match operations: %+v", profile.Type, profile.CompletionParameters)
+		}
+	}
+	compatibleOptions := []string{"best_of", "echo", "frequency_penalty", "logit_bias", "logprobs", "max_tokens", "n", "presence_penalty", "seed", "stop", "suffix", "temperature", "top_p", "user"}
+	for _, providerType := range []string{"openai", "openai-compatible", "openrouter", "azure-openai"} {
+		got := byType[providerType].CompletionParameters
+		if !slices.Equal(got.SupportedOptions, compatibleOptions) || !slices.Equal(got.PromptForms, []string{"text", "text_array", "token_array", "token_batch"}) {
+			t.Errorf("%s completion parameters=%+v", providerType, got)
+		}
+	}
+	if got := byType["ollama"].CompletionParameters; !slices.Equal(got.SupportedOptions, compatibleOptions) || !slices.Equal(got.PromptForms, []string{"text"}) {
+		t.Errorf("ollama completion parameters=%+v", got)
+	}
+	if got := byType["mistral"].CompletionParameters; !slices.Equal(got.SupportedOptions, []string{"metadata", "max_tokens", "min_tokens", "prompt_cache_key", "seed", "stop", "suffix", "temperature", "top_p"}) || !slices.Equal(got.PromptForms, []string{"text"}) {
+		t.Errorf("mistral completion parameters=%+v", got)
 	}
 }
 

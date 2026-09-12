@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.302
+  version: 0.1.303
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9307,19 +9307,19 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters]
+      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters, completion_parameters]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, cohere, mistral, voyage, bedrock, groq, deepseek, xai, opensandbox]}
         operations:
           type: array
           uniqueItems: true
           description: Native operations implemented by the managed adapter. count_tokens is used by the inbound token-count endpoint and is not a deployment capability.
-          items: {type: string, enum: [chat, responses, interactions, count_tokens, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, count_tokens, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, bedrock_invoke]}
         capabilities:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true
@@ -9333,6 +9333,8 @@ components:
           $ref: '#/components/schemas/ProviderEmbeddingParameterPolicy'
         rerank_parameters:
           $ref: '#/components/schemas/ProviderRerankParameterPolicy'
+        completion_parameters:
+          $ref: '#/components/schemas/ProviderCompletionParameterPolicy'
     ProviderChatParameterPolicy:
       type: object
       additionalProperties: false
@@ -9411,6 +9413,19 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, enum: [text, object]}
+    ProviderCompletionParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [supported_options, prompt_forms]
+      properties:
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [metadata, best_of, echo, frequency_penalty, logit_bias, logprobs, max_tokens, min_tokens, n, presence_penalty, prompt_cache_key, seed, stop, suffix, temperature, top_p, user]}
+        prompt_forms:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [text, text_array, token_array, token_batch]}
     ProviderCredentialCreateInput:
       type: object
       additionalProperties: false
