@@ -1755,3 +1755,21 @@ same image. Live liveness and readiness returned 204, the served OpenAPI
 reported 0.1.384, and an unauthenticated Chat request with `logprobs=true`
 returned 401 before deployment selection. No provider credential or external
 inference was used by the smoke checks.
+
+Source `40ebc1b` enables the native Together Chat sampling controls already
+present in the public request contract. `min_p`, `top_k`,
+`repetition_penalty` and integer `logit_bias` now pass through after shared
+range and token-ID validation, and the provider capability profile derives the
+same support from its execution validator. Protocol tests verify the exact wire
+fields and that invalid values make no HTTP request. Focused provider tests,
+vet, build, the full Go suite and the full race suite passed. OpenAPI 0.1.385
+documents the adapter coverage.
+
+Rancher Desktop built `ai-gateway-gateway:together-sampling-40ebc1b` with image
+ID `sha256:b935e087c66cbeee6edd88a711038a28cdd82e72f963762f9654e7640d5bfe78`.
+Gateway Helm revision 491 completed successfully. Pod
+`ai-gateway-gateway-64c97c6dcf-7pmqg` became Ready with zero restarts and the
+same image. Live liveness and readiness returned 204, the served OpenAPI
+reported 0.1.385, and an unauthenticated Chat request carrying all four
+controls returned 401 before deployment selection. No provider credential or
+external inference was used by the smoke checks.

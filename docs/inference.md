@@ -119,6 +119,10 @@ finite non-positive probabilities and reconstruction of the returned text.
 Requested probabilities may not disappear from a content response. Public
 `top_logprobs` and non-empty native alternative maps fail because the native
 contract does not associate alternatives with individual token positions.
+The same native transport forwards `min_p`, `top_k`, `repetition_penalty` and
+integer `logit_bias`. Shared request validation restricts probabilities and
+candidate counts, requires a positive repetition penalty, and accepts only
+nonnegative numeric token IDs with biases from -100 to 100 before provider HTTP.
 
 The same provider type sends bounded Text-to-Speech requests to native
 `/v1/audio/speech`. It preserves model, input, voice and lowercase language or
@@ -441,7 +445,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `deepseek` | Chat/stream and Responses with provider-specific validation and reasoning history passthrough |
 | `cerebras` | Chat/stream with bearer authentication, model discovery, function tools, JSON Schema output, reasoning/logprobs/service-tier validation and normalized reasoning content; unsupported fields fail before upstream execution |
 | `nvidia-nim` | Chat/stream, native Messages/stream and count-tokens, legacy Completions, Responses create/stream/retrieve/cancel, Embeddings and native text Rerank with optional bearer authentication and model discovery; Rerank supports 512 passages, `NONE`/`END` truncation and exact provider token settlement; stored response lifecycle uses the original deployment ownership binding, Chat and Messages use isolated cache scopes, and model-dependent multimodal input is enabled per deployment |
-| `together` | Chat/stream with bounded native reasoning aliases, exact model-specific reasoning-effort policy and normalized selected-token log probabilities, legacy Completions, Embeddings, native Rerank, Image Generation, duration-accounted Audio Transcription/Translation, bounded Text-to-Speech and model discovery with bearer authentication; Rerank requires exact provider usage, image output uses unit accounting, audio uses exact duration or character settlement, tools, structured output and vision are capability-gated, and unsupported Responses, top-logprob alternatives or silently ignored parameters fail before upstream execution |
+| `together` | Chat/stream with bounded native reasoning aliases, exact model-specific reasoning-effort policy, normalized selected-token log probabilities and validated min-p, top-k, repetition-penalty and token-bias controls, legacy Completions, Embeddings, native Rerank, Image Generation, duration-accounted Audio Transcription/Translation, bounded Text-to-Speech and model discovery with bearer authentication; Rerank requires exact provider usage, image output uses unit accounting, audio uses exact duration or character settlement, tools, structured output and vision are capability-gated, and unsupported Responses, top-logprob alternatives or silently ignored parameters fail before upstream execution |
 | `xai` | Chat/stream, Responses and Embeddings with bearer authentication, merged text/embedding model discovery, structured output, vision, web search, response compaction and owned retrieve/input-items/delete lifecycle; priority tier, bounded reasoning/logprobs validation, float/base64 vectors and exact embedding token usage |
 | `demo` | Локальный deterministic fallback для разработки |
 
