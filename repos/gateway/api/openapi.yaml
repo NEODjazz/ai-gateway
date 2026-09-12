@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.345
+  version: 0.1.346
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -955,7 +955,7 @@ paths:
       description: |
         Supports text, base64 user images, function tools and text tool results.
         Bounded native web-search, web-fetch and managed code-execution result blocks are preserved in provider order.
-        Non-streaming requests can execute up to 20 owner-checked native skills through the deployment where each custom skill was created. A returned container ID can be reused until its reported expiry by the same credential and user; routing remains pinned to the original deployment.
+        Requests can execute up to 20 owner-checked native skills through the deployment where each custom skill was created. With stream=true the gateway buffers provider execution until the returned container binding is durably recorded, then emits a valid Messages SSE sequence. A returned container ID can be reused until its reported expiry by the same credential and user; routing remains pinned to the original deployment.
         Other advanced input blocks and server-tool types are rejected.
         Assistant prefill requires an explicitly capable deployment and model.
       security:
@@ -6951,7 +6951,7 @@ components:
                   type: {type: string, enum: [anthropic, custom]}
                   skill_id: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_.-]+$'}
                   version: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_.-]+$'}
-          description: Requires stream=false and a code_execution_20250825 tool. Custom skills are owner-checked and pin routing to their creation deployment. Reused container IDs must belong to the same credential and user and remain unexpired.
+          description: Requires a code_execution_20250825 tool. Custom skills are owner-checked and pin routing to their creation deployment. Reused container IDs must belong to the same credential and user and remain unexpired. Streaming responses are buffered until the returned container binding is durably recorded.
         metadata:
           type: object
           additionalProperties: false

@@ -236,6 +236,11 @@ tab inventories and download state changes, preserves native continuation, and
 requires the explicit `browser_toolset` deployment capability. Browser toolset
 requests bypass response caches and reserve the provider definition overhead
 before TPM and budget admission.
+Native skill execution accepts both JSON and Messages SSE responses. Skill SSE
+is buffered until the provider container descriptor has passed validation and
+its owner, expiry and deployment binding have been stored; only then is the
+complete event sequence emitted. This prevents clients from receiving a
+container ID that cannot be safely reused after a storage failure.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.

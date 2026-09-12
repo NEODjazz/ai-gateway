@@ -710,7 +710,7 @@ SSE final usage, and the internal response usage presented to billing settlement
 the total output-token charge remains unchanged.
 Token counting is a separate endpoint; background jobs are not supported.
 
-Non-streaming Messages requests may load 1–20 native skills with
+Messages requests may load 1–20 native skills with
 `container.skills`. Each reference has `type=anthropic|custom`, a bounded
 `skill_id`, and an optional pinned `version`. The request must also include the
 native `{type: code_execution_20250825, name: code_execution}` tool. Custom
@@ -736,8 +736,12 @@ bounded batches during writes.
 
 The same request shape is accepted in durable `/v1/messages` batches and is
 revalidated when the item executes, including durable container ownership and
-affinity. Streaming with skills remains rejected until native SSE execution state
-can be preserved end to end.
+affinity. `stream=true` returns a valid Messages SSE sequence, buffered until
+the provider response has supplied a valid container descriptor and its owner,
+expiry and deployment binding have been stored. A persistence or descriptor
+failure is returned before SSE starts, so an unusable container ID is never
+published. This mode preserves correctness and failure atomicity; it does not
+provide incremental provider latency.
 
 Messages supports one native regex or BM25 tool-search server tool per request.
 Function tools may set `defer_loading=true` only when tool search is present and

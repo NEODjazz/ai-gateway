@@ -927,3 +927,11 @@ Gateway Helm revision 445 completed successfully, and pod
 same image digest. Its live endpoint served OpenAPI 0.1.345 with the browser
 toolset and representative default and opt-in member configs. A structurally
 valid request enabling `read_console` reached authentication and returned 401.
+
+Source `2697f59` accepts `stream=true` for owner-checked native skill execution.
+The gateway buffers the provider result, validates and durably stores the
+returned container owner, expiry and deployment binding, and only then emits the
+Messages SSE sequence with the container descriptor in `message_start`. Invalid
+or unpersistable containers fail before SSE begins. JSON execution, reusable
+container affinity, tool ACL, TPM reserve and exact settlement remain unchanged.
+Full Go test, race, vet and build checks completed successfully.
