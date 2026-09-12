@@ -1265,3 +1265,13 @@ active-delete conflicts, terminal deletion and job cleanup. Focused tests,
 OpenAPI validation, full Go tests, full race tests, vet and build passed. The
 PostgreSQL batch lifecycle tests also passed against an isolated schema in the
 local Rancher Desktop database.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-a71d455` with image ID
+`sha256:4781b73e462680e0bd36acfc3a653eb254b48cdd03165e6b9df8b21206840ce4`.
+Gateway Helm revision 465 completed successfully, and pod
+`ai-gateway-gateway-5944694776-q7vwl` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.364 exposes all six native Messages Batch
+operations. A structurally valid request reached authentication and returned
+401 for an invalid smoke key; a request without the required protocol version
+returned 400. These smoke checks created no batch and performed no external
+inference.
