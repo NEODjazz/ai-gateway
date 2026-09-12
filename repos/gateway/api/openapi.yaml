@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.384
+  version: 0.1.385
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -8480,12 +8480,13 @@ components:
         top_logprobs: {type: integer, minimum: 0, maximum: 20, description: Requires logprobs=true. Native Gemini maps this to the per-step candidate count; native Ollama returns up to this many alternatives.}
         frequency_penalty: {type: number, minimum: -2, maximum: 2}
         presence_penalty: {type: number, minimum: -2, maximum: 2}
-        min_p: {type: number, minimum: 0, maximum: 1, description: "Relative minimum token probability forwarded by compatible and native Ollama adapters."}
-        top_k: {type: integer, minimum: 0, maximum: 1000000, description: "Maximum candidate token count forwarded by compatible, native Gemini, native Ollama, and native Cohere adapters; Cohere accepts at most 500."}
+        min_p: {type: number, minimum: 0, maximum: 1, description: "Relative minimum token probability forwarded by compatible, native Ollama, and native Together adapters."}
+        top_k: {type: integer, minimum: 0, maximum: 1000000, description: "Maximum candidate token count forwarded by compatible, native Gemini, native Ollama, native Cohere, and native Together adapters; Cohere accepts at most 500."}
         top_a: {type: number, minimum: 0, maximum: 1, description: Dynamic token probability threshold forwarded by compatible adapters.}
-        repetition_penalty: {type: number, exclusiveMinimum: 0, description: Multiplicative repetition penalty forwarded by compatible adapters.}
+        repetition_penalty: {type: number, exclusiveMinimum: 0, description: Multiplicative repetition penalty forwarded by compatible and native Together adapters.}
         logit_bias:
           type: object
+          description: Token bias forwarded by compatible and native Together adapters.
           propertyNames: {pattern: '^[0-9]+$'}
           additionalProperties: {type: integer, minimum: -100, maximum: 100}
 

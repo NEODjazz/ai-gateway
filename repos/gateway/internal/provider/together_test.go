@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -93,7 +94,7 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 		if !slices.Equal(profile.Operations, []string{"chat", "completions", "embeddings", "rerank", "image_generation", "audio_transcription", "audio_translation", "audio_speech", "stream"}) || !slices.Equal(profile.Capabilities, []string{"chat", "completions", "embeddings", "rerank", "image_generation", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "vision"}) || len(profile.AuthTypes) != 0 {
 			t.Fatalf("profile=%+v", profile)
 		}
-		if slices.Contains(profile.ChatParameters.SupportedOptions, "store") || slices.Contains(profile.ChatParameters.SupportedOptions, "metadata") || slices.Contains(profile.ChatParameters.SupportedOptions, "service_tier") || slices.Contains(profile.ChatParameters.SupportedOptions, "prediction") || !slices.Contains(profile.ChatParameters.SupportedOptions, "logprobs") || slices.Contains(profile.ChatParameters.SupportedOptions, "top_logprobs") || slices.Contains(profile.ChatParameters.SupportedOptions, "logit_bias") || !slices.Equal(profile.ChatParameters.Logprobs, []string{"false", "true"}) {
+		if slices.Contains(profile.ChatParameters.SupportedOptions, "store") || slices.Contains(profile.ChatParameters.SupportedOptions, "metadata") || slices.Contains(profile.ChatParameters.SupportedOptions, "service_tier") || slices.Contains(profile.ChatParameters.SupportedOptions, "prediction") || !slices.Contains(profile.ChatParameters.SupportedOptions, "logprobs") || slices.Contains(profile.ChatParameters.SupportedOptions, "top_logprobs") || !slices.Contains(profile.ChatParameters.SupportedOptions, "min_p") || !slices.Contains(profile.ChatParameters.SupportedOptions, "top_k") || !slices.Contains(profile.ChatParameters.SupportedOptions, "repetition_penalty") || !slices.Contains(profile.ChatParameters.SupportedOptions, "logit_bias") || !slices.Equal(profile.ChatParameters.Logprobs, []string{"false", "true"}) {
 			t.Fatalf("ignored options advertised: %+v", profile.ChatParameters)
 		}
 		wantModels := []ProviderChatModelParameterPolicy{
@@ -109,6 +110,56 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 		return
 	}
 	t.Fatal("Together capability profile is missing")
+}
+
+func TestTogetherSamplingControlsRoundTrip(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MinP              *float64       `json:"min_p"`
+			TopK              *int           `json:"top_k"`
+			RepetitionPenalty *float64       `json:"repetition_penalty"`
+			LogitBias         map[string]int `json:"logit_bias"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.MinP == nil || *body.MinP != 0.05 || body.TopK == nil || *body.TopK != 40 || body.RepetitionPenalty == nil || *body.RepetitionPenalty != 1.1 || !maps.Equal(body.LogitBias, map[string]int{"42": -10, "128": 20}) {
+			t.Fatalf("body=%+v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","created":1,"model":"model","choices":[{"index":0,"message":{"role":"assistant","content":"answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+	}))
+	defer server.Close()
+	minP, topK, repetitionPenalty := 0.05, 40, 1.1
+	_, err := NewTogether(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "question"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{MinP: &minP, TopK: &topK, RepetitionPenalty: &repetitionPenalty, LogitBias: map[string]int{"42": -10, "128": 20}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTogetherRejectsInvalidSamplingControlsBeforeHTTP(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	invalidMinP, invalidTopK, invalidRepetition := 1.1, -1, 0.0
+	tests := []openai.ChatGenerationOptions{
+		{MinP: &invalidMinP},
+		{TopK: &invalidTopK},
+		{RepetitionPenalty: &invalidRepetition},
+		{LogitBias: map[string]int{"invalid": 1}},
+		{LogitBias: map[string]int{"42": 101}},
+	}
+	for _, options := range tests {
+		_, err := NewTogether(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "question"}}, ChatGenerationOptions: options})
+		if err == nil {
+			t.Fatalf("invalid options accepted: %+v", options)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("invalid requests reached upstream %d times", calls)
+	}
 }
 
 func TestTogetherLogprobsJSONContract(t *testing.T) {
