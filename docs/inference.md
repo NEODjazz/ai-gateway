@@ -674,7 +674,7 @@ pipeline; this endpoint does not forward client credentials to providers.
 
 Supported input is text, text system blocks, base64 user images, function schemas,
 assistant tool-use history, text tool results, tool choice and parallel-tool
-control, temperature, top-p, positive max_tokens, stop_sequences, stream, `service_tier=auto|standard_only`, opaque
+control, temperature, top-p, nonnegative max_tokens, stop_sequences, stream, `service_tier=auto|standard_only`, opaque
 `metadata.user_id`, output effort, native thinking configuration, signed/redacted thinking history and JSON Schema formatting. Provider-specific
 capability checks still apply after conversion. Responses contain native text or
 tool-use blocks, signed `thinking` blocks, opaque `redacted_thinking` blocks and
@@ -717,6 +717,13 @@ Messages adapter for values from 0 through 1,000,000 and is exposed by its
 managed parameter profile. Support remains model-specific: newer models may
 reject any supplied value, and that provider error is returned without fallback
 to an adapter that would discard the field.
+Messages permits `max_tokens: 0` as an explicit cache-population request without
+generated output. The request still reserves its complete tokenizable input for
+TPM and billing admission, while its output reserve is exactly zero. Routing
+requires the `zero_output` deployment capability, currently advertised only by
+the native Anthropic adapter, so retry and fallback cannot reinterpret zero as a
+default output allowance. Durable Messages batches use the same conversion and
+accounting. Chat Completions continues to reject an explicit zero output limit.
 The provider-assigned `standard`, `priority` or `batch` service tier is retained
 in JSON and SSE usage. Unknown reported tiers fail the response instead of being
 accepted as trusted accounting metadata. Provider-reported `output_tokens_details.thinking_tokens` is retained in JSON,

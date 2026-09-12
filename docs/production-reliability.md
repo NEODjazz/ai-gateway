@@ -980,3 +980,13 @@ Gateway Helm revision 449 completed successfully, and pod
 same digest. Live OpenAPI 0.1.348 exposes `top_k` under Messages only. A valid
 request reached authentication, while a negative value failed validation with
 the documented 400 response.
+
+Source `f522aa0` accepts explicit `max_tokens: 0` only for native Messages and
+preserves that value on the Anthropic wire. TPM and billing admission reserve
+the complete input context with an exact zero output allowance; ordinary Chat
+requests retain their positive-limit validation and default reserve semantics.
+Source `9632c14` requires the explicit `zero_output` deployment capability and
+advertises it only for the native adapter that preserves this contract. Tests
+cover request validation, provider serialization, TPM and billing reserve,
+capability validation, managed profiles and fallback isolation. Full Go test,
+race, vet and build checks and all 166 UI tests completed successfully.

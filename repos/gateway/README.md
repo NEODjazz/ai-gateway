@@ -250,6 +250,11 @@ Native Messages and Chat requests also preserve the deprecated `top_k` sampling
 control on the Anthropic adapter. The managed provider profile advertises it,
 and model-specific upstream rejection is returned instead of retrying through
 an adapter that cannot preserve the request.
+Native Messages additionally accepts `max_tokens: 0` for cache-population calls.
+These calls reserve the complete input context and no output tokens, settle on
+provider-reported usage, and route only through deployments advertising the
+`zero_output` capability. Chat Completions continues to require a positive
+explicit output limit.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.

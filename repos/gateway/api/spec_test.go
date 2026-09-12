@@ -43,6 +43,26 @@ func TestOpenAPITopKBelongsToMessagesRequest(t *testing.T) {
 	}
 }
 
+func TestOpenAPIZeroOutputBelongsToMessagesRequest(t *testing.T) {
+	document := loadDocument(t)
+	messages := document.Components.Schemas["MessagesRequest"].Value
+	if messages == nil || messages.Properties["max_tokens"] == nil || messages.Properties["max_tokens"].Value == nil {
+		t.Fatal("MessagesRequest is missing max_tokens")
+	}
+	minimum := messages.Properties["max_tokens"].Value.Min
+	if minimum == nil || *minimum != 0 {
+		t.Fatalf("MessagesRequest max_tokens minimum = %v, want 0", minimum)
+	}
+	chat := document.Components.Schemas["ChatCompletionRequest"].Value
+	if chat == nil || chat.Properties["max_tokens"] == nil || chat.Properties["max_tokens"].Value == nil {
+		t.Fatal("ChatCompletionRequest is missing max_tokens")
+	}
+	chatMinimum := chat.Properties["max_tokens"].Value.Min
+	if chatMinimum == nil || *chatMinimum != 1 {
+		t.Fatalf("ChatCompletionRequest max_tokens minimum = %v, want 1", chatMinimum)
+	}
+}
+
 func TestOpenAPIRoutesMatchGatewayRouter(t *testing.T) {
 	document := loadDocument(t)
 	want := map[string]bool{}
