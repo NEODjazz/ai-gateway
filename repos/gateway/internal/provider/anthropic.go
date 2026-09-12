@@ -142,6 +142,7 @@ type anthropicContent struct {
 	ToolsetName  string                 `json:"toolset_name,omitempty"`
 	Input        any                    `json:"input,omitempty"`
 	ToolUseID    string                 `json:"tool_use_id,omitempty"`
+	IsError      bool                   `json:"is_error,omitempty"`
 	Content      any                    `json:"content,omitempty"`
 	Citations    []anthropicCitation    `json:"citations,omitempty"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
@@ -652,7 +653,7 @@ func anthropicMessages(messages []openai.Message) (any, []anthropicMessage) {
 			}
 		case "tool":
 			converted = append(converted, anthropicMessage{Role: "user", Content: []anthropicContent{{
-				Type: "tool_result", ToolUseID: message.ToolCallID, Content: message.Content,
+				Type: "tool_result", ToolUseID: message.ToolCallID, IsError: message.ToolResultError, Content: message.Content,
 			}}})
 		default:
 			converted = append(converted, anthropicMessage{Role: "user", Content: anthropicMessageContent(message.Content)})

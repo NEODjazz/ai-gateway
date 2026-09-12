@@ -425,7 +425,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 					Content json.RawMessage `json:"content"`
 					IsError bool            `json:"is_error,omitempty"`
 				}
-				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "user" || block.ID == "" || block.IsError {
+				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "user" || block.ID == "" {
 					return result, errors.New("invalid or unsupported tool_result block")
 				}
 				if call, known := knownCalls[block.ID]; !known || call.ToolsetName != "" {
@@ -436,7 +436,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 					return result, fmt.Errorf("tool_result: %w", err)
 				}
 				flush()
-				result.Messages = append(result.Messages, openai.Message{Role: "tool", ToolCallID: block.ID, Content: content})
+				result.Messages = append(result.Messages, openai.Message{Role: "tool", ToolCallID: block.ID, ToolResultError: block.IsError, Content: content})
 				delete(knownCalls, block.ID)
 			default:
 				return result, fmt.Errorf("unsupported content block type %q", kind.Type)

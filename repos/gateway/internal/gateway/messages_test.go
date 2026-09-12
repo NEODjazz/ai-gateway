@@ -28,12 +28,12 @@ func nativeMessageCall(handler http.Handler, body string, key string) *httptest.
 func TestMessagesConvertsToolsAndResponse(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg-test", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call-next", Type: "function", Function: openai.FunctionCall{Name: "weather", Arguments: `{"city":"Rome"}`}}}}, FinishReason: "tool_calls"}}, Usage: openai.Usage{PromptTokens: 20, CompletionTokens: 5, TotalTokens: 25, PromptTokensDetails: &openai.PromptTokenDetails{CachedTokens: 4, CacheWriteTokens: 3}}}}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
-	response := nativeMessageCall(handler, `{"model":"model","max_tokens":80,"system":[{"type":"text","text":"Be helpful"}],"tools":[{"name":"weather","input_schema":{"type":"object"}}],"tool_choice":{"type":"tool","name":"weather","disable_parallel_tool_use":true},"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call-old","name":"weather","input":{"city":"Paris"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-old","content":[{"type":"text","text":"Sunny"}]}]}]}`, "")
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":80,"system":[{"type":"text","text":"Be helpful"}],"tools":[{"name":"weather","input_schema":{"type":"object"}}],"tool_choice":{"type":"tool","name":"weather","disable_parallel_tool_use":true},"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call-old","name":"weather","input":{"city":"Paris"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-old","is_error":true,"content":[{"type":"text","text":"Sunny"}]}]}]}`, "")
 	if response.Code != 200 {
 		t.Fatalf("response: %d %s", response.Code, response.Body.String())
 	}
 	request := upstream.request.Request
-	if upstream.calls != 1 || *request.MaxTokens != 80 || len(request.Messages) != 3 || request.Messages[0].Content != "Be helpful" || request.Messages[2].Role != "tool" || request.Messages[2].ToolCallID != "call-old" || request.ParallelToolCalls == nil || *request.ParallelToolCalls {
+	if upstream.calls != 1 || *request.MaxTokens != 80 || len(request.Messages) != 3 || request.Messages[0].Content != "Be helpful" || request.Messages[2].Role != "tool" || request.Messages[2].ToolCallID != "call-old" || !request.Messages[2].ToolResultError || request.ParallelToolCalls == nil || *request.ParallelToolCalls {
 		t.Fatalf("conversion: %+v", request)
 	}
 	var body struct {

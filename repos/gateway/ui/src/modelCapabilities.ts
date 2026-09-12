@@ -47,6 +47,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "zero_output", label: "Zero output", description: "Native zero-token cache population requests" },
   { value: "inference_geo", label: "Inference geography", description: "Native US or global inference placement" },
   { value: "context_management", label: "Context management", description: "Native bounded context editing strategies" },
+  { value: "tool_result_error", label: "Tool result errors", description: "Preserve failed native client tool results" },
   { value: "audio", label: "Audio output", description: "Generated audio in chat responses" },
   { value: "audio_input", label: "Audio input", description: "Inline audio input for native multimodal requests" },
   { value: "video_input", label: "Video input", description: "Bounded inline video input for native multimodal requests" },

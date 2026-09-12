@@ -114,14 +114,16 @@ type ChatStreamOptions struct {
 }
 
 type Message struct {
-	Role             string           `json:"role"`
-	Content          any              `json:"content"`
-	Prefix           *bool            `json:"prefix,omitempty"`
-	Refusal          *string          `json:"refusal,omitempty"`
-	Annotations      []ChatAnnotation `json:"annotations,omitempty"`
-	Audio            *ChatAudio       `json:"audio,omitempty"`
-	Name             string           `json:"name,omitempty"`
-	ToolCallID       string           `json:"tool_call_id,omitempty"`
+	Role        string           `json:"role"`
+	Content     any              `json:"content"`
+	Prefix      *bool            `json:"prefix,omitempty"`
+	Refusal     *string          `json:"refusal,omitempty"`
+	Annotations []ChatAnnotation `json:"annotations,omitempty"`
+	Audio       *ChatAudio       `json:"audio,omitempty"`
+	Name        string           `json:"name,omitempty"`
+	ToolCallID  string           `json:"tool_call_id,omitempty"`
+	// ToolResultError preserves the native meaning of a failed client tool result.
+	ToolResultError  bool             `json:"-"`
 	ToolCalls        []ToolCall       `json:"tool_calls,omitempty"`
 	FunctionCall     *FunctionCall    `json:"function_call,omitempty"`
 	Reasoning        []ReasoningBlock `json:"reasoning,omitempty"`

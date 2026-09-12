@@ -50,6 +50,7 @@ describe("modelCapabilityOptions", () => {
       "zero_output",
       "inference_geo",
       "context_management",
+      "tool_result_error",
       "audio",
       "audio_input",
       "video_input",

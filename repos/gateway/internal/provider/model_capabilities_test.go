@@ -12,7 +12,7 @@ func TestCapabilityContractIsSharedByDeploymentsAndOnboarding(t *testing.T) {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "sandbox", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution",
+		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution",
 	}
 	if !validDeploymentCapabilities(capabilities) {
 		t.Fatal("deployment rejected a supported model capability")
@@ -61,6 +61,12 @@ func TestInferenceGeoCapabilityRequiresChat(t *testing.T) {
 func TestContextManagementCapabilityRequiresChat(t *testing.T) {
 	if validDeploymentCapabilities([]string{"context_management"}) || !validDeploymentCapabilities([]string{"chat", "context_management"}) {
 		t.Fatal("context management capability dependency is incorrect")
+	}
+}
+
+func TestToolResultErrorCapabilityRequiresChat(t *testing.T) {
+	if validDeploymentCapabilities([]string{"tool_result_error"}) || !validDeploymentCapabilities([]string{"chat", "tool_result_error"}) {
+		t.Fatal("tool-result error capability dependency is incorrect")
 	}
 }
 

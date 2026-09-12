@@ -138,12 +138,20 @@ func providerCacheKey(kind string, req modules.RequestContext) string {
 // must be added here before it is enabled for cached execution.
 func chatCacheKeyValue(request openai.ChatCompletionRequest) any {
 	nativeContent := make([][]json.RawMessage, len(request.Messages))
+	var toolResultErrors []bool
 	for index := range request.Messages {
 		nativeContent[index] = request.Messages[index].NativeContent
+		if request.Messages[index].ToolResultError {
+			if toolResultErrors == nil {
+				toolResultErrors = make([]bool, len(request.Messages))
+			}
+			toolResultErrors[index] = true
+		}
 	}
 	return struct {
 		Request                                  openai.ChatCompletionRequest  `json:"request"`
 		NativeContent                            [][]json.RawMessage           `json:"native_content,omitempty"`
+		ToolResultErrors                         []bool                        `json:"tool_result_errors,omitempty"`
 		NativeInputTokens                        int                           `json:"native_input_tokens,omitempty"`
 		BedrockServiceTier                       string                        `json:"bedrock_service_tier,omitempty"`
 		BedrockPerformanceLatency                string                        `json:"bedrock_performance_latency,omitempty"`
@@ -153,6 +161,7 @@ func chatCacheKeyValue(request openai.ChatCompletionRequest) any {
 	}{
 		Request:                                  request,
 		NativeContent:                            nativeContent,
+		ToolResultErrors:                         toolResultErrors,
 		NativeInputTokens:                        request.NativeInputTokens,
 		BedrockServiceTier:                       request.BedrockServiceTier,
 		BedrockPerformanceLatency:                request.BedrockPerformanceLatency,

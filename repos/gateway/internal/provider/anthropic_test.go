@@ -99,6 +99,25 @@ func TestAnthropicContextManagementWireAndCapability(t *testing.T) {
 	}
 }
 
+func TestAnthropicToolResultErrorWireAndCapability(t *testing.T) {
+	request := openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "tool", ToolCallID: "call_1", Content: "failed", ToolResultError: true}}}
+	_, messages := anthropicMessages(request.Messages)
+	encoded, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"tool_use_id":"call_1","is_error":true,"content":"failed"`) {
+		t.Fatalf("messages=%s", encoded)
+	}
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,tool_result_error" {
+		t.Fatalf("capabilities=%q", got)
+	}
+	required := requiredChatCapabilities(request, false)
+	if (Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat"}}).supportsCapabilities(required...) || !(Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat", "tool_result_error"}}).supportsCapabilities(required...) {
+		t.Fatal("tool-result error routing capability is not enforced")
+	}
+}
+
 func TestAnthropicThinkingWireAndCapability(t *testing.T) {
 	budget := 2048
 	request := anthropicChatRequest(openai.ChatCompletionRequest{AnthropicThinking: &openai.AnthropicThinkingConfig{Type: "enabled", BudgetTokens: &budget, Display: "summarized"}}, false)
