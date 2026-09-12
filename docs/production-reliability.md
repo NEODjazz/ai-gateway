@@ -877,3 +877,19 @@ Gateway Helm revision 442 completed successfully, and pod
 `ai-gateway-gateway-5877d7f96f-p59jb` became Ready with zero restarts. Its live
 endpoint served OpenAPI 0.1.342 with all three code-execution versions. A valid
 20260521 request reached authentication and returned 401.
+
+Source `527f76c` adds provider-defined memory, bash and versioned text-editor
+client tools to Messages generation, native token counting and durable batches.
+Each fixed tool name is authorized independently, deployment routing requires
+the corresponding capability, native definitions contribute to TPM reserve, and
+exact and semantic response caches are disabled. The caller remains responsible
+for executing the returned operation. Full Go test, race, vet and build checks
+and all 166 UI tests completed successfully.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-527f76c` with image ID
+`sha256:e714edb05df6641ef58d4167231b86907df68fc0946a5de3447548af6c846b0d`.
+Gateway Helm revision 443 completed successfully, and pod
+`ai-gateway-gateway-59bc8886c9-j5ws8` became Ready with zero restarts. Its live
+endpoint served OpenAPI 0.1.343 with memory, bash and both text-editor contracts.
+A valid request containing all three current client-tool families reached
+authentication and returned 401.
