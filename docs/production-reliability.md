@@ -498,3 +498,9 @@ revision 408 completed successfully, and pod
 `ai-gateway-gateway-7d894dcd4-fv42m` became Ready with zero restarts. The live
 endpoint returned the exact regression-locked option sets for compatible/Azure,
 OpenRouter, Gemini, Mistral, Groq and xAI transports.
+
+Source `88e7732` adds execution-validator-derived Audio Translation profiles.
+Rancher Desktop built `ai-gateway-gateway:gaps-88e7732`; Helm revision 409
+completed successfully, and pod `ai-gateway-gateway-78c4d5dfc9-cw242` became
+Ready with zero restarts. The live endpoint confirmed the compatible/Azure and
+Mistral option set plus the native Gemini and Groq language-aware sets.
