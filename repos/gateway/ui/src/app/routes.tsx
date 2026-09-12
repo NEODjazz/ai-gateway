@@ -35,14 +35,13 @@ const GuardrailMonitorPage = lazy(() => import("../pages/GuardrailMonitorPage").
 const MCPServersPage = lazy(() => import("../pages/MCPPages").then((module) => ({ default: module.MCPServersPage })));
 const MCPToolsetsPage = lazy(() => import("../pages/MCPPages").then((module) => ({ default: module.MCPToolsetsPage })));
 const SkillsPage = lazy(() => import("../pages/SkillsPage").then((module) => ({ default: module.SkillsPage })));
+const SearchPage = lazy(() => import("../pages/SearchPage").then((module) => ({ default: module.SearchPage })));
 const CachePage = lazy(() => import("../pages/CachePage").then((module) => ({ default: module.CachePage })));
 const LoggingPage = lazy(() => import("../pages/LoggingPage").then((module) => ({ default: module.LoggingPage })));
 const RouterSettingsPage = lazy(() => import("../pages/RouterSettingsPage").then((module) => ({ default: module.RouterSettingsPage })));
 const EndpointPage = lazy(() => import("../pages/EndpointPage").then((module) => ({ default: module.EndpointPage })));
 
 const readOnly = (title: string, description: string, path: string, columns: ResourceConfig["columns"]): ReactNode => <ResourcePage config={{ eyebrow: "Operations", title, description, listPath: path, columns }} />;
-const unavailable = (title: string, description: string): ReactNode => <CapabilityPage title={title} description={description} />;
-
 function UsersPage() {
   const { hasCapability } = useAuth();
   return <ResourcePage config={resourceConfigs.users} readOnly={!hasCapability("admin")} />;
@@ -85,7 +84,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/mcp-toolsets", title: "MCP toolsets", group: "AI Hub", element: <MCPToolsetsPage />, available: true },
   { path: "/tool-policies", title: "Tool policies", group: "AI Hub", element: <ResourcePage config={resourceConfigs.toolPolicies} />, available: true },
   { path: "/agents", title: "Agent profiles", group: "AI Hub", element: <ResourcePage config={resourceConfigs.agents} />, available: true },
-  { path: "/search-tools", title: "Search tools", group: "AI Hub", element: unavailable("Search tools", "A managed search-tool registry requires a dedicated execution adapter and credential boundary."), available: false },
+  { path: "/search-tools", title: "Search", group: "AI Hub", element: <SearchPage />, available: true, capability: "inference" },
   { path: "/skills", title: "Skills", group: "AI Hub", element: <SkillsPage />, available: true, capability: "inference" },
 
   { path: "/guardrails", title: "Guardrails", group: "Govern", element: <GuardrailsPage />, available: true },
