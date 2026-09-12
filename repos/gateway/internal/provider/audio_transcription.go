@@ -128,9 +128,16 @@ func decodeAudioTranslationResponse(reader io.Reader, duration int) (openai.Audi
 	return *response, nil
 }
 
-func (p OpenAICompatible) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
+func (p OpenAICompatible) ValidateAudioTranscriptionParameters(request openai.AudioTranscriptionRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.AudioTranscriptionResponse{}, &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	return nil
+}
+
+func (p OpenAICompatible) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
+	if err := p.ValidateAudioTranscriptionParameters(request); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
 	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)

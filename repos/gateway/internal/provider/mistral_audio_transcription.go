@@ -62,12 +62,19 @@ func (Mistral) ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest
 	}
 }
 
-func (p Mistral) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
+func (Mistral) ValidateAudioTranscriptionParameters(request openai.AudioTranscriptionRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.AudioTranscriptionResponse{}, mistralAudioClientError(message)
+		return mistralAudioClientError(message)
 	}
 	if request.Prompt != "" || len(request.Include) > 0 || len(request.Languages) > 0 || request.ChunkingStrategy != nil || len(request.KnownSpeakerNames) > 0 || len(request.KnownSpeakerReferences) > 0 {
-		return openai.AudioTranscriptionResponse{}, mistralAudioClientError("unsupported Mistral transcription parameter")
+		return mistralAudioClientError("unsupported Mistral transcription parameter")
+	}
+	return nil
+}
+
+func (p Mistral) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
+	if err := p.ValidateAudioTranscriptionParameters(request); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
 	}
 	if _, err := p.ReserveAudioMilliseconds(request); err != nil {
 		return openai.AudioTranscriptionResponse{}, mistralAudioClientError(err.Error())

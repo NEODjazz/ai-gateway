@@ -17,7 +17,7 @@ func (Gemini) SupportsAudioTranscription() bool { return true }
 func (Gemini) SupportsAudioTranslation() bool   { return true }
 
 func (g Gemini) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
-	if err := validateGeminiAudioTranscriptionRequest(request); err != nil {
+	if err := g.ValidateAudioTranscriptionParameters(request); err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}
 	languages := append([]string(nil), request.Languages...)
@@ -33,6 +33,10 @@ func (g Gemini) TranscribeAudio(ctx context.Context, request openai.AudioTranscr
 		Generation: geminiGeneration{Temperature: request.Temperature, ResponseMIMEType: "text/plain", AudioTranscription: &geminiAudioTranscriptionConfig{LanguageCodes: languages, CustomVocabulary: append([]string(nil), request.Keywords...)}},
 	}
 	return g.generateAudioText(ctx, request, body)
+}
+
+func (Gemini) ValidateAudioTranscriptionParameters(request openai.AudioTranscriptionRequest) error {
+	return validateGeminiAudioTranscriptionRequest(request)
 }
 
 func (g Gemini) TranslateAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {

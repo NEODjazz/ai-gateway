@@ -72,14 +72,14 @@ func (g Groq) ReserveTranslationAudioMilliseconds(request openai.AudioTranscript
 }
 
 func (g Groq) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
-	if err := g.validateAudioRequest(request); err != nil {
+	if err := g.ValidateAudioTranscriptionParameters(request); err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}
 	return g.sendAudioRequest(ctx, request, "audio/transcriptions", true)
 }
 
 func (g Groq) TranslateAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
-	if err := g.validateAudioRequest(request); err != nil {
+	if err := g.ValidateAudioTranscriptionParameters(request); err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}
 	if request.Language != "" && request.Language != "en" {
@@ -91,7 +91,7 @@ func (g Groq) TranslateAudio(ctx context.Context, request openai.AudioTranscript
 	return g.sendAudioRequest(ctx, request, "audio/translations", false)
 }
 
-func (g Groq) validateAudioRequest(request openai.AudioTranscriptionRequest) error {
+func (g Groq) ValidateAudioTranscriptionParameters(request openai.AudioTranscriptionRequest) error {
 	if message := request.Validate(); message != "" {
 		return groqAudioClientError("invalid_request", "", message)
 	}

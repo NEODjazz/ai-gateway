@@ -322,13 +322,13 @@ func (x XAI) ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest) 
 	return x.compatible.ReserveTranslationAudioMilliseconds(request)
 }
 
-func (x XAI) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
+func (x XAI) ValidateAudioTranscriptionParameters(request openai.AudioTranscriptionRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.AudioTranscriptionResponse{}, xaiParameterError("", message)
+		return xaiParameterError("", message)
 	}
 	for _, keyword := range request.Keywords {
 		if len([]rune(keyword)) > 50 {
-			return openai.AudioTranscriptionResponse{}, xaiParameterError("keywords", "each keyword must be at most 50 characters")
+			return xaiParameterError("keywords", "each keyword must be at most 50 characters")
 		}
 	}
 	if err := rejectParameters("xai",
@@ -342,6 +342,13 @@ func (x XAI) TranscribeAudio(ctx context.Context, request openai.AudioTranscript
 		parameterCheck{"known_speaker_names", len(request.KnownSpeakerNames) > 0},
 		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},
 	); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (x XAI) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
+	if err := x.ValidateAudioTranscriptionParameters(request); err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}
 	if _, err := x.ReserveAudioMilliseconds(request); err != nil {

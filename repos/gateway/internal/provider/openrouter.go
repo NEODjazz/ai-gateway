@@ -91,15 +91,22 @@ func (OpenRouter) ValidateRerankParameters(request openai.RerankRequest) error {
 }
 
 func (p OpenRouter) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
-	if err := rejectParameters("openrouter",
+	if err := p.ValidateAudioTranscriptionParameters(request); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	return p.compatible.TranscribeAudio(ctx, request)
+}
+
+func (p OpenRouter) ValidateAudioTranscriptionParameters(request openai.AudioTranscriptionRequest) error {
+	if err := p.compatible.ValidateAudioTranscriptionParameters(request); err != nil {
+		return err
+	}
+	return rejectParameters("openrouter",
 		parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"languages", len(request.Languages) > 0},
 		parameterCheck{"keywords", len(request.Keywords) > 0}, parameterCheck{"chunking_strategy", request.ChunkingStrategy != nil},
 		parameterCheck{"known_speaker_names", len(request.KnownSpeakerNames) > 0},
 		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},
-	); err != nil {
-		return openai.AudioTranscriptionResponse{}, err
-	}
-	return p.compatible.TranscribeAudio(ctx, request)
+	)
 }
 
 func (p OpenRouter) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
