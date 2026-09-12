@@ -1368,3 +1368,13 @@ or number values. Response delivery uses the configured credential and a
 30-second cancellable deadline; failure enters the existing session invalidation
 path. End-to-end and bound regressions, the full Go suite, full race suite, vet
 and build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-a94cf8d` with image ID
+`sha256:7703735a39c31df419b8d4b40cb97ed1ec4b0ee530725277c2970295ac5b07a1`.
+Gateway Helm revision 470 completed successfully, and pod
+`ai-gateway-gateway-56db5854db-cfwxk` became Ready with zero restarts and the
+same digest. Live health returned 204 and OpenAPI remained at 0.1.367 because
+server-request handling changes no public schema. An MCP discovery request with
+an invalid smoke key returned 401 before registry or upstream access. No
+credential was stored and no external MCP call or model inference was
+performed.
