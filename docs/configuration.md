@@ -291,6 +291,9 @@ ClickHouse username/password и service/management shared secrets должны
 Anonymizer слушает `:8081`. `ANONYMIZER_RULES` выбирает built-in правила;
 `ANONYMIZER_RULES_CONFIG_PATH` загружает JSON definitions с `name`,
 `placeholder`, RE2 `pattern`, optional `capture_group` и `validator=luhn`.
+`exclude_values` задаёт регистронезависимый список значений capture group,
+которые правило должно оставить без изменений. Для кириллических слов нужны
+явные Unicode-границы: RE2 `\b` использует ASCII word characters.
 
 DLP и AV используют `HTTP_ADDR` (`:8084` и `:8085`), `<MODULE>_ICAP_HOST`,
 `<MODULE>_ICAP_PORT`, `<MODULE>_ICAP_SERVICE` (`/dlp` или `/av`) и

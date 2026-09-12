@@ -1926,3 +1926,19 @@ Gateway Helm revision 501 completed successfully. Pod
 image. Direct pod liveness and readiness returned 204, OpenAPI 0.1.396 was
 served, and an unauthenticated negative-seed request returned 401 at the auth
 boundary without provider execution.
+
+Source `078351e` replaces ASCII word boundaries in Cyrillic anonymizer rules
+with explicit Unicode boundaries, preserves labels through capture groups and
+supports case-insensitive excluded capture values for known dialogue
+confirmations. Regression tests cover dialogue code words, Russian password
+labels, single Cyrillic names, month names and excluded values. Vet, build, the
+full Go suite, the race suite and Helm lint passed.
+
+Rancher Desktop built `ai-gateway-anonymizer:unicode-078351e` with image ID
+`sha256:ad78580cff6800eadf89a9651d056545c74c88d836f36756812232e84729931c`.
+Anonymizer Helm revision 4 completed successfully. Pod
+`ai-gateway-anonymizer-86d77447c5-p9czq` became Ready with zero restarts. A
+cluster-local synthetic request verified masking for the dialogue code word,
+Russian password and login labels, security key, internal identifiers, broker
+account and Cyrillic month date while preserving the confirmation word and
+surrounding punctuation.

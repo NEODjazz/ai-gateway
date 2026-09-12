@@ -38,6 +38,12 @@ reserve, provider, billing commit/cancel, deanonymization. DLP/AV получаю
 проекцию до masking, поэтому scanner видит исходный чувствительный текст, но не
 identity/credential.
 
+Анонимизация защищает provider boundary, а не меняет клиентский контракт:
+gateway восстанавливает request-local placeholders в успешном ответе. Поэтому
+проверять masking нужно на входе provider или через cluster-internal ответ
+anonymizer; наличие исходного значения в клиентском ответе само по себе не
+означает, что оно было отправлено provider.
+
 Policy attachment может ограничивать DLP/AV по team, opaque key ID/alias,
 public model и tags. Dimensions соединяются AND, значения внутри dimension —
 OR, поддержан только trailing `*`. Policies primary и всех допустимых fallback

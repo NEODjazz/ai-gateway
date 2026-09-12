@@ -34,4 +34,7 @@ currently supports `luhn` for bank card candidates.
 Contextual rules may also set `capture_group` to a positive group number. In
 that case the anonymizer preserves the surrounding match and masks only that
 captured value. Patterns must use Go/RE2 syntax; lookbehind, backreferences,
-and template macros are not supported.
+and template macros are not supported. `exclude_values` can list normalized,
+case-insensitive capture values that the rule must preserve. Use explicit
+Unicode boundaries such as `(?:^|[^\p{L}\p{N}_])` for Cyrillic labels because
+RE2 `\b` uses ASCII word characters.
