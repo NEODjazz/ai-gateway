@@ -935,3 +935,11 @@ Messages SSE sequence with the container descriptor in `message_start`. Invalid
 or unpersistable containers fail before SSE begins. JSON execution, reusable
 container affinity, tool ACL, TPM reserve and exact settlement remain unchanged.
 Full Go test, race, vet and build checks completed successfully.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-2697f59` with image ID
+`sha256:156109508a5d95f44d641b2006d02d7cc4c85452a37445e0dc0ff94e65196dba`.
+Gateway Helm revision 446 completed successfully, and pod
+`ai-gateway-gateway-8fbd75755-9dkcg` became Ready with zero restarts and the same
+image digest. Its live endpoint served OpenAPI 0.1.346 with the buffered skill
+SSE contract. A structurally valid `stream=true` built-in skill request reached
+authentication and returned 401.
