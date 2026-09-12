@@ -525,3 +525,10 @@ Rancher Desktop built `ai-gateway-gateway:gaps-73af8a6`; Helm revision 412
 completed successfully, and pod `ai-gateway-gateway-b5b784c67-q7rfd` became
 Ready with zero restarts. The live endpoint confirmed duration, size and input
 reference controls for compatible/OpenAI and native xAI video creation.
+
+Source `d0e9f77` adds fail-fast adapter validation and capability profiles for
+Fine-tuning creation. Rancher Desktop built
+`ai-gateway-gateway:gaps-d0e9f77`; Helm revision 413 completed successfully, and
+pod `ai-gateway-gateway-5cc4bf6857-wbknk` became Ready with zero restarts. The
+live endpoint confirmed validation-file, suffix, seed, metadata and method
+controls for OpenAI and compatible adapters.
