@@ -30,6 +30,7 @@ describe("modelCapabilityOptions", () => {
       "video_remix",
       "video_extension",
       "container",
+      "container_files",
       "realtime",
       "stream",
       "tools",

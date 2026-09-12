@@ -71,6 +71,73 @@ func (r Router) DeleteContainer(ctx context.Context, binding ContainerBinding, i
 	})
 }
 
+func (r Router) containerFileClient(binding ContainerBinding) (Endpoint, ContainerFileClient, error) {
+	endpoint, _, err := r.containerClient(binding)
+	if err != nil || !endpoint.supportsCapabilities("container", "container_files") {
+		return Endpoint{}, nil, ErrContainerDeploymentChanged
+	}
+	client, ok := endpoint.Provider.(ContainerFileClient)
+	if !ok {
+		return Endpoint{}, nil, ErrContainerDeploymentChanged
+	}
+	return endpoint, client, nil
+}
+
+func (r Router) CreateContainerFile(ctx context.Context, binding ContainerBinding, containerID string, upload ContainerFileUpload) (openai.ContainerFile, error) {
+	return callContainerFileLifecycle(r, ctx, binding, "container.file.create", func(ctx context.Context, client ContainerFileClient) (openai.ContainerFile, error) {
+		return client.CreateContainerFile(ctx, containerID, upload)
+	})
+}
+
+func (r Router) ListContainerFiles(ctx context.Context, binding ContainerBinding, containerID string, options ContainerFileListOptions) (openai.ContainerFileList, error) {
+	return callContainerFileLifecycle(r, ctx, binding, "container.file.list", func(ctx context.Context, client ContainerFileClient) (openai.ContainerFileList, error) {
+		return client.ListContainerFiles(ctx, containerID, options)
+	})
+}
+
+func (r Router) RetrieveContainerFile(ctx context.Context, binding ContainerBinding, containerID, fileID string) (openai.ContainerFile, error) {
+	return callContainerFileLifecycle(r, ctx, binding, "container.file.retrieve", func(ctx context.Context, client ContainerFileClient) (openai.ContainerFile, error) {
+		return client.RetrieveContainerFile(ctx, containerID, fileID)
+	})
+}
+
+func (r Router) DeleteContainerFile(ctx context.Context, binding ContainerBinding, containerID, fileID string) (openai.ContainerDeletion, error) {
+	return callContainerFileLifecycle(r, ctx, binding, "container.file.delete", func(ctx context.Context, client ContainerFileClient) (openai.ContainerDeletion, error) {
+		return client.DeleteContainerFile(ctx, containerID, fileID)
+	})
+}
+
+func (r Router) DownloadContainerFile(ctx context.Context, binding ContainerBinding, containerID, fileID string) (ContainerFileContent, error) {
+	return callContainerFileLifecycle(r, ctx, binding, "container.file.content", func(ctx context.Context, client ContainerFileClient) (ContainerFileContent, error) {
+		return client.DownloadContainerFile(ctx, containerID, fileID)
+	})
+}
+
+func callContainerFileLifecycle[T any](r Router, ctx context.Context, binding ContainerBinding, operation string, call func(context.Context, ContainerFileClient) (T, error)) (T, error) {
+	var zero T
+	endpoint, client, err := r.containerFileClient(binding)
+	if err != nil {
+		return zero, err
+	}
+	release, err := r.acquireEndpoint(ctx, endpoint, 0)
+	if err != nil {
+		return zero, err
+	}
+	defer release()
+	if err = r.health.permit(ctx, endpoint); err != nil {
+		return zero, err
+	}
+	providerCtx, finish := r.startProviderCall(ctx, endpoint, operation)
+	result, callErr := call(providerCtx, client)
+	finish(callErr)
+	if callErr != nil {
+		r.health.failure(ctx, endpoint, callErr)
+		return zero, callErr
+	}
+	r.health.success(ctx, endpoint)
+	return result, nil
+}
+
 func callContainerLifecycle[T any](r Router, ctx context.Context, binding ContainerBinding, operation string, call func(context.Context, ContainerClient) (T, error)) (T, error) {
 	var zero T
 	endpoint, client, err := r.containerClient(binding)

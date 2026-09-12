@@ -10,7 +10,7 @@ func TestCapabilityContractIsSharedByDeploymentsAndOnboarding(t *testing.T) {
 	capabilities := []string{
 		"chat", "responses", "interactions", "embeddings", "rerank", "moderation",
 		"image_generation", "image_edit", "image_variation",
-		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "realtime",
+		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
 		"web_search", "web_fetch", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings",
 	}
@@ -71,6 +71,12 @@ func TestVideoExtensionCapabilityRequiresVideo(t *testing.T) {
 	}
 	if !validDeploymentCapabilities([]string{"video", "video_remix", "video_extension"}) {
 		t.Fatal("video sub-operation was rejected with its required video capability")
+	}
+}
+
+func TestContainerFilesCapabilityRequiresContainer(t *testing.T) {
+	if validDeploymentCapabilities([]string{"container_files"}) || !validDeploymentCapabilities([]string{"container", "container_files"}) {
+		t.Fatal("container files capability dependency is incorrect")
 	}
 }
 

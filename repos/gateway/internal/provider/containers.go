@@ -77,7 +77,7 @@ func validateContainerExpiry(expiry *openai.ContainerExpiresAfter) error {
 }
 
 func validateContainer(result openai.Container) error {
-	if !validResponseResourceID(result.ID) || result.Object != "container" || result.CreatedAt < 0 || result.LastActiveAt < 0 || result.Name == "" || len(result.Name) > 256 || result.Status == "" || len(result.Status) > 64 || result.MemoryLimit == "" || len(result.MemoryLimit) > 16 || validateContainerExpiry(result.ExpiresAfter) != nil {
+	if !validResponseResourceID(result.ID) || result.Object != "container" || result.CreatedAt < 0 || result.LastActiveAt < 0 || result.Name == "" || len(result.Name) > 256 || result.Status == "" || len(result.Status) > 64 || len(result.MemoryLimit) > 16 || validateContainerExpiry(result.ExpiresAfter) != nil {
 		return errors.New("invalid upstream container response")
 	}
 	return nil

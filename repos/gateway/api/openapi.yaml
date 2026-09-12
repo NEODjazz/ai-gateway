@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.276
+  version: 0.1.277
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1149,6 +1149,72 @@ paths:
       security: [{bearerAuth: []}]
       responses:
         '200': {description: Deleted container, content: {application/json: {schema: {$ref: '#/components/schemas/ContainerDeletion'}}}}
+        default: {description: "Authentication, ownership, provider, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/containers/{id}/files:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+    post:
+      operationId: createContainerFile
+      tags: [Inference]
+      summary: Upload a bounded file to an owned container
+      description: Resolves the durable owner-scoped container binding before the provider call. Accepts one multipart file up to the configured file limit or an application/json body with an owner-scoped gateway file_id; local IDs and content are never sent as provider file references.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file]
+              properties: {file: {type: string, format: binary}}
+          application/json: {schema: {$ref: '#/components/schemas/ContainerFileCreateRequest'}}
+      responses:
+        '200': {description: Created container file, content: {application/json: {schema: {$ref: '#/components/schemas/ContainerFile'}}}}
+        default: {description: "Authentication, ownership, validation, provider, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    get:
+      operationId: listContainerFiles
+      tags: [Inference]
+      summary: List files in an owned container through its pinned deployment
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: after, in: query, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
+      responses:
+        '200': {description: Container file page, content: {application/json: {schema: {$ref: '#/components/schemas/ContainerFileList'}}}}
+        default: {description: "Authentication, ownership, validation, provider, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/containers/{id}/files/{file_id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+      - {name: file_id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+    get:
+      operationId: retrieveContainerFile
+      tags: [Inference]
+      summary: Retrieve file metadata from an owned container
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Container file metadata, content: {application/json: {schema: {$ref: '#/components/schemas/ContainerFile'}}}}
+        default: {description: "Authentication, ownership, provider, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    delete:
+      operationId: deleteContainerFile
+      tags: [Inference]
+      summary: Delete a file from an owned container
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Deleted container file, content: {application/json: {schema: {$ref: '#/components/schemas/ContainerFileDeletion'}}}}
+        default: {description: "Authentication, ownership, provider, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/containers/{id}/files/{file_id}/content:
+    get:
+      operationId: downloadContainerFile
+      tags: [Inference]
+      summary: Stream bounded content from a file in an owned container
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+        - {name: file_id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+      responses:
+        '200': {description: Container file bytes, content: {application/octet-stream: {schema: {type: string, format: binary}}}}
         default: {description: "Authentication, ownership, provider, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /v1/videos/{id}:
     parameters:
@@ -4998,7 +5064,7 @@ components:
         memory_limit: {type: string, enum: [1g, 4g, 16g, 64g]}
     Container:
       type: object
-      required: [id, object, created_at, status, last_active_at, memory_limit, name]
+      required: [id, object, created_at, status, name]
       properties:
         id: {type: string, minLength: 1, maxLength: 128}
         object: {type: string, const: container}
@@ -5023,6 +5089,39 @@ components:
       properties:
         id: {type: string}
         object: {type: string, const: container.deleted}
+        deleted: {type: boolean, const: true}
+    ContainerFileCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [file_id]
+      properties:
+        file_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+    ContainerFile:
+      type: object
+      required: [id, object, created_at, bytes, container_id, path, source]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 128}
+        object: {type: string, const: container.file}
+        created_at: {type: integer, format: int64, minimum: 0}
+        bytes: {type: integer, format: int64, minimum: 0, maximum: 536870912}
+        container_id: {type: string, minLength: 1, maxLength: 128}
+        path: {type: string, minLength: 1, maxLength: 4096}
+        source: {type: string, maxLength: 64}
+    ContainerFileList:
+      type: object
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/ContainerFile'}}
+        first_id: {type: string}
+        last_id: {type: string}
+        has_more: {type: boolean}
+    ContainerFileDeletion:
+      type: object
+      required: [id, object, deleted]
+      properties:
+        id: {type: string}
+        object: {type: string, const: container.file.deleted}
         deleted: {type: boolean, const: true}
     FineTuningCreateRequest:
       type: object
@@ -6560,7 +6659,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -8686,12 +8785,12 @@ components:
           type: array
           uniqueItems: true
           description: Native operations implemented by the managed adapter. count_tokens is used by the inbound token-count endpoint and is not a deployment capability.
-          items: {type: string, enum: [chat, responses, interactions, count_tokens, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, realtime, stream, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, count_tokens, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, realtime, stream, bedrock_invoke]}
         capabilities:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

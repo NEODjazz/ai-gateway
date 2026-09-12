@@ -44,3 +44,25 @@ type ContainerDeletion struct {
 	Object  string `json:"object"`
 	Deleted bool   `json:"deleted"`
 }
+
+type ContainerFile struct {
+	ID          string `json:"id"`
+	Object      string `json:"object"`
+	CreatedAt   int64  `json:"created_at"`
+	Bytes       int64  `json:"bytes"`
+	ContainerID string `json:"container_id"`
+	Path        string `json:"path"`
+	Source      string `json:"source"`
+}
+
+type ContainerFileList struct {
+	Object  string          `json:"object"`
+	Data    []ContainerFile `json:"data"`
+	FirstID string          `json:"first_id,omitempty"`
+	LastID  string          `json:"last_id,omitempty"`
+	HasMore bool            `json:"has_more"`
+}
+
+type ContainerFileCreateRequest struct {
+	FileID string `json:"file_id"`
+}

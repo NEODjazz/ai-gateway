@@ -27,6 +27,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "video_remix", label: "Video remix", description: "Create a remix from an existing video" },
   { value: "video_extension", label: "Video extension", description: "Extend an existing video" },
   { value: "container", label: "Containers", description: "Create and manage provider containers" },
+  { value: "container_files", label: "Container files", description: "Upload and manage files in provider containers" },
   { value: "realtime", label: "Realtime", description: "Bidirectional low-latency sessions" },
   { value: "stream", label: "Stream", description: "Streaming responses" },
   { value: "tools", label: "Tools", description: "Function and tool calling" },
