@@ -20,17 +20,18 @@ type TokenCountClient interface {
 	CountTokens(context.Context, TokenCountRequest) (TokenCountResult, error)
 }
 type TokenCountRequest struct {
-	Model                  string
-	Messages               []openai.Message
-	Tools                  []openai.Tool
-	ToolChoice             any
-	ParallelToolCalls      *bool
-	ChatGenerationOptions  openai.ChatGenerationOptions
-	ResponseFormat         *openai.ResponseFormat
-	AnthropicSkills        []openai.AnthropicSkillReference
-	AnthropicContainerID   string
-	AnthropicCodeExecution bool
-	AnthropicToolSearch    string
+	Model                      string
+	Messages                   []openai.Message
+	Tools                      []openai.Tool
+	ToolChoice                 any
+	ParallelToolCalls          *bool
+	ChatGenerationOptions      openai.ChatGenerationOptions
+	ResponseFormat             *openai.ResponseFormat
+	AnthropicSkills            []openai.AnthropicSkillReference
+	AnthropicContainerID       string
+	AnthropicCodeExecution     bool
+	AnthropicCodeExecutionType string
+	AnthropicToolSearch        string
 }
 type TokenCountResult struct {
 	InputTokens int
@@ -39,7 +40,7 @@ type TokenCountResult struct {
 }
 
 func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (TokenCountResult, error) {
-	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat, AnthropicSkills: request.AnthropicSkills, AnthropicContainerID: request.AnthropicContainerID, AnthropicCodeExecution: request.AnthropicCodeExecution, AnthropicToolSearch: request.AnthropicToolSearch}
+	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat, AnthropicSkills: request.AnthropicSkills, AnthropicContainerID: request.AnthropicContainerID, AnthropicCodeExecution: request.AnthropicCodeExecution, AnthropicCodeExecutionType: request.AnthropicCodeExecutionType, AnthropicToolSearch: request.AnthropicToolSearch}
 	if err := validateTokenCountRequest(chat); err != nil {
 		return TokenCountResult{}, err
 	}

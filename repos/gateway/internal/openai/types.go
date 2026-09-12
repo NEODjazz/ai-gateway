@@ -24,7 +24,8 @@ type ChatCompletionRequest struct {
 	AnthropicSkills      []AnthropicSkillReference `json:"-"`
 	AnthropicContainerID string                    `json:"-"`
 	// AnthropicCodeExecution enables the native managed code execution tool.
-	AnthropicCodeExecution bool `json:"-"`
+	AnthropicCodeExecution     bool   `json:"-"`
+	AnthropicCodeExecutionType string `json:"-"`
 	// AnthropicToolSearch selects the validated native tool-search variant.
 	AnthropicToolSearch string `json:"-"`
 	// Bedrock native controls cannot be supplied through the public Chat wire shape.

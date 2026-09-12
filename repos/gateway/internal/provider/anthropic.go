@@ -371,7 +371,11 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		tools = append(tools, anthropicWebFetchTool(request.WebFetchOptions))
 	}
 	if request.AnthropicCodeExecution {
-		tools = append(tools, anthropicTool{Type: "code_execution_20250825", Name: "code_execution"})
+		typeName := request.AnthropicCodeExecutionType
+		if typeName == "" {
+			typeName = "code_execution_20250825"
+		}
+		tools = append(tools, anthropicTool{Type: typeName, Name: "code_execution"})
 	}
 	if request.AnthropicToolSearch != "" {
 		tools = append(tools, anthropicTool{Type: request.AnthropicToolSearch, Name: strings.TrimSuffix(request.AnthropicToolSearch, "_20251119")})

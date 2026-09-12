@@ -27,6 +27,13 @@ func TestAnthropicMapsMaxCompletionTokensToMaxTokens(t *testing.T) {
 	}
 }
 
+func TestAnthropicPreservesCodeExecutionVersion(t *testing.T) {
+	request := anthropicChatRequest(openai.ChatCompletionRequest{AnthropicCodeExecution: true, AnthropicCodeExecutionType: "code_execution_20260521"}, false)
+	if len(request.Tools) != 1 || request.Tools[0].Type != "code_execution_20260521" || request.Tools[0].Name != "code_execution" {
+		t.Fatalf("tools=%+v", request.Tools)
+	}
+}
+
 func TestAnthropicToolSearchWireAndContinuation(t *testing.T) {
 	native := []json.RawMessage{
 		json.RawMessage(`{"type":"server_tool_use","id":"srv_1","name":"tool_search_tool_bm25","input":{"query":"weather"}}`),

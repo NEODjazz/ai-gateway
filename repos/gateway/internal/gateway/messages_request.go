@@ -372,11 +372,12 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 			result.AnthropicToolSearch = tool.Type
 			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
-		case "code_execution_20250825":
+		case "code_execution_20250825", "code_execution_20260120", "code_execution_20260521":
 			if result.AnthropicCodeExecution || tool.Name != "code_execution" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxUses != nil || tool.UserLocation != nil || messagesToolHasNativeWebFields(tool) || tool.MaxContentTokens != 0 || tool.Citations != nil || tool.DeferLoading {
 				return result, errors.New("invalid or duplicate code execution tool")
 			}
 			result.AnthropicCodeExecution = true
+			result.AnthropicCodeExecutionType = tool.Type
 			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		case "web_search_20250305", "web_search_20260209", "web_search_20260318":

@@ -155,6 +155,15 @@ func TestMessagesConvertsCurrentWebToolControls(t *testing.T) {
 	}
 }
 
+func TestMessagesPreservesCurrentCodeExecutionVersion(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}}}}
+	response := nativeMessageCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), `{"model":"model","max_tokens":20,"tools":[{"type":"code_execution_20260521","name":"code_execution"}],"messages":[{"role":"user","content":"run"}]}`, "")
+	request := upstream.request.Request
+	if response.Code != http.StatusOK || upstream.calls != 1 || !request.AnthropicCodeExecution || request.AnthropicCodeExecutionType != "code_execution_20260521" || request.NativeInputTokens == 0 {
+		t.Fatalf("response=%d body=%s request=%+v", response.Code, response.Body.String(), request)
+	}
+}
+
 func TestMessagesRejectsVersionMismatchedWebToolControls(t *testing.T) {
 	for _, body := range []string{
 		`{"model":"m","max_tokens":10,"tools":[{"type":"web_search_20260209","name":"web_search","response_inclusion":"excluded"}],"messages":[{"role":"user","content":"hi"}]}`,
