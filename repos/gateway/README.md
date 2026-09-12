@@ -255,6 +255,10 @@ These calls reserve the complete input context and no output tokens, settle on
 provider-reported usage, and route only through deployments advertising the
 `zero_output` capability. Chat Completions continues to require a positive
 explicit output limit.
+Messages also accepts top-level ephemeral `cache_control` with a default five
+minute or explicit one-hour TTL. It follows the same four-breakpoint limit as
+block and tool markers, requires the `prompt_cache` deployment capability, and
+is preserved by native token counting and durable Messages batches.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.

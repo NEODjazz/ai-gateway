@@ -724,6 +724,12 @@ requires the `zero_output` deployment capability, currently advertised only by
 the native Anthropic adapter, so retry and fallback cannot reinterpret zero as a
 default output allowance. Durable Messages batches use the same conversion and
 accounting. Chat Completions continues to reject an explicit zero output limit.
+Top-level `cache_control` accepts `{ "type": "ephemeral" }` with an optional
+`ttl` of `5m` or `1h` and applies the marker to the last cacheable request block.
+It shares the four-breakpoint request limit with system, message, tool and client
+tool markers. Generation, native token counting and durable Messages batches
+preserve the control, and routing requires `prompt_cache`. The control is part
+of exact response-cache identity, while semantic response caching is disabled.
 The provider-assigned `standard`, `priority` or `batch` service tier is retained
 in JSON and SSE usage. Unknown reported tiers fail the response instead of being
 accepted as trusted accounting metadata. Provider-reported `output_tokens_details.thinking_tokens` is retained in JSON,

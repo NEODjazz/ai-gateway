@@ -1012,3 +1012,10 @@ Gateway Helm revision 451 completed successfully, and pod
 `ai-gateway-gateway-694449765c-vbt54` became Ready with zero restarts and the
 same digest. Live OpenAPI 0.1.350 omits both unsupported Messages fields while
 retaining the tested zero-output contract.
+
+Source `6e44c0b` adds native Messages top-level ephemeral prompt-cache control.
+Validation combines it with block and tool markers under the existing limit,
+routing requires the explicit `prompt_cache` capability, and native generation,
+token counting and durable batches preserve the TTL. Exact response-cache keys
+include the control and semantic caching is disabled. Full Go test, race, vet
+and build checks completed successfully.

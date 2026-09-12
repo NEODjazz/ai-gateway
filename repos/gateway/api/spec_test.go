@@ -76,6 +76,18 @@ func TestOpenAPIMessagesDoesNotAdvertiseUnsupportedLifecycleFields(t *testing.T)
 	}
 }
 
+func TestOpenAPIMessagesAdvertisesTopLevelCacheControl(t *testing.T) {
+	document := loadDocument(t)
+	messages := document.Components.Schemas["MessagesRequest"].Value
+	control := messages.Properties["cache_control"]
+	if control == nil || control.Value == nil {
+		t.Fatal("MessagesRequest is missing cache_control")
+	}
+	if control.Value.Properties["type"] == nil || control.Value.Properties["ttl"] == nil {
+		t.Fatal("MessagesRequest cache_control is incomplete")
+	}
+}
+
 func TestOpenAPIRoutesMatchGatewayRouter(t *testing.T) {
 	document := loadDocument(t)
 	want := map[string]bool{}

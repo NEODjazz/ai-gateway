@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.350
+  version: 0.1.351
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -6912,6 +6912,14 @@ components:
       properties:
         model: {type: string, minLength: 1}
         max_tokens: {type: integer, minimum: 0, description: Total output limit including thinking tokens. Zero performs a cache-population request without generated output and requires the zero_output deployment capability. A manual thinking budget must be smaller than a positive value.}
+        cache_control:
+          type: object
+          additionalProperties: false
+          required: [type]
+          properties:
+            type: {type: string, const: ephemeral}
+            ttl: {type: string, enum: [5m, 1h]}
+          description: Applies an ephemeral prompt-cache marker to the last cacheable request block and requires the prompt_cache deployment capability.
         stop_sequences:
           type: array
           maxItems: 4
