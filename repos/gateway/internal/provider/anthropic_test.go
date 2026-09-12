@@ -27,6 +27,21 @@ func TestAnthropicMapsMaxCompletionTokensToMaxTokens(t *testing.T) {
 	}
 }
 
+func TestAnthropicThinkingWireAndCapability(t *testing.T) {
+	budget := 2048
+	request := anthropicChatRequest(openai.ChatCompletionRequest{AnthropicThinking: &openai.AnthropicThinkingConfig{Type: "enabled", BudgetTokens: &budget, Display: "summarized"}}, false)
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Thinking == nil || request.Thinking.BudgetTokens == nil || *request.Thinking.BudgetTokens != budget || !strings.Contains(string(encoded), `"thinking":{"type":"enabled","budget_tokens":2048,"display":"summarized"}`) {
+		t.Fatalf("request=%s", encoded)
+	}
+	if got := strings.Join(requiredChatCapabilities(openai.ChatCompletionRequest{AnthropicThinking: &openai.AnthropicThinkingConfig{Type: "adaptive"}}, false), ","); got != "chat,thinking" {
+		t.Fatalf("capabilities=%q", got)
+	}
+}
+
 func TestAnthropicPreservesCodeExecutionVersion(t *testing.T) {
 	request := anthropicChatRequest(openai.ChatCompletionRequest{AnthropicCodeExecution: true, AnthropicCodeExecutionType: "code_execution_20260521"}, false)
 	if len(request.Tools) != 1 || request.Tools[0].Type != "code_execution_20260521" || request.Tools[0].Name != "code_execution" {

@@ -23,12 +23,18 @@ type messagesRequest struct {
 	ToolChoice    *messagesToolChoice   `json:"tool_choice,omitempty"`
 	Metadata      *messagesMetadata     `json:"metadata,omitempty"`
 	OutputConfig  *messagesOutputConfig `json:"output_config,omitempty"`
+	Thinking      *messagesThinking     `json:"thinking,omitempty"`
 	ServiceTier   string                `json:"service_tier,omitempty"`
 	Temperature   *float64              `json:"temperature,omitempty"`
 	TopP          *float64              `json:"top_p,omitempty"`
 	Stream        bool                  `json:"stream,omitempty"`
 	StopSequences []string              `json:"stop_sequences,omitempty"`
 	Container     *messagesContainer    `json:"container,omitempty"`
+}
+type messagesThinking struct {
+	Type         string `json:"type"`
+	BudgetTokens *int   `json:"budget_tokens,omitempty"`
+	Display      string `json:"display,omitempty"`
 }
 type messagesContainer struct {
 	ID     string                           `json:"id,omitempty"`
@@ -136,6 +142,31 @@ func (request messagesRequest) chat() (openai.ChatCompletionRequest, error) {
 
 func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatCompletionRequest, error) {
 	result := openai.ChatCompletionRequest{Model: request.Model, MaxTokens: &request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP, Stream: request.Stream}
+	if thinking := request.Thinking; thinking != nil {
+		switch thinking.Type {
+		case "disabled":
+			if thinking.BudgetTokens != nil || thinking.Display != "" {
+				return result, errors.New("thinking disabled does not accept budget_tokens or display")
+			}
+		case "adaptive":
+			if thinking.BudgetTokens != nil {
+				return result, errors.New("thinking adaptive does not accept budget_tokens")
+			}
+		case "enabled":
+			if thinking.BudgetTokens == nil || *thinking.BudgetTokens < 1024 || *thinking.BudgetTokens >= request.MaxTokens {
+				return result, errors.New("thinking enabled requires budget_tokens of at least 1024 and less than max_tokens")
+			}
+		default:
+			return result, errors.New("thinking.type must be adaptive, enabled, or disabled")
+		}
+		if thinking.Display != "" && thinking.Display != "summarized" && thinking.Display != "omitted" {
+			return result, errors.New("thinking.display must be summarized or omitted")
+		}
+		if thinking.Type != "disabled" && request.Temperature != nil && *request.Temperature != 1 {
+			return result, errors.New("temperature must be omitted or 1 when thinking is enabled")
+		}
+		result.AnthropicThinking = &openai.AnthropicThinkingConfig{Type: thinking.Type, BudgetTokens: thinking.BudgetTokens, Display: thinking.Display}
+	}
 	if request.Container != nil {
 		if request.Container.ID != "" && (!validSkillID(request.Container.ID) || len(request.Container.ID) > 128) {
 			return result, errors.New("container.id is invalid")

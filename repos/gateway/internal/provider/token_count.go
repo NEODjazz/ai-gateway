@@ -34,6 +34,7 @@ type TokenCountRequest struct {
 	AnthropicToolSearch        string
 	AnthropicClientTools       []openai.AnthropicClientTool
 	AnthropicClientToolsets    []openai.AnthropicClientToolset
+	AnthropicThinking          *openai.AnthropicThinkingConfig
 }
 type TokenCountResult struct {
 	InputTokens int
@@ -42,7 +43,7 @@ type TokenCountResult struct {
 }
 
 func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (TokenCountResult, error) {
-	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat, AnthropicSkills: request.AnthropicSkills, AnthropicContainerID: request.AnthropicContainerID, AnthropicCodeExecution: request.AnthropicCodeExecution, AnthropicCodeExecutionType: request.AnthropicCodeExecutionType, AnthropicToolSearch: request.AnthropicToolSearch, AnthropicClientTools: request.AnthropicClientTools, AnthropicClientToolsets: request.AnthropicClientToolsets}
+	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat, AnthropicSkills: request.AnthropicSkills, AnthropicContainerID: request.AnthropicContainerID, AnthropicCodeExecution: request.AnthropicCodeExecution, AnthropicCodeExecutionType: request.AnthropicCodeExecutionType, AnthropicToolSearch: request.AnthropicToolSearch, AnthropicClientTools: request.AnthropicClientTools, AnthropicClientToolsets: request.AnthropicClientToolsets, AnthropicThinking: request.AnthropicThinking}
 	if err := validateTokenCountRequest(chat); err != nil {
 		return TokenCountResult{}, err
 	}
@@ -57,8 +58,9 @@ func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (
 		Tools        []anthropicTool        `json:"tools,omitempty"`
 		ToolChoice   map[string]any         `json:"tool_choice,omitempty"`
 		OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+		Thinking     *anthropicThinking     `json:"thinking,omitempty"`
 		Container    *anthropicContainer    `json:"container,omitempty"`
-	}{native.Model, native.System, native.Messages, native.Tools, native.ToolChoice, native.OutputConfig, native.Container})
+	}{native.Model, native.System, native.Messages, native.Tools, native.ToolChoice, native.OutputConfig, native.Thinking, native.Container})
 	if err != nil {
 		return TokenCountResult{}, err
 	}

@@ -53,3 +53,54 @@ func TestMessagesWriterStreamsReasoningBlocks(t *testing.T) {
 		}
 	}
 }
+
+func TestMessagesThinkingConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		body     string
+		typeName string
+		budget   int
+		display  string
+	}{
+		{name: "adaptive", body: `{"model":"m","max_tokens":4096,"messages":[{"role":"user","content":"work"}],"thinking":{"type":"adaptive","display":"summarized"}}`, typeName: "adaptive", display: "summarized"},
+		{name: "enabled", body: `{"model":"m","max_tokens":4096,"messages":[{"role":"user","content":"work"}],"thinking":{"type":"enabled","budget_tokens":2048,"display":"omitted"},"temperature":1}`, typeName: "enabled", budget: 2048, display: "omitted"},
+		{name: "disabled", body: `{"model":"m","max_tokens":4096,"messages":[{"role":"user","content":"work"}],"thinking":{"type":"disabled"},"temperature":0.2}`, typeName: "disabled"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var request messagesRequest
+			if err := json.Unmarshal([]byte(test.body), &request); err != nil {
+				t.Fatal(err)
+			}
+			chat, err := request.chat()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if chat.AnthropicThinking == nil || chat.AnthropicThinking.Type != test.typeName || chat.AnthropicThinking.Display != test.display {
+				t.Fatalf("thinking=%+v", chat.AnthropicThinking)
+			}
+			if test.budget == 0 && chat.AnthropicThinking.BudgetTokens != nil || test.budget != 0 && (chat.AnthropicThinking.BudgetTokens == nil || *chat.AnthropicThinking.BudgetTokens != test.budget) {
+				t.Fatalf("budget=%v", chat.AnthropicThinking.BudgetTokens)
+			}
+		})
+	}
+}
+
+func TestMessagesThinkingRejectsInvalidConfiguration(t *testing.T) {
+	for _, body := range []string{
+		`{"type":"adaptive","budget_tokens":1024}`,
+		`{"type":"enabled"}`,
+		`{"type":"enabled","budget_tokens":1023}`,
+		`{"type":"enabled","budget_tokens":4096}`,
+		`{"type":"disabled","display":"omitted"}`,
+		`{"type":"adaptive","display":"full"}`,
+		`{"type":"unknown"}`,
+	} {
+		var request messagesRequest
+		if err := json.Unmarshal([]byte(`{"model":"m","max_tokens":4096,"messages":[{"role":"user","content":"work"}],"thinking":`+body+`,"temperature":0.5}`), &request); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := request.chat(); err == nil {
+			t.Fatalf("accepted thinking=%s", body)
+		}
+	}
+}

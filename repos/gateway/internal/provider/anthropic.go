@@ -40,7 +40,14 @@ type anthropicRequest struct {
 	ServiceTier   string                 `json:"service_tier,omitempty"`
 	Metadata      *anthropicMetadata     `json:"metadata,omitempty"`
 	OutputConfig  *anthropicOutputConfig `json:"output_config,omitempty"`
+	Thinking      *anthropicThinking     `json:"thinking,omitempty"`
 	Container     *anthropicContainer    `json:"container,omitempty"`
+}
+
+type anthropicThinking struct {
+	Type         string `json:"type"`
+	BudgetTokens *int   `json:"budget_tokens,omitempty"`
+	Display      string `json:"display,omitempty"`
 }
 
 type anthropicContainer struct {
@@ -432,6 +439,10 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 	if len(request.AnthropicSkills) > 0 {
 		container = &anthropicContainer{ID: request.AnthropicContainerID, Skills: append([]openai.AnthropicSkillReference(nil), request.AnthropicSkills...)}
 	}
+	var thinking *anthropicThinking
+	if request.AnthropicThinking != nil {
+		thinking = &anthropicThinking{Type: request.AnthropicThinking.Type, BudgetTokens: request.AnthropicThinking.BudgetTokens, Display: request.AnthropicThinking.Display}
+	}
 	return anthropicRequest{
 		StopSequences: stop,
 		Model:         request.Model,
@@ -446,6 +457,7 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		ServiceTier:   request.ServiceTier,
 		Metadata:      metadata,
 		OutputConfig:  outputConfig,
+		Thinking:      thinking,
 		Container:     container,
 	}
 }

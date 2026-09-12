@@ -43,6 +43,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "text_editor_tool", label: "Text editor tool", description: "Provider-defined client file editing operations" },
   { value: "computer_toolset", label: "Computer toolset", description: "Provider-defined client desktop interaction tools" },
   { value: "browser_toolset", label: "Browser toolset", description: "Provider-defined client browser interaction tools" },
+  { value: "thinking", label: "Thinking", description: "Native adaptive or budgeted reasoning" },
   { value: "audio", label: "Audio output", description: "Generated audio in chat responses" },
   { value: "audio_input", label: "Audio input", description: "Inline audio input for native multimodal requests" },
   { value: "video_input", label: "Video input", description: "Bounded inline video input for native multimodal requests" },

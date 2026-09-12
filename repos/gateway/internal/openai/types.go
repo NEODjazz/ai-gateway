@@ -32,6 +32,8 @@ type ChatCompletionRequest struct {
 	AnthropicClientTools []AnthropicClientTool `json:"-"`
 	// AnthropicClientToolsets contains validated provider-defined client toolsets.
 	AnthropicClientToolsets []AnthropicClientToolset `json:"-"`
+	// AnthropicThinking contains a validated native Messages thinking policy.
+	AnthropicThinking *AnthropicThinkingConfig `json:"-"`
 	// Bedrock native controls cannot be supplied through the public Chat wire shape.
 	BedrockServiceTier                       string                  `json:"-"`
 	BedrockPerformanceLatency                string                  `json:"-"`
@@ -57,6 +59,12 @@ type ChatCompletionRequest struct {
 	TopP                *float64              `json:"top_p,omitempty"`
 	Stop                any                   `json:"stop,omitempty"`
 	Seed                *int64                `json:"seed,omitempty"`
+}
+
+type AnthropicThinkingConfig struct {
+	Type         string
+	BudgetTokens *int
+	Display      string
 }
 
 type AnthropicSkillReference struct {

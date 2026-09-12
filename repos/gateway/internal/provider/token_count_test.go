@@ -175,6 +175,26 @@ func TestAnthropicCountTokensIncludesBrowserToolset(t *testing.T) {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
+
+func TestAnthropicCountTokensIncludesThinking(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Thinking *anthropicThinking `json:"thinking"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Thinking == nil || body.Thinking.Type != "adaptive" || body.Thinking.Display != "omitted" {
+			t.Errorf("thinking context lost: %+v", body.Thinking)
+		}
+		_, _ = w.Write([]byte(`{"input_tokens":31}`))
+	}))
+	defer server.Close()
+	result, err := NewAnthropic(server.URL, "", false).CountTokens(t.Context(), TokenCountRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "count"}}, AnthropicThinking: &openai.AnthropicThinkingConfig{Type: "adaptive", Display: "omitted"}})
+	if err != nil || result.InputTokens != 31 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
 func TestAnthropicCounterRejectsMalformedCounts(t *testing.T) {
 	for _, payload := range []string{`{}`, `{"input_tokens":null}`, `{"input_tokens":-1}`, `{"input_tokens":1.5}`, `{"input_tokens":9223372036854775808}`, `{"input_tokens":1} {}`, strings.Repeat(" ", (64<<10)+1)} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(payload)) }))
