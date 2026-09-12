@@ -1756,6 +1756,18 @@ reported 0.1.384, and an unauthenticated Chat request with `logprobs=true`
 returned 401 before deployment selection. No provider credential or external
 inference was used by the smoke checks.
 
+Source `b5505d3` enforces the documented `1..32768` output-token range for both
+Nemotron 3 model IDs and both public limit names before provider HTTP. Boundary,
+alias and no-upstream regressions, OpenAPI validation, vet, build, the full Go
+suite and the full race suite passed. OpenAPI 0.1.393 identifies the deployed
+contract.
+
+Rancher Desktop built `ai-gateway-gateway:nvidia-output-b5505d3` with image ID
+`sha256:c4289a3f03e1f0d857744734512ef883e891df06e5539498fe0a4475c1fda1c8`.
+Gateway Helm revision 498 completed successfully. Pod
+`ai-gateway-gateway-5d459c568f-knkdk` became Ready with zero restarts. Live
+liveness and readiness returned 204 and the served OpenAPI reported 0.1.393.
+
 Source `40ebc1b` enables the native Together Chat sampling controls already
 present in the public request contract. `min_p`, `top_k`,
 `repetition_penalty` and integer `logit_bias` now pass through after shared

@@ -219,6 +219,8 @@ availability is not inferred from these tests.
   malformed or inconsistent counters.
 - `ebd6e9c`: Native NVIDIA NIM Chat maps public `max_completion_tokens` to the
   provider's native `max_tokens` field in JSON and SSE.
+- `b5505d3`: Native NVIDIA NIM Chat enforces the documented 32,768-token output
+  ceiling for both public limit names on the two Nemotron 3 model IDs.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control
