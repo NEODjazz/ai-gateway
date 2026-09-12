@@ -34,6 +34,24 @@ func TestAnthropicPreservesCodeExecutionVersion(t *testing.T) {
 	}
 }
 
+func TestAnthropicNativeClientToolsWireAndCapabilities(t *testing.T) {
+	maxCharacters := 10000
+	request := anthropicChatRequest(openai.ChatCompletionRequest{
+		AnthropicClientTools: []openai.AnthropicClientTool{
+			{Type: "memory_20250818", Name: "memory"},
+			{Type: "bash_20250124", Name: "bash", AllowedCallers: []string{"direct"}},
+			{Type: "text_editor_20250728", Name: "str_replace_based_edit_tool", MaxCharacters: &maxCharacters},
+		},
+		ToolChoice: "required",
+	}, false)
+	if len(request.Tools) != 3 || request.ToolChoice["type"] != "any" || request.Tools[0].Type != "memory_20250818" || request.Tools[1].AllowedCallers[0] != "direct" || request.Tools[2].MaxCharacters == nil || *request.Tools[2].MaxCharacters != maxCharacters {
+		t.Fatalf("request=%+v", request)
+	}
+	if got := strings.Join(requiredChatCapabilities(openai.ChatCompletionRequest{AnthropicClientTools: []openai.AnthropicClientTool{{Type: "memory_20250818"}, {Type: "bash_20250124"}, {Type: "text_editor_20250728"}}}, false), ","); got != "chat,memory_tool,bash_tool,text_editor_tool" {
+		t.Fatalf("capabilities=%q", got)
+	}
+}
+
 func TestAnthropicToolSearchWireAndContinuation(t *testing.T) {
 	native := []json.RawMessage{
 		json.RawMessage(`{"type":"server_tool_use","id":"srv_1","name":"tool_search_tool_bm25","input":{"query":"weather"}}`),

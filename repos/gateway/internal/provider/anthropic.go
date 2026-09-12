@@ -83,6 +83,7 @@ type anthropicTool struct {
 	MaxContentTokens  int                    `json:"max_content_tokens,omitempty"`
 	CacheControl      *anthropicCacheControl `json:"cache_control,omitempty"`
 	DeferLoading      bool                   `json:"defer_loading,omitempty"`
+	MaxCharacters     *int                   `json:"max_characters,omitempty"`
 }
 
 type anthropicCitations struct {
@@ -363,7 +364,7 @@ func (p Anthropic) setHeaders(request *http.Request) {
 
 func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) anthropicRequest {
 	system, messages := anthropicMessages(request.Messages)
-	tools, toolChoice := anthropicChatTools(request.Tools, request.ToolChoice)
+	tools, _ := anthropicChatTools(request.Tools, nil)
 	if request.WebSearchOptions != nil {
 		tools = append(tools, anthropicWebSearchTool(request.WebSearchOptions))
 	}
@@ -380,6 +381,10 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 	if request.AnthropicToolSearch != "" {
 		tools = append(tools, anthropicTool{Type: request.AnthropicToolSearch, Name: strings.TrimSuffix(request.AnthropicToolSearch, "_20251119")})
 	}
+	for _, tool := range request.AnthropicClientTools {
+		tools = append(tools, anthropicTool{Type: tool.Type, Name: tool.Name, AllowedCallers: append([]string(nil), tool.AllowedCallers...), CacheControl: anthropicToolCacheControl(tool.PromptCacheBreakpoint), DeferLoading: tool.DeferLoading, MaxCharacters: tool.MaxCharacters})
+	}
+	tools, toolChoice := applyAnthropicToolChoice(tools, request.ToolChoice)
 	var outputConfig *anthropicOutputConfig
 	if request.ResponseFormat != nil && request.ResponseFormat.Type == "json_schema" {
 		outputConfig = &anthropicOutputConfig{}

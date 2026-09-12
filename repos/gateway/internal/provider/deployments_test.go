@@ -147,7 +147,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 			}
 			capabilities := []string{test.capability}
 			switch test.capability {
-			case "stream", "tools", "structured_output", "vision", "web_search", "web_fetch", "tool_search", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "bedrock_invoke", "gemini_code_execution":
+			case "stream", "tools", "structured_output", "vision", "web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "bedrock_invoke", "gemini_code_execution":
 				capabilities = append([]string{"chat"}, capabilities...)
 			case "background_responses":
 				capabilities = []string{"responses", "background_responses"}
@@ -175,6 +175,9 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"chat", "mcp", "tools"},
 		{"web_search"},
 		{"tool_search"},
+		{"memory_tool"},
+		{"bash_tool"},
+		{"text_editor_tool"},
 		{"audio_input"},
 		{"video_input"},
 		{"responses", "web_fetch"},
@@ -212,7 +215,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"interactions", "interaction_agents", "interaction_environment_reuse"},
 		{"interactions", "background_interactions"},
 		{"responses", "file_input"},
-		{"chat", "web_search", "web_fetch", "tool_search", "audio", "prompt_cache", "assistant_prefill"},
+		{"chat", "web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "audio", "prompt_cache", "assistant_prefill"},
 		{"chat", "bedrock_invoke"},
 		{"embeddings"},
 		{"video", "video_extension"},
@@ -253,7 +256,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		capabilities []string
 	}{
 		{providerType: "ollama", capabilities: []string{"chat", "tools", "structured_output", "vision"}},
-		{providerType: "anthropic", capabilities: []string{"chat", "tools", "structured_output", "vision", "web_search", "web_fetch", "tool_search", "prompt_cache", "assistant_prefill"}},
+		{providerType: "anthropic", capabilities: []string{"chat", "tools", "structured_output", "vision", "web_search", "web_fetch", "tool_search", "prompt_cache", "assistant_prefill", "memory_tool", "bash_tool", "text_editor_tool"}},
 		{providerType: "gemini", capabilities: []string{"chat", "gemini_safety_settings", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision", "web_search", "audio_input", "video_input", "file_input"}},
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
 		{providerType: "bedrock", capabilities: []string{"chat", "tools", "prompt_cache", "bedrock_invoke"}},

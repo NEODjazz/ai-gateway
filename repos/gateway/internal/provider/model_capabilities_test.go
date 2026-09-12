@@ -12,7 +12,7 @@ func TestCapabilityContractIsSharedByDeploymentsAndOnboarding(t *testing.T) {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "sandbox", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "tool_search", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution",
+		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution",
 	}
 	if !validDeploymentCapabilities(capabilities) {
 		t.Fatal("deployment rejected a supported model capability")

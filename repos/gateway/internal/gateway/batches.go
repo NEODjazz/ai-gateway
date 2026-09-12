@@ -281,6 +281,7 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		if chat.AnthropicToolSearch != "" {
 			tools = append(tools, "tool_search")
 		}
+		tools = append(tools, anthropicClientToolIdentifiers(chat.AnthropicClientTools)...)
 		normalized = request
 	case "/v1/completions":
 		var request openai.CompletionRequest

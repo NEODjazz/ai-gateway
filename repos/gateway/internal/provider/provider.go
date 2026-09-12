@@ -3041,6 +3041,22 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	if request.AnthropicToolSearch != "" {
 		required = append(required, "tool_search")
 	}
+	seenClientCapabilities := map[string]bool{}
+	for _, tool := range request.AnthropicClientTools {
+		capability := ""
+		switch tool.Type {
+		case "memory_20250818":
+			capability = "memory_tool"
+		case "bash_20250124":
+			capability = "bash_tool"
+		case "text_editor_20250124", "text_editor_20250728":
+			capability = "text_editor_tool"
+		}
+		if capability != "" && !seenClientCapabilities[capability] {
+			required = append(required, capability)
+			seenClientCapabilities[capability] = true
+		}
+	}
 	if request.ResponseFormat != nil {
 		required = append(required, "structured_output")
 	}

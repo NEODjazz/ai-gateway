@@ -109,6 +109,28 @@ func TestAnthropicCountTokensIncludesSkillExecutionContext(t *testing.T) {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
+
+func TestAnthropicCountTokensIncludesNativeClientTools(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Tools []anthropicTool `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Tools) != 1 || body.Tools[0].Type != "memory_20250818" || body.Tools[0].Name != "memory" {
+			t.Errorf("client tool context lost: %+v", body.Tools)
+		}
+		_, _ = w.Write([]byte(`{"input_tokens":29}`))
+	}))
+	defer server.Close()
+	result, err := NewAnthropic(server.URL, "", false).CountTokens(t.Context(), TokenCountRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "count"}}, AnthropicClientTools: []openai.AnthropicClientTool{{Type: "memory_20250818", Name: "memory"}},
+	})
+	if err != nil || result.InputTokens != 29 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
 func TestAnthropicCounterRejectsMalformedCounts(t *testing.T) {
 	for _, payload := range []string{`{}`, `{"input_tokens":null}`, `{"input_tokens":-1}`, `{"input_tokens":1.5}`, `{"input_tokens":9223372036854775808}`, `{"input_tokens":1} {}`, strings.Repeat(" ", (64<<10)+1)} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(payload)) }))

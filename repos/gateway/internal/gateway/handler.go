@@ -352,6 +352,7 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 	if request.AnthropicToolSearch != "" {
 		toolIdentifiers = append(toolIdentifiers, "tool_search")
 	}
+	toolIdentifiers = append(toolIdentifiers, anthropicClientToolIdentifiers(request.AnthropicClientTools)...)
 	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) {
 		return
 	}

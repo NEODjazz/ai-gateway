@@ -28,6 +28,8 @@ type ChatCompletionRequest struct {
 	AnthropicCodeExecutionType string `json:"-"`
 	// AnthropicToolSearch selects the validated native tool-search variant.
 	AnthropicToolSearch string `json:"-"`
+	// AnthropicClientTools contains validated provider-defined tools that the caller executes.
+	AnthropicClientTools []AnthropicClientTool `json:"-"`
 	// Bedrock native controls cannot be supplied through the public Chat wire shape.
 	BedrockServiceTier                       string                  `json:"-"`
 	BedrockPerformanceLatency                string                  `json:"-"`
@@ -59,6 +61,15 @@ type AnthropicSkillReference struct {
 	Type    string `json:"type"`
 	SkillID string `json:"skill_id"`
 	Version string `json:"version,omitempty"`
+}
+
+type AnthropicClientTool struct {
+	Type                  string
+	Name                  string
+	AllowedCallers        []string
+	PromptCacheBreakpoint *PromptCacheBreakpoint
+	DeferLoading          bool
+	MaxCharacters         *int
 }
 
 type GeminiSafetySetting struct {

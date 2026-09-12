@@ -61,6 +61,7 @@ type messagesTool struct {
 	ResponseInclusion string                `json:"response_inclusion,omitempty"`
 	UseCache          *bool                 `json:"use_cache,omitempty"`
 	MaxContentTokens  int                   `json:"max_content_tokens,omitempty"`
+	MaxCharacters     *int                  `json:"max_characters,omitempty"`
 	Citations         *messagesCitations    `json:"citations,omitempty"`
 	DeferLoading      bool                  `json:"defer_loading,omitempty"`
 }
@@ -361,11 +362,35 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		return result, errors.New("too many tools")
 	}
 	searchTool, fetchTool, toolSearch := false, false, false
+	clientTools := map[string]bool{}
 	for _, tool := range request.Tools {
 		switch tool.Type {
+		case "memory_20250818", "bash_20250124", "text_editor_20250124", "text_editor_20250728":
+			capability, expectedName := anthropicClientToolIdentity(tool.Type)
+			if clientTools[capability] || tool.Name != expectedName || tool.InputSchema != nil || tool.Description != "" || tool.MaxUses != nil || tool.UserLocation != nil || len(tool.AllowedDomains) > 0 || len(tool.BlockedDomains) > 0 || tool.ResponseInclusion != "" || tool.UseCache != nil || tool.MaxContentTokens != 0 || tool.Citations != nil || !validAnthropicAllowedCallers(tool.AllowedCallers) {
+				return result, errors.New("invalid or duplicate client tool")
+			}
+			if tool.MaxCharacters != nil && (tool.Type != "text_editor_20250728" || *tool.MaxCharacters <= 0 || *tool.MaxCharacters > 1<<20) {
+				return result, errors.New("max_characters requires text_editor_20250728 and must be between 1 and 1048576")
+			}
+			var breakpoint *openai.PromptCacheBreakpoint
+			if tool.CacheControl != nil {
+				if tool.DeferLoading {
+					return result, errors.New("defer_loading cannot be combined with cache_control")
+				}
+				var err error
+				breakpoint, err = messagesPromptCacheBreakpoint(tool.CacheControl)
+				if err != nil {
+					return result, err
+				}
+			}
+			clientTools[capability] = true
+			result.AnthropicClientTools = append(result.AnthropicClientTools, openai.AnthropicClientTool{Type: tool.Type, Name: tool.Name, AllowedCallers: append([]string(nil), tool.AllowedCallers...), PromptCacheBreakpoint: breakpoint, DeferLoading: tool.DeferLoading, MaxCharacters: tool.MaxCharacters})
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
+			continue
 		case "tool_search_tool_regex_20251119", "tool_search_tool_bm25_20251119":
 			expectedName := strings.TrimSuffix(tool.Type, "_20251119")
-			if toolSearch || tool.Name != expectedName || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxUses != nil || tool.UserLocation != nil || messagesToolHasNativeWebFields(tool) || tool.MaxContentTokens != 0 || tool.Citations != nil || tool.DeferLoading {
+			if toolSearch || tool.Name != expectedName || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxUses != nil || tool.UserLocation != nil || messagesToolHasNativeWebFields(tool) || tool.MaxContentTokens != 0 || tool.MaxCharacters != nil || tool.Citations != nil || tool.DeferLoading {
 				return result, errors.New("invalid or duplicate tool search tool")
 			}
 			toolSearch = true
@@ -373,7 +398,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		case "code_execution_20250825", "code_execution_20260120", "code_execution_20260521":
-			if result.AnthropicCodeExecution || tool.Name != "code_execution" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxUses != nil || tool.UserLocation != nil || messagesToolHasNativeWebFields(tool) || tool.MaxContentTokens != 0 || tool.Citations != nil || tool.DeferLoading {
+			if result.AnthropicCodeExecution || tool.Name != "code_execution" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxUses != nil || tool.UserLocation != nil || messagesToolHasNativeWebFields(tool) || tool.MaxContentTokens != 0 || tool.MaxCharacters != nil || tool.Citations != nil || tool.DeferLoading {
 				return result, errors.New("invalid or duplicate code execution tool")
 			}
 			result.AnthropicCodeExecution = true
@@ -382,7 +407,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 			continue
 		case "web_search_20250305", "web_search_20260209", "web_search_20260318":
 			location, validLocation := tool.UserLocation.chat()
-			if searchTool || tool.Name != "web_search" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxContentTokens != 0 || tool.Citations != nil || tool.UseCache != nil || tool.DeferLoading || !validLocation {
+			if searchTool || tool.Name != "web_search" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxContentTokens != 0 || tool.MaxCharacters != nil || tool.Citations != nil || tool.UseCache != nil || tool.DeferLoading || !validLocation {
 				return result, errors.New("invalid or duplicate web search tool")
 			}
 			if tool.ResponseInclusion != "" && tool.Type != "web_search_20260318" {
@@ -393,7 +418,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		case "web_fetch_20250910", "web_fetch_20260209", "web_fetch_20260309", "web_fetch_20260318":
-			if fetchTool || tool.Name != "web_fetch" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.UserLocation != nil || len(tool.BlockedDomains) > 0 || (tool.Citations != nil && !tool.Citations.Enabled) || tool.DeferLoading {
+			if fetchTool || tool.Name != "web_fetch" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.UserLocation != nil || len(tool.BlockedDomains) > 0 || tool.MaxCharacters != nil || (tool.Citations != nil && !tool.Citations.Enabled) || tool.DeferLoading {
 				return result, errors.New("invalid or duplicate web fetch tool")
 			}
 			if tool.UseCache != nil && tool.Type != "web_fetch_20260309" && tool.Type != "web_fetch_20260318" {
@@ -410,7 +435,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		default:
 			return result, errors.New("unsupported server tool")
 		}
-		if tool.Name == "" || tool.InputSchema == nil || tool.MaxUses != nil || tool.UserLocation != nil || messagesToolHasNativeWebFields(tool) || tool.MaxContentTokens != 0 || tool.Citations != nil {
+		if tool.Name == "" || tool.InputSchema == nil || tool.MaxUses != nil || tool.UserLocation != nil || messagesToolHasNativeWebFields(tool) || tool.MaxContentTokens != 0 || tool.MaxCharacters != nil || tool.Citations != nil {
 			return result, errors.New("function tools require name and input_schema")
 		}
 		var breakpoint *openai.PromptCacheBreakpoint
@@ -428,6 +453,11 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 	}
 	for _, tool := range result.Tools {
 		if tool.Function.DeferLoading && !toolSearch {
+			return result, errors.New("defer_loading requires a tool search tool")
+		}
+	}
+	for _, tool := range result.AnthropicClientTools {
+		if tool.DeferLoading && !toolSearch {
 			return result, errors.New("defer_loading requires a tool search tool")
 		}
 	}
@@ -462,6 +492,48 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		}
 	}
 	return result, nil
+}
+
+func anthropicClientToolIdentity(toolType string) (string, string) {
+	switch toolType {
+	case "memory_20250818":
+		return "memory_tool", "memory"
+	case "bash_20250124":
+		return "bash_tool", "bash"
+	case "text_editor_20250124":
+		return "text_editor_tool", "str_replace_editor"
+	case "text_editor_20250728":
+		return "text_editor_tool", "str_replace_based_edit_tool"
+	default:
+		return "", ""
+	}
+}
+
+func validAnthropicAllowedCallers(callers []string) bool {
+	if len(callers) > 4 {
+		return false
+	}
+	seen := make(map[string]bool, len(callers))
+	for _, caller := range callers {
+		switch caller {
+		case "direct", "code_execution_20250825", "code_execution_20260120", "code_execution_20260521":
+		default:
+			return false
+		}
+		if seen[caller] {
+			return false
+		}
+		seen[caller] = true
+	}
+	return true
+}
+
+func anthropicClientToolIdentifiers(tools []openai.AnthropicClientTool) []string {
+	identifiers := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		identifiers = append(identifiers, tool.Name)
+	}
+	return identifiers
 }
 
 func messagesToolHasNativeWebFields(tool messagesTool) bool {

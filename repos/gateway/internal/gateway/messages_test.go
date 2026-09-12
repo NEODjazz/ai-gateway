@@ -164,6 +164,34 @@ func TestMessagesPreservesCurrentCodeExecutionVersion(t *testing.T) {
 	}
 }
 
+func TestMessagesConvertsNativeClientTools(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}}}}
+	response := nativeMessageCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), `{"model":"model","max_tokens":20,"tools":[{"type":"memory_20250818","name":"memory"},{"type":"bash_20250124","name":"bash","allowed_callers":["direct"]},{"type":"text_editor_20250728","name":"str_replace_based_edit_tool","max_characters":10000}],"messages":[{"role":"user","content":"work"}]}`, "")
+	request := upstream.request.Request
+	if response.Code != http.StatusOK || upstream.calls != 1 || len(request.AnthropicClientTools) != 3 || request.AnthropicClientTools[0].Type != "memory_20250818" || request.AnthropicClientTools[1].AllowedCallers[0] != "direct" || request.AnthropicClientTools[2].MaxCharacters == nil || *request.AnthropicClientTools[2].MaxCharacters != 10000 || request.NativeInputTokens == 0 {
+		t.Fatalf("response=%d body=%s request=%+v", response.Code, response.Body.String(), request)
+	}
+}
+
+func TestMessagesRejectsInvalidNativeClientTools(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"m","max_tokens":10,"tools":[{"type":"memory_20250818","name":"wrong"}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"bash_20250124","name":"bash","input_schema":{}}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"text_editor_20250124","name":"str_replace_based_edit_tool"}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"text_editor_20250124","name":"str_replace_editor","max_characters":100}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"text_editor_20250728","name":"str_replace_based_edit_tool","max_characters":0}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"memory_20250818","name":"memory","allowed_callers":["untrusted"]}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"memory_20250818","name":"memory","defer_loading":true}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"memory_20250818","name":"memory"},{"type":"memory_20250818","name":"memory"}],"messages":[{"role":"user","content":"hi"}]}`,
+	} {
+		upstream := &fallbackChatProvider{}
+		response := nativeMessageCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), body, "")
+		if response.Code != http.StatusBadRequest || upstream.calls != 0 {
+			t.Fatalf("response=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestMessagesRejectsVersionMismatchedWebToolControls(t *testing.T) {
 	for _, body := range []string{
 		`{"model":"m","max_tokens":10,"tools":[{"type":"web_search_20260209","name":"web_search","response_inclusion":"excluded"}],"messages":[{"role":"user","content":"hi"}]}`,
@@ -248,6 +276,7 @@ func TestMessagesPreservesAccessControls(t *testing.T) {
 		{name: "model", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"other"}}, body: `{"model":"model","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`, status: 403},
 		{name: "tool", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}, body: `{"model":"model","max_tokens":10,"tools":[{"name":"denied","input_schema":{}}],"messages":[{"role":"user","content":"hi"}]}`, status: 403},
 		{name: "tool search", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}, body: `{"model":"model","max_tokens":10,"tools":[{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex"}],"messages":[{"role":"user","content":"hi"}]}`, status: 403},
+		{name: "client tool", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}, body: `{"model":"model","max_tokens":10,"tools":[{"type":"bash_20250124","name":"bash"}],"messages":[{"role":"user","content":"hi"}]}`, status: 403},
 		{name: "tpm", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tpm: 5}, body: `{"model":"model","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`, status: 429},
 	} {
 		t.Run(test.name, func(t *testing.T) {
