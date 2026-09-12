@@ -43,6 +43,7 @@ type anthropicRequest struct {
 	OutputConfig  *anthropicOutputConfig `json:"output_config,omitempty"`
 	Thinking      *anthropicThinking     `json:"thinking,omitempty"`
 	Container     *anthropicContainer    `json:"container,omitempty"`
+	CacheControl  *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicThinking struct {
@@ -465,6 +466,7 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		OutputConfig:  outputConfig,
 		Thinking:      thinking,
 		Container:     container,
+		CacheControl:  anthropicToolCacheControl(request.AnthropicCacheControl),
 	}
 }
 

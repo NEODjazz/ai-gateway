@@ -505,18 +505,18 @@ func TestMessagesConvertsPromptCacheControls(t *testing.T) {
 		Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11},
 	}}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
-	response := nativeMessageCall(handler, `{"model":"model","max_tokens":10,"system":[{"type":"text","text":"rules","cache_control":{"type":"ephemeral","ttl":"1h"}}],"tools":[{"name":"lookup","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"question","cache_control":{"type":"ephemeral","ttl":"5m"}}]}]}`, "")
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":10,"cache_control":{"type":"ephemeral","ttl":"1h"},"system":[{"type":"text","text":"rules","cache_control":{"type":"ephemeral","ttl":"1h"}}],"tools":[{"name":"lookup","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"question","cache_control":{"type":"ephemeral","ttl":"5m"}}]}]}`, "")
 	if response.Code != http.StatusOK || upstream.calls != 1 {
 		t.Fatalf("response=%d body=%s calls=%d", response.Code, response.Body.String(), upstream.calls)
 	}
 	request := upstream.request.Request
-	if count, message := openai.ChatRequestPromptCacheBreakpoints(request); count != 3 || message != "" {
+	if count, message := openai.ChatRequestPromptCacheBreakpoints(request); count != 4 || message != "" {
 		t.Fatalf("breakpoints count=%d message=%q request=%+v", count, message, request)
 	}
 	systemPart := request.Messages[0].Content.([]any)[0].(map[string]any)["prompt_cache_breakpoint"].(map[string]any)
 	userPart := request.Messages[1].Content.([]any)[0].(map[string]any)["prompt_cache_breakpoint"].(map[string]any)
 	toolBreakpoint := request.Tools[0].Function.PromptCacheBreakpoint
-	if systemPart["ttl"] != "1h" || userPart["ttl"] != "5m" || toolBreakpoint == nil || toolBreakpoint.Mode != "explicit" {
+	if systemPart["ttl"] != "1h" || userPart["ttl"] != "5m" || toolBreakpoint == nil || toolBreakpoint.Mode != "explicit" || request.AnthropicCacheControl == nil || request.AnthropicCacheControl.TTL != "1h" {
 		t.Fatalf("cache controls changed: system=%v user=%v tool=%+v", systemPart, userPart, toolBreakpoint)
 	}
 }

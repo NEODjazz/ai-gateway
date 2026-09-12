@@ -31,6 +31,7 @@ type messagesRequest struct {
 	Stream        bool                  `json:"stream,omitempty"`
 	StopSequences []string              `json:"stop_sequences,omitempty"`
 	Container     *messagesContainer    `json:"container,omitempty"`
+	CacheControl  *messagesCacheControl `json:"cache_control,omitempty"`
 }
 type messagesThinking struct {
 	Type         string `json:"type"`
@@ -145,6 +146,13 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 	result := openai.ChatCompletionRequest{Model: request.Model, MaxTokens: &request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP, Stream: request.Stream}
 	result.AllowZeroMaxTokens = request.MaxTokens == 0
 	result.TopK = request.TopK
+	if request.CacheControl != nil {
+		breakpoint, err := messagesPromptCacheBreakpoint(request.CacheControl)
+		if err != nil {
+			return result, err
+		}
+		result.AnthropicCacheControl = breakpoint
+	}
 	if thinking := request.Thinking; thinking != nil {
 		switch thinking.Type {
 		case "disabled":

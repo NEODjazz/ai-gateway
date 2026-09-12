@@ -217,7 +217,7 @@ func (c *semanticResponseCache) pruneAndEvictLocked(now time.Time, incomingBytes
 
 func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, string, bool) {
 	request := req.Request
-	if count, message := openai.ChatPromptCacheBreakpoints(request.Messages); message != "" || count > 0 {
+	if count, message := openai.ChatRequestPromptCacheBreakpoints(request); message != "" || count > 0 {
 		return "", "", false
 	}
 	if request.RequireMatchedStop {

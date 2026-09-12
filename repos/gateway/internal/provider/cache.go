@@ -142,13 +142,14 @@ func chatCacheKeyValue(request openai.ChatCompletionRequest) any {
 		nativeContent[index] = request.Messages[index].NativeContent
 	}
 	return struct {
-		Request                                  openai.ChatCompletionRequest `json:"request"`
-		NativeContent                            [][]json.RawMessage          `json:"native_content,omitempty"`
-		NativeInputTokens                        int                          `json:"native_input_tokens,omitempty"`
-		BedrockServiceTier                       string                       `json:"bedrock_service_tier,omitempty"`
-		BedrockPerformanceLatency                string                       `json:"bedrock_performance_latency,omitempty"`
-		BedrockAdditionalModelRequestFields      json.RawMessage              `json:"bedrock_additional_model_request_fields,omitempty"`
-		BedrockAdditionalModelResponseFieldPaths []string                     `json:"bedrock_additional_model_response_field_paths,omitempty"`
+		Request                                  openai.ChatCompletionRequest  `json:"request"`
+		NativeContent                            [][]json.RawMessage           `json:"native_content,omitempty"`
+		NativeInputTokens                        int                           `json:"native_input_tokens,omitempty"`
+		BedrockServiceTier                       string                        `json:"bedrock_service_tier,omitempty"`
+		BedrockPerformanceLatency                string                        `json:"bedrock_performance_latency,omitempty"`
+		BedrockAdditionalModelRequestFields      json.RawMessage               `json:"bedrock_additional_model_request_fields,omitempty"`
+		BedrockAdditionalModelResponseFieldPaths []string                      `json:"bedrock_additional_model_response_field_paths,omitempty"`
+		AnthropicCacheControl                    *openai.PromptCacheBreakpoint `json:"anthropic_cache_control,omitempty"`
 	}{
 		Request:                                  request,
 		NativeContent:                            nativeContent,
@@ -157,6 +158,7 @@ func chatCacheKeyValue(request openai.ChatCompletionRequest) any {
 		BedrockPerformanceLatency:                request.BedrockPerformanceLatency,
 		BedrockAdditionalModelRequestFields:      append(json.RawMessage(nil), request.BedrockAdditionalModelRequestFields...),
 		BedrockAdditionalModelResponseFieldPaths: append([]string(nil), request.BedrockAdditionalModelResponseFieldPaths...),
+		AnthropicCacheControl:                    request.AnthropicCacheControl,
 	}
 }
 

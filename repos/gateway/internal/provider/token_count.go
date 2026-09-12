@@ -35,6 +35,7 @@ type TokenCountRequest struct {
 	AnthropicClientTools       []openai.AnthropicClientTool
 	AnthropicClientToolsets    []openai.AnthropicClientToolset
 	AnthropicThinking          *openai.AnthropicThinkingConfig
+	AnthropicCacheControl      *openai.PromptCacheBreakpoint
 }
 type TokenCountResult struct {
 	InputTokens int
@@ -43,7 +44,7 @@ type TokenCountResult struct {
 }
 
 func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (TokenCountResult, error) {
-	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat, AnthropicSkills: request.AnthropicSkills, AnthropicContainerID: request.AnthropicContainerID, AnthropicCodeExecution: request.AnthropicCodeExecution, AnthropicCodeExecutionType: request.AnthropicCodeExecutionType, AnthropicToolSearch: request.AnthropicToolSearch, AnthropicClientTools: request.AnthropicClientTools, AnthropicClientToolsets: request.AnthropicClientToolsets, AnthropicThinking: request.AnthropicThinking}
+	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat, AnthropicSkills: request.AnthropicSkills, AnthropicContainerID: request.AnthropicContainerID, AnthropicCodeExecution: request.AnthropicCodeExecution, AnthropicCodeExecutionType: request.AnthropicCodeExecutionType, AnthropicToolSearch: request.AnthropicToolSearch, AnthropicClientTools: request.AnthropicClientTools, AnthropicClientToolsets: request.AnthropicClientToolsets, AnthropicThinking: request.AnthropicThinking, AnthropicCacheControl: request.AnthropicCacheControl}
 	if err := validateTokenCountRequest(chat); err != nil {
 		return TokenCountResult{}, err
 	}

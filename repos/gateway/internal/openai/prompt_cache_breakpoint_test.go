@@ -49,6 +49,17 @@ func TestChatRequestPromptCacheBreakpointsIncludesTools(t *testing.T) {
 	}
 }
 
+func TestChatRequestPromptCacheBreakpointsIncludesTopLevelControl(t *testing.T) {
+	request := ChatCompletionRequest{AnthropicCacheControl: &PromptCacheBreakpoint{Mode: "explicit", TTL: "1h"}}
+	if count, message := ChatRequestPromptCacheBreakpoints(request); count != 1 || message != "" {
+		t.Fatalf("count=%d message=%q", count, message)
+	}
+	request.AnthropicCacheControl.TTL = "30m"
+	if _, message := ChatRequestPromptCacheBreakpoints(request); message == "" {
+		t.Fatal("invalid top-level cache control accepted")
+	}
+}
+
 func TestChatRequestPromptCacheBreakpointsIncludesNativeClientTools(t *testing.T) {
 	request := ChatCompletionRequest{
 		AnthropicClientTools:    []AnthropicClientTool{{PromptCacheBreakpoint: &PromptCacheBreakpoint{Mode: "explicit"}}},

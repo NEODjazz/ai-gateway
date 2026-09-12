@@ -39,6 +39,15 @@ func ChatRequestPromptCacheBreakpoints(request ChatCompletionRequest) (int, stri
 	if message != "" {
 		return 0, message
 	}
+	if request.AnthropicCacheControl != nil {
+		if !ValidPromptCacheBreakpoint(request.AnthropicCacheControl) {
+			return 0, "top-level prompt cache control requires mode=explicit and optional ttl=5m or 1h"
+		}
+		count++
+		if count > 4 {
+			return 0, "at most 4 prompt_cache_breakpoint values are allowed"
+		}
+	}
 	for _, tool := range request.Tools {
 		if tool.Function.PromptCacheBreakpoint == nil {
 			continue

@@ -263,7 +263,8 @@ func TestAnthropicMapsPromptCacheBreakpoints(t *testing.T) {
 			{Role: "system", Content: []any{map[string]any{"type": "text", "text": "rules", "prompt_cache_breakpoint": map[string]any{"mode": "explicit", "ttl": "1h"}}}},
 			{Role: "user", Content: []any{map[string]any{"type": "text", "text": "question", "prompt_cache_breakpoint": map[string]any{"mode": "explicit"}}}},
 		},
-		Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}, PromptCacheBreakpoint: &openai.PromptCacheBreakpoint{Mode: "explicit", TTL: "5m"}}}},
+		Tools:                 []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}, PromptCacheBreakpoint: &openai.PromptCacheBreakpoint{Mode: "explicit", TTL: "5m"}}}},
+		AnthropicCacheControl: &openai.PromptCacheBreakpoint{Mode: "explicit", TTL: "1h"},
 	}
 	converted := anthropicChatRequest(request, false)
 	system, ok := converted.System.([]anthropicContent)
@@ -271,7 +272,7 @@ func TestAnthropicMapsPromptCacheBreakpoints(t *testing.T) {
 	if !ok || !messageOK || len(system) != 1 || len(message) != 1 || len(converted.Tools) != 1 {
 		t.Fatalf("unexpected conversion: %+v", converted)
 	}
-	if system[0].CacheControl == nil || system[0].CacheControl.Type != "ephemeral" || system[0].CacheControl.TTL != "1h" || message[0].CacheControl == nil || message[0].CacheControl.TTL != "" || converted.Tools[0].CacheControl == nil || converted.Tools[0].CacheControl.TTL != "5m" {
+	if system[0].CacheControl == nil || system[0].CacheControl.Type != "ephemeral" || system[0].CacheControl.TTL != "1h" || message[0].CacheControl == nil || message[0].CacheControl.TTL != "" || converted.Tools[0].CacheControl == nil || converted.Tools[0].CacheControl.TTL != "5m" || converted.CacheControl == nil || converted.CacheControl.TTL != "1h" {
 		t.Fatalf("cache controls changed: system=%+v message=%+v tool=%+v", system[0], message[0], converted.Tools[0])
 	}
 	encoded, err := json.Marshal(converted)

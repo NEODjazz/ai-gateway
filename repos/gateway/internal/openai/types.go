@@ -36,6 +36,8 @@ type ChatCompletionRequest struct {
 	AnthropicClientToolsets []AnthropicClientToolset `json:"-"`
 	// AnthropicThinking contains a validated native Messages thinking policy.
 	AnthropicThinking *AnthropicThinkingConfig `json:"-"`
+	// AnthropicCacheControl contains a validated native top-level prompt-cache marker.
+	AnthropicCacheControl *PromptCacheBreakpoint `json:"-"`
 	// Bedrock native controls cannot be supplied through the public Chat wire shape.
 	BedrockServiceTier                       string                  `json:"-"`
 	BedrockPerformanceLatency                string                  `json:"-"`

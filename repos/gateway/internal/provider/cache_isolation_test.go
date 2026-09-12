@@ -137,6 +137,21 @@ func TestGeminiSafetySettingsBypassResponseCaches(t *testing.T) {
 	}
 }
 
+func TestTopLevelPromptCacheControlIsolatedFromResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, AnthropicCacheControl: &openai.PromptCacheBreakpoint{Mode: "explicit", TTL: "5m"},
+	}}
+	first := providerCacheKey("chat", request)
+	request.Request.AnthropicCacheControl = &openai.PromptCacheBreakpoint{Mode: "explicit", TTL: "1h"}
+	second := providerCacheKey("chat", request)
+	if first == "" || second == "" || first == second {
+		t.Fatalf("exact cache keys do not isolate top-level cache control: first=%q second=%q", first, second)
+	}
+	if _, _, eligible := semanticRequest(request, Endpoint{Name: "endpoint"}); eligible {
+		t.Fatal("semantic cache enabled for top-level prompt cache control")
+	}
+}
+
 func TestSkillExecutionBypassesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
 		Model: "model", Messages: []openai.Message{{Role: "user", Content: "run"}}, AnthropicCodeExecution: true,
