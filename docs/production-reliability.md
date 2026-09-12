@@ -583,3 +583,11 @@ revision 420 completed successfully, and pod
 OpenAPI 0.1.321 contract exposes `stream`, `partial_images` and both event
 schemas; live validation rejected `partial_images` without `stream=true` before
 provider execution.
+
+Source `e6ebb6b` adds bounded Image Edit SSE streaming through the existing
+multipart validation and content-policy lifecycle. Rancher Desktop built
+`ai-gateway-gateway:gaps-e6ebb6b`; Helm revision 421 completed successfully,
+and pod `ai-gateway-gateway-7f9d8bdc5c-8tm5n` became Ready with zero restarts.
+The live OpenAPI 0.1.322 contract exposes Image Edit streaming controls and both
+event schemas; live multipart validation rejected `partial_images` without
+`stream=true` before authentication or provider execution.
