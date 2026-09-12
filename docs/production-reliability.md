@@ -1250,3 +1250,18 @@ same digest. Live OpenAPI 0.1.363 exposes the owner-scoped image file source. A
 well-formed reference reached authentication, while an invalid identifier
 returned 400 before authentication or file storage access. These smoke checks
 used no credential and performed no external inference.
+
+Source `5fb2560` adds the native Messages Batch lifecycle over the existing
+durable batch engine. Creation validates up to 50,000 native request envelopes,
+model and tool policy, streaming exclusion, and resolved file or HTTPS input
+before atomically storing immutable items and jobs. Each item receives a unique
+execution ID and runs through the normal quota, routing and billing lifecycle.
+List and retrieve are scoped to the authenticated credential and user; ordered
+JSONL results become available only after completion, cancellation, expiry or
+failure. Only terminal batches can be deleted, and PostgreSQL removes their
+items and remaining jobs in the same transaction. Regression tests cover native
+success and cancellation results, owner isolation, pagination, invalid input,
+active-delete conflicts, terminal deletion and job cleanup. Focused tests,
+OpenAPI validation, full Go tests, full race tests, vet and build passed. The
+PostgreSQL batch lifecycle tests also passed against an isolated schema in the
+local Rancher Desktop database.
