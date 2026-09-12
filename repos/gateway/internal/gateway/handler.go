@@ -1305,13 +1305,14 @@ func (h Handler) GenerateImage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		request.Stream = false
+		request.PartialImages = nil
 		reqCtx.ImageGenerationRequest = &request
 		response, err := imageProvider.GenerateImage(r.Context(), reqCtx)
 		if err != nil {
 			writeProviderFailure(w, err)
 			return
 		}
-		payload, err := imageGenerationCompletedPayload(response)
+		payload, err := imageCompletedPayload(response, "image_generation.completed")
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
 			return
@@ -1327,12 +1328,12 @@ func (h Handler) GenerateImage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-func imageGenerationCompletedPayload(response openai.ImageGenerationResponse) (string, error) {
+func imageCompletedPayload(response openai.ImageGenerationResponse, eventType string) (string, error) {
 	if len(response.Data) != 1 || response.Data[0].B64JSON == "" || response.Usage == nil {
 		return "", errors.New("synthesized image streaming requires one base64 image and exact usage")
 	}
 	payload, err := json.Marshal(map[string]any{
-		"type": "image_generation.completed", "b64_json": response.Data[0].B64JSON,
+		"type": eventType, "b64_json": response.Data[0].B64JSON,
 		"background": response.Background, "created_at": response.Created, "output_format": response.OutputFormat,
 		"quality": response.Quality, "size": response.Size, "usage": response.Usage,
 	})
@@ -1377,6 +1378,57 @@ func (h Handler) EditImage(w http.ResponseWriter, r *http.Request) {
 	imageProvider, ok := h.provider.(provider.ImageEditProvider)
 	if !ok {
 		writeError(w, http.StatusBadGateway, "provider_failed", "image edits are not supported by the configured provider")
+		return
+	}
+	if request.Stream {
+		streamStarted := false
+		writeStreamPayload := func(payload string) error {
+			if !streamStarted {
+				writeStreamHeaders(w)
+				w.WriteHeader(http.StatusOK)
+				streamStarted = true
+			}
+			return writeSSEPayload(w, payload)
+		}
+		if streamingProvider, supported := h.provider.(provider.StreamingImageEditProvider); supported {
+			if response, streamed, err := streamingProvider.StreamEditImage(r.Context(), reqCtx, writeStreamPayload); streamed {
+				if err != nil {
+					if streamStarted {
+						_ = writeStreamPayload(errorStreamPayload(err))
+						return
+					}
+					writeProviderFailure(w, err)
+					return
+				}
+				if sink, ok := w.(interface {
+					imageEditStreamResult(openai.ImageGenerationResponse)
+				}); ok {
+					sink.imageEditStreamResult(response)
+				}
+				return
+			} else if err != nil {
+				writeProviderFailure(w, err)
+				return
+			}
+		}
+		if request.PartialImages != nil && *request.PartialImages > 0 {
+			writeError(w, http.StatusBadGateway, "streaming_unsupported", "partial image edit streaming is not supported by the selected deployment policy")
+			return
+		}
+		request.Stream = false
+		request.PartialImages = nil
+		reqCtx.ImageEditRequest = &request
+		response, err := imageProvider.EditImage(r.Context(), reqCtx)
+		if err != nil {
+			writeProviderFailure(w, err)
+			return
+		}
+		payload, err := imageCompletedPayload(response, "image_edit.completed")
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
+			return
+		}
+		_ = writeStreamPayload(payload)
 		return
 	}
 	response, err := imageProvider.EditImage(r.Context(), reqCtx)

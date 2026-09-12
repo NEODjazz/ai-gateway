@@ -143,6 +143,8 @@ func validateGeminiImageEditRequest(request openai.ImageEditRequest) error {
 		{"background", request.Background != ""},
 		{"output_format", request.OutputFormat != ""},
 		{"output_compression", request.OutputCompression != nil},
+		{"stream", request.Stream},
+		{"partial_images", request.PartialImages != nil},
 	} {
 		if unsupported.set {
 			return geminiInvalid(unsupported.name)
@@ -195,6 +197,8 @@ func validateGeminiImageRequest(request openai.ImageGenerationRequest) error {
 		{"output_format", request.OutputFormat != ""},
 		{"output_compression", request.OutputCompression != nil},
 		{"seed", request.Seed != nil},
+		{"stream", request.Stream},
+		{"partial_images", request.PartialImages != nil},
 	} {
 		if unsupported.set {
 			return geminiInvalid(unsupported.name)

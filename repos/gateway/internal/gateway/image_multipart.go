@@ -181,7 +181,7 @@ func multipartImageAttachment(contentType string, data []byte) (openai.ImageAtta
 
 func imageEditScalarField(name string) bool {
 	switch name {
-	case "provider", "model", "prompt", "n", "quality", "response_format", "size", "user", "background", "output_format", "output_compression":
+	case "provider", "model", "prompt", "n", "quality", "response_format", "size", "user", "background", "output_format", "output_compression", "stream", "partial_images":
 		return true
 	default:
 		return false
@@ -208,15 +208,22 @@ func setImageEditField(request *openai.ImageEditRequest, name, value string) boo
 		request.Background = value
 	case "output_format":
 		request.OutputFormat = value
-	case "n", "output_compression":
+	case "stream":
+		if value != "true" && value != "false" {
+			return false
+		}
+		request.Stream = value == "true"
+	case "n", "output_compression", "partial_images":
 		parsed, err := strconv.Atoi(value)
 		if err != nil {
 			return false
 		}
 		if name == "n" {
 			request.N = &parsed
-		} else {
+		} else if name == "output_compression" {
 			request.OutputCompression = &parsed
+		} else {
+			request.PartialImages = &parsed
 		}
 	default:
 		return false

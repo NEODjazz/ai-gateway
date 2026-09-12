@@ -32,6 +32,9 @@ func (p OpenAICompatible) GenerateImage(ctx context.Context, request openai.Imag
 	if err := p.ValidateImageGenerationParameters(request); err != nil {
 		return openai.ImageGenerationResponse{}, err
 	}
+	if request.Stream {
+		return openai.ImageGenerationResponse{}, ErrStreamingUnsupported
+	}
 	body, err := json.Marshal(struct {
 		Model             string `json:"model"`
 		Prompt            string `json:"prompt"`
@@ -117,6 +120,14 @@ type imageGenerationStreamEvent struct {
 }
 
 func streamImageGeneration(body io.Reader, request openai.ImageGenerationRequest, write ImageGenerationStreamWriter) (openai.ImageGenerationResponse, error) {
+	return streamImageResult(body, request, "image_generation", write)
+}
+
+func streamImageEdit(body io.Reader, request openai.ImageEditRequest, write ImageGenerationStreamWriter) (openai.ImageGenerationResponse, error) {
+	return streamImageResult(body, request.GenerationRequest(), "image_edit", write)
+}
+
+func streamImageResult(body io.Reader, request openai.ImageGenerationRequest, eventPrefix string, write ImageGenerationStreamWriter) (openai.ImageGenerationResponse, error) {
 	var result openai.ImageGenerationResponse
 	completed := false
 	partialCount := 0
@@ -136,8 +147,8 @@ func streamImageGeneration(body io.Reader, request openai.ImageGenerationRequest
 			Created: event.CreatedAt, Background: event.Background, OutputFormat: event.OutputFormat,
 			Quality: event.Quality, Size: event.Size, Data: []openai.ImageData{{B64JSON: event.B64JSON, MediaType: imageMediaType(event.OutputFormat)}}, Usage: event.Usage,
 		}
-		switch event.Type {
-		case "image_generation.partial_image":
+		switch {
+		case event.Type == eventPrefix+".partial_image":
 			if event.PartialImageIndex == nil || *event.PartialImageIndex != partialCount || request.PartialImages == nil || partialCount >= *request.PartialImages {
 				return errors.New("provider returned an invalid partial image index")
 			}
@@ -147,7 +158,7 @@ func streamImageGeneration(body io.Reader, request openai.ImageGenerationRequest
 			}
 			partialCount++
 			return write(payload)
-		case "image_generation.completed":
+		case event.Type == eventPrefix+".completed":
 			if event.PartialImageIndex != nil {
 				return errors.New("provider returned a partial index on completion")
 			}

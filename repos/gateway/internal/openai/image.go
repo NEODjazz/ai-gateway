@@ -44,6 +44,8 @@ type ImageEditRequest struct {
 	Background        string            `json:"background,omitempty"`
 	OutputFormat      string            `json:"output_format,omitempty"`
 	OutputCompression *int              `json:"output_compression,omitempty"`
+	Stream            bool              `json:"stream,omitempty"`
+	PartialImages     *int              `json:"partial_images,omitempty"`
 }
 
 type ImageVariationRequest struct {
@@ -112,6 +114,7 @@ func (r ImageEditRequest) GenerationRequest() ImageGenerationRequest {
 		Provider: r.Provider, Model: r.Model, Prompt: r.Prompt, N: r.N, Quality: r.Quality,
 		ResponseFormat: r.ResponseFormat, Size: r.Size, User: r.User, Background: r.Background,
 		OutputFormat: r.OutputFormat, OutputCompression: r.OutputCompression,
+		Stream: r.Stream, PartialImages: r.PartialImages,
 	}
 }
 
@@ -172,7 +175,7 @@ func (r ImageGenerationRequest) Validate() string {
 	if r.PartialImages != nil && (*r.PartialImages < 0 || *r.PartialImages > 3) {
 		return "partial_images must be between 0 and 3"
 	}
-	if r.PartialImages != nil && *r.PartialImages > 0 && !r.Stream {
+	if r.PartialImages != nil && !r.Stream {
 		return "partial_images requires stream=true"
 	}
 	if r.Stream && r.N != nil && *r.N != 1 {

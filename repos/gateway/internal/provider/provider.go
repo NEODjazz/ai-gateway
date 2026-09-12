@@ -242,6 +242,14 @@ type ImageEditClient interface {
 	EditImage(ctx context.Context, request openai.ImageEditRequest) (openai.ImageGenerationResponse, error)
 }
 
+type StreamingImageEditProvider interface {
+	StreamEditImage(ctx context.Context, req modules.RequestContext, write ImageGenerationStreamWriter) (openai.ImageGenerationResponse, bool, error)
+}
+
+type StreamingImageEditClient interface {
+	StreamEditImage(ctx context.Context, request openai.ImageEditRequest, write ImageGenerationStreamWriter) (openai.ImageGenerationResponse, error)
+}
+
 type ImageVariationProvider interface {
 	CreateImageVariation(ctx context.Context, req modules.RequestContext) (openai.ImageGenerationResponse, error)
 }
@@ -1371,6 +1379,9 @@ func (r Router) GenerateImage(ctx context.Context, req modules.RequestContext) (
 	if message := request.Validate(); message != "" {
 		return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
+	if request.Stream {
+		return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New("streaming image generation requires StreamGenerateImage")}
+	}
 	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "image_generation")
 	if len(candidates) == 0 {
 		return openai.ImageGenerationResponse{}, fmt.Errorf("no image generation endpoint for provider=%q model=%q", request.Provider, request.Model)
@@ -1586,6 +1597,9 @@ func (r Router) EditImage(ctx context.Context, req modules.RequestContext) (open
 	if message := request.Validate(); message != "" {
 		return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
+	if request.Stream {
+		return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New("streaming image edits require StreamEditImage")}
+	}
 	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "image_edit")
 	if len(candidates) == 0 {
 		return openai.ImageGenerationResponse{}, fmt.Errorf("no image edit endpoint for provider=%q model=%q", request.Provider, request.Model)
@@ -1660,6 +1674,137 @@ func (r Router) EditImage(ctx context.Context, req modules.RequestContext) (open
 		r.modules.RunFailure(ctx, lastAttempt, joined)
 	}
 	return openai.ImageGenerationResponse{}, joined
+}
+
+func (r Router) StreamEditImage(ctx context.Context, req modules.RequestContext, write ImageGenerationStreamWriter) (openai.ImageGenerationResponse, bool, error) {
+	if req.ImageEditRequest == nil {
+		return openai.ImageGenerationResponse{}, true, errors.New("missing image edit request")
+	}
+	request := *req.ImageEditRequest
+	request.Stream = true
+	if message := request.Validate(); message != "" {
+		return openai.ImageGenerationResponse{}, true, &Error{Class: FailureClientRequest, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "image_edit")
+	if len(candidates) == 0 || outputDLPRequired(req, candidates) {
+		return openai.ImageGenerationResponse{}, false, nil
+	}
+	var failures []error
+	var lastAttempt *modules.RequestContext
+	totalRetries, fallbackCount := 0, 0
+	progress := newRouteProgress(candidates)
+	if progress.initialFailure != nil {
+		failures = append(failures, progress.initialFailure)
+		fallbackCount = 1
+	}
+	for index, endpoint := range candidates {
+		client, ok := endpoint.Provider.(StreamingImageEditClient)
+		if !ok || !progress.allows(endpoint) {
+			continue
+		}
+		progress.enter(endpoint)
+		attemptCtx := providerAttemptContext(req, endpoint)
+		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
+		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
+			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
+			failures = append(failures, err)
+			progress.fail(err)
+			continue
+		}
+		attemptCtx.ImageEditRequest.Stream = true
+		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
+			if terminalModuleError(err) || ctx.Err() != nil {
+				return openai.ImageGenerationResponse{}, false, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			}
+			failures = append(failures, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
+			continue
+		}
+		if attemptCtx.ImageEditRequest == nil {
+			return openai.ImageGenerationResponse{}, false, fmt.Errorf("%s/%s modules removed image edit request", endpoint.Type, endpoint.Name)
+		}
+		lastAttempt = &attemptCtx
+		started := time.Now()
+		release, err := r.acquireEndpoint(ctx, endpoint, openai.ImageEditReserveTokens(*attemptCtx.ImageEditRequest))
+		if err != nil {
+			setAttemptMetadata(&attemptCtx, started, err)
+			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
+			failures = append(failures, fmt.Errorf("%s/%s admission failed: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
+			fallbackCount++
+			continue
+		}
+		if err := r.health.permit(ctx, endpoint); err != nil {
+			release()
+			setAttemptMetadata(&attemptCtx, started, err)
+			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
+			failures = append(failures, fmt.Errorf("%s/%s circuit denied call: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
+			fallbackCount++
+			continue
+		}
+		var response openai.ImageGenerationResponse
+		streamStarted := false
+		firstTokenLatency := time.Duration(0)
+		for retry := 0; ; retry++ {
+			tracker := newStreamAttemptTracker(started)
+			providerCtx, finish := r.startProviderCall(ctx, endpoint, "image_edit.stream")
+			response, err = client.StreamEditImage(providerCtx, *attemptCtx.ImageEditRequest, tracker.imageWriter(write))
+			if err == nil {
+				err = validateImageGenerationResponse(response, attemptCtx.ImageEditRequest.GenerationRequest())
+			}
+			finish(err)
+			streamStarted, firstTokenLatency = tracker.state()
+			if err == nil || errors.Is(err, ErrStreamingUnsupported) || streamStarted || ctx.Err() != nil || retry >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
+				break
+			}
+			if waitErr := r.retry.beforeRetry(ctx, err, retry); waitErr != nil {
+				err = waitErr
+				break
+			}
+			totalRetries++
+		}
+		release()
+		setAttemptMetadata(&attemptCtx, started, err)
+		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
+		if streamStarted {
+			setFirstTokenLatency(&attemptCtx, firstTokenLatency)
+		}
+		if errors.Is(err, ErrStreamingUnsupported) {
+			r.health.success(ctx, endpoint)
+			progress.fail(err)
+			fallbackCount++
+			continue
+		}
+		if err != nil {
+			if ctx.Err() == nil {
+				r.health.failure(ctx, endpoint, err)
+			}
+			wrapped := fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err)
+			progress.fail(err)
+			if streamStarted || ctx.Err() != nil || !progress.hasNext(candidates[index+1:]) {
+				r.modules.RunFailure(ctx, &attemptCtx, wrapped)
+				return openai.ImageGenerationResponse{}, streamStarted, wrapped
+			}
+			failures = append(failures, wrapped)
+			fallbackCount++
+			continue
+		}
+		r.health.success(ctx, endpoint)
+		attemptCtx.ImageGenerationResponse = &response
+		if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
+			return openai.ImageGenerationResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+		}
+		return response, true, nil
+	}
+	if len(failures) > 0 {
+		joined := errors.Join(failures...)
+		if lastAttempt != nil {
+			r.modules.RunFailure(ctx, lastAttempt, joined)
+		}
+		return openai.ImageGenerationResponse{}, false, joined
+	}
+	return openai.ImageGenerationResponse{}, false, nil
 }
 
 func (r Router) CreateImageVariation(ctx context.Context, req modules.RequestContext) (openai.ImageGenerationResponse, error) {

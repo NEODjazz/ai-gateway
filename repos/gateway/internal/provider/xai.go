@@ -547,6 +547,8 @@ func (XAI) ValidateImageGenerationParameters(request openai.ImageGenerationReque
 		parameterCheck{"output_format", request.OutputFormat != ""},
 		parameterCheck{"output_compression", request.OutputCompression != nil},
 		parameterCheck{"seed", request.Seed != nil},
+		parameterCheck{"stream", request.Stream},
+		parameterCheck{"partial_images", request.PartialImages != nil},
 	); err != nil {
 		return err
 	}
@@ -603,6 +605,8 @@ func (XAI) ValidateImageEditParameters(request openai.ImageEditRequest) error {
 		parameterCheck{"background", request.Background != ""},
 		parameterCheck{"output_format", request.OutputFormat != ""},
 		parameterCheck{"output_compression", request.OutputCompression != nil},
+		parameterCheck{"stream", request.Stream},
+		parameterCheck{"partial_images", request.PartialImages != nil},
 	); err != nil {
 		return err
 	}

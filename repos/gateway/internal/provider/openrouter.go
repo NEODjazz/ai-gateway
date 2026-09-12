@@ -133,7 +133,7 @@ func (OpenRouter) ValidateImageGenerationParameters(request openai.ImageGenerati
 	if message := request.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "openrouter", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
-	return rejectParameters("openrouter", parameterCheck{"response_format", request.ResponseFormat != ""}, parameterCheck{"style", request.Style != ""})
+	return rejectParameters("openrouter", parameterCheck{"response_format", request.ResponseFormat != ""}, parameterCheck{"style", request.Style != ""}, parameterCheck{"stream", request.Stream}, parameterCheck{"partial_images", request.PartialImages != nil})
 }
 
 func (p OpenRouter) EditImage(ctx context.Context, request openai.ImageEditRequest) (openai.ImageGenerationResponse, error) {
@@ -153,7 +153,7 @@ func (p OpenRouter) ValidateImageEditParameters(request openai.ImageEditRequest)
 	if message := request.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "openrouter", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
-	if err := rejectParameters("openrouter", parameterCheck{"mask", request.Mask != nil}, parameterCheck{"response_format", request.ResponseFormat != ""}); err != nil {
+	if err := rejectParameters("openrouter", parameterCheck{"mask", request.Mask != nil}, parameterCheck{"response_format", request.ResponseFormat != ""}, parameterCheck{"stream", request.Stream}, parameterCheck{"partial_images", request.PartialImages != nil}); err != nil {
 		return err
 	}
 	return p.ValidateImageGenerationParameters(request.GenerationRequest())

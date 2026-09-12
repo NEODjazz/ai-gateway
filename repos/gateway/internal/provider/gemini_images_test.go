@@ -71,6 +71,7 @@ func TestGeminiImageEditRejectsUnsupportedParametersBeforeNetwork(t *testing.T) 
 	defer server.Close()
 	two := 2
 	compression := 90
+	partial := 1
 	mask := editAttachment()
 	gif := openai.ImageAttachment{MediaType: "image/gif", Data: "R0lGODlhZml4dHVyZQ=="}
 	tests := []struct {
@@ -88,6 +89,8 @@ func TestGeminiImageEditRejectsUnsupportedParametersBeforeNetwork(t *testing.T) 
 		{"background", openai.ImageEditRequest{Background: "opaque"}, "background"},
 		{"output format", openai.ImageEditRequest{OutputFormat: "png"}, "output_format"},
 		{"compression", openai.ImageEditRequest{OutputCompression: &compression}, "output_compression"},
+		{"stream", openai.ImageEditRequest{Stream: true}, "stream"},
+		{"partial images", openai.ImageEditRequest{Stream: true, PartialImages: &partial}, "stream"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -189,6 +192,7 @@ func TestGeminiImageGenerationRejectsUnsupportedParametersBeforeNetwork(t *testi
 	two := 2
 	compression := 90
 	seed := int64(1)
+	partial := 1
 	tests := []struct {
 		name    string
 		request openai.ImageGenerationRequest
@@ -204,6 +208,8 @@ func TestGeminiImageGenerationRejectsUnsupportedParametersBeforeNetwork(t *testi
 		{"output format", openai.ImageGenerationRequest{OutputFormat: "png"}, "output_format"},
 		{"compression", openai.ImageGenerationRequest{OutputCompression: &compression}, "output_compression"},
 		{"seed", openai.ImageGenerationRequest{Seed: &seed}, "seed"},
+		{"stream", openai.ImageGenerationRequest{Stream: true}, "stream"},
+		{"partial images", openai.ImageGenerationRequest{Stream: true, PartialImages: &partial}, "stream"},
 		{"aspect ratio", openai.ImageGenerationRequest{AspectRatio: "7:5"}, "aspect_ratio"},
 	}
 	for _, test := range tests {

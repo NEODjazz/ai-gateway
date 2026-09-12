@@ -2,14 +2,41 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
+	"ai-gateway-gateway/internal/provider"
 )
+
+type nativeImageEditStreamProvider struct {
+	chatProvider
+	streamCalls int
+}
+
+type syntheticImageEditStreamProvider struct{ chatProvider }
+
+func (p *syntheticImageEditStreamProvider) EditImage(_ context.Context, req modules.RequestContext) (openai.ImageGenerationResponse, error) {
+	p.request = req
+	return openai.ImageGenerationResponse{Created: 9, OutputFormat: "png", Data: []openai.ImageData{{B64JSON: "ZmluYWw="}}, Usage: &openai.ImageUsage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8}}, nil
+}
+
+func (p *nativeImageEditStreamProvider) StreamEditImage(_ context.Context, req modules.RequestContext, write provider.ImageGenerationStreamWriter) (openai.ImageGenerationResponse, bool, error) {
+	p.streamCalls++
+	p.request = req
+	if err := write(`{"type":"image_edit.partial_image","b64_json":"cGFydGlhbA==","partial_image_index":0}`); err != nil {
+		return openai.ImageGenerationResponse{}, true, err
+	}
+	if err := write(`{"type":"image_edit.completed","b64_json":"ZmluYWw=","usage":{"input_tokens":3,"output_tokens":5,"total_tokens":8}}`); err != nil {
+		return openai.ImageGenerationResponse{}, true, err
+	}
+	return openai.ImageGenerationResponse{Data: []openai.ImageData{{B64JSON: "ZmluYWw="}}, Usage: &openai.ImageUsage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8}}, true, nil
+}
 
 var testPNG = []byte("\x89PNG\r\n\x1a\nfixture")
 
@@ -52,6 +79,57 @@ func TestImageEditUsesAuthenticatedPipelineAndReservesTPM(t *testing.T) {
 	}
 	if rates.tokens != openai.ImageEditReserveTokens(*llm.request.ImageEditRequest) {
 		t.Fatalf("TPM reserve=%d", rates.tokens)
+	}
+}
+
+func TestImageEditStreamsThroughAuthenticatedMultipartPipeline(t *testing.T) {
+	llm := &nativeImageEditStreamProvider{}
+	rates := &embeddingTokenRateStore{}
+	handler := Routes(NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"image-*"}}}), llm, rates))
+	body, contentType := imageEditHTTPBody(t, map[string]string{"model": "image-model", "prompt": "remove background", "stream": "true", "partial_images": "1"}, map[string][]byte{"image": testPNG})
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/edits", body)
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("Authorization", "Bearer client-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	wire := response.Body.String()
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "text/event-stream" || llm.streamCalls != 1 || !strings.Contains(wire, "image_edit.partial_image") || !strings.Contains(wire, "image_edit.completed") || strings.Contains(wire, "[DONE]") || llm.request.APIKey != "" {
+		t.Fatalf("status=%d headers=%v body=%s calls=%d context=%+v", response.Code, response.Header(), wire, llm.streamCalls, llm.request)
+	}
+	if rates.tokens != openai.ImageEditReserveTokens(*llm.request.ImageEditRequest) {
+		t.Fatalf("TPM reserve=%d", rates.tokens)
+	}
+}
+
+func TestImageEditRejectsInvalidStreamingFieldsBeforeProvider(t *testing.T) {
+	for _, fields := range []map[string]string{
+		{"model": "image", "prompt": "edit", "partial_images": "0"},
+		{"model": "image", "prompt": "edit", "stream": "yes"},
+		{"model": "image", "prompt": "edit", "stream": "true", "partial_images": "4"},
+		{"model": "image", "prompt": "edit", "stream": "true", "n": "2"},
+	} {
+		llm := &nativeImageEditStreamProvider{}
+		body, contentType := imageEditHTTPBody(t, fields, map[string][]byte{"image": testPNG})
+		request := httptest.NewRequest(http.MethodPost, "/v1/images/edits", body)
+		request.Header.Set("Content-Type", contentType)
+		response := httptest.NewRecorder()
+		Routes(NewHandler(modules.NewPipeline(nil), llm)).ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest || llm.streamCalls != 0 {
+			t.Fatalf("fields=%v status=%d body=%s calls=%d", fields, response.Code, response.Body.String(), llm.streamCalls)
+		}
+	}
+}
+
+func TestImageEditSynthesizesCompletedEventWithoutNativeStream(t *testing.T) {
+	llm := &syntheticImageEditStreamProvider{}
+	body, contentType := imageEditHTTPBody(t, map[string]string{"model": "image-model", "prompt": "edit", "stream": "true"}, map[string][]byte{"image": testPNG})
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/edits", body)
+	request.Header.Set("Content-Type", contentType)
+	response := httptest.NewRecorder()
+	Routes(NewHandler(modules.NewPipeline(nil), llm)).ServeHTTP(response, request)
+	wire := response.Body.String()
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "text/event-stream" || !strings.Contains(wire, "image_edit.completed") || strings.Contains(wire, "[DONE]") || llm.request.ImageEditRequest == nil || llm.request.ImageEditRequest.Stream || llm.request.ImageEditRequest.PartialImages != nil {
+		t.Fatalf("status=%d headers=%v body=%s context=%+v", response.Code, response.Header(), wire, llm.request)
 	}
 }
 
