@@ -1438,3 +1438,11 @@ forms, provider completion usage and the full WebSocket boundary. The full Go
 suite, full race suite, vet and build passed. OpenAPI 0.1.369 documents the
 temporary fail-closed contract until independent ASR admission and settlement
 are implemented.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-8b59381` with image ID
+`sha256:df97c4647706942fe109aefa96d9535ef110a9f61a894574690679971c2143fe`.
+Gateway Helm revision 474 completed successfully, and pod
+`ai-gateway-gateway-f669f4665-74cgk` became Ready with zero restarts and the
+same image ID. Live health returned 204, OpenAPI reported 0.1.369, and an
+unauthenticated Realtime smoke request returned 401 before deployment selection.
+The smoke checks submitted no audio and performed no external inference.
