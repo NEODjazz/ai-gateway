@@ -1541,3 +1541,26 @@ changed from revision 478. Pod `ai-gateway-gateway-d6d7ddd9f-2t7vz` became Ready
 with zero restarts and the same image ID. In-pod health succeeded, OpenAPI
 reported 0.1.374, and an unauthenticated response retrieval returned 401. No
 provider credential or external inference was used by the smoke checks.
+
+Source `a8dbb43` adds the bounded `together` provider adapter for Chat
+Completions, streaming, legacy Completions, Embeddings and model discovery with
+bearer authentication. Tools, structured output and vision remain explicit
+deployment capabilities. Responses and provider fields known to be accepted
+without effect are rejected before HTTP. Protocol regressions cover all four
+upstream paths, bearer propagation, exact usage, sorted discovery, profile
+boundaries and preflight rejection. The full Go suite, full race suite, vet,
+build, UI typecheck, UI production build and all 167 UI tests passed. Contract
+commit `17ee35e` publishes the provider in OpenAPI 0.1.375.
+
+The first revision smoke exposed that the generic parameter probe still
+advertised incompatible logprob and model-dependent logit-bias controls. Source
+`582f799` now rejects those controls and publishes empty logprob modes. Focused
+protocol and race tests plus the full Go suite, full race suite, vet and build
+passed. Rancher Desktop built `ai-gateway-gateway:together-582f799` with image ID
+`sha256:363f2e81cbd95f569884e2e85ca5667450f08db3e3a263e5a5a3c153065157a0`.
+Gateway Helm revision 481 completed successfully; only the top-level image tag
+changed from revision 480. Pod `ai-gateway-gateway-b7b964498-2d4fl` became Ready
+with zero restarts and the same image ID. In-pod health succeeded, OpenAPI
+reported 0.1.375, and the live capability profile exposed only the bounded
+operations and parameter set. No provider credential or external inference was
+used by the smoke checks.
