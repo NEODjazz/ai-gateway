@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.274
+  version: 0.1.275
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1594,6 +1594,29 @@ paths:
               schema: {$ref: '#/components/schemas/VectorStoreSearchResultPage'}
         default:
           description: Authentication, ownership, content policy, model authorization, quota, provider, validation, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/rag/ingest:
+    post:
+      operationId: ingestRAG
+      tags: [Vector stores]
+      summary: Atomically ingest an owned file into a vector store
+      description: Creates an inline UTF-8 document or uses an existing owner-scoped assistants file, creates a vector store or uses an existing owner-scoped store, and attaches the file in one durable transaction. Inline content is base64 encoded and limited to 1 MiB. Accepted formats are plain text, Markdown, CSV, and JSON. Remote URLs are not accepted. Retrieval-time embedding remains governed by the selected authorized embedding deployment.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RAGIngestRequest'}
+      responses:
+        '200':
+          description: Atomically persisted file, vector store, and attachment
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RAGIngestResponse'}
+        default:
+          description: Authentication, ownership, quota, validation, or durable storage failure
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -5383,6 +5406,49 @@ components:
             include_usage: {type: boolean}
             include_obfuscation: {type: boolean}
       additionalProperties: true
+    RAGInlineFile:
+      type: object
+      additionalProperties: false
+      required: [filename, content]
+      properties:
+        filename: {type: string, minLength: 1, maxLength: 512}
+        content: {type: string, contentEncoding: base64, maxLength: 1398104, description: Base64-encoded file content with a decoded maximum of 1 MiB.}
+        content_type: {type: string, enum: [text/plain, text/markdown, text/csv, application/json]}
+        expires_after_seconds: {type: integer, format: int64, minimum: 3600, maximum: 2592000}
+    RAGIngestRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        file_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+        file: {$ref: '#/components/schemas/RAGInlineFile'}
+        vector_store_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+        vector_store: {$ref: '#/components/schemas/VectorStoreCreateRequest'}
+        attributes:
+          type: object
+          propertyNames: {maxLength: 64}
+          additionalProperties:
+            oneOf:
+              - {type: string, maxLength: 512}
+              - {type: number}
+              - {type: boolean}
+          maxProperties: 16
+        chunking_strategy: {$ref: '#/components/schemas/VectorStoreChunkingStrategy'}
+      allOf:
+        - oneOf:
+            - {required: [file]}
+            - {required: [file_id]}
+        - oneOf:
+            - {required: [vector_store]}
+            - {required: [vector_store_id]}
+    RAGIngestResponse:
+      type: object
+      additionalProperties: false
+      required: [object, file, vector_store, attachment]
+      properties:
+        object: {type: string, const: rag.ingest}
+        file: {$ref: '#/components/schemas/FileObject'}
+        vector_store: {$ref: '#/components/schemas/VectorStore'}
+        attachment: {$ref: '#/components/schemas/VectorStoreFile'}
     RAGRetrievalConfig:
       type: object
       additionalProperties: false

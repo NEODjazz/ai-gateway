@@ -25,6 +25,7 @@ import (
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 	"ai-gateway-gateway/internal/publichttp"
+	"ai-gateway-gateway/internal/ragstate"
 	"ai-gateway-gateway/internal/skillstate"
 	"ai-gateway-gateway/internal/vectorstate"
 	"ai-gateway-gateway/internal/videostate"
@@ -70,6 +71,7 @@ type Handler struct {
 	batchJobs         asyncstate.Store
 	skills            skillstate.Store
 	vectorStores      vectorstate.Store
+	ragIngest         ragstate.Store
 	vectorStoreConfig VectorStoreRuntimeConfig
 	access            *AccessRegistry
 	budgets           BudgetManagementClient
