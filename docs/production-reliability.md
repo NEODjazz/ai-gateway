@@ -655,3 +655,11 @@ Helm revision 427 completed successfully, and pod
 OpenAPI 0.1.327 contract lists `/v1/ocr` in the accepted batch endpoints. An
 unauthenticated request using that endpoint reached authentication with 401,
 while an unknown OCR batch endpoint failed request validation with 400.
+
+The Audio Translation streaming item was removed from the gap list after
+contract revalidation. The public create operation documents synchronous
+multipart output in `json`, `text`, `srt`, `verbose_json` or `vtt` form and does
+not define a streaming request or event lifecycle. The existing regression
+therefore retains the fail-closed rejection of `stream=true` before provider
+execution. The Image Generation row was also corrected after confirming that
+Image Edit streaming had already shipped and was covered by its own regressions.
