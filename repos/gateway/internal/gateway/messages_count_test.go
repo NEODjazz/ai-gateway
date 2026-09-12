@@ -149,6 +149,16 @@ func TestCountEndpointPreservesThinkingConfiguration(t *testing.T) {
 	}
 }
 
+func TestCountEndpointPreservesInferenceGeo(t *testing.T) {
+	counter := &countProviderSpy{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}}}}), counter))
+	response := countEndpointCall(handler, `{"model":"m","inference_geo":"us","cache_control":{"type":"ephemeral","ttl":"1h"},"messages":[{"role":"user","content":"hi"}]}`, "gateway-test-key")
+	control := counter.request.Request.AnthropicCacheControl
+	if response.Code != http.StatusOK || counter.calls != 1 || counter.request.Request.AnthropicInferenceGeo != "us" || control == nil || control.TTL != "1h" {
+		t.Fatalf("status=%d body=%s calls=%d geo=%q cache=%+v", response.Code, response.Body.String(), counter.calls, counter.request.Request.AnthropicInferenceGeo, control)
+	}
+}
+
 func TestCountEndpointIncludesOwnedSkillExecutionContext(t *testing.T) {
 	owner := skillOwnerKey(modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"})
 	store := &memorySkillStore{

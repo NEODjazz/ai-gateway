@@ -32,6 +32,7 @@ type messagesRequest struct {
 	StopSequences []string              `json:"stop_sequences,omitempty"`
 	Container     *messagesContainer    `json:"container,omitempty"`
 	CacheControl  *messagesCacheControl `json:"cache_control,omitempty"`
+	InferenceGeo  string                `json:"inference_geo,omitempty"`
 }
 type messagesThinking struct {
 	Type         string `json:"type"`
@@ -152,6 +153,12 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 			return result, err
 		}
 		result.AnthropicCacheControl = breakpoint
+	}
+	switch request.InferenceGeo {
+	case "", "global", "us":
+		result.AnthropicInferenceGeo = request.InferenceGeo
+	default:
+		return result, errors.New("inference_geo must be global or us")
 	}
 	if thinking := request.Thinking; thinking != nil {
 		switch thinking.Type {

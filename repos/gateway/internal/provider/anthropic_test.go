@@ -46,6 +46,32 @@ func TestAnthropicPreservesExplicitZeroMaxTokens(t *testing.T) {
 	}
 }
 
+func TestAnthropicInferenceGeoWireUsageAndCapability(t *testing.T) {
+	request := openai.ChatCompletionRequest{AnthropicInferenceGeo: "us"}
+	converted := anthropicChatRequest(request, false)
+	encoded, err := json.Marshal(converted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if converted.InferenceGeo != "us" || !strings.Contains(string(encoded), `"inference_geo":"us"`) {
+		t.Fatalf("request=%s", encoded)
+	}
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,inference_geo" {
+		t.Fatalf("capabilities=%q", got)
+	}
+	required := requiredChatCapabilities(request, false)
+	if (Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat"}}).supportsCapabilities(required...) || !(Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat", "inference_geo"}}).supportsCapabilities(required...) {
+		t.Fatal("inference geography routing capability is not enforced")
+	}
+	response := anthropicToChatCompletion(anthropicResponse{Usage: anthropicUsage{InferenceGeo: "us"}}, "model")
+	if response.Usage.InferenceGeo != "us" {
+		t.Fatalf("reported geo=%q", response.Usage.InferenceGeo)
+	}
+	if validateAnthropicInferenceGeo("us", "global") == nil || validateAnthropicInferenceGeo("us", "") == nil {
+		t.Fatal("requested inference geography mismatch accepted")
+	}
+}
+
 func TestAnthropicThinkingWireAndCapability(t *testing.T) {
 	budget := 2048
 	request := anthropicChatRequest(openai.ChatCompletionRequest{AnthropicThinking: &openai.AnthropicThinkingConfig{Type: "enabled", BudgetTokens: &budget, Display: "summarized"}}, false)

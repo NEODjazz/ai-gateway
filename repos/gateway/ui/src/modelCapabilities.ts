@@ -45,6 +45,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "browser_toolset", label: "Browser toolset", description: "Provider-defined client browser interaction tools" },
   { value: "thinking", label: "Thinking", description: "Native adaptive or budgeted reasoning" },
   { value: "zero_output", label: "Zero output", description: "Native zero-token cache population requests" },
+  { value: "inference_geo", label: "Inference geography", description: "Native US or global inference placement" },
   { value: "audio", label: "Audio output", description: "Generated audio in chat responses" },
   { value: "audio_input", label: "Audio input", description: "Inline audio input for native multimodal requests" },
   { value: "video_input", label: "Video input", description: "Bounded inline video input for native multimodal requests" },

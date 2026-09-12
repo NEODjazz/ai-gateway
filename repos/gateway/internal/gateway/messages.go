@@ -130,6 +130,9 @@ func messagesUsage(usage openai.Usage, serviceTier ...string) map[string]any {
 	if len(serviceTier) > 0 && serviceTier[0] != "" {
 		result["service_tier"] = serviceTier[0]
 	}
+	if usage.InferenceGeo != "" {
+		result["inference_geo"] = usage.InferenceGeo
+	}
 	if details := usage.CompletionTokensDetails; details != nil {
 		result["output_tokens_details"] = map[string]int{"thinking_tokens": details.ReasoningTokens}
 	}

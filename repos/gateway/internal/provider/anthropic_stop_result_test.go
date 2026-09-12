@@ -21,7 +21,7 @@ func TestAnthropicMatchedStopIsPreservedInJSONAndStream(t *testing.T) {
 	}
 	var payloads []string
 	stream := "event: message_start\ndata: {\"message\":{\"id\":\"id\",\"model\":\"m\"}}\n\nevent: message_delta\ndata: {\"delta\":{\"stop_reason\":\"stop_sequence\",\"stop_sequence\":\" END \"},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {}\n\n"
-	result, err := streamAnthropicChat(strings.NewReader(stream), "model", false, nil, nil, false, func(payload string) error { payloads = append(payloads, payload); return nil })
+	result, err := streamAnthropicChat(strings.NewReader(stream), "model", false, nil, nil, false, "", func(payload string) error { payloads = append(payloads, payload); return nil })
 	if err != nil || result.Choices[0].StopSequence == nil || *result.Choices[0].StopSequence != sequence || !strings.Contains(strings.Join(payloads, ""), `"stop_sequence":" END "`) {
 		t.Fatalf("stream metadata lost: %+v %v %v", result, err, payloads)
 	}
@@ -35,7 +35,18 @@ func TestAnthropicRejectsMissingMatchedSequence(t *testing.T) {
 	if _, err := NewAnthropic(server.URL, "", false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{Model: "m"}); err == nil {
 		t.Fatal("missing JSON delimiter accepted")
 	}
-	if _, err := streamAnthropicChat(strings.NewReader("event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"stop_sequence\"}}\n\n"), "m", false, nil, nil, false, func(string) error { return nil }); err == nil {
+	if _, err := streamAnthropicChat(strings.NewReader("event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"stop_sequence\"}}\n\n"), "m", false, nil, nil, false, "", func(string) error { return nil }); err == nil {
 		t.Fatal("missing SSE delimiter accepted")
+	}
+}
+
+func TestAnthropicStreamRequiresRequestedInferenceGeo(t *testing.T) {
+	stream := "event: message_start\ndata: {\"message\":{\"id\":\"id\",\"model\":\"m\",\"usage\":{\"inference_geo\":\"us\"}}}\n\nevent: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {}\n\n"
+	result, err := streamAnthropicChat(strings.NewReader(stream), "model", false, nil, nil, false, "us", func(string) error { return nil })
+	if err != nil || result.Usage.InferenceGeo != "us" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if _, err := streamAnthropicChat(strings.NewReader(stream), "model", false, nil, nil, false, "global", func(string) error { return nil }); err == nil {
+		t.Fatal("streamed inference geography mismatch accepted")
 	}
 }

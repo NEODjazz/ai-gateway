@@ -110,6 +110,26 @@ func TestAnthropicCountTokensIncludesSkillExecutionContext(t *testing.T) {
 	}
 }
 
+func TestAnthropicCountTokensIncludesInferenceGeo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body anthropicRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.InferenceGeo != "us" || body.CacheControl == nil || body.CacheControl.TTL != "1h" {
+			t.Errorf("inference_geo=%q cache_control=%+v", body.InferenceGeo, body.CacheControl)
+		}
+		_, _ = w.Write([]byte(`{"input_tokens":17}`))
+	}))
+	defer server.Close()
+	result, err := NewAnthropic(server.URL, "", false).CountTokens(t.Context(), TokenCountRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "count"}}, AnthropicInferenceGeo: "us", AnthropicCacheControl: &openai.PromptCacheBreakpoint{Mode: "explicit", TTL: "1h"},
+	})
+	if err != nil || result.InputTokens != 17 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
 func TestAnthropicCountTokensIncludesNativeClientTools(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {

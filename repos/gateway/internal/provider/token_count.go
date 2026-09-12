@@ -36,6 +36,7 @@ type TokenCountRequest struct {
 	AnthropicClientToolsets    []openai.AnthropicClientToolset
 	AnthropicThinking          *openai.AnthropicThinkingConfig
 	AnthropicCacheControl      *openai.PromptCacheBreakpoint
+	AnthropicInferenceGeo      string
 }
 type TokenCountResult struct {
 	InputTokens int
@@ -44,7 +45,7 @@ type TokenCountResult struct {
 }
 
 func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (TokenCountResult, error) {
-	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat, AnthropicSkills: request.AnthropicSkills, AnthropicContainerID: request.AnthropicContainerID, AnthropicCodeExecution: request.AnthropicCodeExecution, AnthropicCodeExecutionType: request.AnthropicCodeExecutionType, AnthropicToolSearch: request.AnthropicToolSearch, AnthropicClientTools: request.AnthropicClientTools, AnthropicClientToolsets: request.AnthropicClientToolsets, AnthropicThinking: request.AnthropicThinking, AnthropicCacheControl: request.AnthropicCacheControl}
+	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat, AnthropicSkills: request.AnthropicSkills, AnthropicContainerID: request.AnthropicContainerID, AnthropicCodeExecution: request.AnthropicCodeExecution, AnthropicCodeExecutionType: request.AnthropicCodeExecutionType, AnthropicToolSearch: request.AnthropicToolSearch, AnthropicClientTools: request.AnthropicClientTools, AnthropicClientToolsets: request.AnthropicClientToolsets, AnthropicThinking: request.AnthropicThinking, AnthropicCacheControl: request.AnthropicCacheControl, AnthropicInferenceGeo: request.AnthropicInferenceGeo}
 	if err := validateTokenCountRequest(chat); err != nil {
 		return TokenCountResult{}, err
 	}
@@ -61,7 +62,14 @@ func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (
 		OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
 		Thinking     *anthropicThinking     `json:"thinking,omitempty"`
 		Container    *anthropicContainer    `json:"container,omitempty"`
-	}{native.Model, native.System, native.Messages, native.Tools, native.ToolChoice, native.OutputConfig, native.Thinking, native.Container})
+		CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+		InferenceGeo string                 `json:"inference_geo,omitempty"`
+	}{
+		Model: native.Model, System: native.System, Messages: native.Messages,
+		Tools: native.Tools, ToolChoice: native.ToolChoice, OutputConfig: native.OutputConfig,
+		Thinking: native.Thinking, Container: native.Container, CacheControl: native.CacheControl,
+		InferenceGeo: native.InferenceGeo,
+	})
 	if err != nil {
 		return TokenCountResult{}, err
 	}

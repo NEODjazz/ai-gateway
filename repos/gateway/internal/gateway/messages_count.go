@@ -19,6 +19,8 @@ type messagesCountRequest struct {
 	OutputConfig *messagesOutputConfig `json:"output_config,omitempty"`
 	Thinking     *messagesThinking     `json:"thinking,omitempty"`
 	Container    *messagesContainer    `json:"container,omitempty"`
+	CacheControl *messagesCacheControl `json:"cache_control,omitempty"`
+	InferenceGeo string                `json:"inference_geo,omitempty"`
 }
 
 func (h Handler) CountMessageTokens(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +39,7 @@ func (h Handler) CountMessageTokens(w http.ResponseWriter, r *http.Request) {
 	if !decodeInferenceRequest(output, r, &native) {
 		return
 	}
-	request, err := (messagesRequest{Model: native.Model, MaxTokens: 1, Messages: native.Messages, System: native.System, Tools: native.Tools, ToolChoice: native.ToolChoice, OutputConfig: native.OutputConfig, Thinking: native.Thinking, Container: native.Container}).chatContext(true)
+	request, err := (messagesRequest{Model: native.Model, MaxTokens: 1, Messages: native.Messages, System: native.System, Tools: native.Tools, ToolChoice: native.ToolChoice, OutputConfig: native.OutputConfig, Thinking: native.Thinking, Container: native.Container, CacheControl: native.CacheControl, InferenceGeo: native.InferenceGeo}).chatContext(true)
 	if err != nil {
 		writeError(output, 400, "invalid_request", err.Error())
 		return

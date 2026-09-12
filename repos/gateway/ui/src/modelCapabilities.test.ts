@@ -48,6 +48,7 @@ describe("modelCapabilityOptions", () => {
       "browser_toolset",
       "thinking",
       "zero_output",
+      "inference_geo",
       "audio",
       "audio_input",
       "video_input",

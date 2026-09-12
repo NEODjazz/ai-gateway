@@ -2383,8 +2383,14 @@ func (r Router) applyCatalogPricing(ctx context.Context, req *modules.RequestCon
 	}
 	req.Metadata["model_catalog.version"] = catalog.Version
 	req.Metadata["model_catalog.pricing_key"] = entry.Provider + "/" + entry.Model
-	req.Metadata["model_catalog.input_cost_per_1m"] = strconv.FormatFloat(entry.InputCostPer1M, 'g', -1, 64)
-	req.Metadata["model_catalog.output_cost_per_1m"] = strconv.FormatFloat(entry.OutputCostPer1M, 'g', -1, 64)
+	inputCost, outputCost := entry.InputCostPer1M, entry.OutputCostPer1M
+	if req.Request.AnthropicInferenceGeo == "us" {
+		inputCost *= 1.1
+		outputCost *= 1.1
+		req.Metadata["model_catalog.price_modifier"] = "inference_geo_us_1.1"
+	}
+	req.Metadata["model_catalog.input_cost_per_1m"] = strconv.FormatFloat(inputCost, 'g', -1, 64)
+	req.Metadata["model_catalog.output_cost_per_1m"] = strconv.FormatFloat(outputCost, 'g', -1, 64)
 	req.Metadata["model_catalog.training_cost_per_1m"] = strconv.FormatFloat(entry.TrainingCostPer1M, 'g', -1, 64)
 	req.Metadata["model_catalog.search_cost_per_1k"] = strconv.FormatFloat(entry.SearchCostPer1K, 'g', -1, 64)
 	req.Metadata["model_catalog.character_cost_per_1m"] = strconv.FormatFloat(entry.CharacterCostPer1M, 'g', -1, 64)
@@ -3029,6 +3035,9 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	if request.AllowZeroMaxTokens {
 		required = append(required, "zero_output")
 	}
+	if request.AnthropicInferenceGeo != "" {
+		required = append(required, "inference_geo")
+	}
 	if len(request.GeminiSafetySettings) > 0 {
 		required = append(required, "gemini_safety_settings")
 	}
@@ -3339,11 +3348,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "interactions") || hasCapability(required, "interaction_agents") || hasCapability(required, "interaction_environment_reuse") || hasCapability(required, "gemini_safety_settings") || hasCapability(required, "background_interactions") || hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "video") || hasCapability(required, "video_remix") || hasCapability(required, "video_extension") || hasCapability(required, "container") || hasCapability(required, "container_files") || hasCapability(required, "container_network") || hasCapability(required, "video_input") || hasCapability(required, "realtime") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "tool_search") || hasCapability(required, "thinking") || hasCapability(required, "zero_output") || hasCapability(required, "audio") || hasCapability(required, "audio_input") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses") || hasCapability(required, "file_input") || hasCapability(required, "bedrock_invoke")
+	return hasCapability(required, "interactions") || hasCapability(required, "interaction_agents") || hasCapability(required, "interaction_environment_reuse") || hasCapability(required, "gemini_safety_settings") || hasCapability(required, "background_interactions") || hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "video") || hasCapability(required, "video_remix") || hasCapability(required, "video_extension") || hasCapability(required, "container") || hasCapability(required, "container_files") || hasCapability(required, "container_network") || hasCapability(required, "video_input") || hasCapability(required, "realtime") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "tool_search") || hasCapability(required, "thinking") || hasCapability(required, "zero_output") || hasCapability(required, "inference_geo") || hasCapability(required, "audio") || hasCapability(required, "audio_input") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses") || hasCapability(required, "file_input") || hasCapability(required, "bedrock_invoke")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"interactions", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "background_interactions", "mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "video_input", "realtime", "web_search", "web_fetch", "tool_search", "thinking", "zero_output", "audio", "audio_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke"} {
+	for _, capability := range []string{"interactions", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "background_interactions", "mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "video_input", "realtime", "web_search", "web_fetch", "tool_search", "thinking", "zero_output", "inference_geo", "audio", "audio_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

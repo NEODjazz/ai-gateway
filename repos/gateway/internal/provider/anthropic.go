@@ -44,6 +44,7 @@ type anthropicRequest struct {
 	Thinking      *anthropicThinking     `json:"thinking,omitempty"`
 	Container     *anthropicContainer    `json:"container,omitempty"`
 	CacheControl  *anthropicCacheControl `json:"cache_control,omitempty"`
+	InferenceGeo  string                 `json:"inference_geo,omitempty"`
 }
 
 type anthropicThinking struct {
@@ -176,6 +177,7 @@ type anthropicUsage struct {
 	OutputTokensDetails      *anthropicOutputTokenDetails `json:"output_tokens_details,omitempty"`
 	ServerToolUse            *anthropicServerToolUsage    `json:"server_tool_use,omitempty"`
 	ServiceTier              string                       `json:"service_tier,omitempty"`
+	InferenceGeo             string                       `json:"inference_geo,omitempty"`
 }
 
 type anthropicServerToolUsage struct {
@@ -214,6 +216,9 @@ func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompl
 		return openai.ChatCompletionResponse{}, err
 	}
 	if err := validateAnthropicUsage(response.Usage); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	if err := validateAnthropicInferenceGeo(request.AnthropicInferenceGeo, response.Usage.InferenceGeo); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 	if err := validateAnthropicRequestedToolUsage(response.Usage, request.WebSearchOptions, request.WebFetchOptions, request.AnthropicCodeExecution); err != nil {
@@ -259,7 +264,7 @@ func (p Anthropic) StreamChatCompletions(ctx context.Context, request openai.Cha
 	}
 	defer resp.Body.Close()
 
-	return streamAnthropicChat(resp.Body, request.Model, anthropicUsesStructuredTool(request.ResponseFormat), request.WebSearchOptions, request.WebFetchOptions, request.AnthropicCodeExecution, write)
+	return streamAnthropicChat(resp.Body, request.Model, anthropicUsesStructuredTool(request.ResponseFormat), request.WebSearchOptions, request.WebFetchOptions, request.AnthropicCodeExecution, request.AnthropicInferenceGeo, write)
 }
 
 func (p Anthropic) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
@@ -467,6 +472,7 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		Thinking:      thinking,
 		Container:     container,
 		CacheControl:  anthropicToolCacheControl(request.AnthropicCacheControl),
+		InferenceGeo:  request.AnthropicInferenceGeo,
 	}
 }
 
@@ -867,6 +873,7 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 		Usage: openai.Usage{
 			SearchRequests:   anthropicSearchRequests(response.Usage),
 			ToolRequests:     anthropicCodeExecutionRequests(response.Usage),
+			InferenceGeo:     response.Usage.InferenceGeo,
 			PromptTokens:     inputTokens,
 			CompletionTokens: response.Usage.OutputTokens,
 			TotalTokens:      inputTokens + response.Usage.OutputTokens,
@@ -1006,6 +1013,16 @@ func validateAnthropicUsage(usage anthropicUsage) error {
 	}
 	if usage.ServiceTier != "" && usage.ServiceTier != "standard" && usage.ServiceTier != "priority" && usage.ServiceTier != "batch" {
 		return errors.New("invalid Anthropic service tier")
+	}
+	if usage.InferenceGeo != "" && usage.InferenceGeo != "global" && usage.InferenceGeo != "us" {
+		return errors.New("invalid Anthropic inference geo")
+	}
+	return nil
+}
+
+func validateAnthropicInferenceGeo(requested, reported string) error {
+	if requested != "" && reported != requested {
+		return errors.New("Anthropic response inference geo does not match request")
 	}
 	return nil
 }
@@ -1221,7 +1238,7 @@ func anthropicFinishReason(reason string) string {
 	}
 }
 
-func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, webSearch *openai.ChatWebSearchOptions, webFetch *openai.ChatWebFetchOptions, codeExecution bool, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, webSearch *openai.ChatWebSearchOptions, webFetch *openai.ChatWebFetchOptions, codeExecution bool, inferenceGeo string, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	response := openai.ChatCompletionResponse{
 		Object: "chat.completion",
 		Model:  fallbackModel,
@@ -1248,6 +1265,9 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			if err := validateAnthropicUsage(streamEvent.Message.Usage); err != nil {
 				return err
 			}
+			if err := validateAnthropicInferenceGeo(inferenceGeo, streamEvent.Message.Usage.InferenceGeo); err != nil {
+				return err
+			}
 			if err := validateAnthropicRequestedToolUsage(streamEvent.Message.Usage, webSearch, webFetch, codeExecution); err != nil {
 				return err
 			}
@@ -1259,6 +1279,7 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			response.Usage.PromptTokens = anthropicInputTokens(streamEvent.Message.Usage)
 			response.Usage.SearchRequests = anthropicSearchRequests(streamEvent.Message.Usage)
 			response.Usage.ToolRequests = anthropicCodeExecutionRequests(streamEvent.Message.Usage)
+			response.Usage.InferenceGeo = streamEvent.Message.Usage.InferenceGeo
 			response.Usage.PromptTokensDetails = &openai.PromptTokenDetails{CachedTokens: streamEvent.Message.Usage.CacheReadInputTokens, CacheWriteTokens: streamEvent.Message.Usage.CacheCreationInputTokens}
 			response.ServiceTier = streamEvent.Message.Usage.ServiceTier
 			if response.ServiceTier != "" {
@@ -1348,6 +1369,12 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			}
 			if err := validateAnthropicRequestedToolUsage(streamEvent.Usage, webSearch, webFetch, codeExecution); err != nil {
 				return err
+			}
+			if streamEvent.Usage.InferenceGeo != "" {
+				if response.Usage.InferenceGeo != "" && response.Usage.InferenceGeo != streamEvent.Usage.InferenceGeo {
+					return errors.New("Anthropic changed inference geo during stream")
+				}
+				response.Usage.InferenceGeo = streamEvent.Usage.InferenceGeo
 			}
 			if streamEvent.Usage.OutputTokens != 0 {
 				response.Usage.CompletionTokens = streamEvent.Usage.OutputTokens

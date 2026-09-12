@@ -152,6 +152,18 @@ func TestTopLevelPromptCacheControlIsolatedFromResponseCaches(t *testing.T) {
 	}
 }
 
+func TestInferenceGeoIsolatedFromResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, AnthropicInferenceGeo: "global",
+	}}
+	if key := providerCacheKey("chat", request); key != "" {
+		t.Fatalf("exact cache enabled for pinned inference geography: %q", key)
+	}
+	if _, _, eligible := semanticRequest(request, Endpoint{Name: "endpoint"}); eligible {
+		t.Fatal("semantic cache enabled for pinned inference geography")
+	}
+}
+
 func TestSkillExecutionBypassesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
 		Model: "model", Messages: []openai.Message{{Role: "user", Content: "run"}}, AnthropicCodeExecution: true,

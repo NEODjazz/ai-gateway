@@ -38,6 +38,8 @@ type ChatCompletionRequest struct {
 	AnthropicThinking *AnthropicThinkingConfig `json:"-"`
 	// AnthropicCacheControl contains a validated native top-level prompt-cache marker.
 	AnthropicCacheControl *PromptCacheBreakpoint `json:"-"`
+	// AnthropicInferenceGeo pins native Messages inference to an allowed geography.
+	AnthropicInferenceGeo string `json:"-"`
 	// Bedrock native controls cannot be supplied through the public Chat wire shape.
 	BedrockServiceTier                       string                  `json:"-"`
 	BedrockPerformanceLatency                string                  `json:"-"`
@@ -486,6 +488,7 @@ type Usage struct {
 	ToolRequests            int                     `json:"-"`
 	ToolRequestsReported    bool                    `json:"-"`
 	ProviderCostUSDTicks    *int64                  `json:"-"`
+	InferenceGeo            string                  `json:"-"`
 	PromptTokens            int                     `json:"prompt_tokens"`
 	CompletionTokens        int                     `json:"completion_tokens"`
 	TotalTokens             int                     `json:"total_tokens"`

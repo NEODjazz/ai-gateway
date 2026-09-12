@@ -1752,6 +1752,20 @@ func TestRuntimeCatalogPricingSnapshotIsAttachedToProviderAttempt(t *testing.T) 
 	}
 }
 
+func TestUSInferenceGeoAppliesCatalogPricingMultiplier(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"geo-v1","models":[{"provider":"anthropic","model":"model","input_cost_per_1m":10,"output_cost_per_1m":20,"currency":"USD"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := Endpoint{Name: "anthropic", Type: "anthropic"}
+	router := Router{catalog: modelcatalog.NewRegistry(catalog, nil, time.Second)}
+	req := providerAttemptContext(modules.RequestContext{Request: openai.ChatCompletionRequest{AnthropicInferenceGeo: "us"}}, endpoint)
+	router.applyCatalogPricing(context.Background(), &req, endpoint, "model")
+	if req.Metadata["model_catalog.input_cost_per_1m"] != "11" || req.Metadata["model_catalog.output_cost_per_1m"] != "22" || req.Metadata["model_catalog.price_modifier"] != "inference_geo_us_1.1" {
+		t.Fatalf("metadata=%v", req.Metadata)
+	}
+}
+
 func TestRuntimeCatalogUpdateChangesModelsWithoutRebuildingRouter(t *testing.T) {
 	initial, _ := modelcatalog.Parse(`{"version":"v1","unknown_model_policy":"deny","models":[{"provider":"endpoint-a","model":"old","capabilities":["chat"]}]}`)
 	updated, _ := modelcatalog.Parse(`{"version":"v2","unknown_model_policy":"deny","models":[{"provider":"endpoint-a","model":"new","capabilities":["chat"]}]}`)
