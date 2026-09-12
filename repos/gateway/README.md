@@ -224,7 +224,9 @@ at most 500 members in one PostgreSQL transaction, including rollback when any
 member is absent. User names, group display names, and non-empty external IDs
 are unique among visible resources. User responses include current group
 membership as a read-only attribute; user PUT and PATCH preserve it, while
-membership changes remain atomic through the group resource.
+membership changes remain atomic through the group resource. User PATCH can
+remove optional profile attributes or individual roles; required and read-only
+attributes fail with a SCIM error instead of being silently discarded.
 
 The Playground uses the same authorized model list and inference endpoints as
 external clients. It supports incremental Chat Completions and Responses SSE,

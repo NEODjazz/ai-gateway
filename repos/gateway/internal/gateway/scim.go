@@ -17,7 +17,10 @@ import (
 	"ai-gateway-gateway/internal/modules"
 )
 
-var scimUserFilterPattern = regexp.MustCompile(`(?i)^\s*(userName|externalId)\s+eq\s+("(?:[^"\\]|\\.)*")\s*$`)
+var (
+	scimUserFilterPattern = regexp.MustCompile(`(?i)^\s*(userName|externalId)\s+eq\s+("(?:[^"\\]|\\.)*")\s*$`)
+	scimRolePathPattern   = regexp.MustCompile(`(?i)^roles\s*\[\s*value\s+eq\s+("(?:[^"\\]|\\.)*")\s*\]$`)
+)
 
 const (
 	scimUserSchema      = "urn:ietf:params:scim:schemas:core:2.0:User"
@@ -427,7 +430,43 @@ func validSCIMUserInput(w http.ResponseWriter, user scimUser) bool {
 
 func applySCIMUserPatch(user *scimUser, operation scimPatchOperation) error {
 	op := strings.ToLower(strings.TrimSpace(operation.Op))
-	path := strings.ToLower(strings.TrimSpace(operation.Path))
+	rawPath := strings.TrimSpace(operation.Path)
+	path := strings.ToLower(rawPath)
+	if op == "remove" {
+		if path == "" {
+			return errors.New("remove requires a path")
+		}
+		if match := scimRolePathPattern.FindStringSubmatch(rawPath); len(match) == 2 {
+			value, err := strconv.Unquote(match[1])
+			if err != nil {
+				return errors.New("invalid role filter")
+			}
+			roles := user.Roles[:0]
+			for _, role := range user.Roles {
+				if role.Value != value {
+					roles = append(roles, role)
+				}
+			}
+			user.Roles = roles
+			return nil
+		}
+		switch path {
+		case "externalid":
+			user.ExternalID = ""
+		case "displayname", "name.formatted", "name":
+			user.DisplayName = ""
+			user.Name.Formatted = ""
+		case "active":
+			user.Active = nil
+		case "roles":
+			user.Roles = nil
+		case "username":
+			return errors.New("userName is required")
+		default:
+			return fmt.Errorf("path %q is not supported", operation.Path)
+		}
+		return nil
+	}
 	if op != "add" && op != "replace" {
 		return fmt.Errorf("operation %q is not supported", operation.Op)
 	}
@@ -454,6 +493,7 @@ func applySCIMUserPatch(user *scimUser, operation scimPatchOperation) error {
 		}
 		if values.DisplayName != nil {
 			user.DisplayName = *values.DisplayName
+			user.Name.Formatted = *values.DisplayName
 		}
 		if values.Active != nil {
 			user.Active = values.Active
@@ -473,7 +513,12 @@ func applySCIMUserPatch(user *scimUser, operation scimPatchOperation) error {
 	case "username":
 		return json.Unmarshal(operation.Value, &user.UserName)
 	case "displayname", "name.formatted":
-		return json.Unmarshal(operation.Value, &user.DisplayName)
+		var value string
+		if err := json.Unmarshal(operation.Value, &value); err != nil {
+			return err
+		}
+		user.DisplayName, user.Name.Formatted = value, value
+		return nil
 	case "active":
 		return json.Unmarshal(operation.Value, &user.Active)
 	case "roles":

@@ -133,6 +133,33 @@ func TestSCIMUserReplaceWithoutActivePreservesDisabledStatus(t *testing.T) {
 	}
 }
 
+func TestSCIMUserPatchRemovesOptionalAttributes(t *testing.T) {
+	client := &directoryClientStub{user: &DirectoryUser{ID: "user-1", ExternalID: "employee-1", Email: "person@example.test", Name: "Person", Status: "disabled", Roles: []string{"developer", "auditor"}}}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithIdentityDirectory(client)
+	body := `{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"remove","path":"externalId"},{"op":"remove","path":"name.formatted"},{"op":"remove","path":"active"},{"op":"remove","path":"roles[value eq \"auditor\"]"}]}`
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/scim/v2/Users/user-1", strings.NewReader(body)))
+	if response.Code != http.StatusOK || client.user == nil || client.user.ExternalID != "" || client.user.Name != "" || client.user.Status != "active" || len(client.user.Roles) != 1 || client.user.Roles[0] != "developer" {
+		t.Fatalf("status=%d user=%+v body=%s", response.Code, client.user, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "employee-1") || strings.Contains(response.Body.String(), "auditor") {
+		t.Fatalf("removed attributes remain in response: %s", response.Body.String())
+	}
+}
+
+func TestSCIMUserPatchCannotRemoveRequiredOrReadOnlyAttributes(t *testing.T) {
+	for _, path := range []string{"userName", "groups"} {
+		client := &directoryClientStub{user: &DirectoryUser{ID: "user-1", Email: "person@example.test", Status: "active"}}
+		handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithIdentityDirectory(client)
+		body := `{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"remove","path":"` + path + `"}]}`
+		response := httptest.NewRecorder()
+		Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/scim/v2/Users/user-1", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"scimType":"invalidValue"`) {
+			t.Fatalf("path=%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestSCIMRequiresGlobalAdmin(t *testing.T) {
 	handler := NewHandler(modules.NewPipeline([]modules.Module{teamAdminModule{}}), modelsProvider{}).WithIdentityDirectory(&directoryClientStub{})
 	response := httptest.NewRecorder()
