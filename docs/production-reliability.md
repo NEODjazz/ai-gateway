@@ -1942,3 +1942,25 @@ cluster-local synthetic request verified masking for the dialogue code word,
 Russian password and login labels, security key, internal identifiers, broker
 account and Cyrillic month date while preserving the confirmation word and
 surrounding punctuation.
+
+Source `d319443` adds composable anonymization profiles and policy attachment
+scopes for organization, team, user, credential, model, provider, deployment
+and tags. Provider/deployment filters are resolved independently for every
+fallback attempt. Effective policy metadata survives batch and durable
+background execution and participates in cache isolation. Logs contain only
+profile/rule names and replacement counts. The admin API publishes the active
+rule inventory, and the Guardrails/Policies UI supports custom rule selection,
+coverage inspection, policy simulation and anonymized compliance previews.
+Gateway and anonymizer vet, build, full test and race suites passed; all 167 UI
+tests and UI type checking passed.
+
+Rancher Desktop built `ai-gateway-gateway:anon-policy-5037067` with image ID
+`sha256:d99ad682912d875183fb0286b6fa09dff41b1b834bf5f9462578e14a4b2af46c`
+and `ai-gateway-anonymizer:anon-policy-5037067` with image ID
+`sha256:19e32ea52889a50fb49c1e2e489782b004011bd8f548231a66db372b3c37e24c`.
+Gateway Helm revision 502 and anonymizer revision 5 completed successfully;
+both pods became Ready with zero restarts. Liveness and readiness returned 204,
+the admin inventory returned 40 active rules, and a live custom-profile check
+masked an email and a Russian passport into two placeholders without returning
+the source values and reported `content_stored=false`. The temporary test policy
+was restored after verification.
