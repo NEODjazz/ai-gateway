@@ -179,9 +179,13 @@ Bounded Streamable HTTP client выполняет initialize negotiation, под
 JSON и SSE ответы на POST, передает server bearer credential и
 protocol/session headers, ограничивает request/response/tool pages и
 отклоняет private, loopback и link-local адреса при каждом DNS resolve. Реестр
-не возвращает credential после сохранения. Текущий runtime создаёт protocol
-client на каждый внешний gateway request; reuse долгоживущих MCP sessions пока
-не реализован.
+не возвращает credential после сохранения. Успешный protocol client и его MCP
+session переиспользуются между gateway requests в пределах одного процесса.
+Pool ограничен 64 записями, применяет sliding TTL 10 минут и LRU eviction.
+Ключ включает SHA-256 от endpoint и server credential, поэтому ротация или
+удаление credential не переиспользует прежнюю session. Transport или protocol
+failure немедленно инвалидирует запись, чтобы следующий запрос выполнил новое
+`initialize`. Pool локален для replica; межрепличного session sharing нет.
 
 ## Проверка реализации
 

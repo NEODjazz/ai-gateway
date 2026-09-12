@@ -1318,3 +1318,14 @@ same digest. Live OpenAPI 0.1.366 exposes the write-only bearer input and
 read-only configured flag. An MCP discovery request with an invalid smoke key
 returned 401 before registry lookup or upstream network access. The smoke check
 stored no credential and performed no external MCP call or model inference.
+
+Source `d247692` adds replica-local MCP session reuse through a fixed-capacity
+TTL/LRU pool. The pool holds at most 64 clients, refreshes a ten-minute sliding
+TTL on use and hashes endpoint plus server credential for its key. Credential
+rotation and clearing therefore create a separate session identity without
+placing plaintext credentials in map keys. Protocol or transport failures
+invalidate the entry before the next request. A mutex makes concurrent cache
+misses create one client; the protocol client serializes session operations.
+Regressions cover concurrent single creation, capacity eviction, expiry,
+credential isolation, successful request reuse and failure recovery. Focused
+tests, the full Go suite, full race suite, vet and build passed.
