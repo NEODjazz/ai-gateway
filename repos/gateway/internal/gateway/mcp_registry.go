@@ -97,7 +97,7 @@ type MCPRuntimeClient interface {
 	CallTool(context.Context, string, map[string]any) (mcpclient.CallResult, error)
 }
 
-type MCPRuntimeFactory func(string, string) (MCPRuntimeClient, error)
+type MCPRuntimeFactory func(string, string, string) (MCPRuntimeClient, error)
 
 func (h Handler) WithMCPRuntimeFactory(factory MCPRuntimeFactory) Handler {
 	h.mcpRuntime = factory
@@ -105,12 +105,12 @@ func (h Handler) WithMCPRuntimeFactory(factory MCPRuntimeFactory) Handler {
 	return h
 }
 
-func (h Handler) mcpRuntimeClient(endpoint, bearerToken string) (MCPRuntimeClient, error) {
-	return h.mcpRuntimeCache.get(endpoint, bearerToken, h.mcpRuntime)
+func (h Handler) mcpRuntimeClient(transport, endpoint, bearerToken string) (MCPRuntimeClient, error) {
+	return h.mcpRuntimeCache.get(transport, endpoint, bearerToken, h.mcpRuntime)
 }
 
-func (h Handler) invalidateMCPRuntimeClient(endpoint, bearerToken string) {
-	h.mcpRuntimeCache.invalidate(endpoint, bearerToken)
+func (h Handler) invalidateMCPRuntimeClient(transport, endpoint, bearerToken string) {
+	h.mcpRuntimeCache.invalidate(transport, endpoint, bearerToken)
 }
 
 func (h Handler) WithMCPCallStore(store mcpstate.Store) Handler {

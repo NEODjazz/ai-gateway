@@ -59,10 +59,6 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "mcp_server_not_found", "MCP server not found")
 		return
 	}
-	if server.Transport != "streamable-http" {
-		writeError(w, http.StatusBadRequest, "unsupported_mcp_transport", "MCP runtime requires streamable-http transport")
-		return
-	}
 	identifier := "mcp:" + server.ID + "@" + server.ServerURL
 	if !h.authorizeMCPConnector(w, req, identifier) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
 		return
@@ -71,7 +67,7 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 		writeMCPBillingFailure(w, err)
 		return
 	}
-	client, err := h.mcpRuntimeClient(server.ServerURL, bearerToken)
+	client, err := h.mcpRuntimeClient(server.Transport, server.ServerURL, bearerToken)
 	if err != nil {
 		req.Metadata["provider.status"] = "error"
 		req.Metadata["provider.failure_class"] = "configuration"
@@ -81,7 +77,7 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 	}
 	page, err := client.ListTools(r.Context(), r.URL.Query().Get("cursor"))
 	if err != nil {
-		h.invalidateMCPRuntimeClient(server.ServerURL, bearerToken)
+		h.invalidateMCPRuntimeClient(server.Transport, server.ServerURL, bearerToken)
 		req.Metadata["provider.status"] = "error"
 		req.Metadata["provider.failure_class"] = "upstream"
 		_ = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &req, "cancel", err)
@@ -168,10 +164,6 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "mcp_server_not_found", "MCP server not found")
 		return
 	}
-	if server.Transport != "streamable-http" {
-		writeError(w, http.StatusBadRequest, "unsupported_mcp_transport", "MCP runtime requires streamable-http transport")
-		return
-	}
 	identifier := "mcp:" + server.ID + "@" + server.ServerURL
 	if !h.authorizeMCPTool(w, req, server, identifier, toolName) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
 		return
@@ -216,7 +208,7 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 		writeMCPBillingFailure(w, err)
 		return
 	}
-	client, err := h.mcpRuntimeClient(server.ServerURL, bearerToken)
+	client, err := h.mcpRuntimeClient(server.Transport, server.ServerURL, bearerToken)
 	if err != nil {
 		_ = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &req, "cancel", err)
 		_ = h.mcpCalls.Release(r.Context(), scope, key, req.RequestID)
@@ -226,7 +218,7 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := client.CallTool(r.Context(), toolName, input.Arguments)
 	if err != nil {
-		h.invalidateMCPRuntimeClient(server.ServerURL, bearerToken)
+		h.invalidateMCPRuntimeClient(server.Transport, server.ServerURL, bearerToken)
 		req.Metadata["provider.status"] = "error"
 		req.Metadata["provider.failure_class"] = "upstream"
 		_ = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &req, "cancel", err)

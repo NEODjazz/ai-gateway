@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.366
+  version: 0.1.367
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -10956,7 +10956,7 @@ components:
         label: {type: string, minLength: 1, maxLength: 128}
         description: {type: string, maxLength: 1024}
         server_url: {type: string, format: uri, pattern: '^https://[^?#]+$'}
-        transport: {type: string, enum: [streamable-http, sse], description: Streamable HTTP supports authenticated gateway discovery; legacy SSE remains metadata-only}
+        transport: {type: string, enum: [streamable-http, sse], description: Transport used for authenticated tool discovery and execution. SSE uses the legacy 2024-11-05 HTTP and event-stream lifecycle.}
         bearer_token: {type: string, maxLength: 32768, writeOnly: true, description: Optional static server credential. Omit to preserve the stored value; send an empty string to clear it. The value is encrypted at rest and never returned.}
         tools:
           type: array

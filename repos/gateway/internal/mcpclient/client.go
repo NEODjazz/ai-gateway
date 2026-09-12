@@ -58,6 +58,7 @@ type CallResult struct {
 type rpcResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
+	Method  string          `json:"method,omitempty"`
 	Result  json.RawMessage `json:"result"`
 	Error   *struct {
 		Code    int    `json:"code"`
@@ -134,18 +135,25 @@ func (c *Client) ListTools(ctx context.Context, cursor string) (ToolPage, error)
 	if _, err := c.callLocked(ctx, "tools/list", params, &page); err != nil {
 		return ToolPage{}, err
 	}
+	if err := validateToolPage(page); err != nil {
+		return ToolPage{}, err
+	}
+	return page, nil
+}
+
+func validateToolPage(page ToolPage) error {
 	if len(page.Tools) > maxTools {
-		return ToolPage{}, errors.New("MCP tool page exceeds limit")
+		return errors.New("MCP tool page exceeds limit")
 	}
 	if len(page.NextCursor) > 2048 {
-		return ToolPage{}, errors.New("MCP cursor exceeds limit")
+		return errors.New("MCP cursor exceeds limit")
 	}
 	for _, tool := range page.Tools {
 		if tool.Name == "" || len(tool.Name) > 256 || !validJSONObject(tool.InputSchema, true) || (len(tool.OutputSchema) > 0 && !validJSONObject(tool.OutputSchema, true)) || (len(tool.Annotations) > 0 && !validJSONObject(tool.Annotations, false)) {
-			return ToolPage{}, errors.New("invalid MCP tool definition")
+			return errors.New("invalid MCP tool definition")
 		}
 	}
-	return page, nil
+	return nil
 }
 
 func validJSONObject(raw json.RawMessage, requireObjectType bool) bool {
@@ -173,22 +181,29 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments map[string
 	if _, err := c.callLocked(ctx, "tools/call", map[string]any{"name": name, "arguments": arguments}, &result); err != nil {
 		return CallResult{}, err
 	}
+	if err := validateCallResult(result); err != nil {
+		return CallResult{}, err
+	}
+	return result, nil
+}
+
+func validateCallResult(result CallResult) error {
 	if result.Content == nil || len(result.Content) > 1000 {
-		return CallResult{}, errors.New("invalid MCP tool result")
+		return errors.New("invalid MCP tool result")
 	}
 	for _, content := range result.Content {
 		var object map[string]any
 		if json.Unmarshal(content, &object) != nil || object == nil {
-			return CallResult{}, errors.New("invalid MCP tool result content")
+			return errors.New("invalid MCP tool result content")
 		}
 	}
 	if len(result.StructuredContent) > 0 {
 		var object map[string]any
 		if json.Unmarshal(result.StructuredContent, &object) != nil || object == nil {
-			return CallResult{}, errors.New("invalid MCP structured tool result")
+			return errors.New("invalid MCP structured tool result")
 		}
 	}
-	return result, nil
+	return nil
 }
 
 func (c *Client) callLocked(ctx context.Context, method string, params any, destination any) (string, error) {

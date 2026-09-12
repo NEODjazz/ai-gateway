@@ -152,7 +152,10 @@ func NewHandlerWithMetrics(pipeline modules.Pipeline, llmProvider provider.Provi
 	if metrics == nil {
 		metrics = NewMetrics()
 	}
-	return Handler{pipeline: pipeline, provider: llmProvider, rateLimits: rateLimits, metrics: metrics, ready: ready, a2aHTTPClient: publichttp.NewClient(15 * time.Second), mcpRuntimeCache: newMCPRuntimeCache(defaultMCPRuntimeCacheEntries, defaultMCPRuntimeCacheTTL), mcpRuntime: func(endpoint, bearerToken string) (MCPRuntimeClient, error) {
+	return Handler{pipeline: pipeline, provider: llmProvider, rateLimits: rateLimits, metrics: metrics, ready: ready, a2aHTTPClient: publichttp.NewClient(15 * time.Second), mcpRuntimeCache: newMCPRuntimeCache(defaultMCPRuntimeCacheEntries, defaultMCPRuntimeCacheTTL), mcpRuntime: func(transport, endpoint, bearerToken string) (MCPRuntimeClient, error) {
+		if transport == "sse" {
+			return mcpclient.NewSSE(endpoint, bearerToken)
+		}
 		return mcpclient.NewWithBearer(endpoint, bearerToken)
 	}}
 }
