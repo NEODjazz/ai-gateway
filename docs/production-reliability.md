@@ -1992,3 +1992,22 @@ Rancher Desktop built `ai-gateway-gateway:gemini-usage-92be558` with image ID
 Gateway Helm revision 504 completed successfully. Pod
 `ai-gateway-gateway-7f8c649999-tsh69` became Ready with zero restarts. Live
 liveness and readiness returned 204 and OpenAPI 0.1.398 was served.
+
+Source `059beac` adds native GenerateContent URL Context with separate
+deployment capability and tool authorization, bounded provider metadata,
+tool-declaration TPM reserve, provider-reported tool-input billing and exact
+and semantic cache bypass. Native token counting applies the same tool grant.
+The deployment and catalog selectors expose URL Context in the UI, while both
+URL Context and managed code execution require explicit endpoint capabilities.
+Focused regressions, OpenAPI validation, vet, build, the full Go suite, the
+full race suite, all 167 UI tests and UI type checking passed.
+
+Rancher Desktop built
+`ai-gateway-gateway:gemini-url-context-059beac` with image ID
+`sha256:83c64864088fd215e751e70841c8a2be924b2b55894e6ebfd87fa69df72c42b4`.
+Gateway Helm revision 505 completed successfully. Pod
+`ai-gateway-gateway-869c84bb54-tcz99` became Ready with zero restarts on that
+image. Live liveness and readiness returned 204, OpenAPI 0.1.399 exposed the
+URL Context request, response and capability contract, the production UI bundle
+contained both managed Gemini tool selectors, and an unauthenticated URL Context
+request returned 401 at the authentication boundary without provider execution.
