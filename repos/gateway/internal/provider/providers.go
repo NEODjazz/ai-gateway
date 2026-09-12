@@ -46,6 +46,7 @@ type ProviderCapabilityProfile struct {
 	AudioSpeechParameters        ProviderAudioSpeechParameterPolicy        `json:"audio_speech_parameters"`
 	OCRParameters                ProviderOCRParameterPolicy                `json:"ocr_parameters"`
 	VideoCreateParameters        ProviderVideoCreateParameterPolicy        `json:"video_create_parameters"`
+	FineTuningCreateParameters   ProviderFineTuningCreateParameterPolicy   `json:"fine_tuning_create_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -120,6 +121,10 @@ type ProviderOCRParameterPolicy struct {
 }
 
 type ProviderVideoCreateParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
+}
+
+type ProviderFineTuningCreateParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 }
 
@@ -388,9 +393,38 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			AudioSpeechParameters:        managedProviderAudioSpeechParameterPolicy(client, slicesContain(operations, "audio_speech")),
 			OCRParameters:                managedProviderOCRParameterPolicy(client, slicesContain(operations, "ocr")),
 			VideoCreateParameters:        managedProviderVideoCreateParameterPolicy(client, slicesContain(operations, "video")),
+			FineTuningCreateParameters:   managedProviderFineTuningCreateParameterPolicy(client, slicesContain(operations, "fine_tuning")),
 		})
 	}
 	return profiles
+}
+
+func managedProviderFineTuningCreateParameterPolicy(client Client, supported bool) ProviderFineTuningCreateParameterPolicy {
+	policy := ProviderFineTuningCreateParameterPolicy{SupportedOptions: []string{}}
+	validator, ok := client.(interface {
+		ValidateFineTuningCreateParameters(openai.FineTuningCreateRequest) error
+	})
+	if !supported || !ok {
+		return policy
+	}
+	baseline := openai.FineTuningCreateRequest{Model: "model", TrainingFile: "file_training"}
+	for _, probe := range []struct {
+		name  string
+		apply func(*openai.FineTuningCreateRequest)
+	}{
+		{"validation_file", func(r *openai.FineTuningCreateRequest) { r.ValidationFile = "file_validation" }},
+		{"suffix", func(r *openai.FineTuningCreateRequest) { r.Suffix = "custom" }},
+		{"seed", func(r *openai.FineTuningCreateRequest) { value := int64(1); r.Seed = &value }},
+		{"metadata", func(r *openai.FineTuningCreateRequest) { r.Metadata = map[string]string{"key": "value"} }},
+		{"method", func(r *openai.FineTuningCreateRequest) { r.Method = []byte(`{"type":"supervised"}`) }},
+	} {
+		request := baseline
+		probe.apply(&request)
+		if validator.ValidateFineTuningCreateParameters(request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	return policy
 }
 
 func managedProviderVideoCreateParameterPolicy(client Client, supported bool) ProviderVideoCreateParameterPolicy {

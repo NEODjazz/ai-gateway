@@ -667,6 +667,17 @@ func TestManagedProviderCapabilityProfilesExposeValidatedVideoCreateOptions(t *t
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeValidatedFineTuningCreateOptions(t *testing.T) {
+	all := []string{"validation_file", "suffix", "seed", "metadata", "method"}
+	expected := map[string][]string{"openai": all, "openai-compatible": all}
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		want, listed := expected[profile.Type]
+		if slices.Contains(profile.Operations, "fine_tuning") != listed || !slices.Equal(profile.FineTuningCreateParameters.SupportedOptions, want) {
+			t.Errorf("%s fine-tuning create parameters=%v operation=%v", profile.Type, profile.FineTuningCreateParameters.SupportedOptions, slices.Contains(profile.Operations, "fine_tuning"))
+		}
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

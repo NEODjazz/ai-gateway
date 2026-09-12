@@ -30,8 +30,42 @@ type FineTuningClient interface {
 	DeleteFineTunedModel(context.Context, string) (openai.ModelDeletion, error)
 }
 
+func (p OpenAICompatible) ValidateFineTuningCreateParameters(input openai.FineTuningCreateRequest) error {
+	if input.Model == "" || len(input.Model) > 256 || !validFineTuningFileID(input.TrainingFile) || input.ValidationFile != "" && !validFineTuningFileID(input.ValidationFile) || len(input.Suffix) > 18 || len(input.Metadata) > 16 {
+		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New("invalid fine-tuning request")}
+	}
+	for key, value := range input.Metadata {
+		if key == "" || len(key) > 64 || len(value) > 512 {
+			return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "metadata", Err: errors.New("invalid fine-tuning metadata")}
+		}
+	}
+	if len(input.Method) > 0 {
+		trimmed := bytes.TrimSpace(input.Method)
+		if len(trimmed) > 64<<10 || len(trimmed) < 2 || trimmed[0] != '{' || !json.Valid(trimmed) {
+			return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "method", Err: errors.New("method must be a bounded JSON object")}
+		}
+	}
+	return nil
+}
+
+func validFineTuningFileID(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '_' || character == '-' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func (p OpenAICompatible) CreateFineTuningJob(ctx context.Context, input openai.FineTuningCreateRequest) (openai.FineTuningJob, error) {
 	var result openai.FineTuningJob
+	if err := p.ValidateFineTuningCreateParameters(input); err != nil {
+		return result, err
+	}
 	err := p.fineTuningRequest(ctx, http.MethodPost, "fine_tuning/jobs", nil, input, &result)
 	return result, err
 }
