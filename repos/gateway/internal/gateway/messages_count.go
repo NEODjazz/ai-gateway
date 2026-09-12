@@ -93,6 +93,7 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 		tools = append(tools, "tool_search")
 	}
 	tools = append(tools, anthropicClientToolIdentifiers(request.AnthropicClientTools)...)
+	tools = append(tools, anthropicClientToolsetIdentifiers(request.AnthropicClientToolsets)...)
 	if !h.authorizeTools(w, req, tools, valid) || !h.authorizeAccess(w, r.Context(), req, request.Model, openai.ChatInputTokens(request)) {
 		return 0, false
 	}

@@ -200,7 +200,14 @@ func messagesContent(message openai.Message) ([]any, error) {
 		if err := json.Unmarshal([]byte(call.Function.Arguments), &input); err != nil || input == nil {
 			return nil, errors.New("invalid tool arguments")
 		}
-		content = append(content, map[string]any{"type": "tool_use", "id": call.ID, "name": call.Function.Name, "input": input})
+		block := map[string]any{"type": "tool_use", "id": call.ID, "name": call.Function.Name, "input": input}
+		if call.ToolsetName != "" {
+			if call.ToolsetName != "computer" || !computerToolMembers[call.Function.Name] {
+				return nil, errors.New("invalid client toolset identity")
+			}
+			block["toolset_name"] = call.ToolsetName
+		}
+		content = append(content, block)
 	}
 	return content, nil
 }
@@ -235,6 +242,12 @@ func validateNativeMessageBlock(block map[string]any) error {
 		}
 		if _, ok := block["input"].(map[string]any); !ok {
 			return errors.New("native tool input must be an object")
+		}
+		if toolset, found := block["toolset_name"]; found {
+			name, _ := block["name"].(string)
+			if toolset != "computer" || !computerToolMembers[name] || typeName != "tool_use" {
+				return errors.New("invalid native client toolset identity")
+			}
 		}
 	case "web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result", "bash_code_execution_tool_result", "text_editor_code_execution_tool_result":
 		if !stringField("tool_use_id") || block["content"] == nil {
@@ -470,7 +483,14 @@ func (w *messagesWriter) chunk(payload string) error {
 				index = w.blocks
 				w.blocks++
 				w.tools[*call.Index] = index
-				if err := w.event("content_block_start", map[string]any{"index": index, "content_block": map[string]any{"type": "tool_use", "id": call.ID, "name": call.Function.Name, "input": map[string]any{}}}); err != nil {
+				block := map[string]any{"type": "tool_use", "id": call.ID, "name": call.Function.Name, "input": map[string]any{}}
+				if call.ToolsetName != "" {
+					if call.ToolsetName != "computer" || !computerToolMembers[call.Function.Name] {
+						return errors.New("invalid client toolset identity")
+					}
+					block["toolset_name"] = call.ToolsetName
+				}
+				if err := w.event("content_block_start", map[string]any{"index": index, "content_block": block}); err != nil {
 					return err
 				}
 			} else if call.Function.Name != "" || call.ID != "" {

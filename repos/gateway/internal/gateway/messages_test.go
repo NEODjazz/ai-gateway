@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -173,6 +175,63 @@ func TestMessagesConvertsNativeClientTools(t *testing.T) {
 	}
 }
 
+func TestMessagesConvertsComputerToolsetAndPreservesLifecycle(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call-new", Type: "function", Function: openai.FunctionCall{Name: "left_click", Arguments: `{"coordinate":[10,20]}`}, ToolsetName: "computer"}}}, FinishReason: "tool_calls"}}, Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 3, TotalTokens: 13}}}
+	body := `{"model":"model","max_tokens":20,"tools":[{"type":"computer_toolset_20260801","configs":{"zoom":{"enabled":false}},"allowed_callers":["direct"],"cache_control":{"type":"ephemeral"}}],"messages":[{"role":"assistant","content":[{"type":"server_tool_use","id":"server-old","name":"web_search","input":{"query":"docs"}},{"type":"web_search_tool_result","tool_use_id":"server-old","content":[]},{"type":"tool_use","id":"call-old","name":"screenshot","toolset_name":"computer","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-old","toolset_name":"computer","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="}}]}]}]}`
+	response := nativeMessageCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), body, "")
+	request := upstream.request.Request
+	if response.Code != http.StatusOK || upstream.calls != 1 || len(request.AnthropicClientToolsets) != 1 || request.AnthropicClientToolsets[0].Type != "computer_toolset_20260801" || request.AnthropicClientToolsets[0].Configs["zoom"].Enabled == nil || *request.AnthropicClientToolsets[0].Configs["zoom"].Enabled || request.NativeInputTokens < 4590 || len(request.Messages) != 2 || len(request.Messages[0].NativeContent) != 3 || len(request.Messages[1].NativeContent) != 1 {
+		t.Fatalf("response=%d body=%s request=%+v", response.Code, response.Body.String(), request)
+	}
+	if !strings.Contains(response.Body.String(), `"toolset_name":"computer"`) || !strings.Contains(response.Body.String(), `"name":"left_click"`) {
+		t.Fatalf("toolset identity lost: %s", response.Body.String())
+	}
+	identifiers := anthropicClientToolsetIdentifiers(request.AnthropicClientToolsets)
+	if len(identifiers) != 16 || slices.Contains(identifiers, "computer:zoom") || !slices.Contains(identifiers, "computer:screenshot") {
+		t.Fatalf("identifiers=%v", identifiers)
+	}
+}
+
+func TestMessagesRejectsInvalidComputerToolsets(t *testing.T) {
+	allDisabled := make([]string, 0, len(computerToolMembers))
+	for name := range computerToolMembers {
+		allDisabled = append(allDisabled, fmt.Sprintf(`%q:{"enabled":false}`, name))
+	}
+	for _, body := range []string{
+		`{"model":"m","max_tokens":10,"tools":[{"type":"computer_toolset_20260801","name":"computer"}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"computer_toolset_20260801","configs":{"unknown":{}}}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"computer_toolset_20260801","configs":{"zoom":{"extra":true}}}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"computer_toolset_20260801","configs":{"zoom":{"defer_loading":true}}}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"computer_toolset_20260801","allowed_callers":["code_execution_20260521"]}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"computer_toolset_20260801"}],"tool_choice":{"type":"tool","name":"screenshot"},"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"computer_toolset_20260801","configs":{` + strings.Join(allDisabled, ",") + `}}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"computer_toolset_20260801"}],"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call","name":"screenshot","toolset_name":"computer","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call","toolset_name":"browser","content":"no"}]}]}`,
+	} {
+		upstream := &fallbackChatProvider{}
+		response := nativeMessageCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), body, "")
+		if response.Code != http.StatusBadRequest || upstream.calls != 0 {
+			t.Fatalf("response=%d body=%s request=%s", response.Code, response.Body.String(), body)
+		}
+	}
+}
+
+func TestMessagesComputerToolsetDeferredLoadingRequiresToolSearch(t *testing.T) {
+	deferred := true
+	configs := make(map[string]messagesToolsetMemberConfig, len(computerToolMembers))
+	for name := range computerToolMembers {
+		configs[name] = messagesToolsetMemberConfig{DeferLoading: &deferred}
+	}
+	request := messagesRequest{Model: "model", MaxTokens: 10, Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`"work"`)}}, Tools: []messagesTool{{Type: "computer_toolset_20260801", Configs: configs}}}
+	if _, err := request.chat(); err == nil || !strings.Contains(err.Error(), "tool search") {
+		t.Fatalf("deferred toolset accepted without tool search: %v", err)
+	}
+	request.Tools = append(request.Tools, messagesTool{Type: "tool_search_tool_regex_20251119", Name: "tool_search_tool_regex"})
+	chat, err := request.chat()
+	if err != nil || len(chat.AnthropicClientToolsets) != 1 || !toolsetDeferred(chat.AnthropicClientToolsets[0]) {
+		t.Fatalf("deferred toolset rejected with tool search: chat=%+v err=%v", chat, err)
+	}
+}
+
 func TestMessagesRejectsInvalidNativeClientTools(t *testing.T) {
 	for _, body := range []string{
 		`{"model":"m","max_tokens":10,"tools":[{"type":"memory_20250818","name":"wrong"}],"messages":[{"role":"user","content":"hi"}]}`,
@@ -277,6 +336,7 @@ func TestMessagesPreservesAccessControls(t *testing.T) {
 		{name: "tool", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}, body: `{"model":"model","max_tokens":10,"tools":[{"name":"denied","input_schema":{}}],"messages":[{"role":"user","content":"hi"}]}`, status: 403},
 		{name: "tool search", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}, body: `{"model":"model","max_tokens":10,"tools":[{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex"}],"messages":[{"role":"user","content":"hi"}]}`, status: 403},
 		{name: "client tool", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}, body: `{"model":"model","max_tokens":10,"tools":[{"type":"bash_20250124","name":"bash"}],"messages":[{"role":"user","content":"hi"}]}`, status: 403},
+		{name: "client toolset", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tools: []string{"computer:screenshot"}}, body: `{"model":"model","max_tokens":10,"tools":[{"type":"computer_toolset_20260801"}],"messages":[{"role":"user","content":"hi"}]}`, status: 403},
 		{name: "tpm", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tpm: 5}, body: `{"model":"model","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`, status: 429},
 	} {
 		t.Run(test.name, func(t *testing.T) {

@@ -30,6 +30,8 @@ type ChatCompletionRequest struct {
 	AnthropicToolSearch string `json:"-"`
 	// AnthropicClientTools contains validated provider-defined tools that the caller executes.
 	AnthropicClientTools []AnthropicClientTool `json:"-"`
+	// AnthropicClientToolsets contains validated provider-defined client toolsets.
+	AnthropicClientToolsets []AnthropicClientToolset `json:"-"`
 	// Bedrock native controls cannot be supplied through the public Chat wire shape.
 	BedrockServiceTier                       string                  `json:"-"`
 	BedrockPerformanceLatency                string                  `json:"-"`
@@ -70,6 +72,19 @@ type AnthropicClientTool struct {
 	PromptCacheBreakpoint *PromptCacheBreakpoint
 	DeferLoading          bool
 	MaxCharacters         *int
+}
+
+type AnthropicClientToolset struct {
+	Type                  string
+	Name                  string
+	Configs               map[string]AnthropicToolsetMemberConfig
+	AllowedCallers        []string
+	PromptCacheBreakpoint *PromptCacheBreakpoint
+}
+
+type AnthropicToolsetMemberConfig struct {
+	Enabled      *bool
+	DeferLoading *bool
 }
 
 type GeminiSafetySetting struct {
@@ -334,6 +349,8 @@ type ToolCall struct {
 	ID           string                `json:"id,omitempty"`
 	Type         string                `json:"type"`
 	Function     FunctionCall          `json:"function"`
+	// ToolsetName preserves provider-native client toolset identity for Messages responses.
+	ToolsetName string `json:"-"`
 }
 
 type FunctionCall struct {

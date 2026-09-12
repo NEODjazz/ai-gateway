@@ -49,6 +49,16 @@ func TestChatRequestPromptCacheBreakpointsIncludesTools(t *testing.T) {
 	}
 }
 
+func TestChatRequestPromptCacheBreakpointsIncludesNativeClientTools(t *testing.T) {
+	request := ChatCompletionRequest{
+		AnthropicClientTools:    []AnthropicClientTool{{PromptCacheBreakpoint: &PromptCacheBreakpoint{Mode: "explicit"}}},
+		AnthropicClientToolsets: []AnthropicClientToolset{{PromptCacheBreakpoint: &PromptCacheBreakpoint{Mode: "explicit", TTL: "1h"}}},
+	}
+	if count, message := ChatRequestPromptCacheBreakpoints(request); count != 2 || message != "" {
+		t.Fatalf("count=%d message=%q", count, message)
+	}
+}
+
 func TestTextTransformPreservesPromptCacheBreakpoint(t *testing.T) {
 	content := []any{map[string]any{"type": "text", "text": "hello", "prompt_cache_breakpoint": map[string]any{"mode": "explicit"}}}
 	transformed := TransformTextContent(content, strings.ToUpper).([]any)[0].(map[string]any)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -48,22 +49,28 @@ type messagesInput struct {
 	Content json.RawMessage `json:"content"`
 }
 type messagesTool struct {
-	Type              string                `json:"type,omitempty"`
-	Name              string                `json:"name"`
-	Description       string                `json:"description,omitempty"`
-	InputSchema       map[string]any        `json:"input_schema,omitempty"`
-	CacheControl      *messagesCacheControl `json:"cache_control,omitempty"`
-	MaxUses           *int                  `json:"max_uses,omitempty"`
-	UserLocation      *messagesUserLocation `json:"user_location,omitempty"`
-	AllowedDomains    []string              `json:"allowed_domains,omitempty"`
-	BlockedDomains    []string              `json:"blocked_domains,omitempty"`
-	AllowedCallers    []string              `json:"allowed_callers,omitempty"`
-	ResponseInclusion string                `json:"response_inclusion,omitempty"`
-	UseCache          *bool                 `json:"use_cache,omitempty"`
-	MaxContentTokens  int                   `json:"max_content_tokens,omitempty"`
-	MaxCharacters     *int                  `json:"max_characters,omitempty"`
-	Citations         *messagesCitations    `json:"citations,omitempty"`
-	DeferLoading      bool                  `json:"defer_loading,omitempty"`
+	Type              string                                 `json:"type,omitempty"`
+	Name              string                                 `json:"name"`
+	Description       string                                 `json:"description,omitempty"`
+	InputSchema       map[string]any                         `json:"input_schema,omitempty"`
+	CacheControl      *messagesCacheControl                  `json:"cache_control,omitempty"`
+	MaxUses           *int                                   `json:"max_uses,omitempty"`
+	UserLocation      *messagesUserLocation                  `json:"user_location,omitempty"`
+	AllowedDomains    []string                               `json:"allowed_domains,omitempty"`
+	BlockedDomains    []string                               `json:"blocked_domains,omitempty"`
+	AllowedCallers    []string                               `json:"allowed_callers,omitempty"`
+	ResponseInclusion string                                 `json:"response_inclusion,omitempty"`
+	UseCache          *bool                                  `json:"use_cache,omitempty"`
+	MaxContentTokens  int                                    `json:"max_content_tokens,omitempty"`
+	MaxCharacters     *int                                   `json:"max_characters,omitempty"`
+	Citations         *messagesCitations                     `json:"citations,omitempty"`
+	DeferLoading      bool                                   `json:"defer_loading,omitempty"`
+	Configs           map[string]messagesToolsetMemberConfig `json:"configs,omitempty"`
+}
+
+type messagesToolsetMemberConfig struct {
+	Enabled      *bool `json:"enabled,omitempty"`
+	DeferLoading *bool `json:"defer_loading,omitempty"`
 }
 
 type messagesUserLocation struct {
@@ -203,7 +210,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		}
 		result.Messages = append(result.Messages, openai.Message{Role: "system", Content: content})
 	}
-	knownCalls := map[string]bool{}
+	knownCalls := map[string]string{}
 	for _, message := range request.Messages {
 		if message.Role != "user" && message.Role != "assistant" {
 			return result, errors.New("messages role must be user or assistant")
@@ -217,10 +224,10 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		if err := json.Unmarshal(message.Content, &blocks); err != nil || len(blocks) == 0 {
 			return result, errors.New("content must be text or a non-empty block array")
 		}
-		if native, content, err := messagesNativeAssistantContent(message.Role, blocks, knownCalls); err != nil {
+		if native, content, err := messagesNativeContent(message.Role, blocks, knownCalls); err != nil {
 			return result, err
 		} else if native {
-			result.Messages = append(result.Messages, openai.Message{Role: "assistant", NativeContent: content})
+			result.Messages = append(result.Messages, openai.Message{Role: message.Role, NativeContent: content})
 			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(content))
 			continue
 		}
@@ -315,10 +322,13 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 					Name  string         `json:"name"`
 					Input map[string]any `json:"input"`
 				}
-				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "assistant" || block.ID == "" || block.Name == "" || block.Input == nil || knownCalls[block.ID] {
+				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "assistant" || block.ID == "" || block.Name == "" || block.Input == nil {
 					return result, errors.New("invalid or unsupported tool_use block")
 				}
-				knownCalls[block.ID] = true
+				if _, duplicate := knownCalls[block.ID]; duplicate {
+					return result, errors.New("invalid or unsupported tool_use block")
+				}
+				knownCalls[block.ID] = ""
 				args, err := json.Marshal(block.Input)
 				if err != nil {
 					return result, err
@@ -331,7 +341,10 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 					Content json.RawMessage `json:"content"`
 					IsError bool            `json:"is_error,omitempty"`
 				}
-				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "user" || !knownCalls[block.ID] || block.IsError {
+				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "user" || block.ID == "" || block.IsError {
+					return result, errors.New("invalid or unsupported tool_result block")
+				}
+				if toolset, known := knownCalls[block.ID]; !known || toolset != "" {
 					return result, errors.New("invalid or unsupported tool_result block")
 				}
 				content, err := messagesText(block.Content)
@@ -363,8 +376,34 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 	}
 	searchTool, fetchTool, toolSearch := false, false, false
 	clientTools := map[string]bool{}
+	clientToolsets := map[string]bool{}
 	for _, tool := range request.Tools {
+		if tool.Type != "computer_toolset_20260801" && tool.Configs != nil {
+			return result, errors.New("configs is supported only for client toolsets")
+		}
 		switch tool.Type {
+		case "computer_toolset_20260801":
+			if clientToolsets["computer"] || tool.Name != "" || tool.InputSchema != nil || tool.Description != "" || tool.MaxUses != nil || tool.UserLocation != nil || len(tool.AllowedDomains) > 0 || len(tool.BlockedDomains) > 0 || tool.ResponseInclusion != "" || tool.UseCache != nil || tool.MaxContentTokens != 0 || tool.MaxCharacters != nil || tool.Citations != nil || tool.DeferLoading || !validToolsetAllowedCallers(tool.AllowedCallers) {
+				return result, errors.New("invalid or duplicate computer toolset")
+			}
+			configs, deferred, err := computerToolsetConfigs(tool.Configs)
+			if err != nil {
+				return result, err
+			}
+			var breakpoint *openai.PromptCacheBreakpoint
+			if tool.CacheControl != nil {
+				if deferred {
+					return result, errors.New("deferred computer toolset cannot use cache_control")
+				}
+				breakpoint, err = messagesPromptCacheBreakpoint(tool.CacheControl)
+				if err != nil {
+					return result, err
+				}
+			}
+			clientToolsets["computer"] = true
+			result.AnthropicClientToolsets = append(result.AnthropicClientToolsets, openai.AnthropicClientToolset{Type: tool.Type, Name: "computer", Configs: configs, AllowedCallers: append([]string(nil), tool.AllowedCallers...), PromptCacheBreakpoint: breakpoint})
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, 4590)
+			continue
 		case "memory_20250818", "bash_20250124", "text_editor_20250124", "text_editor_20250728":
 			capability, expectedName := anthropicClientToolIdentity(tool.Type)
 			if clientTools[capability] || tool.Name != expectedName || tool.InputSchema != nil || tool.Description != "" || tool.MaxUses != nil || tool.UserLocation != nil || len(tool.AllowedDomains) > 0 || len(tool.BlockedDomains) > 0 || tool.ResponseInclusion != "" || tool.UseCache != nil || tool.MaxContentTokens != 0 || tool.Citations != nil || !validAnthropicAllowedCallers(tool.AllowedCallers) {
@@ -461,6 +500,24 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 			return result, errors.New("defer_loading requires a tool search tool")
 		}
 	}
+	if clientToolsets["computer"] {
+		customNames := make(map[string]bool, len(result.Tools))
+		for _, tool := range result.Tools {
+			customNames[tool.Function.Name] = true
+		}
+		for _, message := range result.Messages {
+			for _, call := range message.ToolCalls {
+				if computerToolMembers[call.Function.Name] && !customNames[call.Function.Name] {
+					return result, errors.New("computer toolset calls require toolset_name")
+				}
+			}
+		}
+	}
+	for _, toolset := range result.AnthropicClientToolsets {
+		if toolsetDeferred(toolset) && !toolSearch {
+			return result, errors.New("deferred computer toolset requires a tool search tool")
+		}
+	}
 	if len(result.AnthropicSkills) > 0 && !result.AnthropicCodeExecution {
 		return result, errors.New("container.skills requires the code_execution_20250825 tool")
 	}
@@ -481,6 +538,9 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		case "tool":
 			if choice.Name == "" {
 				return result, errors.New("tool_choice name required")
+			}
+			if clientToolsets["computer"] && (choice.Name == "computer" || computerToolMembers[choice.Name]) {
+				return result, errors.New("tool_choice cannot select a computer toolset member")
 			}
 			result.ToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": choice.Name}}
 		default:
@@ -536,11 +596,260 @@ func anthropicClientToolIdentifiers(tools []openai.AnthropicClientTool) []string
 	return identifiers
 }
 
+var computerToolMembers = map[string]bool{
+	"screenshot": true, "zoom": true, "left_click": true, "right_click": true, "middle_click": true,
+	"double_click": true, "triple_click": true, "left_click_drag": true, "mouse_move": true,
+	"left_mouse_down": true, "left_mouse_up": true, "cursor_position": true, "scroll": true,
+	"type": true, "key": true, "hold_key": true, "wait": true,
+}
+
+func validToolsetAllowedCallers(callers []string) bool {
+	return len(callers) == 0 || len(callers) == 1 && callers[0] == "direct"
+}
+
+func computerToolsetConfigs(configs map[string]messagesToolsetMemberConfig) (map[string]openai.AnthropicToolsetMemberConfig, bool, error) {
+	converted := make(map[string]openai.AnthropicToolsetMemberConfig, len(configs))
+	enabledCount := 0
+	deferred := false
+	deferSet := false
+	for name := range computerToolMembers {
+		config, configured := configs[name]
+		enabled := true
+		if configured && config.Enabled != nil {
+			enabled = *config.Enabled
+		}
+		if enabled {
+			enabledCount++
+			memberDeferred := configured && config.DeferLoading != nil && *config.DeferLoading
+			if !deferSet {
+				deferred, deferSet = memberDeferred, true
+			} else if memberDeferred != deferred {
+				return nil, false, errors.New("all enabled computer toolset members must use the same defer_loading value")
+			}
+		}
+	}
+	for name, config := range configs {
+		if !computerToolMembers[name] {
+			return nil, false, fmt.Errorf("unknown computer toolset member %q", name)
+		}
+		converted[name] = openai.AnthropicToolsetMemberConfig{Enabled: config.Enabled, DeferLoading: config.DeferLoading}
+	}
+	if enabledCount == 0 {
+		return nil, false, errors.New("computer toolset must enable at least one member")
+	}
+	return converted, deferred, nil
+}
+
+func toolsetDeferred(toolset openai.AnthropicClientToolset) bool {
+	for name := range computerToolMembers {
+		config := toolset.Configs[name]
+		if config.Enabled == nil || *config.Enabled {
+			return config.DeferLoading != nil && *config.DeferLoading
+		}
+	}
+	return false
+}
+
+func anthropicClientToolsetIdentifiers(toolsets []openai.AnthropicClientToolset) []string {
+	var identifiers []string
+	for _, toolset := range toolsets {
+		if toolset.Type != "computer_toolset_20260801" {
+			continue
+		}
+		for name := range computerToolMembers {
+			config := toolset.Configs[name]
+			if config.Enabled == nil || *config.Enabled {
+				identifiers = append(identifiers, "computer:"+name)
+			}
+		}
+	}
+	slices.Sort(identifiers)
+	return identifiers
+}
+
 func messagesToolHasNativeWebFields(tool messagesTool) bool {
 	return len(tool.AllowedDomains) > 0 || len(tool.BlockedDomains) > 0 || len(tool.AllowedCallers) > 0 || tool.ResponseInclusion != "" || tool.UseCache != nil
 }
 
-func messagesNativeAssistantContent(role string, blocks []json.RawMessage, knownCalls map[string]bool) (bool, []json.RawMessage, error) {
+func messagesNativeContent(role string, blocks []json.RawMessage, knownCalls map[string]string) (bool, []json.RawMessage, error) {
+	for _, raw := range blocks {
+		var marker struct {
+			ToolsetName string `json:"toolset_name"`
+		}
+		if json.Unmarshal(raw, &marker) == nil && marker.ToolsetName != "" {
+			return messagesNativeClientToolsetContent(role, blocks, knownCalls)
+		}
+	}
+	return messagesNativeAssistantContent(role, blocks, knownCalls)
+}
+
+func messagesNativeClientToolsetContent(role string, blocks []json.RawMessage, knownCalls map[string]string) (bool, []json.RawMessage, error) {
+	if len(blocks) > 128 || role != "assistant" && role != "user" {
+		return true, nil, errors.New("client toolset content requires a bounded message block array")
+	}
+	result := make([]json.RawMessage, 0, len(blocks))
+	serverCalls := map[string]string{}
+	total := 0
+	for _, raw := range blocks {
+		if !json.Valid(raw) || len(raw) > 4<<20 || total > (32<<20)-len(raw) {
+			return true, nil, errors.New("client toolset content exceeds its size limit")
+		}
+		total += len(raw)
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(raw, &kind) != nil {
+			return true, nil, errors.New("invalid client toolset content")
+		}
+		switch kind.Type {
+		case "text":
+			var block struct {
+				Type         string                `json:"type"`
+				Text         string                `json:"text"`
+				CacheControl *messagesCacheControl `json:"cache_control,omitempty"`
+			}
+			if decodeMessagesValue(raw, &block) != nil {
+				return true, nil, errors.New("invalid client toolset text block")
+			}
+			if block.CacheControl != nil {
+				if _, err := messagesPromptCacheBreakpoint(block.CacheControl); err != nil {
+					return true, nil, err
+				}
+			}
+		case "thinking", "redacted_thinking":
+			if role != "assistant" {
+				return true, nil, errors.New("client toolset reasoning requires assistant role")
+			}
+			var block map[string]any
+			if json.Unmarshal(raw, &block) != nil || validateNativeMessageBlock(block) != nil {
+				return true, nil, errors.New("invalid client toolset reasoning block")
+			}
+		case "tool_use":
+			var block struct {
+				Type        string         `json:"type"`
+				ID          string         `json:"id"`
+				Name        string         `json:"name"`
+				ToolsetName string         `json:"toolset_name,omitempty"`
+				Input       map[string]any `json:"input"`
+			}
+			if decodeMessagesValue(raw, &block) != nil || role != "assistant" || block.ID == "" || block.Name == "" || block.Input == nil || block.ToolsetName != "" && (block.ToolsetName != "computer" || !computerToolMembers[block.Name]) {
+				return true, nil, errors.New("invalid client toolset tool_use block")
+			}
+			if _, duplicate := knownCalls[block.ID]; duplicate {
+				return true, nil, errors.New("invalid client toolset tool_use block")
+			}
+			knownCalls[block.ID] = block.ToolsetName
+		case "server_tool_use":
+			var block struct {
+				Type  string         `json:"type"`
+				ID    string         `json:"id"`
+				Name  string         `json:"name"`
+				Input map[string]any `json:"input"`
+			}
+			if decodeMessagesValue(raw, &block) != nil || role != "assistant" || block.ID == "" || block.Name == "" || block.Input == nil || serverCalls[block.ID] != "" {
+				return true, nil, errors.New("invalid server_tool_use block")
+			}
+			serverCalls[block.ID] = block.Name
+		case "tool_search_tool_result", "web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result", "bash_code_execution_tool_result", "text_editor_code_execution_tool_result":
+			var block map[string]json.RawMessage
+			if json.Unmarshal(raw, &block) != nil || role != "assistant" {
+				return true, nil, errors.New("invalid server tool result block")
+			}
+			var id string
+			if json.Unmarshal(block["tool_use_id"], &id) != nil || id == "" || serverCalls[id] == "" || block["content"] == nil {
+				return true, nil, errors.New("invalid server tool result block")
+			}
+			delete(serverCalls, id)
+		case "tool_result":
+			var block struct {
+				Type         string                `json:"type"`
+				ID           string                `json:"tool_use_id"`
+				ToolsetName  string                `json:"toolset_name"`
+				Content      json.RawMessage       `json:"content"`
+				IsError      bool                  `json:"is_error,omitempty"`
+				CacheControl *messagesCacheControl `json:"cache_control,omitempty"`
+			}
+			if decodeMessagesValue(raw, &block) != nil || role != "user" || block.ID == "" {
+				return true, nil, errors.New("invalid client toolset tool_result block")
+			}
+			expected, known := knownCalls[block.ID]
+			if !known || block.ToolsetName != expected {
+				return true, nil, errors.New("invalid client toolset tool_result block")
+			}
+			if block.ToolsetName == "computer" {
+				if validateComputerToolResultContent(block.Content) != nil {
+					return true, nil, errors.New("invalid computer toolset tool_result block")
+				}
+			} else if block.ToolsetName != "" || block.IsError {
+				return true, nil, errors.New("invalid client toolset tool_result block")
+			} else if _, err := messagesText(block.Content); err != nil {
+				return true, nil, errors.New("invalid tool_result block")
+			}
+			if block.CacheControl != nil {
+				if _, err := messagesPromptCacheBreakpoint(block.CacheControl); err != nil {
+					return true, nil, err
+				}
+			}
+			delete(knownCalls, block.ID)
+		default:
+			return true, nil, fmt.Errorf("unsupported client toolset content block type %q", kind.Type)
+		}
+		result = append(result, append(json.RawMessage(nil), raw...))
+	}
+	if len(serverCalls) > 0 {
+		return true, nil, errors.New("server_tool_use requires a matching result block")
+	}
+	return true, result, nil
+}
+
+func validateComputerToolResultContent(raw json.RawMessage) error {
+	var text string
+	if json.Unmarshal(raw, &text) == nil && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil
+	}
+	var blocks []json.RawMessage
+	if json.Unmarshal(raw, &blocks) != nil || len(blocks) == 0 || len(blocks) > 128 {
+		return errors.New("tool result content must be text or text/image blocks")
+	}
+	for _, rawBlock := range blocks {
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(rawBlock, &kind) != nil {
+			return errors.New("invalid tool result content")
+		}
+		switch kind.Type {
+		case "text":
+			var block struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}
+			if decodeMessagesValue(rawBlock, &block) != nil {
+				return errors.New("invalid tool result text")
+			}
+		case "image":
+			var block struct {
+				Type   string `json:"type"`
+				Source struct {
+					Type      string `json:"type"`
+					MediaType string `json:"media_type"`
+					Data      string `json:"data"`
+				} `json:"source"`
+			}
+			if decodeMessagesValue(rawBlock, &block) != nil || block.Source.Type != "base64" {
+				return errors.New("invalid tool result image")
+			}
+			if _, err := openai.ParseDataImageURL("data:" + block.Source.MediaType + ";base64," + block.Source.Data); err != nil {
+				return err
+			}
+		default:
+			return errors.New("computer tool results support only text and image blocks")
+		}
+	}
+	return nil
+}
+
+func messagesNativeAssistantContent(role string, blocks []json.RawMessage, knownCalls map[string]string) (bool, []json.RawMessage, error) {
 	native := false
 	for _, raw := range blocks {
 		var kind struct {
@@ -577,10 +886,13 @@ func messagesNativeAssistantContent(role string, blocks []json.RawMessage, known
 		case "tool_use":
 			var id, name string
 			var input map[string]any
-			if json.Unmarshal(block["id"], &id) != nil || json.Unmarshal(block["name"], &name) != nil || json.Unmarshal(block["input"], &input) != nil || id == "" || name == "" || knownCalls[id] {
+			if json.Unmarshal(block["id"], &id) != nil || json.Unmarshal(block["name"], &name) != nil || json.Unmarshal(block["input"], &input) != nil || id == "" || name == "" {
 				return true, nil, errors.New("invalid native tool_use block")
 			}
-			knownCalls[id] = true
+			if _, duplicate := knownCalls[id]; duplicate {
+				return true, nil, errors.New("invalid native tool_use block")
+			}
+			knownCalls[id] = ""
 		case "server_tool_use":
 			var id, name string
 			var input map[string]any

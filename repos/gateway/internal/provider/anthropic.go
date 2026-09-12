@@ -68,22 +68,28 @@ type anthropicMessage struct {
 }
 
 type anthropicTool struct {
-	Type              string                 `json:"type,omitempty"`
-	Name              string                 `json:"name"`
-	Description       string                 `json:"description,omitempty"`
-	InputSchema       any                    `json:"input_schema,omitempty"`
-	MaxUses           int                    `json:"max_uses,omitempty"`
-	UserLocation      *anthropicUserLocation `json:"user_location,omitempty"`
-	AllowedDomains    []string               `json:"allowed_domains,omitempty"`
-	BlockedDomains    []string               `json:"blocked_domains,omitempty"`
-	AllowedCallers    []string               `json:"allowed_callers,omitempty"`
-	ResponseInclusion string                 `json:"response_inclusion,omitempty"`
-	UseCache          *bool                  `json:"use_cache,omitempty"`
-	Citations         *anthropicCitations    `json:"citations,omitempty"`
-	MaxContentTokens  int                    `json:"max_content_tokens,omitempty"`
-	CacheControl      *anthropicCacheControl `json:"cache_control,omitempty"`
-	DeferLoading      bool                   `json:"defer_loading,omitempty"`
-	MaxCharacters     *int                   `json:"max_characters,omitempty"`
+	Type              string                                  `json:"type,omitempty"`
+	Name              string                                  `json:"name,omitempty"`
+	Description       string                                  `json:"description,omitempty"`
+	InputSchema       any                                     `json:"input_schema,omitempty"`
+	MaxUses           int                                     `json:"max_uses,omitempty"`
+	UserLocation      *anthropicUserLocation                  `json:"user_location,omitempty"`
+	AllowedDomains    []string                                `json:"allowed_domains,omitempty"`
+	BlockedDomains    []string                                `json:"blocked_domains,omitempty"`
+	AllowedCallers    []string                                `json:"allowed_callers,omitempty"`
+	ResponseInclusion string                                  `json:"response_inclusion,omitempty"`
+	UseCache          *bool                                   `json:"use_cache,omitempty"`
+	Citations         *anthropicCitations                     `json:"citations,omitempty"`
+	MaxContentTokens  int                                     `json:"max_content_tokens,omitempty"`
+	CacheControl      *anthropicCacheControl                  `json:"cache_control,omitempty"`
+	DeferLoading      bool                                    `json:"defer_loading,omitempty"`
+	MaxCharacters     *int                                    `json:"max_characters,omitempty"`
+	Configs           map[string]anthropicToolsetMemberConfig `json:"configs,omitempty"`
+}
+
+type anthropicToolsetMemberConfig struct {
+	Enabled      *bool `json:"enabled,omitempty"`
+	DeferLoading *bool `json:"defer_loading,omitempty"`
 }
 
 type anthropicCitations struct {
@@ -121,6 +127,7 @@ type anthropicContent struct {
 	Source       any                    `json:"source,omitempty"`
 	ID           string                 `json:"id,omitempty"`
 	Name         string                 `json:"name,omitempty"`
+	ToolsetName  string                 `json:"toolset_name,omitempty"`
 	Input        any                    `json:"input,omitempty"`
 	ToolUseID    string                 `json:"tool_use_id,omitempty"`
 	Content      any                    `json:"content,omitempty"`
@@ -384,6 +391,13 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 	for _, tool := range request.AnthropicClientTools {
 		tools = append(tools, anthropicTool{Type: tool.Type, Name: tool.Name, AllowedCallers: append([]string(nil), tool.AllowedCallers...), CacheControl: anthropicToolCacheControl(tool.PromptCacheBreakpoint), DeferLoading: tool.DeferLoading, MaxCharacters: tool.MaxCharacters})
 	}
+	for _, toolset := range request.AnthropicClientToolsets {
+		configs := make(map[string]anthropicToolsetMemberConfig, len(toolset.Configs))
+		for name, config := range toolset.Configs {
+			configs[name] = anthropicToolsetMemberConfig{Enabled: config.Enabled, DeferLoading: config.DeferLoading}
+		}
+		tools = append(tools, anthropicTool{Type: toolset.Type, Configs: configs, AllowedCallers: append([]string(nil), toolset.AllowedCallers...), CacheControl: anthropicToolCacheControl(toolset.PromptCacheBreakpoint)})
+	}
 	tools, toolChoice := applyAnthropicToolChoice(tools, request.ToolChoice)
 	var outputConfig *anthropicOutputConfig
 	if request.ResponseFormat != nil && request.ResponseFormat.Type == "json_schema" {
@@ -563,6 +577,18 @@ func anthropicMessages(messages []openai.Message) (any, []anthropicMessage) {
 	structuredSystem := false
 	converted := make([]anthropicMessage, 0, len(messages))
 	for _, message := range messages {
+		if len(message.NativeContent) > 0 {
+			blocks := make([]json.RawMessage, len(message.NativeContent))
+			for i := range message.NativeContent {
+				blocks[i] = append(json.RawMessage(nil), message.NativeContent[i]...)
+			}
+			role := message.Role
+			if role == "tool" {
+				role = "user"
+			}
+			converted = append(converted, anthropicMessage{Role: role, Content: blocks})
+			continue
+		}
 		content := openai.ContentText(message.Content)
 		switch message.Role {
 		case "system", "developer":
@@ -573,14 +599,6 @@ func anthropicMessages(messages []openai.Message) (any, []anthropicMessage) {
 			systemBlocks = append(systemBlocks, blocks...)
 			structuredSystem = structuredSystem || anthropicBlocksUseCache(blocks)
 		case "assistant":
-			if len(message.NativeContent) > 0 {
-				blocks := make([]json.RawMessage, len(message.NativeContent))
-				for i := range message.NativeContent {
-					blocks[i] = append(json.RawMessage(nil), message.NativeContent[i]...)
-				}
-				converted = append(converted, anthropicMessage{Role: "assistant", Content: blocks})
-				continue
-			}
 			blocks := anthropicReasoningBlocks(message.Reasoning)
 			blocks = append(blocks, anthropicContentBlocks(message.Content)...)
 			for _, call := range message.ToolCalls {
@@ -590,7 +608,7 @@ func anthropicMessages(messages []openai.Message) (any, []anthropicMessage) {
 						input = map[string]any{"raw": call.Function.Arguments}
 					}
 				}
-				blocks = append(blocks, anthropicContent{Type: "tool_use", ID: call.ID, Name: call.Function.Name, Input: input})
+				blocks = append(blocks, anthropicContent{Type: "tool_use", ID: call.ID, Name: call.Function.Name, ToolsetName: call.ToolsetName, Input: input})
 			}
 			if len(blocks) == 0 {
 				converted = append(converted, anthropicMessage{Role: "assistant", Content: ""})
@@ -1052,7 +1070,7 @@ func anthropicToolCalls(response anthropicResponse) []openai.ToolCall {
 		}
 		calls = append(calls, openai.ToolCall{
 			ID: block.ID, Type: "function",
-			Function: openai.FunctionCall{Name: block.Name, Arguments: jsonArguments(block.Input)},
+			Function: openai.FunctionCall{Name: block.Name, Arguments: jsonArguments(block.Input)}, ToolsetName: block.ToolsetName,
 		})
 	}
 	return calls
@@ -1252,7 +1270,7 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			if streamEvent.ContentBlock.Type == "tool_use" {
 				toolIndex := len(response.Choices[0].Message.ToolCalls)
 				toolIndexes[streamEvent.Index] = toolIndex
-				call := openai.ToolCall{ID: streamEvent.ContentBlock.ID, Type: "function", Function: openai.FunctionCall{Name: streamEvent.ContentBlock.Name}}
+				call := openai.ToolCall{ID: streamEvent.ContentBlock.ID, Type: "function", Function: openai.FunctionCall{Name: streamEvent.ContentBlock.Name}, ToolsetName: streamEvent.ContentBlock.ToolsetName}
 				response.Choices[0].Message.ToolCalls = append(response.Choices[0].Message.ToolCalls, call)
 				if !structured {
 					return write(openAIChatToolCallChunkPayload(response.ID, response.Model, toolIndex, call))

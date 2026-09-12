@@ -25,6 +25,7 @@ func (Anthropic) SupportsAssistantPrefill() bool { return true }
 func (Anthropic) SupportsMemoryTool() bool       { return true }
 func (Anthropic) SupportsBashTool() bool         { return true }
 func (Anthropic) SupportsTextEditorTool() bool   { return true }
+func (Anthropic) SupportsComputerToolset() bool  { return true }
 
 func (Gemini) SupportsTools() bool            { return true }
 func (Gemini) SupportsStructuredOutput() bool { return true }

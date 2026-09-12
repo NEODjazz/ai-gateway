@@ -3057,6 +3057,11 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 			seenClientCapabilities[capability] = true
 		}
 	}
+	for _, toolset := range request.AnthropicClientToolsets {
+		if toolset.Type == "computer_toolset_20260801" {
+			required = append(required, "computer_toolset")
+		}
+	}
 	if request.ResponseFormat != nil {
 		required = append(required, "structured_output")
 	}

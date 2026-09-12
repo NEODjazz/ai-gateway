@@ -52,6 +52,31 @@ func TestAnthropicNativeClientToolsWireAndCapabilities(t *testing.T) {
 	}
 }
 
+func TestAnthropicComputerToolsetWireContinuationAndCapabilities(t *testing.T) {
+	enabled := false
+	request := anthropicChatRequest(openai.ChatCompletionRequest{
+		AnthropicClientToolsets: []openai.AnthropicClientToolset{{Type: "computer_toolset_20260801", Name: "computer", Configs: map[string]openai.AnthropicToolsetMemberConfig{"zoom": {Enabled: &enabled}}, AllowedCallers: []string{"direct"}}},
+		Messages: []openai.Message{
+			{Role: "assistant", NativeContent: []json.RawMessage{json.RawMessage(`{"type":"tool_use","id":"call","name":"screenshot","toolset_name":"computer","input":{}}`)}},
+			{Role: "user", NativeContent: []json.RawMessage{json.RawMessage(`{"type":"tool_result","tool_use_id":"call","toolset_name":"computer","content":"ok"}`)}},
+		},
+	}, false)
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Tools) != 1 || request.Tools[0].Name != "" || request.Tools[0].Configs["zoom"].Enabled == nil || *request.Tools[0].Configs["zoom"].Enabled || request.Tools[0].AllowedCallers[0] != "direct" || !strings.Contains(string(encoded), `"toolset_name":"computer"`) {
+		t.Fatalf("request=%s", encoded)
+	}
+	if got := strings.Join(requiredChatCapabilities(openai.ChatCompletionRequest{AnthropicClientToolsets: []openai.AnthropicClientToolset{{Type: "computer_toolset_20260801"}}}, false), ","); got != "chat,computer_toolset" {
+		t.Fatalf("capabilities=%q", got)
+	}
+	calls := anthropicToolCalls(anthropicResponse{Content: []anthropicContent{{Type: "tool_use", ID: "next", Name: "left_click", ToolsetName: "computer", Input: map[string]any{"coordinate": []int{1, 2}}}}})
+	if len(calls) != 1 || calls[0].ToolsetName != "computer" || calls[0].Function.Name != "left_click" {
+		t.Fatalf("response toolset identity lost: %+v", calls)
+	}
+}
+
 func TestAnthropicToolSearchWireAndContinuation(t *testing.T) {
 	native := []json.RawMessage{
 		json.RawMessage(`{"type":"server_tool_use","id":"srv_1","name":"tool_search_tool_bm25","input":{"query":"weather"}}`),

@@ -51,6 +51,30 @@ func ChatRequestPromptCacheBreakpoints(request ChatCompletionRequest) (int, stri
 			return 0, "at most 4 prompt_cache_breakpoint values are allowed"
 		}
 	}
+	for _, tool := range request.AnthropicClientTools {
+		if tool.PromptCacheBreakpoint == nil {
+			continue
+		}
+		if !ValidPromptCacheBreakpoint(tool.PromptCacheBreakpoint) {
+			return 0, "client tool prompt_cache_breakpoint requires mode=explicit and optional ttl=5m or 1h"
+		}
+		count++
+		if count > 4 {
+			return 0, "at most 4 prompt_cache_breakpoint values are allowed"
+		}
+	}
+	for _, toolset := range request.AnthropicClientToolsets {
+		if toolset.PromptCacheBreakpoint == nil {
+			continue
+		}
+		if !ValidPromptCacheBreakpoint(toolset.PromptCacheBreakpoint) {
+			return 0, "client toolset prompt_cache_breakpoint requires mode=explicit and optional ttl=5m or 1h"
+		}
+		count++
+		if count > 4 {
+			return 0, "at most 4 prompt_cache_breakpoint values are allowed"
+		}
+	}
 	return count, ""
 }
 

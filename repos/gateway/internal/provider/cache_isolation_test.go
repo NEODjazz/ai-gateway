@@ -164,6 +164,18 @@ func TestNativeClientToolsBypassResponseCaches(t *testing.T) {
 	}
 }
 
+func TestNativeClientToolsetsBypassResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "run"}}, AnthropicClientToolsets: []openai.AnthropicClientToolset{{Type: "computer_toolset_20260801", Name: "computer"}},
+	}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache enabled for client toolset")
+	}
+	if _, _, eligible := semanticRequest(request, Endpoint{Name: "endpoint"}); eligible {
+		t.Fatal("semantic cache enabled for client toolset")
+	}
+}
+
 func TestChatAudioInputBypassesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
 		Model: "model",
