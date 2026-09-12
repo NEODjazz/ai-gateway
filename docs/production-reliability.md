@@ -1913,3 +1913,16 @@ ID `sha256:517de0b55f597f4a1e7b67f65082de2b232586de310ba84a7f85105728e1ca11`.
 Gateway Helm revision 500 completed successfully. Pod
 `ai-gateway-gateway-75fb6844b6-w5h2n` became Ready with zero restarts. Live
 liveness and readiness returned 204 and OpenAPI 0.1.395 was served.
+
+Source `a966baa` rejects negative seeds for both Nemotron 3 model IDs before
+provider HTTP. Seed zero remains valid and unrelated NIM model policies remain
+unchanged. Focused provider/API tests, OpenAPI validation, vet, build, the full
+Go suite and the full race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:nvidia-seed-a966baa` with image ID
+`sha256:b89fe2e0885dd965e502b8f00b97ad740383ea4f554e658eebaabbcd48b761ae`.
+Gateway Helm revision 501 completed successfully. Pod
+`ai-gateway-gateway-98ccf85c-f2v7l` became Ready with zero restarts on that
+image. Direct pod liveness and readiness returned 204, OpenAPI 0.1.396 was
+served, and an unauthenticated negative-seed request returned 401 at the auth
+boundary without provider execution.

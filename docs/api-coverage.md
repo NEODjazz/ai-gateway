@@ -225,6 +225,8 @@ availability is not inferred from these tests.
   reasoning traces in assistant history before provider execution.
 - `21685e3`: Native NVIDIA NIM Chat enforces the documented maximum temperature
   of 1 for the two Nemotron 3 model IDs.
+- `a966baa`: Native NVIDIA NIM Chat rejects negative seeds for the two Nemotron
+  3 model IDs before provider execution.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control

@@ -112,6 +112,8 @@ contract requires subsequent turns to include only visible assistant content.
 Supplying that trace in assistant history therefore fails before provider HTTP.
 The two Nemotron 3 model IDs additionally reject `temperature` values above 1
 before provider execution; other NIM model policies remain independent.
+Their native seed range starts at zero, so negative `seed` values also fail
+before provider execution while zero remains valid.
 
 Provider type `together` sends Rerank requests to the native `/v1/rerank`
 endpoint with bearer authentication. It accepts text and object documents,
