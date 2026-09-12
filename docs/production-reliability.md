@@ -610,3 +610,11 @@ The live OpenAPI 0.1.324 contract exposes both speech event schemas and explicit
 per-adapter `sse_supported`; live requests accepted `stream_format=sse` into the
 authentication lifecycle and rejected an unknown stream format with
 `invalid_request` before authentication or provider execution.
+
+Source `6fe2c2f` adds Text-to-Speech to durable JSONL batch execution. The
+regressions cover shared request validation, policy snapshot model authorization,
+speech TPM reservation, exact character attribution, independent execution IDs and
+base64 audio output with content type and usage. SSE requests are rejected before
+provider execution. Batch creation now reserves enough output capacity for a bounded
+result line per item, while an oversized provider result becomes a terminal
+`batch_result_too_large` error instead of leaving the batch stuck in finalization.
