@@ -1,3 +1,4 @@
+{{- $adminSSO := default (dict) .Values.gateway.adminUI.sso -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -53,13 +54,13 @@ spec:
             - name: ADMIN_UI_ENABLED
               value: {{ .Values.gateway.adminUI.enabled | quote }}
             - name: ADMIN_SSO_ENABLED
-              value: {{ .Values.gateway.adminUI.sso.enabled | quote }}
+              value: {{ default false (get $adminSSO "enabled") | quote }}
             - name: ADMIN_SSO_AUTHORIZATION_URL
-              value: {{ .Values.gateway.adminUI.sso.authorizationUrl | quote }}
+              value: {{ default "" (get $adminSSO "authorizationUrl") | quote }}
             - name: ADMIN_SSO_TOKEN_URL
-              value: {{ .Values.gateway.adminUI.sso.tokenUrl | quote }}
+              value: {{ default "" (get $adminSSO "tokenUrl") | quote }}
             - name: ADMIN_SSO_CLIENT_ID
-              value: {{ .Values.gateway.adminUI.sso.clientId | quote }}
+              value: {{ default "" (get $adminSSO "clientId") | quote }}
             - name: ADMIN_SSO_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -67,9 +68,9 @@ spec:
                   key: ADMIN_SSO_CLIENT_SECRET
                   optional: true
             - name: ADMIN_SSO_REDIRECT_URL
-              value: {{ .Values.gateway.adminUI.sso.redirectUrl | quote }}
+              value: {{ default "" (get $adminSSO "redirectUrl") | quote }}
             - name: ADMIN_SSO_SCOPES
-              value: {{ .Values.gateway.adminUI.sso.scopes | quote }}
+              value: {{ default "openid profile email" (get $adminSSO "scopes") | quote }}
             - name: ADMIN_SSO_SESSION_KEY
               valueFrom:
                 secretKeyRef:
@@ -77,7 +78,7 @@ spec:
                   key: ADMIN_SSO_SESSION_KEY
                   optional: true
             - name: ADMIN_SSO_SESSION_TTL_SECONDS
-              value: {{ include "ai-gateway.integerString" .Values.gateway.adminUI.sso.sessionTtlSeconds | quote }}
+              value: {{ include "ai-gateway.integerString" (default 28800 (get $adminSSO "sessionTtlSeconds")) | quote }}
             - name: API_DOCS_ENABLED
               value: {{ .Values.gateway.apiDocs.enabled | quote }}
             - name: API_DOCS_TRY_IT_OUT_ENABLED
