@@ -49,6 +49,15 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	if ChatInputTokens(withAudio) <= ChatInputTokens(base)+100 {
 		t.Fatal("assistant audio reference omitted")
 	}
+	withAudioInput := base
+	withAudioInput.Messages = []Message{
+		{Role: "user", Content: []any{
+			map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": strings.Repeat("YQ==", 1000), "format": "wav"}},
+		}},
+	}
+	if ChatInputTokens(withAudioInput) <= ChatInputTokens(base)+500 {
+		t.Fatal("inline audio omitted from the input-token reserve")
+	}
 	withReasoning := base
 	withReasoning.Messages = []Message{{Role: "assistant", ReasoningContent: strings.Repeat("reasoning", 1000)}}
 	if ChatInputTokens(withReasoning) <= ChatInputTokens(base)+1000 {

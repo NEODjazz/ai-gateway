@@ -100,6 +100,29 @@ func ResponseAudioAttachments(input any) ([]AudioAttachment, error) {
 	return attachments, nil
 }
 
+func ChatAudioAttachments(messages []Message) ([]AudioAttachment, error) {
+	var attachments []AudioAttachment
+	for _, message := range messages {
+		found, err := ResponseAudioAttachments(message.Content)
+		if err != nil {
+			return nil, err
+		}
+		if len(found) > 0 && message.Role != "user" {
+			return nil, fmt.Errorf("%w: audio is only accepted in user messages", ErrInvalidAudio)
+		}
+		if len(attachments) > MaxResponseAudioAttachments-len(found) {
+			return nil, ErrInvalidAudio
+		}
+		attachments = append(attachments, found...)
+	}
+	return attachments, nil
+}
+
+func HasChatAudioInput(request ChatCompletionRequest) bool {
+	attachments, err := ChatAudioAttachments(request.Messages)
+	return err == nil && len(attachments) > 0
+}
+
 func HasResponseAudio(request ResponseRequest) bool {
 	attachments, err := ResponseAudioAttachments(request.Input)
 	return err == nil && len(attachments) > 0

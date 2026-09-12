@@ -38,6 +38,7 @@ describe("modelCapabilityOptions", () => {
       "web_search",
       "web_fetch",
       "audio",
+      "audio_input",
       "prompt_cache",
       "assistant_prefill",
       "file_input"

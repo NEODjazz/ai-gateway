@@ -71,3 +71,20 @@ func TestNativeIngressRequiresExplicitCapabilities(t *testing.T) {
 		t.Fatal("deployment with native safety capability rejected")
 	}
 }
+
+func TestInlineAudioRequiresExplicitCapability(t *testing.T) {
+	request := openai.ChatCompletionRequest{
+		Messages: []openai.Message{
+			{Role: "user", Content: []any{map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "UklGRgAAAABXQVZF", "format": "wav"}}}},
+		},
+	}
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,audio_input" {
+		t.Fatalf("required capabilities=%q", got)
+	}
+	if (Endpoint{Capabilities: []string{"chat"}}).supportsCapabilities(requiredChatCapabilities(request, false)...) {
+		t.Fatal("deployment without audio input capability accepted")
+	}
+	if !(Endpoint{Capabilities: []string{"chat", "audio_input"}}).supportsCapabilities(requiredChatCapabilities(request, false)...) {
+		t.Fatal("deployment with audio input capability rejected")
+	}
+}

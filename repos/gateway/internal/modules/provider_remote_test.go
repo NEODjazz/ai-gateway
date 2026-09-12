@@ -402,6 +402,32 @@ func TestAVReceivesBinaryAttachmentsWhileDLPReceivesTextOnly(t *testing.T) {
 	}
 }
 
+func TestAVReceivesChatAudioInput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request ScanRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if len(request.Attachments) != 1 || request.Attachments[0].MediaType != "audio/wav" || request.Attachments[0].Data != "UklGRgAAAABXQVZF" {
+			t.Fatalf("audio attachment missing: %+v", request.Attachments)
+		}
+		_ = json.NewEncoder(w).Encode(ScanResponse{Allowed: true})
+	}))
+	defer server.Close()
+	module := NewProviderRemoteModule("av", true, server.URL)
+	req := RequestContext{
+		Metadata: map[string]string{"provider.modules.av.enabled": "true"},
+		Request: openai.ChatCompletionRequest{
+			Messages: []openai.Message{
+				{Role: "user", Content: []any{map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "UklGRgAAAABXQVZF", "format": "wav"}}}},
+			},
+		},
+	}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPipelineStopsOnContentRejectedEvenWhenOptional(t *testing.T) {
 	pipeline := NewPipeline([]Module{
 		rejectingModule{},

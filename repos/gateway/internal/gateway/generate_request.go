@@ -245,10 +245,23 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 					return fail("inlineData role")
 				}
 				data := "data:" + part.InlineData.MIMEType + ";base64," + part.InlineData.Data
-				if _, err := openai.ParseDataImageURL(data); err != nil {
+				if _, err := openai.ParseDataImageURL(data); err == nil {
+					parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": data}})
+					break
+				}
+				format, filename := "", ""
+				switch part.InlineData.MIMEType {
+				case "audio/wav":
+					format, filename = "wav", "input.wav"
+				case "audio/mpeg":
+					format, filename = "mp3", "input.mp3"
+				default:
+					return fail("inlineData.mimeType")
+				}
+				if err := openai.ValidateAudioAttachment(openai.AudioAttachment{Filename: filename, MediaType: part.InlineData.MIMEType, Data: part.InlineData.Data}); err != nil {
 					return result, err
 				}
-				parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": data}})
+				parts = append(parts, map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": part.InlineData.Data, "format": format}})
 			case part.Call != nil:
 				callIndex++
 				call := part.Call
@@ -367,6 +380,9 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		}
 	}
 	if _, err := openai.ChatImageAttachments(result.Messages); err != nil {
+		return result, err
+	}
+	if _, err := openai.ChatAudioAttachments(result.Messages); err != nil {
 		return result, err
 	}
 	return result, nil

@@ -34,7 +34,8 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "vision", label: "Vision", description: "Image inputs" },
   { value: "web_search", label: "Web search", description: "Provider web search tools" },
   { value: "web_fetch", label: "Web fetch", description: "Provider retrieval of explicitly allowed web domains" },
-  { value: "audio", label: "Audio", description: "Audio input and output" },
+  { value: "audio", label: "Audio output", description: "Generated audio in chat responses" },
+  { value: "audio_input", label: "Audio input", description: "Inline audio input for native multimodal requests" },
   { value: "prompt_cache", label: "Prompt cache", description: "Explicit provider prompt caching" },
   { value: "assistant_prefill", label: "Assistant prefill", description: "Continue a final assistant prefix" },
   { value: "file_input", label: "File input", description: "Bounded inline PDF input for Responses" }

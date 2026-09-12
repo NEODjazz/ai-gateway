@@ -61,8 +61,9 @@ func (g Gemini) authorize(request *http.Request) error {
 	}
 }
 
-func (Gemini) SupportsVision() bool    { return true }
-func (Gemini) SupportsWebSearch() bool { return true }
+func (Gemini) SupportsVision() bool     { return true }
+func (Gemini) SupportsWebSearch() bool  { return true }
+func (Gemini) SupportsAudioInput() bool { return true }
 
 func (Gemini) SupportsResponses() bool { return false }
 
@@ -344,6 +345,9 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	if _, err := openai.ChatImageAttachments(request.Messages); err != nil {
 		return result, err
 	}
+	if _, err := openai.ChatAudioAttachments(request.Messages); err != nil {
+		return result, err
+	}
 	toolNames := make(map[string]string)
 	for _, message := range request.Messages {
 		if len(message.Reasoning) > 0 && message.Role != "assistant" {
@@ -522,6 +526,12 @@ func geminiMessageParts(value any) ([]geminiPart, error) {
 					return nil, err
 				}
 				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachment.MediaType, Data: attachment.Data}})
+			case "input_audio":
+				attachments, err := openai.ResponseAudioAttachments([]any{part})
+				if err != nil || len(attachments) != 1 {
+					return nil, openai.ErrInvalidAudio
+				}
+				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachments[0].MediaType, Data: attachments[0].Data}})
 			default:
 				return nil, geminiInvalid("messages.content.type")
 			}

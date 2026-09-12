@@ -57,6 +57,18 @@ func TestResponseAudioAttachmentsValidateFormatSignatureAndBounds(t *testing.T) 
 	}
 }
 
+func TestChatAudioAttachmentsRequireUserRole(t *testing.T) {
+	wav := base64.StdEncoding.EncodeToString([]byte("RIFF\x00\x00\x00\x00WAVE"))
+	content := []any{map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": wav, "format": "wav"}}}
+	attachments, err := ChatAudioAttachments([]Message{{Role: "user", Content: content}})
+	if err != nil || len(attachments) != 1 || attachments[0].MediaType != "audio/wav" {
+		t.Fatalf("attachments=%+v err=%v", attachments, err)
+	}
+	if _, err := ChatAudioAttachments([]Message{{Role: "assistant", Content: content}}); err == nil {
+		t.Fatal("assistant audio input accepted")
+	}
+}
+
 func TestTextProjectionExcludesAndRestoresImagePayload(t *testing.T) {
 	secretImage := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("binary-secret"))
 	original := []any{

@@ -810,8 +810,14 @@ requires the `web_search` capability, forwards Gemini Google Search grounding,
 validates and preserves source/support/search-entry metadata, bills the actual
 returned search-query count, and bypasses response caches. Search context, location
 and per-request use controls are rejected because the native tool cannot represent
-them. Cached content, other grounding/server tools and file/audio parts remain
-unsupported.
+them. Cached content, other grounding/server tools, file parts and other audio
+formats remain unsupported.
+
+GenerateContent also accepts inline WAV (`audio/wav`) and MP3 (`audio/mpeg`)
+parts in user content. Audio is size- and signature-validated, projected to
+configured AV scanners, included in the conservative TPM reserve, routed only to
+deployments with `audio_input`, and excluded from exact and semantic response
+caches. Other inline audio formats and provider file references remain unsupported.
 
 
 ### Native GenerateContent token counting

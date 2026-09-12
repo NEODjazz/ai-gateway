@@ -127,6 +127,21 @@ func TestGeminiSafetySettingsBypassResponseCaches(t *testing.T) {
 	}
 }
 
+func TestChatAudioInputBypassesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
+		Model: "model",
+		Messages: []openai.Message{
+			{Role: "user", Content: []any{map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "UklGRgAAAABXQVZF", "format": "wav"}}}},
+		},
+	}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache enabled for inline audio")
+	}
+	if _, _, eligible := semanticRequest(request, Endpoint{Name: "endpoint"}); eligible {
+		t.Fatal("semantic cache enabled for inline audio")
+	}
+}
+
 func TestMemoryCacheAndAffinityBounded(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1, 0)

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 )
 
@@ -54,6 +55,25 @@ func TestGenerateRequestMapsGoogleSearchTool(t *testing.T) {
 		if _, err := request.chat("model", false); err == nil {
 			t.Fatalf("invalid Google Search tool accepted: %s", raw)
 		}
+	}
+}
+
+func TestGenerateRequestMapsInlineAudio(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"text":"transcribe"},{"inlineData":{"mimeType":"audio/wav","data":"UklGRgAAAABXQVZF"}}]}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachments, err := openai.ChatAudioAttachments(chat.Messages)
+	if err != nil || len(attachments) != 1 || attachments[0].MediaType != "audio/wav" {
+		t.Fatalf("chat=%+v attachments=%+v err=%v", chat, attachments, err)
+	}
+	native.Contents[0].Role = "model"
+	if _, err := native.chat("model", false); err == nil {
+		t.Fatal("model audio input accepted")
 	}
 }
 func TestGenerateFunctionHistoryRoundTrip(t *testing.T) {
