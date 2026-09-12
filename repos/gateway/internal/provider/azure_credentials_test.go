@@ -67,12 +67,61 @@ func TestAzureIdentityEndpointsSelectSupportedCloud(t *testing.T) {
 		{baseURL: "https://resource.openai.azure.com", authority: azureAuthorityURL, resource: azureOpenAIResource},
 		{baseURL: "https://resource.openai.azure.us/openai/v1", authority: azureGovernmentAuthority, resource: azureGovernmentResource},
 		{baseURL: "https://resource.cognitiveservices.azure.us", authority: azureGovernmentAuthority, resource: azureGovernmentResource},
+		{baseURL: "https://resource.openai.azure.cn/openai/v1", authority: azureChinaAuthority, resource: azureChinaResource},
+		{baseURL: "https://resource.cognitiveservices.azure.cn", authority: azureChinaAuthority, resource: azureChinaResource},
+		{baseURL: "https://resource.openai.azure.cn.example.test", authority: azureAuthorityURL, resource: azureOpenAIResource},
 		{baseURL: "https://custom.example.test", authority: azureAuthorityURL, resource: azureOpenAIResource},
 	} {
 		authority, resource := azureIdentityEndpoints(test.baseURL)
 		if authority != test.authority || resource != test.resource {
 			t.Fatalf("base_url=%q authority=%q resource=%q", test.baseURL, authority, resource)
 		}
+	}
+}
+
+func TestAzureChinaWorkloadIdentityUsesSovereignAudience(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("assertion"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tenant/oauth2/v2.0/token" {
+			t.Errorf("path=%q", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		if r.Form.Get("scope") != azureChinaResource+".default" {
+			t.Errorf("scope=%q", r.Form.Get("scope"))
+		}
+		_, _ = fmt.Fprint(w, `{"access_token":"token","expires_in":3600,"token_type":"Bearer"}`)
+	}))
+	defer server.Close()
+	source := newAzureTokenSource("", "https://resource.openai.azure.cn")
+	source.now = func() time.Time { return now }
+	source.authorityBaseURL = server.URL
+	source.getenv = awsTestEnvironment(map[string]string{"AZURE_TENANT_ID": "tenant", "AZURE_CLIENT_ID": "client", "AZURE_FEDERATED_TOKEN_FILE": tokenFile})
+	if _, err := source.Token(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAzureChinaManagedIdentityUsesSovereignResource(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("resource") != azureChinaResource {
+			t.Errorf("resource=%q", r.URL.Query().Get("resource"))
+		}
+		_, _ = fmt.Fprintf(w, `{"access_token":"token","expires_on":%d,"token_type":"Bearer"}`, now.Add(time.Hour).Unix())
+	}))
+	defer server.Close()
+	source := newAzureTokenSource("", "https://resource.cognitiveservices.azure.cn")
+	source.now = func() time.Time { return now }
+	source.imdsURL = server.URL
+	source.getenv = awsTestEnvironment(nil)
+	if _, err := source.Token(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 
