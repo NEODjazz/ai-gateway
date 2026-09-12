@@ -242,6 +242,7 @@ type batchProvider struct {
 	speech     modules.RequestContext
 	speechData []byte
 	compact    modules.RequestContext
+	ocr        modules.RequestContext
 }
 
 func (p *batchProvider) ChatCompletions(_ context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
@@ -308,6 +309,14 @@ func (p *batchProvider) CompactResponse(_ context.Context, req modules.RequestCo
 		ID: "cmp_" + req.RequestID, Object: "response.compaction", Output: []json.RawMessage{json.RawMessage(`{"type":"compaction","encrypted_content":"opaque"}`)},
 		Usage: openai.ResponseUsage{InputTokens: 8, OutputTokens: 2, TotalTokens: 10},
 	}, nil
+}
+
+func (p *batchProvider) OCR(_ context.Context, req modules.RequestContext) (openai.OCRResponse, error) {
+	p.mu.Lock()
+	p.executions = append(p.executions, req.RequestID)
+	p.ocr = req
+	p.mu.Unlock()
+	return openai.OCRResponse{Pages: []json.RawMessage{json.RawMessage(`{"index":0,"markdown":"text","images":[]}`)}, Model: req.OCRRequest.Model, UsageInfo: openai.OCRUsageInfo{PagesProcessed: 1}}, nil
 }
 
 func TestBatchLifecycleExecutesMixedModelsWithDistinctBillingIDs(t *testing.T) {
@@ -591,6 +600,66 @@ func TestBatchAudioSpeechRejectsSSEAndContainsOversizedResults(t *testing.T) {
 	errorsFile, err := files.Get(t.Context(), owner, batch.ErrorFileID, true)
 	if err != nil || !strings.Contains(string(errorsFile.Content), `"code":"batch_result_too_large"`) {
 		t.Fatalf("errors=%s err=%v", errorsFile.Content, err)
+	}
+}
+
+func TestBatchLifecycleExecutesOCRWithOwnerScopedFileResolution(t *testing.T) {
+	store := newMemoryBatchStore()
+	files := &memoryFileStore{files: map[string]filestate.File{}}
+	runtime := &batchProvider{models: []string{"ocr-model"}}
+	rates := &embeddingTokenRateStore{}
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	document := []byte("%PDF-1.7\ntext")
+	files.files["file_document"] = filestate.File{ID: "file_document", OwnerKey: owner, Filename: "document.pdf", Purpose: "assistants", ContentType: "application/pdf", Bytes: int64(len(document)), Content: document}
+	payload := []byte("{\"custom_id\":\"ocr\",\"method\":\"POST\",\"url\":\"/v1/ocr\",\"body\":{\"model\":\"ocr-model\",\"document\":{\"type\":\"file\",\"file_id\":\"file_document\"},\"pages\":[0]}}\n")
+	files.files["file_ocr"] = filestate.File{ID: "file_ocr", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(payload)), Content: payload}
+	h := NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), runtime, rates).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
+	routes := Routes(h)
+	request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_ocr","endpoint":"/v1/ocr","completion_window":"24h"}`))
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	routes.ServeHTTP(response, request)
+	var created openai.Batch
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s err=%v", response.Code, response.Body.String(), err)
+	}
+	if processed, err := h.ProcessBatchItems(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	reservedTokens := rates.tokens
+	done := authorizedFileRequest(t, routes, http.MethodGet, "/v1/batches/"+created.ID)
+	var batch openai.Batch
+	if err := json.Unmarshal(done.Body.Bytes(), &batch); err != nil || batch.RequestCounts.Completed != 1 || batch.OutputFileID == "" {
+		t.Fatalf("status=%d batch=%+v err=%v", done.Code, batch, err)
+	}
+	output, err := files.Get(t.Context(), owner, batch.OutputFileID, true)
+	if err != nil || !strings.Contains(string(output.Content), `"pages_processed":1`) || !strings.Contains(string(output.Content), `"markdown":"text"`) {
+		t.Fatalf("output=%s err=%v", output.Content, err)
+	}
+	runtime.mu.Lock()
+	ocrRequest := runtime.ocr
+	runtime.mu.Unlock()
+	if ocrRequest.OCRRequest == nil || ocrRequest.RequestID == "" || ocrRequest.InputPages != 1 || ocrRequest.OCRRequest.Document.Type != "document_url" || !strings.HasPrefix(ocrRequest.OCRRequest.Document.DocumentURL, "data:application/pdf;base64,") || ocrRequest.OCRRequest.Document.FileID != "" || reservedTokens != ocrRequest.OCRRequest.InputTokens() {
+		t.Fatalf("request=%+v pages=%d TPM=%d", ocrRequest.OCRRequest, ocrRequest.InputPages, reservedTokens)
+	}
+}
+
+func TestBatchOCRDoesNotResolveAnotherOwnersFile(t *testing.T) {
+	store := newMemoryBatchStore()
+	files := &memoryFileStore{files: map[string]filestate.File{}}
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	foreign := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "other"})
+	document := []byte("%PDF-1.7\ntext")
+	files.files["file_foreign_document"] = filestate.File{ID: "file_foreign_document", OwnerKey: foreign, Filename: "document.pdf", Purpose: "assistants", ContentType: "application/pdf", Bytes: int64(len(document)), Content: document}
+	payload := []byte("{\"custom_id\":\"ocr\",\"method\":\"POST\",\"url\":\"/v1/ocr\",\"body\":{\"model\":\"ocr-model\",\"document\":{\"type\":\"file\",\"file_id\":\"file_foreign_document\"}}}\n")
+	files.files["file_ocr_foreign"] = filestate.File{ID: "file_ocr_foreign", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(payload)), Content: payload}
+	h := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), &batchProvider{models: []string{"ocr-model"}}).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
+	request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_ocr_foreign","endpoint":"/v1/ocr","completion_window":"24h"}`))
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	Routes(h).ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"code":"file_not_found"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

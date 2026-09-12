@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.326
+  version: 0.1.327
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -5636,7 +5636,7 @@ components:
         endpoint:
           type: string
           description: For /v1/audio/speech, each JSONL response body contains base64 data, content_type, model and optional usage; stream_format=sse is rejected.
-          enum: [/v1/responses, /v1/responses/compact, /v1/chat/completions, /v1/embeddings, /v1/completions, /v1/moderations, /v1/rerank, /v1/search, /v1/images/generations, /v1/audio/speech]
+          enum: [/v1/responses, /v1/responses/compact, /v1/chat/completions, /v1/embeddings, /v1/completions, /v1/moderations, /v1/rerank, /v1/search, /v1/images/generations, /v1/audio/speech, /v1/ocr]
         completion_window: {type: string, const: 24h}
         metadata:
           type: object

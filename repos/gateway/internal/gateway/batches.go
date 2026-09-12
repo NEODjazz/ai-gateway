@@ -151,6 +151,24 @@ func (h Handler) decodeBatchItems(w http.ResponseWriter, ctx context.Context, id
 		if err != nil {
 			return nil, fmt.Errorf("line %d: %w", lineNumber, err)
 		}
+		if endpoint == "/v1/ocr" {
+			var request openai.OCRRequest
+			if json.Unmarshal(normalized, &request) != nil {
+				return nil, fmt.Errorf("line %d: normalized OCR request is invalid", lineNumber)
+			}
+			if request.Document.Type == "file" {
+				resolved, resolveErr := h.resolveOCRFile(ctx, fileOwnerKey(identity), request.Document.FileID)
+				if resolveErr != nil {
+					writeOCRFileError(w, resolveErr)
+					return nil, errBatchResponseWritten
+				}
+				request.Document = resolved
+				normalized, err = json.Marshal(request)
+				if err != nil {
+					return nil, fmt.Errorf("line %d: encode resolved OCR request: %w", lineNumber, err)
+				}
+			}
+		}
 		if !h.authorizeBatchModel(w, identity, model) {
 			return nil, errBatchResponseWritten
 		}
@@ -375,6 +393,16 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		}
 		if request.StreamFormat == "sse" {
 			return nil, "", nil, errors.New("stream_format=sse is not supported in batches")
+		}
+		model = request.Model
+		normalized = request
+	case "/v1/ocr":
+		var request openai.OCRRequest
+		if err := decodeStrictJSON(body, &request); err != nil {
+			return nil, "", nil, err
+		}
+		if message := request.Validate(); message != "" {
+			return nil, "", nil, errors.New(message)
 		}
 		model = request.Model
 		normalized = request
@@ -812,6 +840,24 @@ func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestCont
 		}
 		response, err := client.GenerateSpeech(ctx, *req)
 		payload, _ := json.Marshal(openai.BatchAudioSpeechResponse{Data: response.Data, ContentType: response.ContentType, Model: response.Model, Usage: response.Usage})
+		return http.StatusOK, payload, err
+	case "/v1/ocr":
+		var value openai.OCRRequest
+		if err := json.Unmarshal(body, &value); err != nil {
+			return 0, nil, err
+		}
+		req.OCRRequest = &value
+		req.InputPages = value.ReservePages()
+		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model}
+		if !h.allowBatchRate(ctx, *req, value.InputTokens()) {
+			return 0, nil, errBatchRateLimited
+		}
+		client, ok := h.provider.(provider.OCRProvider)
+		if !ok {
+			return 0, nil, errors.New("OCR unsupported")
+		}
+		response, err := client.OCR(ctx, *req)
+		payload, _ := json.Marshal(response)
 		return http.StatusOK, payload, err
 	}
 	return 0, nil, errors.New("unsupported endpoint")
