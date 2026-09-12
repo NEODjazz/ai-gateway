@@ -226,7 +226,7 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if request.Logprobs != nil && *request.Logprobs {
 		return "", "", false
 	}
-	if request.WebSearchOptions != nil || request.WebFetchOptions != nil {
+	if request.WebSearchOptions != nil || request.WebFetchOptions != nil || request.GeminiCodeExecution {
 		return "", "", false
 	}
 	if len(request.BedrockRequestMetadata) > 0 {

@@ -3052,6 +3052,9 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	if request.WebFetchOptions != nil {
 		required = append(required, "web_fetch")
 	}
+	if request.GeminiCodeExecution {
+		required = append(required, "gemini_code_execution")
+	}
 	if openai.ChatRequestsAudio(request) || openai.ChatHasAudioHistory(request) {
 		required = append(required, "audio")
 	}

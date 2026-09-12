@@ -18,6 +18,8 @@ type ChatCompletionRequest struct {
 	NativeInputTokens int `json:"-"`
 	// GeminiSafetySettings contains validated native safety controls.
 	GeminiSafetySettings []GeminiSafetySetting `json:"-"`
+	// GeminiCodeExecution enables the native server-side code execution tool.
+	GeminiCodeExecution bool `json:"-"`
 	// Bedrock native controls cannot be supplied through the public Chat wire shape.
 	BedrockServiceTier                       string                  `json:"-"`
 	BedrockPerformanceLatency                string                  `json:"-"`
@@ -71,6 +73,26 @@ type Message struct {
 	// NativeContent is an internal, validated response representation used by
 	// protocol adapters that must preserve provider-native content block order.
 	NativeContent []json.RawMessage `json:"-"`
+	// GeminiCodeExecutionParts preserves validated native execution output order.
+	GeminiCodeExecutionParts []GeminiCodeExecutionPart `json:"-"`
+}
+
+type GeminiCodeExecutionPart struct {
+	Index  int
+	Code   *GeminiExecutableCode
+	Result *GeminiCodeExecutionResult
+}
+
+type GeminiExecutableCode struct {
+	ID       string `json:"id,omitempty"`
+	Language string `json:"language"`
+	Code     string `json:"code"`
+}
+
+type GeminiCodeExecutionResult struct {
+	ID      string `json:"id,omitempty"`
+	Outcome string `json:"outcome"`
+	Output  string `json:"output,omitempty"`
 }
 
 const MaxChatReasoningContentBytes = 1 << 20

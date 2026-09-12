@@ -15,8 +15,9 @@ type generateRequest struct {
 	System   *generateContent             `json:"systemInstruction,omitempty"`
 	Safety   []openai.GeminiSafetySetting `json:"safetySettings,omitempty"`
 	Tools    []struct {
-		Functions    []generateFunction `json:"functionDeclarations,omitempty"`
-		GoogleSearch *struct{}          `json:"googleSearch,omitempty"`
+		Functions     []generateFunction `json:"functionDeclarations,omitempty"`
+		GoogleSearch  *struct{}          `json:"googleSearch,omitempty"`
+		CodeExecution *struct{}          `json:"codeExecution,omitempty"`
 	} `json:"tools,omitempty"`
 	ToolConfig *struct {
 		FunctionCalling struct {
@@ -68,8 +69,10 @@ type generatePart struct {
 		Name     string         `json:"name"`
 		Response map[string]any `json:"response"`
 	} `json:"functionResponse,omitempty"`
-	Signature string `json:"thoughtSignature,omitempty"`
-	Thought   bool   `json:"thought,omitempty"`
+	ExecutableCode      *openai.GeminiExecutableCode      `json:"executableCode,omitempty"`
+	CodeExecutionResult *openai.GeminiCodeExecutionResult `json:"codeExecutionResult,omitempty"`
+	Signature           string                            `json:"thoughtSignature,omitempty"`
+	Thought             bool                              `json:"thought,omitempty"`
 }
 
 func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionRequest, error) {
@@ -198,7 +201,7 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		message := openai.Message{Role: role}
 		parts := []any{}
 		flush := func() {
-			if len(parts) > 0 || len(message.ToolCalls) > 0 || len(message.Reasoning) > 0 {
+			if len(parts) > 0 || len(message.ToolCalls) > 0 || len(message.Reasoning) > 0 || len(message.GeminiCodeExecutionParts) > 0 {
 				message.Content = parts
 				result.Messages = append(result.Messages, message)
 				message = openai.Message{Role: role}
@@ -207,12 +210,12 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		}
 		for partIndex, part := range content.Parts {
 			members := 0
-			for _, present := range []bool{part.Text != nil, part.InlineData != nil, part.Call != nil, part.Result != nil} {
+			for _, present := range []bool{part.Text != nil, part.InlineData != nil, part.Call != nil, part.Result != nil, part.ExecutableCode != nil, part.CodeExecutionResult != nil} {
 				if present {
 					members++
 				}
 			}
-			if members != 1 || (part.Thought && part.Text == nil) || part.Text != nil && part.Signature != "" && !validGenerateBase64(part.Signature) {
+			if members != 1 || (part.Thought && part.Text == nil) || part.Signature != "" && part.Text == nil && part.Call == nil || part.Text != nil && part.Signature != "" && !validGenerateBase64(part.Signature) {
 				return fail("contents.parts")
 			}
 			switch {
@@ -341,6 +344,26 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 				flush()
 				result.Messages = append(result.Messages, openai.Message{Role: "tool", ToolCallID: pending[found].ID, Content: string(encoded)})
 				pending = append(pending[:found], pending[found+1:]...)
+			case part.ExecutableCode != nil:
+				if role != "assistant" {
+					return fail("executableCode role")
+				}
+				block := openai.GeminiCodeExecutionPart{Index: partIndex, Code: part.ExecutableCode}
+				if err := openai.ValidateGeminiCodeExecutionParts([]openai.GeminiCodeExecutionPart{block}); err != nil {
+					return result, err
+				}
+				message.GeminiCodeExecutionParts = append(message.GeminiCodeExecutionParts, block)
+				result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(part.ExecutableCode))
+			case part.CodeExecutionResult != nil:
+				if role != "assistant" {
+					return fail("codeExecutionResult role")
+				}
+				block := openai.GeminiCodeExecutionPart{Index: partIndex, Result: part.CodeExecutionResult}
+				if err := openai.ValidateGeminiCodeExecutionParts([]openai.GeminiCodeExecutionPart{block}); err != nil {
+					return result, err
+				}
+				message.GeminiCodeExecutionParts = append(message.GeminiCodeExecutionParts, block)
+				result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(part.CodeExecutionResult))
 			}
 		}
 		flush()
@@ -352,7 +375,13 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		return result, err
 	}
 	for _, tool := range r.Tools {
-		if (len(tool.Functions) == 0) == (tool.GoogleSearch == nil) {
+		members := 0
+		for _, present := range []bool{len(tool.Functions) > 0, tool.GoogleSearch != nil, tool.CodeExecution != nil} {
+			if present {
+				members++
+			}
+		}
+		if members != 1 {
 			return fail("tools")
 		}
 		if tool.GoogleSearch != nil {
@@ -360,6 +389,13 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 				return fail("googleSearch")
 			}
 			result.WebSearchOptions = &openai.ChatWebSearchOptions{}
+			continue
+		}
+		if tool.CodeExecution != nil {
+			if result.GeminiCodeExecution {
+				return fail("codeExecution")
+			}
+			result.GeminiCodeExecution = true
 			continue
 		}
 		for _, function := range tool.Functions {

@@ -216,6 +216,42 @@ func TestGenerateContentEnforcesToolACL(t *testing.T) {
 		t.Fatalf("tool ACL bypassed: %d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestGenerateContentGeminiCodeExecutionStreamAndACL(t *testing.T) {
+	denied := &fallbackChatProvider{}
+	deniedHandler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}}}), denied))
+	response := generateCall(deniedHandler, "/v1beta/models/m:generateContent", `{"contents":[{"parts":[{"text":"calculate"}]}],"tools":[{"codeExecution":{}}]}`, "gateway-test-key")
+	if response.Code != http.StatusForbidden || denied.calls != 0 || !strings.Contains(response.Body.String(), "code_execution") {
+		t.Fatalf("code execution ACL bypassed: %d %s calls=%d", response.Code, response.Body.String(), denied.calls)
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(body["tools"])
+		if !strings.Contains(string(encoded), `"codeExecution":{}`) {
+			t.Fatalf("native tool lost: %s", encoded)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"responseId\":\"code\",\"modelVersion\":\"gemini-code\",\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"executableCode\":{\"id\":\"exec-1\",\"language\":\"PYTHON\",\"code\":\"print(4)\"}},{\"codeExecutionResult\":{\"id\":\"exec-1\",\"outcome\":\"OUTCOME_OK\",\"output\":\"4\\n\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"responseId\":\"code\",\"modelVersion\":\"gemini-code\",\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"The answer is 4.\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":4,\"candidatesTokenCount\":8,\"totalTokenCount\":12}}\n\n"))
+	}))
+	defer upstream.Close()
+	billing := &messagesUsageRecorder{}
+	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "native", Type: "gemini", BaseURL: upstream.URL, APIKey: "provider-key", Stream: true, Models: []string{"m"}, ModelAliases: map[string]string{"m": "gemini-code"}, Capabilities: []string{"chat", "stream", "gemini_code_execution"}}}, Modules: modules.NewPipeline([]modules.Module{billing})})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"m"}, tools: []string{"code_execution"}}}}), router))
+	response = generateCall(handler, "/v1beta/models/m:streamGenerateContent?alt=sse", `{"contents":[{"parts":[{"text":"calculate"}]}],"tools":[{"codeExecution":{}}]}`, "gateway-test-key")
+	for _, want := range []string{`"executableCode":{"id":"exec-1","language":"PYTHON","code":"print(4)"}`, `"codeExecutionResult":{"id":"exec-1","outcome":"OUTCOME_OK","output":"4\n"}`, `"text":"The answer is 4."`, `"totalTokenCount":12`} {
+		if !strings.Contains(response.Body.String(), want) {
+			t.Fatalf("missing %s: %d %s", want, response.Code, response.Body.String())
+		}
+	}
+	if response.Code != http.StatusOK || billing.calls != 1 || billing.usage.TotalTokens != 12 {
+		t.Fatalf("code execution settlement: status=%d billing=%d usage=%+v", response.Code, billing.calls, billing.usage)
+	}
+}
 func TestGenerateContentFallbackSSE(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "fallback", Model: "m", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "hello"}, FinishReason: "stop"}}, Usage: openai.Usage{PromptTokens: 2, CompletionTokens: 1, TotalTokens: 3}}}
 	response := generateCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), "/v1beta/models/m:streamGenerateContent?alt=sse", `{"contents":[{"parts":[{"text":"hi"}]}]}`, "")

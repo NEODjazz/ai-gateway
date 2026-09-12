@@ -337,6 +337,9 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		return
 	}
 	toolIdentifiers, validTools := chatToolIdentifiers(request.Tools, request.Functions)
+	if request.GeminiCodeExecution {
+		toolIdentifiers = append(toolIdentifiers, "code_execution")
+	}
 	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) {
 		return
 	}

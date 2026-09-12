@@ -38,3 +38,21 @@ func TestGeminiSafetySettingsAreBoundedAndUnique(t *testing.T) {
 		}
 	}
 }
+
+func TestGeminiCodeExecutionPartsAreBounded(t *testing.T) {
+	valid := []GeminiCodeExecutionPart{
+		{Index: 0, Code: &GeminiExecutableCode{ID: "exec-1", Language: "PYTHON", Code: "print(2 + 2)"}},
+		{Index: 1, Result: &GeminiCodeExecutionResult{ID: "exec-1", Outcome: "OUTCOME_OK", Output: "4\n"}},
+	}
+	if err := ValidateGeminiCodeExecutionParts(valid); err != nil {
+		t.Fatal(err)
+	}
+	invalid := []GeminiCodeExecutionPart{{Index: 0, Code: &GeminiExecutableCode{Language: "JAVASCRIPT", Code: "1+1"}}, {Index: 0, Result: &GeminiCodeExecutionResult{Outcome: "OUTCOME_OK"}}}
+	if err := ValidateGeminiCodeExecutionParts(invalid); err == nil {
+		t.Fatal("invalid execution parts accepted")
+	}
+	oversized := []GeminiCodeExecutionPart{{Index: 0, Result: &GeminiCodeExecutionResult{Outcome: "OUTCOME_FAILED", Output: string(make([]byte, MaxGeminiCodeExecutionBytes+1))}}}
+	if err := ValidateGeminiCodeExecutionParts(oversized); err == nil {
+		t.Fatal("oversized execution output accepted")
+	}
+}

@@ -61,11 +61,12 @@ func (g Gemini) authorize(request *http.Request) error {
 	}
 }
 
-func (Gemini) SupportsVision() bool     { return true }
-func (Gemini) SupportsWebSearch() bool  { return true }
-func (Gemini) SupportsAudioInput() bool { return true }
-func (Gemini) SupportsFileInput() bool  { return true }
-func (Gemini) SupportsVideoInput() bool { return true }
+func (Gemini) SupportsVision() bool        { return true }
+func (Gemini) SupportsWebSearch() bool     { return true }
+func (Gemini) SupportsCodeExecution() bool { return true }
+func (Gemini) SupportsAudioInput() bool    { return true }
+func (Gemini) SupportsFileInput() bool     { return true }
+func (Gemini) SupportsVideoInput() bool    { return true }
 
 func (Gemini) SupportsResponses() bool { return false }
 
@@ -73,12 +74,14 @@ func (Gemini) SupportsReasoningBlocks() bool   { return true }
 func (Gemini) SupportsUnsignedReasoning() bool { return true }
 
 type geminiPart struct {
-	Text             string                  `json:"text,omitempty"`
-	InlineData       *geminiInlineData       `json:"inlineData,omitempty"`
-	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
-	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
-	Thought          bool                    `json:"thought,omitempty"`
-	ThoughtSignature string                  `json:"thoughtSignature,omitempty"`
+	Text                string                            `json:"text,omitempty"`
+	InlineData          *geminiInlineData                 `json:"inlineData,omitempty"`
+	FunctionCall        *geminiFunctionCall               `json:"functionCall,omitempty"`
+	FunctionResponse    *geminiFunctionResponse           `json:"functionResponse,omitempty"`
+	ExecutableCode      *openai.GeminiExecutableCode      `json:"executableCode,omitempty"`
+	CodeExecutionResult *openai.GeminiCodeExecutionResult `json:"codeExecutionResult,omitempty"`
+	Thought             bool                              `json:"thought,omitempty"`
+	ThoughtSignature    string                            `json:"thoughtSignature,omitempty"`
 }
 type geminiInlineData struct {
 	MIMEType string `json:"mimeType"`
@@ -104,8 +107,9 @@ type geminiFunction struct {
 	Parameters  any    `json:"parametersJsonSchema,omitempty"`
 }
 type geminiTool struct {
-	Functions    []geminiFunction `json:"functionDeclarations,omitempty"`
-	GoogleSearch *struct{}        `json:"googleSearch,omitempty"`
+	Functions     []geminiFunction `json:"functionDeclarations,omitempty"`
+	GoogleSearch  *struct{}        `json:"googleSearch,omitempty"`
+	CodeExecution *struct{}        `json:"codeExecution,omitempty"`
 }
 type geminiGeneration struct {
 	MaxOutputTokens    *int                            `json:"maxOutputTokens,omitempty"`
@@ -430,6 +434,16 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 				}
 				content.Parts[signature.Index].ThoughtSignature = signature.Signature
 			}
+			if err := openai.ValidateGeminiCodeExecutionParts(message.GeminiCodeExecutionParts); err != nil {
+				return result, geminiInvalid("messages.code_execution")
+			}
+			for _, block := range message.GeminiCodeExecutionParts {
+				part := geminiPart{ExecutableCode: block.Code, CodeExecutionResult: block.Result}
+				position := min(block.Index, len(content.Parts))
+				content.Parts = append(content.Parts, geminiPart{})
+				copy(content.Parts[position+1:], content.Parts[position:])
+				content.Parts[position] = part
+			}
 		case "tool":
 			name, ok := toolNames[message.ToolCallID]
 			if !ok || message.ToolCallID == "" {
@@ -469,6 +483,9 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	}
 	if request.WebSearchOptions != nil {
 		result.Tools = append(result.Tools, geminiTool{GoogleSearch: &struct{}{}})
+	}
+	if request.GeminiCodeExecution {
+		result.Tools = append(result.Tools, geminiTool{CodeExecution: &struct{}{}})
 	}
 	if request.ToolChoice != nil {
 		if len(request.Tools) == 0 {
@@ -739,6 +756,17 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 			if part.InlineData != nil || part.FunctionResponse != nil {
 				return result, errors.New("unsupported Gemini output modality")
 			}
+			if part.ExecutableCode != nil || part.CodeExecutionResult != nil {
+				block := openai.GeminiCodeExecutionPart{Index: partIndex, Code: part.ExecutableCode, Result: part.CodeExecutionResult}
+				if err := openai.ValidateGeminiCodeExecutionParts([]openai.GeminiCodeExecutionPart{block}); err != nil {
+					return result, err
+				}
+				if part.Text != "" || part.FunctionCall != nil || part.ThoughtSignature != "" {
+					return result, errors.New("invalid Gemini code execution part")
+				}
+				choice.Message.GeminiCodeExecutionParts = append(choice.Message.GeminiCodeExecutionParts, block)
+				continue
+			}
 			text.WriteString(part.Text)
 			if part.ThoughtSignature != "" && part.FunctionCall == nil {
 				var err error
@@ -772,6 +800,9 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 				}
 				choice.Message.ToolCalls = append(choice.Message.ToolCalls, call)
 			}
+		}
+		if err := openai.ValidateGeminiCodeExecutionParts(choice.Message.GeminiCodeExecutionParts); err != nil {
+			return result, err
 		}
 		choice.Message.Content = text.String()
 		annotations, searches, err := geminiGrounding(candidate.Grounding, text.String())
@@ -978,6 +1009,13 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 				current.Logprobs.Content = append(current.Logprobs.Content, choice.Logprobs.Content...)
 			}
 			current.Message.Content = openai.ContentText(current.Message.Content) + openai.ContentText(choice.Message.Content)
+			for _, block := range choice.Message.GeminiCodeExecutionParts {
+				block.Index = len(current.Message.GeminiCodeExecutionParts)
+				current.Message.GeminiCodeExecutionParts = append(current.Message.GeminiCodeExecutionParts, block)
+			}
+			if err := openai.ValidateGeminiCodeExecutionParts(current.Message.GeminiCodeExecutionParts); err != nil {
+				return err
+			}
 			incomingSignatures, err := openai.GeminiPartSignatures(choice.Message.NativeContent)
 			if err != nil {
 				return err

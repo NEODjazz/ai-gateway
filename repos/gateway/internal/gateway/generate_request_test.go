@@ -59,6 +59,35 @@ func TestGenerateRequestMapsGoogleSearchTool(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsCodeExecutionToolAndHistory(t *testing.T) {
+	var native generateRequest
+	raw := `{"contents":[{"role":"model","parts":[{"executableCode":{"id":"exec-1","language":"PYTHON","code":"print(4)"}},{"codeExecutionResult":{"id":"exec-1","outcome":"OUTCOME_OK","output":"4\n"}},{"text":"done"}]},{"role":"user","parts":[{"text":"continue"}]}],"tools":[{"codeExecution":{}}]}`
+	if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !chat.GeminiCodeExecution || len(chat.Messages) != 2 || len(chat.Messages[0].GeminiCodeExecutionParts) != 2 || chat.NativeInputTokens == 0 {
+		t.Fatalf("code execution context lost: %+v", chat)
+	}
+	for _, raw := range []string{
+		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"codeExecution":{},"googleSearch":{}}]}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"codeExecution":{}},{"codeExecution":{}}]}`,
+		`{"contents":[{"role":"user","parts":[{"executableCode":{"language":"PYTHON","code":"print(1)"}}]}]}`,
+		`{"contents":[{"role":"model","parts":[{"codeExecutionResult":{"outcome":"OUTCOME_UNSPECIFIED"}}]}]}`,
+	} {
+		var request generateRequest
+		if err := decodeMessagesValue(json.RawMessage(raw), &request); err != nil {
+			continue
+		}
+		if _, err := request.chat("model", false); err == nil {
+			t.Fatalf("invalid code execution request accepted: %s", raw)
+		}
+	}
+}
+
 func TestGenerateRequestMapsInlineAudio(t *testing.T) {
 	var native generateRequest
 	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"text":"transcribe"},{"inlineData":{"mimeType":"audio/wav","data":"UklGRgAAAABXQVZF"}}]}]}`), &native); err != nil {

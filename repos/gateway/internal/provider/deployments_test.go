@@ -136,6 +136,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "anthropic", capability: "background_responses"},
 		{providerType: "anthropic", capability: "bedrock_invoke"},
 		{providerType: "openai-compatible", capability: "video_extension"},
+		{providerType: "openai-compatible", capability: "gemini_code_execution"},
 	}
 	for _, test := range tests {
 		t.Run(test.providerType+"/"+test.capability, func(t *testing.T) {
@@ -145,7 +146,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 			}
 			capabilities := []string{test.capability}
 			switch test.capability {
-			case "stream", "tools", "structured_output", "vision", "web_search", "web_fetch", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "bedrock_invoke":
+			case "stream", "tools", "structured_output", "vision", "web_search", "web_fetch", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "bedrock_invoke", "gemini_code_execution":
 				capabilities = append([]string{"chat"}, capabilities...)
 			case "background_responses":
 				capabilities = []string{"responses", "background_responses"}
@@ -324,6 +325,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	}
 	if !slices.Contains(profilesByType["gemini"].Capabilities, "web_search") {
 		t.Fatalf("Gemini profile is missing native Google Search: %+v", profilesByType["gemini"])
+	}
+	if !slices.Contains(profilesByType["gemini"].Capabilities, "gemini_code_execution") {
+		t.Fatalf("Gemini profile is missing native code execution: %+v", profilesByType["gemini"])
 	}
 	if !slices.Contains(profilesByType["gemini"].Capabilities, "audio_input") {
 		t.Fatalf("Gemini profile is missing native inline audio: %+v", profilesByType["gemini"])

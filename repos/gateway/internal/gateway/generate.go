@@ -96,20 +96,21 @@ func validateGenerateQuery(r *http.Request, stream bool) error {
 }
 
 type generateWriter struct {
-	destination       http.ResponseWriter
-	headers           http.Header
-	status            int
-	buffer            bytes.Buffer
-	started, terminal bool
-	id, model, reason string
-	usage             openai.Usage
-	tools             [128]*openai.ToolCall
-	toolNames         [128]strings.Builder
-	toolArguments     [128]strings.Builder
-	toolBytes         int
-	partSignatures    []openai.GeminiPartSignature
-	directResponse    *openai.ChatCompletionResponse
-	err               error
+	destination        http.ResponseWriter
+	headers            http.Header
+	status             int
+	buffer             bytes.Buffer
+	started, terminal  bool
+	id, model, reason  string
+	usage              openai.Usage
+	tools              [128]*openai.ToolCall
+	toolNames          [128]strings.Builder
+	toolArguments      [128]strings.Builder
+	toolBytes          int
+	partSignatures     []openai.GeminiPartSignature
+	codeExecutionParts []openai.GeminiCodeExecutionPart
+	directResponse     *openai.ChatCompletionResponse
+	err                error
 }
 
 func (w *generateWriter) Header() http.Header  { return w.headers }
@@ -241,6 +242,21 @@ func generateParts(message openai.Message) ([]any, error) {
 		copy(parts[position+1:], parts[position:])
 		parts[position] = part
 	}
+	if err := openai.ValidateGeminiCodeExecutionParts(message.GeminiCodeExecutionParts); err != nil {
+		return nil, err
+	}
+	for _, block := range message.GeminiCodeExecutionParts {
+		var part map[string]any
+		if block.Code != nil {
+			part = map[string]any{"executableCode": block.Code}
+		} else {
+			part = map[string]any{"codeExecutionResult": block.Result}
+		}
+		position := min(block.Index, len(parts))
+		parts = append(parts, nil)
+		copy(parts[position+1:], parts[position:])
+		parts[position] = part
+	}
 	return parts, nil
 }
 func generateEnvelope(id, model string, parts []any, reason string, usage map[string]int, grounding ...json.RawMessage) map[string]any {
@@ -268,7 +284,7 @@ func (w *generateWriter) chunk(payload string) error {
 		if w.reason == "" {
 			return errors.New("stream ended without finish reason")
 		}
-		message := openai.Message{Role: "assistant"}
+		message := openai.Message{Role: "assistant", GeminiCodeExecutionParts: append([]openai.GeminiCodeExecutionPart(nil), w.codeExecutionParts...)}
 		for index, call := range w.tools {
 			if call != nil {
 				call.Function.Name = w.toolNames[index].String()
@@ -416,6 +432,11 @@ func (w *generateWriter) chatStreamResult(response openai.ChatCompletionResponse
 			return
 		}
 		w.partSignatures = signatures
+		if err := openai.ValidateGeminiCodeExecutionParts(response.Choices[0].Message.GeminiCodeExecutionParts); err != nil {
+			w.err = err
+			return
+		}
+		w.codeExecutionParts = append([]openai.GeminiCodeExecutionPart(nil), response.Choices[0].Message.GeminiCodeExecutionParts...)
 	}
 }
 

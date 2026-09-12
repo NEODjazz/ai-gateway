@@ -93,6 +93,29 @@ func TestGeminiGoogleSearchGroundingAndUsage(t *testing.T) {
 	}
 }
 
+func TestGeminiCodeExecutionRoundTrip(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body geminiRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Tools) != 1 || body.Tools[0].CodeExecution == nil {
+			t.Fatalf("code execution tool lost: %+v", body.Tools)
+		}
+		_, _ = fmt.Fprint(w, `{"responseId":"code","candidates":[{"index":0,"content":{"parts":[{"executableCode":{"id":"exec-1","language":"PYTHON","code":"print(4)"}},{"codeExecutionResult":{"id":"exec-1","outcome":"OUTCOME_OK","output":"4\n"}},{"text":"The answer is 4."}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":8,"totalTokenCount":12}}`)
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "calculate"}}, GeminiCodeExecution: true}
+	response, err := NewGemini(server.URL, "key", false).ChatCompletions(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := response.Choices[0].Message.GeminiCodeExecutionParts
+	if len(parts) != 2 || parts[0].Code == nil || parts[1].Result == nil || parts[1].Result.Output != "4\n" || openai.ContentText(response.Choices[0].Message.Content) != "The answer is 4." {
+		t.Fatalf("execution response lost: %+v", response)
+	}
+}
+
 func TestGeminiRejectsInvalidGroundingAndUnrepresentableSearchOptions(t *testing.T) {
 	request := openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{SearchContextSize: "high"}}}
 	if err := (Gemini{}).ValidateChatParameters(request); err == nil {

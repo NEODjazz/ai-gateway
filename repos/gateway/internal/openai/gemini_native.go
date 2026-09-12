@@ -6,6 +6,42 @@ import (
 	"errors"
 )
 
+const MaxGeminiCodeExecutionBytes = 1 << 20
+
+func ValidateGeminiCodeExecutionParts(parts []GeminiCodeExecutionPart) error {
+	if len(parts) > 128 {
+		return errors.New("Gemini code execution parts exceed limit")
+	}
+	total := 0
+	seen := make(map[int]bool, len(parts))
+	for _, part := range parts {
+		if part.Index < 0 || part.Index >= 128 || seen[part.Index] || (part.Code == nil) == (part.Result == nil) {
+			return errors.New("invalid Gemini code execution part")
+		}
+		seen[part.Index] = true
+		if part.Code != nil {
+			if part.Code.Language != "PYTHON" || part.Code.Code == "" || len(part.Code.ID) > 128 {
+				return errors.New("invalid Gemini executable code")
+			}
+			total += len(part.Code.ID) + len(part.Code.Code)
+		} else {
+			switch part.Result.Outcome {
+			case "OUTCOME_OK", "OUTCOME_FAILED", "OUTCOME_DEADLINE_EXCEEDED":
+			default:
+				return errors.New("invalid Gemini code execution outcome")
+			}
+			if len(part.Result.ID) > 128 {
+				return errors.New("invalid Gemini code execution result")
+			}
+			total += len(part.Result.ID) + len(part.Result.Output)
+		}
+		if total > MaxGeminiCodeExecutionBytes {
+			return errors.New("Gemini code execution parts exceed size limit")
+		}
+	}
+	return nil
+}
+
 func ValidateGeminiSafetySettings(settings []GeminiSafetySetting) error {
 	if len(settings) > 6 {
 		return errors.New("Gemini safety settings exceed limit")
