@@ -550,6 +550,9 @@ func TestManagedProviderCapabilityProfilesExposeValidatedEmbeddingAndRerankOptio
 	if got := byType["cohere"].RerankParameters; !slices.Equal(got.SupportedOptions, []string{"top_n", "return_documents", "max_tokens_per_doc"}) || !slices.Equal(got.DocumentForms, []string{"text"}) {
 		t.Errorf("cohere rerank parameters=%+v", got)
 	}
+	if got := byType["nvidia-nim"].RerankParameters; !slices.Equal(got.SupportedOptions, []string{"top_n", "return_documents", "truncate"}) || !slices.Equal(got.DocumentForms, []string{"text"}) {
+		t.Errorf("nvidia-nim rerank parameters=%+v", got)
+	}
 }
 
 func TestManagedProviderCapabilityProfilesExposeValidatedCompletionOptions(t *testing.T) {

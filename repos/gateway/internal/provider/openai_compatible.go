@@ -243,7 +243,9 @@ func (p OpenAICompatible) Rerank(ctx context.Context, request openai.RerankReque
 	return response, nil
 }
 
-func (OpenAICompatible) ValidateRerankParameters(openai.RerankRequest) error { return nil }
+func (p OpenAICompatible) ValidateRerankParameters(request openai.RerankRequest) error {
+	return rejectParameters(p.providerName(), parameterCheck{"truncate", request.Truncate != ""})
+}
 
 func (p OpenAICompatible) Moderations(ctx context.Context, request openai.ModerationRequest) (openai.ModerationResponse, error) {
 	if err := p.ValidateModerationParameters(request); err != nil {

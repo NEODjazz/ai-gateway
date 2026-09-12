@@ -1103,6 +1103,7 @@ func managedProviderRerankParameterPolicy(client Client, supported bool) Provide
 		{"return_documents", func(r *openai.RerankRequest) { value := true; r.ReturnDocuments = &value }},
 		{"max_chunks_per_doc", func(r *openai.RerankRequest) { value := 1; r.MaxChunksPerDoc = &value }},
 		{"max_tokens_per_doc", func(r *openai.RerankRequest) { value := 128; r.MaxTokensPerDoc = &value }},
+		{"truncate", func(r *openai.RerankRequest) { r.Truncate = "END" }},
 	} {
 		request := baseline
 		probe.apply(&request)

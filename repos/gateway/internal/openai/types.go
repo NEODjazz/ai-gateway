@@ -593,6 +593,7 @@ type RerankRequest struct {
 	ReturnDocuments *bool    `json:"return_documents,omitempty"`
 	MaxChunksPerDoc *int     `json:"max_chunks_per_doc,omitempty"`
 	MaxTokensPerDoc *int     `json:"max_tokens_per_doc,omitempty"`
+	Truncate        string   `json:"truncate,omitempty"`
 }
 
 type RerankResponse struct {

@@ -87,6 +87,7 @@ func (OpenRouter) ValidateRerankParameters(request openai.RerankRequest) error {
 		parameterCheck{"rank_fields", len(request.RankFields) > 0},
 		parameterCheck{"max_chunks_per_doc", request.MaxChunksPerDoc != nil},
 		parameterCheck{"max_tokens_per_doc", request.MaxTokensPerDoc != nil},
+		parameterCheck{"truncate", request.Truncate != ""},
 	)
 }
 

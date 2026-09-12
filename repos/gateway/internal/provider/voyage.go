@@ -140,7 +140,7 @@ func (p Voyage) Embeddings(ctx context.Context, request openai.EmbeddingRequest)
 }
 
 func (Voyage) ValidateRerankParameters(request openai.RerankRequest) error {
-	if err := rejectParameters("voyage", parameterCheck{"rank_fields", len(request.RankFields) > 0}, parameterCheck{"max_chunks_per_doc", request.MaxChunksPerDoc != nil}, parameterCheck{"max_tokens_per_doc", request.MaxTokensPerDoc != nil}); err != nil {
+	if err := rejectParameters("voyage", parameterCheck{"rank_fields", len(request.RankFields) > 0}, parameterCheck{"max_chunks_per_doc", request.MaxChunksPerDoc != nil}, parameterCheck{"max_tokens_per_doc", request.MaxTokensPerDoc != nil}, parameterCheck{"truncate", request.Truncate != ""}); err != nil {
 		return err
 	}
 	if len(request.Documents) == 0 || len(request.Documents) > maxVoyageInputs {

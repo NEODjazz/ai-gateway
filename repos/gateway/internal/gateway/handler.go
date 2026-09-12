@@ -1914,6 +1914,9 @@ func validateRerankRequest(request openai.RerankRequest) string {
 	if request.MaxTokensPerDoc != nil && *request.MaxTokensPerDoc <= 0 {
 		return "max_tokens_per_doc must be positive"
 	}
+	if request.Truncate != "" && request.Truncate != "NONE" && request.Truncate != "END" {
+		return "truncate must be NONE or END"
+	}
 	if len(request.RankFields) > 32 {
 		return "rank_fields must not contain more than 32 fields"
 	}

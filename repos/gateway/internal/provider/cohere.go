@@ -852,6 +852,7 @@ func (Cohere) ValidateRerankParameters(request openai.RerankRequest) error {
 	if err := rejectParameters("cohere",
 		parameterCheck{"rank_fields", len(request.RankFields) > 0},
 		parameterCheck{"max_chunks_per_doc", request.MaxChunksPerDoc != nil},
+		parameterCheck{"truncate", request.Truncate != ""},
 	); err != nil {
 		return err
 	}

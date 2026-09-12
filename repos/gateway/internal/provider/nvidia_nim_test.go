@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,8 +22,8 @@ func TestNVIDIANIMInferenceContracts(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer nim-key" {
 			t.Fatalf("path=%q authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
 		}
+		var body map[string]any
 		if r.Method == http.MethodPost {
-			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
@@ -39,6 +40,15 @@ func TestNVIDIANIMInferenceContracts(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"id":"response","object":"response","status":"completed","model":"model","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
 		case "/v1/embeddings":
 			_, _ = fmt.Fprint(w, `{"object":"list","model":"model","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}],"usage":{"prompt_tokens":2,"total_tokens":2}}`)
+		case "/v1/ranking":
+			if query, ok := body["query"].(map[string]any); !ok || query["text"] != "query" || body["truncate"] != "END" {
+				t.Fatalf("ranking body=%#v", body)
+			}
+			passages, ok := body["passages"].([]any)
+			if !ok || len(passages) != 2 || passages[0].(map[string]any)["text"] != "first" {
+				t.Fatalf("ranking passages=%#v", body["passages"])
+			}
+			_, _ = fmt.Fprint(w, `{"rankings":[{"index":1,"logit":2.5},{"index":0,"logit":-1.25}],"usage":{"prompt_tokens":7,"total_tokens":7}}`)
 		case "/v1/models":
 			_, _ = fmt.Fprint(w, `{"object":"list","data":[{"id":"model-b"},{"id":"model-a"}]}`)
 		default:
@@ -64,6 +74,11 @@ func TestNVIDIANIMInferenceContracts(t *testing.T) {
 	if err != nil || embedding.Usage.TotalTokens != 2 || len(embedding.Data) != 1 {
 		t.Fatalf("embedding=%+v err=%v", embedding, err)
 	}
+	topN := 1
+	reranked, err := client.Rerank(t.Context(), openai.RerankRequest{Model: "model", Query: "query", Documents: []any{"first", "second"}, TopN: &topN, Truncate: "END"})
+	if err != nil || len(reranked.Results) != 1 || reranked.Results[0].Index != 1 || reranked.Results[0].RelevanceScore != 2.5 || reranked.Meta == nil || reranked.Meta.Tokens == nil || reranked.Meta.Tokens.InputTokens != 7 {
+		t.Fatalf("reranked=%+v err=%v", reranked, err)
+	}
 
 	router := New(Config{CredentialEncryptionKey: []byte("nvidia-nim-test-key")}).(*Router)
 	if _, err := router.CreateProvider(ManagedProvider{ID: "nim", Type: "nvidia-nim", BaseURL: server.URL, Enabled: true}); err != nil {
@@ -76,7 +91,7 @@ func TestNVIDIANIMInferenceContracts(t *testing.T) {
 	if err != nil || len(models) != 2 || models[0].ID != "model-a" || models[1].ID != "model-b" {
 		t.Fatalf("models=%+v err=%v", models, err)
 	}
-	for _, path := range []string{"/v1/chat/completions", "/v1/completions", "/v1/responses", "/v1/embeddings", "/v1/models"} {
+	for _, path := range []string{"/v1/chat/completions", "/v1/completions", "/v1/responses", "/v1/embeddings", "/v1/ranking", "/v1/models"} {
 		if seen[path] != 1 {
 			t.Fatalf("path %s called %d times", path, seen[path])
 		}
@@ -88,10 +103,13 @@ func TestNVIDIANIMCapabilityProfileIsBounded(t *testing.T) {
 		if profile.Type != "nvidia-nim" {
 			continue
 		}
-		expectedOperations := []string{"chat", "completions", "responses", "count_tokens", "embeddings", "stream"}
-		expectedCapabilities := []string{"chat", "completions", "responses", "embeddings", "stream", "tools", "structured_output", "vision", "audio_input", "video_input"}
+		expectedOperations := []string{"chat", "completions", "responses", "count_tokens", "embeddings", "rerank", "stream"}
+		expectedCapabilities := []string{"chat", "completions", "responses", "embeddings", "rerank", "stream", "tools", "structured_output", "vision", "audio_input", "video_input"}
 		if !slices.Equal(profile.Operations, expectedOperations) || !slices.Equal(profile.Capabilities, expectedCapabilities) {
 			t.Fatalf("profile=%+v", profile)
+		}
+		if !slices.Equal(profile.RerankParameters.SupportedOptions, []string{"top_n", "return_documents", "truncate"}) || !slices.Equal(profile.RerankParameters.DocumentForms, []string{"text"}) {
+			t.Fatalf("rerank profile=%+v", profile.RerankParameters)
 		}
 		return
 	}
@@ -215,3 +233,91 @@ func TestNVIDIANIMResponseLifecycleContracts(t *testing.T) {
 
 var _ responseRetrieveClient = NVIDIANIM{}
 var _ responseCancelClient = NVIDIANIM{}
+var _ RerankClient = NVIDIANIM{}
+
+func TestNVIDIANIMRerankRejectsUnsupportedInputsBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewNVIDIANIM(server.URL, "nim-key", false)
+	one := 1
+	tests := []openai.RerankRequest{
+		{Model: "model", Query: "query", Documents: []any{map[string]any{"text": "document"}}},
+		{Model: "model", Query: "query", Documents: []any{"document"}, RankFields: []string{"text"}},
+		{Model: "model", Query: "query", Documents: []any{"document"}, MaxChunksPerDoc: &one},
+		{Model: "model", Query: "query", Documents: []any{"document"}, MaxTokensPerDoc: &one},
+		{Model: "model", Query: "query", Documents: []any{"document"}, Truncate: "MIDDLE"},
+		{Model: "model", Query: "query", Documents: make([]any, nvidiaNIMMaxRerankPassages+1)},
+	}
+	for _, request := range tests {
+		if _, err := client.Rerank(t.Context(), request); err == nil {
+			t.Fatalf("unsupported request accepted: %+v", request)
+		}
+	}
+	if called {
+		t.Fatal("invalid request reached upstream")
+	}
+}
+
+func TestNVIDIANIMRerankRequiresExactUsageAndRankings(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "missing usage", body: `{"rankings":[{"index":0,"logit":1}]}`},
+		{name: "zero usage", body: `{"rankings":[{"index":0,"logit":1}],"usage":{"prompt_tokens":0,"total_tokens":0}}`},
+		{name: "inconsistent usage", body: `{"rankings":[{"index":0,"logit":1}],"usage":{"prompt_tokens":2,"total_tokens":3}}`},
+		{name: "missing ranking", body: `{"rankings":[],"usage":{"prompt_tokens":2,"total_tokens":2}}`},
+		{name: "duplicate ranking", body: `{"rankings":[{"index":0,"logit":2},{"index":0,"logit":1}],"usage":{"prompt_tokens":2,"total_tokens":2}}`},
+		{name: "unordered ranking", body: `{"rankings":[{"index":0,"logit":1},{"index":1,"logit":2}],"usage":{"prompt_tokens":2,"total_tokens":2}}`},
+		{name: "trailing data", body: `{"rankings":[{"index":0,"logit":1}],"usage":{"prompt_tokens":2,"total_tokens":2}} {}`},
+		{name: "oversized", body: strings.Repeat(" ", (8<<20)+1)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprint(w, test.body)
+			}))
+			defer server.Close()
+			documents := []any{"one"}
+			if strings.Contains(test.name, "duplicate") || strings.Contains(test.name, "unordered") {
+				documents = []any{"one", "two"}
+			}
+			if _, err := NewNVIDIANIM(server.URL, "nim-key", false).Rerank(t.Context(), openai.RerankRequest{Model: "model", Query: "query", Documents: documents}); err == nil {
+				t.Fatal("invalid response accepted")
+			}
+		})
+	}
+}
+
+type nvidiaNIMRerankLifecycleRecorder struct {
+	settledTokens int
+}
+
+func (*nvidiaNIMRerankLifecycleRecorder) Name() string   { return "nvidia-nim-rerank-recorder" }
+func (*nvidiaNIMRerankLifecycleRecorder) Required() bool { return true }
+func (*nvidiaNIMRerankLifecycleRecorder) Handle(context.Context, *modules.RequestContext) error {
+	return nil
+}
+func (*nvidiaNIMRerankLifecycleRecorder) PostResponseEnabled() bool { return true }
+func (m *nvidiaNIMRerankLifecycleRecorder) HandlePostResponse(_ context.Context, request *modules.RequestContext) error {
+	if request.RerankResponse != nil && request.RerankResponse.Meta != nil && request.RerankResponse.Meta.Tokens != nil {
+		m.settledTokens = request.RerankResponse.Meta.Tokens.InputTokens
+	}
+	return nil
+}
+
+func TestRouterNVIDIANIMRerankPreservesDocumentsAndExactUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"rankings":[{"index":1,"logit":2},{"index":0,"logit":1}],"usage":{"prompt_tokens":9,"total_tokens":9}}`)
+	}))
+	defer server.Close()
+	recorder := &nvidiaNIMRerankLifecycleRecorder{}
+	router := New(Config{Modules: modules.NewPipeline([]modules.Module{recorder}), Endpoints: []config.ProviderEndpointConfig{{Name: "nim", Type: "nvidia-nim", BaseURL: server.URL, Models: []string{"public"}, ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"rerank"}}}}).(*Router)
+	returnDocuments := true
+	request := openai.RerankRequest{Model: "public", Query: "query", Documents: []any{"first", "second"}, ReturnDocuments: &returnDocuments}
+	response, err := router.Rerank(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, RerankRequest: &request})
+	if err != nil || len(response.Results) != 2 || response.Results[0].Document != "second" || recorder.settledTokens != 9 {
+		t.Fatalf("response=%+v settled=%d err=%v", response, recorder.settledTokens, err)
+	}
+}
