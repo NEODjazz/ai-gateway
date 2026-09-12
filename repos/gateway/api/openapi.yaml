@@ -4981,7 +4981,6 @@ components:
         max_completion_tokens: {type: integer, minimum: 1, maximum: 1000000}
         temperature: {type: number, minimum: 0, maximum: 2}
         top_p: {type: number, minimum: 0, maximum: 1}
-        top_k: {type: integer, minimum: 0, maximum: 1000000, description: Deprecated native sampling control. Availability depends on the selected upstream model.}
     AssistantRun:
       type: object
       additionalProperties: false
@@ -6928,6 +6927,7 @@ components:
             include_obfuscation: {type: boolean, default: true, description: Add random padding to streaming delta events to reduce payload-size side channels.}
         temperature: {type: number, minimum: 0, maximum: 1, description: Must be omitted or equal to 1 when adaptive or enabled thinking is requested.}
         top_p: {type: number, minimum: 0, maximum: 1}
+        top_k: {type: integer, minimum: 0, maximum: 1000000, description: Deprecated native sampling control. Availability depends on the selected upstream model.}
         service_tier: {type: string, enum: [auto, standard_only], description: "Native capacity selection. The assigned standard, priority or batch tier is returned in usage.service_tier."}
         container:
           type: object

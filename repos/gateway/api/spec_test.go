@@ -31,6 +31,18 @@ func TestOpenAPIDocumentIsValid(t *testing.T) {
 	loadDocument(t)
 }
 
+func TestOpenAPITopKBelongsToMessagesRequest(t *testing.T) {
+	document := loadDocument(t)
+	messages := document.Components.Schemas["MessagesRequest"].Value
+	if messages == nil || messages.Properties["top_k"] == nil {
+		t.Fatal("MessagesRequest is missing top_k")
+	}
+	run := document.Components.Schemas["AssistantRunCreateRequest"].Value
+	if run != nil && run.Properties["top_k"] != nil {
+		t.Fatal("AssistantRunCreateRequest unexpectedly exposes top_k")
+	}
+}
+
 func TestOpenAPIRoutesMatchGatewayRouter(t *testing.T) {
 	document := loadDocument(t)
 	want := map[string]bool{}
