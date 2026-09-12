@@ -155,6 +155,16 @@ func TestAnthropicPDFDocumentCitationsWireAndCapability(t *testing.T) {
 	}
 }
 
+func TestNativeMessageCapabilitiesComposeAcrossMessages(t *testing.T) {
+	request := openai.ChatCompletionRequest{Messages: []openai.Message{
+		{Role: "tool", ToolCallID: "tool-1", ToolResultError: true, Content: "failed"},
+		{Role: "user", Content: []any{map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64,JVBERi0xLjcKY29udGVudA==", "filename": "report.pdf"}}, AnthropicDocumentCitations: []bool{true}},
+	}}
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,tool_result_error,document_citations,file_input" {
+		t.Fatalf("required capabilities=%s", got)
+	}
+}
+
 func TestAnthropicThinkingWireAndCapability(t *testing.T) {
 	budget := 2048
 	request := anthropicChatRequest(openai.ChatCompletionRequest{AnthropicThinking: &openai.AnthropicThinkingConfig{Type: "enabled", BudgetTokens: &budget, Display: "summarized"}}, false)

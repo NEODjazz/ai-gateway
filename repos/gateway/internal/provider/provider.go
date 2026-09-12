@@ -3042,15 +3042,20 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	if len(request.AnthropicContextManagement) > 0 {
 		required = append(required, "context_management")
 	}
+	toolResultError, documentCitations := false, false
 	for _, message := range request.Messages {
 		if message.ToolResultError {
-			required = append(required, "tool_result_error")
-			break
+			toolResultError = true
 		}
 		if slices.Contains(message.AnthropicDocumentCitations, true) {
-			required = append(required, "document_citations")
-			break
+			documentCitations = true
 		}
+	}
+	if toolResultError {
+		required = append(required, "tool_result_error")
+	}
+	if documentCitations {
+		required = append(required, "document_citations")
 	}
 	if len(request.GeminiSafetySettings) > 0 {
 		required = append(required, "gemini_safety_settings")
