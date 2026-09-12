@@ -1231,3 +1231,13 @@ same digest. Live OpenAPI 0.1.362 exposes the URL image source and bounds. A
 valid URL image passed structural validation and reached authentication; an
 HTTP loopback URL returned 400 before authentication or network access. These
 smoke checks used no credential and performed no external inference.
+
+Source `eef22c2` adds owner-scoped stored image references to native Messages.
+The Files object must have `purpose=user_data`, belong to the authenticated
+credential and user, and contain a supported JPEG, PNG, GIF or WebP. Resolution
+precedes policy, TPM and billing while preserving the existing signature,
+per-image and aggregate byte checks. Native token counting follows the same path
+without generation billing. Durable batch creation stores immutable resolved
+bytes so expiry or deletion cannot change execution. Foreign and unavailable
+files remain indistinguishable. Focused regressions and the full Go tests, race
+tests, vet and build passed.

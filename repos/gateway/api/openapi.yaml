@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.362
+  version: 0.1.363
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -7069,7 +7069,13 @@ components:
               properties:
                 type: {type: string, const: url}
                 url: {type: string, format: uri, pattern: '^https://', maxLength: 2048, description: "Public HTTPS image URL. Credentials, fragments and redirects are rejected."}
-      description: Base64 or public HTTPS JPEG, PNG, GIF or WebP user image. At most eight images and 16 MiB decoded bytes are accepted per request, with an 8 MiB per-image limit and signature validation. URL images are fetched after authentication through the bounded public-address transport and converted to inline data before policy, accounting and provider execution. Durable batches snapshot fetched bytes during creation.
+            - type: object
+              additionalProperties: false
+              required: [type, file_id]
+              properties:
+                type: {type: string, const: file}
+                file_id: {type: string, pattern: '^file_[A-Za-z0-9_-]+$', maxLength: 128, description: "Owner-scoped file with purpose user_data containing JPEG, PNG, GIF or WebP."}
+      description: Base64, public HTTPS or owner-scoped stored JPEG, PNG, GIF or WebP user image. At most eight images and 16 MiB decoded bytes are accepted per request, with an 8 MiB per-image limit and signature validation. URL and file references are resolved after authentication and converted to inline data before policy, accounting and provider execution. Stored files are isolated by authenticated credential and user. Durable batches snapshot resolved bytes during creation.
     MessagesRequest:
       type: object
       additionalProperties: false

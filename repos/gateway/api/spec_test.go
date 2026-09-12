@@ -180,12 +180,16 @@ func TestOpenAPIMessagesAdvertisesBoundedURLImages(t *testing.T) {
 		t.Fatalf("MessagesImageBlock is incomplete: %#v", block)
 	}
 	source := block.Properties["source"].Value
-	if len(source.OneOf) != 2 || source.OneOf[0].Value == nil || source.OneOf[1].Value == nil {
+	if len(source.OneOf) != 3 || source.OneOf[0].Value == nil || source.OneOf[1].Value == nil || source.OneOf[2].Value == nil {
 		t.Fatalf("MessagesImageBlock source is incomplete: %#v", source)
 	}
 	remote := source.OneOf[1].Value
 	if remote.Properties["type"] == nil || remote.Properties["type"].Value == nil || remote.Properties["type"].Value.Const != "url" || remote.Properties["url"] == nil || remote.Properties["url"].Value == nil || remote.Properties["url"].Value.Pattern != "^https://" || remote.Properties["url"].Value.MaxLength == nil || *remote.Properties["url"].Value.MaxLength != 2048 {
 		t.Fatalf("MessagesImageBlock URL source is incomplete: %#v", remote)
+	}
+	file := source.OneOf[2].Value
+	if file.Properties["type"] == nil || file.Properties["type"].Value == nil || file.Properties["type"].Value.Const != "file" || file.Properties["file_id"] == nil || file.Properties["file_id"].Value == nil || file.Properties["file_id"].Value.MaxLength == nil || *file.Properties["file_id"].Value.MaxLength != 128 {
+		t.Fatalf("MessagesImageBlock file source is incomplete: %#v", file)
 	}
 }
 

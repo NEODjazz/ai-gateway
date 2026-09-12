@@ -742,7 +742,14 @@ TPM, cache isolation, routing and billing. Per-image and aggregate decoded limit
 are 8 MiB and 16 MiB, with at most eight images and mandatory signature checks.
 Token counting uses resolved bytes without generation billing; durable batch
 creation snapshots the image so later URL changes do not affect execution.
-Owner-scoped stored image references and text after tool_use are not supported. Ordinary client
+An image may also use `source: {"type":"file","file_id":"file_..."}` for an
+owner-scoped `user_data` Files object containing JPEG, PNG, GIF or WebP. The
+gateway resolves it only inside the authenticated credential and user boundary,
+then applies the same signature, per-image and aggregate limits before policy,
+accounting and provider execution. Missing, foreign, expired, malformed and
+unsupported files share the unavailable response. Durable batches snapshot the
+resolved image, so later deletion cannot alter queued work.
+Text after tool_use is not supported. Ordinary client
 `tool_result` blocks may set `is_error=true`; the flag is preserved by native
 generation, token counting and durable batches. Such requests require the
 `tool_result_error` deployment capability, include the flag in exact-cache
