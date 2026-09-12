@@ -668,6 +668,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedAudioTranscriptionOptio
 		"gemini":     {"language", "prompt", "response_format", "temperature", "timestamp_granularities", "languages", "keywords", "mode"},
 		"mistral":    {"language", "response_format", "temperature", "timestamp_granularities", "keywords"},
 		"groq":       {"language", "prompt", "response_format", "temperature", "timestamp_granularities"},
+		"together":   {"language", "response_format", "temperature", "timestamp_granularities"},
 		"xai":        {"language", "keywords"},
 	}
 	for _, profile := range ManagedProviderCapabilityProfiles() {

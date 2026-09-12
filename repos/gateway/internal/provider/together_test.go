@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 
+	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
 
@@ -87,7 +90,7 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 		if profile.Type != "together" {
 			continue
 		}
-		if !slices.Equal(profile.Operations, []string{"chat", "completions", "embeddings", "rerank", "audio_speech", "stream"}) || !slices.Equal(profile.Capabilities, []string{"chat", "completions", "embeddings", "rerank", "audio_speech", "stream", "tools", "structured_output", "vision"}) || len(profile.AuthTypes) != 0 {
+		if !slices.Equal(profile.Operations, []string{"chat", "completions", "embeddings", "rerank", "audio_transcription", "audio_speech", "stream"}) || !slices.Equal(profile.Capabilities, []string{"chat", "completions", "embeddings", "rerank", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision"}) || len(profile.AuthTypes) != 0 {
 			t.Fatalf("profile=%+v", profile)
 		}
 		if slices.Contains(profile.ChatParameters.SupportedOptions, "store") || slices.Contains(profile.ChatParameters.SupportedOptions, "metadata") || slices.Contains(profile.ChatParameters.SupportedOptions, "service_tier") || slices.Contains(profile.ChatParameters.SupportedOptions, "prediction") || slices.Contains(profile.ChatParameters.SupportedOptions, "logprobs") || slices.Contains(profile.ChatParameters.SupportedOptions, "logit_bias") || len(profile.ChatParameters.Logprobs) != 0 {
@@ -96,6 +99,128 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 		return
 	}
 	t.Fatal("Together capability profile is missing")
+}
+
+func TestTogetherAudioTranscriptionContract(t *testing.T) {
+	attachment := mistralWAVAttachment(12500)
+	temperature := 0.25
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/audio/transcriptions" || r.Header.Get("Authorization") != "Bearer together-key" {
+			t.Fatalf("method=%s path=%s authorization=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+		}
+		if err := r.ParseMultipartForm(openai.MaxAudioBytes + 1); err != nil {
+			t.Fatal(err)
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		data, err := io.ReadAll(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if header.Filename != attachment.Filename || len(data) == 0 || r.FormValue("model") != "speech" || r.FormValue("language") != "en" || r.FormValue("response_format") != "verbose_json" || r.FormValue("temperature") != "0.25" || !slices.Equal(r.MultipartForm.Value["timestamp_granularities[]"], []string{"word", "segment"}) {
+			t.Fatalf("form=%#v file=%q bytes=%d", r.MultipartForm.Value, header.Filename, len(data))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"text":"hello world","words":[{"word":"hello","start":0,"end":0.5}],"segments":[{"id":0,"text":"hello world","start":0,"end":1.25}]}`)
+	}))
+	defer server.Close()
+
+	response, err := NewTogether(server.URL, "together-key", false).TranscribeAudio(t.Context(), openai.AudioTranscriptionRequest{
+		Model: "speech", File: attachment, Language: "en", ResponseFormat: "verbose_json", Temperature: &temperature, TimestampGranularities: []string{"word", "segment"},
+	})
+	if err != nil || response.Text != "hello world" || response.Duration != 12.5 || response.Usage == nil || response.Usage.Type != "duration" || response.Usage.InputAudioMilliseconds != 12500 || len(response.Words) != 1 || len(response.Segments) != 1 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestRouterTogetherTranscriptionReservesAndSettlesExactDuration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"text":"hello"}`)
+	}))
+	defer server.Close()
+	recorder := &transcriptionLifecycleRecorder{}
+	router := New(Config{Modules: modules.NewPipeline([]modules.Module{recorder}), Endpoints: []config.ProviderEndpointConfig{{
+		Name: "speech", Type: "together", BaseURL: server.URL, Models: []string{"audio-model"}, Capabilities: []string{"audio_transcription"},
+	}}}).(*Router)
+	request := openai.AudioTranscriptionRequest{Model: "audio-model", File: mistralWAVAttachment(1250)}
+
+	response, err := router.TranscribeAudio(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: request.Model}, AudioTranscriptionRequest: &request})
+	if err != nil || response.Text != "hello" || recorder.reserved != 1250 || recorder.settled != 1250 || recorder.settledTokens != 0 {
+		t.Fatalf("response=%+v recorder=%+v err=%v", response, recorder, err)
+	}
+}
+
+func TestTogetherAudioTranscriptionRejectsUnsupportedParametersBeforeHTTP(t *testing.T) {
+	attachment := mistralWAVAttachment(1000)
+	tests := []struct {
+		param string
+		apply func(*openai.AudioTranscriptionRequest)
+	}{
+		{param: "language", apply: func(r *openai.AudioTranscriptionRequest) { r.Language = "en-US" }},
+		{param: "prompt", apply: func(r *openai.AudioTranscriptionRequest) { r.Prompt = "terms" }},
+		{param: "response_format", apply: func(r *openai.AudioTranscriptionRequest) { r.ResponseFormat = "diarized_json" }},
+		{param: "include", apply: func(r *openai.AudioTranscriptionRequest) { r.Include = []string{"logprobs"} }},
+		{param: "languages", apply: func(r *openai.AudioTranscriptionRequest) { r.Languages = []string{"en"} }},
+		{param: "keywords", apply: func(r *openai.AudioTranscriptionRequest) { r.Keywords = []string{"term"} }},
+		{param: "mode", apply: func(r *openai.AudioTranscriptionRequest) { r.Mode = "SMART" }},
+		{param: "chunking_strategy", apply: func(r *openai.AudioTranscriptionRequest) {
+			r.ChunkingStrategy = &openai.AudioChunkingStrategy{Type: "auto"}
+		}},
+		{param: "stream", apply: func(r *openai.AudioTranscriptionRequest) { r.Stream = true }},
+	}
+	for _, test := range tests {
+		t.Run(test.param, func(t *testing.T) {
+			called := false
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+			defer server.Close()
+			request := openai.AudioTranscriptionRequest{Model: "speech", File: attachment}
+			test.apply(&request)
+
+			_, err := NewTogether(server.URL, "key", false).TranscribeAudio(t.Context(), request)
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Param != test.param || failure.UpstreamCode != "unsupported_parameter" || called {
+				t.Fatalf("err=%v called=%v", err, called)
+			}
+		})
+	}
+}
+
+func TestTogetherAudioTranscriptionRequiresReliableDuration(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	request := openai.AudioTranscriptionRequest{Model: "speech", File: openai.AudioAttachment{Filename: "audio.aac", MediaType: "audio/aac", Data: "//FQgAAf/A=="}}
+
+	_, err := NewTogether(server.URL, "key", false).TranscribeAudio(t.Context(), request)
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Param != "file" || failure.UpstreamCode != "unsupported_audio" || called {
+		t.Fatalf("err=%v called=%v", err, called)
+	}
+	if _, err := togetherBoundedAudioDuration(togetherMaxAudioMilliseconds+1, nil); err == nil {
+		t.Fatal("audio longer than four hours accepted")
+	}
+}
+
+func TestTogetherAudioTranscriptionRejectsInvalidResponses(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "null", body: `null`},
+		{name: "missing text", body: `{}`},
+		{name: "trailing", body: `{"text":"hello"} {}`},
+		{name: "oversized", body: strings.Repeat(" ", maxAudioTranscriptionResponseBytes+1)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := decodeTogetherAudioTranscription(strings.NewReader(test.body), 1000); err == nil {
+				t.Fatal("invalid response accepted")
+			}
+		})
+	}
 }
 
 func TestTogetherAudioSpeechContract(t *testing.T) {

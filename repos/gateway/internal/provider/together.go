@@ -3,10 +3,13 @@ package provider
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"ai-gateway-gateway/internal/openai"
@@ -33,6 +36,10 @@ func (Together) SupportsStructuredOutput() bool { return true }
 func (Together) SupportsVision() bool           { return true }
 func (Together) SupportsAudioSpeech() bool      { return true }
 func (Together) SupportsAudioSpeechStreaming() bool {
+	return false
+}
+func (Together) SupportsAudioTranscription() bool { return true }
+func (Together) SupportsAudioTranscriptionStreaming() bool {
 	return false
 }
 
@@ -142,6 +149,126 @@ func (t Together) GenerateSpeech(ctx context.Context, request openai.AudioSpeech
 	}
 	response.ContentType = request.ExpectedContentType()
 	return response, nil
+}
+
+const togetherMaxAudioMilliseconds = 4 * 60 * 60 * 1000
+
+func (Together) ReserveAudioMilliseconds(request openai.AudioTranscriptionRequest) (int, error) {
+	data, err := base64.StdEncoding.DecodeString(request.File.Data)
+	if err != nil {
+		return 0, openai.ErrInvalidAudio
+	}
+	switch strings.ToLower(request.File.MediaType) {
+	case "audio/wav", "audio/wave", "audio/x-wav":
+		return togetherBoundedAudioDuration(wavDurationMilliseconds(data))
+	case "audio/flac":
+		return togetherBoundedAudioDuration(flacDurationMilliseconds(data))
+	case "audio/ogg", "audio/opus":
+		return togetherBoundedAudioDuration(oggDurationMilliseconds(data))
+	case "audio/mpeg", "audio/mp3":
+		return togetherBoundedAudioDuration(mp3DurationMilliseconds(data))
+	case "audio/mp4", "video/mp4", "audio/x-m4a", "audio/m4a":
+		return togetherBoundedAudioDuration(mp4DurationMilliseconds(data))
+	case "audio/webm", "video/webm":
+		return togetherBoundedAudioDuration(webmAudioDurationMilliseconds(data))
+	default:
+		return 0, errors.New("together transcription requires audio with reliable duration metadata")
+	}
+}
+
+func togetherBoundedAudioDuration(duration int, err error) (int, error) {
+	if err != nil || duration <= 0 || duration > togetherMaxAudioMilliseconds {
+		return 0, errors.New("together transcription duration is invalid or exceeds four hours")
+	}
+	return duration, nil
+}
+
+func (Together) ValidateAudioTranscriptionParameters(request openai.AudioTranscriptionRequest) error {
+	if message := request.Validate(); message != "" {
+		return &Error{Class: FailureClientRequest, Provider: "together", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	invalidLanguage := request.Language != "" && request.Language != "auto" && (len(request.Language) != 2 || request.Language != strings.ToLower(request.Language))
+	return rejectParameters("together",
+		parameterCheck{"language", invalidLanguage},
+		parameterCheck{"prompt", request.Prompt != ""},
+		parameterCheck{"response_format", request.ResponseFormat == "diarized_json"},
+		parameterCheck{"include", len(request.Include) > 0},
+		parameterCheck{"languages", len(request.Languages) > 0},
+		parameterCheck{"keywords", len(request.Keywords) > 0},
+		parameterCheck{"mode", request.Mode != ""},
+		parameterCheck{"chunking_strategy", request.ChunkingStrategy != nil},
+		parameterCheck{"known_speaker_names", len(request.KnownSpeakerNames) > 0},
+		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},
+		parameterCheck{"stream", request.Stream},
+	)
+}
+
+func (t Together) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
+	if err := t.ValidateAudioTranscriptionParameters(request); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	duration, err := t.ReserveAudioMilliseconds(request)
+	if err != nil {
+		return openai.AudioTranscriptionResponse{}, &Error{Class: FailureClientRequest, Provider: "together", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_audio", Param: "file", Err: err}
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	fields := map[string]string{"model": request.Model, "language": request.Language, "response_format": request.ResponseFormat}
+	if request.Temperature != nil {
+		fields["temperature"] = strconv.FormatFloat(*request.Temperature, 'g', -1, 64)
+	}
+	for name, value := range fields {
+		if value != "" {
+			if err := writer.WriteField(name, value); err != nil {
+				return openai.AudioTranscriptionResponse{}, err
+			}
+		}
+	}
+	for _, value := range request.TimestampGranularities {
+		if err := writer.WriteField("timestamp_granularities[]", value); err != nil {
+			return openai.AudioTranscriptionResponse{}, err
+		}
+	}
+	if err := writeAudioPart(writer, request.File); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	if err := writer.Close(); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(t.compatible.baseURL, "audio/transcriptions"), &body)
+	if err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+	if t.compatible.apiKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+t.compatible.apiKey)
+	}
+	response, err := t.compatible.client.Do(httpRequest)
+	if err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return openai.AudioTranscriptionResponse{}, responseStatusError("together", response)
+	}
+	return decodeTogetherAudioTranscription(response.Body, duration)
+}
+
+func decodeTogetherAudioTranscription(reader io.Reader, duration int) (openai.AudioTranscriptionResponse, error) {
+	payload, err := io.ReadAll(io.LimitReader(reader, maxAudioTranscriptionResponseBytes+1))
+	if err != nil || len(payload) > maxAudioTranscriptionResponseBytes {
+		return openai.AudioTranscriptionResponse{}, errors.New("together transcription response exceeds limit")
+	}
+	var response *openai.AudioTranscriptionResponse
+	if err := json.Unmarshal(payload, &response); err != nil || response == nil {
+		return openai.AudioTranscriptionResponse{}, errors.New("together transcription response must be an object")
+	}
+	response.Duration = float64(duration) / 1000
+	response.Usage = &openai.AudioTranscriptionUsage{Type: "duration", InputAudioMilliseconds: duration}
+	if message := response.Validate(); message != "" {
+		return openai.AudioTranscriptionResponse{}, errors.New(message)
+	}
+	return *response, nil
 }
 
 func (Together) ValidateRerankParameters(request openai.RerankRequest) error {
