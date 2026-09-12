@@ -264,6 +264,13 @@ func (p *batchProvider) Models() []openai.Model {
 	return out
 }
 
+func (p *batchProvider) Rerank(_ context.Context, req modules.RequestContext) (openai.RerankResponse, error) {
+	p.mu.Lock()
+	p.executions = append(p.executions, req.RequestID)
+	p.mu.Unlock()
+	return openai.RerankResponse{ID: "rerank_" + req.RequestID, Results: []openai.RerankResult{{Index: 1, RelevanceScore: 0.9}}}, nil
+}
+
 func TestBatchLifecycleExecutesMixedModelsWithDistinctBillingIDs(t *testing.T) {
 	store := newMemoryBatchStore()
 	files := &memoryFileStore{files: map[string]filestate.File{}}
@@ -316,6 +323,40 @@ func TestBatchLifecycleExecutesMixedModelsWithDistinctBillingIDs(t *testing.T) {
 	provider.mu.Unlock()
 	if len(executions) != 2 || executions[0] == executions[1] {
 		t.Fatalf("execution IDs=%v", executions)
+	}
+}
+
+func TestBatchLifecycleExecutesRerankWithSharedValidation(t *testing.T) {
+	store := newMemoryBatchStore()
+	files := &memoryFileStore{files: map[string]filestate.File{}}
+	runtime := &batchProvider{models: []string{"rerank-model"}}
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	payload := []byte("{\"custom_id\":\"rank\",\"method\":\"POST\",\"url\":\"/v1/rerank\",\"body\":{\"model\":\"rerank-model\",\"query\":\"refund\",\"documents\":[\"shipping\",\"refund policy\"],\"top_n\":1}}\n")
+	files.files["file_rerank"] = filestate.File{ID: "file_rerank", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(payload)), Content: payload}
+	h := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), runtime).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
+	routes := Routes(h)
+	request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_rerank","endpoint":"/v1/rerank","completion_window":"24h"}`))
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	routes.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	var created openai.Batch
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if processed, err := h.ProcessBatchItems(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	done := authorizedFileRequest(t, routes, http.MethodGet, "/v1/batches/"+created.ID)
+	var batch openai.Batch
+	if err := json.Unmarshal(done.Body.Bytes(), &batch); err != nil || done.Code != http.StatusOK || batch.RequestCounts.Completed != 1 {
+		t.Fatalf("status=%d batch=%+v err=%v", done.Code, batch, err)
+	}
+	output, err := files.Get(t.Context(), owner, batch.OutputFileID, true)
+	if err != nil || !strings.Contains(string(output.Content), `"id":"rerank_`) || !strings.Contains(string(output.Content), `"index":1`) {
+		t.Fatalf("output=%s err=%v", output.Content, err)
 	}
 }
 

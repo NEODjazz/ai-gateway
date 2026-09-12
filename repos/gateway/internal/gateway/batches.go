@@ -317,6 +317,16 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		}
 		model = request.Model
 		normalized = request
+	case "/v1/rerank":
+		var request openai.RerankRequest
+		if err := decodeStrictJSON(body, &request); err != nil {
+			return nil, "", nil, err
+		}
+		if message := validateRerankRequest(request); message != "" {
+			return nil, "", nil, errors.New(message)
+		}
+		model = request.Model
+		normalized = request
 	default:
 		return nil, "", nil, errors.New("unsupported endpoint")
 	}
@@ -647,6 +657,23 @@ func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestCont
 			return 0, nil, errors.New("moderations unsupported")
 		}
 		response, err := client.Moderations(ctx, *req)
+		payload, _ := json.Marshal(response)
+		return http.StatusOK, payload, err
+	case "/v1/rerank":
+		var value openai.RerankRequest
+		if err := json.Unmarshal(body, &value); err != nil {
+			return 0, nil, err
+		}
+		req.RerankRequest = &value
+		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model}
+		if !h.allowBatchRate(ctx, *req, estimateRerankTokens(value)) {
+			return 0, nil, errBatchRateLimited
+		}
+		client, ok := h.provider.(provider.RerankProvider)
+		if !ok {
+			return 0, nil, errors.New("rerank unsupported")
+		}
+		response, err := client.Rerank(ctx, *req)
 		payload, _ := json.Marshal(response)
 		return http.StatusOK, payload, err
 	}
