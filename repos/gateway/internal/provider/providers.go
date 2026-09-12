@@ -45,6 +45,7 @@ type ProviderCapabilityProfile struct {
 	AudioTranslationParameters   ProviderAudioTranslationParameterPolicy   `json:"audio_translation_parameters"`
 	AudioSpeechParameters        ProviderAudioSpeechParameterPolicy        `json:"audio_speech_parameters"`
 	OCRParameters                ProviderOCRParameterPolicy                `json:"ocr_parameters"`
+	VideoCreateParameters        ProviderVideoCreateParameterPolicy        `json:"video_create_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -116,6 +117,10 @@ type ProviderAudioSpeechParameterPolicy struct {
 type ProviderOCRParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 	DocumentForms    []string `json:"document_forms"`
+}
+
+type ProviderVideoCreateParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
 }
 
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai", "opensandbox"}
@@ -382,9 +387,38 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			AudioTranslationParameters:   managedProviderAudioTranslationParameterPolicy(client, slicesContain(operations, "audio_translation")),
 			AudioSpeechParameters:        managedProviderAudioSpeechParameterPolicy(client, slicesContain(operations, "audio_speech")),
 			OCRParameters:                managedProviderOCRParameterPolicy(client, slicesContain(operations, "ocr")),
+			VideoCreateParameters:        managedProviderVideoCreateParameterPolicy(client, slicesContain(operations, "video")),
 		})
 	}
 	return profiles
+}
+
+func managedProviderVideoCreateParameterPolicy(client Client, supported bool) ProviderVideoCreateParameterPolicy {
+	policy := ProviderVideoCreateParameterPolicy{SupportedOptions: []string{}}
+	validator, ok := client.(interface {
+		ValidateVideoCreateParameters(openai.VideoCreateRequest) error
+	})
+	if !supported || !ok {
+		return policy
+	}
+	baseline := openai.VideoCreateRequest{Model: "model", Prompt: "prompt"}
+	for _, probe := range []struct {
+		name  string
+		apply func(*openai.VideoCreateRequest)
+	}{
+		{"seconds", func(r *openai.VideoCreateRequest) { r.Seconds = "4" }},
+		{"size", func(r *openai.VideoCreateRequest) { r.Size = "1280x720" }},
+		{"input_reference", func(r *openai.VideoCreateRequest) {
+			r.InputReference = &openai.VideoInputReference{ImageURL: "https://example.test/image.png"}
+		}},
+	} {
+		request := baseline
+		probe.apply(&request)
+		if validator.ValidateVideoCreateParameters(request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	return policy
 }
 
 func managedProviderOCRParameterPolicy(client Client, supported bool) ProviderOCRParameterPolicy {

@@ -42,10 +42,17 @@ type VideoExtensionClient interface {
 	ExtendVideo(context.Context, string, openai.VideoExtendRequest) (openai.Video, error)
 }
 
+func (p OpenAICompatible) ValidateVideoCreateParameters(input openai.VideoCreateRequest) error {
+	if param, err := validateVideoCreateRequest(input); err != nil {
+		return videoParameterError(param, err)
+	}
+	return nil
+}
+
 func (p OpenAICompatible) CreateVideo(ctx context.Context, input openai.VideoCreateRequest) (openai.Video, error) {
 	var result openai.Video
-	if param, err := validateVideoCreateRequest(input); err != nil {
-		return result, videoParameterError(param, err)
+	if err := p.ValidateVideoCreateParameters(input); err != nil {
+		return result, err
 	}
 	err := p.videoJSONRequest(ctx, http.MethodPost, "videos", nil, input, &result)
 	return result, err

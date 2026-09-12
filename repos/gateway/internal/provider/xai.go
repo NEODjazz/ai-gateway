@@ -43,14 +43,29 @@ func (XAI) SupportsAudioTranscription() bool { return true }
 func (XAI) SupportsAudioSpeech() bool        { return true }
 func (XAI) SupportsVideo() bool              { return true }
 
-func (x XAI) CreateVideo(ctx context.Context, request openai.VideoCreateRequest) (openai.Video, error) {
+func (XAI) ValidateVideoCreateParameters(request openai.VideoCreateRequest) error {
 	if param, err := validateVideoCreateRequest(request); err != nil {
-		return openai.Video{}, xaiParameterError(param, err.Error())
+		return xaiParameterError(param, err.Error())
 	}
-	aspectRatio, resolution, err := xaiVideoDimensions(request.Size)
-	if err != nil {
+	if _, _, err := xaiVideoDimensions(request.Size); err != nil {
+		return err
+	}
+	if request.InputReference != nil {
+		if request.InputReference.FileID != "" {
+			return xaiUnsupportedParameter("input_reference.file_id")
+		}
+		if !validXAIMediaURL(request.InputReference.ImageURL) {
+			return xaiParameterError("input_reference.image_url", "image URL must use HTTPS")
+		}
+	}
+	return nil
+}
+
+func (x XAI) CreateVideo(ctx context.Context, request openai.VideoCreateRequest) (openai.Video, error) {
+	if err := x.ValidateVideoCreateParameters(request); err != nil {
 		return openai.Video{}, err
 	}
+	aspectRatio, resolution, _ := xaiVideoDimensions(request.Size)
 	size := request.Size
 	if size == "" {
 		size = "1280x720"
@@ -71,12 +86,6 @@ func (x XAI) CreateVideo(ctx context.Context, request openai.VideoCreateRequest)
 		Image       *source `json:"image,omitempty"`
 	}{Model: request.Model, Prompt: request.Prompt, Duration: duration, AspectRatio: aspectRatio, Resolution: resolution}
 	if request.InputReference != nil {
-		if request.InputReference.FileID != "" {
-			return openai.Video{}, xaiUnsupportedParameter("input_reference.file_id")
-		}
-		if !validXAIMediaURL(request.InputReference.ImageURL) {
-			return openai.Video{}, xaiParameterError("input_reference.image_url", "image URL must use HTTPS")
-		}
 		body.Image = &source{URL: request.InputReference.ImageURL}
 	}
 	var response struct {

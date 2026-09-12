@@ -654,6 +654,19 @@ func TestManagedProviderCapabilityProfilesExposeValidatedOCROptions(t *testing.T
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeValidatedVideoCreateOptions(t *testing.T) {
+	expected := map[string][]string{
+		"openai": {"seconds", "size", "input_reference"}, "openai-compatible": {"seconds", "size", "input_reference"},
+		"xai": {"seconds", "size", "input_reference"},
+	}
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		want, listed := expected[profile.Type]
+		if slices.Contains(profile.Operations, "video") != listed || !slices.Equal(profile.VideoCreateParameters.SupportedOptions, want) {
+			t.Errorf("%s video create parameters=%v operation=%v", profile.Type, profile.VideoCreateParameters.SupportedOptions, slices.Contains(profile.Operations, "video"))
+		}
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
