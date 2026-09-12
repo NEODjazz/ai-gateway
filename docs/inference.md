@@ -587,6 +587,13 @@ Azure deployment с пустым `api_version` подключается к nativ
 настроенный `api-key` либо Entra bearer token, включая ambient managed identity.
 Отсутствующий API key закрывает запрос до WebSocket dial.
 
+Realtime input transcription является отдельным ASR execution с собственным
+usage и ценой модели. Пока для него не настроен независимый pricing, admission
+и billing lifecycle, gateway отклоняет `session.type=transcription`, legacy
+`input_audio_transcription`, текущий `audio.input.transcription` и неожиданные
+provider transcription events. Клиент получает `unsupported_feature`, а
+конфигурация не достигает provider WebSocket.
+
 `n` принимает от 1 до 128 choices для OpenAI-compatible adapter. TPM и budget
 reserve умножают per-choice output limit (включая default reserve) на `n` с
 насыщением при переполнении. Native adapters отклоняют `n` до provider modules.

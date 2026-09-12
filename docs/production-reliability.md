@@ -1427,3 +1427,14 @@ Gateway Helm revision 473 completed successfully, and pod
 same image ID. Live health returned 204 and OpenAPI remained at 0.1.368. An
 invalid Realtime smoke credential returned 401 before deployment selection.
 No cloud credential or external inference was used by the smoke checks.
+
+Source `ad74244` closes unaccounted Realtime ASR execution. Input transcription
+usage belongs to a separate transcription model and can be token- or
+duration-priced, while the existing session tracked only Realtime response
+usage. Legacy and current transcription configuration now fails before provider
+delivery with an explicit `unsupported_feature`; unexpected provider
+transcription events also fail closed. Regressions cover all three configuration
+forms, provider completion usage and the full WebSocket boundary. The full Go
+suite, full race suite, vet and build passed. OpenAPI 0.1.369 documents the
+temporary fail-closed contract until independent ASR admission and settlement
+are implemented.
