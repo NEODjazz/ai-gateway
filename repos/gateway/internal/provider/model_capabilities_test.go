@@ -12,7 +12,7 @@ func TestCapabilityContractIsSharedByDeploymentsAndOnboarding(t *testing.T) {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke", "interaction_agents",
+		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents",
 	}
 	if !validDeploymentCapabilities(capabilities) {
 		t.Fatal("deployment rejected a supported model capability")
@@ -34,6 +34,15 @@ func TestInteractionAgentCapabilityRequiresInteractions(t *testing.T) {
 	}
 	if !validDeploymentCapabilities([]string{"interactions", "interaction_agents"}) {
 		t.Fatal("interaction agent capability was rejected with interactions")
+	}
+}
+
+func TestBackgroundInteractionCapabilityRequiresInteractions(t *testing.T) {
+	if validDeploymentCapabilities([]string{"background_interactions"}) {
+		t.Fatal("background interaction capability was accepted without interactions")
+	}
+	if !validDeploymentCapabilities([]string{"interactions", "background_interactions"}) {
+		t.Fatal("background interaction capability was rejected with interactions")
 	}
 }
 

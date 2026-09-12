@@ -15,7 +15,7 @@ import (
 )
 
 func (g Gemini) Interactions(ctx context.Context, request openai.InteractionRequest) (openai.InteractionResponse, error) {
-	if _, message := request.NativeResponseRequest(); message != "" || request.Stream || request.Background {
+	if _, message := request.NativeResponseRequest(); message != "" || request.Stream {
 		return openai.InteractionResponse{}, geminiInvalid("interactions")
 	}
 	return g.doInteraction(ctx, request, false, nil)
@@ -43,6 +43,7 @@ func (g Gemini) doInteraction(ctx context.Context, request openai.InteractionReq
 		PreviousInteractionID string                             `json:"previous_interaction_id,omitempty"`
 		Store                 *bool                              `json:"store,omitempty"`
 		Stream                bool                               `json:"stream,omitempty"`
+		Background            bool                               `json:"background,omitempty"`
 		GenerationConfig      openai.InteractionGenerationConfig `json:"generation_config,omitempty"`
 	}
 	shared, _ := request.NativeResponseRequest()
@@ -58,7 +59,7 @@ func (g Gemini) doInteraction(ctx context.Context, request openai.InteractionReq
 	payload, err := json.Marshal(interactionPayload{
 		Model: model, Agent: agent, Input: request.Input, SystemInstruction: request.SystemInstruction,
 		Tools: request.Tools, ResponseFormat: responseFormat, PreviousInteractionID: request.PreviousInteractionID,
-		Store: request.Store, Stream: request.Stream, GenerationConfig: request.GenerationConfig,
+		Store: shared.Store, Stream: request.Stream, Background: request.Background, GenerationConfig: request.GenerationConfig,
 	})
 	if err != nil {
 		return openai.InteractionResponse{}, err

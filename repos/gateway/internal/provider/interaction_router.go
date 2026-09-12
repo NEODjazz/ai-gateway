@@ -179,11 +179,17 @@ func (r Router) Interactions(ctx context.Context, req modules.RequestContext, re
 	if err := r.validateResponseOwnership(req, *req.ResponseRequest); err != nil {
 		return openai.InteractionResponse{}, err
 	}
+	if request.Background && interfaceIsNil(r.asyncJobs) {
+		return openai.InteractionResponse{}, ErrBackgroundResponseStorageUnavailable
+	}
 	candidates, err := r.interactionCandidates(ctx, req, request)
 	if err != nil {
 		return openai.InteractionResponse{}, err
 	}
 	if len(candidates) == 0 {
+		if request.Background {
+			return openai.InteractionResponse{}, ErrBackgroundInteractionsUnsupported
+		}
 		return openai.InteractionResponse{}, fmt.Errorf("no interaction endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 	var failures []error
@@ -233,6 +239,25 @@ func (r Router) Interactions(ctx context.Context, req modules.RequestContext, re
 				return openai.InteractionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 			}
 			attemptCtx.ResponsesResponse = &shared
+			if request.Background && backgroundInteractionPending(response) {
+				result := openai.InteractionFromResponse(shared)
+				result.Agent, result.Updated = response.Agent, response.Updated
+				if interactionUsesAgent(request) {
+					result.Agent, result.Model = interactionRoutingModel(request), ""
+				}
+				model := interactionRoutingModel(request)
+				if err := r.persistInteractionOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, model, interactionUsesAgent(request), result.ID, endpoint); err != nil {
+					r.compensateBackgroundInteraction(ctx, attemptCtx, result.ID, model, interactionUsesAgent(request), endpoint)
+					r.modules.RunFailure(ctx, &attemptCtx, err)
+					return openai.InteractionResponse{}, err
+				}
+				if err := r.enqueueBackgroundInteraction(ctx, attemptCtx, result, endpoint, interactionUsesAgent(request)); err != nil {
+					r.compensateBackgroundInteraction(ctx, attemptCtx, result.ID, model, interactionUsesAgent(request), endpoint)
+					r.modules.RunFailure(ctx, &attemptCtx, err)
+					return openai.InteractionResponse{}, err
+				}
+				return result, nil
+			}
 			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 				return openai.InteractionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 			}
@@ -380,6 +405,9 @@ func requiredInteractionCapabilities(request openai.InteractionRequest) []string
 	if interactionUsesAgent(request) {
 		required = append(required, "interaction_agents")
 	}
+	if request.Background {
+		required = append(required, "background_interactions")
+	}
 	if request.Stream {
 		required = append(required, "stream")
 	}
@@ -400,6 +428,10 @@ func requiredInteractionCapabilities(request openai.InteractionRequest) []string
 		required = append(required, "file_input")
 	}
 	return required
+}
+
+func backgroundInteractionPending(response openai.InteractionResponse) bool {
+	return response.Status == "queued" || response.Status == "in_progress"
 }
 
 func interactionRoutingModel(request openai.InteractionRequest) string {

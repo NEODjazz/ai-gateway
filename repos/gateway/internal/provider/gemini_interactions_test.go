@@ -60,6 +60,21 @@ func TestGeminiInteractionsUsesNativeAgentContract(t *testing.T) {
 	}
 }
 
+func TestGeminiInteractionsStartsNativeBackgroundExecution(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["background"] != true || body["store"] != true || body["stream"] != nil {
+			t.Errorf("body=%#v err=%v", body, err)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"interaction_background","object":"interaction","model":"model","status":"queued"}`)
+	}))
+	defer server.Close()
+	response, err := NewGemini(server.URL, "secret", false).Interactions(t.Context(), openai.InteractionRequest{Model: "model", Input: "hello", Background: true})
+	if err != nil || response.ID != "interaction_background" || response.Status != "queued" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
 func TestGeminiStoredInteractionLifecycleUsesOwnerBinding(t *testing.T) {
 	var creates, continues, retrieves, cancels, deletes atomic.Int32
 	var otherDeploymentCalls atomic.Int32

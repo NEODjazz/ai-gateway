@@ -37,10 +37,6 @@ func (h Handler) serveNativeInteraction(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
-	if request.Background {
-		writeError(w, http.StatusBadRequest, "unsupported_operation", "native background interactions are not supported")
-		return
-	}
 	if _, err := openai.ResponseImageAttachments(shared.Input); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
 		return

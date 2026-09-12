@@ -17,11 +17,13 @@ import (
 )
 
 const backgroundResponseJobKind = "responses.background.v1"
+const backgroundInteractionJobKind = "interactions.background.v1"
 const backgroundResponseLease = time.Minute
 const backgroundResponseBatchSize = 10
 
 var ErrBackgroundResponseStorageUnavailable = errors.New("background response storage is unavailable")
 var ErrBackgroundResponsesUnsupported = errors.New("background responses are not supported by the selected deployment")
+var ErrBackgroundInteractionsUnsupported = errors.New("background interactions are not supported by the selected deployment")
 
 // BackgroundResponseProcessor is run by the application lifecycle. Each call
 // claims a bounded batch so multiple gateway replicas can safely share work.
@@ -46,6 +48,7 @@ type backgroundResponseJob struct {
 	Provider        string            `json:"provider,omitempty"`
 	Model           string            `json:"model"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
+	Agent           bool              `json:"agent,omitempty"`
 }
 
 func backgroundResponsePending(response openai.ResponseResponse) bool {
@@ -116,6 +119,26 @@ func (r Router) enqueueBackgroundResponse(ctx context.Context, req modules.Reque
 	return nil
 }
 
+func (r Router) enqueueBackgroundInteraction(ctx context.Context, req modules.RequestContext, response openai.InteractionResponse, endpoint Endpoint, agent bool) error {
+	if interfaceIsNil(r.asyncJobs) {
+		return ErrBackgroundResponseStorageUnavailable
+	}
+	job := newBackgroundResponseJob(req)
+	job.Agent = agent
+	payload, err := json.Marshal(job)
+	if err != nil {
+		return ErrBackgroundResponseStorageUnavailable
+	}
+	_, err = r.asyncJobs.EnqueueAsyncJob(ctx, asyncstate.Job{
+		Kind: backgroundInteractionJobKind, ResourceID: response.ID, OwnerKey: backgroundResponseOwner(req),
+		EndpointID: endpoint.Name, ExecutionID: req.RequestID, Payload: payload,
+	})
+	if err != nil {
+		return errors.Join(ErrBackgroundResponseStorageUnavailable, err)
+	}
+	return nil
+}
+
 func (r Router) BackgroundResponseSettled(ctx context.Context, req modules.RequestContext, responseID string) (bool, error) {
 	if interfaceIsNil(r.asyncJobs) {
 		return false, ErrBackgroundResponseStorageUnavailable
@@ -137,21 +160,41 @@ func (r Router) compensateBackgroundResponse(ctx context.Context, req modules.Re
 	_ = r.ownership.remove(ctx, req, responseID, binding)
 }
 
+func (r Router) compensateBackgroundInteraction(ctx context.Context, req modules.RequestContext, responseID, model string, agent bool, endpoint Endpoint) {
+	if client, ok := endpoint.Provider.(InteractionResourceClient); ok {
+		_, _ = callResponseLifecycle(r, ctx, endpoint, "interactions.cancel", func(callCtx context.Context) (openai.InteractionResponse, error) {
+			return client.CancelInteraction(callCtx, responseID)
+		})
+	}
+	binding := responseOwnership{Endpoint: endpoint.Name, Model: model, Deployment: responseDeploymentIdentity(endpoint), Resource: "interaction", Agent: agent}
+	_ = r.ownership.remove(ctx, req, responseID, binding)
+}
+
 func (r Router) ProcessBackgroundResponses(ctx context.Context) (int, error) {
 	if interfaceIsNil(r.asyncJobs) {
 		return 0, ErrBackgroundResponseStorageUnavailable
 	}
-	jobs, err := r.asyncJobs.ClaimAsyncJobs(ctx, backgroundResponseJobKind, backgroundResponseBatchSize, backgroundResponseLease)
+	responseJobs, err := r.asyncJobs.ClaimAsyncJobs(ctx, backgroundResponseJobKind, backgroundResponseBatchSize, backgroundResponseLease)
 	if err != nil {
 		return 0, err
 	}
 	var failures []error
-	for _, job := range jobs {
+	for _, job := range responseJobs {
 		if err := r.processBackgroundResponse(ctx, job); err != nil {
 			failures = append(failures, fmt.Errorf("response %s: %w", job.ResourceID, err))
 		}
 	}
-	return len(jobs), errors.Join(failures...)
+	interactionJobs, err := r.asyncJobs.ClaimAsyncJobs(ctx, backgroundInteractionJobKind, backgroundResponseBatchSize, backgroundResponseLease)
+	if err != nil {
+		failures = append(failures, err)
+		return len(responseJobs), errors.Join(failures...)
+	}
+	for _, job := range interactionJobs {
+		if err := r.processBackgroundInteraction(ctx, job); err != nil {
+			failures = append(failures, fmt.Errorf("interaction %s: %w", job.ResourceID, err))
+		}
+	}
+	return len(responseJobs) + len(interactionJobs), errors.Join(failures...)
 }
 
 func (r Router) processBackgroundResponse(ctx context.Context, claimed asyncstate.Job) error {
@@ -177,6 +220,36 @@ func (r Router) processBackgroundResponse(ctx context.Context, claimed asyncstat
 		}
 	}
 	req.ResponsesResponse = &response
+	if err := r.modules.RunPostResponse(ctx, &req); err != nil && !errors.Is(err, modules.ErrContentRejected) {
+		return r.retryBackgroundResponse(ctx, claimed, err)
+	}
+	return r.asyncJobs.CompleteAsyncJob(ctx, claimed.Kind, claimed.ResourceID, claimed.LeaseGeneration)
+}
+
+func (r Router) processBackgroundInteraction(ctx context.Context, claimed asyncstate.Job) error {
+	var job backgroundResponseJob
+	if json.Unmarshal(claimed.Payload, &job) != nil || job.RequestID != claimed.ExecutionID || job.CredentialID == "" || job.Model == "" {
+		return r.retryBackgroundResponse(ctx, claimed, errors.New("invalid persisted background interaction job"))
+	}
+	req := job.requestContext()
+	response, err := r.RetrieveInteraction(ctx, req, claimed.ResourceID)
+	if err != nil {
+		return r.retryBackgroundResponse(ctx, claimed, err)
+	}
+	if backgroundInteractionPending(response) {
+		return r.retryBackgroundResponse(ctx, claimed, nil)
+	}
+	if response.Status == "failed" || response.Status == "cancelled" {
+		if req.Metadata == nil {
+			req.Metadata = map[string]string{}
+		}
+		req.Metadata["provider.status"] = "error"
+		if response.Error != nil {
+			req.Metadata["provider.error"] = response.Error.Message
+		}
+	}
+	shared := openai.ResponseFromInteraction(response)
+	req.ResponsesResponse = &shared
 	if err := r.modules.RunPostResponse(ctx, &req); err != nil && !errors.Is(err, modules.ErrContentRejected) {
 		return r.retryBackgroundResponse(ctx, claimed, err)
 	}
