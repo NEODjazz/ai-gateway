@@ -82,6 +82,14 @@ the AV, model-capability, TPM and billing pipeline, and are persisted only after
 remote URLs have been replaced with validated inline bytes. Remote fetches do not
 forward client authorization headers.
 
+Rancher Desktop built `ai-gateway-gateway:gaps-70dd297` with image ID
+`sha256:ff06c3eb35d717bdc040fdc24343716474a6472191aa257c68d33b04af27a764`.
+Helm revision 433 completed successfully, and pod
+`ai-gateway-gateway-9f4c5977d-9bgqg` became Ready with zero restarts. Its live
+endpoint served OpenAPI 0.1.333. No agent profile was configured in the deployed
+control plane, so the Agent Card and SendMessage runtime checks remained covered
+by the end-to-end HTTP regressions without mutating control-plane data.
+
 Synchronous vector-store search resolves ownership before reading files and
 allows only bounded UTF-8 text formats with `purpose=assistants`. Query and file
 chunks pass through the configured inference content policy and token admission
