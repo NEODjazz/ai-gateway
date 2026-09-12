@@ -315,6 +315,18 @@ WAV, FLAC, OGG, MP3, завершенный MP4/M4A или audio-only WebM с п
 длительностью и фиксирует эту длительность при отсутствии точных upstream
 counters. Неполные и неоднозначные контейнеры отклоняются до budget reserve.
 
+`POST /v1/audio/speech` с `stream_format=sse` использует compatible или Azure
+deployment с включенным upstream streaming. Gateway пропускает только
+`speech.audio.delta` с непустым корректным base64 audio и обязательное
+`speech.audio.done` с согласованным точным token usage. Суммарный decoded audio
+ограничен 32 MiB, а wire stream — 64 MiB. Retry и fallback допустимы только до
+первого события; после него ошибка завершается SSE error без смешивания audio от
+другого deployment. Complete-output policy и adapters без подтвержденного SSE
+возвращают `streaming_unsupported`. Capability profile содержит отдельный
+`sse_supported`, вычисленный из transport configuration и runtime validator.
+Character billing остается точным по преобразованному input, а terminal usage
+фиксируется как точный provider token usage.
+
 Native Gemini deployment с capability `audio_speech` вызывает Interactions API,
 запрашивает inline audio и проверяет completed model-output до декодирования.
 Поддерживаются voice, natural-language `instructions` и форматы MP3, Opus, WAV
