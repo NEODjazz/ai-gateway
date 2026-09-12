@@ -1790,3 +1790,20 @@ same image. Live liveness and readiness returned 204, the served OpenAPI
 reported 0.1.386, and an unauthenticated Chat request carrying
 `max_completion_tokens` returned 401 before deployment selection. No provider
 credential or external inference was used by the smoke checks.
+
+Source `7765869` normalizes Together's native `eos` Chat terminal reason to the
+public `stop` value in JSON and SSE. The adapter preserves every other
+documented terminal value, permits `null` only for pending stream chunks, and
+rejects missing JSON or unknown terminal reasons before accepting output.
+Regressions cover direct normalization and emitted SSE data. Focused provider
+tests, vet, build, the full Go suite and the full race suite passed. OpenAPI
+0.1.387 identifies the deployed contract revision.
+
+Rancher Desktop built `ai-gateway-gateway:together-finish-7765869` with image
+ID `sha256:d904fdedb52cd50922d3bc7d04a633d00eca2d77c380259413fdd12d5251ee40`.
+Gateway Helm revision 493 completed successfully. Pod
+`ai-gateway-gateway-6765b74b48-rb92h` became Ready with zero restarts and the
+same image. Live liveness and readiness returned 204, the served OpenAPI
+reported 0.1.387, and an unauthenticated Chat request returned 401 before
+deployment selection. No provider credential or external inference was used by
+the smoke checks.

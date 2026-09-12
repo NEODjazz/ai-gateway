@@ -127,6 +127,11 @@ Together exposes only native `max_tokens`, so the adapter maps public
 `max_completion_tokens` to that field for JSON and SSE. The gateway continues
 to reject requests containing both public limit names and uses their common
 effective value for TPM admission and billing reserve.
+Together's native terminal reason `eos` is exposed as public `stop` in JSON and
+SSE. The adapter preserves `stop`, `length`, `tool_calls` and the deprecated
+`function_call`; pending stream chunks may use `null`. Missing JSON terminal
+reasons and unknown values fail before the response or affected stream chunk is
+accepted.
 
 The same provider type sends bounded Text-to-Speech requests to native
 `/v1/audio/speech`. It preserves model, input, voice and lowercase language or
