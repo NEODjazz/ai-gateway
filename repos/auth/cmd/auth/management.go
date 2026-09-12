@@ -224,12 +224,16 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 		if !ok {
 			return
 		}
-		users, err := module.ListDirectoryUsers(r.Context(), r.URL.Query().Get("team_id"), limit)
+		offset, ok := managementOffset(w, r)
+		if !ok {
+			return
+		}
+		users, total, err := module.ListDirectoryUsers(r.Context(), r.URL.Query().Get("team_id"), offset, limit)
 		if err != nil {
 			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		writeManagementJSON(w, http.StatusOK, map[string]any{"data": users})
+		writeManagementJSON(w, http.StatusOK, map[string]any{"data": users, "total": total})
 	}))
 	mux.HandleFunc("PUT /internal/v1/users/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		var user modules.DirectoryUser
@@ -254,12 +258,16 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 		if !ok {
 			return
 		}
-		teams, err := module.ListDirectoryTeams(r.Context(), r.URL.Query().Get("team_id"), limit)
+		offset, ok := managementOffset(w, r)
+		if !ok {
+			return
+		}
+		teams, total, err := module.ListDirectoryTeams(r.Context(), r.URL.Query().Get("team_id"), offset, limit)
 		if err != nil {
 			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		writeManagementJSON(w, http.StatusOK, map[string]any{"data": teams})
+		writeManagementJSON(w, http.StatusOK, map[string]any{"data": teams, "total": total})
 	}))
 	mux.HandleFunc("PUT /internal/v1/teams/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		var team modules.DirectoryTeam
@@ -344,6 +352,19 @@ func managementLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
 		limit = parsed
 	}
 	return limit, true
+}
+
+func managementOffset(w http.ResponseWriter, r *http.Request) (int, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get("offset"))
+	if raw == "" {
+		return 0, true
+	}
+	offset, err := strconv.Atoi(raw)
+	if err != nil || offset < 0 {
+		http.Error(w, "offset must be a non-negative integer", http.StatusBadRequest)
+		return 0, false
+	}
+	return offset, true
 }
 
 func decodeManagementJSON(w http.ResponseWriter, r *http.Request, target any) bool {

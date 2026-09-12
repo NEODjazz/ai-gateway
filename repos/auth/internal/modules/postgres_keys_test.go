@@ -68,13 +68,21 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	if _, err := store.PutMembership(ctx, TeamMembership{TeamID: directoryTeamID, UserID: directoryUserID, Roles: []string{"team_admin"}}); err != nil {
 		t.Fatal(err)
 	}
-	users, err := store.ListUsers(ctx, directoryTeamID, 10)
-	if err != nil || len(users) != 1 || users[0].ID != directoryUserID || len(users[0].TeamIDs) != 1 {
-		t.Fatalf("scoped users=%+v err=%v", users, err)
+	users, totalUsers, err := store.ListUsers(ctx, directoryTeamID, 0, 10)
+	if err != nil || totalUsers != 1 || len(users) != 1 || users[0].ID != directoryUserID || len(users[0].TeamIDs) != 1 {
+		t.Fatalf("scoped users=%+v total=%d err=%v", users, totalUsers, err)
 	}
-	teams, err := store.ListTeams(ctx, directoryTeamID, 10)
-	if err != nil || len(teams) != 1 || teams[0].MemberCount != 1 {
-		t.Fatalf("scoped teams=%+v err=%v", teams, err)
+	users, totalUsers, err = store.ListUsers(ctx, directoryTeamID, 1, 10)
+	if err != nil || totalUsers != 1 || len(users) != 0 {
+		t.Fatalf("scoped user page=%+v total=%d err=%v", users, totalUsers, err)
+	}
+	teams, totalTeams, err := store.ListTeams(ctx, directoryTeamID, 0, 10)
+	if err != nil || totalTeams != 1 || len(teams) != 1 || teams[0].MemberCount != 1 {
+		t.Fatalf("scoped teams=%+v total=%d err=%v", teams, totalTeams, err)
+	}
+	teams, totalTeams, err = store.ListTeams(ctx, directoryTeamID, 1, 10)
+	if err != nil || totalTeams != 1 || len(teams) != 0 {
+		t.Fatalf("scoped team page=%+v total=%d err=%v", teams, totalTeams, err)
 	}
 	organization, err := store.PutOrganization(ctx, Organization{ID: organizationID, Name: "Acme", Status: "active"})
 	if err != nil || organization.ID != organizationID {

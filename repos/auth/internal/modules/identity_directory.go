@@ -39,15 +39,15 @@ type TeamMembership struct {
 
 var ErrInvalidDirectoryEntry = errors.New("invalid identity directory entry")
 
-func (m AuthModule) ListDirectoryUsers(ctx context.Context, teamID string, limit int) ([]DirectoryUser, error) {
+func (m AuthModule) ListDirectoryUsers(ctx context.Context, teamID string, offset, limit int) ([]DirectoryUser, int, error) {
 	store, err := m.directoryStore()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	if limit < 1 || limit > 500 || len(teamID) > 256 {
-		return nil, ErrInvalidDirectoryEntry
+	if offset < 0 || limit < 1 || limit > 500 || len(teamID) > 256 {
+		return nil, 0, ErrInvalidDirectoryEntry
 	}
-	return store.ListUsers(ctx, strings.TrimSpace(teamID), limit)
+	return store.ListUsers(ctx, strings.TrimSpace(teamID), offset, limit)
 }
 
 func (m AuthModule) PutDirectoryUser(ctx context.Context, user DirectoryUser) (DirectoryUser, error) {
@@ -62,15 +62,15 @@ func (m AuthModule) PutDirectoryUser(ctx context.Context, user DirectoryUser) (D
 	return store.PutUser(ctx, user)
 }
 
-func (m AuthModule) ListDirectoryTeams(ctx context.Context, teamID string, limit int) ([]DirectoryTeam, error) {
+func (m AuthModule) ListDirectoryTeams(ctx context.Context, teamID string, offset, limit int) ([]DirectoryTeam, int, error) {
 	store, err := m.directoryStore()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	if limit < 1 || limit > 500 || len(teamID) > 256 {
-		return nil, ErrInvalidDirectoryEntry
+	if offset < 0 || limit < 1 || limit > 500 || len(teamID) > 256 {
+		return nil, 0, ErrInvalidDirectoryEntry
 	}
-	return store.ListTeams(ctx, strings.TrimSpace(teamID), limit)
+	return store.ListTeams(ctx, strings.TrimSpace(teamID), offset, limit)
 }
 
 func (m AuthModule) PutDirectoryTeam(ctx context.Context, team DirectoryTeam) (DirectoryTeam, error) {
@@ -138,9 +138,9 @@ func (m AuthModule) teamMembershipStore() (teamMembershipStore, error) {
 }
 
 type identityDirectoryStore interface {
-	ListUsers(context.Context, string, int) ([]DirectoryUser, error)
+	ListUsers(context.Context, string, int, int) ([]DirectoryUser, int, error)
 	PutUser(context.Context, DirectoryUser) (DirectoryUser, error)
-	ListTeams(context.Context, string, int) ([]DirectoryTeam, error)
+	ListTeams(context.Context, string, int, int) ([]DirectoryTeam, int, error)
 	PutTeam(context.Context, DirectoryTeam) (DirectoryTeam, error)
 	PutMembership(context.Context, TeamMembership) (TeamMembership, error)
 }
@@ -170,25 +170,32 @@ func validDirectoryID(value string) bool {
 
 func validDirectoryStatus(value string) bool { return value == "active" || value == "disabled" }
 
-func (s *PostgresVirtualKeyStore) ListUsers(ctx context.Context, teamID string, limit int) ([]DirectoryUser, error) {
+func (s *PostgresVirtualKeyStore) ListUsers(ctx context.Context, teamID string, offset, limit int) ([]DirectoryUser, int, error) {
 	rows, err := s.pool.Query(ctx, `SELECT u.id,COALESCE(u.email,''),u.name,u.status,u.roles,
 		COALESCE(array_agg(m.team_id ORDER BY m.team_id) FILTER (WHERE m.team_id IS NOT NULL),'{}'),u.created_at,u.updated_at
 		FROM users u LEFT JOIN auth_team_memberships m ON m.user_id=u.id
 		WHERE ($1='' OR m.team_id=$1) GROUP BY u.id,u.email,u.name,u.status,u.roles,u.created_at,u.updated_at
-		ORDER BY u.created_at DESC,u.id LIMIT $2`, teamID, limit)
+		ORDER BY u.created_at DESC,u.id OFFSET $2 LIMIT $3`, teamID, offset, limit)
 	if err != nil {
-		return nil, fmt.Errorf("list directory users: %w", err)
+		return nil, 0, fmt.Errorf("list directory users: %w", err)
 	}
 	defer rows.Close()
 	result := make([]DirectoryUser, 0)
 	for rows.Next() {
 		var user DirectoryUser
 		if err := rows.Scan(&user.ID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.TeamIDs, &user.CreatedAt, &user.UpdatedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		result = append(result, user)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	var total int
+	if err := s.pool.QueryRow(ctx, `SELECT count(DISTINCT u.id) FROM users u LEFT JOIN auth_team_memberships m ON m.user_id=u.id WHERE ($1='' OR m.team_id=$1)`, teamID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count directory users: %w", err)
+	}
+	return result, total, nil
 }
 
 func (s *PostgresVirtualKeyStore) PutUser(ctx context.Context, user DirectoryUser) (DirectoryUser, error) {
@@ -198,23 +205,30 @@ func (s *PostgresVirtualKeyStore) PutUser(ctx context.Context, user DirectoryUse
 	return user, err
 }
 
-func (s *PostgresVirtualKeyStore) ListTeams(ctx context.Context, teamID string, limit int) ([]DirectoryTeam, error) {
+func (s *PostgresVirtualKeyStore) ListTeams(ctx context.Context, teamID string, offset, limit int) ([]DirectoryTeam, int, error) {
 	rows, err := s.pool.Query(ctx, `SELECT t.id,t.name,t.description,t.status,count(m.user_id),t.created_at,t.updated_at FROM auth_teams t
 		LEFT JOIN auth_team_memberships m ON m.team_id=t.id WHERE ($1='' OR t.id=$1)
-		GROUP BY t.id ORDER BY t.created_at DESC,t.id LIMIT $2`, teamID, limit)
+		GROUP BY t.id ORDER BY t.created_at DESC,t.id OFFSET $2 LIMIT $3`, teamID, offset, limit)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	result := make([]DirectoryTeam, 0)
 	for rows.Next() {
 		var team DirectoryTeam
 		if err := rows.Scan(&team.ID, &team.Name, &team.Description, &team.Status, &team.MemberCount, &team.CreatedAt, &team.UpdatedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		result = append(result, team)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	var total int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM auth_teams WHERE ($1='' OR id=$1)`, teamID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count directory teams: %w", err)
+	}
+	return result, total, nil
 }
 
 func (s *PostgresVirtualKeyStore) PutTeam(ctx context.Context, team DirectoryTeam) (DirectoryTeam, error) {

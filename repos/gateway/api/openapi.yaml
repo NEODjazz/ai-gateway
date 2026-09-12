@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.284
+  version: 0.1.285
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3009,10 +3009,18 @@ paths:
       parameters:
         - {name: team_id, in: query, schema: {type: string}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
       responses:
         '200':
           description: Directory users
-          content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/DirectoryUser'}}}}}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/DirectoryUser'}}
+                  total: {type: integer, minimum: 0}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
@@ -3037,8 +3045,18 @@ paths:
       parameters:
         - {name: team_id, in: query, schema: {type: string}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
       responses:
-        '200': {description: Directory teams, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/DirectoryTeam'}}}}}}}
+        '200':
+          description: Directory teams
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/DirectoryTeam'}}
+                  total: {type: integer, minimum: 0}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}

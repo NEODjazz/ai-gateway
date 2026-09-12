@@ -12,6 +12,8 @@ import (
 
 type directoryClientStub struct {
 	teamFilter  string
+	userOffset  int
+	userLimit   int
 	putTeam     string
 	memberTeam  string
 	memberUser  string
@@ -19,16 +21,17 @@ type directoryClientStub struct {
 	deletedUser string
 }
 
-func (c *directoryClientStub) ListUsers(context.Context, ManagementAudit, string, int) ([]DirectoryUser, error) {
-	return []DirectoryUser{{ID: "user-1", Status: "active"}}, nil
+func (c *directoryClientStub) ListUsers(_ context.Context, _ ManagementAudit, _ string, offset, limit int) ([]DirectoryUser, int, error) {
+	c.userOffset, c.userLimit = offset, limit
+	return []DirectoryUser{{ID: "user-1", Status: "active"}}, 7, nil
 }
 func (c *directoryClientStub) PutUser(_ context.Context, _ ManagementAudit, id string, user DirectoryUser) (DirectoryUser, error) {
 	user.ID = id
 	return user, nil
 }
-func (c *directoryClientStub) ListTeams(_ context.Context, _ ManagementAudit, teamID string, _ int) ([]DirectoryTeam, error) {
+func (c *directoryClientStub) ListTeams(_ context.Context, _ ManagementAudit, teamID string, _, _ int) ([]DirectoryTeam, int, error) {
 	c.teamFilter = teamID
-	return []DirectoryTeam{{ID: "team-a", Name: "Team A", Status: "active"}}, nil
+	return []DirectoryTeam{{ID: "team-a", Name: "Team A", Status: "active"}}, 1, nil
 }
 func (c *directoryClientStub) PutTeam(_ context.Context, _ ManagementAudit, id string, team DirectoryTeam) (DirectoryTeam, error) {
 	c.putTeam = id
@@ -57,6 +60,22 @@ func TestIdentityDirectoryAdminCRUD(t *testing.T) {
 	Routes(handler).ServeHTTP(response, request)
 	if response.Code != http.StatusOK || client.putTeam != "team-a" {
 		t.Fatalf("status=%d client=%+v body=%s", response.Code, client, response.Body.String())
+	}
+}
+
+func TestIdentityDirectoryPaginationReturnsExactTotal(t *testing.T) {
+	client := &directoryClientStub{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithIdentityDirectory(client)
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/v1/users?offset=3&limit=2", nil))
+	if response.Code != http.StatusOK || client.userOffset != 3 || client.userLimit != 2 || !strings.Contains(response.Body.String(), `"total":7`) {
+		t.Fatalf("status=%d offset=%d limit=%d body=%s", response.Code, client.userOffset, client.userLimit, response.Body.String())
+	}
+
+	invalid := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(invalid, httptest.NewRequest(http.MethodGet, "/admin/v1/users?offset=-1", nil))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid offset status=%d body=%s", invalid.Code, invalid.Body.String())
 	}
 }
 

@@ -42,9 +42,9 @@ type TeamMembership struct {
 }
 
 type IdentityDirectoryClient interface {
-	ListUsers(context.Context, ManagementAudit, string, int) ([]DirectoryUser, error)
+	ListUsers(context.Context, ManagementAudit, string, int, int) ([]DirectoryUser, int, error)
 	PutUser(context.Context, ManagementAudit, string, DirectoryUser) (DirectoryUser, error)
-	ListTeams(context.Context, ManagementAudit, string, int) ([]DirectoryTeam, error)
+	ListTeams(context.Context, ManagementAudit, string, int, int) ([]DirectoryTeam, int, error)
 	PutTeam(context.Context, ManagementAudit, string, DirectoryTeam) (DirectoryTeam, error)
 	PutMembership(context.Context, ManagementAudit, string, string, TeamMembership) (TeamMembership, error)
 	ListMemberships(context.Context, ManagementAudit, string, int) ([]TeamMembership, error)
@@ -56,28 +56,30 @@ func (h Handler) WithIdentityDirectory(client IdentityDirectoryClient) Handler {
 	return h
 }
 
-func (c *RemoteManagementClient) ListUsers(ctx context.Context, audit ManagementAudit, teamID string, limit int) ([]DirectoryUser, error) {
-	q := url.Values{"limit": {strconv.Itoa(limit)}}
+func (c *RemoteManagementClient) ListUsers(ctx context.Context, audit ManagementAudit, teamID string, offset, limit int) ([]DirectoryUser, int, error) {
+	q := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}
 	if teamID != "" {
 		q.Set("team_id", teamID)
 	}
 	result, err := managementCall[struct{}, struct {
-		Data []DirectoryUser `json:"data"`
+		Data  []DirectoryUser `json:"data"`
+		Total int             `json:"total"`
 	}](ctx, c, http.MethodGet, "/internal/v1/users?"+q.Encode(), audit, struct{}{})
-	return result.Data, err
+	return result.Data, result.Total, err
 }
 func (c *RemoteManagementClient) PutUser(ctx context.Context, audit ManagementAudit, id string, user DirectoryUser) (DirectoryUser, error) {
 	return managementCall[DirectoryUser, DirectoryUser](ctx, c, http.MethodPut, "/internal/v1/users/"+url.PathEscape(id), audit, user)
 }
-func (c *RemoteManagementClient) ListTeams(ctx context.Context, audit ManagementAudit, teamID string, limit int) ([]DirectoryTeam, error) {
-	q := url.Values{"limit": {strconv.Itoa(limit)}}
+func (c *RemoteManagementClient) ListTeams(ctx context.Context, audit ManagementAudit, teamID string, offset, limit int) ([]DirectoryTeam, int, error) {
+	q := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}
 	if teamID != "" {
 		q.Set("team_id", teamID)
 	}
 	result, err := managementCall[struct{}, struct {
-		Data []DirectoryTeam `json:"data"`
+		Data  []DirectoryTeam `json:"data"`
+		Total int             `json:"total"`
 	}](ctx, c, http.MethodGet, "/internal/v1/teams?"+q.Encode(), audit, struct{}{})
-	return result.Data, err
+	return result.Data, result.Total, err
 }
 func (c *RemoteManagementClient) PutTeam(ctx context.Context, audit ManagementAudit, id string, team DirectoryTeam) (DirectoryTeam, error) {
 	return managementCall[DirectoryTeam, DirectoryTeam](ctx, c, http.MethodPut, "/internal/v1/teams/"+url.PathEscape(id), audit, team)
@@ -105,13 +107,17 @@ func (h Handler) ListDirectoryUsers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	offset, ok := directoryOffset(w, r)
+	if !ok {
+		return
+	}
 	teamID := directoryScope(req, r.URL.Query().Get("team_id"))
-	users, err := h.directory.ListUsers(r.Context(), managementAudit(req), teamID, limit)
+	users, total, err := h.directory.ListUsers(r.Context(), managementAudit(req), teamID, offset, limit)
 	if err != nil {
 		writeDirectoryFailure(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": users})
+	writeJSON(w, http.StatusOK, map[string]any{"data": users, "total": total})
 }
 func (h Handler) ListDirectoryTeams(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.authorizeDirectory(w, r, "")
@@ -122,13 +128,17 @@ func (h Handler) ListDirectoryTeams(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	offset, ok := directoryOffset(w, r)
+	if !ok {
+		return
+	}
 	teamID := directoryScope(req, r.URL.Query().Get("team_id"))
-	teams, err := h.directory.ListTeams(r.Context(), managementAudit(req), teamID, limit)
+	teams, total, err := h.directory.ListTeams(r.Context(), managementAudit(req), teamID, offset, limit)
 	if err != nil {
 		writeDirectoryFailure(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": teams})
+	writeJSON(w, http.StatusOK, map[string]any{"data": teams, "total": total})
 }
 func (h Handler) PutDirectoryUser(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.authorizeDirectory(w, r, "__global__")
@@ -306,6 +316,18 @@ func directoryLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
 		limit = value
 	}
 	return limit, true
+}
+func directoryOffset(w http.ResponseWriter, r *http.Request) (int, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get("offset"))
+	if raw == "" {
+		return 0, true
+	}
+	offset, err := strconv.Atoi(raw)
+	if err != nil || offset < 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "offset must be a non-negative integer")
+		return 0, false
+	}
+	return offset, true
 }
 func decodeDirectoryJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 64<<10))
