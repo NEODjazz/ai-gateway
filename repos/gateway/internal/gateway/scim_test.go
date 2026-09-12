@@ -157,6 +157,17 @@ func TestSCIMUserPatchRemovesOptionalAttributes(t *testing.T) {
 	}
 }
 
+func TestSCIMUserPatchAddRolesPreservesExistingValues(t *testing.T) {
+	client := &directoryClientStub{user: &DirectoryUser{ID: "user-1", Email: "person@example.test", Status: "active", Roles: []string{"developer"}}}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithIdentityDirectory(client)
+	body := `{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"add","path":"roles","value":[{"value":"auditor"},{"value":"developer"}]},{"op":"add","value":{"roles":[{"value":"operator"},{"value":"auditor"}]}}]}`
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/scim/v2/Users/user-1", strings.NewReader(body)))
+	if response.Code != http.StatusOK || client.user == nil || len(client.user.Roles) != 3 || client.user.Roles[0] != "developer" || client.user.Roles[1] != "auditor" || client.user.Roles[2] != "operator" {
+		t.Fatalf("status=%d user=%+v body=%s", response.Code, client.user, response.Body.String())
+	}
+}
+
 func TestSCIMUserPatchCannotRemoveRequiredOrReadOnlyAttributes(t *testing.T) {
 	for _, path := range []string{"userName", "groups"} {
 		client := &directoryClientStub{user: &DirectoryUser{ID: "user-1", Email: "person@example.test", Status: "active"}}

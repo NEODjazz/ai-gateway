@@ -514,7 +514,11 @@ func applySCIMUserPatch(user *scimUser, operation scimPatchOperation) error {
 			user.Active = values.Active
 		}
 		if values.Roles != nil {
-			user.Roles = *values.Roles
+			if op == "add" {
+				user.Roles = appendUniqueSCIMValues(user.Roles, *values.Roles...)
+			} else {
+				user.Roles = *values.Roles
+			}
 		}
 		if values.Name != nil {
 			user.Name = *values.Name
@@ -537,10 +541,32 @@ func applySCIMUserPatch(user *scimUser, operation scimPatchOperation) error {
 	case "active":
 		return json.Unmarshal(operation.Value, &user.Active)
 	case "roles":
-		return json.Unmarshal(operation.Value, &user.Roles)
+		var roles []scimValue
+		if err := json.Unmarshal(operation.Value, &roles); err != nil {
+			return err
+		}
+		if op == "add" {
+			user.Roles = appendUniqueSCIMValues(user.Roles, roles...)
+		} else {
+			user.Roles = roles
+		}
+		return nil
 	default:
 		return fmt.Errorf("path %q is not supported", operation.Path)
 	}
+}
+
+func appendUniqueSCIMValues(existing []scimValue, added ...scimValue) []scimValue {
+	seen := make(map[string]struct{}, len(existing)+len(added))
+	result := make([]scimValue, 0, len(existing)+len(added))
+	for _, value := range append(append([]scimValue(nil), existing...), added...) {
+		if _, ok := seen[value.Value]; ok {
+			continue
+		}
+		seen[value.Value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func decodeSCIMRaw(value json.RawMessage, target any) error {
