@@ -1275,3 +1275,15 @@ operations. A structurally valid request reached authentication and returned
 401 for an invalid smoke key; a request without the required protocol version
 returned 400. These smoke checks created no batch and performed no external
 inference.
+
+Source `64e4029` adds owner-scoped `fileData` to native GenerateContent JSON,
+SSE and countTokens requests. The gateway accepts only its own bounded Files
+identifiers and resolves them after authentication under the credential-and-user
+owner key. Declared and stored MIME types must match. Images, PDF/plain text,
+signature-verifiable audio and MP4/WebM video are converted to the same internal
+forms as validated inline input, including aggregate attachment limits. Resolved
+content then enters policy scanning, TPM admission, capability routing, cache
+isolation and generation billing; token counting runs the same pre-inference path
+without opening billing. Regressions cover every supported media family,
+counting, authentication order, foreign ownership and MIME mismatch. Focused and
+OpenAPI tests, the full Go suite, full race suite, vet and build passed.
