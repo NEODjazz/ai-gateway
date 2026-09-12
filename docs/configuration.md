@@ -103,11 +103,13 @@ Function tools, structured output и model-dependent image, audio и video input
 
 `together` использует bearer credential и публикует только подтвержденные
 Chat Completions, streaming, legacy Completions, Embeddings, Rerank,
-Audio Transcription, Text-to-Speech и `/v1/models`. Rerank принимает текстовые и
-объектные документы, `top_n` и `return_documents`; его учет требует точного
-provider usage. Transcription принимает WAV, FLAC, OGG/Opus, MP3, M4A/MP4 и
-WebM только при локально проверяемой длительности до четырех часов; JSON-ответ
-ограничен и получает точный duration usage. Text-to-Speech принимает lowercase
+Audio Transcription/Translation, Text-to-Speech и `/v1/models`. Rerank принимает
+текстовые и объектные документы, `top_n` и `return_documents`; его учет требует
+точного provider usage. Transcription и Translation принимают WAV, FLAC,
+OGG/Opus, MP3, M4A/MP4 и WebM только при локально проверяемой длительности до
+четырех часов; JSON-ответ ограничен и получает точный duration usage.
+Translation передает prompt, response format и temperature, но отклоняет
+неприменимые language и timestamp controls. Text-to-Speech принимает lowercase
 language/locale, MP3, WAV и PCM, возвращает ограниченный бинарный ответ и
 учитывает точное число Unicode-символов. Raw upstream streaming не публикуется
 как SSE. Tools, structured output и vision задаются deployment capabilities.
