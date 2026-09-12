@@ -37,7 +37,8 @@ func (t Together) ValidateChatParameters(request openai.ChatCompletionRequest) e
 		parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""}, parameterCheck{"web_search_options", request.WebSearchOptions != nil},
 		parameterCheck{"web_fetch_options", request.WebFetchOptions != nil}, parameterCheck{"safe_prompt", request.SafePrompt != nil},
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"top_a", request.TopA != nil},
-		parameterCheck{"repetition_penalty", request.RepetitionPenalty != nil},
+		parameterCheck{"repetition_penalty", request.RepetitionPenalty != nil}, parameterCheck{"logprobs", request.Logprobs != nil},
+		parameterCheck{"top_logprobs", request.TopLogprobs != nil}, parameterCheck{"logit_bias", request.LogitBias != nil},
 	); err != nil {
 		return err
 	}
