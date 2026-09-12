@@ -970,3 +970,13 @@ profile now advertises the accepted field, while upstream model-specific
 rejection remains explicit and terminal. Existing cache identity, quota reserve,
 retry and billing paths already include the shared generation options. Full Go
 test, race, vet and build checks completed successfully.
+
+Source `07688c9` adds an OpenAPI regression that keeps `top_k` scoped to
+Messages and excludes it from the unrelated assistant-run request schema.
+Rancher Desktop built `ai-gateway-gateway:gaps-07688c9` with image ID
+`sha256:21398d4d919fa0d5f729fa33c9f7912ce3badaf7abfcefae343af2fdcaa7c6bc`.
+Gateway Helm revision 449 completed successfully, and pod
+`ai-gateway-gateway-78f6667f4d-g49mm` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.348 exposes `top_k` under Messages only. A valid
+request reached authentication, while a negative value failed validation with
+the documented 400 response.
