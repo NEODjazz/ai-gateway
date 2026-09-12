@@ -848,19 +848,29 @@ func encodeCohereEmbedding(values []float64) (string, error) {
 	return base64.StdEncoding.EncodeToString(encoded), nil
 }
 
-func (p Cohere) Rerank(ctx context.Context, request openai.RerankRequest) (openai.RerankResponse, error) {
+func (Cohere) ValidateRerankParameters(request openai.RerankRequest) error {
 	if err := rejectParameters("cohere",
 		parameterCheck{"rank_fields", len(request.RankFields) > 0},
 		parameterCheck{"max_chunks_per_doc", request.MaxChunksPerDoc != nil},
 	); err != nil {
+		return err
+	}
+	for _, document := range request.Documents {
+		_, ok := document.(string)
+		if !ok {
+			return &Error{Class: FailureClientRequest, Provider: "cohere", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "documents", Err: errors.New("Cohere v2 rerank requires string documents")}
+		}
+	}
+	return nil
+}
+
+func (p Cohere) Rerank(ctx context.Context, request openai.RerankRequest) (openai.RerankResponse, error) {
+	if err := p.ValidateRerankParameters(request); err != nil {
 		return openai.RerankResponse{}, err
 	}
 	documents := make([]string, len(request.Documents))
 	for index, document := range request.Documents {
-		text, ok := document.(string)
-		if !ok {
-			return openai.RerankResponse{}, &Error{Class: FailureClientRequest, Provider: "cohere", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "documents", Err: errors.New("Cohere v2 rerank requires string documents")}
-		}
+		text := document.(string)
 		documents[index] = text
 	}
 	body, err := json.Marshal(cohereRerankRequest{Model: request.Model, Query: request.Query, Documents: documents, TopN: request.TopN, MaxTokensPerDoc: request.MaxTokensPerDoc})

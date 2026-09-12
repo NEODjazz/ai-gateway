@@ -196,6 +196,9 @@ func (p OpenAICompatible) mapEmbeddingDimensions(request *openAICompatibleEmbedd
 }
 
 func (p OpenAICompatible) Rerank(ctx context.Context, request openai.RerankRequest) (openai.RerankResponse, error) {
+	if err := p.ValidateRerankParameters(request); err != nil {
+		return openai.RerankResponse{}, err
+	}
 	body, err := json.Marshal(openAICompatibleRerankRequest{
 		Model: request.Model, Query: request.Query, Documents: request.Documents, TopN: request.TopN,
 		RankFields: request.RankFields, ReturnDocuments: request.ReturnDocuments,
@@ -236,6 +239,8 @@ func (p OpenAICompatible) Rerank(ctx context.Context, request openai.RerankReque
 	}
 	return response, nil
 }
+
+func (OpenAICompatible) ValidateRerankParameters(openai.RerankRequest) error { return nil }
 
 func (p OpenAICompatible) Moderations(ctx context.Context, request openai.ModerationRequest) (openai.ModerationResponse, error) {
 	if err := p.ValidateModerationParameters(request); err != nil {

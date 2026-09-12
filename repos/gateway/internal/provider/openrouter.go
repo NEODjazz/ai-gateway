@@ -76,14 +76,18 @@ func (p OpenRouter) Embeddings(ctx context.Context, request openai.EmbeddingRequ
 }
 
 func (p OpenRouter) Rerank(ctx context.Context, request openai.RerankRequest) (openai.RerankResponse, error) {
-	if err := rejectParameters("openrouter",
-		parameterCheck{"rank_fields", len(request.RankFields) > 0},
-		parameterCheck{"max_chunks_per_doc", request.MaxChunksPerDoc != nil},
-		parameterCheck{"max_tokens_per_doc", request.MaxTokensPerDoc != nil},
-	); err != nil {
+	if err := p.ValidateRerankParameters(request); err != nil {
 		return openai.RerankResponse{}, err
 	}
 	return p.compatible.Rerank(ctx, request)
+}
+
+func (OpenRouter) ValidateRerankParameters(request openai.RerankRequest) error {
+	return rejectParameters("openrouter",
+		parameterCheck{"rank_fields", len(request.RankFields) > 0},
+		parameterCheck{"max_chunks_per_doc", request.MaxChunksPerDoc != nil},
+		parameterCheck{"max_tokens_per_doc", request.MaxTokensPerDoc != nil},
+	)
 }
 
 func (p OpenRouter) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {

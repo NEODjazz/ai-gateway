@@ -139,19 +139,29 @@ func (p Voyage) Embeddings(ctx context.Context, request openai.EmbeddingRequest)
 	return result, nil
 }
 
-func (p Voyage) Rerank(ctx context.Context, request openai.RerankRequest) (openai.RerankResponse, error) {
+func (Voyage) ValidateRerankParameters(request openai.RerankRequest) error {
 	if err := rejectParameters("voyage", parameterCheck{"rank_fields", len(request.RankFields) > 0}, parameterCheck{"max_chunks_per_doc", request.MaxChunksPerDoc != nil}, parameterCheck{"max_tokens_per_doc", request.MaxTokensPerDoc != nil}); err != nil {
-		return openai.RerankResponse{}, err
+		return err
 	}
 	if len(request.Documents) == 0 || len(request.Documents) > maxVoyageInputs {
-		return openai.RerankResponse{}, voyageParameterError("documents", "Voyage rerank requires between 1 and 1000 string documents")
+		return voyageParameterError("documents", "Voyage rerank requires between 1 and 1000 string documents")
+	}
+	for _, document := range request.Documents {
+		text, ok := document.(string)
+		if !ok || text == "" {
+			return voyageParameterError("documents", "Voyage rerank requires non-empty string documents")
+		}
+	}
+	return nil
+}
+
+func (p Voyage) Rerank(ctx context.Context, request openai.RerankRequest) (openai.RerankResponse, error) {
+	if err := p.ValidateRerankParameters(request); err != nil {
+		return openai.RerankResponse{}, err
 	}
 	documents := make([]string, len(request.Documents))
 	for index, document := range request.Documents {
-		text, ok := document.(string)
-		if !ok || text == "" {
-			return openai.RerankResponse{}, voyageParameterError("documents", "Voyage rerank requires non-empty string documents")
-		}
+		text := document.(string)
 		documents[index] = text
 	}
 	body := voyageRerankRequest{Query: request.Query, Documents: documents, Model: request.Model, TopK: request.TopN, Truncation: false}
