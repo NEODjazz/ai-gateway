@@ -1309,3 +1309,12 @@ The UI supports create, rotate, preserve and explicit clear without reading a
 stored secret. Focused regressions, all 167 UI tests, UI typecheck/build, the
 full Go suite, full race suite, vet and build passed. OpenAPI 0.1.366 documents
 the write-only input and read-only configured state.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-1668250` with image ID
+`sha256:4e498d332fc806a20ae1df461c87cfc0028472b4407dc11732592dee61bbc316`.
+Gateway Helm revision 467 completed successfully, and pod
+`ai-gateway-gateway-7b9584b47f-c62q9` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.366 exposes the write-only bearer input and
+read-only configured flag. An MCP discovery request with an invalid smoke key
+returned 401 before registry lookup or upstream network access. The smoke check
+stored no credential and performed no external MCP call or model inference.
