@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -101,6 +102,25 @@ func TestMessagesThinkingRejectsInvalidConfiguration(t *testing.T) {
 		}
 		if _, err := request.chat(); err == nil {
 			t.Fatalf("accepted thinking=%s", body)
+		}
+	}
+}
+
+func TestMessagesTopKGenerationControl(t *testing.T) {
+	for _, test := range []struct {
+		value int
+		valid bool
+	}{{0, true}, {40, true}, {-1, false}, {1_000_001, false}} {
+		var request messagesRequest
+		if err := json.Unmarshal([]byte(fmt.Sprintf(`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"work"}],"top_k":%d}`, test.value)), &request); err != nil {
+			t.Fatal(err)
+		}
+		chat, err := request.chat()
+		if (err == nil) != test.valid {
+			t.Fatalf("top_k=%d valid=%v err=%v", test.value, test.valid, err)
+		}
+		if test.valid && (chat.TopK == nil || *chat.TopK != test.value) {
+			t.Fatalf("top_k lost: %+v", chat.TopK)
 		}
 	}
 }

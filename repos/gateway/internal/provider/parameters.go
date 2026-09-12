@@ -83,6 +83,12 @@ func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) er
 		options.WebSearchOptions = nil
 	}
 	options.WebFetchOptions = nil
+	if options.TopK != nil {
+		if *options.TopK < 0 {
+			return &Error{Class: FailureClientRequest, Provider: "anthropic", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "top_k", Err: errors.New("top_k must be non-negative")}
+		}
+		options.TopK = nil
+	}
 	if err := rejectGenerationOptions("anthropic", options); err != nil {
 		return err
 	}

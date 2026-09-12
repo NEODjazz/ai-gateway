@@ -424,7 +424,7 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedChatOptions(t *testi
 		"openai-compatible": compatible,
 		"openrouter":        compatibleTiered,
 		"azure-openai":      compatible,
-		"anthropic":         {"metadata", "web_search_options", "web_fetch_options", "reasoning_effort", "service_tier"},
+		"anthropic":         {"metadata", "web_search_options", "web_fetch_options", "top_k", "reasoning_effort", "service_tier"},
 		"gemini":            {"modalities", "n", "web_search_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "top_k", "reasoning_effort", "service_tier"},
 		"cohere":            {"logprobs", "frequency_penalty", "presence_penalty", "top_k"},
 		"mistral":           {"metadata", "safe_prompt", "n", "prompt_cache_key", "prompt_mode", "prediction", "frequency_penalty", "presence_penalty", "reasoning_effort"},

@@ -311,7 +311,7 @@ func TestGenerationControlsAreRejectedByNativeAdapters(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, client := range []Client{NewAnthropic("http://unused.invalid", "", false), NewOllama("http://unused.invalid", false), Demo{}} {
-			if _, anthropic := client.(Anthropic); anthropic && (request.ReasoningEffort == "high" || request.WebSearchOptions != nil) {
+			if _, anthropic := client.(Anthropic); anthropic && (request.ReasoningEffort == "high" || request.WebSearchOptions != nil || request.TopK != nil) {
 				continue
 			}
 			if _, ollama := client.(Ollama); ollama && (request.MinP != nil || request.TopK != nil || request.Logprobs != nil || request.TopLogprobs != nil || request.ReasoningEffort == "none" || request.ReasoningEffort == "high") {

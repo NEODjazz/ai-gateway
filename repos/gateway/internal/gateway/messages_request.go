@@ -27,6 +27,7 @@ type messagesRequest struct {
 	ServiceTier   string                `json:"service_tier,omitempty"`
 	Temperature   *float64              `json:"temperature,omitempty"`
 	TopP          *float64              `json:"top_p,omitempty"`
+	TopK          *int                  `json:"top_k,omitempty"`
 	Stream        bool                  `json:"stream,omitempty"`
 	StopSequences []string              `json:"stop_sequences,omitempty"`
 	Container     *messagesContainer    `json:"container,omitempty"`
@@ -142,6 +143,7 @@ func (request messagesRequest) chat() (openai.ChatCompletionRequest, error) {
 
 func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatCompletionRequest, error) {
 	result := openai.ChatCompletionRequest{Model: request.Model, MaxTokens: &request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP, Stream: request.Stream}
+	result.TopK = request.TopK
 	if thinking := request.Thinking; thinking != nil {
 		switch thinking.Type {
 		case "disabled":
@@ -236,6 +238,9 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 	}
 	if request.TopP != nil && (*request.TopP < 0 || *request.TopP > 1) {
 		return result, errors.New("top_p must be between 0 and 1")
+	}
+	if request.TopK != nil && (*request.TopK < 0 || *request.TopK > 1_000_000) {
+		return result, errors.New("top_k must be between 0 and 1000000")
 	}
 	if len(request.System) > 0 {
 		content, err := messagesSystem(request.System)

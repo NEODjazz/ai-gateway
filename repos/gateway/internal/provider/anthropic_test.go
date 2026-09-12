@@ -42,6 +42,25 @@ func TestAnthropicThinkingWireAndCapability(t *testing.T) {
 	}
 }
 
+func TestAnthropicForwardsTopK(t *testing.T) {
+	topK := 40
+	request := anthropicChatRequest(openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK}}, false)
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.TopK == nil || *request.TopK != topK || !strings.Contains(string(encoded), `"top_k":40`) {
+		t.Fatalf("request=%s", encoded)
+	}
+	if err := (Anthropic{}).ValidateChatParameters(openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK}}); err != nil {
+		t.Fatalf("top_k rejected: %v", err)
+	}
+	negative := -1
+	if err := (Anthropic{}).ValidateChatParameters(openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &negative}}); err == nil {
+		t.Fatal("negative top_k accepted")
+	}
+}
+
 func TestAnthropicPreservesCodeExecutionVersion(t *testing.T) {
 	request := anthropicChatRequest(openai.ChatCompletionRequest{AnthropicCodeExecution: true, AnthropicCodeExecutionType: "code_execution_20260521"}, false)
 	if len(request.Tools) != 1 || request.Tools[0].Type != "code_execution_20260521" || request.Tools[0].Name != "code_execution" {

@@ -37,6 +37,7 @@ type anthropicRequest struct {
 	Stream        bool                   `json:"stream,omitempty"`
 	Temperature   *float64               `json:"temperature,omitempty"`
 	TopP          *float64               `json:"top_p,omitempty"`
+	TopK          *int                   `json:"top_k,omitempty"`
 	ServiceTier   string                 `json:"service_tier,omitempty"`
 	Metadata      *anthropicMetadata     `json:"metadata,omitempty"`
 	OutputConfig  *anthropicOutputConfig `json:"output_config,omitempty"`
@@ -454,6 +455,7 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		Stream:        stream,
 		Temperature:   request.Temperature,
 		TopP:          request.TopP,
+		TopK:          request.TopK,
 		ServiceTier:   request.ServiceTier,
 		Metadata:      metadata,
 		OutputConfig:  outputConfig,
