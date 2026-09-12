@@ -245,6 +245,30 @@ func TestNVIDIANIMRejectsNemotronOutputLimitBeforeHTTP(t *testing.T) {
 	}
 }
 
+func TestNVIDIANIMRejectsDeepSeekReasoningHistoryBeforeHTTP(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	client := NewNVIDIANIM(server.URL, "key", false)
+	request := openai.ChatCompletionRequest{
+		Model: "deepseek-ai/DeepSeek-V4-Pro-0813",
+		Messages: []openai.Message{
+			{Role: "user", Content: "question"},
+			{Role: "assistant", Content: "answer", ReasoningContent: "private plan"},
+			{Role: "user", Content: "continue"},
+		},
+	}
+	_, err := client.ChatCompletions(t.Context(), request)
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Param != "messages.reasoning_content" || failure.UpstreamCode != "unsupported_parameter" || calls != 0 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+	request.Model = "nvidia/nemotron-3-super-120b-a12b"
+	if err := client.ValidateChatParameters(request); err != nil {
+		t.Fatalf("other model history rejected: %v", err)
+	}
+}
+
 func TestNVIDIANIMNormalizesReasoningUsageInJSONAndSSE(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
