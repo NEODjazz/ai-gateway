@@ -1133,3 +1133,9 @@ same digest. Live OpenAPI 0.1.357 documents the all-or-none rule. A request with
 two cited PDFs reached authentication, while a mixed cited and uncited request
 returned 400 before authentication. These smoke checks used no credential and
 performed no external inference.
+
+Source `93cdfc8` makes native Messages capability discovery cumulative across
+the complete message list. A failed tool result can no longer stop discovery
+before a later cited document, so routing requires both `tool_result_error` and
+`document_citations` when both semantics are present. The focused regression
+test and full Go tests, race tests, vet and build passed.
