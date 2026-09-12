@@ -627,3 +627,9 @@ OpenAPI 0.1.325 contract lists `/v1/audio/speech` in the accepted batch
 endpoints. An unauthenticated request using that endpoint reached authentication
 with 401, while an unknown batch endpoint was rejected by request validation
 with 400.
+
+Source `3c8d423` adds Response Compact to durable JSONL batch execution. The
+regression runs a compact request through shared strict validation, model policy,
+TPM admission, independent execution identity, provider retry and post-response
+billing, and verifies usage-bearing compact output. Empty input and unknown
+request fields fail before a job is queued.
