@@ -15,7 +15,9 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-const MaxRealtimeEventBytes = 4 << 20
+// MaxRealtimeEventBytes admits one 15 MiB decoded audio append plus its base64
+// encoding and a bounded amount of JSON envelope overhead.
+const MaxRealtimeEventBytes = (20 << 20) + (64 << 10)
 const MaxRealtimeSessionDuration = 30 * time.Minute
 
 type RealtimeConnection interface {

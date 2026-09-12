@@ -453,6 +453,17 @@ func TestAVReceivesBinaryAttachmentsWhileDLPReceivesTextOnly(t *testing.T) {
 	}
 }
 
+func TestRequestImageAttachmentsIncludesTransportAttachments(t *testing.T) {
+	request := RequestContext{Attachments: []openai.ImageAttachment{{MediaType: "audio/pcm", Data: "YQ=="}}}
+	attachments, err := requestImageAttachments(&request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 1 || attachments[0].MediaType != "audio/pcm" || attachments[0].Data != "YQ==" {
+		t.Fatalf("attachments=%+v", attachments)
+	}
+}
+
 func TestAVReceivesChatAudioInput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request ScanRequest

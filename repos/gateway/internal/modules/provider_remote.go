@@ -114,10 +114,12 @@ type ScanRequest struct {
 }
 
 func requestImageAttachments(req *RequestContext) ([]openai.ImageAttachment, error) {
-	attachments, err := openai.ChatImageAttachments(req.Request.Messages)
+	attachments := append([]openai.ImageAttachment(nil), req.Attachments...)
+	chatImages, err := openai.ChatImageAttachments(req.Request.Messages)
 	if err != nil {
 		return nil, err
 	}
+	attachments = append(attachments, chatImages...)
 	chatAudio, err := openai.ChatAudioAttachments(req.Request.Messages)
 	if err != nil {
 		return nil, err

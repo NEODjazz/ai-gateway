@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 	"golang.org/x/net/websocket"
 )
@@ -25,6 +27,9 @@ type realtimeAuthModule struct {
 type realtimeBillingEvent struct {
 	phase, requestID string
 	input, output    int
+	inputAudio       int
+	outputAudio      int
+	cached           int
 	exact            string
 }
 
@@ -37,6 +42,28 @@ type realtimeBillingModule struct {
 type realtimeDLPModule struct {
 	mu      sync.Mutex
 	content string
+}
+
+type realtimeAVModule struct {
+	mu          sync.Mutex
+	attachments []openai.ImageAttachment
+	reject      bool
+}
+
+func (*realtimeAVModule) Name() string              { return "av" }
+func (*realtimeAVModule) Required() bool            { return true }
+func (*realtimeAVModule) PostResponseEnabled() bool { return false }
+func (m *realtimeAVModule) Handle(_ context.Context, request *modules.RequestContext) error {
+	m.mu.Lock()
+	m.attachments = append([]openai.ImageAttachment(nil), request.Attachments...)
+	m.mu.Unlock()
+	if m.reject {
+		return modules.ErrContentRejected
+	}
+	return nil
+}
+func (*realtimeAVModule) HandlePostResponse(context.Context, *modules.RequestContext) error {
+	return nil
 }
 
 func (*realtimeDLPModule) Name() string              { return "dlp" }
@@ -71,6 +98,13 @@ func (m *realtimeBillingModule) record(phase string, request *modules.RequestCon
 	event := realtimeBillingEvent{phase: phase, requestID: request.RequestID, exact: request.Metadata["gateway.realtime_usage_exact"]}
 	if request.Usage != nil {
 		event.input, event.output = request.Usage.PromptTokens, request.Usage.CompletionTokens
+		if request.Usage.PromptTokensDetails != nil {
+			event.inputAudio = request.Usage.PromptTokensDetails.AudioTokens
+			event.cached = request.Usage.PromptTokensDetails.CachedTokens
+		}
+		if request.Usage.CompletionTokensDetails != nil {
+			event.outputAudio = request.Usage.CompletionTokensDetails.AudioTokens
+		}
 	}
 	m.mu.Lock()
 	m.events = append(m.events, event)
@@ -379,6 +413,144 @@ func TestRealtimeInputDLPRejectsTextBeforeProvider(t *testing.T) {
 	}
 	if upstreamEvents.Load() != 0 {
 		t.Fatal("DLP-rejected realtime input reached the provider")
+	}
+}
+
+func TestRealtimeAudioLifecycleScansAndAccountsCommittedInput(t *testing.T) {
+	billing := &realtimeBillingModule{}
+	av := &realtimeAVModule{}
+	metadata := map[string]string{
+		"provider.realtime_audio_input.enabled":  "true",
+		"provider.realtime_audio_output.enabled": "true",
+		"provider.modules.av.enabled":            "true",
+	}
+	tracker := newRealtimeBillingTracker(modules.NewPipeline([]modules.Module{billing, av}), modules.RequestContext{Metadata: metadata}, "model", nil)
+	session := json.RawMessage(`{"audio":{"input":{"format":{"type":"audio/pcm","rate":24000}},"output":{"format":{"type":"audio/pcmu"}}}}`)
+	if err := tracker.ClientEvent(t.Context(), append([]byte(`{"type":"session.update","session":`), append(session, '}')...)); err != nil {
+		t.Fatal(err)
+	}
+	audio := base64.StdEncoding.EncodeToString(make([]byte, 4800))
+	if err := tracker.ClientEvent(t.Context(), []byte(`{"type":"input_audio_buffer.append","audio":"`+audio+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+	av.mu.Lock()
+	attachments := append([]openai.ImageAttachment(nil), av.attachments...)
+	av.mu.Unlock()
+	if len(attachments) != 1 || attachments[0].MediaType != "audio/pcm" || attachments[0].Data != audio {
+		t.Fatalf("AV attachments=%+v", attachments)
+	}
+	if err := tracker.ClientEvent(t.Context(), []byte(`{"type":"input_audio_buffer.commit"}`)); err != nil {
+		t.Fatal(err)
+	}
+	tracker.mu.Lock()
+	if tracker.conversationTokens != 1 || tracker.unnamedItems != 1 || len(tracker.pendingAudio) != 1 {
+		t.Fatalf("committed audio tokens=%d unnamed=%d pending=%v", tracker.conversationTokens, tracker.unnamedItems, tracker.pendingAudio)
+	}
+	tracker.mu.Unlock()
+	if err := tracker.ProviderEvent(t.Context(), []byte(`{"type":"input_audio_buffer.committed","item_id":"audio_1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	response := json.RawMessage(`{"max_output_tokens":2}`)
+	if err := tracker.ClientEvent(t.Context(), append([]byte(`{"type":"response.create","response":`), append(response, '}')...)); err != nil {
+		t.Fatal(err)
+	}
+	wantInput := saturatedRealtimeTokens(realtimeRawTokens(session), 1)
+	wantInput = saturatedRealtimeTokens(wantInput, realtimeRawTokens(response))
+	events := billing.snapshot()
+	if len(events) != 1 || events[0].input != wantInput || events[0].output != 2 {
+		t.Fatalf("audio reserve=%+v want_input=%d", events, wantInput)
+	}
+	tracker.deleteConversationItem("audio_1")
+	tracker.mu.Lock()
+	if tracker.conversationTokens != 0 || tracker.unnamedItems != 0 || len(tracker.pendingAudio) != 0 {
+		t.Fatalf("deleted audio tokens=%d unnamed=%d pending=%v", tracker.conversationTokens, tracker.unnamedItems, tracker.pendingAudio)
+	}
+	tracker.mu.Unlock()
+	tracker.Close(t.Context(), errors.New("closed"))
+}
+
+func TestRealtimeAudioServerCommitAndLimits(t *testing.T) {
+	if provider.MaxRealtimeEventBytes <= base64.StdEncoding.EncodedLen(maxRealtimeAudioAppendBytes)+64 {
+		t.Fatalf("realtime event limit %d cannot carry a 15 MiB audio append", provider.MaxRealtimeEventBytes)
+	}
+	metadata := map[string]string{"provider.realtime_audio_input.enabled": "true"}
+	tracker := newRealtimeBillingTracker(modules.NewPipeline(nil), modules.RequestContext{Metadata: metadata}, "model", func(context.Context, int) error { return nil })
+	audio := base64.StdEncoding.EncodeToString(make([]byte, 800))
+	if err := tracker.ClientEvent(t.Context(), []byte(`{"type":"session.update","session":{"input_audio_format":"g711_ulaw"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.ClientEvent(t.Context(), []byte(`{"type":"input_audio_buffer.append","audio":"`+audio+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.ProviderEvent(t.Context(), []byte(`{"type":"input_audio_buffer.committed","item_id":"server_audio"}`)); err != nil {
+		t.Fatal(err)
+	}
+	tracker.mu.Lock()
+	if tracker.conversationItems["server_audio"] != 1 || tracker.conversationTokens != 1 || tracker.audioBufferBytes != 0 {
+		t.Fatalf("server commit items=%v tokens=%d buffered=%d", tracker.conversationItems, tracker.conversationTokens, tracker.audioBufferBytes)
+	}
+	tracker.audioBufferBytes = maxRealtimeAudioBufferBytes
+	tracker.mu.Unlock()
+	if err := tracker.ClientEvent(t.Context(), []byte(`{"type":"input_audio_buffer.append","audio":"YQ=="}`)); err == nil || !strings.Contains(err.Error(), "buffer exceeds") {
+		t.Fatalf("buffer overflow error=%v", err)
+	}
+}
+
+func TestRealtimeAudioRejectsUnsupportedInvalidAndUnsafeEvents(t *testing.T) {
+	withoutAudio := newRealtimeBillingTracker(modules.NewPipeline(nil), modules.RequestContext{Metadata: map[string]string{}}, "model", func(context.Context, int) error { return nil })
+	if err := withoutAudio.ClientEvent(t.Context(), []byte(`{"type":"input_audio_buffer.append","audio":"YQ=="}`)); err == nil || !strings.Contains(err.Error(), "does not support audio input") {
+		t.Fatalf("unsupported input error=%v", err)
+	}
+	if err := withoutAudio.ClientEvent(t.Context(), []byte(`{"type":"session.update","session":{"modalities":["audio"]}}`)); err == nil || !strings.Contains(err.Error(), "does not support audio output") {
+		t.Fatalf("unsupported output error=%v", err)
+	}
+	if err := withoutAudio.ProviderEvent(t.Context(), []byte(`{"type":"response.output_audio.delta","delta":"YQ=="}`)); err == nil || !strings.Contains(err.Error(), "unsupported audio output") {
+		t.Fatalf("provider capability error=%v", err)
+	}
+
+	withAudio := newRealtimeBillingTracker(modules.NewPipeline(nil), modules.RequestContext{Metadata: map[string]string{
+		"provider.realtime_audio_input.enabled": "true", "provider.realtime_audio_output.enabled": "true",
+	}}, "model", func(context.Context, int) error { return nil })
+	if err := withAudio.ClientEvent(t.Context(), []byte(`{"type":"input_audio_buffer.append","audio":"%%%"}`)); err == nil || !strings.Contains(err.Error(), "strict base64") {
+		t.Fatalf("invalid input error=%v", err)
+	}
+	if err := withAudio.ProviderEvent(t.Context(), []byte(`{"type":"response.output_audio.delta","delta":"%%%"}`)); err == nil || !strings.Contains(err.Error(), "strict base64") {
+		t.Fatalf("invalid output error=%v", err)
+	}
+	if err := withAudio.ClientEvent(t.Context(), []byte(`{"type":"input_audio_buffer.commit"}`)); err == nil || !strings.Contains(err.Error(), "buffer is empty") {
+		t.Fatalf("empty commit error=%v", err)
+	}
+
+	rejectingAV := &realtimeAVModule{reject: true}
+	scanned := newRealtimeBillingTracker(modules.NewPipeline([]modules.Module{rejectingAV}), modules.RequestContext{Metadata: map[string]string{
+		"provider.realtime_audio_input.enabled": "true", "provider.modules.av.enabled": "true",
+	}}, "model", func(context.Context, int) error { return nil })
+	if err := scanned.ClientEvent(t.Context(), []byte(`{"type":"input_audio_buffer.append","audio":"YQ=="}`)); err == nil || !errors.Is(err, modules.ErrContentRejected) {
+		t.Fatalf("AV rejection error=%v", err)
+	}
+	scanned.mu.Lock()
+	buffered := scanned.audioBufferBytes
+	scanned.mu.Unlock()
+	if buffered != 0 {
+		t.Fatalf("AV-rejected audio buffered=%d", buffered)
+	}
+}
+
+func TestRealtimeUsagePreservesAudioAndCacheDetails(t *testing.T) {
+	responseID, usage, err := realtimeResponseUsage(json.RawMessage(`{"id":"resp_audio","usage":{"input_tokens":12,"output_tokens":5,"total_tokens":17,"input_token_details":{"cached_tokens":4,"text_tokens":7,"audio_tokens":5},"output_token_details":{"text_tokens":2,"audio_tokens":3}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if responseID != "resp_audio" || usage.PromptTokensDetails == nil || usage.PromptTokensDetails.CachedTokens != 4 || usage.PromptTokensDetails.AudioTokens != 5 || usage.CompletionTokensDetails == nil || usage.CompletionTokensDetails.AudioTokens != 3 {
+		t.Fatalf("response_id=%q usage=%+v", responseID, usage)
+	}
+	for _, payload := range []string{
+		`{"id":"bad","usage":{"input_tokens":1,"output_tokens":0,"total_tokens":1,"input_token_details":{"audio_tokens":2}}}`,
+		`{"id":"bad","usage":{"input_tokens":0,"output_tokens":1,"total_tokens":1,"output_token_details":{"text_tokens":1,"audio_tokens":1}}}`,
+	} {
+		if _, _, err := realtimeResponseUsage(json.RawMessage(payload)); err == nil {
+			t.Fatalf("invalid token details accepted: %s", payload)
+		}
 	}
 }
 

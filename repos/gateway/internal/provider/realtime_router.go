@@ -38,6 +38,8 @@ func (r Router) OpenRealtime(ctx context.Context, identity modules.RequestContex
 		}
 		attempt := providerAttemptContext(identity, endpoint)
 		attempt.Metadata["gateway.api_type"] = "realtime"
+		attempt.Metadata["provider.realtime_audio_input.enabled"] = boolString(hasCapability(endpoint.Capabilities, "audio_input"))
+		attempt.Metadata["provider.realtime_audio_output.enabled"] = boolString(hasCapability(endpoint.Capabilities, "audio"))
 		r.applyCatalogPricing(ctx, &attempt, endpoint, model)
 		providerCtx, finish := r.startProviderCall(ctx, endpoint, "realtime.session")
 		connection, callErr := client.OpenRealtime(providerCtx, attempt.Request.Model)

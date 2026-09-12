@@ -69,7 +69,10 @@ type RequestContext struct {
 	SandboxRequest             *openai.SandboxExecuteRequest      `json:"sandbox_request,omitempty"`
 	Usage                      *openai.Usage                      `json:"usage,omitempty"`
 	Metadata                   map[string]string                  `json:"metadata,omitempty"`
-	AnonymizationValues        map[string]string                  `json:"anonymization_values,omitempty"`
+	// Attachments carries validated transport-specific binary input to policy
+	// modules without adding it to provider request payloads.
+	Attachments         []openai.ImageAttachment `json:"-"`
+	AnonymizationValues map[string]string        `json:"anonymization_values,omitempty"`
 }
 
 type Module interface {

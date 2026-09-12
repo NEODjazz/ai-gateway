@@ -268,7 +268,7 @@ func TestRealtimeRouterRequiresCapabilityPinsAdmissionAndAppliesAlias(t *testing
 
 	router := New(Config{Endpoints: []config.ProviderEndpointConfig{
 		{Name: "missing-capability", Type: "openai", BaseURL: skipped.URL, Models: []string{"public-model"}, Priority: 1, Capabilities: []string{"chat"}},
-		{Name: "realtime", Type: "openai-compatible", BaseURL: selected.URL, Models: []string{"public-model"}, ModelAliases: map[string]string{"public-model": "upstream-model"}, Priority: 2, Capabilities: []string{"realtime"}, MaxParallelRequests: 1},
+		{Name: "realtime", Type: "openai-compatible", BaseURL: selected.URL, Models: []string{"public-model"}, ModelAliases: map[string]string{"public-model": "upstream-model"}, Priority: 2, Capabilities: []string{"realtime", "audio_input", "audio"}, MaxParallelRequests: 1},
 	}})
 	runtime, ok := router.(RealtimeProvider)
 	if !ok {
@@ -282,7 +282,7 @@ func TestRealtimeRouterRequiresCapabilityPinsAdmissionAndAppliesAlias(t *testing
 	if skippedCalls.Load() != 0 || selectedCalls.Load() != 1 || !aliasApplied.Load() {
 		t.Fatalf("routing skipped=%d selected=%d alias=%v", skippedCalls.Load(), selectedCalls.Load(), aliasApplied.Load())
 	}
-	if attempt.Request.Model != "upstream-model" || attempt.Metadata["provider.endpoint.name"] != "realtime" || attempt.Metadata["gateway.api_type"] != "realtime" {
+	if attempt.Request.Model != "upstream-model" || attempt.Metadata["provider.endpoint.name"] != "realtime" || attempt.Metadata["gateway.api_type"] != "realtime" || attempt.Metadata["provider.realtime_audio_input.enabled"] != "true" || attempt.Metadata["provider.realtime_audio_output.enabled"] != "true" {
 		t.Fatalf("attempt=%+v metadata=%v", attempt.Request, attempt.Metadata)
 	}
 	if second, _, err := runtime.OpenRealtime(t.Context(), identity, "public-model"); err == nil {

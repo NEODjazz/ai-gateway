@@ -3,11 +3,13 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +21,8 @@ const maxRealtimePendingResponses = 16
 const maxRealtimeConversationItems = 1024
 const maxRealtimeDLPProjectionBytes = 64 << 10
 const maxRealtimeCancelledResponses = 64
+const maxRealtimeAudioAppendBytes = 15 << 20
+const maxRealtimeAudioBufferBytes = 1 << 30
 
 type realtimeBillingTracker struct {
 	pipeline modules.Pipeline
@@ -37,6 +41,9 @@ type realtimeBillingTracker struct {
 	byResponse         map[string]*realtimeBillingEntry
 	cancelledResponses map[string]struct{}
 	cancelledOrder     []string
+	audioInputFormat   string
+	audioBufferBytes   int
+	pendingAudio       []int
 	closed             bool
 }
 
@@ -55,6 +62,8 @@ type realtimeEventEnvelope struct {
 	Session    json.RawMessage `json:"session"`
 	Response   json.RawMessage `json:"response"`
 	ResponseID string          `json:"response_id"`
+	Audio      string          `json:"audio"`
+	Delta      string          `json:"delta"`
 }
 
 func newRealtimeBillingTracker(pipeline modules.Pipeline, template modules.RequestContext, model string, admit func(context.Context, int) error) *realtimeBillingTracker {
@@ -63,6 +72,7 @@ func newRealtimeBillingTracker(pipeline modules.Pipeline, template modules.Reque
 		pipeline: pipeline, template: template, model: model, enabled: billing || admit != nil, billing: billing, admit: admit,
 		conversationItems: map[string]int{}, byResponse: map[string]*realtimeBillingEntry{},
 		cancelledResponses: map[string]struct{}{},
+		audioInputFormat:   "pcm16",
 	}
 }
 
@@ -75,6 +85,9 @@ func (t *realtimeBillingTracker) ClientEvent(ctx context.Context, payload []byte
 		return err
 	}
 	if err := t.scanClientEvent(ctx, event); err != nil {
+		return err
+	}
+	if err := t.handleClientAudioEvent(ctx, event); err != nil {
 		return err
 	}
 	switch event.Type {
@@ -90,6 +103,288 @@ func (t *realtimeBillingTracker) ClientEvent(ctx context.Context, payload []byte
 		return t.reserveResponse(ctx, event)
 	case "response.cancel":
 		return t.cancelResponse(ctx, event.ResponseID, errors.New("realtime response cancelled by client"))
+	}
+	return nil
+}
+
+func (t *realtimeBillingTracker) handleClientAudioEvent(ctx context.Context, event realtimeEventEnvelope) error {
+	switch event.Type {
+	case "session.update":
+		inputFormat, inputConfigured, outputConfigured, err := realtimeSessionAudioConfig(event.Session)
+		if err != nil {
+			return err
+		}
+		if inputConfigured && t.template.Metadata["provider.realtime_audio_input.enabled"] != "true" {
+			return errors.New("selected realtime deployment does not support audio input")
+		}
+		if outputConfigured && t.template.Metadata["provider.realtime_audio_output.enabled"] != "true" {
+			return errors.New("selected realtime deployment does not support audio output")
+		}
+		if inputFormat != "" {
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			if t.audioBufferBytes != 0 && inputFormat != t.audioInputFormat {
+				return errors.New("realtime input audio format cannot change with buffered audio")
+			}
+			t.audioInputFormat = inputFormat
+		}
+	case "input_audio_buffer.append":
+		if t.template.Metadata["provider.realtime_audio_input.enabled"] != "true" {
+			return errors.New("selected realtime deployment does not support audio input")
+		}
+		decodedBytes, err := validRealtimeAudio(event.Audio)
+		if err != nil {
+			return err
+		}
+		t.mu.Lock()
+		format := t.audioInputFormat
+		t.mu.Unlock()
+		if err := t.scanRealtimeAudio(ctx, format, event.Audio); err != nil {
+			return err
+		}
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if decodedBytes > maxRealtimeAudioBufferBytes-t.audioBufferBytes {
+			return errors.New("realtime input audio buffer exceeds limit")
+		}
+		t.audioBufferBytes += decodedBytes
+	case "input_audio_buffer.clear":
+		if t.template.Metadata["provider.realtime_audio_input.enabled"] != "true" {
+			return errors.New("selected realtime deployment does not support audio input")
+		}
+		t.mu.Lock()
+		t.audioBufferBytes = 0
+		t.mu.Unlock()
+	case "input_audio_buffer.commit":
+		if t.template.Metadata["provider.realtime_audio_input.enabled"] != "true" {
+			return errors.New("selected realtime deployment does not support audio input")
+		}
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if t.audioBufferBytes == 0 {
+			return errors.New("realtime input audio buffer is empty")
+		}
+		if len(t.conversationItems)+t.unnamedItems >= maxRealtimeConversationItems {
+			return errors.New("realtime conversation item limit exceeded")
+		}
+		tokens := realtimeAudioTokens(t.audioBufferBytes, t.audioInputFormat)
+		t.audioBufferBytes = 0
+		t.pendingAudio = append(t.pendingAudio, tokens)
+		t.unnamedItems++
+		t.conversationTokens = saturatedRealtimeTokens(t.conversationTokens, tokens)
+	}
+	return nil
+}
+
+func (t *realtimeBillingTracker) handleProviderAudioEvent(event realtimeEventEnvelope) error {
+	switch event.Type {
+	case "response.output_audio.delta", "response.audio.delta":
+		if t.template.Metadata["provider.realtime_audio_output.enabled"] != "true" {
+			return errors.New("selected realtime deployment returned unsupported audio output")
+		}
+		_, err := validRealtimeAudio(event.Delta)
+		return err
+	case "response.output_audio.done", "response.audio.done", "response.output_audio_transcript.delta", "response.output_audio_transcript.done", "response.audio_transcript.delta", "response.audio_transcript.done":
+		if t.template.Metadata["provider.realtime_audio_output.enabled"] != "true" {
+			return errors.New("selected realtime deployment returned unsupported audio output")
+		}
+	case "input_audio_buffer.committed":
+		if t.template.Metadata["provider.realtime_audio_input.enabled"] != "true" || event.ItemID == "" || len(event.ItemID) > 256 {
+			return errors.New("invalid realtime input audio commit")
+		}
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if _, exists := t.conversationItems[event.ItemID]; exists {
+			return errors.New("duplicate realtime input audio item")
+		}
+		var tokens int
+		if len(t.pendingAudio) > 0 {
+			tokens = t.pendingAudio[0]
+			t.pendingAudio = t.pendingAudio[1:]
+			t.unnamedItems--
+		} else if t.audioBufferBytes > 0 {
+			if len(t.conversationItems)+t.unnamedItems >= maxRealtimeConversationItems {
+				return errors.New("realtime conversation item limit exceeded")
+			}
+			tokens = realtimeAudioTokens(t.audioBufferBytes, t.audioInputFormat)
+			t.audioBufferBytes = 0
+			t.conversationTokens = saturatedRealtimeTokens(t.conversationTokens, tokens)
+		}
+		t.conversationItems[event.ItemID] = tokens
+	case "input_audio_buffer.cleared":
+		if t.template.Metadata["provider.realtime_audio_input.enabled"] != "true" {
+			return errors.New("selected realtime deployment returned unsupported audio input event")
+		}
+		t.mu.Lock()
+		t.audioBufferBytes = 0
+		t.mu.Unlock()
+	}
+	return nil
+}
+
+func (t *realtimeBillingTracker) scanRealtimeAudio(ctx context.Context, format, audio string) error {
+	if t.template.Metadata["provider.modules.av.enabled"] != "true" {
+		return nil
+	}
+	request := cloneRealtimeBillingRequest(t.template)
+	request.RequestID = newExecutionID()
+	request.Attachments = []openai.ImageAttachment{{MediaType: realtimeAudioMediaType(format), Data: audio}}
+	return t.pipeline.RunNamed(ctx, &request, "av")
+}
+
+func validRealtimeAudio(value string) (int, error) {
+	if value == "" || len(value) > base64.StdEncoding.EncodedLen(maxRealtimeAudioAppendBytes) {
+		return 0, errors.New("realtime audio chunk exceeds its size limit")
+	}
+	for index := range len(value) {
+		character := value[index]
+		if !(character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || character == '+' || character == '/' || character == '=') {
+			return 0, errors.New("realtime audio must be strict base64")
+		}
+	}
+	decoded, err := io.Copy(io.Discard, base64.NewDecoder(base64.StdEncoding.Strict(), strings.NewReader(value)))
+	if err != nil || decoded <= 0 || decoded > maxRealtimeAudioAppendBytes {
+		return 0, errors.New("realtime audio must be non-empty strict base64 within 15 MiB")
+	}
+	return int(decoded), nil
+}
+
+func realtimeAudioTokens(byteCount int, format string) int {
+	bytesPerToken := 4800
+	if format == "g711_ulaw" || format == "g711_alaw" {
+		bytesPerToken = 800
+	}
+	return (byteCount + bytesPerToken - 1) / bytesPerToken
+}
+
+func realtimeAudioMediaType(format string) string {
+	switch format {
+	case "g711_ulaw":
+		return "audio/pcmu"
+	case "g711_alaw":
+		return "audio/pcma"
+	default:
+		return "audio/pcm"
+	}
+}
+
+func realtimeSessionAudioConfig(raw json.RawMessage) (string, bool, bool, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", false, false, nil
+	}
+	var session struct {
+		InputFormat      json.RawMessage `json:"input_audio_format"`
+		OutputFormat     json.RawMessage `json:"output_audio_format"`
+		Modalities       []string        `json:"modalities"`
+		OutputModalities []string        `json:"output_modalities"`
+		Audio            json.RawMessage `json:"audio"`
+	}
+	if json.Unmarshal(raw, &session) != nil {
+		return "", false, false, errors.New("invalid realtime session audio configuration")
+	}
+	inputFormat, inputConfigured, err := parseRealtimeAudioFormat(session.InputFormat)
+	if err != nil {
+		return "", false, false, err
+	}
+	_, outputConfigured, err := parseRealtimeAudioFormat(session.OutputFormat)
+	if err != nil {
+		return "", false, false, err
+	}
+	for _, modality := range append(session.Modalities, session.OutputModalities...) {
+		if modality == "audio" {
+			outputConfigured = true
+		}
+	}
+	if len(session.Audio) > 0 && string(session.Audio) != "null" {
+		var audio struct {
+			Input  json.RawMessage `json:"input"`
+			Output json.RawMessage `json:"output"`
+		}
+		if json.Unmarshal(session.Audio, &audio) != nil {
+			return "", false, false, errors.New("invalid realtime session audio configuration")
+		}
+		if len(audio.Input) > 0 && string(audio.Input) != "null" {
+			inputConfigured = true
+			var input struct {
+				Format json.RawMessage `json:"format"`
+			}
+			if json.Unmarshal(audio.Input, &input) != nil {
+				return "", false, false, errors.New("invalid realtime input audio configuration")
+			}
+			if nested, present, nestedErr := parseRealtimeAudioFormat(input.Format); nestedErr != nil {
+				return "", false, false, nestedErr
+			} else if present {
+				if inputFormat != "" && inputFormat != nested {
+					return "", false, false, errors.New("conflicting realtime input audio formats")
+				}
+				inputFormat = nested
+			}
+		}
+		if len(audio.Output) > 0 && string(audio.Output) != "null" {
+			outputConfigured = true
+			var output struct {
+				Format json.RawMessage `json:"format"`
+			}
+			if json.Unmarshal(audio.Output, &output) != nil {
+				return "", false, false, errors.New("invalid realtime output audio configuration")
+			}
+			if _, _, err := parseRealtimeAudioFormat(output.Format); err != nil {
+				return "", false, false, err
+			}
+		}
+	}
+	return inputFormat, inputConfigured, outputConfigured, nil
+}
+
+func parseRealtimeAudioFormat(raw json.RawMessage) (string, bool, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", false, nil
+	}
+	var legacy string
+	if json.Unmarshal(raw, &legacy) == nil {
+		switch legacy {
+		case "pcm16", "g711_ulaw", "g711_alaw":
+			return legacy, true, nil
+		default:
+			return "", false, errors.New("unsupported realtime audio format")
+		}
+	}
+	var current struct {
+		Type string `json:"type"`
+		Rate int    `json:"rate,omitempty"`
+	}
+	if decodeStrictRealtimeJSON(raw, &current) != nil {
+		return "", false, errors.New("invalid realtime audio format")
+	}
+	switch current.Type {
+	case "audio/pcm":
+		if current.Rate != 24000 {
+			return "", false, errors.New("realtime PCM audio requires 24000 Hz")
+		}
+		return "pcm16", true, nil
+	case "audio/pcmu":
+		if current.Rate != 0 {
+			return "", false, errors.New("realtime PCMU format must not set rate")
+		}
+		return "g711_ulaw", true, nil
+	case "audio/pcma":
+		if current.Rate != 0 {
+			return "", false, errors.New("realtime PCMA format must not set rate")
+		}
+		return "g711_alaw", true, nil
+	default:
+		return "", false, errors.New("unsupported realtime audio format")
+	}
+}
+
+func decodeStrictRealtimeJSON(raw json.RawMessage, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		return errors.New("invalid trailing realtime configuration data")
 	}
 	return nil
 }
@@ -123,12 +418,15 @@ func (t *realtimeBillingTracker) scanClientEvent(ctx context.Context, event real
 }
 
 func (t *realtimeBillingTracker) ProviderEvent(ctx context.Context, payload []byte) error {
-	if !t.billing {
-		return nil
-	}
 	event, err := decodeRealtimeBillingEvent(payload)
 	if err != nil {
 		return err
+	}
+	if err := t.handleProviderAudioEvent(event); err != nil {
+		return err
+	}
+	if !t.billing {
+		return nil
 	}
 	switch event.Type {
 	case "response.created":
@@ -490,9 +788,18 @@ func realtimeResponseUsage(response json.RawMessage) (string, *openai.Usage, err
 	var value struct {
 		ID    string `json:"id"`
 		Usage *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-			TotalTokens  int `json:"total_tokens"`
+			InputTokens       int `json:"input_tokens"`
+			OutputTokens      int `json:"output_tokens"`
+			TotalTokens       int `json:"total_tokens"`
+			InputTokenDetails *struct {
+				CachedTokens int `json:"cached_tokens"`
+				TextTokens   int `json:"text_tokens"`
+				AudioTokens  int `json:"audio_tokens"`
+			} `json:"input_token_details"`
+			OutputTokenDetails *struct {
+				TextTokens  int `json:"text_tokens"`
+				AudioTokens int `json:"audio_tokens"`
+			} `json:"output_token_details"`
 		} `json:"usage"`
 	}
 	if len(response) == 0 || json.Unmarshal(response, &value) != nil || len(value.ID) > 256 {
@@ -505,7 +812,20 @@ func realtimeResponseUsage(response json.RawMessage) (string, *openai.Usage, err
 	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.TotalTokens < 0 || usage.InputTokens > math.MaxInt-usage.OutputTokens || usage.TotalTokens != usage.InputTokens+usage.OutputTokens {
 		return "", nil, errors.New("invalid realtime response usage")
 	}
-	return value.ID, &openai.Usage{PromptTokens: usage.InputTokens, CompletionTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens}, nil
+	result := &openai.Usage{PromptTokens: usage.InputTokens, CompletionTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens}
+	if details := usage.InputTokenDetails; details != nil {
+		if details.CachedTokens < 0 || details.TextTokens < 0 || details.AudioTokens < 0 || details.CachedTokens > usage.InputTokens || details.TextTokens > usage.InputTokens-details.AudioTokens {
+			return "", nil, errors.New("invalid realtime input token details")
+		}
+		result.PromptTokensDetails = &openai.PromptTokenDetails{CachedTokens: details.CachedTokens, TextTokens: details.TextTokens, AudioTokens: details.AudioTokens}
+	}
+	if details := usage.OutputTokenDetails; details != nil {
+		if details.TextTokens < 0 || details.AudioTokens < 0 || details.TextTokens > usage.OutputTokens-details.AudioTokens {
+			return "", nil, errors.New("invalid realtime output token details")
+		}
+		result.CompletionTokensDetails = &openai.CompletionTokenDetails{TextTokens: details.TextTokens, AudioTokens: details.AudioTokens}
+	}
+	return value.ID, result, nil
 }
 
 func saturatedRealtimeTokens(current, increment int) int {
@@ -519,6 +839,7 @@ func cloneRealtimeBillingRequest(request modules.RequestContext) modules.Request
 	request.Tags = append([]string(nil), request.Tags...)
 	request.Roles = append([]string(nil), request.Roles...)
 	request.AccessGroupIDs = append([]string(nil), request.AccessGroupIDs...)
+	request.Attachments = append([]openai.ImageAttachment(nil), request.Attachments...)
 	request.Metadata = cloneRealtimeMetadata(request.Metadata)
 	return request
 }
