@@ -70,6 +70,7 @@ describe("modelCapabilityOptions", () => {
     expect(defaultModelCapabilities("deepseek")).toEqual(["chat", "responses", "stream"]);
     expect(defaultModelCapabilities("cerebras")).toEqual(["chat", "stream"]);
     expect(defaultModelCapabilities("nvidia-nim")).toEqual(["chat", "completions", "responses", "stream"]);
+    expect(defaultModelCapabilities("together")).toEqual(["chat", "completions", "stream"]);
     expect(defaultModelCapabilities("gemini")).toEqual(["chat", "interactions", "stream"]);
     expect(defaultModelCapabilities("xai")).toEqual(["chat", "responses", "embeddings", "stream"]);
     expect(defaultModelCapabilities("demo")).toEqual(["chat", "responses", "embeddings"]);

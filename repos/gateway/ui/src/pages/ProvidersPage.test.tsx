@@ -81,6 +81,7 @@ describe("ProvidersPage", () => {
     expect(within(form).getByRole("option", { name: "openrouter" })).toBeInTheDocument();
     expect(within(form).getByRole("option", { name: "cerebras" })).toBeInTheDocument();
     expect(within(form).getByRole("option", { name: "nvidia-nim" })).toBeInTheDocument();
+    expect(within(form).getByRole("option", { name: "together" })).toBeInTheDocument();
     await userEvent.type(within(form).getByLabelText("ID"), "managed-router");
     await userEvent.selectOptions(within(form).getByLabelText("Type"), "openrouter");
     await userEvent.type(within(form).getByLabelText("Base URL"), "https://api.example.test");
