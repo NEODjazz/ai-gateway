@@ -1329,3 +1329,12 @@ misses create one client; the protocol client serializes session operations.
 Regressions cover concurrent single creation, capacity eviction, expiry,
 credential isolation, successful request reuse and failure recovery. Focused
 tests, the full Go suite, full race suite, vet and build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-0f04fcd` with image ID
+`sha256:b61efd80f89115b0b289ce5cdad64df4cf2c293d28f211330ca5feb03b9684f3`.
+Gateway Helm revision 468 completed successfully, and pod
+`ai-gateway-gateway-cbdc6f686-2wdp7` became Ready with zero restarts and the
+same digest. Live OpenAPI remained at 0.1.366 because the session pool changes
+no public schema. An MCP discovery request with an invalid smoke key returned
+401 before registry or upstream access. No credential was stored and no
+external MCP call or model inference was performed.
