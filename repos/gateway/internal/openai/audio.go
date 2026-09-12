@@ -270,11 +270,17 @@ func audioExtension(mediaType string) string {
 		return ".flac"
 	case "audio/ogg":
 		return ".ogg"
+	case "audio/opus":
+		return ".opus"
+	case "audio/aiff", "audio/x-aiff":
+		return ".aiff"
+	case "audio/aac":
+		return ".aac"
 	case "audio/webm", "video/webm":
 		return ".webm"
 	case "audio/mpeg", "audio/mp3":
 		return ".mp3"
-	case "audio/mp4", "video/mp4", "audio/x-m4a":
+	case "audio/mp4", "video/mp4", "audio/x-m4a", "audio/m4a":
 		return ".m4a"
 	default:
 		return ""
@@ -301,11 +307,17 @@ func validAudioSignature(mediaType string, data []byte) bool {
 		return len(data) >= 4 && string(data[:4]) == "fLaC"
 	case "audio/ogg":
 		return len(data) >= 4 && string(data[:4]) == "OggS"
+	case "audio/opus":
+		return len(data) >= 4 && string(data[:4]) == "OggS"
+	case "audio/aiff", "audio/x-aiff":
+		return len(data) >= 12 && string(data[:4]) == "FORM" && (string(data[8:12]) == "AIFF" || string(data[8:12]) == "AIFC")
+	case "audio/aac":
+		return len(data) >= 7 && data[0] == 0xff && data[1]&0xf6 == 0xf0
 	case "audio/webm", "video/webm":
 		return len(data) >= 4 && data[0] == 0x1a && data[1] == 0x45 && data[2] == 0xdf && data[3] == 0xa3
 	case "audio/mpeg", "audio/mp3":
 		return len(data) >= 3 && (string(data[:3]) == "ID3" || (data[0] == 0xff && data[1]&0xe0 == 0xe0))
-	case "audio/mp4", "video/mp4", "audio/x-m4a":
+	case "audio/mp4", "video/mp4", "audio/x-m4a", "audio/m4a":
 		return len(data) >= 12 && string(data[4:8]) == "ftyp"
 	default:
 		return false

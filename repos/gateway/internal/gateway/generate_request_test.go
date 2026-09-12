@@ -114,8 +114,11 @@ func TestGenerateRequestMapsAdditionalInlineAudioFormats(t *testing.T) {
 	}{
 		{"audio/flac", []byte("fLaCpayload")},
 		{"audio/ogg", []byte("OggSpayload")},
+		{"audio/opus", []byte("OggSpayload")},
+		{"audio/aiff", []byte("FORM\x00\x00\x00\x00AIFFpayload")},
+		{"audio/aac", []byte("\xff\xf1\x50\x80\x00\x1f\xfc")},
 		{"audio/webm", []byte("\x1a\x45\xdf\xa3payload")},
-		{"audio/mp4", []byte("\x00\x00\x00\x18ftypisom")},
+		{"audio/m4a", []byte("\x00\x00\x00\x18ftypisom")},
 	}
 	for _, test := range tests {
 		t.Run(test.mediaType, func(t *testing.T) {

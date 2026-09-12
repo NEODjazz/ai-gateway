@@ -615,8 +615,11 @@ func TestGeminiMapsAdditionalInlineAudioFormats(t *testing.T) {
 	}{
 		{"flac", "audio/flac", []byte("fLaCpayload")},
 		{"ogg", "audio/ogg", []byte("OggSpayload")},
+		{"opus", "audio/opus", []byte("OggSpayload")},
+		{"aiff", "audio/aiff", []byte("FORM\x00\x00\x00\x00AIFFpayload")},
+		{"aac", "audio/aac", []byte("\xff\xf1\x50\x80\x00\x1f\xfc")},
 		{"webm", "audio/webm", []byte("\x1a\x45\xdf\xa3payload")},
-		{"m4a", "audio/mp4", []byte("\x00\x00\x00\x18ftypisom")},
+		{"m4a", "audio/m4a", []byte("\x00\x00\x00\x18ftypisom")},
 	}
 	for _, test := range tests {
 		encoded := base64.StdEncoding.EncodeToString(test.data)
