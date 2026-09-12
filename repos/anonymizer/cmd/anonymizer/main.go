@@ -47,8 +47,8 @@ func newHandler(module modules.AnonymizerModule) http.Handler {
 		if request.Query != "" || request.Documents != nil {
 			ctx.RerankRequest = &openai.RerankRequest{Query: request.Query, Documents: request.Documents}
 		}
-		if err := module.Handle(r.Context(), &ctx); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if err := module.HandleWithRules(&ctx, request.Rules); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		response := anonymizeResponse{Messages: ctx.Request.Messages, Replacements: ctx.AnonymizationValues}
@@ -73,6 +73,7 @@ type anonymizeRequest struct {
 	Instructions string           `json:"instructions,omitempty"`
 	Query        string           `json:"query,omitempty"`
 	Documents    []any            `json:"documents,omitempty"`
+	Rules        []string         `json:"rules,omitempty"`
 }
 
 type anonymizeResponse struct {

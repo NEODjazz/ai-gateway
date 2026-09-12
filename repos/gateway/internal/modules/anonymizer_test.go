@@ -228,6 +228,32 @@ func TestAnonymizerRulesCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestAnonymizerUsesEffectiveRuleMode(t *testing.T) {
+	module := NewAnonymizerModule(true, RuleEmail, RulePhone)
+	req := RequestContext{
+		Metadata: map[string]string{"provider.modules.anonymizer.mode": "custom", "provider.modules.anonymizer.rules": "email"},
+		Request:  openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "user@example.com +7 999 123-45-67"}}},
+	}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	content := openai.ContentText(req.Request.Messages[0].Content)
+	if !strings.Contains(content, "{{EMAIL_1}}") || !strings.Contains(content, "+7 999 123-45-67") {
+		t.Fatalf("unexpected selected-rule content: %s", content)
+	}
+
+	disabled := RequestContext{
+		Metadata: map[string]string{"provider.modules.anonymizer.mode": "disabled"},
+		Request:  openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "user@example.com"}}},
+	}
+	if err := module.Handle(context.Background(), &disabled); err != nil {
+		t.Fatal(err)
+	}
+	if got := openai.ContentText(disabled.Request.Messages[0].Content); got != "user@example.com" {
+		t.Fatalf("disabled anonymizer changed content: %s", got)
+	}
+}
+
 func TestDeanonymizeResponseRestoresOriginalValues(t *testing.T) {
 	module := NewAnonymizerModule(true, RuleEmail, RulePhone)
 	req := RequestContext{

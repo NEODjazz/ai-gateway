@@ -3,6 +3,7 @@ package modules
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"regexp"
 	"strings"
@@ -70,6 +71,33 @@ func (m AnonymizerModule) Required() bool {
 }
 
 func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
+	rules := m.rules
+	switch mode := strings.TrimSpace(req.Metadata["provider.modules.anonymizer.mode"]); mode {
+	case "disabled":
+		return nil
+	case "", "strict":
+	case "basic", "custom":
+		selected := map[string]bool{}
+		for _, name := range splitAnonymizerRules(req.Metadata["provider.modules.anonymizer.rules"]) {
+			selected[name] = true
+		}
+		if len(selected) == 0 {
+			return errors.New("effective anonymizer rules are empty")
+		}
+		rules = nil
+		for _, rule := range m.rules {
+			if selected[rule.Name] {
+				rules = append(rules, rule)
+				delete(selected, rule.Name)
+			}
+		}
+		if len(selected) != 0 {
+			return errors.New("effective anonymizer rules contain an unknown rule")
+		}
+	default:
+		return errors.New("invalid effective anonymizer mode")
+	}
+	m.rules = rules
 	for index := range req.Request.Messages {
 		req.Request.Messages[index].Content = m.anonymizeAny(req, req.Request.Messages[index].Content)
 		for metadataIndex := range req.Request.Messages[index].AnthropicDocumentMetadata {

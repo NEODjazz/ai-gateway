@@ -48,6 +48,34 @@ func TestAnonymizeRerankProjection(t *testing.T) {
 	}
 }
 
+func TestAnonymizeSelectsRulesPerRequest(t *testing.T) {
+	handler := newHandler(modules.NewAnonymizerModule(true, modules.RuleEmail, modules.RulePhone))
+	request := httptest.NewRequest(http.MethodPost, "/anonymize", strings.NewReader(`{"messages":[{"role":"user","content":"user@example.com +7 999 123-45-67"}],"rules":["email"]}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body anonymizeResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	content := openai.ContentText(body.Messages[0].Content)
+	if !strings.Contains(content, "{{EMAIL_1}}") || !strings.Contains(content, "+7 999 123-45-67") || strings.Contains(content, "{{PHONE") {
+		t.Fatalf("unexpected selected-rule response: %+v", body)
+	}
+}
+
+func TestAnonymizeRejectsUnknownRequestedRule(t *testing.T) {
+	handler := newHandler(modules.NewAnonymizerModule(true, modules.RuleEmail))
+	request := httptest.NewRequest(http.MethodPost, "/anonymize", strings.NewReader(`{"messages":[{"role":"user","content":"user@example.com"}],"rules":["missing"]}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestAnonymizerHealthReturns204(t *testing.T) {
 	response := httptest.NewRecorder()
 	newHandler(modules.NewAnonymizerModule(true)).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/healthz", nil))

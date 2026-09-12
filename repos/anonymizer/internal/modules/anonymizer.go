@@ -71,27 +71,61 @@ func (m AnonymizerModule) Required() bool {
 }
 
 func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
+	return m.handle(req, m.rules)
+}
+
+func (m AnonymizerModule) HandleWithRules(req *RequestContext, enabledRules []string) error {
+	if len(enabledRules) == 0 {
+		return m.handle(req, m.rules)
+	}
+	selected := selectedRuleNames(enabledRules)
+	if selected["__disabled__"] {
+		return nil
+	}
+	rules := make([]AnonymizerRule, 0, len(m.rules))
+	matched := make(map[string]bool, len(selected))
+	for _, rule := range m.rules {
+		if selected["all"] || selected[rule.Name] {
+			rules = append(rules, rule)
+			matched[rule.Name] = true
+		}
+	}
+	if !selected["all"] {
+		for name := range selected {
+			if !matched[name] {
+				return &RuleSelectionError{Name: name}
+			}
+		}
+	}
+	return m.handle(req, rules)
+}
+
+type RuleSelectionError struct{ Name string }
+
+func (e *RuleSelectionError) Error() string { return "unknown anonymizer rule " + e.Name }
+
+func (m AnonymizerModule) handle(req *RequestContext, rules []AnonymizerRule) error {
 	for index := range req.Request.Messages {
-		req.Request.Messages[index].Content = m.anonymizeAny(req, req.Request.Messages[index].Content)
+		req.Request.Messages[index].Content = anonymizeAny(req, req.Request.Messages[index].Content, rules)
 		for callIndex := range req.Request.Messages[index].ToolCalls {
-			req.Request.Messages[index].ToolCalls[callIndex].Function.Arguments = m.anonymize(req, req.Request.Messages[index].ToolCalls[callIndex].Function.Arguments)
+			req.Request.Messages[index].ToolCalls[callIndex].Function.Arguments = anonymize(req, req.Request.Messages[index].ToolCalls[callIndex].Function.Arguments, rules)
 		}
 	}
 	if req.ResponseRequest != nil {
-		req.ResponseRequest.Input = m.anonymizeAny(req, req.ResponseRequest.Input)
-		req.ResponseRequest.Instructions = m.anonymize(req, req.ResponseRequest.Instructions)
+		req.ResponseRequest.Input = anonymizeAny(req, req.ResponseRequest.Input, rules)
+		req.ResponseRequest.Instructions = anonymize(req, req.ResponseRequest.Instructions, rules)
 	}
 	if req.RerankRequest != nil {
-		req.RerankRequest.Query = m.anonymize(req, req.RerankRequest.Query)
+		req.RerankRequest.Query = anonymize(req, req.RerankRequest.Query, rules)
 		for index := range req.RerankRequest.Documents {
-			req.RerankRequest.Documents[index] = m.anonymizeAny(req, req.RerankRequest.Documents[index])
+			req.RerankRequest.Documents[index] = anonymizeAny(req, req.RerankRequest.Documents[index], rules)
 		}
 	}
 	return nil
 }
 
-func (m AnonymizerModule) anonymize(req *RequestContext, value string) string {
-	for _, rule := range m.rules {
+func anonymize(req *RequestContext, value string, rules []AnonymizerRule) string {
+	for _, rule := range rules {
 		value = rule.apply(req, value)
 	}
 	return value
@@ -209,9 +243,9 @@ func DeanonymizeAny(value any, replacements map[string]string) any {
 	})
 }
 
-func (m AnonymizerModule) anonymizeAny(req *RequestContext, value any) any {
+func anonymizeAny(req *RequestContext, value any, rules []AnonymizerRule) any {
 	return openai.TransformTextContent(value, func(text string) string {
-		return m.anonymize(req, text)
+		return anonymize(req, text, rules)
 	})
 }
 

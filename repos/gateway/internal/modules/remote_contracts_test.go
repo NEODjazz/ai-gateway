@@ -59,6 +59,41 @@ func TestRemoteAnonymizerDoesNotReceiveBearerOrIdentity(t *testing.T) {
 	}
 }
 
+func TestRemoteAnonymizerAppliesEffectiveMode(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var request AnonymizeRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(request.Rules, ",") != "email,phone" {
+			t.Fatalf("rules=%v", request.Rules)
+		}
+		_ = json.NewEncoder(w).Encode(AnonymizeResponse{Messages: request.Messages})
+	}))
+	defer server.Close()
+	module := NewRemoteAnonymizerModule(true, server.URL)
+	req := RequestContext{Metadata: map[string]string{"provider.modules.anonymizer.mode": "custom", "provider.modules.anonymizer.rules": "email,phone"}}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	req.Metadata["provider.modules.anonymizer.mode"] = "disabled"
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls=%d", calls)
+	}
+}
+
+func TestRemoteAnonymizerRejectsEmptyEffectiveRules(t *testing.T) {
+	req := RequestContext{Metadata: map[string]string{"provider.modules.anonymizer.mode": "custom"}}
+	if err := NewRemoteAnonymizerModule(true, "http://127.0.0.1:1").Handle(context.Background(), &req); err == nil {
+		t.Fatal("expected empty custom rule set to fail closed")
+	}
+}
+
 func TestRemoteAnonymizerPreservesToolCallContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request AnonymizeRequest

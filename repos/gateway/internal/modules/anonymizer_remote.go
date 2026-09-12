@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -17,6 +18,7 @@ type AnonymizeRequest struct {
 	Documents    []any            `json:"documents,omitempty"`
 	Keywords     []string         `json:"keywords,omitempty"`
 	SpeakerNames []string         `json:"speaker_names,omitempty"`
+	Rules        []string         `json:"rules,omitempty"`
 }
 
 type AnonymizeResponse struct {
@@ -44,7 +46,22 @@ func (m RemoteAnonymizerModule) Name() string   { return "anonymizer" }
 func (m RemoteAnonymizerModule) Required() bool { return m.required }
 
 func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext) error {
+	mode := strings.TrimSpace(req.Metadata["provider.modules.anonymizer.mode"])
+	if mode == "disabled" {
+		return nil
+	}
 	request := AnonymizeRequest{RequestID: req.RequestID, Messages: projectMessages(req.Request.Messages)}
+	switch mode {
+	case "", "strict":
+		request.Rules = []string{"all"}
+	case "basic", "custom":
+		request.Rules = splitAnonymizerRules(req.Metadata["provider.modules.anonymizer.rules"])
+	default:
+		return errors.New("invalid effective anonymizer mode")
+	}
+	if (mode == "basic" || mode == "custom") && len(request.Rules) == 0 {
+		return errors.New("effective anonymizer rules are empty")
+	}
 	if req.ResponseRequest != nil {
 		request.Input = openai.TextOnlyProjection(req.ResponseRequest.Input)
 		request.Instructions = req.ResponseRequest.Instructions
@@ -146,6 +163,17 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 	}
 	req.AnonymizationValues = cloneStringMap(response.Replacements)
 	return nil
+}
+
+func splitAnonymizerRules(value string) []string {
+	parts := strings.Split(value, ",")
+	rules := make([]string, 0, len(parts))
+	for _, rule := range parts {
+		if rule = strings.TrimSpace(rule); rule != "" {
+			rules = append(rules, rule)
+		}
+	}
+	return rules
 }
 
 func projectMessages(messages []openai.Message) []openai.Message {
