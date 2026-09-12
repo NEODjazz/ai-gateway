@@ -79,6 +79,17 @@ func TestCohereRejectsUnsupportedRerankParametersBeforeUpstream(t *testing.T) {
 	}
 }
 
+func TestCohereRejectsWebFetchOptions(t *testing.T) {
+	request := openai.ChatCompletionRequest{
+		Model: "command", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{WebFetchOptions: &openai.ChatWebFetchOptions{AllowedDomains: []string{"example.com"}, MaxContentTokens: 1000}},
+	}
+	var failure *Error
+	if err := NewCohere("http://unused.invalid", "").ValidateChatParameters(request); !errors.As(err, &failure) || failure.Param != "web_fetch_options" || failure.UpstreamCode != "unsupported_parameter" {
+		t.Fatalf("web_fetch_options was not rejected explicitly: %v", err)
+	}
+}
+
 func TestCohereRerankRejectsInvalidTransportAndUsage(t *testing.T) {
 	if _, err := cohereEndpoint("https://user:secret@example.test", "v2/rerank"); err == nil {
 		t.Fatal("credential-bearing base URL accepted")
