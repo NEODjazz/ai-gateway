@@ -560,3 +560,10 @@ successfully, and pod `ai-gateway-gateway-784dcb8fbf-ncckj` became Ready with
 zero restarts. The live OpenAPI 0.1.318 contract lists `/v1/rerank` in the
 accepted batch endpoints; the regression executes it through durable input and
 output files, shared validation, model policy, TPM admission and routing.
+
+Source `2ab8c57` adds Search to durable JSONL batch execution. Rancher Desktop
+built `ai-gateway-gateway:gaps-2ab8c57`; Helm revision 418 completed
+successfully, and pod `ai-gateway-gateway-6df7cfd5cf-zw2lj` became Ready with
+zero restarts. The live OpenAPI 0.1.319 contract lists `/v1/search` in the
+accepted batch endpoints; the regression covers multi-query execution through
+shared validation, policy-visible messages, TPM admission and search-unit usage.
