@@ -125,6 +125,59 @@ func TestMCPRuntimeListsToolsWithACLRateLimitAndBilling(t *testing.T) {
 	}
 }
 
+func TestMCPRuntimeReusesSessionAndIsolatesCredentialRotation(t *testing.T) {
+	registry := runtimeRegistry(t, "streamable-http")
+	server, _ := registry.Server("weather")
+	if _, err := registry.PutServer("weather", server, "credential-a"); err != nil {
+		t.Fatal(err)
+	}
+	var factoryCalls int
+	var credentials []string
+	client := &fakeMCPRuntimeClient{page: mcpclient.ToolPage{Tools: []mcpclient.Tool{}}}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{}}), nil).WithMCPRegistry(registry).WithMCPRuntimeFactory(func(_ string, credential string) (MCPRuntimeClient, error) {
+		factoryCalls++
+		credentials = append(credentials, credential)
+		return client, nil
+	})
+	router := Routes(handler)
+	call := func() int {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/mcp/servers/weather/tools", nil))
+		return response.Code
+	}
+	if call() != http.StatusOK || call() != http.StatusOK || factoryCalls != 1 || client.calls != 2 {
+		t.Fatalf("initial reuse status calls=%d factory=%d", client.calls, factoryCalls)
+	}
+	if _, err := registry.PutServer("weather", server, "credential-b"); err != nil {
+		t.Fatal(err)
+	}
+	if call() != http.StatusOK || factoryCalls != 2 || strings.Join(credentials, ",") != "credential-a,credential-b" {
+		t.Fatalf("rotation factory=%d credentials=%v", factoryCalls, credentials)
+	}
+}
+
+func TestMCPRuntimeInvalidatesFailedSession(t *testing.T) {
+	registry := runtimeRegistry(t, "streamable-http")
+	clients := []*fakeMCPRuntimeClient{
+		{err: errors.New("invalid session")},
+		{page: mcpclient.ToolPage{Tools: []mcpclient.Tool{}}},
+	}
+	var factoryCalls int
+	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{}}), nil).WithMCPRegistry(registry).WithMCPRuntimeFactory(func(string, string) (MCPRuntimeClient, error) {
+		client := clients[factoryCalls]
+		factoryCalls++
+		return client, nil
+	})
+	router := Routes(handler)
+	first := httptest.NewRecorder()
+	router.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/v1/mcp/servers/weather/tools", nil))
+	second := httptest.NewRecorder()
+	router.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/v1/mcp/servers/weather/tools", nil))
+	if first.Code != http.StatusBadGateway || second.Code != http.StatusOK || factoryCalls != 2 {
+		t.Fatalf("first=%d second=%d factory=%d", first.Code, second.Code, factoryCalls)
+	}
+}
+
 func TestMCPRuntimeFailsClosedForPolicyTransportAndUpstream(t *testing.T) {
 	for _, test := range []struct {
 		name      string

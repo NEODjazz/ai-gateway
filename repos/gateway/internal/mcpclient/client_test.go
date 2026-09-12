@@ -139,7 +139,7 @@ func TestClientRejectsUnsafeEndpointsAndAddresses(t *testing.T) {
 			t.Fatalf("accepted endpoint %q", endpoint)
 		}
 	}
-	for _, bearer := range []string{" leading", "trailing ", "line\nbreak", strings.Repeat("x", 32769)} {
+	for _, bearer := range []string{" leading", "trailing ", "line\nbreak", "nul\x00byte", strings.Repeat("x", 32769)} {
 		if _, err := NewWithBearer("https://example.com/mcp", bearer); err == nil {
 			t.Fatalf("accepted unsafe bearer credential %q", bearer)
 		}

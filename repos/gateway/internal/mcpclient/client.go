@@ -71,10 +71,22 @@ func New(endpoint string) (*Client, error) {
 
 func NewWithBearer(endpoint, bearer string) (*Client, error) {
 	parsed, err := url.Parse(strings.TrimSpace(endpoint))
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || len(bearer) > 32768 || strings.TrimSpace(bearer) != bearer || strings.ContainsAny(bearer, "\r\n") {
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || !validBearerCredential(bearer) {
 		return nil, errors.New("MCP endpoint must be an HTTPS URL without credentials, query, or fragment")
 	}
 	return &Client{endpoint: parsed, http: publichttp.NewClient(30 * time.Second), bearer: bearer}, nil
+}
+
+func validBearerCredential(value string) bool {
+	if len(value) > 32768 {
+		return false
+	}
+	for index := range len(value) {
+		if value[index] < 0x21 || value[index] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Client) Initialize(ctx context.Context) error {

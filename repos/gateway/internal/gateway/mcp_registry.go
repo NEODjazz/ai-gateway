@@ -101,7 +101,16 @@ type MCPRuntimeFactory func(string, string) (MCPRuntimeClient, error)
 
 func (h Handler) WithMCPRuntimeFactory(factory MCPRuntimeFactory) Handler {
 	h.mcpRuntime = factory
+	h.mcpRuntimeCache = newMCPRuntimeCache(defaultMCPRuntimeCacheEntries, defaultMCPRuntimeCacheTTL)
 	return h
+}
+
+func (h Handler) mcpRuntimeClient(endpoint, bearerToken string) (MCPRuntimeClient, error) {
+	return h.mcpRuntimeCache.get(endpoint, bearerToken, h.mcpRuntime)
+}
+
+func (h Handler) invalidateMCPRuntimeClient(endpoint, bearerToken string) {
+	h.mcpRuntimeCache.invalidate(endpoint, bearerToken)
 }
 
 func (h Handler) WithMCPCallStore(store mcpstate.Store) Handler {
@@ -153,7 +162,15 @@ func firstString(values []string) string {
 }
 
 func validMCPBearerToken(value string) bool {
-	return len(value) <= 32768 && strings.TrimSpace(value) == value && !strings.ContainsAny(value, "\r\n")
+	if len(value) > 32768 {
+		return false
+	}
+	for index := range len(value) {
+		if value[index] < 0x21 || value[index] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 func (r *MCPRegistry) PutToolset(id string, toolset MCPToolset) (MCPToolset, error) {
 	id = strings.TrimSpace(id)

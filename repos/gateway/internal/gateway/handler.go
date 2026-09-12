@@ -61,6 +61,7 @@ type Handler struct {
 	a2aPushVault      *a2aPushVault
 	mcp               *MCPRegistry
 	mcpRuntime        MCPRuntimeFactory
+	mcpRuntimeCache   *mcpRuntimeCache
 	mcpCalls          mcpstate.Store
 	files             filestate.Store
 	fileConfig        FileRuntimeConfig
@@ -151,7 +152,7 @@ func NewHandlerWithMetrics(pipeline modules.Pipeline, llmProvider provider.Provi
 	if metrics == nil {
 		metrics = NewMetrics()
 	}
-	return Handler{pipeline: pipeline, provider: llmProvider, rateLimits: rateLimits, metrics: metrics, ready: ready, a2aHTTPClient: publichttp.NewClient(15 * time.Second), mcpRuntime: func(endpoint, bearerToken string) (MCPRuntimeClient, error) {
+	return Handler{pipeline: pipeline, provider: llmProvider, rateLimits: rateLimits, metrics: metrics, ready: ready, a2aHTTPClient: publichttp.NewClient(15 * time.Second), mcpRuntimeCache: newMCPRuntimeCache(defaultMCPRuntimeCacheEntries, defaultMCPRuntimeCacheTTL), mcpRuntime: func(endpoint, bearerToken string) (MCPRuntimeClient, error) {
 		return mcpclient.NewWithBearer(endpoint, bearerToken)
 	}}
 }
