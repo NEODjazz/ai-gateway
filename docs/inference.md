@@ -58,7 +58,7 @@ job storage и deployment capability `background_responses`. Распознав�
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
 | `/v1/responses/compact` | `provider`, `model`, `input`, `instructions` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `metadata`, `input_type`, `encoding_format`, `dimensions`, `output_dtype`, `user` |
-| `/v1/rerank` | `provider`, `model`, `query`, `documents`, `top_n`, `rank_fields`, `return_documents`, `max_chunks_per_doc`, `max_tokens_per_doc` |
+| `/v1/rerank` | `provider`, `model`, `query`, `documents`, `top_n`, `rank_fields`, `return_documents`, `max_chunks_per_doc`, `max_tokens_per_doc`, `truncate` |
 | `/v1/moderations` | `provider`, `model`, `input`, `metadata` |
 | `/v1/images/generations` | `provider`, `model`, `prompt`, `n`, `quality`, `response_format`, `size`, `style`, `user`, `background`, `output_format`, `output_compression` |
 | `/v1/images/edits` | Multipart: `image`/`image[]`, `mask`, `provider`, `model`, `prompt`, `n`, `quality`, `response_format`, `size`, `user`, `background`, `output_format`, `output_compression` |
@@ -82,6 +82,15 @@ token or billed-unit counters. Search units remain observable provider usage;
 token-based catalog pricing continues to use the existing bounded input estimate.
 
 The same provider type implements native text embeddings through `/v2/embed`.
+
+Provider type `nvidia-nim` sends native Rerank requests to `/v1/ranking`. The
+adapter accepts 1 to 512 non-empty string passages, applies `top_n` locally,
+preserves requested documents in the gateway response and forwards optional
+`truncate` values `NONE` or `END`. Object documents, rank fields and chunk/token
+limits fail before upstream execution. The bounded response must contain one
+unique result per passage in descending-logit order and positive provider usage
+where `total_tokens` equals `prompt_tokens`; otherwise the request fails before
+billing settlement.
 
 Provider type `together` sends Rerank requests to the native `/v1/rerank`
 endpoint with bearer authentication. It accepts text and object documents,
@@ -399,7 +408,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `groq` | Chat/stream, tools, structured output, vision, user attribution and service tiers |
 | `deepseek` | Chat/stream and Responses with provider-specific validation and reasoning history passthrough |
 | `cerebras` | Chat/stream with bearer authentication, model discovery, function tools, JSON Schema output, reasoning/logprobs/service-tier validation and normalized reasoning content; unsupported fields fail before upstream execution |
-| `nvidia-nim` | Chat/stream, native Messages/stream and count-tokens, legacy Completions, Responses create/stream/retrieve/cancel and Embeddings with optional bearer authentication and model discovery; stored response lifecycle uses the original deployment ownership binding, Chat and Messages use isolated cache scopes, and model-dependent multimodal input is enabled per deployment |
+| `nvidia-nim` | Chat/stream, native Messages/stream and count-tokens, legacy Completions, Responses create/stream/retrieve/cancel, Embeddings and native text Rerank with optional bearer authentication and model discovery; Rerank supports 512 passages, `NONE`/`END` truncation and exact provider token settlement; stored response lifecycle uses the original deployment ownership binding, Chat and Messages use isolated cache scopes, and model-dependent multimodal input is enabled per deployment |
 | `together` | Chat/stream, legacy Completions, Embeddings, native Rerank, duration-accounted Audio Transcription/Translation, bounded Text-to-Speech and model discovery with bearer authentication; Rerank requires exact provider usage, audio uses exact duration or character settlement, tools, structured output and vision are capability-gated, and unsupported Responses or silently ignored parameters fail before upstream execution |
 | `xai` | Chat/stream, Responses and Embeddings with bearer authentication, merged text/embedding model discovery, structured output, vision, web search, response compaction and owned retrieve/input-items/delete lifecycle; priority tier, bounded reasoning/logprobs validation, float/base64 vectors and exact embedding token usage |
 | `demo` | Локальный deterministic fallback для разработки |

@@ -96,7 +96,10 @@ Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 hosted endpoints с bearer credential. Профиль публикует Chat Completions,
 native Messages и count-tokens, legacy Completions, Responses
 create/stream/retrieve/cancel,
-Embeddings и `/v1/models` discovery. Входящий Messages-запрос сохраняет общий
+Embeddings, native text Rerank и `/v1/models` discovery. Rerank принимает до
+512 строковых passages, передает `truncate=NONE|END`, применяет `top_n` после
+проверки полного результата и требует точный положительный provider token usage.
+Входящий Messages-запрос сохраняет общий
 policy, quota, retry и billing lifecycle, но отправляется в native endpoint.
 Function tools, structured output и model-dependent image, audio и video input
 доступны только через явно выбранные deployment capabilities.
