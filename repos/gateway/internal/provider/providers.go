@@ -150,7 +150,7 @@ type ProviderContainerCreateParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 }
 
-var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai", "opensandbox"}
+var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "cerebras", "xai", "opensandbox"}
 
 var managedOperationCapabilities = []string{
 	"chat", "completions", "responses", "interactions", "count_tokens", "embeddings", "rerank", "moderation",

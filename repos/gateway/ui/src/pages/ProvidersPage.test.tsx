@@ -79,6 +79,7 @@ describe("ProvidersPage", () => {
     const form = screen.getByRole("dialog", { name: "Create Provider" });
     expect(within(form).getByRole("option", { name: "voyage" })).toBeInTheDocument();
     expect(within(form).getByRole("option", { name: "openrouter" })).toBeInTheDocument();
+    expect(within(form).getByRole("option", { name: "cerebras" })).toBeInTheDocument();
     await userEvent.type(within(form).getByLabelText("ID"), "managed-router");
     await userEvent.selectOptions(within(form).getByLabelText("Type"), "openrouter");
     await userEvent.type(within(form).getByLabelText("Base URL"), "https://api.example.test");

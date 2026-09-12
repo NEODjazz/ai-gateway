@@ -68,6 +68,7 @@ describe("modelCapabilityOptions", () => {
     expect(defaultModelCapabilities("bedrock")).toEqual(["chat"]);
     expect(defaultModelCapabilities("groq")).toEqual(["chat", "stream"]);
     expect(defaultModelCapabilities("deepseek")).toEqual(["chat", "responses", "stream"]);
+    expect(defaultModelCapabilities("cerebras")).toEqual(["chat", "stream"]);
     expect(defaultModelCapabilities("gemini")).toEqual(["chat", "interactions", "stream"]);
     expect(defaultModelCapabilities("xai")).toEqual(["chat", "responses", "embeddings", "stream"]);
     expect(defaultModelCapabilities("demo")).toEqual(["chat", "responses", "embeddings"]);

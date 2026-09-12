@@ -77,6 +77,8 @@ export function defaultModelCapabilities(providerType: string): string[] {
       return ["chat", "stream"];
     case "deepseek":
       return ["chat", "responses", "stream"];
+    case "cerebras":
+      return ["chat", "stream"];
     case "gemini":
       return ["chat", "interactions", "stream"];
     case "xai":

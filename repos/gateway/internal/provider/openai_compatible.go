@@ -478,6 +478,10 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	if err := p.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	return p.chatCompletions(ctx, request, decodeChatCompletionResponse, nil)
+}
+
+func (p OpenAICompatible) chatCompletions(ctx context.Context, request openai.ChatCompletionRequest, decodeResponse func(io.Reader, *openai.ChatCompletionResponse) error, normalizeStream func(string) (string, error)) (openai.ChatCompletionResponse, error) {
 	upstreamRequest := openAICompatibleChatRequest{
 		ChatGenerationOptions: request.ChatGenerationOptions,
 		Model:                 request.Model, Messages: request.Messages, Functions: request.Functions, FunctionCall: request.FunctionCall, Tools: request.Tools,
@@ -498,7 +502,7 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	defer resp.Body.Close()
 
 	if request.Stream && p.upstreamStream {
-		response, err := decodeChatCompletionStream(resp.Body, request.Model)
+		response, err := streamChatCompletionDataWithNormalizer(resp.Body, request.Model, nil, normalizeStream)
 		if err == nil {
 			err = validateChatCompletionEnvelope(response)
 		}
@@ -518,7 +522,7 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 	}
 
 	var response openai.ChatCompletionResponse
-	if err := decodeChatCompletionResponse(resp.Body, &response); err != nil {
+	if err := decodeResponse(resp.Body, &response); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 	if err := validateChatCompletionEnvelope(response); err != nil {
@@ -659,6 +663,10 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 	if err := p.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	return p.streamChatCompletions(ctx, request, write, nil)
+}
+
+func (p OpenAICompatible) streamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter, normalizeStream func(string) (string, error)) (openai.ChatCompletionResponse, error) {
 	if !p.upstreamStream {
 		return openai.ChatCompletionResponse{}, ErrStreamingUnsupported
 	}
@@ -680,7 +688,7 @@ func (p OpenAICompatible) StreamChatCompletions(ctx context.Context, request ope
 	}
 	defer resp.Body.Close()
 
-	response, err := streamChatCompletionData(resp.Body, request.Model, write)
+	response, err := streamChatCompletionDataWithNormalizer(resp.Body, request.Model, write, normalizeStream)
 	if err == nil {
 		err = validateChatCompletionEnvelope(response)
 	}
@@ -874,6 +882,10 @@ const maxChatStreamChoices = 128
 const maxChatStreamToolCalls = 128
 
 func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+	return streamChatCompletionDataWithNormalizer(body, fallbackModel, write, nil)
+}
+
+func streamChatCompletionDataWithNormalizer(body io.Reader, fallbackModel string, write ChatCompletionStreamWriter, normalize func(string) (string, error)) (openai.ChatCompletionResponse, error) {
 	response := openai.ChatCompletionResponse{
 		Object: "chat.completion",
 		Model:  fallbackModel,
@@ -889,6 +901,13 @@ func streamChatCompletionData(body io.Reader, fallbackModel string, write ChatCo
 	err := scanSSEData(body, func(payload string) error {
 		if payload == "[DONE]" {
 			return io.EOF
+		}
+		if normalize != nil {
+			var err error
+			payload, err = normalize(payload)
+			if err != nil {
+				return err
+			}
 		}
 		var chunk struct {
 			ID                string             `json:"id"`
