@@ -12,6 +12,7 @@ type InteractionRequest struct {
 	Provider              string                      `json:"provider,omitempty"`
 	Model                 string                      `json:"model,omitempty"`
 	Agent                 string                      `json:"agent,omitempty"`
+	Environment           string                      `json:"environment,omitempty"`
 	Input                 any                         `json:"input"`
 	SystemInstruction     string                      `json:"system_instruction,omitempty"`
 	Tools                 []ResponseTool              `json:"tools,omitempty"`
@@ -65,6 +66,18 @@ func (r InteractionRequest) NativeResponseRequest() (ResponseRequest, string) {
 	}
 	if model != "" && agent != "" {
 		return ResponseRequest{}, "model and agent are mutually exclusive"
+	}
+	environment := strings.TrimSpace(r.Environment)
+	if environment != "" {
+		if agent == "" {
+			return ResponseRequest{}, "environment requires an agent interaction"
+		}
+		if strings.TrimSpace(r.PreviousInteractionID) == "" {
+			return ResponseRequest{}, "environment reuse requires previous_interaction_id"
+		}
+		if !ValidInteractionResourceID(environment) || strings.EqualFold(environment, "remote") {
+			return ResponseRequest{}, "environment must reference an existing environment ID"
+		}
 	}
 	effectiveModel := model
 	if effectiveModel == "" {
@@ -128,6 +141,9 @@ func (r InteractionRequest) NativeResponseRequest() (ResponseRequest, string) {
 		MaxOutputTokens: r.GenerationConfig.MaxOutputTokens, Temperature: r.GenerationConfig.Temperature,
 		TopP: r.GenerationConfig.TopP,
 	}
+	if environment != "" {
+		result.NativeInputTokens = EstimateContextTokens(environment)
+	}
 	if message := result.Validate(); message != "" {
 		return ResponseRequest{}, message
 	}
@@ -189,11 +205,24 @@ type InteractionResponse struct {
 	Updated           string                     `json:"updated,omitempty"`
 	Model             string                     `json:"model,omitempty"`
 	Agent             string                     `json:"agent,omitempty"`
+	EnvironmentID     string                     `json:"environment_id,omitempty"`
 	Status            string                     `json:"status"`
 	Steps             []InteractionStep          `json:"steps,omitempty"`
 	Usage             InteractionUsage           `json:"usage,omitempty"`
 	Error             *ResponseError             `json:"error,omitempty"`
 	IncompleteDetails *ResponseIncompleteDetails `json:"incomplete_details,omitempty"`
+}
+
+func ValidInteractionResourceID(value string) bool {
+	if value = strings.TrimSpace(value); value == "" || len(value) > 256 {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '_' && char != '-' && char != '.' && char != ':' {
+			return false
+		}
+	}
+	return true
 }
 
 func ResponseFromInteraction(interaction InteractionResponse) ResponseResponse {

@@ -134,10 +134,11 @@ func (r Router) StreamInteractions(ctx context.Context, req modules.RequestConte
 		modules.DeanonymizeResponsesResponse(&attemptCtx, &shared)
 		result := openai.InteractionFromResponse(shared)
 		result.Agent, result.Updated = response.Agent, response.Updated
+		result.EnvironmentID = strings.TrimSpace(response.EnvironmentID)
 		if interactionUsesAgent(request) {
 			result.Agent, result.Model = interactionRoutingModel(request), ""
 		}
-		if err := r.persistInteractionOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, interactionRoutingModel(request), interactionUsesAgent(request), result.ID, endpoint); err != nil {
+		if err := r.persistInteractionOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, interactionRoutingModel(request), interactionUsesAgent(request), result.EnvironmentID, result.ID, endpoint); err != nil {
 			return openai.InteractionResponse{}, streamStarted, err
 		}
 		terminal, err := json.Marshal(map[string]any{"event_type": "interaction.completed", "interaction": result})
@@ -242,11 +243,12 @@ func (r Router) Interactions(ctx context.Context, req modules.RequestContext, re
 			if request.Background && backgroundInteractionPending(response) {
 				result := openai.InteractionFromResponse(shared)
 				result.Agent, result.Updated = response.Agent, response.Updated
+				result.EnvironmentID = strings.TrimSpace(response.EnvironmentID)
 				if interactionUsesAgent(request) {
 					result.Agent, result.Model = interactionRoutingModel(request), ""
 				}
 				model := interactionRoutingModel(request)
-				if err := r.persistInteractionOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, model, interactionUsesAgent(request), result.ID, endpoint); err != nil {
+				if err := r.persistInteractionOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, model, interactionUsesAgent(request), result.EnvironmentID, result.ID, endpoint); err != nil {
 					r.compensateBackgroundInteraction(ctx, attemptCtx, result.ID, model, interactionUsesAgent(request), endpoint)
 					r.modules.RunFailure(ctx, &attemptCtx, err)
 					return openai.InteractionResponse{}, err
@@ -264,10 +266,11 @@ func (r Router) Interactions(ctx context.Context, req modules.RequestContext, re
 			modules.DeanonymizeResponsesResponse(&attemptCtx, &shared)
 			result := openai.InteractionFromResponse(shared)
 			result.Agent, result.Updated = response.Agent, response.Updated
+			result.EnvironmentID = strings.TrimSpace(response.EnvironmentID)
 			if interactionUsesAgent(request) {
 				result.Agent, result.Model = interactionRoutingModel(request), ""
 			}
-			if err := r.persistInteractionOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, interactionRoutingModel(request), interactionUsesAgent(request), result.ID, endpoint); err != nil {
+			if err := r.persistInteractionOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, interactionRoutingModel(request), interactionUsesAgent(request), result.EnvironmentID, result.ID, endpoint); err != nil {
 				return openai.InteractionResponse{}, err
 			}
 			return result, nil
@@ -301,14 +304,21 @@ func (r Router) interactionCandidates(ctx context.Context, req modules.RequestCo
 	if binding.Model != model || binding.Agent != interactionUsesAgent(request) || providerMismatch || !endpoint.supportsCapabilities(requiredInteractionCapabilities(request)...) {
 		return nil, ErrResponseDeploymentChanged
 	}
+	if environment := strings.TrimSpace(request.Environment); environment != "" && environment != binding.EnvironmentID {
+		return nil, ErrResponseDeploymentChanged
+	}
 	return []Endpoint{endpoint}, nil
 }
 
-func (r Router) persistInteractionOwnership(ctx context.Context, req modules.RequestContext, request openai.ResponseRequest, model string, agent bool, id string, endpoint Endpoint) error {
+func (r Router) persistInteractionOwnership(ctx context.Context, req modules.RequestContext, request openai.ResponseRequest, model string, agent bool, environmentID, id string, endpoint Endpoint) error {
 	if !persistentResponseRequested(request) {
 		return nil
 	}
-	binding := responseOwnership{Endpoint: endpoint.Name, Model: model, Deployment: responseDeploymentIdentity(endpoint), Resource: "interaction", Agent: agent}
+	environmentID = strings.TrimSpace(environmentID)
+	if environmentID != "" && !openai.ValidInteractionResourceID(environmentID) {
+		return errors.New("provider returned an invalid interaction environment ID")
+	}
+	binding := responseOwnership{Endpoint: endpoint.Name, Model: model, Deployment: responseDeploymentIdentity(endpoint), Resource: "interaction", Agent: agent, EnvironmentID: environmentID}
 	if err := r.ownership.put(ctx, req, id, binding); err != nil {
 		if errors.Is(err, ErrResponseOwnershipConflict) {
 			return err
@@ -405,6 +415,9 @@ func requiredInteractionCapabilities(request openai.InteractionRequest) []string
 	if interactionUsesAgent(request) {
 		required = append(required, "interaction_agents")
 	}
+	if request.Environment != "" {
+		required = append(required, "interaction_environment_reuse")
+	}
 	if request.Background {
 		required = append(required, "background_interactions")
 	}
@@ -446,6 +459,7 @@ func interactionUsesAgent(request openai.InteractionRequest) bool {
 }
 
 func setInteractionBinding(result *openai.InteractionResponse, binding responseOwnership) {
+	result.EnvironmentID = binding.EnvironmentID
 	if binding.Agent {
 		result.Agent, result.Model = binding.Model, ""
 		return

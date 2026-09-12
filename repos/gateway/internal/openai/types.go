@@ -578,6 +578,8 @@ func EmbeddingInputText(value any) string {
 }
 
 type ResponseRequest struct {
+	// NativeInputTokens reserves provider-native context omitted from the public Responses wire shape.
+	NativeInputTokens int                `json:"-"`
 	Metadata          map[string]string  `json:"metadata,omitempty"`
 	TopLogprobs       *int               `json:"top_logprobs,omitempty"`
 	Truncation        *string            `json:"truncation,omitempty"`

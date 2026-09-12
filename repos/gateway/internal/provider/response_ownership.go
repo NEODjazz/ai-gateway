@@ -24,11 +24,12 @@ var ErrResponseDeploymentChanged = errors.New("response deployment changed")
 // Ownership is separate from optional routing affinity. Lifecycle operations
 // must never infer ownership from an upstream ID or fall back on a cache miss.
 type responseOwnership struct {
-	Endpoint   string `json:"endpoint"`
-	Model      string `json:"model"`
-	Deployment string `json:"deployment"`
-	Resource   string `json:"resource,omitempty"`
-	Agent      bool   `json:"agent,omitempty"`
+	Endpoint      string `json:"endpoint"`
+	Model         string `json:"model"`
+	Deployment    string `json:"deployment"`
+	Resource      string `json:"resource,omitempty"`
+	Agent         bool   `json:"agent,omitempty"`
+	EnvironmentID string `json:"environment_id,omitempty"`
 }
 
 type responseOwnershipStore struct {

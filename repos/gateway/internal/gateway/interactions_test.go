@@ -160,9 +160,19 @@ func TestInteractionsUsesNativeGeminiAgentWithExplicitCapability(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["agent"] != "upstream-agent" || body["model"] != nil {
 				t.Errorf("body=%#v err=%v", body, err)
 			}
-			_, _ = fmt.Fprint(w, `{"id":"interaction_agent","object":"interaction","agent":"upstream-agent","status":"completed","usage":{"total_input_tokens":2,"total_output_tokens":1,"total_tokens":3}}`)
+			if body["previous_interaction_id"] == "interaction_agent" {
+				if body["environment"] != "env_owned" {
+					t.Errorf("continuation body=%#v", body)
+				}
+				_, _ = fmt.Fprint(w, `{"id":"interaction_next","object":"interaction","agent":"upstream-agent","environment_id":"env_owned","status":"completed","usage":{"total_input_tokens":2,"total_output_tokens":1,"total_tokens":3}}`)
+				return
+			}
+			if body["environment"] != nil {
+				t.Errorf("initial body=%#v", body)
+			}
+			_, _ = fmt.Fprint(w, `{"id":"interaction_agent","object":"interaction","agent":"upstream-agent","environment_id":"env_owned","status":"completed","usage":{"total_input_tokens":2,"total_output_tokens":1,"total_tokens":3}}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1beta/interactions/interaction_agent":
-			_, _ = fmt.Fprint(w, `{"id":"interaction_agent","object":"interaction","agent":"upstream-agent","status":"completed","usage":{"total_tokens":3}}`)
+			_, _ = fmt.Fprint(w, `{"id":"interaction_agent","object":"interaction","agent":"upstream-agent","environment_id":"env_provider_changed","status":"completed","usage":{"total_tokens":3}}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -170,22 +180,46 @@ func TestInteractionsUsesNativeGeminiAgentWithExplicitCapability(t *testing.T) {
 	defer upstream.Close()
 	recorder := &statelessUsageRecorder{}
 	sessions := &interactionOwnershipStore{data: map[string][]byte{}}
-	endpoint := config.ProviderEndpointConfig{Name: "gemini-agent", Type: "gemini", BaseURL: upstream.URL, APIKey: "secret", Models: []string{"research-agent"}, ModelAliases: map[string]string{"research-agent": "upstream-agent"}, Capabilities: []string{"interactions", "interaction_agents"}}
+	endpoint := config.ProviderEndpointConfig{Name: "gemini-agent", Type: "gemini", BaseURL: upstream.URL, APIKey: "secret", Models: []string{"research-agent"}, ModelAliases: map[string]string{"research-agent": "upstream-agent"}, Capabilities: []string{"interactions", "interaction_agents", "interaction_environment_reuse"}}
 	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{endpoint}, Modules: modules.NewPipeline([]modules.Module{recorder}), SessionStore: sessions, ResponseOwnershipTTL: time.Hour})
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"research-agent"}}}), router))
 	request := httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"provider":"gemini-agent","agent":"research-agent","input":"hello","store":true,"generation_config":{"max_output_tokens":8}}`))
 	request.Header.Set("Authorization", "Bearer gateway-test-key")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || calls.Load() != 1 || !strings.Contains(response.Body.String(), `"agent":"research-agent"`) || strings.Contains(response.Body.String(), `"model":`) || len(recorder.totals) != 1 || recorder.totals[0] != 3 {
+	if response.Code != http.StatusOK || calls.Load() != 1 || !strings.Contains(response.Body.String(), `"agent":"research-agent"`) || !strings.Contains(response.Body.String(), `"environment_id":"env_owned"`) || strings.Contains(response.Body.String(), `"model":`) || len(recorder.totals) != 1 || recorder.totals[0] != 3 {
 		t.Fatalf("status=%d calls=%d totals=%v body=%s", response.Code, calls.Load(), recorder.totals, response.Body.String())
+	}
+	continuation := httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"provider":"gemini-agent","agent":"research-agent","environment":"env_owned","previous_interaction_id":"interaction_agent","input":"continue","store":true}`))
+	continuation.Header.Set("Authorization", "Bearer gateway-test-key")
+	continued := httptest.NewRecorder()
+	handler.ServeHTTP(continued, continuation)
+	if continued.Code != http.StatusOK || calls.Load() != 2 || !strings.Contains(continued.Body.String(), `"id":"interaction_next"`) || !strings.Contains(continued.Body.String(), `"environment_id":"env_owned"`) || len(recorder.totals) != 2 {
+		t.Fatalf("continuation status=%d calls=%d totals=%v body=%s", continued.Code, calls.Load(), recorder.totals, continued.Body.String())
 	}
 	retrieve := httptest.NewRequest(http.MethodGet, "/v1/interactions/interaction_agent", nil)
 	retrieve.Header.Set("Authorization", "Bearer gateway-test-key")
 	retrieved := httptest.NewRecorder()
 	handler.ServeHTTP(retrieved, retrieve)
-	if retrieved.Code != http.StatusOK || calls.Load() != 2 || !strings.Contains(retrieved.Body.String(), `"agent":"research-agent"`) || strings.Contains(retrieved.Body.String(), `"model":`) || len(recorder.totals) != 1 {
+	if retrieved.Code != http.StatusOK || calls.Load() != 3 || !strings.Contains(retrieved.Body.String(), `"agent":"research-agent"`) || !strings.Contains(retrieved.Body.String(), `"environment_id":"env_owned"`) || strings.Contains(retrieved.Body.String(), `"model":`) || len(recorder.totals) != 2 {
 		t.Fatalf("retrieve status=%d calls=%d totals=%v body=%s", retrieved.Code, calls.Load(), recorder.totals, retrieved.Body.String())
+	}
+	mismatchedEnvironment := httptest.NewRecorder()
+	continuation = httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"provider":"gemini-agent","agent":"research-agent","environment":"env_other","previous_interaction_id":"interaction_agent","input":"continue","store":true}`))
+	continuation.Header.Set("Authorization", "Bearer gateway-test-key")
+	handler.ServeHTTP(mismatchedEnvironment, continuation)
+	if mismatchedEnvironment.Code != http.StatusConflict || calls.Load() != 3 || !strings.Contains(mismatchedEnvironment.Body.String(), `"code":"response_deployment_changed"`) {
+		t.Fatalf("mismatched environment status=%d calls=%d body=%s", mismatchedEnvironment.Code, calls.Load(), mismatchedEnvironment.Body.String())
+	}
+
+	endpoint.Capabilities = []string{"interactions", "interaction_agents"}
+	withoutEnvironmentCapability := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"research-agent"}}}), provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{endpoint}, SessionStore: sessions, ResponseOwnershipTTL: time.Hour})))
+	rejectedEnvironment := httptest.NewRecorder()
+	continuation = httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"provider":"gemini-agent","agent":"research-agent","environment":"env_owned","previous_interaction_id":"interaction_agent","input":"continue","store":true}`))
+	continuation.Header.Set("Authorization", "Bearer gateway-test-key")
+	withoutEnvironmentCapability.ServeHTTP(rejectedEnvironment, continuation)
+	if rejectedEnvironment.Code != http.StatusBadRequest || calls.Load() != 3 || !strings.Contains(rejectedEnvironment.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("missing environment capability status=%d calls=%d body=%s", rejectedEnvironment.Code, calls.Load(), rejectedEnvironment.Body.String())
 	}
 
 	endpoint.Capabilities = []string{"interactions"}
@@ -194,7 +228,7 @@ func TestInteractionsUsesNativeGeminiAgentWithExplicitCapability(t *testing.T) {
 	request = httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"provider":"gemini-agent","agent":"research-agent","input":"hello","generation_config":{"max_output_tokens":8}}`))
 	request.Header.Set("Authorization", "Bearer gateway-test-key")
 	withoutCapability.ServeHTTP(rejected, request)
-	if rejected.Code != http.StatusBadRequest || calls.Load() != 2 || !strings.Contains(rejected.Body.String(), `"code":"invalid_request"`) {
+	if rejected.Code != http.StatusBadRequest || calls.Load() != 3 || !strings.Contains(rejected.Body.String(), `"code":"invalid_request"`) {
 		t.Fatalf("missing capability status=%d calls=%d body=%s", rejected.Code, calls.Load(), rejected.Body.String())
 	}
 }

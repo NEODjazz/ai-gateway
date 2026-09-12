@@ -48,14 +48,14 @@ func TestGeminiInteractionsUsesNativeContract(t *testing.T) {
 func TestGeminiInteractionsUsesNativeAgentContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["agent"] != "research-agent" || body["model"] != nil || body["input"] != "hello" {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["agent"] != "research-agent" || body["model"] != nil || body["environment"] != "env_existing" || body["previous_interaction_id"] != "interaction_previous" || body["input"] != "hello" {
 			t.Errorf("body=%#v err=%v", body, err)
 		}
-		_, _ = fmt.Fprint(w, `{"id":"interaction_agent","object":"interaction","agent":"research-agent","status":"completed","usage":{"total_tokens":3}}`)
+		_, _ = fmt.Fprint(w, `{"id":"interaction_agent","object":"interaction","agent":"research-agent","environment_id":"env_existing","status":"completed","usage":{"total_tokens":3}}`)
 	}))
 	defer server.Close()
-	response, err := NewGemini(server.URL, "secret", false).Interactions(t.Context(), openai.InteractionRequest{Agent: "research-agent", Input: "hello"})
-	if err != nil || response.ID != "interaction_agent" || response.Agent != "research-agent" || response.Model != "" || response.Usage.TotalTokens != 3 {
+	response, err := NewGemini(server.URL, "secret", false).Interactions(t.Context(), openai.InteractionRequest{Agent: "research-agent", Environment: "env_existing", PreviousInteractionID: "interaction_previous", Input: "hello"})
+	if err != nil || response.ID != "interaction_agent" || response.Agent != "research-agent" || response.Model != "" || response.EnvironmentID != "env_existing" || response.Usage.TotalTokens != 3 {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }

@@ -2077,7 +2077,7 @@ paths:
       operationId: createInteraction
       tags: [Inference]
       summary: Create a model interaction
-      description: Uses a native model interaction adapter when the selected deployment declares the interactions capability; otherwise converts the request to the Responses execution pipeline. The native Gemini path supports synchronous, incremental SSE, and durable background model or agent interactions, optional durable ownership for store=true, owner-isolated continuity through previous_interaction_id, retrieve/cancel/delete lifecycle calls, string or step-array input, system instructions, function tools, structured response formats, text and JSON response MIME normalization, and bounded generation settings including seed, stop sequences, and thinking level. Agent requests require the interaction_agents deployment capability and use the configured agent ID as the gateway authorization, quota, routing, and billing model key. Native background requests require background_interactions and durable job storage. Their usage and billing settle only after the provider reaches a terminal state. Continuations remain pinned to the immutable deployment binding of the previous interaction. The terminal streaming completion event and stored ownership binding are released only after post-processing succeeds. The Responses bridge retains its synchronous, incremental SSE, durable background, continuity, and storage behavior.
+      description: Uses a native model interaction adapter when the selected deployment declares the interactions capability; otherwise converts the request to the Responses execution pipeline. The native Gemini path supports synchronous, incremental SSE, and durable background model or agent interactions, optional durable ownership for store=true, owner-isolated continuity through previous_interaction_id, retrieve/cancel/delete lifecycle calls, string or step-array input, system instructions, function tools, structured response formats, text and JSON response MIME normalization, and bounded generation settings including seed, stop sequences, and thinking level. Agent requests require the interaction_agents deployment capability and use the configured agent ID as the gateway authorization, quota, routing, and billing model key. An existing native environment can be reused only when its ID was returned by the owner-isolated previous interaction and the deployment declares interaction_environment_reuse. Native background requests require background_interactions and durable job storage. Their usage and billing settle only after the provider reaches a terminal state. Continuations remain pinned to the immutable deployment binding of the previous interaction. The terminal streaming completion event and stored ownership binding are released only after post-processing succeeds. The Responses bridge retains its synchronous, incremental SSE, durable background, continuity, and storage behavior.
       requestBody:
         required: true
         content:
@@ -6305,7 +6305,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -7398,6 +7398,7 @@ components:
         provider: {type: string}
         model: {type: string, minLength: 1}
         agent: {type: string, minLength: 1, description: Native provider agent ID. The deployment must list this ID as a model and declare interaction_agents.}
+        environment: {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9_.:-]+$', description: "Existing native environment ID returned by the owner-isolated previous interaction. Requires agent, previous_interaction_id, and interaction_environment_reuse. Inline environment configuration is rejected."}
         input:
           oneOf:
             - type: string
@@ -7457,6 +7458,7 @@ components:
         updated: {type: string, format: date-time}
         model: {type: string}
         agent: {type: string}
+        environment_id: {type: string, description: Native environment ID bound to this stored interaction for owner-isolated continuation.}
         status: {type: string}
         steps:
           type: array
@@ -8434,7 +8436,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

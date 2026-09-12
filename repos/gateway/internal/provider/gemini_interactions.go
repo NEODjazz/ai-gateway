@@ -36,6 +36,7 @@ func (g Gemini) doInteraction(ctx context.Context, request openai.InteractionReq
 	type interactionPayload struct {
 		Model                 string                             `json:"model,omitempty"`
 		Agent                 string                             `json:"agent,omitempty"`
+		Environment           string                             `json:"environment,omitempty"`
 		Input                 any                                `json:"input"`
 		SystemInstruction     string                             `json:"system_instruction,omitempty"`
 		Tools                 []openai.ResponseTool              `json:"tools,omitempty"`
@@ -57,7 +58,7 @@ func (g Gemini) doInteraction(ctx context.Context, request openai.InteractionReq
 		model = ""
 	}
 	payload, err := json.Marshal(interactionPayload{
-		Model: model, Agent: agent, Input: request.Input, SystemInstruction: request.SystemInstruction,
+		Model: model, Agent: agent, Environment: strings.TrimSpace(request.Environment), Input: request.Input, SystemInstruction: request.SystemInstruction,
 		Tools: request.Tools, ResponseFormat: responseFormat, PreviousInteractionID: request.PreviousInteractionID,
 		Store: shared.Store, Stream: request.Stream, Background: request.Background, GenerationConfig: request.GenerationConfig,
 	})

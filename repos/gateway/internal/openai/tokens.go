@@ -103,13 +103,17 @@ func ChatInputTokens(r ChatCompletionRequest) int {
 }
 
 func ResponseInputTokens(r ResponseRequest) int {
-	return EstimateContextTokens(struct {
+	estimated := EstimateContextTokens(struct {
 		Input        any            `json:"input"`
 		Instructions string         `json:"instructions,omitempty"`
 		Tools        []ResponseTool `json:"tools,omitempty"`
 		ToolChoice   any            `json:"tool_choice,omitempty"`
 		Text         any            `json:"text,omitempty"`
 	}{r.Input, r.Instructions, r.Tools, r.ToolChoice, r.Text})
+	if r.NativeInputTokens > intMax()-estimated {
+		return intMax()
+	}
+	return estimated + max(0, r.NativeInputTokens)
 }
 
 func ResponseCompactInputTokens(r ResponseCompactRequest) int {

@@ -69,6 +69,15 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	if ResponseInputTokens(response) < 1000 {
 		t.Fatal("instructions omitted")
 	}
+	native := response
+	native.NativeInputTokens = 37
+	if ResponseInputTokens(native) != ResponseInputTokens(response)+37 {
+		t.Fatal("native response context omitted")
+	}
+	native.NativeInputTokens = maximum
+	if ResponseInputTokens(native) != maximum {
+		t.Fatal("native response token estimate overflow")
+	}
 	compact := ResponseCompactRequest{Input: "test", Instructions: strings.Repeat("compact", 1000)}
 	if ResponseCompactInputTokens(compact) < 1000 {
 		t.Fatal("compaction instructions omitted")

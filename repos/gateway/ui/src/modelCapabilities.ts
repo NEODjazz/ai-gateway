@@ -6,6 +6,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "responses", label: "Responses", description: "Responses API" },
   { value: "interactions", label: "Interactions", description: "Native model interactions" },
   { value: "interaction_agents", label: "Interaction agents", description: "Native provider agent interactions" },
+  { value: "interaction_environment_reuse", label: "Interaction environment reuse", description: "Reuse an owner-bound native agent environment" },
   { value: "background_responses", label: "Background responses", description: "Durable asynchronous Responses execution" },
   { value: "background_interactions", label: "Background interactions", description: "Durable asynchronous native Interactions execution" },
   { value: "embeddings", label: "Embeddings", description: "Vector embeddings" },

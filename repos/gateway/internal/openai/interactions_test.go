@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -63,6 +64,33 @@ func TestNativeAgentInteractionUsesAgentAsPolicyModel(t *testing.T) {
 	}
 	if _, message := (InteractionRequest{Model: "model", Agent: "agent", Input: "hello"}).NativeResponseRequest(); message != "model and agent are mutually exclusive" {
 		t.Fatalf("ambiguous request message=%q", message)
+	}
+}
+
+func TestNativeInteractionEnvironmentReuseIsValidatedAndCounted(t *testing.T) {
+	request := InteractionRequest{Agent: "research-agent", Environment: "env_existing", PreviousInteractionID: "interaction_previous", Input: "hello"}
+	shared, message := request.NativeResponseRequest()
+	if message != "" || shared.NativeInputTokens != EstimateContextTokens("env_existing") {
+		t.Fatalf("shared=%+v message=%q", shared, message)
+	}
+	withoutEnvironment, message := (InteractionRequest{Agent: "research-agent", Input: "hello"}).NativeResponseRequest()
+	if message != "" || ResponseInputTokens(shared) <= ResponseInputTokens(withoutEnvironment) {
+		t.Fatalf("environment token reserve was omitted: with=%d without=%d message=%q", ResponseInputTokens(shared), ResponseInputTokens(withoutEnvironment), message)
+	}
+	for _, test := range []struct {
+		request InteractionRequest
+		message string
+	}{
+		{InteractionRequest{Model: "model", Environment: "env_existing", PreviousInteractionID: "interaction_previous", Input: "hello"}, "environment requires an agent interaction"},
+		{InteractionRequest{Agent: "agent", Environment: "env_existing", Input: "hello"}, "environment reuse requires previous_interaction_id"},
+		{InteractionRequest{Agent: "agent", Environment: "remote", PreviousInteractionID: "interaction_previous", Input: "hello"}, "environment must reference an existing environment ID"},
+		{InteractionRequest{Agent: "agent", Environment: "REMOTE", PreviousInteractionID: "interaction_previous", Input: "hello"}, "environment must reference an existing environment ID"},
+		{InteractionRequest{Agent: "agent", Environment: "env/unsafe", PreviousInteractionID: "interaction_previous", Input: "hello"}, "environment must reference an existing environment ID"},
+		{InteractionRequest{Agent: "agent", Environment: strings.Repeat("e", 257), PreviousInteractionID: "interaction_previous", Input: "hello"}, "environment must reference an existing environment ID"},
+	} {
+		if _, message := test.request.NativeResponseRequest(); message != test.message {
+			t.Fatalf("request=%+v message=%q want=%q", test.request, message, test.message)
+		}
 	}
 }
 

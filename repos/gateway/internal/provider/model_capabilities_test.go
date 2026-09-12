@@ -12,7 +12,7 @@ func TestCapabilityContractIsSharedByDeploymentsAndOnboarding(t *testing.T) {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents",
+		"web_search", "web_fetch", "audio", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents", "interaction_environment_reuse",
 	}
 	if !validDeploymentCapabilities(capabilities) {
 		t.Fatal("deployment rejected a supported model capability")
@@ -34,6 +34,17 @@ func TestInteractionAgentCapabilityRequiresInteractions(t *testing.T) {
 	}
 	if !validDeploymentCapabilities([]string{"interactions", "interaction_agents"}) {
 		t.Fatal("interaction agent capability was rejected with interactions")
+	}
+}
+
+func TestInteractionEnvironmentReuseRequiresAgentInteractions(t *testing.T) {
+	for _, capabilities := range [][]string{{"interaction_environment_reuse"}, {"interactions", "interaction_environment_reuse"}} {
+		if validDeploymentCapabilities(capabilities) {
+			t.Fatalf("environment reuse accepted without agent interactions: %v", capabilities)
+		}
+	}
+	if !validDeploymentCapabilities([]string{"interactions", "interaction_agents", "interaction_environment_reuse"}) {
+		t.Fatal("environment reuse rejected with agent interactions")
 	}
 }
 

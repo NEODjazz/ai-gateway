@@ -9,6 +9,7 @@ describe("modelCapabilityOptions", () => {
       "responses",
       "interactions",
       "interaction_agents",
+      "interaction_environment_reuse",
       "background_responses",
       "background_interactions",
       "embeddings",
