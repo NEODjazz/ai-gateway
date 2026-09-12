@@ -91,6 +91,33 @@ func TestChatReasoningContentSupportIsExplicit(t *testing.T) {
 	}
 }
 
+func TestDemoRejectsIgnoredResponseParameters(t *testing.T) {
+	limit, sample, parallel := 16, 0.5, true
+	for _, test := range []struct {
+		name    string
+		request openai.ResponseRequest
+	}{
+		{name: "instructions", request: openai.ResponseRequest{Instructions: "be concise"}},
+		{name: "tools", request: openai.ResponseRequest{Tools: []openai.ResponseTool{{Type: "function", Name: "lookup"}}}},
+		{name: "tool_choice", request: openai.ResponseRequest{ToolChoice: "none"}},
+		{name: "parallel_tool_calls", request: openai.ResponseRequest{ParallelToolCalls: &parallel}},
+		{name: "text", request: openai.ResponseRequest{Text: map[string]any{"format": map[string]any{"type": "json_object"}}}},
+		{name: "previous_response_id", request: openai.ResponseRequest{PreviousResponse: "resp_previous"}},
+		{name: "max_output_tokens", request: openai.ResponseRequest{MaxOutputTokens: &limit}},
+		{name: "max_tokens", request: openai.ResponseRequest{MaxTokens: &limit}},
+		{name: "temperature", request: openai.ResponseRequest{Temperature: &sample}},
+		{name: "top_p", request: openai.ResponseRequest{TopP: &sample}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			test.request.Model, test.request.Input = "demo", "hello"
+			var failure *Error
+			if err := (Demo{}).ValidateResponseParameters(test.request); !errors.As(err, &failure) || failure.Param != test.name || failure.UpstreamCode != "unsupported_parameter" {
+				t.Fatalf("ignored parameter was not rejected: %v", err)
+			}
+		})
+	}
+}
+
 func TestNativeAdaptersRejectUnrepresentableChatParameters(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(500) }))

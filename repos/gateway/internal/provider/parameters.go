@@ -480,7 +480,17 @@ func rejectChatMessageAudio(adapter string, messages []openai.Message) error {
 
 func (Demo) ValidateResponseParameters(request openai.ResponseRequest) error {
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
-	return rejectParameters("demo", parameterCheck{"background", request.Background}, parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil}, parameterCheck{"user", request.User != ""}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"text.verbosity", verbositySupplied}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil}, parameterCheck{"max_tool_calls", request.MaxToolCalls != nil})
+	return rejectParameters("demo",
+		parameterCheck{"background", request.Background}, parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil},
+		parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil},
+		parameterCheck{"top_logprobs", request.TopLogprobs != nil}, parameterCheck{"instructions", request.Instructions != ""}, parameterCheck{"tools", len(request.Tools) > 0},
+		parameterCheck{"tool_choice", request.ToolChoice != nil}, parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil}, parameterCheck{"text", request.Text != nil && !verbositySupplied},
+		parameterCheck{"previous_response_id", request.PreviousResponse != ""}, parameterCheck{"user", request.User != ""}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
+		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"text.verbosity", verbositySupplied}, parameterCheck{"service_tier", request.ServiceTier != ""},
+		parameterCheck{"max_output_tokens", request.MaxOutputTokens != nil}, parameterCheck{"max_tokens", request.MaxTokens != nil}, parameterCheck{"temperature", request.Temperature != nil},
+		parameterCheck{"top_p", request.TopP != nil}, parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil},
+		parameterCheck{"max_tool_calls", request.MaxToolCalls != nil},
+	)
 }
 
 // Provider-specific reasoning and compaction cannot be flattened into messages.
