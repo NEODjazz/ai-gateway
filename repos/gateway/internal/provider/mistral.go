@@ -200,7 +200,7 @@ func (p Mistral) ValidateChatParameters(request openai.ChatCompletionRequest) er
 	if err := p.OpenAICompatible.ValidateChatParameters(request); err != nil {
 		return err
 	}
-	if request.ReasoningEffort == "max" {
+	if request.ReasoningEffort == "max" || request.ReasoningEffort == "default" {
 		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "reasoning_effort", Err: errors.New("reasoning_effort must be none, minimal, low, medium, high, or xhigh")}
 	}
 	return rejectParameters("mistral", parameterCheck{"web_search_options", request.WebSearchOptions != nil}, parameterCheck{"web_fetch_options", request.WebFetchOptions != nil})

@@ -365,7 +365,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedChatParameters(t *testi
 	for _, profile := range profiles {
 		byType[profile.Type] = profile.ChatParameters
 	}
-	allReasoning := []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+	allReasoning := []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "default"}
 	allTiers := []string{"auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast", "standard_only"}
 	tests := map[string]ProviderChatParameterPolicy{
 		"demo":              {ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{}},

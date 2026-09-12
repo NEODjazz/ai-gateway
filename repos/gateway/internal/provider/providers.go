@@ -302,7 +302,7 @@ func managedProviderChatParameterPolicy(client Client, supportsChat bool) Provid
 		return policy
 	}
 	baseline := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "test"}}}
-	for _, value := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"} {
+	for _, value := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "default"} {
 		request := baseline
 		request.ReasoningEffort = value
 		if validateChatAdapter(client, request) == nil {

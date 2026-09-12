@@ -308,12 +308,14 @@ func TestMistralRejectsUnsupportedChatParametersBeforeUpstream(t *testing.T) {
 		})
 	}
 
-	request := base()
-	request.ReasoningEffort = "max"
-	_, err := client.ChatCompletions(t.Context(), request)
-	var failure *Error
-	if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.UpstreamCode != "invalid_request" || failure.Param != "reasoning_effort" {
-		t.Fatalf("reasoning error=%v failure=%+v", err, failure)
+	for _, value := range []string{"max", "default"} {
+		request := base()
+		request.ReasoningEffort = value
+		_, err := client.ChatCompletions(t.Context(), request)
+		var failure *Error
+		if !errors.As(err, &failure) || failure.Provider != "mistral" || failure.UpstreamCode != "invalid_request" || failure.Param != "reasoning_effort" {
+			t.Fatalf("reasoning=%q error=%v failure=%+v", value, err, failure)
+		}
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("unsupported Mistral Chat parameters reached upstream: %d", calls.Load())
