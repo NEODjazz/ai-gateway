@@ -122,6 +122,17 @@ func TestSCIMUserReportsReadOnlyGroupMemberships(t *testing.T) {
 	}
 }
 
+func TestSCIMUserReplaceWithoutActivePreservesDisabledStatus(t *testing.T) {
+	client := &directoryClientStub{user: &DirectoryUser{ID: "user-1", Email: "person@example.test", Status: "disabled"}}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithIdentityDirectory(client)
+	body := `{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"renamed@example.test"}`
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/scim/v2/Users/user-1", strings.NewReader(body)))
+	if response.Code != http.StatusOK || client.user == nil || client.user.Status != "disabled" || !strings.Contains(response.Body.String(), `"active":false`) {
+		t.Fatalf("status=%d user=%+v body=%s", response.Code, client.user, response.Body.String())
+	}
+}
+
 func TestSCIMRequiresGlobalAdmin(t *testing.T) {
 	handler := NewHandler(modules.NewPipeline([]modules.Module{teamAdminModule{}}), modelsProvider{}).WithIdentityDirectory(&directoryClientStub{})
 	response := httptest.NewRecorder()

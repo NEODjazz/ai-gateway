@@ -295,6 +295,9 @@ func (h Handler) ReplaceSCIMUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated := scimUserToDirectory(id, input)
+	if input.Active == nil {
+		updated.Status = current.Status
+	}
 	updated.TeamIDs = append([]string(nil), current.TeamIDs...)
 	h.putSCIMUser(w, r, req, updated, "scim.user.replace")
 }

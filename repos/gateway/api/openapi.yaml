@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.290
+  version: 0.1.291
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9039,7 +9039,7 @@ components:
           additionalProperties: false
           properties: {formatted: {type: string, maxLength: 256}}
         displayName: {type: string, maxLength: 256}
-        active: {type: boolean, default: true}
+        active: {type: boolean, description: Defaults to active on create and preserves the current status when omitted on replace.}
         roles: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/SCIMValue'}}
         groups: {type: array, readOnly: true, maxItems: 500, items: {$ref: '#/components/schemas/SCIMValue'}}
     SCIMUser:
