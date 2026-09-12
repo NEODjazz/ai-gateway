@@ -685,3 +685,10 @@ MP3/MPEG, AIFF, AAC, OGG/Opus, FLAC, M4A and WebM containers. Every format passe
 the same decoded-size limit, container signature check, AV projection, TPM reserve,
 `audio_input` routing requirement and response-cache exclusion. Regression tests
 cover decoding into the shared attachment model and the native provider mapping.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-83266a0` with image ID
+`sha256:548dbde89eaeb98ba09a16e82a0b5dc7dcaaa85e4c60638a540d744c0e7916e6`.
+Helm revision 429 completed successfully, and pod
+`ai-gateway-gateway-5bbb7db899-jg2qk` became Ready with zero restarts. The pod's
+live endpoint served OpenAPI 0.1.329, and an unauthenticated GenerateContent
+request containing signature-valid AAC reached authentication and returned 401.
