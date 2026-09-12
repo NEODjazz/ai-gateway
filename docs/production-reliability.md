@@ -1005,3 +1005,10 @@ the strict request decoder does not implement either field. A schema regression
 prevents these unsupported lifecycle controls from being advertised again;
 background Messages and client-controlled stream options remain explicit API
 coverage gaps.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-c179c4a` with image ID
+`sha256:3000ee3fe21294a84e3f1ce12c24e38bc3cd28bdadd7035d43304d5699796456`.
+Gateway Helm revision 451 completed successfully, and pod
+`ai-gateway-gateway-694449765c-vbt54` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.350 omits both unsupported Messages fields while
+retaining the tested zero-output contract.
