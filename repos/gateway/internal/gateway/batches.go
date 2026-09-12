@@ -327,6 +327,16 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		}
 		model = request.Model
 		normalized = request
+	case "/v1/search":
+		var request openai.SearchRequest
+		if err := decodeStrictJSON(body, &request); err != nil {
+			return nil, "", nil, err
+		}
+		if message := request.Validate(); message != "" {
+			return nil, "", nil, errors.New(message)
+		}
+		model, _ = request.RoutingModel()
+		normalized = request
 	default:
 		return nil, "", nil, errors.New("unsupported endpoint")
 	}
@@ -674,6 +684,35 @@ func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestCont
 			return 0, nil, errors.New("rerank unsupported")
 		}
 		response, err := client.Rerank(ctx, *req)
+		payload, _ := json.Marshal(response)
+		return http.StatusOK, payload, err
+	case "/v1/search":
+		var value openai.SearchRequest
+		if err := json.Unmarshal(body, &value); err != nil {
+			return 0, nil, err
+		}
+		model, err := value.RoutingModel()
+		if err != nil {
+			return 0, nil, err
+		}
+		queries, err := value.Queries()
+		if err != nil {
+			return 0, nil, err
+		}
+		messages := make([]openai.Message, len(queries))
+		for index, query := range queries {
+			messages[index] = openai.Message{Role: "user", Content: query}
+		}
+		req.SearchRequest = &value
+		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: model, Messages: messages}
+		if !h.allowBatchRate(ctx, *req, openai.SearchReserveTokens(value)) {
+			return 0, nil, errBatchRateLimited
+		}
+		client, ok := h.provider.(provider.SearchProvider)
+		if !ok {
+			return 0, nil, errors.New("search unsupported")
+		}
+		response, err := client.Search(ctx, *req)
 		payload, _ := json.Marshal(response)
 		return http.StatusOK, payload, err
 	}
