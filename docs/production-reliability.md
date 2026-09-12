@@ -1390,3 +1390,12 @@ deployment capability and malformed deltas fail closed. Exact terminal usage
 preserves cached, text and audio token details. Focused regressions, the full Go
 suite, full race suite, vet and build passed. OpenAPI 0.1.368 records these
 bounds and capability requirements.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-b1a0a66` with image ID
+`sha256:42eecd2c0ca96b35cb46d5ae0539adce39647054b737e3aa594a5a69b69c2b05`.
+Gateway Helm revision 471 completed successfully, and pod
+`ai-gateway-gateway-5fdcb55b7d-f4wrz` became Ready with zero restarts and the
+same image ID. Live health returned 204 and OpenAPI 0.1.368 exposes the Realtime
+audio capability, lifecycle and size contract. A Realtime request with an
+invalid smoke key returned 401 before deployment selection or upstream access.
+The smoke checks performed no external inference and submitted no audio.
