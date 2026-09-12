@@ -1657,3 +1657,27 @@ same image ID. Live liveness and readiness returned 204, OpenAPI reported
 prompt, response-format and temperature controls. An unauthenticated multipart
 request containing a valid WAV returned 401 before deployment selection. No
 provider credential or external inference was used by the smoke checks.
+
+Source `2295897` adds native NVIDIA NIM text Rerank through `/v1/ranking`.
+Requests carry one query object and 1 to 512 text passage objects, with optional
+`NONE` or `END` truncation. `top_n` is applied only after the adapter validates
+the complete ordered ranking, so provider work and token usage remain exact.
+Object documents and unsupported chunk/token controls fail before HTTP. The
+8 MiB response contract rejects trailing JSON, missing, duplicate, out-of-range
+or unordered rankings, and missing, zero or inconsistent provider usage. Router
+regressions verify document projection and exact usage propagation into the
+post-response lifecycle. Every other managed rerank adapter rejects the
+native-only truncation field. Vet, build, the full Go suite and full race suite
+passed. Contract commit `824fc56` publishes the operation and parameter matrix
+in OpenAPI 0.1.380.
+
+Rancher Desktop built `ai-gateway-gateway:nvidia-rerank-824fc56` with image ID
+`sha256:f766df9b2095125c051636932f8cf97a85da7c84bef0ca75528d87ecadd3e54e`.
+Gateway Helm revision 486 completed successfully; its manifest differs from
+revision 485 only by the top-level image tag. Pod
+`ai-gateway-gateway-87675b75f-m2csr` became Ready with zero restarts and the
+same image ID. Live liveness and readiness returned 204, and OpenAPI reported
+0.1.380 with the bounded `truncate` enum and provider-profile option. An
+unauthenticated native Rerank-shaped request returned 401 before deployment
+selection. No NVIDIA NIM credential or external inference was used by the smoke
+checks.
