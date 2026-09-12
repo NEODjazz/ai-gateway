@@ -256,6 +256,20 @@ bounded array fields отклоняются.
 согласованной суммой. Duration-priced provider возвращает отдельный usage type с
 нулевыми token counters и положительной billable audio duration.
 
+При `stream=true` compatible и Azure deployment с включенным upstream streaming
+возвращает SSE-события `transcript.text.delta`, опциональные
+`transcript.text.segment` для `diarized_json` и обязательное терминальное
+`transcript.text.done`. Gateway ограничивает общий ответ 8 MiB, проверяет каждое
+событие, требует точного usage в `done` и сверяет финальный text с накопленными
+delta. Retry и fallback разрешены только до первой записи клиенту. После первой
+записи ошибка завершается SSE error и не запускает второй deployment, исключая
+смешанный transcript. Если выбранная policy требует проверки полного output или
+upstream streaming выключен, gateway выполняет обычную транскрипцию через весь
+policy и billing lifecycle и возвращает один проверенный `transcript.text.done`.
+Capability profile публикует `stream` только для deployment, где transport
+действительно включен. `stream=true` для translation отклоняется до выполнения
+pipeline и provider call.
+
 Native Mistral transcription передает `language`, `temperature`,
 `timestamp_granularities` и `keywords[]` как `context_bias`; `diarized_json`
 включает diarization. Параметры без точного native соответствия отклоняются до
@@ -264,7 +278,8 @@ commit. Для WAV, FLAC, OGG, MP3 и завершенного audio-only WebM r
 рассчитывается из RIFF, STREAMINFO, Ogg granule metadata, полного scan Layer III
 frames или WebM Segment Info с округлением вверх до миллисекунды. Для остальных
 WebM резервируется документированный предел 60 минут, чтобы контейнер не мог
-занизить duration budget. Streaming остается отдельным контрактом.
+занизить duration budget. Native Mistral streaming отклоняется явно до provider
+call.
 
 Native Groq transcription передает `language`, `prompt`, `temperature` и
 `timestamp_granularities`, а upstream всегда запрашивает `verbose_json`, чтобы
