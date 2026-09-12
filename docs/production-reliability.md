@@ -519,3 +519,9 @@ revision 411 completed successfully, and pod
 endpoint confirmed Mistral HTTPS/inline PDF and image inputs with all extraction
 controls, and Gemini inline-only PDF/image inputs with page selection and
 Markdown table output.
+
+Source `73af8a6` adds execution-validator-derived Video creation profiles.
+Rancher Desktop built `ai-gateway-gateway:gaps-73af8a6`; Helm revision 412
+completed successfully, and pod `ai-gateway-gateway-b5b784c67-q7rfd` became
+Ready with zero restarts. The live endpoint confirmed duration, size and input
+reference controls for compatible/OpenAI and native xAI video creation.
