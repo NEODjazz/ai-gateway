@@ -32,7 +32,7 @@ func HasChatFileReferences(request ChatCompletionRequest) bool {
 	return false
 }
 
-func HasChatURLDocuments(request ChatCompletionRequest) bool {
+func HasChatURLReferences(request ChatCompletionRequest) bool {
 	for _, message := range request.Messages {
 		parts, ok := message.Content.([]any)
 		if !ok {
@@ -40,7 +40,7 @@ func HasChatURLDocuments(request ChatCompletionRequest) bool {
 		}
 		for _, part := range parts {
 			object, ok := part.(map[string]any)
-			if ok && object["type"] == "input_url_document" {
+			if ok && (object["type"] == "input_url_document" || object["type"] == "input_url_image") {
 				return true
 			}
 		}
@@ -48,6 +48,6 @@ func HasChatURLDocuments(request ChatCompletionRequest) bool {
 	return false
 }
 
-func HasChatDocumentReferences(request ChatCompletionRequest) bool {
-	return HasChatFileReferences(request) || HasChatURLDocuments(request)
+func HasChatResolvableReferences(request ChatCompletionRequest) bool {
+	return HasChatFileReferences(request) || HasChatURLReferences(request)
 }

@@ -296,7 +296,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		result.Messages = append(result.Messages, openai.Message{Role: "system", Content: content})
 	}
 	knownCalls := map[string]messagesKnownToolCall{}
-	documentCount, citedDocumentCount, textDocumentRunes := 0, 0, 0
+	documentCount, citedDocumentCount, textDocumentRunes, imageCount := 0, 0, 0, 0
 	for _, message := range request.Messages {
 		if message.Role != "user" && message.Role != "assistant" {
 			return result, errors.New("messages role must be user or assistant")
@@ -401,16 +401,34 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 						Type      string `json:"type"`
 						MediaType string `json:"media_type"`
 						Data      string `json:"data"`
+						URL       string `json:"url"`
 					} `json:"source"`
 				}
-				if err := decodeMessagesValue(raw, &block); err != nil || block.Source.Type != "base64" || message.Role != "user" {
-					return result, errors.New("only base64 user image blocks are supported")
+				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "user" {
+					return result, errors.New("invalid user image block")
 				}
-				data := "data:" + block.Source.MediaType + ";base64," + block.Source.Data
-				if _, err := openai.ParseDataImageURL(data); err != nil {
-					return result, err
+				var image any
+				switch {
+				case block.Source.Type == "base64" && block.Source.MediaType != "" && block.Source.Data != "" && block.Source.URL == "":
+					data := "data:" + block.Source.MediaType + ";base64," + block.Source.Data
+					if _, err := openai.ParseDataImageURL(data); err != nil {
+						return result, err
+					}
+					image = map[string]any{"type": "image_url", "image_url": map[string]any{"url": data}}
+				case block.Source.Type == "url" && block.Source.URL != "" && block.Source.MediaType == "" && block.Source.Data == "":
+					parsed, err := url.Parse(block.Source.URL)
+					if err != nil || len(block.Source.URL) > 2048 || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+						return result, errors.New("image URL must be a valid public HTTPS URL")
+					}
+					image = map[string]any{"type": "input_url_image", "url": block.Source.URL}
+				default:
+					return result, errors.New("only base64 and URL user image blocks are supported")
 				}
-				parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": data}})
+				imageCount++
+				if imageCount > openai.MaxImageAttachments {
+					return result, fmt.Errorf("at most %d images are supported", openai.MaxImageAttachments)
+				}
+				parts = append(parts, image)
 			case "document":
 				var block struct {
 					Type      string             `json:"type"`

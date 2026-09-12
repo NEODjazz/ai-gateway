@@ -18,10 +18,11 @@ import (
 
 var errMessagesFileUnavailable = errors.New("document file is unavailable")
 var errMessagesFileStorageUnavailable = errors.New("document file storage is unavailable")
-var errMessagesURLUnavailable = errors.New("document URL is unavailable")
+var errMessagesRemoteUnavailable = errors.New("remote content is unavailable")
 
 func (h Handler) resolveMessagesRequestDocumentReferences(ctx context.Context, identity modules.RequestContext, request *messagesRequest) error {
 	owner := fileOwnerKey(identity)
+	remoteImageBytes := 0
 	for messageIndex := range request.Messages {
 		content := bytes.TrimSpace(request.Messages[messageIndex].Content)
 		if len(content) == 0 || content[0] != '[' {
@@ -33,6 +34,20 @@ func (h Handler) resolveMessagesRequestDocumentReferences(ctx context.Context, i
 		}
 		changed := false
 		for _, block := range blocks {
+			if block["type"] == "image" {
+				source, _ := block["source"].(map[string]any)
+				if source["type"] == "url" {
+					remoteURL, _ := source["url"].(string)
+					data, mediaType, err := h.fetchMessagesImage(ctx, remoteURL, openai.MaxTotalImageBytes-remoteImageBytes)
+					if err != nil {
+						return err
+					}
+					remoteImageBytes += len(data)
+					block["source"] = map[string]any{"type": "base64", "media_type": mediaType, "data": base64.StdEncoding.EncodeToString(data)}
+					changed = true
+				}
+				continue
+			}
 			if block["type"] != "document" {
 				continue
 			}
@@ -80,9 +95,35 @@ func (h Handler) resolveMessagesRequestDocumentReferences(ctx context.Context, i
 	return err
 }
 
+func (h Handler) fetchMessagesImage(ctx context.Context, remoteURL string, remaining int) ([]byte, string, error) {
+	if h.a2aHTTPClient == nil {
+		return nil, "", errMessagesRemoteUnavailable
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, remoteURL, nil)
+	if err != nil {
+		return nil, "", errors.New("image URL is invalid")
+	}
+	request.Header.Set("Accept", "image/jpeg, image/png, image/gif, image/webp")
+	response, err := h.a2aHTTPClient.Do(request)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: %v", errMessagesRemoteUnavailable, err)
+	}
+	data, mediaType, err := readA2ARemoteContent(response, "", remaining, 0, 0, 0, remaining)
+	if err != nil {
+		if errors.Is(err, errA2ARemoteUnavailable) {
+			return nil, "", fmt.Errorf("%w: %v", errMessagesRemoteUnavailable, err)
+		}
+		return nil, "", err
+	}
+	if !strings.HasPrefix(mediaType, "image/") {
+		return nil, "", errors.New("image URL content type is invalid")
+	}
+	return data, mediaType, nil
+}
+
 func (h Handler) fetchMessagesPDF(ctx context.Context, remoteURL string) ([]byte, error) {
 	if h.a2aHTTPClient == nil {
-		return nil, errMessagesURLUnavailable
+		return nil, errMessagesRemoteUnavailable
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, remoteURL, nil)
 	if err != nil {
@@ -91,12 +132,12 @@ func (h Handler) fetchMessagesPDF(ctx context.Context, remoteURL string) ([]byte
 	request.Header.Set("Accept", "application/pdf")
 	response, err := h.a2aHTTPClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errMessagesURLUnavailable, err)
+		return nil, fmt.Errorf("%w: %v", errMessagesRemoteUnavailable, err)
 	}
 	data, mediaType, err := readA2ARemoteContent(response, "application/pdf", 0, 0, 0, openai.MaxResponseFileBytes, openai.MaxResponseFileBytes)
 	if err != nil {
 		if errors.Is(err, errA2ARemoteUnavailable) {
-			return nil, fmt.Errorf("%w: %v", errMessagesURLUnavailable, err)
+			return nil, fmt.Errorf("%w: %v", errMessagesRemoteUnavailable, err)
 		}
 		return nil, err
 	}
@@ -121,8 +162,20 @@ func (h Handler) ownedMessagesFile(ctx context.Context, owner, fileID string) (f
 }
 
 func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity modules.RequestContext, request *openai.ChatCompletionRequest) error {
-	if !openai.HasChatDocumentReferences(*request) {
+	if !openai.HasChatResolvableReferences(*request) {
 		return nil
+	}
+	images, err := openai.ChatImageAttachments(request.Messages)
+	if err != nil {
+		return err
+	}
+	imageBytes := 0
+	for _, image := range images {
+		decoded, err := base64.StdEncoding.DecodeString(image.Data)
+		if err != nil {
+			return err
+		}
+		imageBytes += len(decoded)
 	}
 	textRunes := 0
 	for _, message := range request.Messages {
@@ -155,6 +208,16 @@ func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity
 				parts[partIndex] = map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64," + base64.StdEncoding.EncodeToString(data), "filename": "input.pdf"}
 				continue
 			}
+			if object["type"] == "input_url_image" {
+				remoteURL, _ := object["url"].(string)
+				data, mediaType, err := h.fetchMessagesImage(ctx, remoteURL, openai.MaxTotalImageBytes-imageBytes)
+				if err != nil {
+					return err
+				}
+				imageBytes += len(data)
+				parts[partIndex] = map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(data)}}
+				continue
+			}
 			if object["type"] != "input_file_reference" {
 				continue
 			}
@@ -185,6 +248,9 @@ func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity
 	}
 	if _, err := openai.ChatFileAttachments(request.Messages); err != nil {
 		return errMessagesFileUnavailable
+	}
+	if _, err := openai.ChatImageAttachments(request.Messages); err != nil {
+		return err
 	}
 	return nil
 }

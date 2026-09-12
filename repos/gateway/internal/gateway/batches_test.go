@@ -427,7 +427,7 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 	request := messagesRequest{
 		Model: "message-model", MaxTokens: 32,
 		System:   json.RawMessage(`"Be concise"`),
-		Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"},{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"title":"PDF report","context":"Audited","citations":{"enabled":true}},{"type":"document","source":{"type":"file","file_id":"file_document"},"title":"Text report","context":"Internal","citations":{"enabled":true}},{"type":"document","source":{"type":"url","url":"https://documents.example/remote.pdf"},"title":"Remote report","citations":{"enabled":true}}]`)}},
+		Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`[{"type":"image","source":{"type":"url","url":"https://images.example/chart.png"}},{"type":"text","text":"hello"},{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"title":"PDF report","context":"Audited","citations":{"enabled":true}},{"type":"document","source":{"type":"file","file_id":"file_document"},"title":"Text report","context":"Internal","citations":{"enabled":true}},{"type":"document","source":{"type":"url","url":"https://documents.example/remote.pdf"},"title":"Remote report","citations":{"enabled":true}}]`)}},
 	}
 	requestBody, err := json.Marshal(request)
 	if err != nil {
@@ -443,8 +443,11 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 	files.files["file_document"] = filestate.File{ID: "file_document", OwnerKey: owner, Filename: "report.txt", Purpose: "user_data", ContentType: "text/plain", Bytes: int64(len(document)), Content: document}
 	h := NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), runtime, rates).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
 	fetches := 0
-	h.a2aHTTPClient = a2aHTTPDoerFunc(func(*http.Request) (*http.Response, error) {
+	h.a2aHTTPClient = a2aHTTPDoerFunc(func(request *http.Request) (*http.Response, error) {
 		fetches++
+		if strings.HasSuffix(request.URL.Path, ".png") {
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"image/png"}}, Body: io.NopCloser(strings.NewReader("\x89PNG\r\n\x1a\nimage"))}, nil
+		}
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/pdf"}}, Body: io.NopCloser(strings.NewReader("%PDF-1.7\nremote"))}, nil
 	})
 	routes := Routes(h)
@@ -480,6 +483,7 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 	providerRequest := runtime.chat
 	runtime.mu.Unlock()
 	attachments, attachmentErr := openai.ChatFileAttachments(providerRequest.Request.Messages)
+	images, imageErr := openai.ChatImageAttachments(providerRequest.Request.Messages)
 	var citations []bool
 	var metadata []openai.DocumentMetadata
 	for _, message := range providerRequest.Request.Messages {
@@ -488,7 +492,7 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 			metadata = message.AnthropicDocumentMetadata
 		}
 	}
-	if providerRequest.RequestID == "" || providerRequest.Metadata["gateway.api_type"] != "messages" || reservedTokens != estimateChatTokens(providerRequest.Request) || attachmentErr != nil || len(attachments) != 2 || !openai.HasChatTextDocuments(providerRequest.Request) || len(citations) != 3 || !citations[0] || !citations[1] || !citations[2] || len(metadata) != 3 || metadata[0].Title != "PDF report" || metadata[1].Title != "Text report" || metadata[2].Title != "Remote report" || fetches != 1 {
+	if providerRequest.RequestID == "" || providerRequest.Metadata["gateway.api_type"] != "messages" || reservedTokens != estimateChatTokens(providerRequest.Request) || attachmentErr != nil || len(attachments) != 2 || imageErr != nil || len(images) != 1 || !openai.HasChatTextDocuments(providerRequest.Request) || len(citations) != 3 || !citations[0] || !citations[1] || !citations[2] || len(metadata) != 3 || metadata[0].Title != "PDF report" || metadata[1].Title != "Text report" || metadata[2].Title != "Remote report" || fetches != 2 {
 		t.Fatalf("request=%+v metadata=%v TPM=%d want=%d", providerRequest.Request, providerRequest.Metadata, reservedTokens, estimateChatTokens(providerRequest.Request))
 	}
 }

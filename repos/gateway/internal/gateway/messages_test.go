@@ -204,6 +204,26 @@ func TestMessagesRejectsInvalidURLDocumentResponses(t *testing.T) {
 	}
 }
 
+func TestMessagesFetchesBoundedURLImageAfterAuthentication(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg-image-url", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "image"}, FinishReason: "stop"}}}}
+	h := NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}}), upstream)
+	h.a2aHTTPClient = a2aHTTPDoerFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Header.Get("Accept") != "image/jpeg, image/png, image/gif, image/webp" || request.Header.Get("Authorization") != "" {
+			t.Fatalf("unexpected fetch headers: %v", request.Header)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"image/png"}}, Body: io.NopCloser(strings.NewReader("\x89PNG\r\n\x1a\nimage"))}, nil
+	})
+	response := nativeMessageCall(Routes(h), `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"url","url":"https://images.example/chart.png"}},{"type":"text","text":"Describe it"}]}]}`, "key")
+	images, err := openai.ChatImageAttachments(upstream.request.Request.Messages)
+	if response.Code != http.StatusOK || upstream.calls != 1 || err != nil || len(images) != 1 || images[0].MediaType != "image/png" {
+		t.Fatalf("status=%d calls=%d images=%+v err=%v body=%s", response.Code, upstream.calls, images, err, response.Body.String())
+	}
+	invalid := nativeMessageCall(Routes(h), `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"url","url":"http://127.0.0.1/chart.png"}}]}]}`, "key")
+	if invalid.Code != http.StatusBadRequest || upstream.calls != 1 {
+		t.Fatalf("invalid URL status=%d calls=%d body=%s", invalid.Code, upstream.calls, invalid.Body.String())
+	}
+}
+
 func TestMessagesAcceptsExplicitZeroMaxTokens(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg-cache", Model: "model", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: ""}, FinishReason: "length"}}, Usage: openai.Usage{PromptTokens: 5, CompletionTokens: 0, TotalTokens: 5}}}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))

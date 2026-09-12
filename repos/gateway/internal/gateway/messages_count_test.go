@@ -192,6 +192,20 @@ func TestCountEndpointFetchesURLPDFWithoutBilling(t *testing.T) {
 		t.Fatalf("status=%d fetches=%d calls=%d billing=%d attachments=%+v err=%v body=%s", response.Code, fetches, counter.calls, billing.calls, attachments, err, response.Body.String())
 	}
 }
+
+func TestCountEndpointFetchesURLImageWithoutBilling(t *testing.T) {
+	counter := &countProviderSpy{result: provider.TokenCountResult{InputTokens: 9}}
+	billing := &lifecycleBillingModule{}
+	h := NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}, billing, accessPolicyModule{models: []string{"*"}}}), counter)
+	h.a2aHTTPClient = a2aHTTPDoerFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"image/png"}}, Body: io.NopCloser(strings.NewReader("\x89PNG\r\n\x1a\nimage"))}, nil
+	})
+	response := countEndpointCall(Routes(h), `{"model":"m","messages":[{"role":"user","content":[{"type":"image","source":{"type":"url","url":"https://images.example/chart.png"}}]}]}`, "gateway-test-key")
+	images, err := openai.ChatImageAttachments(counter.request.Request.Messages)
+	if response.Code != http.StatusOK || counter.calls != 1 || billing.calls != 0 || err != nil || len(images) != 1 || !strings.Contains(response.Body.String(), `"input_tokens":9`) {
+		t.Fatalf("status=%d calls=%d billing=%d images=%+v err=%v body=%s", response.Code, counter.calls, billing.calls, images, err, response.Body.String())
+	}
+}
 func TestCountEndpointEnforcesToolACLAndSharedRPM(t *testing.T) {
 	counter := &countProviderSpy{}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}, rpm: 1}}}), counter))

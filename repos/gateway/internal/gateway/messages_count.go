@@ -72,15 +72,15 @@ func (h Handler) CountMessageTokens(w http.ResponseWriter, r *http.Request) {
 func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, key string) (provider.TokenCountResult, bool) {
 	req := modules.RequestContext{APIKey: key, RequestID: executionID(w), SessionID: sessionID(r), Request: request}
 	var pipelineErr error
-	if openai.HasChatDocumentReferences(request) {
+	if openai.HasChatResolvableReferences(request) {
 		pipelineErr = h.pipeline.RunAuthentication(r.Context(), &req)
 		if pipelineErr == nil {
 			req.APIKey = ""
 			if err := h.resolveMessagesDocumentReferences(r.Context(), req, &req.Request); err != nil {
 				if errors.Is(err, errMessagesFileStorageUnavailable) {
 					writeError(w, http.StatusServiceUnavailable, "file_storage_unavailable", err.Error())
-				} else if errors.Is(err, errMessagesURLUnavailable) {
-					writeError(w, http.StatusBadGateway, "document_unavailable", err.Error())
+				} else if errors.Is(err, errMessagesRemoteUnavailable) {
+					writeError(w, http.StatusBadGateway, "remote_content_unavailable", err.Error())
 				} else {
 					writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 				}
