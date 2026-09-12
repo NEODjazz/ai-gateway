@@ -990,3 +990,12 @@ advertises it only for the native adapter that preserves this contract. Tests
 cover request validation, provider serialization, TPM and billing reserve,
 capability validation, managed profiles and fallback isolation. Full Go test,
 race, vet and build checks and all 166 UI tests completed successfully.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-61a0475` with image ID
+`sha256:fe8845d80d37dcbb22b063578702d8c94136dafe5dbb77e4e004128af53ae9ce`.
+Gateway Helm revision 450 completed successfully, and pod
+`ai-gateway-gateway-6b9bd5955f-jcv6d` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.349 documents the Messages zero-output contract.
+A versioned `max_tokens: 0` Messages request passed structural validation and
+reached authentication, while a negative Messages value and an explicit zero
+Chat limit failed validation with 400 responses.
