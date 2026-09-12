@@ -4,7 +4,7 @@ import "testing"
 
 func TestBatchCreateRequestValidation(t *testing.T) {
 	valid := BatchCreateRequest{InputFileID: "file_input", CompletionWindow: "24h"}
-	for _, endpoint := range []string{"/v1/responses", "/v1/rerank", "/v1/search", "/v1/images/generations"} {
+	for _, endpoint := range []string{"/v1/responses", "/v1/rerank", "/v1/search", "/v1/images/generations", "/v1/audio/speech"} {
 		request := valid
 		request.Endpoint = endpoint
 		if message := request.Validate(); message != "" {

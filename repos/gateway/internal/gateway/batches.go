@@ -30,6 +30,7 @@ const (
 	batchItemTimeout   = 15 * time.Minute
 	batchWorkerLease   = 16 * time.Minute
 	batchResultMaxSize = 64 << 20
+	batchResultMinLine = 512
 )
 
 type batchJob struct {
@@ -75,6 +76,10 @@ func (h Handler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(err, errBatchResponseWritten) {
 			writeError(w, http.StatusBadRequest, "invalid_batch_file", err.Error())
 		}
+		return
+	}
+	if len(items) > h.batchResultLimit()/batchResultMinLine {
+		writeError(w, http.StatusBadRequest, "invalid_batch_file", "batch contains too many requests for the configured output file limit")
 		return
 	}
 	if request.Metadata == nil {
@@ -350,6 +355,19 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		}
 		model = request.Model
 		normalized = request
+	case "/v1/audio/speech":
+		var request openai.AudioSpeechRequest
+		if err := decodeStrictJSON(body, &request); err != nil {
+			return nil, "", nil, err
+		}
+		if message := request.Validate(); message != "" {
+			return nil, "", nil, errors.New(message)
+		}
+		if request.StreamFormat == "sse" {
+			return nil, "", nil, errors.New("stream_format=sse is not supported in batches")
+		}
+		model = request.Model
+		normalized = request
 	default:
 		return nil, "", nil, errors.New("unsupported endpoint")
 	}
@@ -601,6 +619,10 @@ func (h Handler) executeBatchItem(ctx context.Context, batch batchstate.Batch, i
 	}
 	line := openai.BatchOutputLine{ID: "batch_req_" + item.ExecutionID, CustomID: item.CustomID, Response: &openai.BatchOutputResponse{StatusCode: status, RequestID: item.ExecutionID, Body: body}}
 	encoded, _ := json.Marshal(line)
+	itemLimit := h.batchResultLimit() / max(batch.Total, 1)
+	if len(encoded)+1 > itemLimit {
+		return batchErrorResult(item, "batch_result_too_large", "batch item result exceeds storage limit"), true, false
+	}
 	return encoded, false, false
 }
 
@@ -745,6 +767,24 @@ func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestCont
 		response, err := client.GenerateImage(ctx, *req)
 		payload, _ := json.Marshal(response)
 		return http.StatusOK, payload, err
+	case "/v1/audio/speech":
+		var value openai.AudioSpeechRequest
+		if err := json.Unmarshal(body, &value); err != nil {
+			return 0, nil, err
+		}
+		req.AudioSpeechRequest = &value
+		req.InputCharacters = value.InputCharacters()
+		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model, Messages: []openai.Message{{Role: "user", Content: value.Input}}}
+		if !h.allowBatchRate(ctx, *req, estimateAudioSpeechTokens(value)) {
+			return 0, nil, errBatchRateLimited
+		}
+		client, ok := h.provider.(provider.AudioSpeechProvider)
+		if !ok {
+			return 0, nil, errors.New("audio speech unsupported")
+		}
+		response, err := client.GenerateSpeech(ctx, *req)
+		payload, _ := json.Marshal(openai.BatchAudioSpeechResponse{Data: response.Data, ContentType: response.ContentType, Model: response.Model, Usage: response.Usage})
+		return http.StatusOK, payload, err
 	}
 	return 0, nil, errors.New("unsupported endpoint")
 }
@@ -798,10 +838,7 @@ func (h Handler) storeBatchResults(ctx context.Context, batch batchstate.Batch, 
 	if len(items) == 0 {
 		return "", nil
 	}
-	limit := batchResultMaxSize
-	if h.fileConfig.MaxBytes < int64(limit) {
-		limit = int(h.fileConfig.MaxBytes)
-	}
+	limit := h.batchResultLimit()
 	var content bytes.Buffer
 	for _, item := range items {
 		if content.Len()+len(item.Result)+1 > limit {
@@ -824,6 +861,14 @@ func (h Handler) storeBatchResults(ctx context.Context, batch batchstate.Batch, 
 		return "", err
 	}
 	return id, nil
+}
+
+func (h Handler) batchResultLimit() int {
+	limit := batchResultMaxSize
+	if h.fileConfig.MaxBytes < int64(limit) {
+		limit = int(h.fileConfig.MaxBytes)
+	}
+	return limit
 }
 func RunBatchWorker(ctx context.Context, handler Handler) {
 	ticker := time.NewTicker(time.Second)

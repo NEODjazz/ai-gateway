@@ -239,6 +239,8 @@ type batchProvider struct {
 	mu         sync.Mutex
 	models     []string
 	executions []string
+	speech     modules.RequestContext
+	speechData []byte
 }
 
 func (p *batchProvider) ChatCompletions(_ context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
@@ -284,6 +286,16 @@ func (p *batchProvider) GenerateImage(_ context.Context, req modules.RequestCont
 	p.executions = append(p.executions, req.RequestID)
 	p.mu.Unlock()
 	return openai.ImageGenerationResponse{Created: 7, Data: []openai.ImageData{{URL: "https://images.example/result.png"}}, Usage: &openai.ImageUsage{InputTokens: 2, OutputTokens: 5, TotalTokens: 7}}, nil
+}
+
+func (p *batchProvider) GenerateSpeech(_ context.Context, req modules.RequestContext) (openai.AudioSpeechResponse, error) {
+	p.mu.Lock()
+	p.executions = append(p.executions, req.RequestID)
+	p.speech = req
+	data := append([]byte(nil), p.speechData...)
+	p.mu.Unlock()
+	usage := openai.AudioSpeechUsage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}
+	return openai.AudioSpeechResponse{Data: data, ContentType: "audio/mpeg", Model: req.AudioSpeechRequest.Model, Usage: &usage}, nil
 }
 
 func TestBatchLifecycleExecutesMixedModelsWithDistinctBillingIDs(t *testing.T) {
@@ -440,6 +452,99 @@ func TestBatchLifecycleExecutesImageGenerationWithTokenSettlement(t *testing.T) 
 	output, err := files.Get(t.Context(), owner, batch.OutputFileID, true)
 	if err != nil || !strings.Contains(string(output.Content), `https://images.example/result.png`) || !strings.Contains(string(output.Content), `"total_tokens":7`) {
 		t.Fatalf("output=%s err=%v", output.Content, err)
+	}
+}
+
+func TestBatchLifecycleExecutesAudioSpeechWithBoundedJSONOutput(t *testing.T) {
+	store := newMemoryBatchStore()
+	files := &memoryFileStore{files: map[string]filestate.File{}}
+	runtime := &batchProvider{models: []string{"tts-model"}, speechData: []byte("ID3audio")}
+	rates := &embeddingTokenRateStore{}
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	payload := []byte("{\"custom_id\":\"speech\",\"method\":\"POST\",\"url\":\"/v1/audio/speech\",\"body\":{\"model\":\"tts-model\",\"input\":\"Привет 👋\",\"voice\":\"alloy\",\"response_format\":\"mp3\"}}\n")
+	files.files["file_speech"] = filestate.File{ID: "file_speech", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(payload)), Content: payload}
+	h := NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), runtime, rates).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
+	routes := Routes(h)
+	request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_speech","endpoint":"/v1/audio/speech","completion_window":"24h"}`))
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	routes.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	var created openai.Batch
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if processed, err := h.ProcessBatchItems(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	reservedTokens := rates.tokens
+	done := authorizedFileRequest(t, routes, http.MethodGet, "/v1/batches/"+created.ID)
+	var batch openai.Batch
+	if err := json.Unmarshal(done.Body.Bytes(), &batch); err != nil || done.Code != http.StatusOK || batch.RequestCounts.Completed != 1 {
+		t.Fatalf("status=%d batch=%+v err=%v", done.Code, batch, err)
+	}
+	output, err := files.Get(t.Context(), owner, batch.OutputFileID, true)
+	if err != nil || !strings.Contains(string(output.Content), `"data":"SUQzYXVkaW8="`) || !strings.Contains(string(output.Content), `"content_type":"audio/mpeg"`) || !strings.Contains(string(output.Content), `"total_tokens":5`) {
+		t.Fatalf("output=%s err=%v", output.Content, err)
+	}
+	runtime.mu.Lock()
+	speechRequest := runtime.speech
+	runtime.mu.Unlock()
+	if speechRequest.AudioSpeechRequest == nil || speechRequest.InputCharacters != 8 || speechRequest.RequestID == "" || reservedTokens != openai.AudioSpeechReserveTokens(*speechRequest.AudioSpeechRequest) {
+		t.Fatalf("request=%+v characters=%d TPM=%d", speechRequest.AudioSpeechRequest, speechRequest.InputCharacters, reservedTokens)
+	}
+}
+
+func TestBatchAudioSpeechRejectsSSEAndContainsOversizedResults(t *testing.T) {
+	if _, _, _, err := validateBatchBody("/v1/audio/speech", []byte(`{"model":"tts","input":"hello","voice":"alloy","stream_format":"sse"}`)); err == nil || !strings.Contains(err.Error(), "not supported in batches") {
+		t.Fatalf("SSE err=%v", err)
+	}
+
+	store := newMemoryBatchStore()
+	files := &memoryFileStore{files: map[string]filestate.File{}}
+	runtime := &batchProvider{models: []string{"tts"}, speechData: []byte(strings.Repeat("a", 400))}
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	payload := []byte("{\"custom_id\":\"large\",\"method\":\"POST\",\"url\":\"/v1/audio/speech\",\"body\":{\"model\":\"tts\",\"input\":\"hello\",\"voice\":\"alloy\"}}\n")
+	files.files["file_large"] = filestate.File{ID: "file_large", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(payload)), Content: payload}
+	h := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), runtime).WithFileStore(files, FileRuntimeConfig{MaxBytes: batchResultMinLine, OwnerQuotaBytes: 4096}).WithBatchStore(store, store)
+	routes := Routes(h)
+	request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_large","endpoint":"/v1/audio/speech","completion_window":"24h"}`))
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	routes.ServeHTTP(response, request)
+	var created openai.Batch
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s err=%v", response.Code, response.Body.String(), err)
+	}
+	if processed, err := h.ProcessBatchItems(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	done := authorizedFileRequest(t, routes, http.MethodGet, "/v1/batches/"+created.ID)
+	var batch openai.Batch
+	if err := json.Unmarshal(done.Body.Bytes(), &batch); err != nil || batch.RequestCounts.Failed != 1 || batch.ErrorFileID == "" {
+		t.Fatalf("status=%d batch=%+v err=%v", done.Code, batch, err)
+	}
+	errorsFile, err := files.Get(t.Context(), owner, batch.ErrorFileID, true)
+	if err != nil || !strings.Contains(string(errorsFile.Content), `"code":"batch_result_too_large"`) {
+		t.Fatalf("errors=%s err=%v", errorsFile.Content, err)
+	}
+}
+
+func TestBatchRejectsRequestCountThatCannotFitBoundedResults(t *testing.T) {
+	store := newMemoryBatchStore()
+	files := &memoryFileStore{files: map[string]filestate.File{}}
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	payload := []byte("{\"custom_id\":\"one\",\"method\":\"POST\",\"url\":\"/v1/audio/speech\",\"body\":{\"model\":\"tts\",\"input\":\"one\",\"voice\":\"alloy\"}}\n{\"custom_id\":\"two\",\"method\":\"POST\",\"url\":\"/v1/audio/speech\",\"body\":{\"model\":\"tts\",\"input\":\"two\",\"voice\":\"alloy\"}}\n")
+	files.files["file_crowded"] = filestate.File{ID: "file_crowded", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(payload)), Content: payload}
+	h := NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), &batchProvider{models: []string{"tts"}}).WithFileStore(files, FileRuntimeConfig{MaxBytes: batchResultMinLine, OwnerQuotaBytes: 4096}).WithBatchStore(store, store)
+	request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_crowded","endpoint":"/v1/audio/speech","completion_window":"24h"}`))
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	Routes(h).ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_batch_file"`) || !strings.Contains(response.Body.String(), "configured output file limit") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

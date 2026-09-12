@@ -25,7 +25,7 @@ func (r BatchCreateRequest) Validate() string {
 		return "input_file_id is required"
 	}
 	switch r.Endpoint {
-	case "/v1/responses", "/v1/chat/completions", "/v1/embeddings", "/v1/completions", "/v1/moderations", "/v1/rerank", "/v1/search", "/v1/images/generations":
+	case "/v1/responses", "/v1/chat/completions", "/v1/embeddings", "/v1/completions", "/v1/moderations", "/v1/rerank", "/v1/search", "/v1/images/generations", "/v1/audio/speech":
 	default:
 		return "endpoint is not supported"
 	}
@@ -113,6 +113,15 @@ type BatchOutputResponse struct {
 	StatusCode int             `json:"status_code"`
 	RequestID  string          `json:"request_id"`
 	Body       json.RawMessage `json:"body"`
+}
+
+// BatchAudioSpeechResponse represents binary speech output inside a JSONL
+// batch result. Data is encoded as base64 by encoding/json.
+type BatchAudioSpeechResponse struct {
+	Data        []byte            `json:"data"`
+	ContentType string            `json:"content_type"`
+	Model       string            `json:"model"`
+	Usage       *AudioSpeechUsage `json:"usage,omitempty"`
 }
 
 type BatchOutputLineError struct {
