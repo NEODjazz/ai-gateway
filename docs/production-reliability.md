@@ -671,3 +671,11 @@ to TPM admission, and provider-generated code/result parts are bounded to 128 pa
 and 1 MiB before they can be returned or reused. JSON and SSE regressions cover
 native transport, history preservation, routing, authorization and final usage
 settlement.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-2589b6e` with image ID
+`sha256:6cef767a8311ef09c5164896cbd56a725fbdafd9125de29a3749be15c6c4dfb0`.
+Helm revision 428 completed successfully, and pod
+`ai-gateway-gateway-945b85d48-qd9vw` became Ready with zero restarts. The live
+OpenAPI contract reported version 0.1.328, and an unauthenticated native
+GenerateContent request containing `codeExecution` reached authentication and
+returned the native 401 error envelope.
