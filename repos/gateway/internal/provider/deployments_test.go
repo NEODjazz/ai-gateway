@@ -453,6 +453,35 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedResponseOptions(t *t
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeValidatedEmbeddingAndRerankOptions(t *testing.T) {
+	profiles := ManagedProviderCapabilityProfiles()
+	byType := make(map[string]ProviderCapabilityProfile, len(profiles))
+	for _, profile := range profiles {
+		byType[profile.Type] = profile
+		if slices.Contains(profile.Operations, "embeddings") != (len(profile.EmbeddingParameters.InputForms) > 0) {
+			t.Errorf("%s embedding profile does not match operations: %+v", profile.Type, profile.EmbeddingParameters)
+		}
+		if slices.Contains(profile.Operations, "rerank") != (len(profile.RerankParameters.DocumentForms) > 0) {
+			t.Errorf("%s rerank profile does not match operations: %+v", profile.Type, profile.RerankParameters)
+		}
+	}
+	assertEmbedding := func(providerType string, want ProviderEmbeddingParameterPolicy) {
+		got := byType[providerType].EmbeddingParameters
+		if !slices.Equal(got.SupportedOptions, want.SupportedOptions) || !slices.Equal(got.InputForms, want.InputForms) || !slices.Equal(got.InputTypes, want.InputTypes) || !slices.Equal(got.EncodingFormats, want.EncodingFormats) || !slices.Equal(got.OutputDTypes, want.OutputDTypes) {
+			t.Errorf("%s embedding parameters=%+v want=%+v", providerType, got, want)
+		}
+	}
+	assertEmbedding("demo", ProviderEmbeddingParameterPolicy{SupportedOptions: []string{"dimensions", "encoding_format"}, InputForms: []string{"text", "text_array"}, EncodingFormats: []string{"float"}})
+	assertEmbedding("cohere", ProviderEmbeddingParameterPolicy{SupportedOptions: []string{"dimensions", "input_type", "encoding_format"}, InputForms: []string{"text", "text_array"}, InputTypes: []string{"search_query", "search_document", "classification", "clustering"}, EncodingFormats: []string{"float", "base64"}})
+	assertEmbedding("voyage", ProviderEmbeddingParameterPolicy{SupportedOptions: []string{"dimensions", "input_type", "encoding_format", "output_dtype"}, InputForms: []string{"text", "text_array"}, InputTypes: []string{"query", "document"}, EncodingFormats: []string{"float", "base64"}, OutputDTypes: []string{"float", "int8", "uint8", "binary", "ubinary"}})
+	if got := byType["openrouter"].RerankParameters; !slices.Equal(got.SupportedOptions, []string{"top_n", "return_documents"}) || !slices.Equal(got.DocumentForms, []string{"text", "object"}) {
+		t.Errorf("openrouter rerank parameters=%+v", got)
+	}
+	if got := byType["cohere"].RerankParameters; !slices.Equal(got.SupportedOptions, []string{"top_n", "return_documents", "max_tokens_per_doc"}) || !slices.Equal(got.DocumentForms, []string{"text"}) {
+		t.Errorf("cohere rerank parameters=%+v", got)
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

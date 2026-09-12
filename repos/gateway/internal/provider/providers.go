@@ -27,12 +27,14 @@ type ManagedProvider struct {
 }
 
 type ProviderCapabilityProfile struct {
-	Type               string                          `json:"type"`
-	Operations         []string                        `json:"operations"`
-	Capabilities       []string                        `json:"capabilities"`
-	AuthTypes          []string                        `json:"auth_types"`
-	ChatParameters     ProviderChatParameterPolicy     `json:"chat_parameters"`
-	ResponseParameters ProviderResponseParameterPolicy `json:"response_parameters"`
+	Type                string                           `json:"type"`
+	Operations          []string                         `json:"operations"`
+	Capabilities        []string                         `json:"capabilities"`
+	AuthTypes           []string                         `json:"auth_types"`
+	ChatParameters      ProviderChatParameterPolicy      `json:"chat_parameters"`
+	ResponseParameters  ProviderResponseParameterPolicy  `json:"response_parameters"`
+	EmbeddingParameters ProviderEmbeddingParameterPolicy `json:"embedding_parameters"`
+	RerankParameters    ProviderRerankParameterPolicy    `json:"rerank_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -46,6 +48,19 @@ type ProviderResponseParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 	ReasoningEffort  []string `json:"reasoning_effort"`
 	ServiceTier      []string `json:"service_tier"`
+}
+
+type ProviderEmbeddingParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
+	InputForms       []string `json:"input_forms"`
+	InputTypes       []string `json:"input_types"`
+	EncodingFormats  []string `json:"encoding_formats"`
+	OutputDTypes     []string `json:"output_dtypes"`
+}
+
+type ProviderRerankParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
+	DocumentForms    []string `json:"document_forms"`
 }
 
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai", "opensandbox"}
@@ -294,15 +309,114 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			}
 		}
 		profiles = append(profiles, ProviderCapabilityProfile{
-			Type:               providerType,
-			Operations:         operations,
-			Capabilities:       capabilities,
-			AuthTypes:          managedProviderAuthTypes(providerType),
-			ChatParameters:     managedProviderChatParameterPolicy(client, slicesContain(operations, "chat")),
-			ResponseParameters: managedProviderResponseParameterPolicy(client, slicesContain(operations, "responses")),
+			Type:                providerType,
+			Operations:          operations,
+			Capabilities:        capabilities,
+			AuthTypes:           managedProviderAuthTypes(providerType),
+			ChatParameters:      managedProviderChatParameterPolicy(client, slicesContain(operations, "chat")),
+			ResponseParameters:  managedProviderResponseParameterPolicy(client, slicesContain(operations, "responses")),
+			EmbeddingParameters: managedProviderEmbeddingParameterPolicy(client, slicesContain(operations, "embeddings")),
+			RerankParameters:    managedProviderRerankParameterPolicy(client, slicesContain(operations, "rerank")),
 		})
 	}
 	return profiles
+}
+
+func managedProviderEmbeddingParameterPolicy(client Client, supported bool) ProviderEmbeddingParameterPolicy {
+	policy := ProviderEmbeddingParameterPolicy{SupportedOptions: []string{}, InputForms: []string{}, InputTypes: []string{}, EncodingFormats: []string{}, OutputDTypes: []string{}}
+	if !supported {
+		return policy
+	}
+	baseline := openai.EmbeddingRequest{Model: "model", Input: "test"}
+	for _, value := range []string{"query", "document", "search_query", "search_document", "classification", "clustering"} {
+		request := baseline
+		request.InputType = value
+		if validateEmbeddingAdapter(client, request) == nil {
+			policy.InputTypes = append(policy.InputTypes, value)
+		}
+	}
+	if validateEmbeddingAdapter(client, baseline) != nil && len(policy.InputTypes) > 0 {
+		baseline.InputType = policy.InputTypes[0]
+	}
+	for _, probe := range []struct {
+		name  string
+		input any
+	}{{"text", "test"}, {"text_array", []string{"test"}}, {"token_array", []int{1}}, {"token_batch", [][]int{{1}}}} {
+		request := baseline
+		request.Input = probe.input
+		if validateEmbeddingAdapter(client, request) == nil {
+			policy.InputForms = append(policy.InputForms, probe.name)
+		}
+	}
+	for _, value := range []string{"float", "base64"} {
+		request := baseline
+		request.EncodingFormat = value
+		if validateEmbeddingAdapter(client, request) == nil {
+			policy.EncodingFormats = append(policy.EncodingFormats, value)
+		}
+	}
+	for _, value := range []string{"float", "int8", "uint8", "binary", "ubinary"} {
+		request := baseline
+		request.OutputDType = value
+		if validateEmbeddingAdapter(client, request) == nil {
+			policy.OutputDTypes = append(policy.OutputDTypes, value)
+		}
+	}
+	for _, probe := range []struct {
+		name  string
+		apply func(*openai.EmbeddingRequest)
+	}{{"metadata", func(r *openai.EmbeddingRequest) { r.Metadata = map[string]string{"trace": "probe"} }}, {"dimensions", func(r *openai.EmbeddingRequest) { value := 256; r.Dimensions = &value }}, {"user", func(r *openai.EmbeddingRequest) { r.User = "probe" }}} {
+		request := baseline
+		probe.apply(&request)
+		if validateEmbeddingAdapter(client, request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	if len(policy.InputTypes) > 0 {
+		policy.SupportedOptions = append(policy.SupportedOptions, "input_type")
+	}
+	if len(policy.EncodingFormats) > 0 {
+		policy.SupportedOptions = append(policy.SupportedOptions, "encoding_format")
+	}
+	if len(policy.OutputDTypes) > 0 {
+		policy.SupportedOptions = append(policy.SupportedOptions, "output_dtype")
+	}
+	return policy
+}
+
+func managedProviderRerankParameterPolicy(client Client, supported bool) ProviderRerankParameterPolicy {
+	policy := ProviderRerankParameterPolicy{SupportedOptions: []string{}, DocumentForms: []string{}}
+	if !supported {
+		return policy
+	}
+	baseline := openai.RerankRequest{Model: "model", Query: "query", Documents: []any{"document"}}
+	for _, probe := range []struct {
+		name      string
+		documents []any
+	}{{"text", []any{"document"}}, {"object", []any{map[string]any{"text": "document"}}}} {
+		request := baseline
+		request.Documents = probe.documents
+		if validateRerankAdapter(client, request) == nil {
+			policy.DocumentForms = append(policy.DocumentForms, probe.name)
+		}
+	}
+	for _, probe := range []struct {
+		name  string
+		apply func(*openai.RerankRequest)
+	}{
+		{"top_n", func(r *openai.RerankRequest) { value := 1; r.TopN = &value }},
+		{"rank_fields", func(r *openai.RerankRequest) { r.RankFields = []string{"text"} }},
+		{"return_documents", func(r *openai.RerankRequest) { value := true; r.ReturnDocuments = &value }},
+		{"max_chunks_per_doc", func(r *openai.RerankRequest) { value := 1; r.MaxChunksPerDoc = &value }},
+		{"max_tokens_per_doc", func(r *openai.RerankRequest) { value := 128; r.MaxTokensPerDoc = &value }},
+	} {
+		request := baseline
+		probe.apply(&request)
+		if validateRerankAdapter(client, request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	return policy
 }
 
 func managedProviderResponseParameterPolicy(client Client, supportsResponses bool) ProviderResponseParameterPolicy {

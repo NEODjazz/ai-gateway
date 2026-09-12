@@ -240,6 +240,15 @@ func validateEmbeddingAdapter(client Client, request openai.EmbeddingRequest) er
 	return nil
 }
 
+func validateRerankAdapter(client Client, request openai.RerankRequest) error {
+	if validator, ok := client.(interface {
+		ValidateRerankParameters(openai.RerankRequest) error
+	}); ok {
+		return validator.ValidateRerankParameters(request)
+	}
+	return nil
+}
+
 func validateModerationAdapter(client ModerationClient, request openai.ModerationRequest) error {
 	if validator, ok := client.(interface {
 		ValidateModerationParameters(openai.ModerationRequest) error

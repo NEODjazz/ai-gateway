@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.301
+  version: 0.1.302
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9307,7 +9307,7 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters]
+      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, cohere, mistral, voyage, bedrock, groq, deepseek, xai, opensandbox]}
         operations:
@@ -9329,6 +9329,10 @@ components:
           $ref: '#/components/schemas/ProviderChatParameterPolicy'
         response_parameters:
           $ref: '#/components/schemas/ProviderResponseParameterPolicy'
+        embedding_parameters:
+          $ref: '#/components/schemas/ProviderEmbeddingParameterPolicy'
+        rerank_parameters:
+          $ref: '#/components/schemas/ProviderRerankParameterPolicy'
     ProviderChatParameterPolicy:
       type: object
       additionalProperties: false
@@ -9369,6 +9373,44 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only]}
+    ProviderEmbeddingParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [supported_options, input_forms, input_types, encoding_formats, output_dtypes]
+      properties:
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [metadata, dimensions, user, input_type, encoding_format, output_dtype]}
+        input_forms:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [text, text_array, token_array, token_batch]}
+        input_types:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [query, document, search_query, search_document, classification, clustering]}
+        encoding_formats:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [float, base64]}
+        output_dtypes:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [float, int8, uint8, binary, ubinary]}
+    ProviderRerankParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [supported_options, document_forms]
+      properties:
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [top_n, rank_fields, return_documents, max_chunks_per_doc, max_tokens_per_doc]}
+        document_forms:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [text, object]}
     ProviderCredentialCreateInput:
       type: object
       additionalProperties: false
