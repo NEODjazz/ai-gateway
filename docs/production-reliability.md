@@ -1737,3 +1737,21 @@ reported 0.1.383 with the exact model-specific profile schema. An
 unauthenticated Chat request with `reasoning_effort` returned 401 before
 deployment selection. No provider credential or external inference was used by
 the smoke checks.
+
+Source `07662f1` adds native Together Chat selected-token log probabilities.
+The adapter maps public `logprobs=true` to the provider's integer control and
+normalizes bounded JSON token arrays and numeric SSE probabilities into the
+public response shape. It rejects unsupported top alternatives, malformed
+arrays, token identifiers or probabilities, and missing requested probability
+data before accepting a completed response. Focused provider tests, vet, build,
+the full Go suite and the full race suite passed. OpenAPI 0.1.384 publishes the
+updated capability profile.
+
+Rancher Desktop built `ai-gateway-gateway:together-logprobs-07662f1` with image
+ID `sha256:5c56cde674ebfbaad0433d63d0b7e63e4a610d42ca3f14e971c4cb64a20e22ed`.
+Gateway Helm revision 490 completed successfully. Pod
+`ai-gateway-gateway-77d5865559-m2jcw` became Ready with zero restarts and the
+same image. Live liveness and readiness returned 204, the served OpenAPI
+reported 0.1.384, and an unauthenticated Chat request with `logprobs=true`
+returned 401 before deployment selection. No provider credential or external
+inference was used by the smoke checks.
