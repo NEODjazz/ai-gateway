@@ -750,6 +750,13 @@ does not create a separate usage unit; its input and output remain part of token
 billing. Messages streaming uses the existing bounded buffered conversion so
 policy checks finish before native SSE is emitted.
 
+Messages accepts the 2026 dynamic-filtering versions of native web search and
+web fetch, including bounded caller and domain controls. Cache bypass is limited
+to `web_fetch_20260309` and later; response inclusion is limited to the 20260318
+variants. Native flat search location fields are forwarded directly, while the
+former nested gateway shape remains accepted for existing clients. Every native
+server-tool definition now contributes to TPM and budget reserve.
+
 Regressions cover request/response conversion, native and fallback SSE, stream
 failure, model/tool authorization, TPM, unknown input, response-size bounds and
 reported usage reaching the accounting stage through Router. No live paid

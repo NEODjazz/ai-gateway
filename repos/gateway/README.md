@@ -209,6 +209,11 @@ The route also accepts one `tool_search_tool_regex_20251119` or
 `defer_loading`; the gateway requires explicit deployment capability and tool
 authorization, counts native continuation context, preserves bounded result
 blocks, and excludes these requests from response caches.
+Web search and fetch also accept their 2026 dynamic-filtering versions, bounded
+caller/domain controls, version-gated cache bypass and response inclusion. Native
+flat search location fields are forwarded directly; the earlier nested gateway
+shape remains accepted for compatibility. All server-tool definitions contribute
+to TPM reserve.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.
