@@ -31,6 +31,22 @@ func TestOpenAPIDocumentIsValid(t *testing.T) {
 	loadDocument(t)
 }
 
+func TestOpenAPIProviderProfilesExposeModelSpecificChatPolicy(t *testing.T) {
+	document := loadDocument(t)
+	profile := document.Components.Schemas["ProviderCapabilityProfile"].Value
+	if profile == nil || profile.Properties["chat_model_parameters"] == nil {
+		t.Fatal("ProviderCapabilityProfile is missing chat_model_parameters")
+	}
+	policy := document.Components.Schemas["ProviderChatModelParameterPolicy"].Value
+	if policy == nil || policy.Properties["model"] == nil || policy.Properties["reasoning_effort"] == nil {
+		t.Fatal("ProviderChatModelParameterPolicy is incomplete")
+	}
+	models := policy.Properties["model"].Value.Enum
+	if len(models) != 3 || models[0] != "openai/gpt-oss-20b" || models[1] != "openai/gpt-oss-120b" || models[2] != "deepseek-ai/DeepSeek-V4-Pro-0813" {
+		t.Fatalf("model-specific chat policy models=%v", models)
+	}
+}
+
 func TestOpenAPITopKBelongsToMessagesRequest(t *testing.T) {
 	document := loadDocument(t)
 	messages := document.Components.Schemas["MessagesRequest"].Value

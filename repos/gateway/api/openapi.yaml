@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.382
+  version: 0.1.383
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -10127,7 +10127,7 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, interaction_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters, image_edit_parameters, image_variation_parameters, audio_transcription_parameters, audio_translation_parameters, audio_speech_parameters, ocr_parameters, video_create_parameters, video_extend_parameters, fine_tuning_create_parameters, container_create_parameters]
+      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, interaction_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters, image_edit_parameters, image_variation_parameters, audio_transcription_parameters, audio_translation_parameters, audio_speech_parameters, ocr_parameters, video_create_parameters, video_extend_parameters, fine_tuning_create_parameters, container_create_parameters, chat_model_parameters]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, cohere, mistral, voyage, bedrock, groq, deepseek, cerebras, nvidia-nim, together, xai, opensandbox]}
         operations:
@@ -10183,6 +10183,10 @@ components:
           $ref: '#/components/schemas/ProviderFineTuningCreateParameterPolicy'
         container_create_parameters:
           $ref: '#/components/schemas/ProviderContainerCreateParameterPolicy'
+        chat_model_parameters:
+          type: array
+          description: Exact upstream-model overrides relative to chat_parameters. An empty array means the adapter has no published model-specific override.
+          items: {$ref: '#/components/schemas/ProviderChatModelParameterPolicy'}
     ProviderChatParameterPolicy:
       type: object
       additionalProperties: false
@@ -10205,6 +10209,23 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only]}
+    ProviderChatModelParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [model, supported_options, reasoning_effort]
+      description: Options accepted only for this exact upstream model. The values are derived by probing the runtime adapter validator and take precedence over the provider-wide value arrays.
+      properties:
+        model:
+          type: string
+          enum: [openai/gpt-oss-20b, openai/gpt-oss-120b, deepseek-ai/DeepSeek-V4-Pro-0813]
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [reasoning_effort]}
+        reasoning_effort:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [low, medium, high, max]}
     ProviderResponseParameterPolicy:
       type: object
       additionalProperties: false

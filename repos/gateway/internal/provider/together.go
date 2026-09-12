@@ -27,6 +27,7 @@ func NewTogether(baseURL, apiKey string, stream bool) Together {
 	}
 	compatible := NewOpenAICompatible(baseURL, apiKey, stream)
 	compatible.errorProvider = "together"
+	compatible.chatMessages = togetherChatMessages
 	return Together{compatible: compatible}
 }
 
@@ -159,10 +160,22 @@ func decodeTogetherImageResponse(reader io.Reader, request openai.ImageGeneratio
 }
 
 func (t Together) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if request.ReasoningEffort != "" {
+		allowed := map[string]bool{}
+		switch request.Model {
+		case "openai/gpt-oss-20b", "openai/gpt-oss-120b":
+			allowed = map[string]bool{"low": true, "medium": true, "high": true}
+		case "deepseek-ai/DeepSeek-V4-Pro-0813":
+			allowed = map[string]bool{"high": true, "max": true}
+		}
+		if !allowed[request.ReasoningEffort] {
+			return &Error{Class: FailureClientRequest, Provider: "together", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "reasoning_effort", Err: errors.New("reasoning_effort is not supported for this Together model or value")}
+		}
+	}
 	if err := rejectParameters("together",
 		parameterCheck{"store", request.Store != nil}, parameterCheck{"metadata", request.Metadata != nil},
 		parameterCheck{"prediction", request.Prediction != nil}, parameterCheck{"service_tier", request.ServiceTier != ""},
-		parameterCheck{"reasoning_effort", request.ReasoningEffort != ""}, parameterCheck{"modalities", request.Modalities != nil},
+		parameterCheck{"modalities", request.Modalities != nil},
 		parameterCheck{"audio", request.Audio != nil}, parameterCheck{"verbosity", request.Verbosity != ""},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil},
 		parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""}, parameterCheck{"web_search_options", request.WebSearchOptions != nil},
@@ -176,18 +189,60 @@ func (t Together) ValidateChatParameters(request openai.ChatCompletionRequest) e
 	return t.compatible.ValidateChatParameters(request)
 }
 
+func (Together) ManagedChatModelProbes() []string {
+	return []string{"openai/gpt-oss-20b", "openai/gpt-oss-120b", "deepseek-ai/DeepSeek-V4-Pro-0813"}
+}
+
+func togetherChatMessages(request openai.ChatCompletionRequest) (any, error) {
+	if request.Model != "openai/gpt-oss-20b" && request.Model != "openai/gpt-oss-120b" && request.Model != "deepseek-ai/DeepSeek-V4-Pro-0813" {
+		return nil, nil
+	}
+	messages := make([]map[string]json.RawMessage, len(request.Messages))
+	for index, message := range request.Messages {
+		payload, err := json.Marshal(message)
+		if err != nil || json.Unmarshal(payload, &messages[index]) != nil {
+			return nil, errors.New("failed to encode Together chat message")
+		}
+		if reasoning, found := messages[index]["reasoning_content"]; found {
+			delete(messages[index], "reasoning_content")
+			messages[index]["reasoning"] = reasoning
+		}
+	}
+	return messages, nil
+}
+
+func decodeTogetherChatCompletionResponse(reader io.Reader, target *openai.ChatCompletionResponse) error {
+	payload, err := io.ReadAll(io.LimitReader(reader, maxChatCompletionResponseBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(payload) > maxChatCompletionResponseBytes {
+		return errors.New("chat completion response exceeds limit")
+	}
+	normalized, err := normalizeChatReasoningAliasPayload("Together", payload, "message")
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(normalized, target)
+}
+
+func normalizeTogetherChatStreamPayload(payload string) (string, error) {
+	normalized, err := normalizeChatReasoningAliasPayload("Together", []byte(payload), "delta")
+	return string(normalized), err
+}
+
 func (t Together) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	if err := t.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	return t.compatible.ChatCompletions(ctx, request)
+	return t.compatible.chatCompletions(ctx, request, decodeTogetherChatCompletionResponse, normalizeTogetherChatStreamPayload)
 }
 
 func (t Together) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	if err := t.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	return t.compatible.StreamChatCompletions(ctx, request, write)
+	return t.compatible.streamChatCompletions(ctx, request, write, normalizeTogetherChatStreamPayload)
 }
 
 func (Together) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {

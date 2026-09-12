@@ -22,6 +22,7 @@ type openAICompatibleChatRequest struct {
 	openai.ChatGenerationOptions
 	Model               string                         `json:"model"`
 	Messages            []openai.Message               `json:"messages"`
+	messagesOverride    any                            `json:"-"`
 	Functions           []openai.FunctionDefinition    `json:"functions,omitempty"`
 	FunctionCall        *openai.LegacyFunctionChoice   `json:"function_call,omitempty"`
 	Tools               []openai.Tool                  `json:"tools,omitempty"`
@@ -43,6 +44,24 @@ type openAICompatibleChatRequest struct {
 
 type deepSeekThinking struct {
 	Type string `json:"type"`
+}
+
+func (r openAICompatibleChatRequest) MarshalJSON() ([]byte, error) {
+	type wire openAICompatibleChatRequest
+	payload, err := json.Marshal(wire(r))
+	if err != nil || r.messagesOverride == nil {
+		return payload, err
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &object); err != nil {
+		return nil, err
+	}
+	messages, err := json.Marshal(r.messagesOverride)
+	if err != nil {
+		return nil, err
+	}
+	object["messages"] = messages
+	return json.Marshal(object)
 }
 
 type openAICompatibleResponseRequest struct {
@@ -146,6 +165,7 @@ type OpenAICompatible struct {
 	supportsMessagePrefix bool
 	realtimeURL           func(string) (*url.URL, error)
 	realtimeAuth          func(context.Context) (http.Header, error)
+	chatMessages          func(openai.ChatCompletionRequest) (any, error)
 	client                *http.Client
 }
 
@@ -484,9 +504,17 @@ func (p OpenAICompatible) ChatCompletions(ctx context.Context, request openai.Ch
 }
 
 func (p OpenAICompatible) chatCompletions(ctx context.Context, request openai.ChatCompletionRequest, decodeResponse func(io.Reader, *openai.ChatCompletionResponse) error, normalizeStream func(string) (string, error)) (openai.ChatCompletionResponse, error) {
+	var messages any
+	if p.chatMessages != nil {
+		var err error
+		messages, err = p.chatMessages(request)
+		if err != nil {
+			return openai.ChatCompletionResponse{}, err
+		}
+	}
 	upstreamRequest := openAICompatibleChatRequest{
 		ChatGenerationOptions: request.ChatGenerationOptions,
-		Model:                 request.Model, Messages: request.Messages, Functions: request.Functions, FunctionCall: request.FunctionCall, Tools: request.Tools,
+		Model:                 request.Model, Messages: request.Messages, messagesOverride: messages, Functions: request.Functions, FunctionCall: request.FunctionCall, Tools: request.Tools,
 		ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		ResponseFormat: request.ResponseFormat, Stream: request.Stream && p.upstreamStream,
 		MaxTokens: request.MaxTokens, MaxCompletionTokens: request.MaxCompletionTokens,
@@ -673,9 +701,17 @@ func (p OpenAICompatible) streamChatCompletions(ctx context.Context, request ope
 		return openai.ChatCompletionResponse{}, ErrStreamingUnsupported
 	}
 
+	var messages any
+	if p.chatMessages != nil {
+		var err error
+		messages, err = p.chatMessages(request)
+		if err != nil {
+			return openai.ChatCompletionResponse{}, err
+		}
+	}
 	upstreamRequest := openAICompatibleChatRequest{
 		ChatGenerationOptions: request.ChatGenerationOptions,
-		Model:                 request.Model, Messages: request.Messages, Functions: request.Functions, FunctionCall: request.FunctionCall, Tools: request.Tools,
+		Model:                 request.Model, Messages: request.Messages, messagesOverride: messages, Functions: request.Functions, FunctionCall: request.FunctionCall, Tools: request.Tools,
 		ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		ResponseFormat: request.ResponseFormat, Stream: true,
 		MaxTokens: request.MaxTokens, MaxCompletionTokens: request.MaxCompletionTokens,

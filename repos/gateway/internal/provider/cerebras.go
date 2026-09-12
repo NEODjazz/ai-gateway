@@ -120,7 +120,7 @@ func decodeCerebrasChatCompletionResponse(reader io.Reader, target *openai.ChatC
 	if len(payload) > maxChatCompletionResponseBytes {
 		return errors.New("chat completion response exceeds limit")
 	}
-	normalized, err := normalizeCerebrasChatPayload(payload, "message")
+	normalized, err := normalizeChatReasoningAliasPayload("Cerebras", payload, "message")
 	if err != nil {
 		return err
 	}
@@ -128,11 +128,15 @@ func decodeCerebrasChatCompletionResponse(reader io.Reader, target *openai.ChatC
 }
 
 func normalizeCerebrasChatStreamPayload(payload string) (string, error) {
-	normalized, err := normalizeCerebrasChatPayload([]byte(payload), "delta")
+	normalized, err := normalizeChatReasoningAliasPayload("Cerebras", []byte(payload), "delta")
 	return string(normalized), err
 }
 
 func normalizeCerebrasChatPayload(payload []byte, messageField string) ([]byte, error) {
+	return normalizeChatReasoningAliasPayload("Cerebras", payload, messageField)
+}
+
+func normalizeChatReasoningAliasPayload(providerName string, payload []byte, messageField string) ([]byte, error) {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &envelope); err != nil {
 		return nil, err
@@ -141,7 +145,7 @@ func normalizeCerebrasChatPayload(payload []byte, messageField string) ([]byte, 
 	rawChoices, hasChoices := envelope["choices"]
 	if hasChoices {
 		if len(rawChoices) == 0 {
-			return nil, errors.New("provider returned invalid Cerebras choices")
+			return nil, fmt.Errorf("provider returned invalid %s choices", providerName)
 		}
 		if err := json.Unmarshal(rawChoices, &choices); err != nil {
 			return nil, err
@@ -162,15 +166,15 @@ func normalizeCerebrasChatPayload(payload []byte, messageField string) ([]byte, 
 		}
 		var reasoning string
 		if err := json.Unmarshal(reasoningRaw, &reasoning); err != nil {
-			return nil, errors.New("provider returned invalid Cerebras reasoning")
+			return nil, fmt.Errorf("provider returned invalid %s reasoning", providerName)
 		}
 		if len(reasoning) > openai.MaxChatReasoningContentBytes {
-			return nil, errors.New("provider Cerebras reasoning exceeds limit")
+			return nil, fmt.Errorf("provider %s reasoning exceeds limit", providerName)
 		}
 		if existing := message["reasoning_content"]; len(existing) > 0 {
 			var value string
 			if json.Unmarshal(existing, &value) != nil || value != reasoning {
-				return nil, errors.New("provider returned conflicting Cerebras reasoning")
+				return nil, fmt.Errorf("provider returned conflicting %s reasoning", providerName)
 			}
 		}
 		delete(message, "reasoning")

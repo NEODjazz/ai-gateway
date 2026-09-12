@@ -50,6 +50,7 @@ type ProviderCapabilityProfile struct {
 	VideoExtendParameters        ProviderVideoExtendParameterPolicy        `json:"video_extend_parameters"`
 	FineTuningCreateParameters   ProviderFineTuningCreateParameterPolicy   `json:"fine_tuning_create_parameters"`
 	ContainerCreateParameters    ProviderContainerCreateParameterPolicy    `json:"container_create_parameters"`
+	ChatModelParameters          []ProviderChatModelParameterPolicy        `json:"chat_model_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -57,6 +58,12 @@ type ProviderChatParameterPolicy struct {
 	ReasoningEffort  []string `json:"reasoning_effort"`
 	Logprobs         []string `json:"logprobs"`
 	ServiceTier      []string `json:"service_tier"`
+}
+
+type ProviderChatModelParameterPolicy struct {
+	Model            string   `json:"model"`
+	SupportedOptions []string `json:"supported_options"`
+	ReasoningEffort  []string `json:"reasoning_effort"`
 }
 
 type ProviderResponseParameterPolicy struct {
@@ -419,9 +426,30 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			VideoExtendParameters:        managedProviderVideoExtendParameterPolicy(client, slicesContain(operations, "video_extension")),
 			FineTuningCreateParameters:   managedProviderFineTuningCreateParameterPolicy(client, slicesContain(operations, "fine_tuning")),
 			ContainerCreateParameters:    managedProviderContainerCreateParameterPolicy(client, operations),
+			ChatModelParameters:          managedProviderChatModelParameterPolicies(client, slicesContain(operations, "chat")),
 		})
 	}
 	return profiles
+}
+
+func managedProviderChatModelParameterPolicies(client Client, supported bool) []ProviderChatModelParameterPolicy {
+	result := []ProviderChatModelParameterPolicy{}
+	prober, ok := client.(interface{ ManagedChatModelProbes() []string })
+	if !supported || !ok {
+		return result
+	}
+	base := managedProviderChatParameterPolicy(client, true)
+	for _, model := range prober.ManagedChatModelProbes() {
+		policy := managedProviderChatParameterPolicyForModel(client, true, model)
+		options := make([]string, 0, len(policy.SupportedOptions))
+		for _, option := range policy.SupportedOptions {
+			if !slicesContain(base.SupportedOptions, option) {
+				options = append(options, option)
+			}
+		}
+		result = append(result, ProviderChatModelParameterPolicy{Model: model, SupportedOptions: options, ReasoningEffort: policy.ReasoningEffort})
+	}
+	return result
 }
 
 func managedProviderInteractionParameterPolicy(client Client, supported bool) ProviderInteractionParameterPolicy {
@@ -1179,11 +1207,15 @@ func managedResponseOptionProbes() []managedResponseOptionProbe {
 }
 
 func managedProviderChatParameterPolicy(client Client, supportsChat bool) ProviderChatParameterPolicy {
+	return managedProviderChatParameterPolicyForModel(client, supportsChat, "model")
+}
+
+func managedProviderChatParameterPolicyForModel(client Client, supportsChat bool, model string) ProviderChatParameterPolicy {
 	policy := ProviderChatParameterPolicy{SupportedOptions: []string{}, ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{}}
 	if !supportsChat {
 		return policy
 	}
-	baseline := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "test"}}}
+	baseline := openai.ChatCompletionRequest{Model: model, Messages: []openai.Message{{Role: "user", Content: "test"}}}
 	for _, value := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "default"} {
 		request := baseline
 		request.ReasoningEffort = value

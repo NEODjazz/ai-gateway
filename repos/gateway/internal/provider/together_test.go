@@ -96,9 +96,106 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 		if slices.Contains(profile.ChatParameters.SupportedOptions, "store") || slices.Contains(profile.ChatParameters.SupportedOptions, "metadata") || slices.Contains(profile.ChatParameters.SupportedOptions, "service_tier") || slices.Contains(profile.ChatParameters.SupportedOptions, "prediction") || slices.Contains(profile.ChatParameters.SupportedOptions, "logprobs") || slices.Contains(profile.ChatParameters.SupportedOptions, "logit_bias") || len(profile.ChatParameters.Logprobs) != 0 {
 			t.Fatalf("ignored options advertised: %+v", profile.ChatParameters)
 		}
+		wantModels := []ProviderChatModelParameterPolicy{
+			{Model: "openai/gpt-oss-20b", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"low", "medium", "high"}},
+			{Model: "openai/gpt-oss-120b", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"low", "medium", "high"}},
+			{Model: "deepseek-ai/DeepSeek-V4-Pro-0813", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"high", "max"}},
+		}
+		if !slices.EqualFunc(profile.ChatModelParameters, wantModels, func(left, right ProviderChatModelParameterPolicy) bool {
+			return left.Model == right.Model && slices.Equal(left.SupportedOptions, right.SupportedOptions) && slices.Equal(left.ReasoningEffort, right.ReasoningEffort)
+		}) {
+			t.Fatalf("model parameters=%+v want=%+v", profile.ChatModelParameters, wantModels)
+		}
 		return
 	}
 	t.Fatal("Together capability profile is missing")
+}
+
+func TestTogetherReasoningEffortAndReasoningAliasJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		messages, _ := body["messages"].([]any)
+		prior, _ := messages[1].(map[string]any)
+		if body["reasoning_effort"] != "medium" || prior["reasoning"] != "prior plan" || prior["reasoning_content"] != nil {
+			t.Fatalf("body=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","created":1,"model":"openai/gpt-oss-20b","choices":[{"index":0,"message":{"role":"assistant","reasoning":"new plan","content":"answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8,"completion_tokens_details":{"reasoning_tokens":2}}}`)
+	}))
+	defer server.Close()
+
+	response, err := NewTogether(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model:                 "openai/gpt-oss-20b",
+		Messages:              []openai.Message{{Role: "user", Content: "question"}, {Role: "assistant", Content: "prior answer", ReasoningContent: "prior plan"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "medium"},
+	})
+	if err != nil || response.Choices[0].Message.ReasoningContent != "new plan" || response.Usage.CompletionTokensDetails == nil || response.Usage.CompletionTokensDetails.ReasoningTokens != 2 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestTogetherReasoningAliasSSE(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"openai/gpt-oss-120b\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"reasoning\":\"plan \"},\"finish_reason\":null}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"openai/gpt-oss-120b\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"done\",\"content\":\"answer\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3,\"total_tokens\":8}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	chunks := []string{}
+	request := openai.ChatCompletionRequest{Model: "openai/gpt-oss-120b", Messages: []openai.Message{{Role: "user", Content: "question"}}, Stream: true, ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "high"}}
+	response, err := NewTogether(server.URL, "key", true).StreamChatCompletions(t.Context(), request, func(payload string) error {
+		chunks = append(chunks, payload)
+		return nil
+	})
+	if err != nil || response.Choices[0].Message.ReasoningContent != "plan done" || openai.ContentText(response.Choices[0].Message.Content) != "answer" || response.Usage.TotalTokens != 8 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+	for _, payload := range chunks {
+		if strings.Contains(payload, `"reasoning":`) || !strings.Contains(payload, `"reasoning_content":`) {
+			t.Fatalf("reasoning alias was not normalized: %s", payload)
+		}
+	}
+}
+
+func TestTogetherReasoningEffortRejectsUnsupportedModelOrValueBeforeHTTP(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	client := NewTogether(server.URL, "key", false)
+	for _, request := range []openai.ChatCompletionRequest{
+		{Model: "other", Messages: []openai.Message{{Role: "user", Content: "question"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "medium"}},
+		{Model: "openai/gpt-oss-20b", Messages: []openai.Message{{Role: "user", Content: "question"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "xhigh"}},
+		{Model: "deepseek-ai/DeepSeek-V4-Pro-0813", Messages: []openai.Message{{Role: "user", Content: "question"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "medium"}},
+	} {
+		if _, err := client.ChatCompletions(t.Context(), request); err == nil {
+			t.Fatalf("accepted request=%+v", request)
+		}
+	}
+	if err := client.ValidateChatParameters(openai.ChatCompletionRequest{Model: "deepseek-ai/DeepSeek-V4-Pro-0813", Messages: []openai.Message{{Role: "user", Content: "question"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "max"}}); err != nil {
+		t.Fatalf("documented DeepSeek value rejected: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("upstream calls=%d", calls)
+	}
+}
+
+func TestTogetherReasoningAliasRejectsInvalidResponses(t *testing.T) {
+	for name, payload := range map[string]string{
+		"wrong type":   `{"choices":[{"message":{"reasoning":{"text":"plan"}}}]}`,
+		"conflict":     `{"choices":[{"message":{"reasoning":"plan","reasoning_content":"other"}}]}`,
+		"over maximum": `{"choices":[{"message":{"reasoning":"` + strings.Repeat("x", openai.MaxChatReasoningContentBytes+1) + `"}}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var response openai.ChatCompletionResponse
+			if err := decodeTogetherChatCompletionResponse(strings.NewReader(payload), &response); err == nil {
+				t.Fatal("invalid reasoning accepted")
+			}
+		})
+	}
 }
 
 func TestTogetherImageGenerationContract(t *testing.T) {
