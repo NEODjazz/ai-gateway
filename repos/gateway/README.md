@@ -72,8 +72,10 @@ Concurrent subscriptions, stream duration and polling frequency are limited by
 
 The Batches API accepts owner-scoped JSONL Files for Chat Completions, Responses,
 Response Compaction, Completions, Embeddings, Rerank, Search, Image Generation,
-Text-to-Speech, OCR and Moderations. Every line is validated and authorized before
-the batch is queued. OCR file references are resolved to immutable owner-scoped
+Audio Transcription, Audio Translation, Text-to-Speech, OCR and Moderations. Every
+line is validated and authorized before the batch is queued. Transcription and
+translation use structured inline base64 audio, reject streaming and are bounded by
+the 4 MiB JSONL line limit. OCR file references are resolved to immutable owner-scoped
 content snapshots before jobs are persisted.
 Durable per-item jobs reuse the normal routing, content-policy, rate-limit and billing
 path with independent execution IDs, including mixed-model files. Binary speech output
