@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -103,5 +104,43 @@ func TestOpenSandboxBoundsOutputAndValidatesInputs(t *testing.T) {
 	}
 	if validSandboxHeader("Host", "example.test") || validSandboxHeader("X-Test", "ok\r\nbad") {
 		t.Fatal("unsafe execution header accepted")
+	}
+}
+
+func TestOpenSandboxPollsTemporarilyUnavailableExecutionEndpoint(t *testing.T) {
+	var endpointCalls atomic.Int32
+	var deleted atomic.Bool
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/sandboxes":
+			_, _ = io.WriteString(w, `{"id":"sandbox_1"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/sandboxes/sandbox_1":
+			_, _ = io.WriteString(w, `{"status":{"state":"Running"}}`)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/endpoints/44772"):
+			if endpointCalls.Add(1) == 1 {
+				http.NotFound(w, r)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"endpoint": server.URL})
+		case r.Method == http.MethodPost && r.URL.Path == "/code":
+			_, _ = io.WriteString(w, "data: {\"type\":\"stdout\",\"text\":\"ready\"}\n")
+		case r.Method == http.MethodDelete:
+			deleted.Store(true)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewOpenSandbox(server.URL, "")
+	client.pollInterval = time.Millisecond
+	result, err := client.ExecuteSandbox(t.Context(), openai.SandboxExecuteRequest{Model: "code-interpreter", Code: "x", Language: "python", Template: openai.DefaultSandboxTemplate, TimeoutSeconds: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if endpointCalls.Load() != 2 || result.Stdout != "ready" || !deleted.Load() {
+		t.Fatalf("calls=%d result=%+v deleted=%v", endpointCalls.Load(), result, deleted.Load())
 	}
 }

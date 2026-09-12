@@ -26,13 +26,14 @@ type SandboxClient interface {
 }
 
 type OpenSandbox struct {
-	baseURL string
-	apiKey  string
-	client  *http.Client
+	baseURL      string
+	apiKey       string
+	client       *http.Client
+	pollInterval time.Duration
 }
 
 func NewOpenSandbox(baseURL, apiKey string) OpenSandbox {
-	return OpenSandbox{baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"), apiKey: apiKey, client: newProviderHTTPClient(180 * time.Second)}
+	return OpenSandbox{baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"), apiKey: apiKey, client: newProviderHTTPClient(180 * time.Second), pollInterval: 250 * time.Millisecond}
 }
 
 func (OpenSandbox) ChatCompletions(context.Context, openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
@@ -65,10 +66,11 @@ func (p OpenSandbox) ExecuteSandbox(ctx context.Context, request openai.SandboxE
 			err = errors.Join(err, fmt.Errorf("delete sandbox %s: %w", sandboxID, cleanupErr))
 		}
 	}()
-	if err = p.waitForSandbox(ctx, sandboxID, request.TimeoutSeconds); err != nil {
+	deadline := time.Now().Add(time.Duration(request.TimeoutSeconds) * time.Second)
+	if err = p.waitForSandbox(ctx, sandboxID, deadline); err != nil {
 		return result, err
 	}
-	endpoint, headers, err := p.executionEndpoint(ctx, sandboxID)
+	endpoint, headers, err := p.waitForExecutionEndpoint(ctx, sandboxID, deadline)
 	if err != nil {
 		return result, err
 	}
@@ -97,8 +99,7 @@ func (p OpenSandbox) createSandbox(ctx context.Context, request openai.SandboxEx
 	return response.ID, nil
 }
 
-func (p OpenSandbox) waitForSandbox(ctx context.Context, id string, timeoutSeconds int) error {
-	deadline := time.Now().Add(time.Duration(timeoutSeconds) * time.Second)
+func (p OpenSandbox) waitForSandbox(ctx context.Context, id string, deadline time.Time) error {
 	for {
 		var response struct {
 			Status struct {
@@ -117,12 +118,28 @@ func (p OpenSandbox) waitForSandbox(ctx context.Context, id string, timeoutSecon
 		if time.Now().After(deadline) {
 			return errors.New("sandbox readiness timeout")
 		}
-		timer := time.NewTimer(250 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
+		if err := p.waitForPoll(ctx, deadline, p.pollInterval); err != nil {
+			return err
+		}
+	}
+}
+
+func (p OpenSandbox) waitForExecutionEndpoint(ctx context.Context, id string, deadline time.Time) (string, map[string]string, error) {
+	for {
+		endpoint, headers, err := p.executionEndpoint(ctx, id)
+		if err == nil {
+			return endpoint, headers, nil
+		}
+		if !temporarySandboxEndpointError(err) {
+			return "", nil, err
+		}
+		wait := p.pollInterval
+		var providerErr *Error
+		if errors.As(err, &providerErr) && providerErr.RetryAfter > wait {
+			wait = providerErr.RetryAfter
+		}
+		if waitErr := p.waitForPoll(ctx, deadline, wait); waitErr != nil {
+			return "", nil, fmt.Errorf("sandbox execution endpoint readiness timeout: %w", err)
 		}
 	}
 }
@@ -141,6 +158,38 @@ func (p OpenSandbox) executionEndpoint(ctx context.Context, id string) (string, 
 		return "", nil, err
 	}
 	return endpoint, response.Headers, nil
+}
+
+func temporarySandboxEndpointError(err error) bool {
+	var providerErr *Error
+	if !errors.As(err, &providerErr) {
+		return false
+	}
+	return providerErr.StatusCode == http.StatusNotFound || providerErr.StatusCode == http.StatusConflict || providerErr.StatusCode == http.StatusTooEarly || providerErr.StatusCode == http.StatusTooManyRequests || providerErr.StatusCode >= 500
+}
+
+func (p OpenSandbox) waitForPoll(ctx context.Context, deadline time.Time, duration time.Duration) error {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return context.DeadlineExceeded
+	}
+	if duration <= 0 {
+		duration = time.Millisecond
+	}
+	if duration > remaining {
+		duration = remaining
+	}
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		if time.Now().After(deadline) {
+			return context.DeadlineExceeded
+		}
+		return nil
+	}
 }
 
 func (p OpenSandbox) validateExecutionEndpoint(raw string) (string, error) {
