@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -31,7 +32,7 @@ func (g Gemini) TranscribeAudio(ctx context.Context, request openai.AudioTranscr
 	}
 	body := geminiRequest{
 		Contents:   []geminiContent{{Parts: []geminiPart{{Text: prompt}, {InlineData: &geminiInlineData{MIMEType: mediaType, Data: request.File.Data}}}}},
-		Generation: geminiGeneration{Temperature: request.Temperature, ResponseMIMEType: "text/plain", AudioTranscription: &geminiAudioTranscriptionConfig{LanguageCodes: languages, CustomVocabulary: append([]string(nil), request.Keywords...), Mode: request.Mode}},
+		Generation: geminiGeneration{Temperature: request.Temperature, ResponseMIMEType: "text/plain", AudioTranscription: &geminiAudioTranscriptionConfig{LanguageCodes: languages, CustomVocabulary: append([]string(nil), request.Keywords...), WordTimestamp: len(request.TimestampGranularities) > 0, Diarization: request.ResponseFormat == "diarized_json", Mode: request.Mode}},
 	}
 	return g.generateAudioText(ctx, request, body)
 }
@@ -89,7 +90,7 @@ func (g Gemini) generateAudioText(ctx context.Context, request openai.AudioTrans
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return openai.AudioTranscriptionResponse{}, responseStatusError("gemini", response)
 	}
-	return decodeGeminiAudioTextResponse(response.Body)
+	return decodeGeminiAudioTextResponse(response.Body, request)
 }
 
 func validateGeminiAudioTranslationRequest(request openai.AudioTranscriptionRequest) error {
@@ -121,9 +122,20 @@ func validateGeminiAudioTranscriptionRequest(request openai.AudioTranscriptionRe
 	if _, ok := geminiAudioInputMIMEType(request.File.MediaType); !ok {
 		return geminiInvalid("file")
 	}
+	wordTimestamps := len(request.TimestampGranularities) == 1 && request.TimestampGranularities[0] == "word"
+	diarization := request.ResponseFormat == "diarized_json"
+	structuredFormat := (request.ResponseFormat == "verbose_json" && wordTimestamps) || diarization
+	if len(request.TimestampGranularities) > 0 && !wordTimestamps {
+		return geminiInvalid("timestamp_granularities")
+	}
+	if (wordTimestamps || diarization) && len(request.Keywords) > 0 {
+		return geminiInvalid("keywords")
+	}
+	if (wordTimestamps || diarization) && request.Mode == "SMART" {
+		return geminiInvalid("mode")
+	}
 	return rejectParameters("gemini",
-		parameterCheck{"response_format", request.ResponseFormat != "" && request.ResponseFormat != "json"},
-		parameterCheck{"timestamp_granularities", len(request.TimestampGranularities) > 0},
+		parameterCheck{"response_format", request.ResponseFormat != "" && request.ResponseFormat != "json" && !structuredFormat},
 		parameterCheck{"include", len(request.Include) > 0},
 		parameterCheck{"chunking_strategy", request.ChunkingStrategy != nil},
 		parameterCheck{"known_speaker_names", len(request.KnownSpeakerNames) > 0},
@@ -159,7 +171,7 @@ func geminiAudioInputMIMEType(mediaType string) (string, bool) {
 	}
 }
 
-func decodeGeminiAudioTextResponse(reader io.Reader) (openai.AudioTranscriptionResponse, error) {
+func decodeGeminiAudioTextResponse(reader io.Reader, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
 	payload, err := io.ReadAll(io.LimitReader(reader, maxAudioTranscriptionResponseBytes+1))
 	if err != nil || len(payload) > maxAudioTranscriptionResponseBytes {
 		return openai.AudioTranscriptionResponse{}, errors.New("Gemini audio response exceeds limit")
@@ -170,22 +182,69 @@ func decodeGeminiAudioTextResponse(reader io.Reader) (openai.AudioTranscriptionR
 		return openai.AudioTranscriptionResponse{}, errors.New("Gemini returned invalid audio response")
 	}
 	var textParts []string
+	var annotationParts []string
+	var words []openai.AudioTranscriptionWord
+	var segments []openai.AudioTranscriptionSegment
 	for _, part := range upstream.Candidates[0].Content.Parts {
 		if part.Thought {
 			continue
 		}
-		if part.Text == "" || part.InlineData != nil || part.FunctionCall != nil || part.FunctionResponse != nil {
+		if part.InlineData != nil || part.FunctionCall != nil || part.FunctionResponse != nil || (part.Text == "") == (part.AudioTranscription == nil) {
 			return openai.AudioTranscriptionResponse{}, errors.New("Gemini returned invalid audio content")
 		}
-		textParts = append(textParts, part.Text)
+		if part.Text != "" {
+			textParts = append(textParts, part.Text)
+			continue
+		}
+		transcription := part.AudioTranscription
+		segmentWords := make([]string, 0, len(transcription.Words))
+		segmentStart, segmentEnd := 0.0, 0.0
+		for index, word := range transcription.Words {
+			start, startErr := geminiAudioOffsetSeconds(word.StartOffset)
+			end, endErr := geminiAudioOffsetSeconds(word.EndOffset)
+			if startErr != nil || endErr != nil || strings.TrimSpace(word.Word) == "" || end < start {
+				return openai.AudioTranscriptionResponse{}, errors.New("Gemini returned invalid audio annotation")
+			}
+			if index == 0 {
+				segmentStart = start
+			}
+			segmentEnd = end
+			segmentWords = append(segmentWords, word.Word)
+			words = append(words, openai.AudioTranscriptionWord{Word: word.Word, Start: start, End: end})
+		}
+		if len(segmentWords) == 0 {
+			return openai.AudioTranscriptionResponse{}, errors.New("Gemini returned empty audio annotation")
+		}
+		annotationText := strings.Join(segmentWords, " ")
+		if request.ResponseFormat == "diarized_json" {
+			if strings.TrimSpace(transcription.SpeakerLabel) == "" {
+				return openai.AudioTranscriptionResponse{}, errors.New("Gemini returned audio annotation without a speaker")
+			}
+			segments = append(segments, openai.AudioTranscriptionSegment{ID: len(segments), Type: "transcript.text.segment", Speaker: transcription.SpeakerLabel, Text: annotationText, Start: segmentStart, End: segmentEnd})
+		}
+		annotationParts = append(annotationParts, annotationText)
 	}
 	usage := upstream.Usage
 	if usage.Prompt < 0 || usage.Total <= 0 || usage.Total < usage.Prompt || usage.Candidates < 0 || usage.Thoughts < 0 || usage.Candidates > int(^uint(0)>>1)-usage.Thoughts || usage.Total < usage.Prompt+usage.Candidates+usage.Thoughts {
 		return openai.AudioTranscriptionResponse{}, errors.New("Gemini returned inconsistent audio usage")
 	}
-	result := openai.AudioTranscriptionResponse{Text: strings.TrimSpace(strings.Join(textParts, "")), Usage: &openai.AudioTranscriptionUsage{Type: "tokens", InputTokens: usage.Prompt, OutputTokens: usage.Total - usage.Prompt, TotalTokens: usage.Total}}
+	if (len(request.TimestampGranularities) > 0 || request.ResponseFormat == "diarized_json") && len(words) == 0 {
+		return openai.AudioTranscriptionResponse{}, errors.New("Gemini returned audio response without requested annotations")
+	}
+	if len(textParts) == 0 {
+		textParts = []string{strings.Join(annotationParts, " ")}
+	}
+	result := openai.AudioTranscriptionResponse{Text: strings.TrimSpace(strings.Join(textParts, "")), Words: words, Segments: segments, Usage: &openai.AudioTranscriptionUsage{Type: "tokens", InputTokens: usage.Prompt, OutputTokens: usage.Total - usage.Prompt, TotalTokens: usage.Total}}
 	if message := result.Validate(); message != "" {
 		return openai.AudioTranscriptionResponse{}, errors.New(message)
 	}
 	return result, nil
+}
+
+func geminiAudioOffsetSeconds(value string) (float64, error) {
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration < 0 {
+		return 0, errors.New("invalid audio offset")
+	}
+	return duration.Seconds(), nil
 }

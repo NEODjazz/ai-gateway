@@ -86,10 +86,6 @@ func TestGeminiAudioTranscriptionRejectsUnsupportedParametersBeforeNetwork(t *te
 		mutate      func(*openai.AudioTranscriptionRequest)
 	}{
 		{"format", "response_format", func(r *openai.AudioTranscriptionRequest) { r.ResponseFormat = "verbose_json" }},
-		{"timestamps", "response_format", func(r *openai.AudioTranscriptionRequest) {
-			r.ResponseFormat = "verbose_json"
-			r.TimestampGranularities = []string{"word"}
-		}},
 		{"include", "include", func(r *openai.AudioTranscriptionRequest) { r.Include = []string{"logprobs"} }},
 		{"chunking", "chunking_strategy", func(r *openai.AudioTranscriptionRequest) {
 			r.ChunkingStrategy = &openai.AudioChunkingStrategy{Type: "auto"}
@@ -108,6 +104,74 @@ func TestGeminiAudioTranscriptionRejectsUnsupportedParametersBeforeNetwork(t *te
 	}
 	if calls != 0 {
 		t.Fatalf("calls=%d", calls)
+	}
+}
+
+func TestGeminiAudioTranscriptionMapsDiarization(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body geminiRequest
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.Generation.AudioTranscription == nil || body.Generation.AudioTranscription.WordTimestamp || !body.Generation.AudioTranscription.Diarization {
+			t.Fatalf("body=%+v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"text":"Hello world"},{"audioTranscription":{"speakerLabel":"spk_1","words":[{"word":"Hello","startOffset":"0.100s","endOffset":"0.450s"},{"word":"world","startOffset":"0.500s","endOffset":"0.850s"}]}}]}}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2,"totalTokenCount":10}}`)
+	}))
+	defer server.Close()
+	request := openai.AudioTranscriptionRequest{Model: "model", File: transcriptionAttachment(), ResponseFormat: "diarized_json", Mode: "VERBATIM"}
+	response, err := NewGemini(server.URL, "secret", false).TranscribeAudio(t.Context(), request)
+	if err != nil || response.Text != "Hello world" || len(response.Words) != 2 || response.Words[0].Start != 0.1 || response.Words[1].End != 0.85 || len(response.Segments) != 1 || response.Segments[0].Speaker != "spk_1" || response.Usage == nil || response.Usage.TotalTokens != 10 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGeminiAudioTranscriptionMapsWordTimestamps(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body geminiRequest
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.Generation.AudioTranscription == nil || !body.Generation.AudioTranscription.WordTimestamp || body.Generation.AudioTranscription.Diarization {
+			t.Fatalf("body=%+v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"audioTranscription":{"words":[{"word":"Hello","startOffset":"0.100s","endOffset":"0.450s"}]}}]}}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":1,"totalTokenCount":9}}`)
+	}))
+	defer server.Close()
+	request := openai.AudioTranscriptionRequest{Model: "model", File: transcriptionAttachment(), ResponseFormat: "verbose_json", TimestampGranularities: []string{"word"}}
+	response, err := NewGemini(server.URL, "secret", false).TranscribeAudio(t.Context(), request)
+	if err != nil || response.Text != "Hello" || len(response.Words) != 1 || response.Words[0].Start != 0.1 || len(response.Segments) != 0 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGeminiAudioTranscriptionRejectsIncompatibleStructuredControls(t *testing.T) {
+	tests := []struct {
+		name, param string
+		request     openai.AudioTranscriptionRequest
+	}{
+		{"segment timestamps", "timestamp_granularities", openai.AudioTranscriptionRequest{ResponseFormat: "verbose_json", TimestampGranularities: []string{"segment"}}},
+		{"timestamps with vocabulary", "keywords", openai.AudioTranscriptionRequest{ResponseFormat: "verbose_json", TimestampGranularities: []string{"word"}, Keywords: []string{"Acme"}}},
+		{"diarization with vocabulary", "keywords", openai.AudioTranscriptionRequest{ResponseFormat: "diarized_json", Keywords: []string{"Acme"}}},
+		{"smart timestamps", "mode", openai.AudioTranscriptionRequest{ResponseFormat: "verbose_json", TimestampGranularities: []string{"word"}, Mode: "SMART"}},
+		{"smart diarization", "mode", openai.AudioTranscriptionRequest{ResponseFormat: "diarized_json", Mode: "SMART"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.request.Model, test.request.File = "model", transcriptionAttachment()
+			err := NewGemini("https://example.invalid", "secret", false).ValidateAudioTranscriptionParameters(test.request)
+			var providerErr *Error
+			if !errors.As(err, &providerErr) || providerErr.Param != test.param {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
+func TestGeminiAudioTranscriptionRejectsMalformedAnnotations(t *testing.T) {
+	request := openai.AudioTranscriptionRequest{ResponseFormat: "verbose_json", TimestampGranularities: []string{"word"}}
+	for _, payload := range []string{
+		`{"candidates":[{"content":{"parts":[{"text":"hello"}]}}],"usageMetadata":{"promptTokenCount":1,"totalTokenCount":2}}`,
+		`{"candidates":[{"content":{"parts":[{"audioTranscription":{"words":[{"word":"hello","startOffset":"bad","endOffset":"1s"}]}}]}}],"usageMetadata":{"promptTokenCount":1,"totalTokenCount":2}}`,
+		`{"candidates":[{"content":{"parts":[{"audioTranscription":{"words":[{"word":"hello","startOffset":"2s","endOffset":"1s"}]}}]}}],"usageMetadata":{"promptTokenCount":1,"totalTokenCount":2}}`,
+	} {
+		if _, err := decodeGeminiAudioTextResponse(strings.NewReader(payload), request); err == nil {
+			t.Fatalf("malformed annotations accepted: %s", payload)
+		}
 	}
 }
 

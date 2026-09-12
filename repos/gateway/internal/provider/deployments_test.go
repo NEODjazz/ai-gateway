@@ -620,7 +620,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedAudioTranscriptionOptio
 	expected := map[string][]string{
 		"openai": streaming, "openai-compatible": streaming, "azure-openai": streaming,
 		"openrouter": {"language", "prompt", "response_format", "temperature", "timestamp_granularities"},
-		"gemini":     {"language", "prompt", "response_format", "temperature", "languages", "keywords", "mode"},
+		"gemini":     {"language", "prompt", "response_format", "temperature", "timestamp_granularities", "languages", "keywords", "mode"},
 		"mistral":    {"language", "response_format", "temperature", "timestamp_granularities", "keywords"},
 		"groq":       {"language", "prompt", "response_format", "temperature", "timestamp_granularities"},
 		"xai":        {"language", "keywords"},

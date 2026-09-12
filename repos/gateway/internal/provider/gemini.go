@@ -76,6 +76,7 @@ func (Gemini) SupportsUnsignedReasoning() bool { return true }
 type geminiPart struct {
 	Text                string                            `json:"text,omitempty"`
 	InlineData          *geminiInlineData                 `json:"inlineData,omitempty"`
+	AudioTranscription  *geminiAudioTranscription         `json:"audioTranscription,omitempty"`
 	FunctionCall        *geminiFunctionCall               `json:"functionCall,omitempty"`
 	FunctionResponse    *geminiFunctionResponse           `json:"functionResponse,omitempty"`
 	ExecutableCode      *openai.GeminiExecutableCode      `json:"executableCode,omitempty"`
@@ -133,7 +134,20 @@ type geminiGeneration struct {
 type geminiAudioTranscriptionConfig struct {
 	LanguageCodes    []string `json:"languageCodes,omitempty"`
 	CustomVocabulary []string `json:"customVocabulary,omitempty"`
+	WordTimestamp    bool     `json:"wordTimestamp,omitempty"`
+	Diarization      bool     `json:"diarization,omitempty"`
 	Mode             string   `json:"mode,omitempty"`
+}
+
+type geminiAudioTranscription struct {
+	SpeakerLabel string            `json:"speakerLabel,omitempty"`
+	Words        []geminiAudioWord `json:"words,omitempty"`
+}
+
+type geminiAudioWord struct {
+	Word        string `json:"word"`
+	StartOffset string `json:"startOffset"`
+	EndOffset   string `json:"endOffset"`
 }
 type geminiImageConfig struct {
 	AspectRatio string `json:"aspectRatio,omitempty"`
