@@ -241,6 +241,11 @@ is buffered until the provider container descriptor has passed validation and
 its owner, expiry and deployment binding have been stored; only then is the
 complete event sequence emitted. This prevents clients from receiving a
 container ID that cannot be safely reused after a storage failure.
+Messages accepts native `thinking` policies in adaptive, disabled and legacy
+budgeted modes. Validation enforces the mode-specific fields, the manual budget
+against the total `max_tokens` output limit, and the temperature constraint.
+Generation, token counting and durable batches preserve the policy, routing
+requires the `thinking` deployment capability, and response caches are bypassed.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.

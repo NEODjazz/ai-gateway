@@ -943,3 +943,13 @@ Gateway Helm revision 446 completed successfully, and pod
 image digest. Its live endpoint served OpenAPI 0.1.346 with the buffered skill
 SSE contract. A structurally valid `stream=true` built-in skill request reached
 authentication and returned 401.
+
+Source `fd09e6d` adds native Messages thinking configuration in adaptive,
+disabled and legacy budgeted modes. Validation enforces mode-specific fields,
+manual budget and temperature constraints. Routing requires an explicit native
+thinking capability, response caches are bypassed, and the existing max_tokens
+reserve remains the total output bound. Follow-up source `5e132c4` preserves the
+same policy through the public native token-count endpoint. Generation, token
+counting and durable batches therefore use the same validated provider context.
+Full Go test, race, vet and build checks and all 166 UI tests completed
+successfully.

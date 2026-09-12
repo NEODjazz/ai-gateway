@@ -675,7 +675,7 @@ pipeline; this endpoint does not forward client credentials to providers.
 Supported input is text, text system blocks, base64 user images, function schemas,
 assistant tool-use history, text tool results, tool choice and parallel-tool
 control, temperature, top-p, positive max_tokens, stop_sequences, stream, `service_tier=auto|standard_only`, opaque
-`metadata.user_id`, output effort, signed/redacted thinking history and JSON Schema formatting. Provider-specific
+`metadata.user_id`, output effort, native thinking configuration, signed/redacted thinking history and JSON Schema formatting. Provider-specific
 capability checks still apply after conversion. Responses contain native text or
 tool-use blocks, signed `thinking` blocks, opaque `redacted_thinking` blocks and
 native usage fields. Thinking is never projected into ordinary response text.
@@ -703,6 +703,15 @@ that cannot be represented in Messages produces an explicit conversion error.
 `metadata.user_id` is limited to 512 Unicode characters and remains request
 metadata; it does not replace gateway authorization or billing identities.
 Supported effort values are `low`, `medium`, `high`, `xhigh`, and `max`.
+Native `thinking` accepts adaptive, disabled, and legacy enabled modes. Adaptive
+thinking may select `display=summarized|omitted`; enabled thinking additionally
+requires `budget_tokens >= 1024` and a budget smaller than `max_tokens`.
+Temperature must be omitted or exactly 1 for adaptive and enabled modes. Routing
+requires the explicit `thinking` capability on a native Anthropic deployment.
+The same configuration is forwarded to native token counting and durable batch
+execution. Exact and semantic response caches are bypassed. The existing
+`max_tokens` reserve remains the total output bound, including thinking, and
+provider-reported usage settles the complete output once.
 The provider-assigned `standard`, `priority` or `batch` service tier is retained
 in JSON and SSE usage. Unknown reported tiers fail the response instead of being
 accepted as trusted accounting metadata. Provider-reported `output_tokens_details.thinking_tokens` is retained in JSON,
@@ -811,7 +820,8 @@ failure, model/tool authorization, TPM, unknown input, response-size bounds and
 reported usage reaching the accounting stage through Router. No live paid
 provider calls were used. Protocol references:
 [Messages](https://platform.claude.com/docs/en/api/messages/create) and
-[streaming](https://platform.claude.com/docs/en/build-with-claude/streaming).
+[streaming](https://platform.claude.com/docs/en/build-with-claude/streaming), and
+[extended thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking).
 
 When an adapter reports an exact matched stop sequence, Chat choices preserve it
 in the optional `stop_sequence` result field. Anthropic populates this only for

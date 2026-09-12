@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.346
+  version: 0.1.347
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -6897,6 +6897,7 @@ components:
         tools: {$ref: '#/components/schemas/MessagesRequest/properties/tools'}
         tool_choice: {$ref: '#/components/schemas/MessagesRequest/properties/tool_choice'}
         output_config: {$ref: '#/components/schemas/MessagesRequest/properties/output_config'}
+        thinking: {$ref: '#/components/schemas/MessagesRequest/properties/thinking'}
         container: {$ref: '#/components/schemas/MessagesRequest/properties/container'}
     MessagesToolsetMemberConfig:
       type: object
@@ -6910,7 +6911,7 @@ components:
       required: [model, max_tokens, messages]
       properties:
         model: {type: string, minLength: 1}
-        max_tokens: {type: integer, minimum: 1}
+        max_tokens: {type: integer, minimum: 1, description: Total output limit including thinking tokens. A manual thinking budget must be smaller than this value.}
         stop_sequences:
           type: array
           maxItems: 4
@@ -6924,7 +6925,7 @@ components:
           properties:
             include_usage: {type: boolean, description: Emit a final usage chunk to the client; upstream usage collection remains enabled for billing.}
             include_obfuscation: {type: boolean, default: true, description: Add random padding to streaming delta events to reduce payload-size side channels.}
-        temperature: {type: number, minimum: 0, maximum: 1}
+        temperature: {type: number, minimum: 0, maximum: 1, description: Must be omitted or equal to 1 when adaptive or enabled thinking is requested.}
         top_p: {type: number, minimum: 0, maximum: 1}
         service_tier: {type: string, enum: [auto, standard_only], description: "Native capacity selection. The assigned standard, priority or batch tier is returned in usage.service_tier."}
         container:
@@ -6969,6 +6970,27 @@ components:
               properties:
                 type: {type: string, const: json_schema}
                 schema: {type: object, additionalProperties: true}
+        thinking:
+          description: Native reasoning policy. Requires the thinking deployment capability. Response caching is bypassed and provider-reported output usage settles the complete response within max_tokens.
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [type]
+              properties:
+                type: {type: string, const: adaptive}
+                display: {type: string, enum: [summarized, omitted]}
+            - type: object
+              additionalProperties: false
+              required: [type, budget_tokens]
+              properties:
+                type: {type: string, const: enabled}
+                budget_tokens: {type: integer, minimum: 1024, description: Must be smaller than max_tokens on generation requests.}
+                display: {type: string, enum: [summarized, omitted]}
+            - type: object
+              additionalProperties: false
+              required: [type]
+              properties:
+                type: {type: string, const: disabled}
         system:
           description: Text or text blocks. Text blocks may carry an explicit ephemeral cache_control breakpoint.
           oneOf:
