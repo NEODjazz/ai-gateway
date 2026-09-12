@@ -143,6 +143,24 @@ func (p Pipeline) RunTokenCount(ctx context.Context, req *RequestContext) error 
 	return p.runPre(ctx, req, true)
 }
 
+// RunTokenCountAfterAuthentication applies counting policies to an owned
+// resource resolved after authentication without running auth or billing twice.
+func (p Pipeline) RunTokenCountAfterAuthentication(ctx context.Context, req *RequestContext) error {
+	for _, module := range p.modules {
+		if module.Name() == "auth" || module.Name() == "billing" {
+			continue
+		}
+		err := p.run(ctx, req, module, "pre", module.Handle)
+		if err != nil {
+			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
+				return fmt.Errorf("%s module failed: %w", module.Name(), err)
+			}
+			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
+		}
+	}
+	return nil
+}
+
 // RunAuthentication establishes the caller identity for a non-inference
 // operation without invoking content transforms or the billing lifecycle.
 func (p Pipeline) RunAuthentication(ctx context.Context, req *RequestContext) error {

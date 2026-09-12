@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
@@ -155,6 +156,21 @@ func TestCountEndpointPreservesPlainTextDocument(t *testing.T) {
 	response := countEndpointCall(handler, `{"model":"m","messages":[{"role":"user","content":[{"type":"document","source":{"type":"text","media_type":"text/plain","data":"private@example.com"},"title":"Report","citations":{"enabled":true}}]}]}`, "gateway-test-key")
 	message := counter.request.Request.Messages[0]
 	if response.Code != http.StatusOK || counter.calls != 1 || !openai.HasChatTextDocuments(counter.request.Request) || openai.ContentText(message.Content) != "private@example.com" || len(message.AnthropicDocumentMetadata) != 1 || message.AnthropicDocumentMetadata[0].Title != "Report" || len(message.AnthropicDocumentCitations) != 1 || !message.AnthropicDocumentCitations[0] {
+		t.Fatalf("status=%d body=%s calls=%d request=%+v", response.Code, response.Body.String(), counter.calls, counter.request.Request)
+	}
+}
+
+func TestCountEndpointResolvesOwnedFileDocumentWithoutBilling(t *testing.T) {
+	counter := &countProviderSpy{}
+	billing := &lifecycleBillingModule{}
+	identity := modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"}
+	content := []byte("count this document")
+	files := &memoryFileStore{files: map[string]filestate.File{"file_owned": {
+		ID: "file_owned", OwnerKey: fileOwnerKey(identity), Filename: "notes.txt", Purpose: "user_data", ContentType: "text/plain", Bytes: int64(len(content)), Content: content,
+	}}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: identity.CredentialID, user: identity.UserID}, billing, accessPolicyModule{models: []string{"*"}}}), counter).WithFileStore(files, FileRuntimeConfig{MaxBytes: 32 << 20, OwnerQuotaBytes: 64 << 20}))
+	response := countEndpointCall(handler, `{"model":"m","messages":[{"role":"user","content":[{"type":"document","source":{"type":"file","file_id":"file_owned"}}]}]}`, "gateway-test-key")
+	if response.Code != http.StatusOK || counter.calls != 1 || billing.calls != 0 || !openai.HasChatTextDocuments(counter.request.Request) || openai.ContentText(counter.request.Request.Messages[0].Content) != string(content) {
 		t.Fatalf("status=%d body=%s calls=%d request=%+v", response.Code, response.Body.String(), counter.calls, counter.request.Request)
 	}
 }

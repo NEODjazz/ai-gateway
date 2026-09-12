@@ -420,6 +420,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 						Type      string `json:"type"`
 						MediaType string `json:"media_type"`
 						Data      string `json:"data"`
+						FileID    string `json:"file_id"`
 					} `json:"source"`
 				}
 				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "user" || block.Citations != nil && !block.Citations.Enabled {
@@ -446,6 +447,11 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 					}
 					textDocumentRunes += runes
 					document = map[string]any{"type": "input_document", "text": block.Source.Data}
+				case block.Source.Type == "file" && block.Source.FileID != "" && block.Source.MediaType == "" && block.Source.Data == "":
+					if len(block.Source.FileID) > 128 || !strings.HasPrefix(block.Source.FileID, "file_") {
+						return result, errors.New("document file_id is invalid")
+					}
+					document = map[string]any{"type": "input_file_reference", "file_id": block.Source.FileID}
 				default:
 					return result, errors.New("only base64 PDF and inline plain-text user documents are supported")
 				}

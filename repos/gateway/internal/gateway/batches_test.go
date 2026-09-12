@@ -426,7 +426,7 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 	request := messagesRequest{
 		Model: "message-model", MaxTokens: 32,
 		System:   json.RawMessage(`"Be concise"`),
-		Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"},{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"title":"PDF report","context":"Audited","citations":{"enabled":true}},{"type":"document","source":{"type":"text","media_type":"text/plain","data":"Quarterly revenue is 42."},"title":"Text report","context":"Internal","citations":{"enabled":true}}]`)}},
+		Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"},{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"title":"PDF report","context":"Audited","citations":{"enabled":true}},{"type":"document","source":{"type":"file","file_id":"file_document"},"title":"Text report","context":"Internal","citations":{"enabled":true}}]`)}},
 	}
 	requestBody, err := json.Marshal(request)
 	if err != nil {
@@ -438,6 +438,8 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 	}
 	line = append(line, '\n')
 	files.files["file_messages"] = filestate.File{ID: "file_messages", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(line)), Content: line}
+	document := []byte("Quarterly revenue is 42.")
+	files.files["file_document"] = filestate.File{ID: "file_document", OwnerKey: owner, Filename: "report.txt", Purpose: "user_data", ContentType: "text/plain", Bytes: int64(len(document)), Content: document}
 	h := NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), runtime, rates).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
 	routes := Routes(h)
 	createBody, _ := json.Marshal(openai.BatchCreateRequest{InputFileID: "file_messages", Endpoint: "/v1/messages", CompletionWindow: openai.BatchCompletionWindow})
@@ -449,6 +451,9 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 	if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil || createdResponse.Code != http.StatusOK {
 		t.Fatalf("create status=%d body=%s err=%v", createdResponse.Code, createdResponse.Body.String(), err)
 	}
+	files.mu.Lock()
+	delete(files.files, "file_document")
+	files.mu.Unlock()
 	if processed, err := h.ProcessBatchItems(t.Context()); err != nil || processed != 1 {
 		t.Fatalf("processed=%d err=%v", processed, err)
 	}
@@ -462,10 +467,6 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 	if err != nil || !strings.Contains(string(output.Content), `"type":"message"`) || !strings.Contains(string(output.Content), `"stop_reason":"end_turn"`) || !strings.Contains(string(output.Content), `"input_tokens":3`) {
 		t.Fatalf("output=%s err=%v", output.Content, err)
 	}
-	chat, err := request.chat()
-	if err != nil {
-		t.Fatal(err)
-	}
 	runtime.mu.Lock()
 	providerRequest := runtime.chat
 	runtime.mu.Unlock()
@@ -478,8 +479,8 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 			metadata = message.AnthropicDocumentMetadata
 		}
 	}
-	if providerRequest.RequestID == "" || providerRequest.Metadata["gateway.api_type"] != "messages" || reservedTokens != estimateChatTokens(chat) || attachmentErr != nil || len(attachments) != 1 || !openai.HasChatTextDocuments(providerRequest.Request) || len(citations) != 2 || !citations[0] || !citations[1] || len(metadata) != 2 || metadata[0].Title != "PDF report" || metadata[1].Title != "Text report" {
-		t.Fatalf("request=%+v metadata=%v TPM=%d want=%d", providerRequest.Request, providerRequest.Metadata, reservedTokens, estimateChatTokens(chat))
+	if providerRequest.RequestID == "" || providerRequest.Metadata["gateway.api_type"] != "messages" || reservedTokens != estimateChatTokens(providerRequest.Request) || attachmentErr != nil || len(attachments) != 1 || !openai.HasChatTextDocuments(providerRequest.Request) || len(citations) != 2 || !citations[0] || !citations[1] || len(metadata) != 2 || metadata[0].Title != "PDF report" || metadata[1].Title != "Text report" {
+		t.Fatalf("request=%+v metadata=%v TPM=%d want=%d", providerRequest.Request, providerRequest.Metadata, reservedTokens, estimateChatTokens(providerRequest.Request))
 	}
 }
 

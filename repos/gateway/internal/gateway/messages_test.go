@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
@@ -119,6 +120,35 @@ func TestMessagesConvertsBoundedPlainTextDocument(t *testing.T) {
 	request.Messages[0].Content = encoded
 	if _, err := request.chat(); err == nil || !strings.Contains(err.Error(), "five documents") {
 		t.Fatalf("too many text documents accepted: %v", err)
+	}
+}
+
+func TestMessagesResolvesOwnedFileDocumentBeforePolicy(t *testing.T) {
+	identity := modules.RequestContext{CredentialID: "credential", UserID: "user"}
+	owner := fileOwnerKey(identity)
+	content := []byte("Contact private@example.com")
+	files := &memoryFileStore{files: map[string]filestate.File{
+		"file_owned": {ID: "file_owned", OwnerKey: owner, Filename: "notes.txt", Purpose: "user_data", ContentType: "text/plain", Bytes: int64(len(content)), Content: content},
+		"file_pdf":   {ID: "file_pdf", OwnerKey: owner, Filename: "report.pdf", Purpose: "user_data", ContentType: "application/pdf", Bytes: 16, Content: []byte("%PDF-1.7\ncontent")},
+		"file_other": {ID: "file_other", OwnerKey: "another-owner", Filename: "secret.txt", Purpose: "user_data", ContentType: "text/plain", Bytes: 6, Content: []byte("secret")},
+	}}
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg-file", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "summary"}, FinishReason: "stop"}}}}
+	billing := &lifecycleBillingModule{}
+	pipeline := modules.NewPipeline([]modules.Module{&fileAuthModule{credential: identity.CredentialID, user: identity.UserID}, modules.NewAnonymizerModule(true, modules.RuleEmail), billing})
+	handler := Routes(NewHandler(pipeline, upstream).WithFileStore(files, FileRuntimeConfig{MaxBytes: 32 << 20, OwnerQuotaBytes: 64 << 20}))
+
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"file","file_id":"file_owned"},"title":"Notes"}]}]}`, "key")
+	if response.Code != http.StatusOK || upstream.calls != 1 || billing.calls != 1 || !openai.HasChatTextDocuments(upstream.request.Request) || strings.Contains(openai.ContentText(upstream.request.Request.Messages[0].Content), "private@example.com") {
+		t.Fatalf("status=%d calls=%d request=%+v body=%s", response.Code, upstream.calls, upstream.request.Request, response.Body.String())
+	}
+	pdf := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"file","file_id":"file_pdf"},"citations":{"enabled":true}}]}]}`, "key")
+	attachments, attachmentErr := openai.ChatFileAttachments(upstream.request.Request.Messages)
+	if pdf.Code != http.StatusOK || upstream.calls != 2 || billing.calls != 2 || attachmentErr != nil || len(attachments) != 1 || len(upstream.request.Request.Messages[0].AnthropicDocumentCitations) != 1 || !upstream.request.Request.Messages[0].AnthropicDocumentCitations[0] {
+		t.Fatalf("PDF status=%d calls=%d billing=%d attachments=%+v err=%v body=%s", pdf.Code, upstream.calls, billing.calls, attachments, attachmentErr, pdf.Body.String())
+	}
+	foreign := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"file","file_id":"file_other"}}]}]}`, "key")
+	if foreign.Code != http.StatusBadRequest || upstream.calls != 2 || billing.calls != 2 || !strings.Contains(foreign.Body.String(), "document file is unavailable") {
+		t.Fatalf("foreign status=%d calls=%d body=%s", foreign.Code, upstream.calls, foreign.Body.String())
 	}
 }
 

@@ -71,11 +71,29 @@ func (h Handler) CountMessageTokens(w http.ResponseWriter, r *http.Request) {
 // counting protocol, without opening a generation billing lifecycle.
 func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, key string) (provider.TokenCountResult, bool) {
 	req := modules.RequestContext{APIKey: key, RequestID: executionID(w), SessionID: sessionID(r), Request: request}
-	if err := h.pipeline.RunTokenCount(r.Context(), &req); err != nil {
-		if errors.Is(err, modules.ErrUnauthorized) {
+	var pipelineErr error
+	if openai.HasChatFileReferences(request) {
+		pipelineErr = h.pipeline.RunAuthentication(r.Context(), &req)
+		if pipelineErr == nil {
+			req.APIKey = ""
+			if err := h.resolveMessagesFileReferences(r.Context(), req, &req.Request); err != nil {
+				if errors.Is(err, errMessagesFileStorageUnavailable) {
+					writeError(w, http.StatusServiceUnavailable, "file_storage_unavailable", err.Error())
+				} else {
+					writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+				}
+				return provider.TokenCountResult{}, false
+			}
+			pipelineErr = h.pipeline.RunTokenCountAfterAuthentication(r.Context(), &req)
+		}
+	} else {
+		pipelineErr = h.pipeline.RunTokenCount(r.Context(), &req)
+	}
+	if pipelineErr != nil {
+		if errors.Is(pipelineErr, modules.ErrUnauthorized) {
 			writeError(w, 401, "unauthorized", "invalid api key")
 		} else {
-			writeProviderFailure(w, err)
+			writeProviderFailure(w, pipelineErr)
 		}
 		return provider.TokenCountResult{}, false
 	}

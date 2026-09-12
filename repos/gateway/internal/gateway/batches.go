@@ -31,6 +31,7 @@ const (
 	batchWorkerLease   = 16 * time.Minute
 	batchResultMaxSize = 64 << 20
 	batchResultMinLine = 512
+	batchMaxLineBytes  = 4 << 20
 )
 
 type batchJob struct {
@@ -122,7 +123,7 @@ var errBatchResponseWritten = errors.New("batch response already written")
 
 func (h Handler) decodeBatchItems(w http.ResponseWriter, ctx context.Context, identity modules.RequestContext, endpoint string, payload []byte) ([]batchstate.Item, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(payload))
-	scanner.Buffer(make([]byte, 64<<10), 4<<20)
+	scanner.Buffer(make([]byte, 64<<10), batchMaxLineBytes)
 	items := make([]batchstate.Item, 0)
 	seen := map[string]struct{}{}
 	for scanner.Scan() {
@@ -167,6 +168,23 @@ func (h Handler) decodeBatchItems(w http.ResponseWriter, ctx context.Context, id
 				if err != nil {
 					return nil, fmt.Errorf("line %d: encode resolved OCR request: %w", lineNumber, err)
 				}
+			}
+		}
+		if endpoint == "/v1/messages" {
+			var request messagesRequest
+			if json.Unmarshal(normalized, &request) != nil {
+				return nil, fmt.Errorf("line %d: normalized Messages request is invalid", lineNumber)
+			}
+			resolveErr := h.resolveMessagesRequestFileReferences(ctx, identity, &request)
+			if resolveErr != nil {
+				return nil, fmt.Errorf("line %d: %w", lineNumber, resolveErr)
+			}
+			normalized, err = json.Marshal(request)
+			if err != nil {
+				return nil, fmt.Errorf("line %d: encode resolved Messages request: %w", lineNumber, err)
+			}
+			if len(normalized) > batchMaxLineBytes {
+				return nil, fmt.Errorf("line %d: resolved Messages request exceeds the 4 MiB limit", lineNumber)
 			}
 		}
 		if !h.authorizeBatchModel(w, identity, model) {

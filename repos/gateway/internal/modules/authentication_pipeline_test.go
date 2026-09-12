@@ -46,6 +46,19 @@ func TestRunAuthenticationRequiresEstablishedCredential(t *testing.T) {
 	}
 }
 
+func TestRunTokenCountAfterAuthenticationSkipsAuthAndBilling(t *testing.T) {
+	auth := &authenticationPipelineModule{name: "auth", establish: true}
+	billing := &authenticationPipelineModule{name: "billing"}
+	content := &authenticationPipelineModule{name: "dlp"}
+	req := RequestContext{CredentialID: "credential"}
+	if err := NewPipeline([]Module{auth, billing, content}).RunTokenCountAfterAuthentication(t.Context(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if auth.calls != 0 || billing.calls != 0 || content.calls != 1 {
+		t.Fatalf("auth=%d billing=%d content=%d", auth.calls, billing.calls, content.calls)
+	}
+}
+
 func TestRunBillingLifecycleOnlyRunsBillingPhase(t *testing.T) {
 	auth := &authenticationPipelineModule{name: "auth", establish: true}
 	billing := &billingLifecyclePipelineModule{}
