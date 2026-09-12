@@ -43,6 +43,7 @@ type ProviderCapabilityProfile struct {
 	ImageVariationParameters     ProviderImageVariationParameterPolicy     `json:"image_variation_parameters"`
 	AudioTranscriptionParameters ProviderAudioTranscriptionParameterPolicy `json:"audio_transcription_parameters"`
 	AudioTranslationParameters   ProviderAudioTranslationParameterPolicy   `json:"audio_translation_parameters"`
+	AudioSpeechParameters        ProviderAudioSpeechParameterPolicy        `json:"audio_speech_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -104,6 +105,10 @@ type ProviderAudioTranscriptionParameterPolicy struct {
 }
 
 type ProviderAudioTranslationParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
+}
+
+type ProviderAudioSpeechParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 }
 
@@ -369,9 +374,38 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			ImageVariationParameters:     managedProviderImageVariationParameterPolicy(client, slicesContain(operations, "image_variation")),
 			AudioTranscriptionParameters: managedProviderAudioTranscriptionParameterPolicy(client, slicesContain(operations, "audio_transcription")),
 			AudioTranslationParameters:   managedProviderAudioTranslationParameterPolicy(client, slicesContain(operations, "audio_translation")),
+			AudioSpeechParameters:        managedProviderAudioSpeechParameterPolicy(client, slicesContain(operations, "audio_speech")),
 		})
 	}
 	return profiles
+}
+
+func managedProviderAudioSpeechParameterPolicy(client Client, supported bool) ProviderAudioSpeechParameterPolicy {
+	policy := ProviderAudioSpeechParameterPolicy{SupportedOptions: []string{}}
+	validator, ok := client.(interface {
+		ValidateAudioSpeechParameters(openai.AudioSpeechRequest) error
+	})
+	if !supported || !ok {
+		return policy
+	}
+	baseline := openai.AudioSpeechRequest{Model: "model", Input: "text", Voice: "voice"}
+	for _, probe := range []struct {
+		name  string
+		apply func(*openai.AudioSpeechRequest)
+	}{
+		{"language", func(r *openai.AudioSpeechRequest) { r.Language = "en" }},
+		{"instructions", func(r *openai.AudioSpeechRequest) { r.Instructions = "warmly" }},
+		{"response_format", func(r *openai.AudioSpeechRequest) { r.ResponseFormat = "mp3" }},
+		{"speed", func(r *openai.AudioSpeechRequest) { value := 1.0; r.Speed = &value }},
+		{"stream_format", func(r *openai.AudioSpeechRequest) { r.StreamFormat = "audio" }},
+	} {
+		request := baseline
+		probe.apply(&request)
+		if validator.ValidateAudioSpeechParameters(request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	return policy
 }
 
 func managedProviderAudioTranslationParameterPolicy(client Client, supported bool) ProviderAudioTranslationParameterPolicy {

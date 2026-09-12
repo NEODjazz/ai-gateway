@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.310
+  version: 0.1.311
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9307,7 +9307,7 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters, image_edit_parameters, image_variation_parameters, audio_transcription_parameters, audio_translation_parameters]
+      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters, image_edit_parameters, image_variation_parameters, audio_transcription_parameters, audio_translation_parameters, audio_speech_parameters]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, cohere, mistral, voyage, bedrock, groq, deepseek, xai, opensandbox]}
         operations:
@@ -9349,6 +9349,8 @@ components:
           $ref: '#/components/schemas/ProviderAudioTranscriptionParameterPolicy'
         audio_translation_parameters:
           $ref: '#/components/schemas/ProviderAudioTranslationParameterPolicy'
+        audio_speech_parameters:
+          $ref: '#/components/schemas/ProviderAudioSpeechParameterPolicy'
     ProviderChatParameterPolicy:
       type: object
       additionalProperties: false
@@ -9512,6 +9514,15 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, enum: [language, prompt, response_format, temperature, timestamp_granularities, include, languages, keywords, chunking_strategy, known_speakers]}
+    ProviderAudioSpeechParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [supported_options]
+      properties:
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [language, instructions, response_format, speed, stream_format]}
     ProviderCredentialCreateInput:
       type: object
       additionalProperties: false

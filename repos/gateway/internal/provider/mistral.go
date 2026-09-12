@@ -84,17 +84,21 @@ func (Mistral) CreateImageVariation(context.Context, openai.ImageVariationReques
 	return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_operation", Err: errors.New("image variations are not supported by this adapter")}
 }
 
-func (p Mistral) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
+func (Mistral) ValidateAudioSpeechParameters(request openai.AudioSpeechRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.AudioSpeechResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
-	if err := rejectParameters("mistral",
+	return rejectParameters("mistral",
 		parameterCheck{"language", request.Language != ""},
 		parameterCheck{"instructions", request.Instructions != ""},
 		parameterCheck{"speed", request.Speed != nil},
 		parameterCheck{"stream_format", request.StreamFormat != ""},
 		parameterCheck{"response_format", request.ResponseFormat == "aac"},
-	); err != nil {
+	)
+}
+
+func (p Mistral) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
+	if err := p.ValidateAudioSpeechParameters(request); err != nil {
 		return openai.AudioSpeechResponse{}, err
 	}
 	responseFormat := request.ResponseFormat

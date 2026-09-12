@@ -110,12 +110,19 @@ func (p OpenRouter) ValidateAudioTranscriptionParameters(request openai.AudioTra
 }
 
 func (p OpenRouter) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
-	if err := rejectParameters("openrouter",
-		parameterCheck{"instructions", request.Instructions != ""}, parameterCheck{"stream_format", request.StreamFormat != ""},
-	); err != nil {
+	if err := p.ValidateAudioSpeechParameters(request); err != nil {
 		return openai.AudioSpeechResponse{}, err
 	}
 	return p.compatible.GenerateSpeech(ctx, request)
+}
+
+func (p OpenRouter) ValidateAudioSpeechParameters(request openai.AudioSpeechRequest) error {
+	if err := p.compatible.ValidateAudioSpeechParameters(request); err != nil {
+		return err
+	}
+	return rejectParameters("openrouter",
+		parameterCheck{"instructions", request.Instructions != ""}, parameterCheck{"stream_format", request.StreamFormat != ""},
+	)
 }
 
 func (p OpenRouter) GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {

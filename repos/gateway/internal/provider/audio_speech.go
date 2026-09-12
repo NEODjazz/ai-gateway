@@ -17,11 +17,15 @@ const maxAudioSpeechResponseBytes = 32 << 20
 
 func (OpenAICompatible) SupportsAudioSpeech() bool { return true }
 
-func (p OpenAICompatible) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
+func (p OpenAICompatible) ValidateAudioSpeechParameters(request openai.AudioSpeechRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.AudioSpeechResponse{}, &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
-	if err := rejectParameters(p.providerName(), parameterCheck{"language", request.Language != ""}); err != nil {
+	return rejectParameters(p.providerName(), parameterCheck{"language", request.Language != ""})
+}
+
+func (p OpenAICompatible) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
+	if err := p.ValidateAudioSpeechParameters(request); err != nil {
 		return openai.AudioSpeechResponse{}, err
 	}
 	payload, err := json.Marshal(struct {

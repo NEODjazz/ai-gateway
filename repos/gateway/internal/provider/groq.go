@@ -117,19 +117,27 @@ func (g Groq) StreamResponses(ctx context.Context, request openai.ResponseReques
 	return g.compatible.StreamResponses(ctx, request, write)
 }
 
-func (g Groq) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
+func (g Groq) ValidateAudioSpeechParameters(request openai.AudioSpeechRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.AudioSpeechResponse{}, &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+		return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
 	if err := rejectParameters("groq",
+		parameterCheck{"language", request.Language != ""},
 		parameterCheck{"instructions", request.Instructions != ""},
 		parameterCheck{"stream_format", request.StreamFormat != ""},
 		parameterCheck{"response_format", request.ResponseFormat != "" && request.ResponseFormat != "mp3" && request.ResponseFormat != "flac" && request.ResponseFormat != "wav"},
 	); err != nil {
-		return openai.AudioSpeechResponse{}, err
+		return err
 	}
 	if request.Speed != nil && *request.Speed < 0.5 {
-		return openai.AudioSpeechResponse{}, &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "speed", Err: errors.New("speed must be between 0.5 and 4")}
+		return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "speed", Err: errors.New("speed must be between 0.5 and 4")}
+	}
+	return nil
+}
+
+func (g Groq) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
+	if err := g.ValidateAudioSpeechParameters(request); err != nil {
+		return openai.AudioSpeechResponse{}, err
 	}
 	return g.compatible.GenerateSpeech(ctx, request)
 }

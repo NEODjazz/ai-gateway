@@ -52,15 +52,19 @@ type geminiSpeechResponse struct {
 
 func (Gemini) SupportsAudioSpeech() bool { return true }
 
-func (g Gemini) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
+func (Gemini) ValidateAudioSpeechParameters(request openai.AudioSpeechRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.AudioSpeechResponse{}, &Error{Class: FailureClientRequest, Provider: "gemini", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+		return &Error{Class: FailureClientRequest, Provider: "gemini", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
-	if err := rejectParameters("gemini",
+	return rejectParameters("gemini",
 		parameterCheck{"language", request.Language != ""},
 		parameterCheck{"speed", request.Speed != nil},
 		parameterCheck{"response_format", request.ResponseFormat == "aac" || request.ResponseFormat == "flac"},
-	); err != nil {
+	)
+}
+
+func (g Gemini) GenerateSpeech(ctx context.Context, request openai.AudioSpeechRequest) (openai.AudioSpeechResponse, error) {
+	if err := g.ValidateAudioSpeechParameters(request); err != nil {
 		return openai.AudioSpeechResponse{}, err
 	}
 	model := strings.TrimPrefix(request.Model, "models/")
