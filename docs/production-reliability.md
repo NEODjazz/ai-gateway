@@ -1964,3 +1964,17 @@ the admin inventory returned 40 active rules, and a live custom-profile check
 masked an email and a Russian passport into two placeholders without returning
 the source values and reported `content_stored=false`. The temporary test policy
 was restored after verification.
+
+Source `f0094dd` adds native GenerateContent `serviceTier` and `store`
+controls, preserves the effective service tier in JSON and SSE usage, and
+bypasses exact and semantic response caches when provider-side storage is
+requested. Invalid tiers fail before provider execution. Native conversion,
+exact Gemini wire, capability-profile, cache-bypass and OpenAPI regressions,
+vet, build, the full Go suite and the full race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:gemini-controls-f0094dd` with image
+ID `sha256:fce33acd3abcf3297e87ffa0550e2fe810c96d5a3a4dbf6fbaf4fbfb6e601b04`.
+Gateway Helm revision 503 completed successfully. Pod
+`ai-gateway-gateway-59f66ff795-dl6gx` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.397 was served, and an invalid
+native service tier returned 400 before authentication or provider execution.
