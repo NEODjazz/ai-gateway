@@ -25,6 +25,8 @@ type ChatCompletionRequest struct {
 	AnthropicContainerID string                    `json:"-"`
 	// AnthropicCodeExecution enables the native managed code execution tool.
 	AnthropicCodeExecution bool `json:"-"`
+	// AnthropicToolSearch selects the validated native tool-search variant.
+	AnthropicToolSearch string `json:"-"`
 	// Bedrock native controls cannot be supplied through the public Chat wire shape.
 	BedrockServiceTier                       string                  `json:"-"`
 	BedrockPerformanceLatency                string                  `json:"-"`
@@ -298,6 +300,8 @@ type FunctionDefinition struct {
 	Parameters            any                    `json:"parameters,omitempty"`
 	Strict                *bool                  `json:"strict,omitempty"`
 	PromptCacheBreakpoint *PromptCacheBreakpoint `json:"prompt_cache_breakpoint,omitempty"`
+	// DeferLoading keeps a native Messages function schema out of the initial context.
+	DeferLoading bool `json:"-"`
 }
 
 type PromptCacheBreakpoint struct {

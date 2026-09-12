@@ -27,6 +27,45 @@ func TestAnthropicMapsMaxCompletionTokensToMaxTokens(t *testing.T) {
 	}
 }
 
+func TestAnthropicToolSearchWireAndContinuation(t *testing.T) {
+	native := []json.RawMessage{
+		json.RawMessage(`{"type":"server_tool_use","id":"srv_1","name":"tool_search_tool_bm25","input":{"query":"weather"}}`),
+		json.RawMessage(`{"type":"tool_search_tool_result","tool_use_id":"srv_1","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"weather"}]}}`),
+	}
+	request := anthropicChatRequest(openai.ChatCompletionRequest{
+		Model: "claude", AnthropicToolSearch: "tool_search_tool_bm25_20251119",
+		Tools:    []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather", Parameters: map[string]any{"type": "object"}, DeferLoading: true}}},
+		Messages: []openai.Message{{Role: "assistant", NativeContent: native}, {Role: "user", Content: "continue"}},
+	}, false)
+	if len(request.Tools) != 2 || !request.Tools[0].DeferLoading || request.Tools[1].Type != "tool_search_tool_bm25_20251119" || request.Tools[1].Name != "tool_search_tool_bm25" {
+		t.Fatalf("tools=%+v", request.Tools)
+	}
+	encoded, err := json.Marshal(request.Messages[0].Content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "[" + string(native[0]) + "," + string(native[1]) + "]"
+	if string(encoded) != want {
+		t.Fatalf("native continuation changed: %s", encoded)
+	}
+	if got := anthropicBetaFeatures(request); got != "advanced-tool-use-2025-11-20" {
+		t.Fatalf("beta header=%q", got)
+	}
+	content := []anthropicContent{{Type: "server_tool_use", ID: "srv_1", Name: "tool_search_tool_bm25", Input: map[string]any{"query": "weather"}}, {Type: "tool_search_tool_result", ToolUseID: "srv_1", Content: map[string]any{"type": "tool_search_tool_search_result"}}}
+	if err := validateAnthropicNativeMessageContent(content); err != nil || len(anthropicNativeMessageContent(content)) != 2 {
+		t.Fatalf("tool search response rejected: %v", err)
+	}
+	if err := validateAnthropicToolSearchContent(content, "tool_search_tool_bm25_20251119"); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateAnthropicToolSearchContent(content, ""); err == nil {
+		t.Fatal("unrequested tool search response accepted")
+	}
+	if got := strings.Join(requiredChatCapabilities(openai.ChatCompletionRequest{AnthropicToolSearch: "tool_search_tool_bm25_20251119"}, false), ","); got != "chat,tool_search" {
+		t.Fatalf("capabilities=%q", got)
+	}
+}
+
 func TestAnthropicSkillExecutionWireContract(t *testing.T) {
 	var upstream anthropicRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

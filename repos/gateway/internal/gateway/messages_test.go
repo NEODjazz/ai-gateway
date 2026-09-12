@@ -142,6 +142,41 @@ func TestMessagesConvertsBoundedNativeServerTools(t *testing.T) {
 	}
 }
 
+func TestMessagesConvertsToolSearchAndDeferredFunctions(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}}}}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"tools":[{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex"},{"name":"weather","description":"Weather lookup","input_schema":{"type":"object"},"defer_loading":true}],"messages":[{"role":"user","content":"weather"}]}`, "")
+	request := upstream.request.Request
+	if response.Code != http.StatusOK || upstream.calls != 1 || request.AnthropicToolSearch != "tool_search_tool_regex_20251119" || len(request.Tools) != 1 || !request.Tools[0].Function.DeferLoading {
+		t.Fatalf("response=%d body=%s request=%+v", response.Code, response.Body.String(), request)
+	}
+}
+
+func TestMessagesPreservesNativeToolSearchContinuation(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}}}}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"messages":[{"role":"assistant","content":[{"type":"server_tool_use","id":"srv_1","name":"tool_search_tool_regex","input":{"query":"weather"}},{"type":"tool_search_tool_result","tool_use_id":"srv_1","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"weather"}]}},{"type":"tool_use","id":"call_1","name":"weather","input":{"city":"Paris"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"sunny"}]}]}`, "")
+	request := upstream.request.Request
+	if response.Code != http.StatusOK || upstream.calls != 1 || len(request.Messages) != 2 || len(request.Messages[0].NativeContent) != 3 || request.Messages[1].Role != "tool" || request.NativeInputTokens == 0 {
+		t.Fatalf("response=%d body=%s request=%+v", response.Code, response.Body.String(), request)
+	}
+}
+
+func TestMessagesRejectsInvalidToolSearchConfiguration(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"m","max_tokens":10,"tools":[{"name":"lookup","input_schema":{},"defer_loading":true}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"tool_search_tool_regex_20251119","name":"wrong"}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"tool_search_tool_bm25_20251119","name":"tool_search_tool_bm25"},{"name":"lookup","input_schema":{},"defer_loading":true,"cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"messages":[{"role":"assistant","content":[{"type":"server_tool_use","id":"srv_1","name":"tool_search_tool_regex","input":{}}]},{"role":"user","content":"next"}]}`,
+	} {
+		upstream := &fallbackChatProvider{}
+		response := nativeMessageCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), body, "")
+		if response.Code != http.StatusBadRequest || upstream.calls != 0 {
+			t.Fatalf("response=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestMessagesRejectsInvalidNativeProviderBlocks(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		upstream := &fallbackChatProvider{response: nativeServerToolResponse()}
@@ -175,6 +210,7 @@ func TestMessagesPreservesAccessControls(t *testing.T) {
 		{name: "auth", body: `{"model":"model","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`, status: 401},
 		{name: "model", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"other"}}, body: `{"model":"model","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`, status: 403},
 		{name: "tool", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}, body: `{"model":"model","max_tokens":10,"tools":[{"name":"denied","input_schema":{}}],"messages":[{"role":"user","content":"hi"}]}`, status: 403},
+		{name: "tool search", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}, body: `{"model":"model","max_tokens":10,"tools":[{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex"}],"messages":[{"role":"user","content":"hi"}]}`, status: 403},
 		{name: "tpm", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tpm: 5}, body: `{"model":"model","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`, status: 429},
 	} {
 		t.Run(test.name, func(t *testing.T) {

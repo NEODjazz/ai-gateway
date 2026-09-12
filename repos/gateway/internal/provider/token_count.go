@@ -30,6 +30,7 @@ type TokenCountRequest struct {
 	AnthropicSkills        []openai.AnthropicSkillReference
 	AnthropicContainerID   string
 	AnthropicCodeExecution bool
+	AnthropicToolSearch    string
 }
 type TokenCountResult struct {
 	InputTokens int
@@ -38,7 +39,7 @@ type TokenCountResult struct {
 }
 
 func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (TokenCountResult, error) {
-	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat, AnthropicSkills: request.AnthropicSkills, AnthropicContainerID: request.AnthropicContainerID, AnthropicCodeExecution: request.AnthropicCodeExecution}
+	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat, AnthropicSkills: request.AnthropicSkills, AnthropicContainerID: request.AnthropicContainerID, AnthropicCodeExecution: request.AnthropicCodeExecution, AnthropicToolSearch: request.AnthropicToolSearch}
 	if err := validateTokenCountRequest(chat); err != nil {
 		return TokenCountResult{}, err
 	}

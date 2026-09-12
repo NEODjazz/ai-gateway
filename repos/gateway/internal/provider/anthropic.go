@@ -78,6 +78,7 @@ type anthropicTool struct {
 	Citations        *anthropicCitations    `json:"citations,omitempty"`
 	MaxContentTokens int                    `json:"max_content_tokens,omitempty"`
 	CacheControl     *anthropicCacheControl `json:"cache_control,omitempty"`
+	DeferLoading     bool                   `json:"defer_loading,omitempty"`
 }
 
 type anthropicCitations struct {
@@ -206,6 +207,9 @@ func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompl
 	if err := validateAnthropicNativeMessageContent(response.Content); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	if err := validateAnthropicToolSearchContent(response.Content, request.AnthropicToolSearch); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	converted := anthropicToChatCompletion(response, request.Model)
 	converted.Usage.ToolRequestsReported = request.AnthropicCodeExecution
 	if err := openai.ValidateReasoningBlocks(converted.Choices[0].Message.Reasoning); err != nil {
@@ -289,8 +293,8 @@ func (p Anthropic) doMessages(ctx context.Context, request anthropicRequest, tar
 		return err
 	}
 	p.setHeaders(httpReq)
-	if request.Container != nil && len(request.Container.Skills) > 0 {
-		httpReq.Header.Set("Anthropic-Beta", "skills-2025-10-02")
+	if beta := anthropicBetaFeatures(request); beta != "" {
+		httpReq.Header.Set("Anthropic-Beta", beta)
 	}
 
 	resp, err := p.client.Do(httpReq)
@@ -316,8 +320,8 @@ func (p Anthropic) doMessagesStream(ctx context.Context, request anthropicReques
 		return nil, err
 	}
 	p.setHeaders(httpReq)
-	if request.Container != nil && len(request.Container.Skills) > 0 {
-		httpReq.Header.Set("Anthropic-Beta", "skills-2025-10-02")
+	if beta := anthropicBetaFeatures(request); beta != "" {
+		httpReq.Header.Set("Anthropic-Beta", beta)
 	}
 
 	resp, err := p.client.Do(httpReq)
@@ -329,6 +333,20 @@ func (p Anthropic) doMessagesStream(ctx context.Context, request anthropicReques
 		return nil, responseStatusError("anthropic", resp)
 	}
 	return resp, nil
+}
+
+func anthropicBetaFeatures(request anthropicRequest) string {
+	features := make([]string, 0, 2)
+	if request.Container != nil && len(request.Container.Skills) > 0 {
+		features = append(features, "skills-2025-10-02")
+	}
+	for _, tool := range request.Tools {
+		if strings.HasPrefix(tool.Type, "tool_search_tool_") {
+			features = append(features, "advanced-tool-use-2025-11-20")
+			break
+		}
+	}
+	return strings.Join(features, ",")
 }
 
 func (p Anthropic) setHeaders(request *http.Request) {
@@ -350,6 +368,9 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 	}
 	if request.AnthropicCodeExecution {
 		tools = append(tools, anthropicTool{Type: "code_execution_20250825", Name: "code_execution"})
+	}
+	if request.AnthropicToolSearch != "" {
+		tools = append(tools, anthropicTool{Type: request.AnthropicToolSearch, Name: strings.TrimSuffix(request.AnthropicToolSearch, "_20251119")})
 	}
 	var outputConfig *anthropicOutputConfig
 	if request.ResponseFormat != nil && request.ResponseFormat.Type == "json_schema" {
@@ -525,6 +546,14 @@ func anthropicMessages(messages []openai.Message) (any, []anthropicMessage) {
 			systemBlocks = append(systemBlocks, blocks...)
 			structuredSystem = structuredSystem || anthropicBlocksUseCache(blocks)
 		case "assistant":
+			if len(message.NativeContent) > 0 {
+				blocks := make([]json.RawMessage, len(message.NativeContent))
+				for i := range message.NativeContent {
+					blocks[i] = append(json.RawMessage(nil), message.NativeContent[i]...)
+				}
+				converted = append(converted, anthropicMessage{Role: "assistant", Content: blocks})
+				continue
+			}
 			blocks := anthropicReasoningBlocks(message.Reasoning)
 			blocks = append(blocks, anthropicContentBlocks(message.Content)...)
 			for _, call := range message.ToolCalls {
@@ -686,7 +715,7 @@ func anthropicChatTools(tools []openai.Tool, choice any) ([]anthropicTool, map[s
 		if schema == nil {
 			schema = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
-		converted = append(converted, anthropicTool{Name: tool.Function.Name, Description: tool.Function.Description, InputSchema: schema, CacheControl: anthropicToolCacheControl(tool.Function.PromptCacheBreakpoint)})
+		converted = append(converted, anthropicTool{Name: tool.Function.Name, Description: tool.Function.Description, InputSchema: schema, CacheControl: anthropicToolCacheControl(tool.Function.PromptCacheBreakpoint), DeferLoading: tool.Function.DeferLoading})
 	}
 	return applyAnthropicToolChoice(converted, choice)
 }
@@ -825,7 +854,7 @@ func validateAnthropicNativeMessageContent(content []anthropicContent) error {
 	total := 0
 	for _, block := range content {
 		switch block.Type {
-		case "text", "thinking", "redacted_thinking", "tool_use", "server_tool_use", "web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result", "bash_code_execution_tool_result", "text_editor_code_execution_tool_result":
+		case "text", "thinking", "redacted_thinking", "tool_use", "server_tool_use", "tool_search_tool_result", "web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result", "bash_code_execution_tool_result", "text_editor_code_execution_tool_result":
 		default:
 			return errors.New("Anthropic returned unsupported native content")
 		}
@@ -840,11 +869,24 @@ func validateAnthropicNativeMessageContent(content []anthropicContent) error {
 
 func anthropicNativeServerBlock(kind string) bool {
 	switch kind {
-	case "server_tool_use", "web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result", "bash_code_execution_tool_result", "text_editor_code_execution_tool_result":
+	case "server_tool_use", "tool_search_tool_result", "web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result", "bash_code_execution_tool_result", "text_editor_code_execution_tool_result":
 		return true
 	default:
 		return false
 	}
+}
+
+func validateAnthropicToolSearchContent(content []anthropicContent, requested string) error {
+	expected := strings.TrimSuffix(requested, "_20251119")
+	for _, block := range content {
+		if block.Type == "server_tool_use" && strings.HasPrefix(block.Name, "tool_search_tool_") && (expected == "" || block.Name != expected) {
+			return errors.New("Anthropic returned unrequested tool search content")
+		}
+		if block.Type == "tool_search_tool_result" && expected == "" {
+			return errors.New("Anthropic returned unrequested tool search content")
+		}
+	}
+	return nil
 }
 
 func anthropicCodeExecutionRequests(usage anthropicUsage) int {

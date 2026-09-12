@@ -140,6 +140,18 @@ func TestSkillExecutionBypassesResponseCaches(t *testing.T) {
 	}
 }
 
+func TestToolSearchBypassesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "find a tool"}}, AnthropicToolSearch: "tool_search_tool_regex_20251119",
+	}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache enabled for tool search")
+	}
+	if _, _, eligible := semanticRequest(request, Endpoint{Name: "endpoint"}); eligible {
+		t.Fatal("semantic cache enabled for tool search")
+	}
+}
+
 func TestChatAudioInputBypassesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
 		Model: "model",

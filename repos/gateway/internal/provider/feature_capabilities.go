@@ -19,6 +19,7 @@ func (Ollama) SupportsStructuredOutput() bool { return true }
 func (Anthropic) SupportsTools() bool            { return true }
 func (Anthropic) SupportsStructuredOutput() bool { return true }
 func (Anthropic) SupportsWebSearch() bool        { return true }
+func (Anthropic) SupportsToolSearch() bool       { return true }
 func (Anthropic) SupportsPromptCache() bool      { return true }
 func (Anthropic) SupportsAssistantPrefill() bool { return true }
 

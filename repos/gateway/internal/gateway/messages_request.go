@@ -58,6 +58,7 @@ type messagesTool struct {
 	AllowedDomains   []string                          `json:"allowed_domains,omitempty"`
 	MaxContentTokens int                               `json:"max_content_tokens,omitempty"`
 	Citations        *messagesCitations                `json:"citations,omitempty"`
+	DeferLoading     bool                              `json:"defer_loading,omitempty"`
 }
 
 type messagesCitations struct {
@@ -184,6 +185,13 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		var blocks []json.RawMessage
 		if err := json.Unmarshal(message.Content, &blocks); err != nil || len(blocks) == 0 {
 			return result, errors.New("content must be text or a non-empty block array")
+		}
+		if native, content, err := messagesNativeAssistantContent(message.Role, blocks, knownCalls); err != nil {
+			return result, err
+		} else if native {
+			result.Messages = append(result.Messages, openai.Message{Role: "assistant", NativeContent: content})
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(content))
+			continue
 		}
 		converted := openai.Message{Role: message.Role}
 		parts := []any{}
@@ -322,11 +330,20 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 	if len(request.Tools) > 128 {
 		return result, errors.New("too many tools")
 	}
-	searchTool, fetchTool := false, false
+	searchTool, fetchTool, toolSearch := false, false, false
 	for _, tool := range request.Tools {
 		switch tool.Type {
+		case "tool_search_tool_regex_20251119", "tool_search_tool_bm25_20251119":
+			expectedName := strings.TrimSuffix(tool.Type, "_20251119")
+			if toolSearch || tool.Name != expectedName || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxUses != nil || tool.UserLocation != nil || len(tool.AllowedDomains) > 0 || tool.MaxContentTokens != 0 || tool.Citations != nil || tool.DeferLoading {
+				return result, errors.New("invalid or duplicate tool search tool")
+			}
+			toolSearch = true
+			result.AnthropicToolSearch = tool.Type
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
+			continue
 		case "code_execution_20250825":
-			if result.AnthropicCodeExecution || tool.Name != "code_execution" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxUses != nil || tool.UserLocation != nil || len(tool.AllowedDomains) > 0 || tool.MaxContentTokens != 0 || tool.Citations != nil {
+			if result.AnthropicCodeExecution || tool.Name != "code_execution" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxUses != nil || tool.UserLocation != nil || len(tool.AllowedDomains) > 0 || tool.MaxContentTokens != 0 || tool.Citations != nil || tool.DeferLoading {
 				return result, errors.New("invalid or duplicate code execution tool")
 			}
 			result.AnthropicCodeExecution = true
@@ -354,13 +371,21 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		}
 		var breakpoint *openai.PromptCacheBreakpoint
 		if tool.CacheControl != nil {
+			if tool.DeferLoading {
+				return result, errors.New("defer_loading cannot be combined with cache_control")
+			}
 			var err error
 			breakpoint, err = messagesPromptCacheBreakpoint(tool.CacheControl)
 			if err != nil {
 				return result, err
 			}
 		}
-		result.Tools = append(result.Tools, openai.Tool{Type: "function", Function: openai.FunctionDefinition{Name: tool.Name, Description: tool.Description, Parameters: tool.InputSchema, PromptCacheBreakpoint: breakpoint}})
+		result.Tools = append(result.Tools, openai.Tool{Type: "function", Function: openai.FunctionDefinition{Name: tool.Name, Description: tool.Description, Parameters: tool.InputSchema, PromptCacheBreakpoint: breakpoint, DeferLoading: tool.DeferLoading}})
+	}
+	for _, tool := range result.Tools {
+		if tool.Function.DeferLoading && !toolSearch {
+			return result, errors.New("defer_loading requires a tool search tool")
+		}
 	}
 	if len(result.AnthropicSkills) > 0 && !result.AnthropicCodeExecution {
 		return result, errors.New("container.skills requires the code_execution_20250825 tool")
@@ -393,6 +418,71 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		}
 	}
 	return result, nil
+}
+
+func messagesNativeAssistantContent(role string, blocks []json.RawMessage, knownCalls map[string]bool) (bool, []json.RawMessage, error) {
+	native := false
+	for _, raw := range blocks {
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(raw, &kind) == nil && (kind.Type == "server_tool_use" || strings.HasSuffix(kind.Type, "_tool_result") && kind.Type != "tool_result") {
+			native = true
+		}
+	}
+	if !native {
+		return false, nil, nil
+	}
+	if role != "assistant" || len(blocks) > 128 {
+		return true, nil, errors.New("native server tool content requires a bounded assistant block array")
+	}
+	serverCalls := map[string]string{}
+	result := make([]json.RawMessage, 0, len(blocks))
+	total := 0
+	for _, raw := range blocks {
+		if !json.Valid(raw) || len(raw) > 4<<20 || total > (32<<20)-len(raw) {
+			return true, nil, errors.New("native server tool content exceeds its size limit")
+		}
+		total += len(raw)
+		var block map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &block); err != nil {
+			return true, nil, errors.New("invalid native server tool content")
+		}
+		var kind string
+		if err := json.Unmarshal(block["type"], &kind); err != nil {
+			return true, nil, errors.New("invalid native server tool content type")
+		}
+		switch kind {
+		case "text", "thinking", "redacted_thinking":
+		case "tool_use":
+			var id, name string
+			var input map[string]any
+			if json.Unmarshal(block["id"], &id) != nil || json.Unmarshal(block["name"], &name) != nil || json.Unmarshal(block["input"], &input) != nil || id == "" || name == "" || knownCalls[id] {
+				return true, nil, errors.New("invalid native tool_use block")
+			}
+			knownCalls[id] = true
+		case "server_tool_use":
+			var id, name string
+			var input map[string]any
+			if json.Unmarshal(block["id"], &id) != nil || json.Unmarshal(block["name"], &name) != nil || json.Unmarshal(block["input"], &input) != nil || id == "" || name == "" || serverCalls[id] != "" {
+				return true, nil, errors.New("invalid server_tool_use block")
+			}
+			serverCalls[id] = name
+		case "tool_search_tool_result", "web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result", "bash_code_execution_tool_result", "text_editor_code_execution_tool_result":
+			var id string
+			if json.Unmarshal(block["tool_use_id"], &id) != nil || id == "" || serverCalls[id] == "" || block["content"] == nil {
+				return true, nil, errors.New("invalid server tool result block")
+			}
+			delete(serverCalls, id)
+		default:
+			return true, nil, fmt.Errorf("unsupported native content block type %q", kind)
+		}
+		result = append(result, append(json.RawMessage(nil), raw...))
+	}
+	if len(serverCalls) > 0 {
+		return true, nil, errors.New("server_tool_use requires a matching result block")
+	}
+	return true, result, nil
 }
 
 func messagesSystem(raw json.RawMessage) (any, error) {
