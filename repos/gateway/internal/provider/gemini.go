@@ -65,6 +65,7 @@ func (Gemini) SupportsVision() bool     { return true }
 func (Gemini) SupportsWebSearch() bool  { return true }
 func (Gemini) SupportsAudioInput() bool { return true }
 func (Gemini) SupportsFileInput() bool  { return true }
+func (Gemini) SupportsVideoInput() bool { return true }
 
 func (Gemini) SupportsResponses() bool { return false }
 
@@ -349,6 +350,12 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	if _, err := openai.ChatAudioAttachments(request.Messages); err != nil {
 		return result, err
 	}
+	if _, err := openai.ChatFileAttachments(request.Messages); err != nil {
+		return result, err
+	}
+	if _, err := openai.ChatVideoAttachments(request.Messages); err != nil {
+		return result, err
+	}
 	toolNames := make(map[string]string)
 	for _, message := range request.Messages {
 		if len(message.Reasoning) > 0 && message.Role != "assistant" {
@@ -537,6 +544,12 @@ func geminiMessageParts(value any) ([]geminiPart, error) {
 				attachments, err := openai.ResponseFileAttachments([]any{part})
 				if err != nil || len(attachments) != 1 {
 					return nil, openai.ErrInvalidFileInput
+				}
+				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachments[0].MediaType, Data: attachments[0].Data}})
+			case "input_video":
+				attachments, err := openai.ChatVideoAttachments([]openai.Message{{Role: "user", Content: []any{part}}})
+				if err != nil || len(attachments) != 1 {
+					return nil, openai.ErrInvalidVideoInput
 				}
 				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachments[0].MediaType, Data: attachments[0].Data}})
 			default:

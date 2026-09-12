@@ -36,9 +36,10 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "web_fetch", label: "Web fetch", description: "Provider retrieval of explicitly allowed web domains" },
   { value: "audio", label: "Audio output", description: "Generated audio in chat responses" },
   { value: "audio_input", label: "Audio input", description: "Inline audio input for native multimodal requests" },
+  { value: "video_input", label: "Video input", description: "Bounded inline video input for native multimodal requests" },
   { value: "prompt_cache", label: "Prompt cache", description: "Explicit provider prompt caching" },
   { value: "assistant_prefill", label: "Assistant prefill", description: "Continue a final assistant prefix" },
-  { value: "file_input", label: "File input", description: "Bounded inline PDF input for Responses" }
+  { value: "file_input", label: "File input", description: "Bounded inline PDF input" }
 ];
 
 export function providerModelCapabilityOptions(capabilities?: string[]): ChipOption[] {

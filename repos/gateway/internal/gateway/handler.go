@@ -309,6 +309,18 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
 		return
 	}
+	if _, err := openai.ChatAudioAttachments(reqCtx.Request.Messages); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_audio", err.Error())
+		return
+	}
+	if _, err := openai.ChatFileAttachments(reqCtx.Request.Messages); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_file", err.Error())
+		return
+	}
+	if _, err := openai.ChatVideoAttachments(reqCtx.Request.Messages); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_video", err.Error())
+		return
+	}
 	request = reqCtx.Request
 	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())

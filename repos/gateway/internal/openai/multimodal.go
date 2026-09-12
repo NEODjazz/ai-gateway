@@ -266,7 +266,7 @@ func HasResponseImages(request ResponseRequest) bool {
 func IsMediaContent(value map[string]any) bool {
 	typeName, _ := value["type"].(string)
 	switch typeName {
-	case "image_url", "input_image", "image", "input_audio", "audio", "input_file", "file":
+	case "image_url", "input_image", "image", "input_audio", "audio", "input_video", "video", "input_file", "file":
 		return true
 	default:
 		return false

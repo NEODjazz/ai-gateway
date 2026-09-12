@@ -108,6 +108,15 @@ func validateTokenCountRequest(request openai.ChatCompletionRequest) error {
 	if _, err := openai.ChatImageAttachments(request.Messages); err != nil {
 		return err
 	}
+	if _, err := openai.ChatAudioAttachments(request.Messages); err != nil {
+		return err
+	}
+	if _, err := openai.ChatFileAttachments(request.Messages); err != nil {
+		return err
+	}
+	if _, err := openai.ChatVideoAttachments(request.Messages); err != nil {
+		return err
+	}
 	hasConversation := false
 	for _, message := range request.Messages {
 		if message.Role != "system" && message.Role != "developer" {

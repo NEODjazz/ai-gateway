@@ -124,6 +124,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "demo", capability: "stream"},
 		{providerType: "gemini", capability: "web_fetch"},
 		{providerType: "anthropic", capability: "audio_input"},
+		{providerType: "anthropic", capability: "video_input"},
 		{providerType: "demo", capability: "tools"},
 		{providerType: "voyage", capability: "structured_output"},
 		{providerType: "cohere", capability: "vision"},
@@ -144,7 +145,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 			}
 			capabilities := []string{test.capability}
 			switch test.capability {
-			case "stream", "tools", "structured_output", "vision", "web_search", "web_fetch", "audio", "audio_input", "prompt_cache", "assistant_prefill", "bedrock_invoke":
+			case "stream", "tools", "structured_output", "vision", "web_search", "web_fetch", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "bedrock_invoke":
 				capabilities = append([]string{"chat"}, capabilities...)
 			case "background_responses":
 				capabilities = []string{"responses", "background_responses"}
@@ -172,6 +173,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"chat", "mcp", "tools"},
 		{"web_search"},
 		{"audio_input"},
+		{"video_input"},
 		{"responses", "web_fetch"},
 		{"responses", "audio"},
 		{"responses", "prompt_cache"},
@@ -196,6 +198,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{},
 		{"chat"},
 		{"chat", "audio_input"},
+		{"chat", "video_input"},
 		{"chat", "gemini_safety_settings"},
 		{"responses", "stream"},
 		{"chat", "tools", "structured_output", "vision"},
@@ -248,7 +251,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 	}{
 		{providerType: "ollama", capabilities: []string{"chat", "tools", "structured_output", "vision"}},
 		{providerType: "anthropic", capabilities: []string{"chat", "tools", "structured_output", "vision", "web_search", "web_fetch", "prompt_cache", "assistant_prefill"}},
-		{providerType: "gemini", capabilities: []string{"chat", "gemini_safety_settings", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision", "web_search", "audio_input"}},
+		{providerType: "gemini", capabilities: []string{"chat", "gemini_safety_settings", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision", "web_search", "audio_input", "video_input", "file_input"}},
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
 		{providerType: "bedrock", capabilities: []string{"chat", "tools", "prompt_cache", "bedrock_invoke"}},
 		{providerType: "groq", capabilities: []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}},
@@ -327,6 +330,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	}
 	if !slices.Contains(profilesByType["gemini"].Capabilities, "file_input") {
 		t.Fatalf("Gemini profile is missing native inline files: %+v", profilesByType["gemini"])
+	}
+	if !slices.Contains(profilesByType["gemini"].Capabilities, "video_input") {
+		t.Fatalf("Gemini profile is missing native inline video: %+v", profilesByType["gemini"])
 	}
 	if !slices.Contains(profilesByType["gemini"].Operations, "interactions") || slices.Contains(profilesByType["openai"].Operations, "interactions") {
 		t.Fatalf("native interaction profiles are incorrect: gemini=%+v openai=%+v", profilesByType["gemini"], profilesByType["openai"])

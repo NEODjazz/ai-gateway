@@ -91,6 +91,22 @@ func TestTextProjectionExcludesAndRestoresImagePayload(t *testing.T) {
 	}
 }
 
+func TestTextProjectionExcludesVideoPayload(t *testing.T) {
+	secretVideo := base64.StdEncoding.EncodeToString([]byte("\x00\x00\x00\x18ftypprivate-video"))
+	original := []any{
+		map[string]any{"type": "text", "text": "describe"},
+		map[string]any{"type": "input_video", "input_video": map[string]any{"data": secretVideo, "format": "mp4"}},
+	}
+	projection := TextOnlyProjection(original)
+	if strings.Contains(string(mustJSON(t, projection)), secretVideo) {
+		t.Fatal("text projection contains video payload")
+	}
+	transformed := TransformTextContent(original, strings.ToUpper).([]any)
+	if transformed[1].(map[string]any)["input_video"].(map[string]any)["data"] != secretVideo {
+		t.Fatal("video payload was transformed as text")
+	}
+}
+
 func mustJSON(t *testing.T, value any) []byte {
 	t.Helper()
 	encoded, err := json.Marshal(value)

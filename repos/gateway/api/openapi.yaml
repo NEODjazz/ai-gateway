@@ -6063,9 +6063,9 @@ components:
           additionalProperties: false
           required: [mimeType, data]
           properties:
-            mimeType: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp, audio/wav, audio/mpeg, application/pdf]}
+            mimeType: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp, audio/wav, audio/mpeg, video/mp4, video/webm, application/pdf]}
             data: {type: string, format: byte}
-          description: Inline images require vision, WAV and MP3 require audio_input, and PDF requires file_input. All binary parts are bounded, signature-validated and projected to configured AV scanners.
+          description: Inline images require vision, WAV and MP3 require audio_input, MP4 and WebM require video_input, and PDF requires file_input. All binary parts are bounded, signature-validated and projected to configured AV scanners.
         functionCall:
           type: object
           additionalProperties: false
@@ -6330,7 +6330,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -8461,7 +8461,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

@@ -118,3 +118,29 @@ func TestInlineFileRequiresExplicitCapabilityAndBypassesCaches(t *testing.T) {
 		t.Fatal("semantic cache enabled for inline file")
 	}
 }
+
+func TestInlineVideoRequiresExplicitCapabilityAndBypassesCaches(t *testing.T) {
+	request := openai.ChatCompletionRequest{
+		Messages: []openai.Message{
+			{Role: "user", Content: []any{map[string]any{
+				"type": "input_video", "input_video": map[string]any{"data": "AAAAE2Z0eXBpc29t", "format": "mp4"},
+			}}},
+		},
+	}
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,video_input" {
+		t.Fatalf("required capabilities=%s", got)
+	}
+	if (Endpoint{Capabilities: []string{"chat"}}).supportsCapabilities(requiredChatCapabilities(request, false)...) {
+		t.Fatal("deployment without video input capability accepted")
+	}
+	if !(Endpoint{Capabilities: []string{"chat", "video_input"}}).supportsCapabilities(requiredChatCapabilities(request, false)...) {
+		t.Fatal("deployment with video input capability rejected")
+	}
+	requestContext := modules.RequestContext{CredentialID: "credential", Request: request}
+	if providerCacheKey("chat", requestContext) != "" {
+		t.Fatal("exact cache enabled for inline video")
+	}
+	if _, _, ok := semanticRequest(requestContext, Endpoint{Name: "endpoint"}); ok {
+		t.Fatal("semantic cache enabled for inline video")
+	}
+}

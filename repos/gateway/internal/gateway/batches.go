@@ -217,6 +217,15 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		if _, err := openai.ChatImageAttachments(request.Messages); err != nil {
 			return nil, "", nil, err
 		}
+		if _, err := openai.ChatAudioAttachments(request.Messages); err != nil {
+			return nil, "", nil, err
+		}
+		if _, err := openai.ChatFileAttachments(request.Messages); err != nil {
+			return nil, "", nil, err
+		}
+		if _, err := openai.ChatVideoAttachments(request.Messages); err != nil {
+			return nil, "", nil, err
+		}
 		model = request.Model
 		var valid bool
 		tools, valid = chatToolIdentifiers(request.Tools, request.Functions)

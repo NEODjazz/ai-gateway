@@ -257,6 +257,21 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 					parts = append(parts, file)
 					break
 				}
+				videoFormat := ""
+				switch part.InlineData.MIMEType {
+				case "video/mp4":
+					videoFormat = "mp4"
+				case "video/webm":
+					videoFormat = "webm"
+				}
+				if videoFormat != "" {
+					video := map[string]any{"type": "input_video", "input_video": map[string]any{"data": part.InlineData.Data, "format": videoFormat}}
+					if _, err := openai.ChatVideoAttachments([]openai.Message{{Role: "user", Content: []any{video}}}); err != nil {
+						return result, err
+					}
+					parts = append(parts, video)
+					break
+				}
 				format, filename := "", ""
 				switch part.InlineData.MIMEType {
 				case "audio/wav":
@@ -331,6 +346,9 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		flush()
 	}
 	if _, err := openai.ChatFileAttachments(result.Messages); err != nil {
+		return result, err
+	}
+	if _, err := openai.ChatVideoAttachments(result.Messages); err != nil {
 		return result, err
 	}
 	for _, tool := range r.Tools {

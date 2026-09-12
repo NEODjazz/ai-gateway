@@ -353,7 +353,7 @@ func validDeploymentCapabilities(capabilities []string) bool {
 	if seen["bedrock_invoke"] && !seen["chat"] && !seen["responses"] {
 		return false
 	}
-	for _, capability := range []string{"web_search", "web_fetch", "audio", "audio_input", "prompt_cache", "assistant_prefill"} {
+	for _, capability := range []string{"web_search", "web_fetch", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill"} {
 		if seen[capability] && !seen["chat"] {
 			return false
 		}
@@ -385,7 +385,7 @@ func ValidModelCapability(capability string) bool {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "audio", "audio_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke":
+		"web_search", "web_fetch", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke":
 		return true
 	default:
 		return false
@@ -574,6 +574,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	case "audio_input":
 		client, ok := endpoint.Provider.(interface{ SupportsAudioInput() bool })
 		return ok && client.SupportsAudioInput()
+	case "video_input":
+		client, ok := endpoint.Provider.(interface{ SupportsVideoInput() bool })
+		return ok && client.SupportsVideoInput()
 	case "file_input":
 		if endpoint.Type != "openai" && endpoint.Type != "openai-compatible" && endpoint.Type != "azure-openai" && endpoint.Type != "gemini" {
 			return false

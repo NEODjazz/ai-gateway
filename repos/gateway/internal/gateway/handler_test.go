@@ -1444,6 +1444,21 @@ func TestChatCompletionsRejectsRemoteImageURL(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsRejectsMalformedVideoBeforeProvider(t *testing.T) {
+	upstream := &chatProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":[{"type":"input_video","input_video":{"data":"bm90LXZpZGVv","format":"mp4"}}]}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "invalid_video") {
+		t.Fatalf("malformed video accepted: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if upstream.request.Request.Model != "" {
+		t.Fatal("malformed video reached provider")
+	}
+}
+
 func TestResponsesRejectsUnownedFileReferenceBeforeExecution(t *testing.T) {
 	provider := &chatProvider{}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), provider))

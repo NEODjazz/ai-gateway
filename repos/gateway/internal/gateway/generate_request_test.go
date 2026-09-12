@@ -111,6 +111,40 @@ func TestGenerateRequestRejectsMalformedInlinePDF(t *testing.T) {
 		t.Fatal("malformed PDF accepted")
 	}
 }
+
+func TestGenerateRequestMapsInlineVideo(t *testing.T) {
+	data := base64.StdEncoding.EncodeToString([]byte("\x00\x00\x00\x18ftypisom"))
+	var native generateRequest
+	raw := `{"contents":[{"role":"user","parts":[{"text":"describe"},{"inlineData":{"mimeType":"video/mp4","data":"` + data + `"}}]}]}`
+	if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachments, err := openai.ChatVideoAttachments(chat.Messages)
+	if err != nil || len(attachments) != 1 || attachments[0].Data != data || attachments[0].MediaType != "video/mp4" {
+		t.Fatalf("chat=%+v attachments=%+v err=%v", chat, attachments, err)
+	}
+	if openai.ChatInputTokens(chat) <= openai.ChatInputTokens(openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "describe"}}}) {
+		t.Fatal("inline video omitted from token reserve")
+	}
+	native.Contents[0].Role = "model"
+	if _, err := native.chat("model", false); err == nil {
+		t.Fatal("model video input accepted")
+	}
+}
+
+func TestGenerateRequestRejectsMalformedInlineVideo(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"parts":[{"inlineData":{"mimeType":"video/webm","data":"bm90IHdlYm0="}}]}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := native.chat("model", false); err == nil {
+		t.Fatal("malformed video accepted")
+	}
+}
 func TestGenerateFunctionHistoryRoundTrip(t *testing.T) {
 	var native generateRequest
 	raw := `{"contents":[{"role":"model","parts":[{"functionCall":{"name":"weather","args":{"city":"Paris"}},"thoughtSignature":"opaque"}]},{"role":"user","parts":[{"functionResponse":{"name":"weather","response":{"temperature":18}}}]}]}`
