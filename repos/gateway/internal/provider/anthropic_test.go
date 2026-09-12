@@ -118,6 +118,26 @@ func TestAnthropicToolResultErrorWireAndCapability(t *testing.T) {
 	}
 }
 
+func TestAnthropicPDFDocumentWireAndCapability(t *testing.T) {
+	file := map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64,JVBERi0xLjcKY29udGVudA==", "filename": "input.pdf"}
+	request := openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: []any{file}}}}
+	_, messages := anthropicMessages(request.Messages)
+	encoded, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"type":"document","source":{"data":"JVBERi0xLjcKY29udGVudA==","media_type":"application/pdf","type":"base64"}`) {
+		t.Fatalf("messages=%s", encoded)
+	}
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,file_input" {
+		t.Fatalf("capabilities=%q", got)
+	}
+	required := requiredChatCapabilities(request, false)
+	if (Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat"}}).supportsCapabilities(required...) || !(Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat", "file_input"}}).supportsCapabilities(required...) {
+		t.Fatal("PDF document routing capability is not enforced")
+	}
+}
+
 func TestAnthropicThinkingWireAndCapability(t *testing.T) {
 	budget := 2048
 	request := anthropicChatRequest(openai.ChatCompletionRequest{AnthropicThinking: &openai.AnthropicThinkingConfig{Type: "enabled", BudgetTokens: &budget, Display: "summarized"}}, false)

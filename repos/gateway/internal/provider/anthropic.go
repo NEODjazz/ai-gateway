@@ -761,6 +761,13 @@ func anthropicMessageContent(value any) any {
 					"type": "base64", "media_type": attachment.MediaType, "data": attachment.Data,
 				}})
 			}
+		case "input_file":
+			attachments, err := openai.ResponseFileAttachments([]any{object})
+			if err == nil && len(attachments) == 1 {
+				blocks = append(blocks, anthropicContent{Type: "document", Source: map[string]any{
+					"type": "base64", "media_type": attachments[0].MediaType, "data": attachments[0].Data,
+				}})
+			}
 		default:
 			if text := openai.ContentText(object); text != "" {
 				blocks = append(blocks, anthropicContent{Type: "text", Text: text})

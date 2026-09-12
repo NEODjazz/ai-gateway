@@ -399,6 +399,23 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 					return result, err
 				}
 				parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": data}})
+			case "document":
+				var block struct {
+					Type   string `json:"type"`
+					Source struct {
+						Type      string `json:"type"`
+						MediaType string `json:"media_type"`
+						Data      string `json:"data"`
+					} `json:"source"`
+				}
+				if err := decodeMessagesValue(raw, &block); err != nil || block.Source.Type != "base64" || block.Source.MediaType != "application/pdf" || message.Role != "user" {
+					return result, errors.New("only base64 user PDF document blocks are supported")
+				}
+				file := map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64," + block.Source.Data, "filename": "input.pdf"}
+				if _, err := openai.ResponseFileAttachments([]any{file}); err != nil {
+					return result, err
+				}
+				parts = append(parts, file)
 			case "tool_use":
 				var block struct {
 					Type  string         `json:"type"`

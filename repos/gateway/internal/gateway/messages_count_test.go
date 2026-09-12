@@ -12,6 +12,7 @@ import (
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 	"ai-gateway-gateway/internal/skillstate"
 )
@@ -133,6 +134,16 @@ func TestCountEndpointPreservesContextManagement(t *testing.T) {
 	response := countEndpointCall(handler, `{"model":"m","context_management":{"edits":[{"type":"clear_tool_uses_20250919"}]},"messages":[{"role":"user","content":"hi"}]}`, "gateway-test-key")
 	if response.Code != 200 || !strings.Contains(response.Body.String(), `"original_input_tokens":70`) || !strings.Contains(string(counter.request.Request.AnthropicContextManagement), "clear_tool_uses_20250919") {
 		t.Fatalf("status=%d body=%s context=%s", response.Code, response.Body.String(), counter.request.Request.AnthropicContextManagement)
+	}
+}
+
+func TestCountEndpointPreservesPDFDocument(t *testing.T) {
+	counter := &countProviderSpy{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}}}}), counter))
+	response := countEndpointCall(handler, `{"model":"m","messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="}}]}]}`, "gateway-test-key")
+	attachments, err := openai.ChatFileAttachments(counter.request.Request.Messages)
+	if response.Code != http.StatusOK || counter.calls != 1 || err != nil || len(attachments) != 1 || attachments[0].MediaType != "application/pdf" {
+		t.Fatalf("status=%d body=%s calls=%d attachments=%+v err=%v", response.Code, response.Body.String(), counter.calls, attachments, err)
 	}
 }
 func TestCountEndpointEnforcesToolACLAndSharedRPM(t *testing.T) {

@@ -54,6 +54,20 @@ func TestMessagesConvertsToolsAndResponse(t *testing.T) {
 	}
 }
 
+func TestMessagesConvertsBoundedPDFDocument(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg-pdf", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "summary"}, FinishReason: "stop"}}, Usage: openai.Usage{PromptTokens: 5, CompletionTokens: 1, TotalTokens: 6}}}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":[{"type":"text","text":"summarize"},{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="}}]}]}`, "")
+	attachments, err := openai.ChatFileAttachments(upstream.request.Request.Messages)
+	if response.Code != http.StatusOK || err != nil || upstream.calls != 1 || len(attachments) != 1 || attachments[0].MediaType != "application/pdf" || openai.ChatInputTokens(upstream.request.Request) <= 1 {
+		t.Fatalf("status=%d body=%s calls=%d attachments=%+v err=%v", response.Code, response.Body.String(), upstream.calls, attachments, err)
+	}
+	invalid := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"bm90IGEgcGRm"}}]}]}`, "")
+	if invalid.Code != http.StatusBadRequest || upstream.calls != 1 {
+		t.Fatalf("invalid PDF accepted: status=%d calls=%d body=%s", invalid.Code, upstream.calls, invalid.Body.String())
+	}
+}
+
 func TestMessagesAcceptsExplicitZeroMaxTokens(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg-cache", Model: "model", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: ""}, FinishReason: "length"}}, Usage: openai.Usage{PromptTokens: 5, CompletionTokens: 0, TotalTokens: 5}}}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
