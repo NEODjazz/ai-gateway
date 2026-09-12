@@ -32,6 +32,9 @@ type InteractionGenerationConfig struct {
 }
 
 func (r InteractionRequest) ResponseRequest() (ResponseRequest, string) {
+	if strings.TrimSpace(r.Agent) != "" {
+		return ResponseRequest{}, "agent interactions require a native agent-capable deployment"
+	}
 	result, message := r.NativeResponseRequest()
 	if message != "" {
 		return ResponseRequest{}, message
@@ -51,14 +54,19 @@ func (r InteractionRequest) ResponseRequest() (ResponseRequest, string) {
 	return result, ""
 }
 
-// NativeResponseRequest validates the model-based Interactions contract and
+// NativeResponseRequest validates the model or agent Interactions contract and
 // returns its shared Responses representation for policy, token, and billing modules.
 func (r InteractionRequest) NativeResponseRequest() (ResponseRequest, string) {
-	if strings.TrimSpace(r.Agent) != "" {
-		return ResponseRequest{}, "agent interactions are not supported"
+	model, agent := strings.TrimSpace(r.Model), strings.TrimSpace(r.Agent)
+	if model == "" && agent == "" {
+		return ResponseRequest{}, "model or agent is required"
 	}
-	if strings.TrimSpace(r.Model) == "" {
-		return ResponseRequest{}, "model is required"
+	if model != "" && agent != "" {
+		return ResponseRequest{}, "model and agent are mutually exclusive"
+	}
+	effectiveModel := model
+	if effectiveModel == "" {
+		effectiveModel = agent
 	}
 	switch input := r.Input.(type) {
 	case string:
@@ -109,7 +117,7 @@ func (r InteractionRequest) NativeResponseRequest() (ResponseRequest, string) {
 		store = &stored
 	}
 	result := ResponseRequest{
-		Provider: r.Provider, Model: r.Model, Input: r.Input, Instructions: r.SystemInstruction,
+		Provider: r.Provider, Model: effectiveModel, Input: r.Input, Instructions: r.SystemInstruction,
 		Tools: r.Tools, Text: text, PreviousResponse: r.PreviousInteractionID, Store: store, Stream: r.Stream, Background: r.Background,
 		MaxOutputTokens: r.GenerationConfig.MaxOutputTokens, Temperature: r.GenerationConfig.Temperature,
 		TopP: r.GenerationConfig.TopP,
@@ -121,7 +129,12 @@ func (r InteractionRequest) NativeResponseRequest() (ResponseRequest, string) {
 }
 
 func (r InteractionRequest) WithResponseRequest(shared ResponseRequest) InteractionRequest {
-	r.Provider, r.Model, r.Input, r.SystemInstruction = shared.Provider, shared.Model, shared.Input, shared.Instructions
+	r.Provider, r.Input, r.SystemInstruction = shared.Provider, shared.Input, shared.Instructions
+	if strings.TrimSpace(r.Agent) != "" {
+		r.Agent, r.Model = shared.Model, ""
+	} else {
+		r.Model = shared.Model
+	}
 	r.Tools, r.ResponseFormat, r.PreviousInteractionID = shared.Tools, nil, shared.PreviousResponse
 	if text, ok := shared.Text.(map[string]any); ok {
 		r.ResponseFormat = text["format"]
@@ -136,7 +149,7 @@ type InteractionResponse struct {
 	Object            string                     `json:"object"`
 	Created           string                     `json:"created,omitempty"`
 	Updated           string                     `json:"updated,omitempty"`
-	Model             string                     `json:"model"`
+	Model             string                     `json:"model,omitempty"`
 	Agent             string                     `json:"agent,omitempty"`
 	Status            string                     `json:"status"`
 	Steps             []InteractionStep          `json:"steps,omitempty"`

@@ -150,6 +150,55 @@ func TestInteractionsUsesNativeGeminiRoutingAndBilling(t *testing.T) {
 	}
 }
 
+func TestInteractionsUsesNativeGeminiAgentWithExplicitCapability(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/interactions":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["agent"] != "upstream-agent" || body["model"] != nil {
+				t.Errorf("body=%#v err=%v", body, err)
+			}
+			_, _ = fmt.Fprint(w, `{"id":"interaction_agent","object":"interaction","agent":"upstream-agent","status":"completed","usage":{"total_input_tokens":2,"total_output_tokens":1,"total_tokens":3}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1beta/interactions/interaction_agent":
+			_, _ = fmt.Fprint(w, `{"id":"interaction_agent","object":"interaction","agent":"upstream-agent","status":"completed","usage":{"total_tokens":3}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	recorder := &statelessUsageRecorder{}
+	sessions := &interactionOwnershipStore{data: map[string][]byte{}}
+	endpoint := config.ProviderEndpointConfig{Name: "gemini-agent", Type: "gemini", BaseURL: upstream.URL, APIKey: "secret", Models: []string{"research-agent"}, ModelAliases: map[string]string{"research-agent": "upstream-agent"}, Capabilities: []string{"interactions", "interaction_agents"}}
+	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{endpoint}, Modules: modules.NewPipeline([]modules.Module{recorder}), SessionStore: sessions, ResponseOwnershipTTL: time.Hour})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"research-agent"}}}), router))
+	request := httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"provider":"gemini-agent","agent":"research-agent","input":"hello","store":true,"generation_config":{"max_output_tokens":8}}`))
+	request.Header.Set("Authorization", "Bearer gateway-test-key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || calls.Load() != 1 || !strings.Contains(response.Body.String(), `"agent":"research-agent"`) || strings.Contains(response.Body.String(), `"model":`) || len(recorder.totals) != 1 || recorder.totals[0] != 3 {
+		t.Fatalf("status=%d calls=%d totals=%v body=%s", response.Code, calls.Load(), recorder.totals, response.Body.String())
+	}
+	retrieve := httptest.NewRequest(http.MethodGet, "/v1/interactions/interaction_agent", nil)
+	retrieve.Header.Set("Authorization", "Bearer gateway-test-key")
+	retrieved := httptest.NewRecorder()
+	handler.ServeHTTP(retrieved, retrieve)
+	if retrieved.Code != http.StatusOK || calls.Load() != 2 || !strings.Contains(retrieved.Body.String(), `"agent":"research-agent"`) || strings.Contains(retrieved.Body.String(), `"model":`) || len(recorder.totals) != 1 {
+		t.Fatalf("retrieve status=%d calls=%d totals=%v body=%s", retrieved.Code, calls.Load(), recorder.totals, retrieved.Body.String())
+	}
+
+	endpoint.Capabilities = []string{"interactions"}
+	withoutCapability := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"research-agent"}}}), provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{endpoint}})))
+	rejected := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"provider":"gemini-agent","agent":"research-agent","input":"hello","generation_config":{"max_output_tokens":8}}`))
+	request.Header.Set("Authorization", "Bearer gateway-test-key")
+	withoutCapability.ServeHTTP(rejected, request)
+	if rejected.Code != http.StatusBadRequest || calls.Load() != 2 || !strings.Contains(rejected.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("missing capability status=%d calls=%d body=%s", rejected.Code, calls.Load(), rejected.Body.String())
+	}
+}
+
 func TestInteractionsStreamsNativeGeminiAndSettlesBeforeCompletion(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("alt") != "sse" {

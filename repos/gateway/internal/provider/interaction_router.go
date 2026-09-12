@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"ai-gateway-gateway/internal/modules"
@@ -133,7 +134,10 @@ func (r Router) StreamInteractions(ctx context.Context, req modules.RequestConte
 		modules.DeanonymizeResponsesResponse(&attemptCtx, &shared)
 		result := openai.InteractionFromResponse(shared)
 		result.Agent, result.Updated = response.Agent, response.Updated
-		if err := r.persistInteractionOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, request.Model, result.ID, endpoint); err != nil {
+		if interactionUsesAgent(request) {
+			result.Agent, result.Model = interactionRoutingModel(request), ""
+		}
+		if err := r.persistInteractionOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, interactionRoutingModel(request), interactionUsesAgent(request), result.ID, endpoint); err != nil {
 			return openai.InteractionResponse{}, streamStarted, err
 		}
 		terminal, err := json.Marshal(map[string]any{"event_type": "interaction.completed", "interaction": result})
@@ -156,10 +160,11 @@ func (r Router) StreamInteractions(ctx context.Context, req modules.RequestConte
 }
 
 func (r Router) CanRouteInteraction(ctx context.Context, request openai.InteractionRequest) bool {
-	if request.Model == "" {
+	model := interactionRoutingModel(request)
+	if model == "" {
 		return false
 	}
-	for _, endpoint := range r.routeCandidates(ctx, modules.RequestContext{}, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model, MaxTokens: request.GenerationConfig.MaxOutputTokens}, requiredInteractionCapabilities(request)...) {
+	for _, endpoint := range r.routeCandidates(ctx, modules.RequestContext{}, openai.ChatCompletionRequest{Provider: request.Provider, Model: model, MaxTokens: request.GenerationConfig.MaxOutputTokens}, requiredInteractionCapabilities(request)...) {
 		if _, ok := endpoint.Provider.(InteractionClient); ok {
 			return true
 		}
@@ -234,7 +239,10 @@ func (r Router) Interactions(ctx context.Context, req modules.RequestContext, re
 			modules.DeanonymizeResponsesResponse(&attemptCtx, &shared)
 			result := openai.InteractionFromResponse(shared)
 			result.Agent, result.Updated = response.Agent, response.Updated
-			if err := r.persistInteractionOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, request.Model, result.ID, endpoint); err != nil {
+			if interactionUsesAgent(request) {
+				result.Agent, result.Model = interactionRoutingModel(request), ""
+			}
+			if err := r.persistInteractionOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, interactionRoutingModel(request), interactionUsesAgent(request), result.ID, endpoint); err != nil {
 				return openai.InteractionResponse{}, err
 			}
 			return result, nil
@@ -256,25 +264,26 @@ func (r Router) Interactions(ctx context.Context, req modules.RequestContext, re
 }
 
 func (r Router) interactionCandidates(ctx context.Context, req modules.RequestContext, request openai.InteractionRequest) ([]Endpoint, error) {
+	model := interactionRoutingModel(request)
 	if request.PreviousInteractionID == "" {
-		return r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model, MaxTokens: request.GenerationConfig.MaxOutputTokens}, requiredInteractionCapabilities(request)...), nil
+		return r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: model, MaxTokens: request.GenerationConfig.MaxOutputTokens}, requiredInteractionCapabilities(request)...), nil
 	}
 	binding, endpoint, err := r.interactionResource(ctx, req, request.PreviousInteractionID)
 	if err != nil {
 		return nil, err
 	}
 	providerMismatch := request.Provider != "" && request.Provider != endpoint.Name && request.Provider != endpoint.ProviderID && request.Provider != endpoint.Type
-	if binding.Model != request.Model || providerMismatch || !endpoint.supportsCapabilities(requiredInteractionCapabilities(request)...) {
+	if binding.Model != model || binding.Agent != interactionUsesAgent(request) || providerMismatch || !endpoint.supportsCapabilities(requiredInteractionCapabilities(request)...) {
 		return nil, ErrResponseDeploymentChanged
 	}
 	return []Endpoint{endpoint}, nil
 }
 
-func (r Router) persistInteractionOwnership(ctx context.Context, req modules.RequestContext, request openai.ResponseRequest, model, id string, endpoint Endpoint) error {
+func (r Router) persistInteractionOwnership(ctx context.Context, req modules.RequestContext, request openai.ResponseRequest, model string, agent bool, id string, endpoint Endpoint) error {
 	if !persistentResponseRequested(request) {
 		return nil
 	}
-	binding := responseOwnership{Endpoint: endpoint.Name, Model: model, Deployment: responseDeploymentIdentity(endpoint), Resource: "interaction"}
+	binding := responseOwnership{Endpoint: endpoint.Name, Model: model, Deployment: responseDeploymentIdentity(endpoint), Resource: "interaction", Agent: agent}
 	if err := r.ownership.put(ctx, req, id, binding); err != nil {
 		if errors.Is(err, ErrResponseOwnershipConflict) {
 			return err
@@ -322,7 +331,7 @@ func (r Router) RetrieveInteraction(ctx context.Context, req modules.RequestCont
 		return client.RetrieveInteraction(callCtx, id)
 	})
 	if err == nil {
-		result.Model = binding.Model
+		setInteractionBinding(&result, binding)
 	}
 	return result, err
 }
@@ -339,8 +348,8 @@ func (r Router) CancelInteraction(ctx context.Context, req modules.RequestContex
 	result, err := callResponseLifecycle(r, ctx, endpoint, "interactions.cancel", func(callCtx context.Context) (openai.InteractionResponse, error) {
 		return client.CancelInteraction(callCtx, id)
 	})
-	if result.Model == "" {
-		result.Model = binding.Model
+	if err == nil {
+		setInteractionBinding(&result, binding)
 	}
 	return result, err
 }
@@ -368,6 +377,9 @@ func (r Router) DeleteInteraction(ctx context.Context, req modules.RequestContex
 
 func requiredInteractionCapabilities(request openai.InteractionRequest) []string {
 	required := []string{"interactions"}
+	if interactionUsesAgent(request) {
+		required = append(required, "interaction_agents")
+	}
 	if request.Stream {
 		required = append(required, "stream")
 	}
@@ -388,6 +400,25 @@ func requiredInteractionCapabilities(request openai.InteractionRequest) []string
 		required = append(required, "file_input")
 	}
 	return required
+}
+
+func interactionRoutingModel(request openai.InteractionRequest) string {
+	if strings.TrimSpace(request.Model) != "" {
+		return request.Model
+	}
+	return strings.TrimSpace(request.Agent)
+}
+
+func interactionUsesAgent(request openai.InteractionRequest) bool {
+	return strings.TrimSpace(request.Agent) != ""
+}
+
+func setInteractionBinding(result *openai.InteractionResponse, binding responseOwnership) {
+	if binding.Agent {
+		result.Agent, result.Model = binding.Model, ""
+		return
+	}
+	result.Model = binding.Model
 }
 
 func (r Router) callInteraction(ctx context.Context, endpoint Endpoint, client InteractionClient, request openai.InteractionRequest) (openai.InteractionResponse, int, error) {

@@ -2077,7 +2077,7 @@ paths:
       operationId: createInteraction
       tags: [Inference]
       summary: Create a model interaction
-      description: Uses a native model interaction adapter when the selected deployment declares the interactions capability; otherwise converts the request to the Responses execution pipeline. The native Gemini path supports synchronous and incremental SSE model interactions, optional durable ownership for store=true, owner-isolated continuity through previous_interaction_id, retrieve/cancel/delete lifecycle calls, string or step-array input, system instructions, function tools, structured response formats, and bounded generation settings including seed, stop sequences, and thinking level. Continuations remain pinned to the immutable deployment binding of the previous interaction. It applies gateway authorization, tool ACLs, quotas, policy modules, retries, health tracking, usage accounting, and billing; the terminal completion event and stored ownership binding are released only after post-processing succeeds. Native background execution and agents remain unsupported. The Responses bridge retains its synchronous, incremental SSE, durable background, continuity, and storage behavior.
+      description: Uses a native model interaction adapter when the selected deployment declares the interactions capability; otherwise converts the request to the Responses execution pipeline. The native Gemini path supports synchronous and incremental SSE model or agent interactions, optional durable ownership for store=true, owner-isolated continuity through previous_interaction_id, retrieve/cancel/delete lifecycle calls, string or step-array input, system instructions, function tools, structured response formats, and bounded generation settings including seed, stop sequences, and thinking level. Agent requests require the interaction_agents deployment capability and use the configured agent ID as the gateway authorization, quota, routing, and billing model key. Continuations remain pinned to the immutable deployment binding of the previous interaction. The terminal completion event and stored ownership binding are released only after post-processing succeeds. Native background execution remains unsupported. The Responses bridge retains its synchronous, incremental SSE, durable background, continuity, and storage behavior.
       requestBody:
         required: true
         content:
@@ -7387,11 +7387,16 @@ components:
     InteractionRequest:
       type: object
       additionalProperties: false
-      required: [model, input]
+      required: [input]
+      oneOf:
+        - required: [model]
+          not: {required: [agent]}
+        - required: [agent]
+          not: {required: [model]}
       properties:
         provider: {type: string}
         model: {type: string, minLength: 1}
-        agent: {type: string, description: Reserved for a future agent lifecycle and currently rejected.}
+        agent: {type: string, minLength: 1, description: Native provider agent ID. The deployment must list this ID as a model and declare interaction_agents.}
         input:
           oneOf:
             - type: string
@@ -7440,7 +7445,10 @@ components:
     InteractionResponse:
       type: object
       additionalProperties: false
-      required: [id, object, model, status]
+      required: [id, object, status]
+      oneOf:
+        - required: [model]
+        - required: [agent]
       properties:
         id: {type: string}
         object: {type: string, const: interaction}

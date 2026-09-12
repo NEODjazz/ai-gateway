@@ -34,7 +34,8 @@ func (g Gemini) doInteraction(ctx context.Context, request openai.InteractionReq
 		return openai.InteractionResponse{}, errors.New("invalid Gemini base URL")
 	}
 	type interactionPayload struct {
-		Model                 string                             `json:"model"`
+		Model                 string                             `json:"model,omitempty"`
+		Agent                 string                             `json:"agent,omitempty"`
 		Input                 any                                `json:"input"`
 		SystemInstruction     string                             `json:"system_instruction,omitempty"`
 		Tools                 []openai.ResponseTool              `json:"tools,omitempty"`
@@ -44,8 +45,13 @@ func (g Gemini) doInteraction(ctx context.Context, request openai.InteractionReq
 		Stream                bool                               `json:"stream,omitempty"`
 		GenerationConfig      openai.InteractionGenerationConfig `json:"generation_config,omitempty"`
 	}
+	agent := strings.TrimSpace(request.Agent)
+	model := request.Model
+	if agent != "" {
+		model = ""
+	}
 	payload, err := json.Marshal(interactionPayload{
-		Model: request.Model, Input: request.Input, SystemInstruction: request.SystemInstruction,
+		Model: model, Agent: agent, Input: request.Input, SystemInstruction: request.SystemInstruction,
 		Tools: request.Tools, ResponseFormat: request.ResponseFormat, PreviousInteractionID: request.PreviousInteractionID,
 		Store: request.Store, Stream: request.Stream, GenerationConfig: request.GenerationConfig,
 	})

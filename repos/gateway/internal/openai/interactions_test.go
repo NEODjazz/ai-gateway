@@ -51,6 +51,21 @@ func TestNativeInteractionRequestPreservesGenerationConfig(t *testing.T) {
 	}
 }
 
+func TestNativeAgentInteractionUsesAgentAsPolicyModel(t *testing.T) {
+	request := InteractionRequest{Agent: "research-agent", Input: "hello"}
+	shared, message := request.NativeResponseRequest()
+	if message != "" || shared.Model != "research-agent" || shared.Input != "hello" {
+		t.Fatalf("shared=%+v message=%q", shared, message)
+	}
+	mapped := request.WithResponseRequest(ResponseRequest{Provider: "gemini", Model: "upstream-agent", Input: "masked"})
+	if mapped.Agent != "upstream-agent" || mapped.Model != "" || mapped.Provider != "gemini" || mapped.Input != "masked" {
+		t.Fatalf("mapped=%+v", mapped)
+	}
+	if _, message := (InteractionRequest{Model: "model", Agent: "agent", Input: "hello"}).NativeResponseRequest(); message != "model and agent are mutually exclusive" {
+		t.Fatalf("ambiguous request message=%q", message)
+	}
+}
+
 func TestInteractionRequestRejectsUnsupportedOrInvalidSemantics(t *testing.T) {
 	seed := int64(1)
 	zero := 0

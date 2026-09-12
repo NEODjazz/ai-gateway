@@ -51,7 +51,7 @@ var managedOperationCapabilities = []string{
 var managedFeatureCapabilities = []string{
 	"tools", "structured_output", "mcp", "vision", "web_search",
 	"web_fetch", "audio", "prompt_cache", "assistant_prefill",
-	"background_responses", "file_input",
+	"background_responses", "file_input", "interaction_agents",
 }
 
 type ProviderController interface {

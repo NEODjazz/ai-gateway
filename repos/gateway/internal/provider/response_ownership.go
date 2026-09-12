@@ -28,6 +28,7 @@ type responseOwnership struct {
 	Model      string `json:"model"`
 	Deployment string `json:"deployment"`
 	Resource   string `json:"resource,omitempty"`
+	Agent      bool   `json:"agent,omitempty"`
 }
 
 type responseOwnershipStore struct {

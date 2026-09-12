@@ -361,6 +361,9 @@ func validDeploymentCapabilities(capabilities []string) bool {
 	if seen["background_responses"] && !seen["responses"] {
 		return false
 	}
+	if seen["interaction_agents"] && !seen["interactions"] {
+		return false
+	}
 	if (seen["video_remix"] || seen["video_extension"]) && !seen["video"] {
 		return false
 	}
@@ -369,7 +372,7 @@ func validDeploymentCapabilities(capabilities []string) bool {
 
 func ValidModelCapability(capability string) bool {
 	switch capability {
-	case "chat", "responses", "interactions", "embeddings", "rerank", "moderation",
+	case "chat", "responses", "interactions", "interaction_agents", "embeddings", "rerank", "moderation",
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
@@ -461,6 +464,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	case "interactions":
 		_, ok := endpoint.Provider.(InteractionClient)
 		return ok
+	case "interaction_agents":
+		_, ok := endpoint.Provider.(InteractionClient)
+		return ok && endpoint.Type == "gemini"
 	case "count_tokens":
 		_, ok := endpoint.Provider.(TokenCountClient)
 		return ok
