@@ -272,8 +272,10 @@ func (s *PostgresVirtualKeyStore) ListUsers(ctx context.Context, teamID string, 
 
 func (s *PostgresVirtualKeyStore) GetUser(ctx context.Context, id string) (DirectoryUser, error) {
 	var user DirectoryUser
-	err := s.pool.QueryRow(ctx, `SELECT id,external_id,COALESCE(email,''),name,status,roles,created_at,updated_at,scim_deleted_at FROM users WHERE id=$1`, id).
-		Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.CreatedAt, &user.UpdatedAt, &user.DeletedAt)
+	err := s.pool.QueryRow(ctx, `SELECT u.id,u.external_id,COALESCE(u.email,''),u.name,u.status,u.roles,
+		COALESCE(array_agg(m.team_id ORDER BY m.team_id) FILTER (WHERE m.team_id IS NOT NULL),'{}'),u.created_at,u.updated_at,u.scim_deleted_at
+		FROM users u LEFT JOIN auth_team_memberships m ON m.user_id=u.id WHERE u.id=$1 GROUP BY u.id`, id).
+		Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.TeamIDs, &user.CreatedAt, &user.UpdatedAt, &user.DeletedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DirectoryUser{}, ErrDirectoryNotFound
 	}
@@ -281,10 +283,14 @@ func (s *PostgresVirtualKeyStore) GetUser(ctx context.Context, id string) (Direc
 }
 
 func (s *PostgresVirtualKeyStore) FindUser(ctx context.Context, attribute, value string) (DirectoryUser, bool, error) {
-	query := `SELECT id,external_id,COALESCE(email,''),name,status,roles,created_at,updated_at,scim_deleted_at FROM users WHERE external_id=$1 AND scim_deleted_at IS NULL`
+	query := `SELECT u.id,u.external_id,COALESCE(u.email,''),u.name,u.status,u.roles,
+		COALESCE(array_agg(m.team_id ORDER BY m.team_id) FILTER (WHERE m.team_id IS NOT NULL),'{}'),u.created_at,u.updated_at,u.scim_deleted_at
+		FROM users u LEFT JOIN auth_team_memberships m ON m.user_id=u.id WHERE u.external_id=$1 AND u.scim_deleted_at IS NULL GROUP BY u.id`
 	switch attribute {
 	case "userName":
-		query = `SELECT id,external_id,COALESCE(email,''),name,status,roles,created_at,updated_at,scim_deleted_at FROM users WHERE lower(email)=$1 AND scim_deleted_at IS NULL`
+		query = `SELECT u.id,u.external_id,COALESCE(u.email,''),u.name,u.status,u.roles,
+			COALESCE(array_agg(m.team_id ORDER BY m.team_id) FILTER (WHERE m.team_id IS NOT NULL),'{}'),u.created_at,u.updated_at,u.scim_deleted_at
+			FROM users u LEFT JOIN auth_team_memberships m ON m.user_id=u.id WHERE lower(u.email)=$1 AND u.scim_deleted_at IS NULL GROUP BY u.id`
 		value = strings.ToLower(value)
 	case "externalId":
 	default:
@@ -292,7 +298,7 @@ func (s *PostgresVirtualKeyStore) FindUser(ctx context.Context, attribute, value
 	}
 	var user DirectoryUser
 	err := s.pool.QueryRow(ctx, query, value).
-		Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.CreatedAt, &user.UpdatedAt, &user.DeletedAt)
+		Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.TeamIDs, &user.CreatedAt, &user.UpdatedAt, &user.DeletedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DirectoryUser{}, false, nil
 	}
@@ -325,9 +331,11 @@ func (s *PostgresVirtualKeyStore) DeleteUser(ctx context.Context, id string) (Di
 }
 
 func (s *PostgresVirtualKeyStore) CreateUser(ctx context.Context, user DirectoryUser) (DirectoryUser, error) {
-	err := s.pool.QueryRow(ctx, `INSERT INTO users(id,external_id,email,name,status,roles,scim_deleted_at) VALUES($1,$2,NULLIF($3,''),$4,$5,$6,$7)
-		ON CONFLICT DO NOTHING RETURNING id,external_id,COALESCE(email,''),name,status,roles,created_at,updated_at,scim_deleted_at`, user.ID, user.ExternalID, user.Email, user.Name, user.Status, nonNilStrings(user.Roles), user.DeletedAt).
-		Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.CreatedAt, &user.UpdatedAt, &user.DeletedAt)
+	err := s.pool.QueryRow(ctx, `WITH saved AS (
+		INSERT INTO users(id,external_id,email,name,status,roles,scim_deleted_at) VALUES($1,$2,NULLIF($3,''),$4,$5,$6,$7)
+		ON CONFLICT DO NOTHING RETURNING id,external_id,email,name,status,roles,created_at,updated_at,scim_deleted_at)
+		SELECT id,external_id,COALESCE(email,''),name,status,roles,'{}'::text[],created_at,updated_at,scim_deleted_at FROM saved`, user.ID, user.ExternalID, user.Email, user.Name, user.Status, nonNilStrings(user.Roles), user.DeletedAt).
+		Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.TeamIDs, &user.CreatedAt, &user.UpdatedAt, &user.DeletedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DirectoryUser{}, ErrDirectoryConflict
 	}
@@ -340,9 +348,14 @@ func isUniqueViolation(err error) bool {
 }
 
 func (s *PostgresVirtualKeyStore) PutUser(ctx context.Context, user DirectoryUser) (DirectoryUser, error) {
-	err := s.pool.QueryRow(ctx, `INSERT INTO users(id,external_id,email,name,status,roles,scim_deleted_at) VALUES($1,$2,NULLIF($3,''),$4,$5,$6,$7)
+	err := s.pool.QueryRow(ctx, `WITH saved AS (
+		INSERT INTO users(id,external_id,email,name,status,roles,scim_deleted_at) VALUES($1,$2,NULLIF($3,''),$4,$5,$6,$7)
 		ON CONFLICT(id) DO UPDATE SET external_id=EXCLUDED.external_id,email=EXCLUDED.email,name=EXCLUDED.name,status=EXCLUDED.status,roles=EXCLUDED.roles,scim_deleted_at=EXCLUDED.scim_deleted_at,updated_at=now()
-		RETURNING id,external_id,COALESCE(email,''),name,status,roles,created_at,updated_at,scim_deleted_at`, user.ID, user.ExternalID, user.Email, user.Name, user.Status, nonNilStrings(user.Roles), user.DeletedAt).Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.CreatedAt, &user.UpdatedAt, &user.DeletedAt)
+		RETURNING id,external_id,email,name,status,roles,created_at,updated_at,scim_deleted_at)
+		SELECT s.id,s.external_id,COALESCE(s.email,''),s.name,s.status,s.roles,
+		COALESCE(array_agg(m.team_id ORDER BY m.team_id) FILTER (WHERE m.team_id IS NOT NULL),'{}'),s.created_at,s.updated_at,s.scim_deleted_at
+		FROM saved s LEFT JOIN auth_team_memberships m ON m.user_id=s.id
+		GROUP BY s.id,s.external_id,s.email,s.name,s.status,s.roles,s.created_at,s.updated_at,s.scim_deleted_at`, user.ID, user.ExternalID, user.Email, user.Name, user.Status, nonNilStrings(user.Roles), user.DeletedAt).Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.TeamIDs, &user.CreatedAt, &user.UpdatedAt, &user.DeletedAt)
 	return user, err
 }
 

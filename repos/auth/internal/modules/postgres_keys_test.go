@@ -89,6 +89,19 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	if _, err := store.PutMembership(ctx, TeamMembership{TeamID: directoryTeamID, UserID: directoryUserID, Roles: []string{"team_admin"}}); err != nil {
 		t.Fatal(err)
 	}
+	loadedUser, err := store.GetUser(ctx, directoryUserID)
+	if err != nil || len(loadedUser.TeamIDs) != 1 || loadedUser.TeamIDs[0] != directoryTeamID {
+		t.Fatalf("get user memberships: user=%+v err=%v", loadedUser, err)
+	}
+	foundUser, found, err := store.FindUser(ctx, "userName", "OWNER@example.test")
+	if err != nil || !found || len(foundUser.TeamIDs) != 1 || foundUser.TeamIDs[0] != directoryTeamID {
+		t.Fatalf("find user memberships: user=%+v found=%v err=%v", foundUser, found, err)
+	}
+	loadedUser.Name = "Owner Updated"
+	updatedUser, err := store.PutUser(ctx, loadedUser)
+	if err != nil || len(updatedUser.TeamIDs) != 1 || updatedUser.TeamIDs[0] != directoryTeamID {
+		t.Fatalf("put user preserved memberships: user=%+v err=%v", updatedUser, err)
+	}
 	provisionedGroup, members, err := store.SaveTeamWithMembers(ctx, DirectoryTeam{ID: provisionedGroupID, ExternalID: "department-" + suffix, Name: "Provisioned " + suffix, Status: "active"}, []string{directoryUserID, scimUserID}, true)
 	if err != nil || provisionedGroup.MemberCount != 2 || len(members) != 2 {
 		t.Fatalf("create provisioned group failed: group=%+v members=%v err=%v", provisionedGroup, members, err)

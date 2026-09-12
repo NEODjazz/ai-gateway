@@ -220,7 +220,9 @@ create, replace, patch, and delete operations use the durable identity directory
 and fail closed when audit recording is unavailable. Group writes synchronize
 at most 500 members in one PostgreSQL transaction, including rollback when any
 member is absent. User names, group display names, and non-empty external IDs
-are unique among visible resources.
+are unique among visible resources. User responses include current group
+membership as a read-only attribute; user PUT and PATCH preserve it, while
+membership changes remain atomic through the group resource.
 
 The Playground uses the same authorized model list and inference endpoints as
 external clients. It supports incremental Chat Completions and Responses SSE,

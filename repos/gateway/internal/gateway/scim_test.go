@@ -88,6 +88,25 @@ func TestSCIMDiscoveryAndPaginationAreTruthful(t *testing.T) {
 	}
 }
 
+func TestSCIMUserReportsReadOnlyGroupMemberships(t *testing.T) {
+	client := &directoryClientStub{user: &DirectoryUser{ID: "user-1", Email: "person@example.test", Name: "Person", Status: "active", TeamIDs: []string{"platform", "risk/team"}}}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithIdentityDirectory(client)
+	router := Routes(handler)
+
+	get := httptest.NewRecorder()
+	router.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/scim/v2/Users/user-1", nil))
+	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"groups":[{"value":"platform","$ref":"/scim/v2/Groups/platform"},{"value":"risk/team","$ref":"/scim/v2/Groups/risk%2Fteam"}]`) {
+		t.Fatalf("get status=%d body=%s", get.Code, get.Body.String())
+	}
+
+	replace := httptest.NewRecorder()
+	body := `{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"renamed@example.test","groups":[{"value":"untrusted"}]}`
+	router.ServeHTTP(replace, httptest.NewRequest(http.MethodPut, "/scim/v2/Users/user-1", strings.NewReader(body)))
+	if replace.Code != http.StatusOK || client.user == nil || len(client.user.TeamIDs) != 2 || client.user.TeamIDs[0] != "platform" || strings.Contains(replace.Body.String(), "untrusted") {
+		t.Fatalf("replace status=%d user=%+v body=%s", replace.Code, client.user, replace.Body.String())
+	}
+}
+
 func TestSCIMRequiresGlobalAdmin(t *testing.T) {
 	handler := NewHandler(modules.NewPipeline([]modules.Module{teamAdminModule{}}), modelsProvider{}).WithIdentityDirectory(&directoryClientStub{})
 	response := httptest.NewRecorder()

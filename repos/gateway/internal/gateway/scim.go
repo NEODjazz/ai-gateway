@@ -29,6 +29,7 @@ const (
 
 type scimValue struct {
 	Value string `json:"value"`
+	Ref   string `json:"$ref,omitempty"`
 }
 
 type scimUserName struct {
@@ -44,6 +45,7 @@ type scimUser struct {
 	DisplayName string       `json:"displayName,omitempty"`
 	Active      *bool        `json:"active,omitempty"`
 	Roles       []scimValue  `json:"roles,omitempty"`
+	Groups      []scimValue  `json:"groups,omitempty"`
 	Meta        *scimMeta    `json:"meta,omitempty"`
 }
 
@@ -101,6 +103,7 @@ func (h Handler) SCIMSchemas(w http.ResponseWriter, r *http.Request) {
 			{"name": "displayName", "type": "string", "multiValued": false, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none"},
 			{"name": "active", "type": "boolean", "multiValued": false, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none"},
 			{"name": "roles", "type": "complex", "multiValued": true, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none", "subAttributes": []map[string]any{{"name": "value", "type": "string", "multiValued": false, "required": true, "mutability": "readWrite", "returned": "default", "uniqueness": "none"}}},
+			{"name": "groups", "type": "complex", "multiValued": true, "required": false, "mutability": "readOnly", "returned": "default", "uniqueness": "none", "subAttributes": []map[string]any{{"name": "value", "type": "string", "multiValued": false, "required": true, "mutability": "readOnly", "returned": "default", "uniqueness": "none"}, {"name": "$ref", "type": "reference", "referenceTypes": []string{"Group"}, "multiValued": false, "required": false, "mutability": "readOnly", "returned": "default", "uniqueness": "none"}}},
 		},
 	}
 	groupSchema := map[string]any{
@@ -249,7 +252,9 @@ func (h Handler) ReplaceSCIMUser(w http.ResponseWriter, r *http.Request) {
 		writeSCIMError(w, http.StatusNotFound, "", "user not found")
 		return
 	}
-	h.putSCIMUser(w, r, req, scimUserToDirectory(id, input), "scim.user.replace")
+	updated := scimUserToDirectory(id, input)
+	updated.TeamIDs = append([]string(nil), current.TeamIDs...)
+	h.putSCIMUser(w, r, req, updated, "scim.user.replace")
 }
 
 func (h Handler) PatchSCIMUser(w http.ResponseWriter, r *http.Request) {
@@ -285,7 +290,9 @@ func (h Handler) PatchSCIMUser(w http.ResponseWriter, r *http.Request) {
 	if !validSCIMUserInput(w, input) {
 		return
 	}
-	h.putSCIMUser(w, r, req, scimUserToDirectory(current.ID, input), "scim.user.patch")
+	updated := scimUserToDirectory(current.ID, input)
+	updated.TeamIDs = append([]string(nil), current.TeamIDs...)
+	h.putSCIMUser(w, r, req, updated, "scim.user.patch")
 }
 
 func (h Handler) DeleteSCIMUser(w http.ResponseWriter, r *http.Request) {
@@ -336,7 +343,11 @@ func scimUserFromDirectory(user DirectoryUser) scimUser {
 	for _, role := range user.Roles {
 		roles = append(roles, scimValue{Value: role})
 	}
-	return scimUser{Schemas: []string{scimUserSchema}, ID: user.ID, ExternalID: user.ExternalID, UserName: user.Email, Name: scimUserName{Formatted: user.Name}, DisplayName: user.Name, Active: &active, Roles: roles, Meta: &scimMeta{ResourceType: "User", Created: user.CreatedAt, LastModified: user.UpdatedAt, Location: scimResourceBaseURL + url.PathEscape(user.ID)}}
+	groups := make([]scimValue, 0, len(user.TeamIDs))
+	for _, teamID := range user.TeamIDs {
+		groups = append(groups, scimValue{Value: teamID, Ref: "/scim/v2/Groups/" + url.PathEscape(teamID)})
+	}
+	return scimUser{Schemas: []string{scimUserSchema}, ID: user.ID, ExternalID: user.ExternalID, UserName: user.Email, Name: scimUserName{Formatted: user.Name}, DisplayName: user.Name, Active: &active, Roles: roles, Groups: groups, Meta: &scimMeta{ResourceType: "User", Created: user.CreatedAt, LastModified: user.UpdatedAt, Location: scimResourceBaseURL + url.PathEscape(user.ID)}}
 }
 
 func scimUserToDirectory(id string, user scimUser) DirectoryUser {
