@@ -22,6 +22,22 @@ describe("APIClient", () => {
     await expect(new APIClient(() => "x").request("/resource", { method: "DELETE" })).resolves.toBeUndefined();
   });
 
+  it("uploads forms without overriding the multipart boundary and downloads binary responses", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "skill_a" }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response("archive", { status: 200, headers: { "Content-Type": "application/zip" } }));
+    const client = new APIClient(() => "token");
+    const form = new FormData(); form.append("files", new File(["content"], "SKILL.md"));
+    await expect(client.requestForm<{ id: string }>("/v1/skills", form, { method: "POST" })).resolves.toEqual({ id: "skill_a" });
+    const uploadHeaders = new Headers(fetchMock.mock.calls[0][1]?.headers);
+    expect(uploadHeaders.get("Authorization")).toBe("Bearer token");
+    expect(uploadHeaders.has("Content-Type")).toBe(false);
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(form);
+    const downloaded = await client.download("/v1/skills/skill_a/content");
+    expect(downloaded.contentType).toBe("application/zip");
+    expect(downloaded.body).toBeInstanceOf(Blob);
+  });
+
   it("maps bounded API errors", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: { code: "invalid_request", message: "Invalid input" } }), { status: 400 }));
     await expect(new APIClient(() => "x").request("/resource")).rejects.toEqual(expect.objectContaining<Partial<APIError>>({ status: 400, code: "invalid_request", message: "Invalid input" }));

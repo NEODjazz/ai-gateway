@@ -9,7 +9,8 @@ describe("dashboard route manifest", () => {
   });
   it("keeps unsupported capabilities explicit", () => {
     const unavailable = appRoutes.filter((route) => !route.available).map((route) => route.path);
-    expect(unavailable).toEqual(expect.arrayContaining(["/search-tools", "/skills"]));
+    expect(unavailable).toEqual(expect.arrayContaining(["/search-tools"]));
+    expect(unavailable).not.toContain("/skills");
     expect(unavailable).not.toContain("/tag-management");
     expect(unavailable).not.toContain("/policies");
     expect(unavailable).not.toContain("/router-settings");
@@ -42,6 +43,7 @@ describe("dashboard route manifest", () => {
     expect(routeCapability(appRoutes.find((route) => route.path === "/providers")!)).toBe("admin");
     expect(routeCapability(appRoutes.find((route) => route.path === "/teams")!)).toBe("team_directory");
     expect(routeCapability(appRoutes.find((route) => route.path === "/playground")!)).toBe("inference");
+    expect(routeCapability(appRoutes.find((route) => route.path === "/skills")!)).toBe("inference");
     expect(routeCapability(appRoutes.find((route) => route.path === "/api-reference")!)).toBe("api_docs");
   });
 });

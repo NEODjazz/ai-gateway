@@ -34,6 +34,7 @@ const BudgetsPage = lazy(() => import("../pages/BudgetsPage").then((module) => (
 const GuardrailMonitorPage = lazy(() => import("../pages/GuardrailMonitorPage").then((module) => ({ default: module.GuardrailMonitorPage })));
 const MCPServersPage = lazy(() => import("../pages/MCPPages").then((module) => ({ default: module.MCPServersPage })));
 const MCPToolsetsPage = lazy(() => import("../pages/MCPPages").then((module) => ({ default: module.MCPToolsetsPage })));
+const SkillsPage = lazy(() => import("../pages/SkillsPage").then((module) => ({ default: module.SkillsPage })));
 const CachePage = lazy(() => import("../pages/CachePage").then((module) => ({ default: module.CachePage })));
 const LoggingPage = lazy(() => import("../pages/LoggingPage").then((module) => ({ default: module.LoggingPage })));
 const RouterSettingsPage = lazy(() => import("../pages/RouterSettingsPage").then((module) => ({ default: module.RouterSettingsPage })));
@@ -85,7 +86,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/tool-policies", title: "Tool policies", group: "AI Hub", element: <ResourcePage config={resourceConfigs.toolPolicies} />, available: true },
   { path: "/agents", title: "Agent profiles", group: "AI Hub", element: <ResourcePage config={resourceConfigs.agents} />, available: true },
   { path: "/search-tools", title: "Search tools", group: "AI Hub", element: unavailable("Search tools", "A managed search-tool registry requires a dedicated execution adapter and credential boundary."), available: false },
-  { path: "/skills", title: "Skills", group: "AI Hub", element: unavailable("Skills", "The gateway governs tool identities but does not store or execute skill content."), available: false },
+  { path: "/skills", title: "Skills", group: "AI Hub", element: <SkillsPage />, available: true, capability: "inference" },
 
   { path: "/guardrails", title: "Guardrails", group: "Govern", element: <GuardrailsPage />, available: true },
   { path: "/guardrails-monitor", title: "Guardrail monitor", group: "Govern", element: <GuardrailMonitorPage />, available: true },

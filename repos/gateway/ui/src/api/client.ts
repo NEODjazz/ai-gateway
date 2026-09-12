@@ -6,6 +6,7 @@ export class APIError extends Error {
 }
 
 export type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown };
+export type BinaryResponse = { body: Blob; contentType: string };
 export type SSEEvent = { event: string; data: string };
 export type StreamResult<T> = { streamed: true } | { streamed: false; data: T };
 
@@ -60,6 +61,26 @@ export class APIClient {
     if (!response.ok) return this.throwResponseError(response);
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
+  }
+
+  async requestForm<T>(path: string, body: FormData, options: Omit<RequestInit, "body"> = {}): Promise<T> {
+    const response = await fetch(path, {
+      ...options,
+      headers: this.headers(options, "application/json"),
+      body
+    });
+    if (!response.ok) return this.throwResponseError(response);
+    if (response.status === 204) return undefined as T;
+    return response.json() as Promise<T>;
+  }
+
+  async download(path: string, options: Omit<RequestInit, "body"> = {}): Promise<BinaryResponse> {
+    const response = await fetch(path, {
+      ...options,
+      headers: this.headers(options, "application/octet-stream")
+    });
+    if (!response.ok) return this.throwResponseError(response);
+    return { body: await response.blob(), contentType: response.headers.get("Content-Type") || "application/octet-stream" };
   }
 
   async stream<T = never>(path: string, options: RequestOptions, onEvent: (event: SSEEvent) => void, acceptJSONFallback = false): Promise<StreamResult<T>> {

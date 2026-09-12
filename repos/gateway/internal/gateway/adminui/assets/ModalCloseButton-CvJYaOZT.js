@@ -1,0 +1,1 @@
+import{j as a,G as t,K as o,I as r,X as i}from"./app.js";function c({label:s,...e}){return a.jsx(t,{className:"gravity-control-scope",children:a.jsx(o,{...e,view:"flat",size:"m",className:"gateway-modal-close","aria-label":s,title:s,children:a.jsx(r,{data:i,size:16})})})}export{c as M};
