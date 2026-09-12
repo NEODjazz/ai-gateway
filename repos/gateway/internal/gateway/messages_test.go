@@ -84,6 +84,23 @@ func TestMessagesPreservesPDFDocumentCitations(t *testing.T) {
 	}
 }
 
+func TestMessagesPreservesBoundedPDFDocumentMetadata(t *testing.T) {
+	request := messagesRequest{Model: "model", MaxTokens: 20, Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"title":"Quarterly report","context":"Internal finance@example.com"}]`)}}}
+	chat, err := request.chat()
+	if err != nil || len(chat.Messages) != 1 || len(chat.Messages[0].AnthropicDocumentMetadata) != 1 || chat.Messages[0].AnthropicDocumentMetadata[0].Title != "Quarterly report" || chat.Messages[0].AnthropicDocumentMetadata[0].Context != "Internal finance@example.com" {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	for _, content := range []string{
+		`[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"title":" "}]`,
+		`[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"context":"` + strings.Repeat("x", 8193) + `"}]`,
+	} {
+		request.Messages[0].Content = json.RawMessage(content)
+		if _, err := request.chat(); err == nil {
+			t.Fatalf("invalid document metadata accepted: %.80s", content)
+		}
+	}
+}
+
 func TestMessagesAcceptsExplicitZeroMaxTokens(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg-cache", Model: "model", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: ""}, FinishReason: "length"}}, Usage: openai.Usage{PromptTokens: 5, CompletionTokens: 0, TotalTokens: 5}}}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))

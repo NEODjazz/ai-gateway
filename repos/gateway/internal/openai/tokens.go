@@ -93,16 +93,26 @@ func EstimateContextTokens(value any) int {
 }
 
 func ChatInputTokens(r ChatCompletionRequest) int {
+	var documentMetadata [][]DocumentMetadata
+	for index := range r.Messages {
+		if len(r.Messages[index].AnthropicDocumentMetadata) > 0 {
+			if documentMetadata == nil {
+				documentMetadata = make([][]DocumentMetadata, len(r.Messages))
+			}
+			documentMetadata[index] = r.Messages[index].AnthropicDocumentMetadata
+		}
+	}
 	estimated := EstimateContextTokens(struct {
-		Messages     []Message             `json:"messages"`
-		Functions    []FunctionDefinition  `json:"functions,omitempty"`
-		FunctionCall *LegacyFunctionChoice `json:"function_call,omitempty"`
-		Tools        []Tool                `json:"tools,omitempty"`
-		ToolChoice   any                   `json:"tool_choice,omitempty"`
-		Format       *ResponseFormat       `json:"response_format,omitempty"`
-		WebSearch    *ChatWebSearchOptions `json:"web_search_options,omitempty"`
-		WebFetch     *ChatWebFetchOptions  `json:"web_fetch_options,omitempty"`
-	}{r.Messages, r.Functions, r.FunctionCall, r.Tools, r.ToolChoice, r.ResponseFormat, r.WebSearchOptions, r.WebFetchOptions})
+		Messages         []Message             `json:"messages"`
+		DocumentMetadata [][]DocumentMetadata  `json:"document_metadata,omitempty"`
+		Functions        []FunctionDefinition  `json:"functions,omitempty"`
+		FunctionCall     *LegacyFunctionChoice `json:"function_call,omitempty"`
+		Tools            []Tool                `json:"tools,omitempty"`
+		ToolChoice       any                   `json:"tool_choice,omitempty"`
+		Format           *ResponseFormat       `json:"response_format,omitempty"`
+		WebSearch        *ChatWebSearchOptions `json:"web_search_options,omitempty"`
+		WebFetch         *ChatWebFetchOptions  `json:"web_fetch_options,omitempty"`
+	}{r.Messages, documentMetadata, r.Functions, r.FunctionCall, r.Tools, r.ToolChoice, r.ResponseFormat, r.WebSearchOptions, r.WebFetchOptions})
 	if r.NativeInputTokens > intMax()-estimated {
 		return intMax()
 	}

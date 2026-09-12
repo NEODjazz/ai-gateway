@@ -239,6 +239,14 @@ func scanPayload(req *RequestContext) string {
 				parts = append(parts, "reasoning: "+block.Thinking)
 			}
 		}
+		for _, metadata := range message.AnthropicDocumentMetadata {
+			if metadata.Title != "" {
+				parts = append(parts, "document_title: "+metadata.Title)
+			}
+			if metadata.Context != "" {
+				parts = append(parts, "document_context: "+metadata.Context)
+			}
+		}
 	}
 	if text := openai.BedrockDocumentText(req.Request.Messages); text != "" {
 		parts = append(parts, "document: "+text)

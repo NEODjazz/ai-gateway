@@ -323,6 +323,13 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 				if !slices.Contains(converted.AnthropicDocumentCitations, true) {
 					converted.AnthropicDocumentCitations = nil
 				}
+				metadataPresent := false
+				for _, metadata := range converted.AnthropicDocumentMetadata {
+					metadataPresent = metadataPresent || metadata.Title != "" || metadata.Context != ""
+				}
+				if !metadataPresent {
+					converted.AnthropicDocumentMetadata = nil
+				}
 				converted.Content = parts
 				result.Messages = append(result.Messages, converted)
 				converted = openai.Message{Role: message.Role}
@@ -407,6 +414,8 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 				var block struct {
 					Type      string             `json:"type"`
 					Citations *messagesCitations `json:"citations,omitempty"`
+					Title     *string            `json:"title,omitempty"`
+					Context   *string            `json:"context,omitempty"`
 					Source    struct {
 						Type      string `json:"type"`
 						MediaType string `json:"media_type"`
@@ -416,12 +425,26 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 				if err := decodeMessagesValue(raw, &block); err != nil || block.Source.Type != "base64" || block.Source.MediaType != "application/pdf" || message.Role != "user" || block.Citations != nil && !block.Citations.Enabled {
 					return result, errors.New("only base64 user PDF document blocks are supported")
 				}
+				if invalidMessagesDocumentMetadata(block.Title, 512) {
+					return result, errors.New("document title must be non-empty and at most 512 characters")
+				}
+				if invalidMessagesDocumentMetadata(block.Context, 8192) {
+					return result, errors.New("document context must be non-empty and at most 8192 characters")
+				}
 				file := map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64," + block.Source.Data, "filename": "input.pdf"}
 				if _, err := openai.ResponseFileAttachments([]any{file}); err != nil {
 					return result, err
 				}
 				parts = append(parts, file)
 				converted.AnthropicDocumentCitations = append(converted.AnthropicDocumentCitations, block.Citations != nil)
+				metadata := openai.DocumentMetadata{}
+				if block.Title != nil {
+					metadata.Title = *block.Title
+				}
+				if block.Context != nil {
+					metadata.Context = *block.Context
+				}
+				converted.AnthropicDocumentMetadata = append(converted.AnthropicDocumentMetadata, metadata)
 				documentCount++
 				if block.Citations != nil {
 					citedDocumentCount++
@@ -705,6 +728,10 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		}
 	}
 	return result, nil
+}
+
+func invalidMessagesDocumentMetadata(value *string, maxRunes int) bool {
+	return value != nil && (strings.TrimSpace(*value) == "" || utf8.RuneCountInString(*value) > maxRunes)
 }
 
 func anthropicClientToolIdentity(toolType string) (string, string) {

@@ -140,17 +140,17 @@ func TestAnthropicPDFDocumentWireAndCapability(t *testing.T) {
 
 func TestAnthropicPDFDocumentCitationsWireAndCapability(t *testing.T) {
 	file := map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64,JVBERi0xLjcKY29udGVudA==", "filename": "input.pdf"}
-	request := openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: []any{file}, AnthropicDocumentCitations: []bool{true}}}}
+	request := openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: []any{file}, AnthropicDocumentCitations: []bool{true}, AnthropicDocumentMetadata: []openai.DocumentMetadata{{Title: "Report", Context: "Audited"}}}}}
 	_, messages := anthropicMessages(request.Messages)
 	encoded, err := json.Marshal(messages)
-	if err != nil || !strings.Contains(string(encoded), `"citations":{"enabled":true}`) {
+	if err != nil || !strings.Contains(string(encoded), `"citations":{"enabled":true}`) || !strings.Contains(string(encoded), `"title":"Report"`) || !strings.Contains(string(encoded), `"context":"Audited"`) {
 		t.Fatalf("messages=%s err=%v", encoded, err)
 	}
-	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,document_citations,file_input" {
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,document_citations,document_metadata,file_input" {
 		t.Fatalf("capabilities=%q", got)
 	}
 	required := requiredChatCapabilities(request, false)
-	if (Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat", "file_input"}}).supportsCapabilities(required...) || !(Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat", "file_input", "document_citations"}}).supportsCapabilities(required...) {
+	if (Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat", "file_input", "document_citations"}}).supportsCapabilities(required...) || !(Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat", "file_input", "document_citations", "document_metadata"}}).supportsCapabilities(required...) {
 		t.Fatal("document citations routing capability is not enforced")
 	}
 }

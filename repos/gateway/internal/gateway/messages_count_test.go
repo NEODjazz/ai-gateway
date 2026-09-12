@@ -140,10 +140,11 @@ func TestCountEndpointPreservesContextManagement(t *testing.T) {
 func TestCountEndpointPreservesPDFDocument(t *testing.T) {
 	counter := &countProviderSpy{}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}}}}), counter))
-	response := countEndpointCall(handler, `{"model":"m","messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"citations":{"enabled":true}}]}]}`, "gateway-test-key")
+	response := countEndpointCall(handler, `{"model":"m","messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"title":"Report","context":"Audited","citations":{"enabled":true}}]}]}`, "gateway-test-key")
 	attachments, err := openai.ChatFileAttachments(counter.request.Request.Messages)
 	citations := counter.request.Request.Messages[0].AnthropicDocumentCitations
-	if response.Code != http.StatusOK || counter.calls != 1 || err != nil || len(attachments) != 1 || attachments[0].MediaType != "application/pdf" || len(citations) != 1 || !citations[0] {
+	metadata := counter.request.Request.Messages[0].AnthropicDocumentMetadata
+	if response.Code != http.StatusOK || counter.calls != 1 || err != nil || len(attachments) != 1 || attachments[0].MediaType != "application/pdf" || len(citations) != 1 || !citations[0] || len(metadata) != 1 || metadata[0].Title != "Report" || metadata[0].Context != "Audited" {
 		t.Fatalf("status=%d body=%s calls=%d attachments=%+v err=%v", response.Code, response.Body.String(), counter.calls, attachments, err)
 	}
 }

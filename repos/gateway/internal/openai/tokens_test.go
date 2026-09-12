@@ -63,6 +63,11 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	if ChatInputTokens(withReasoning) <= ChatInputTokens(base)+1000 {
 		t.Fatal("assistant reasoning_content omitted")
 	}
+	withDocumentMetadata := base
+	withDocumentMetadata.Messages = []Message{{Role: "user", Content: "test", AnthropicDocumentMetadata: []DocumentMetadata{{Title: strings.Repeat("title", 100), Context: strings.Repeat("context", 1000)}}}}
+	if ChatInputTokens(withDocumentMetadata) <= ChatInputTokens(base)+1000 {
+		t.Fatal("document metadata omitted from the input-token reserve")
+	}
 	maximumFetches := 3
 	withFetch := base
 	withFetch.WebFetchOptions = &ChatWebFetchOptions{AllowedDomains: []string{"docs.example.com"}, MaxUses: &maximumFetches, MaxContentTokens: 20000}

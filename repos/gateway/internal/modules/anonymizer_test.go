@@ -10,6 +10,20 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
+func TestAnonymizerMasksDocumentMetadata(t *testing.T) {
+	module := NewAnonymizerModule(true, RuleEmail)
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{
+		Role: "user", AnthropicDocumentMetadata: []openai.DocumentMetadata{{Title: "user@example.com", Context: "owner@example.com"}},
+	}}}}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	metadata := req.Request.Messages[0].AnthropicDocumentMetadata[0]
+	if metadata.Title != "{{EMAIL_1}}" || metadata.Context != "{{EMAIL_2}}" {
+		t.Fatalf("metadata=%+v replacements=%v", metadata, req.AnonymizationValues)
+	}
+}
+
 func TestAnonymizerDoesNotTransformImagePayload(t *testing.T) {
 	image := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("api_key=sk-test-1234567890abcdef"))
 	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: []any{

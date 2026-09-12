@@ -146,6 +146,8 @@ type anthropicContent struct {
 	Content          any                    `json:"content,omitempty"`
 	Citations        []anthropicCitation    `json:"citations,omitempty"`
 	RequestCitations *anthropicCitations    `json:"-"`
+	Title            string                 `json:"title,omitempty"`
+	Context          string                 `json:"context,omitempty"`
 	CacheControl     *anthropicCacheControl `json:"cache_control,omitempty"`
 	Thinking         string                 `json:"thinking,omitempty"`
 	Signature        string                 `json:"signature,omitempty"`
@@ -671,7 +673,7 @@ func anthropicMessages(messages []openai.Message) (any, []anthropicMessage) {
 				Type: "tool_result", ToolUseID: message.ToolCallID, IsError: message.ToolResultError, Content: message.Content,
 			}}})
 		default:
-			converted = append(converted, anthropicMessage{Role: "user", Content: anthropicMessageContentWithDocumentCitations(message.Content, message.AnthropicDocumentCitations)})
+			converted = append(converted, anthropicMessage{Role: "user", Content: anthropicMessageContentWithDocumentOptions(message.Content, message.AnthropicDocumentCitations, message.AnthropicDocumentMetadata)})
 		}
 	}
 	if len(converted) == 0 {
@@ -743,10 +745,10 @@ func anthropicResponseMessages(input any) ([]anthropicMessage, error) {
 }
 
 func anthropicMessageContent(value any) any {
-	return anthropicMessageContentWithDocumentCitations(value, nil)
+	return anthropicMessageContentWithDocumentOptions(value, nil, nil)
 }
 
-func anthropicMessageContentWithDocumentCitations(value any, documentCitations []bool) any {
+func anthropicMessageContentWithDocumentOptions(value any, documentCitations []bool, documentMetadata []openai.DocumentMetadata) any {
 	items, ok := value.([]any)
 	if !ok {
 		return openai.ContentText(value)
@@ -789,6 +791,10 @@ func anthropicMessageContentWithDocumentCitations(value any, documentCitations [
 				}}
 				if documentIndex < len(documentCitations) && documentCitations[documentIndex] {
 					block.RequestCitations = &anthropicCitations{Enabled: true}
+				}
+				if documentIndex < len(documentMetadata) {
+					block.Title = documentMetadata[documentIndex].Title
+					block.Context = documentMetadata[documentIndex].Context
 				}
 				blocks = append(blocks, block)
 				documentIndex++

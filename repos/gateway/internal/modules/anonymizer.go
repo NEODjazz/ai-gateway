@@ -72,6 +72,11 @@ func (m AnonymizerModule) Required() bool {
 func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 	for index := range req.Request.Messages {
 		req.Request.Messages[index].Content = m.anonymizeAny(req, req.Request.Messages[index].Content)
+		for metadataIndex := range req.Request.Messages[index].AnthropicDocumentMetadata {
+			metadata := &req.Request.Messages[index].AnthropicDocumentMetadata[metadataIndex]
+			metadata.Title = m.anonymize(req, metadata.Title)
+			metadata.Context = m.anonymize(req, metadata.Context)
+		}
 		if req.Request.Messages[index].Refusal != nil {
 			value := m.anonymize(req, *req.Request.Messages[index].Refusal)
 			req.Request.Messages[index].Refusal = &value

@@ -52,6 +52,7 @@ describe("modelCapabilityOptions", () => {
       "context_management",
       "tool_result_error",
       "document_citations",
+      "document_metadata",
       "audio",
       "audio_input",
       "video_input",

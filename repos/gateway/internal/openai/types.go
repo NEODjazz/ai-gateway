@@ -133,8 +133,15 @@ type Message struct {
 	NativeContent []json.RawMessage `json:"-"`
 	// AnthropicDocumentCitations aligns native citation controls with input_file parts.
 	AnthropicDocumentCitations []bool `json:"-"`
+	// AnthropicDocumentMetadata aligns policy-visible title and context with input_file parts.
+	AnthropicDocumentMetadata []DocumentMetadata `json:"-"`
 	// GeminiCodeExecutionParts preserves validated native execution output order.
 	GeminiCodeExecutionParts []GeminiCodeExecutionPart `json:"-"`
+}
+
+type DocumentMetadata struct {
+	Title   string `json:"title,omitempty"`
+	Context string `json:"context,omitempty"`
 }
 
 type GeminiCodeExecutionPart struct {

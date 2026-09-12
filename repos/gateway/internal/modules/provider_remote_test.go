@@ -146,6 +146,17 @@ func TestChatPDFProjectsAttachmentToAV(t *testing.T) {
 	}
 }
 
+func TestChatDocumentMetadataReachesDLPProjection(t *testing.T) {
+	request := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{
+		Role: "user", Content: []any{map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64,JVBERi0xLjcKY29udGVudA==", "filename": "report.pdf"}},
+		AnthropicDocumentMetadata: []openai.DocumentMetadata{{Title: "Private title", Context: "finance@example.com"}},
+	}}}}
+	payload := scanPayload(&request)
+	if !strings.Contains(payload, "document_title: Private title") || !strings.Contains(payload, "document_context: finance@example.com") {
+		t.Fatalf("document metadata missing from DLP projection: %q", payload)
+	}
+}
+
 func TestChatVideoProjectsAttachmentToAV(t *testing.T) {
 	request := RequestContext{Request: openai.ChatCompletionRequest{
 		Messages: []openai.Message{
