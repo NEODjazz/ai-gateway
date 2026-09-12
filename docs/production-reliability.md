@@ -468,3 +468,9 @@ Rancher Desktop built `ai-gateway-gateway:gaps-3d6b722`; Helm revision 404
 completed successfully, and pod `ai-gateway-gateway-7c99b7479f-f4f78` became
 Ready with zero restarts. The live endpoint confirmed scalar/batch queries and
 all four bounded Search controls for OpenAI, Azure and compatible adapters.
+
+Source `45c98a9` adds execution-validator-derived Image Generation profiles.
+Rancher Desktop built `ai-gateway-gateway:gaps-45c98a9`; Helm revision 405
+completed successfully, and pod `ai-gateway-gateway-56c5fb65bb-l49vp` became
+Ready with zero restarts. The live endpoint confirmed distinct full compatible,
+OpenRouter, Gemini and xAI generation-control sets.
