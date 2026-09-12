@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.315
+  version: 0.1.316
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9307,7 +9307,7 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters, image_edit_parameters, image_variation_parameters, audio_transcription_parameters, audio_translation_parameters, audio_speech_parameters, ocr_parameters, video_create_parameters, fine_tuning_create_parameters, container_create_parameters]
+      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters, image_edit_parameters, image_variation_parameters, audio_transcription_parameters, audio_translation_parameters, audio_speech_parameters, ocr_parameters, video_create_parameters, video_extend_parameters, fine_tuning_create_parameters, container_create_parameters]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, cohere, mistral, voyage, bedrock, groq, deepseek, xai, opensandbox]}
         operations:
@@ -9355,6 +9355,8 @@ components:
           $ref: '#/components/schemas/ProviderOCRParameterPolicy'
         video_create_parameters:
           $ref: '#/components/schemas/ProviderVideoCreateParameterPolicy'
+        video_extend_parameters:
+          $ref: '#/components/schemas/ProviderVideoExtendParameterPolicy'
         fine_tuning_create_parameters:
           $ref: '#/components/schemas/ProviderFineTuningCreateParameterPolicy'
         container_create_parameters:
@@ -9547,12 +9549,39 @@ components:
     ProviderVideoCreateParameterPolicy:
       type: object
       additionalProperties: false
-      required: [supported_options]
+      required: [supported_options, seconds, sizes, input_reference_forms]
+      description: Video creation options and values accepted by the runtime adapter validator. Empty arrays mean the adapter rejects that dimension.
       properties:
         supported_options:
           type: array
           uniqueItems: true
           items: {type: string, enum: [seconds, size, input_reference]}
+        seconds:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: ['4', '8', '12']}
+        sizes:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [720x1280, 1280x720, 1024x1792, 1792x1024]}
+        input_reference_forms:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [image_url]}
+    ProviderVideoExtendParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [supported_options, seconds]
+      description: Video extension options and values accepted by the runtime adapter validator. Empty arrays mean the adapter does not expose native video extension.
+      properties:
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [seconds]}
+        seconds:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: ['4', '8', '12']}
     ProviderFineTuningCreateParameterPolicy:
       type: object
       additionalProperties: false

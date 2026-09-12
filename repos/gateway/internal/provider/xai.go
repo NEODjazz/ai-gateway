@@ -224,16 +224,12 @@ func (x XAI) ExtendVideo(ctx context.Context, id string, request openai.VideoExt
 	if !validResponseResourceID(id) {
 		return openai.Video{}, xaiParameterError("video_id", "invalid video ID")
 	}
-	if len(request.Prompt) == 0 || len(request.Prompt) > 32000 {
-		return openai.Video{}, xaiParameterError("prompt", "prompt must contain between 1 and 32000 bytes")
+	if err := x.ValidateVideoExtendParameters(request); err != nil {
+		return openai.Video{}, err
 	}
 	duration := 4
 	if request.Seconds != "" {
-		var err error
-		duration, err = strconv.Atoi(request.Seconds)
-		if err != nil || duration != 4 && duration != 8 && duration != 12 {
-			return openai.Video{}, xaiParameterError("seconds", "seconds must be 4, 8, or 12")
-		}
+		duration, _ = strconv.Atoi(request.Seconds)
 	}
 	source, err := x.RetrieveVideo(ctx, id)
 	if err != nil {
@@ -261,6 +257,19 @@ func (x XAI) ExtendVideo(ctx context.Context, id string, request openai.VideoExt
 	}
 	prompt := request.Prompt
 	return openai.Video{ID: response.RequestID, Object: "video", Model: source.Model, Status: "queued", Prompt: &prompt, RemixedFromVideoID: &id, Seconds: strconv.Itoa(duration)}, nil
+}
+
+func (XAI) ValidateVideoExtendParameters(request openai.VideoExtendRequest) error {
+	if len(request.Prompt) == 0 || len(request.Prompt) > 32000 {
+		return xaiParameterError("prompt", "prompt must contain between 1 and 32000 bytes")
+	}
+	if request.Seconds != "" {
+		duration, err := strconv.Atoi(request.Seconds)
+		if err != nil || duration != 4 && duration != 8 && duration != 12 {
+			return xaiParameterError("seconds", "seconds must be 4, 8, or 12")
+		}
+	}
+	return nil
 }
 
 func (XAI) ListVideos(context.Context, VideoListOptions) (openai.VideoList, error) {

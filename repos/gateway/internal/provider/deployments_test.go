@@ -655,14 +655,40 @@ func TestManagedProviderCapabilityProfilesExposeValidatedOCROptions(t *testing.T
 }
 
 func TestManagedProviderCapabilityProfilesExposeValidatedVideoCreateOptions(t *testing.T) {
-	expected := map[string][]string{
-		"openai": {"seconds", "size", "input_reference"}, "openai-compatible": {"seconds", "size", "input_reference"},
-		"xai": {"seconds", "size", "input_reference"},
+	type videoPolicy struct {
+		options    []string
+		seconds    []string
+		sizes      []string
+		references []string
+	}
+	allOptions := []string{"seconds", "size", "input_reference"}
+	allSeconds := []string{"4", "8", "12"}
+	allSizes := []string{"720x1280", "1280x720", "1024x1792", "1792x1024"}
+	expected := map[string]videoPolicy{
+		"openai":            {allOptions, allSeconds, allSizes, []string{"image_url"}},
+		"openai-compatible": {allOptions, allSeconds, allSizes, []string{"image_url"}},
+		"xai":               {allOptions, allSeconds, []string{"720x1280", "1280x720"}, []string{"image_url"}},
 	}
 	for _, profile := range ManagedProviderCapabilityProfiles() {
 		want, listed := expected[profile.Type]
-		if slices.Contains(profile.Operations, "video") != listed || !slices.Equal(profile.VideoCreateParameters.SupportedOptions, want) {
-			t.Errorf("%s video create parameters=%v operation=%v", profile.Type, profile.VideoCreateParameters.SupportedOptions, slices.Contains(profile.Operations, "video"))
+		got := profile.VideoCreateParameters
+		if slices.Contains(profile.Operations, "video") != listed || !slices.Equal(got.SupportedOptions, want.options) || !slices.Equal(got.Seconds, want.seconds) || !slices.Equal(got.Sizes, want.sizes) || !slices.Equal(got.InputReferenceForms, want.references) {
+			t.Errorf("%s video create parameters=%+v operation=%v", profile.Type, got, slices.Contains(profile.Operations, "video"))
+		}
+	}
+}
+
+func TestManagedProviderCapabilityProfilesExposeValidatedVideoExtendOptions(t *testing.T) {
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		wantOptions, wantSeconds := []string(nil), []string(nil)
+		listed := profile.Type == "xai"
+		if listed {
+			wantOptions = []string{"seconds"}
+			wantSeconds = []string{"4", "8", "12"}
+		}
+		got := profile.VideoExtendParameters
+		if slices.Contains(profile.Operations, "video_extension") != listed || !slices.Equal(got.SupportedOptions, wantOptions) || !slices.Equal(got.Seconds, wantSeconds) {
+			t.Errorf("%s video extend parameters=%+v operation=%v", profile.Type, got, slices.Contains(profile.Operations, "video_extension"))
 		}
 	}
 }

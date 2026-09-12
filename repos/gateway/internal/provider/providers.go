@@ -46,6 +46,7 @@ type ProviderCapabilityProfile struct {
 	AudioSpeechParameters        ProviderAudioSpeechParameterPolicy        `json:"audio_speech_parameters"`
 	OCRParameters                ProviderOCRParameterPolicy                `json:"ocr_parameters"`
 	VideoCreateParameters        ProviderVideoCreateParameterPolicy        `json:"video_create_parameters"`
+	VideoExtendParameters        ProviderVideoExtendParameterPolicy        `json:"video_extend_parameters"`
 	FineTuningCreateParameters   ProviderFineTuningCreateParameterPolicy   `json:"fine_tuning_create_parameters"`
 	ContainerCreateParameters    ProviderContainerCreateParameterPolicy    `json:"container_create_parameters"`
 }
@@ -122,7 +123,15 @@ type ProviderOCRParameterPolicy struct {
 }
 
 type ProviderVideoCreateParameterPolicy struct {
+	SupportedOptions    []string `json:"supported_options"`
+	Seconds             []string `json:"seconds"`
+	Sizes               []string `json:"sizes"`
+	InputReferenceForms []string `json:"input_reference_forms"`
+}
+
+type ProviderVideoExtendParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
+	Seconds          []string `json:"seconds"`
 }
 
 type ProviderFineTuningCreateParameterPolicy struct {
@@ -398,6 +407,7 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			AudioSpeechParameters:        managedProviderAudioSpeechParameterPolicy(client, slicesContain(operations, "audio_speech")),
 			OCRParameters:                managedProviderOCRParameterPolicy(client, slicesContain(operations, "ocr")),
 			VideoCreateParameters:        managedProviderVideoCreateParameterPolicy(client, slicesContain(operations, "video")),
+			VideoExtendParameters:        managedProviderVideoExtendParameterPolicy(client, slicesContain(operations, "video_extension")),
 			FineTuningCreateParameters:   managedProviderFineTuningCreateParameterPolicy(client, slicesContain(operations, "fine_tuning")),
 			ContainerCreateParameters:    managedProviderContainerCreateParameterPolicy(client, operations),
 		})
@@ -467,7 +477,7 @@ func managedProviderFineTuningCreateParameterPolicy(client Client, supported boo
 }
 
 func managedProviderVideoCreateParameterPolicy(client Client, supported bool) ProviderVideoCreateParameterPolicy {
-	policy := ProviderVideoCreateParameterPolicy{SupportedOptions: []string{}}
+	policy := ProviderVideoCreateParameterPolicy{SupportedOptions: []string{}, Seconds: []string{}, Sizes: []string{}, InputReferenceForms: []string{}}
 	validator, ok := client.(interface {
 		ValidateVideoCreateParameters(openai.VideoCreateRequest) error
 	})
@@ -490,6 +500,47 @@ func managedProviderVideoCreateParameterPolicy(client Client, supported bool) Pr
 		if validator.ValidateVideoCreateParameters(request) == nil {
 			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
 		}
+	}
+	for _, seconds := range []string{"4", "8", "12"} {
+		request := baseline
+		request.Seconds = seconds
+		if validator.ValidateVideoCreateParameters(request) == nil {
+			policy.Seconds = append(policy.Seconds, seconds)
+		}
+	}
+	for _, size := range []string{"720x1280", "1280x720", "1024x1792", "1792x1024"} {
+		request := baseline
+		request.Size = size
+		if validator.ValidateVideoCreateParameters(request) == nil {
+			policy.Sizes = append(policy.Sizes, size)
+		}
+	}
+	request := baseline
+	request.InputReference = &openai.VideoInputReference{ImageURL: "https://example.test/image.png"}
+	if validator.ValidateVideoCreateParameters(request) == nil {
+		policy.InputReferenceForms = append(policy.InputReferenceForms, "image_url")
+	}
+	return policy
+}
+
+func managedProviderVideoExtendParameterPolicy(client Client, supported bool) ProviderVideoExtendParameterPolicy {
+	policy := ProviderVideoExtendParameterPolicy{SupportedOptions: []string{}, Seconds: []string{}}
+	validator, ok := client.(interface {
+		ValidateVideoExtendParameters(openai.VideoExtendRequest) error
+	})
+	if !supported || !ok {
+		return policy
+	}
+	baseline := openai.VideoExtendRequest{Prompt: "prompt"}
+	for _, seconds := range []string{"4", "8", "12"} {
+		request := baseline
+		request.Seconds = seconds
+		if validator.ValidateVideoExtendParameters(request) == nil {
+			policy.Seconds = append(policy.Seconds, seconds)
+		}
+	}
+	if len(policy.Seconds) > 0 {
+		policy.SupportedOptions = append(policy.SupportedOptions, "seconds")
 	}
 	return policy
 }
