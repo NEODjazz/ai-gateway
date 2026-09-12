@@ -575,6 +575,20 @@ func TestManagedProviderCapabilityProfilesExposeValidatedImageEditOptions(t *tes
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeValidatedImageVariationOptions(t *testing.T) {
+	all := []string{"n", "response_format", "size", "user"}
+	expected := map[string][]string{
+		"openai": all, "openai-compatible": all, "azure-openai": all,
+		"gemini": {"n", "response_format"},
+	}
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		want, listed := expected[profile.Type]
+		if slices.Contains(profile.Operations, "image_variation") != listed || !slices.Equal(profile.ImageVariationParameters.SupportedOptions, want) {
+			t.Errorf("%s image variation parameters=%v operation=%v", profile.Type, profile.ImageVariationParameters.SupportedOptions, slices.Contains(profile.Operations, "image_variation"))
+		}
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

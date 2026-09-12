@@ -40,6 +40,7 @@ type ProviderCapabilityProfile struct {
 	SearchParameters          ProviderSearchParameterPolicy          `json:"search_parameters"`
 	ImageGenerationParameters ProviderImageGenerationParameterPolicy `json:"image_generation_parameters"`
 	ImageEditParameters       ProviderImageEditParameterPolicy       `json:"image_edit_parameters"`
+	ImageVariationParameters  ProviderImageVariationParameterPolicy  `json:"image_variation_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -90,6 +91,10 @@ type ProviderImageGenerationParameterPolicy struct {
 type ProviderImageEditParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 	MaxImages        int      `json:"max_images"`
+}
+
+type ProviderImageVariationParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
 }
 
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai", "opensandbox"}
@@ -351,9 +356,40 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			SearchParameters:          managedProviderSearchParameterPolicy(client, slicesContain(operations, "search")),
 			ImageGenerationParameters: managedProviderImageGenerationParameterPolicy(client, slicesContain(operations, "image_generation")),
 			ImageEditParameters:       managedProviderImageEditParameterPolicy(client, slicesContain(operations, "image_edit")),
+			ImageVariationParameters:  managedProviderImageVariationParameterPolicy(client, slicesContain(operations, "image_variation")),
 		})
 	}
 	return profiles
+}
+
+func managedProviderImageVariationParameterPolicy(client Client, supported bool) ProviderImageVariationParameterPolicy {
+	policy := ProviderImageVariationParameterPolicy{SupportedOptions: []string{}}
+	validator, ok := client.(interface {
+		ValidateImageVariationParameters(openai.ImageVariationRequest) error
+	})
+	if !supported || !ok {
+		return policy
+	}
+	baseline := openai.ImageVariationRequest{
+		Model: "model",
+		Image: openai.ImageAttachment{MediaType: "image/png", Data: "iVBORw0KGgpmaXh0dXJl"},
+	}
+	for _, probe := range []struct {
+		name  string
+		apply func(*openai.ImageVariationRequest)
+	}{
+		{"n", func(r *openai.ImageVariationRequest) { value := 1; r.N = &value }},
+		{"response_format", func(r *openai.ImageVariationRequest) { r.ResponseFormat = "b64_json" }},
+		{"size", func(r *openai.ImageVariationRequest) { r.Size = "1024x1024" }},
+		{"user", func(r *openai.ImageVariationRequest) { r.User = "probe" }},
+	} {
+		request := baseline
+		probe.apply(&request)
+		if validator.ValidateImageVariationParameters(request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	return policy
 }
 
 func managedProviderImageEditParameterPolicy(client Client, supported bool) ProviderImageEditParameterPolicy {

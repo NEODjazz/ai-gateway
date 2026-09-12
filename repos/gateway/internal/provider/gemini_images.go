@@ -65,7 +65,7 @@ func (g Gemini) EditImage(ctx context.Context, request openai.ImageEditRequest) 
 }
 
 func (g Gemini) CreateImageVariation(ctx context.Context, request openai.ImageVariationRequest) (openai.ImageGenerationResponse, error) {
-	if err := validateGeminiImageVariationRequest(request); err != nil {
+	if err := g.ValidateImageVariationParameters(request); err != nil {
 		return openai.ImageGenerationResponse{}, err
 	}
 	body := geminiRequest{
@@ -76,6 +76,10 @@ func (g Gemini) CreateImageVariation(ctx context.Context, request openai.ImageVa
 		Generation: geminiGeneration{ResponseModalities: []string{"IMAGE"}},
 	}
 	return g.executeImageRequest(ctx, request.Model, body, request.GenerationRequest())
+}
+
+func (Gemini) ValidateImageVariationParameters(request openai.ImageVariationRequest) error {
+	return validateGeminiImageVariationRequest(request)
 }
 
 func (g Gemini) executeImageRequest(ctx context.Context, modelName string, body geminiRequest, responseRequest openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {

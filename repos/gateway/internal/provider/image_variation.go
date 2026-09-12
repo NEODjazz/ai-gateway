@@ -13,9 +13,16 @@ import (
 
 func (OpenAICompatible) SupportsImageVariation() bool { return true }
 
-func (p OpenAICompatible) CreateImageVariation(ctx context.Context, request openai.ImageVariationRequest) (openai.ImageGenerationResponse, error) {
+func (p OpenAICompatible) ValidateImageVariationParameters(request openai.ImageVariationRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	return nil
+}
+
+func (p OpenAICompatible) CreateImageVariation(ctx context.Context, request openai.ImageVariationRequest) (openai.ImageGenerationResponse, error) {
+	if err := p.ValidateImageVariationParameters(request); err != nil {
+		return openai.ImageGenerationResponse{}, err
 	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
