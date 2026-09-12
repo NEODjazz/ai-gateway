@@ -182,6 +182,63 @@ func TestNVIDIANIMReasoningEffortPolicyAndWireContract(t *testing.T) {
 	}
 }
 
+func TestNVIDIANIMNormalizesReasoningUsageInJSONAndSSE(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				payload := `{"id":"chat","object":"chat.completion","created":1,"model":"deepseek-ai/DeepSeek-V4-Pro-0813","choices":[{"index":0,"message":{"role":"assistant","reasoning_content":"plan","content":"answer"},"delta":{"role":"assistant","reasoning_content":"plan","content":"answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":5,"total_tokens":7,"reasoning_tokens":3}}`
+				if stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", payload)
+					return
+				}
+				_, _ = fmt.Fprint(w, payload)
+			}))
+			defer server.Close()
+			client := NewNVIDIANIM(server.URL, "key", true)
+			request := openai.ChatCompletionRequest{Model: "deepseek-ai/DeepSeek-V4-Pro-0813", Messages: []openai.Message{{Role: "user", Content: "question"}}, Stream: stream}
+			var response openai.ChatCompletionResponse
+			var err error
+			if stream {
+				response, err = client.StreamChatCompletions(t.Context(), request, func(payload string) error {
+					var envelope struct {
+						Usage map[string]json.RawMessage `json:"usage"`
+					}
+					if json.Unmarshal([]byte(payload), &envelope) != nil || envelope.Usage["reasoning_tokens"] != nil || envelope.Usage["completion_tokens_details"] == nil {
+						t.Fatalf("unnormalized stream payload=%s", payload)
+					}
+					return nil
+				})
+			} else {
+				response, err = client.ChatCompletions(t.Context(), request)
+			}
+			if err != nil || response.Usage.CompletionTokensDetails == nil || response.Usage.CompletionTokensDetails.ReasoningTokens != 3 || response.Usage.TotalTokens != 7 {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+		})
+	}
+}
+
+func TestNVIDIANIMRejectsInvalidReasoningUsage(t *testing.T) {
+	for name, payload := range map[string]string{
+		"negative":      `{"usage":{"completion_tokens":5,"reasoning_tokens":-1}}`,
+		"over output":   `{"usage":{"completion_tokens":2,"reasoning_tokens":3}}`,
+		"fractional":    `{"usage":{"completion_tokens":5,"reasoning_tokens":1.5}}`,
+		"null":          `{"usage":{"completion_tokens":5,"reasoning_tokens":null}}`,
+		"null output":   `{"usage":{"completion_tokens":null,"reasoning_tokens":0}}`,
+		"conflicting":   `{"usage":{"completion_tokens":5,"reasoning_tokens":3,"completion_tokens_details":{"reasoning_tokens":2}}}`,
+		"null existing": `{"usage":{"completion_tokens":5,"reasoning_tokens":0,"completion_tokens_details":{"reasoning_tokens":null}}}`,
+		"bad details":   `{"usage":{"completion_tokens":5,"reasoning_tokens":3,"completion_tokens_details":[]}}`,
+		"missing total": `{"usage":{"reasoning_tokens":3}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := normalizeNVIDIANIMChatPayload([]byte(payload)); err == nil {
+				t.Fatalf("invalid payload accepted: %s", payload)
+			}
+		})
+	}
+}
+
 func TestNVIDIANIMNativeMessagesAndCountTokens(t *testing.T) {
 	var messagesCalls, chatCalls, countCalls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

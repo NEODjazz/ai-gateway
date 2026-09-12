@@ -55,18 +55,83 @@ func (n NVIDIANIM) ChatCompletions(ctx context.Context, request openai.ChatCompl
 	if err := n.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	return n.compatible.ChatCompletions(ctx, request)
+	return n.compatible.chatCompletions(ctx, request, decodeNVIDIANIMChatCompletionResponse, normalizeNVIDIANIMChatStreamPayload)
 }
 
 func (n NVIDIANIM) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	if err := n.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	return n.compatible.StreamChatCompletions(ctx, request, write)
+	return n.compatible.streamChatCompletions(ctx, request, write, normalizeNVIDIANIMChatStreamPayload)
 }
 
 func (NVIDIANIM) ManagedChatModelProbes() []string {
 	return []string{"nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b", "deepseek-ai/DeepSeek-V4-Pro-0813"}
+}
+
+func decodeNVIDIANIMChatCompletionResponse(reader io.Reader, target *openai.ChatCompletionResponse) error {
+	payload, err := io.ReadAll(io.LimitReader(reader, maxChatCompletionResponseBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(payload) > maxChatCompletionResponseBytes {
+		return errors.New("chat completion response exceeds limit")
+	}
+	normalized, err := normalizeNVIDIANIMChatPayload(payload)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(normalized, target)
+}
+
+func normalizeNVIDIANIMChatStreamPayload(payload string) (string, error) {
+	normalized, err := normalizeNVIDIANIMChatPayload([]byte(payload))
+	return string(normalized), err
+}
+
+func normalizeNVIDIANIMChatPayload(payload []byte) ([]byte, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return nil, err
+	}
+	rawUsage := envelope["usage"]
+	if len(rawUsage) == 0 || bytes.Equal(bytes.TrimSpace(rawUsage), []byte("null")) {
+		return payload, nil
+	}
+	var usage map[string]json.RawMessage
+	if err := json.Unmarshal(rawUsage, &usage); err != nil {
+		return nil, errors.New("provider returned invalid NVIDIA NIM usage")
+	}
+	rawReasoning, found := usage["reasoning_tokens"]
+	if !found {
+		return payload, nil
+	}
+	var reasoningTokens int
+	if bytes.Equal(bytes.TrimSpace(rawReasoning), []byte("null")) || json.Unmarshal(rawReasoning, &reasoningTokens) != nil || reasoningTokens < 0 {
+		return nil, errors.New("provider returned invalid NVIDIA NIM reasoning tokens")
+	}
+	rawCompletion := usage["completion_tokens"]
+	var completionTokens int
+	if bytes.Equal(bytes.TrimSpace(rawCompletion), []byte("null")) || json.Unmarshal(rawCompletion, &completionTokens) != nil || reasoningTokens > completionTokens {
+		return nil, errors.New("provider returned inconsistent NVIDIA NIM reasoning tokens")
+	}
+	details := map[string]json.RawMessage{}
+	if rawDetails := usage["completion_tokens_details"]; len(rawDetails) > 0 && !bytes.Equal(bytes.TrimSpace(rawDetails), []byte("null")) {
+		if json.Unmarshal(rawDetails, &details) != nil {
+			return nil, errors.New("provider returned invalid NVIDIA NIM completion token details")
+		}
+	}
+	if rawExisting, exists := details["reasoning_tokens"]; exists {
+		var existing int
+		if bytes.Equal(bytes.TrimSpace(rawExisting), []byte("null")) || json.Unmarshal(rawExisting, &existing) != nil || existing != reasoningTokens {
+			return nil, errors.New("provider returned conflicting NVIDIA NIM reasoning tokens")
+		}
+	}
+	details["reasoning_tokens"], _ = json.Marshal(reasoningTokens)
+	usage["completion_tokens_details"], _ = json.Marshal(details)
+	delete(usage, "reasoning_tokens")
+	envelope["usage"], _ = json.Marshal(usage)
+	return json.Marshal(envelope)
 }
 
 func (n NVIDIANIM) Messages(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
