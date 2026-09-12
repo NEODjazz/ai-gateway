@@ -633,3 +633,11 @@ regression runs a compact request through shared strict validation, model policy
 TPM admission, independent execution identity, provider retry and post-response
 billing, and verifies usage-bearing compact output. Empty input and unknown
 request fields fail before a job is queued.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-3c8d423` with image ID
+`sha256:870163902961668bdda449abce2a2563e22cf39e571fa049c64e160d7ff95b95`.
+Helm revision 426 completed successfully, and pod
+`ai-gateway-gateway-868db9ff96-mjs5j` became Ready with zero restarts. The live
+OpenAPI 0.1.326 contract lists `/v1/responses/compact` in the accepted batch
+endpoints. An unauthenticated request using that endpoint reached authentication
+with 401, while a misspelled endpoint failed request validation with 400.
