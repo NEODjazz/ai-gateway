@@ -1634,3 +1634,26 @@ language, response format, temperature and timestamp controls. An
 unauthenticated multipart request containing a valid WAV returned 401 before
 deployment selection. No provider credential or external inference was used by
 the smoke checks.
+
+Source `ddfa2da` adds native Together Audio Translation through multipart
+`/v1/audio/translations`. Prompt bias, JSON or verbose JSON response format and
+temperature are preserved; language, timestamps, diarization, batch controls
+and streaming fail before HTTP. Translation reuses the transcription
+container-duration gate, 4-hour limit, bounded response decoder and exact
+duration settlement. Protocol regressions cover the multipart body, bearer
+propagation, parameter isolation and exact Router reserve/settlement. Focused
+protocol and race tests, the full Go suite, full race suite, vet and build
+passed. Contract commit `d468681` publishes the operation and parameter matrix
+in OpenAPI 0.1.379.
+
+Rancher Desktop built `ai-gateway-gateway:together-translation-d468681` with
+image ID
+`sha256:1357fae90bd141a9123195d8eadf8415f64500e6ecfa5e8646dd96e3724675a5`.
+Gateway Helm revision 485 completed successfully; its manifest differs from
+revision 484 only by the top-level image tag. Pod
+`ai-gateway-gateway-5b6fc5754f-4lpm4` became Ready with zero restarts and the
+same image ID. Live liveness and readiness returned 204, OpenAPI reported
+0.1.379, and the Together capability profile exposed Audio Translation with
+prompt, response-format and temperature controls. An unauthenticated multipart
+request containing a valid WAV returned 401 before deployment selection. No
+provider credential or external inference was used by the smoke checks.
