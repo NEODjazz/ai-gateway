@@ -50,17 +50,32 @@ func TestGenerateContentRoutesModelIDContainingColon(t *testing.T) {
 	}
 }
 func TestGenerateContentNativeJSON(t *testing.T) {
-	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "id", Model: "m", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call", Type: "function", Function: openai.FunctionCall{Name: "weather", Arguments: `{"city":"Paris"}`}, ExtraContent: &openai.ToolCallExtraContent{Google: &openai.GoogleToolCallContent{ThoughtSignature: "opaque"}}}}}, FinishReason: "tool_calls"}}, Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 7, TotalTokens: 17, CompletionTokensDetails: &openai.CompletionTokenDetails{ReasoningTokens: 4}}}}
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "id", Model: "m", ServiceTier: "standard", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call", Type: "function", Function: openai.FunctionCall{Name: "weather", Arguments: `{"city":"Paris"}`}, ExtraContent: &openai.ToolCallExtraContent{Google: &openai.GoogleToolCallContent{ThoughtSignature: "opaque"}}}}}, FinishReason: "tool_calls"}}, Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 7, TotalTokens: 17, CompletionTokensDetails: &openai.CompletionTokenDetails{ReasoningTokens: 4}}}}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))
-	response := generateCall(handler, "/v1beta/models/m:generateContent", `{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":20,"topK":10,"presencePenalty":0.2,"frequencyPenalty":-0.1,"responseLogprobs":true,"logprobs":3,"responseModalities":["TEXT"],"candidateCount":1}}`, "")
+	response := generateCall(handler, "/v1beta/models/m:generateContent", `{"contents":[{"parts":[{"text":"hi"}]}],"serviceTier":"standard","store":true,"generationConfig":{"maxOutputTokens":20,"topK":10,"presencePenalty":0.2,"frequencyPenalty":-0.1,"responseLogprobs":true,"logprobs":3,"responseModalities":["TEXT"],"candidateCount":1}}`, "")
 	request := upstream.request.Request
-	if response.Code != 200 || upstream.calls != 1 || request.MaxCompletionTokens == nil || *request.MaxCompletionTokens != 20 || request.TopK == nil || *request.TopK != 10 || request.PresencePenalty == nil || *request.PresencePenalty != 0.2 || request.FrequencyPenalty == nil || *request.FrequencyPenalty != -0.1 || request.Logprobs == nil || !*request.Logprobs || request.TopLogprobs == nil || *request.TopLogprobs != 3 || request.N != nil || request.Modalities != nil {
+	if response.Code != 200 || upstream.calls != 1 || request.MaxCompletionTokens == nil || *request.MaxCompletionTokens != 20 || request.TopK == nil || *request.TopK != 10 || request.PresencePenalty == nil || *request.PresencePenalty != 0.2 || request.FrequencyPenalty == nil || *request.FrequencyPenalty != -0.1 || request.Logprobs == nil || !*request.Logprobs || request.TopLogprobs == nil || *request.TopLogprobs != 3 || request.N != nil || request.Modalities != nil || request.ServiceTier != "standard_only" || request.Store == nil || !*request.Store {
 		t.Fatalf("request: %d %s", response.Code, response.Body.String())
 	}
-	for _, want := range []string{`"functionCall"`, `"thoughtSignature":"opaque"`, `"finishReason":"STOP"`, `"thoughtsTokenCount":4`, `"candidatesTokenCount":3`, `"totalTokenCount":17`} {
+	for _, want := range []string{`"functionCall"`, `"thoughtSignature":"opaque"`, `"finishReason":"STOP"`, `"thoughtsTokenCount":4`, `"candidatesTokenCount":3`, `"totalTokenCount":17`, `"serviceTier":"standard"`} {
 		if !strings.Contains(response.Body.String(), want) {
 			t.Fatalf("missing %s: %s", want, response.Body.String())
 		}
+	}
+}
+
+func TestGenerateUsageMapsServiceTier(t *testing.T) {
+	usage := openai.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}
+	for internal, native := range map[string]string{"auto": "unspecified", "default": "unspecified", "standard": "standard", "standard_only": "standard", "flex": "flex", "priority": "priority"} {
+		t.Run(internal, func(t *testing.T) {
+			result, err := generateUsage(usage, internal)
+			if err != nil || result["serviceTier"] != native {
+				t.Fatalf("serviceTier=%v err=%v", result["serviceTier"], err)
+			}
+		})
+	}
+	if _, err := generateUsage(usage, "unknown"); err == nil {
+		t.Fatal("invalid service tier was accepted")
 	}
 }
 
@@ -164,6 +179,7 @@ func TestGenerateContentAuthQuotasAndUnsupportedParameters(t *testing.T) {
 		{path: "/v1beta/models/m:streamGenerateContent", body: `{}`, code: 400},
 		{path: "/v1beta/models/m:generateContent?key=not-accepted", body: `{}`, code: 400},
 		{path: "/v1beta/models/m:generateContent", body: `{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"candidateCount":2}}`, code: 400},
+		{path: "/v1beta/models/m:generateContent", body: `{"contents":[{"parts":[{"text":"hi"}]}],"serviceTier":"unknown"}`, code: 400},
 		{path: "/v1beta/models/m:generateContent", body: `{"contents":[{"parts":[{"text":"hi"}]}],"unknown":true}`, code: 400},
 		{path: "/v1beta/models/m:missing", body: `{}`, code: 404},
 	} {
@@ -207,14 +223,17 @@ func TestGenerateContentGeminiRoundTripUsageAndBilling(t *testing.T) {
 		if !strings.Contains(string(toolsJSON), `"googleSearch":{}`) {
 			t.Errorf("Google Search tool lost: %#v", native["tools"])
 		}
-		_, _ = w.Write([]byte("data: {\"responseId\":\"g-test\",\"modelVersion\":\"gemini-resolved\",\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"hi\"}]},\"finishReason\":\"STOP\",\"groundingMetadata\":{\"webSearchQueries\":[\"query\"],\"groundingChunks\":[],\"groundingSupports\":[],\"searchEntryPoint\":{\"renderedContent\":\"widget\"}}}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":3,\"totalTokenCount\":15}}\n\n"))
+		if native["serviceTier"] != "priority" || native["store"] != true {
+			t.Errorf("native service controls lost: %#v", native)
+		}
+		_, _ = w.Write([]byte("data: {\"responseId\":\"g-test\",\"modelVersion\":\"gemini-resolved\",\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"hi\"}]},\"finishReason\":\"STOP\",\"groundingMetadata\":{\"webSearchQueries\":[\"query\"],\"groundingChunks\":[],\"groundingSupports\":[],\"searchEntryPoint\":{\"renderedContent\":\"widget\"}}}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":3,\"totalTokenCount\":15,\"serviceTier\":\"priority\"}}\n\n"))
 	}))
 	defer upstream.Close()
 	billing := &messagesUsageRecorder{}
 	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "native", Type: "gemini", BaseURL: upstream.URL, APIKey: "provider-key", Stream: true, Models: []string{"m"}, ModelAliases: map[string]string{"m": "gemini-test"}, Capabilities: []string{"chat", "stream", "web_search"}}}, Modules: modules.NewPipeline([]modules.Module{billing})})
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"m"}}}}), router))
-	response := generateCall(handler, "/v1beta/models/m:streamGenerateContent?alt=sse", `{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"googleSearch":{}}],"generationConfig":{"maxOutputTokens":10}}`, "gateway-test-key")
-	if !strings.Contains(response.Body.String(), `"modelVersion":"gemini-resolved"`) || response.Code != 200 || billing.calls != 1 || billing.usage.TotalTokens != 15 || billing.usage.CompletionTokens != 5 || billing.usage.SearchRequests != 1 || !strings.Contains(response.Body.String(), `"candidatesTokenCount":2`) || !strings.Contains(response.Body.String(), `"thoughtsTokenCount":3`) || !strings.Contains(response.Body.String(), `"searchEntryPoint":{"renderedContent":"widget"}`) {
+	response := generateCall(handler, "/v1beta/models/m:streamGenerateContent?alt=sse", `{"contents":[{"parts":[{"text":"hi"}]}],"serviceTier":"priority","store":true,"tools":[{"googleSearch":{}}],"generationConfig":{"maxOutputTokens":10}}`, "gateway-test-key")
+	if !strings.Contains(response.Body.String(), `"modelVersion":"gemini-resolved"`) || response.Code != 200 || billing.calls != 1 || billing.usage.TotalTokens != 15 || billing.usage.CompletionTokens != 5 || billing.usage.SearchRequests != 1 || !strings.Contains(response.Body.String(), `"candidatesTokenCount":2`) || !strings.Contains(response.Body.String(), `"thoughtsTokenCount":3`) || !strings.Contains(response.Body.String(), `"serviceTier":"priority"`) || !strings.Contains(response.Body.String(), `"searchEntryPoint":{"renderedContent":"widget"}`) {
 		t.Fatalf("native usage: %d %+v %s", response.Code, billing.usage, response.Body.String())
 	}
 }

@@ -11,10 +11,12 @@ import (
 )
 
 type generateRequest struct {
-	Contents []generateContent            `json:"contents"`
-	System   *generateContent             `json:"systemInstruction,omitempty"`
-	Safety   []openai.GeminiSafetySetting `json:"safetySettings,omitempty"`
-	Tools    []struct {
+	ServiceTier string                       `json:"serviceTier,omitempty"`
+	Store       *bool                        `json:"store,omitempty"`
+	Contents    []generateContent            `json:"contents"`
+	System      *generateContent             `json:"systemInstruction,omitempty"`
+	Safety      []openai.GeminiSafetySetting `json:"safetySettings,omitempty"`
+	Tools       []struct {
 		Functions     []generateFunction `json:"functionDeclarations,omitempty"`
 		GoogleSearch  *struct{}          `json:"googleSearch,omitempty"`
 		CodeExecution *struct{}          `json:"codeExecution,omitempty"`
@@ -87,6 +89,18 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 	fail := func(field string) (openai.ChatCompletionRequest, error) {
 		return result, fmt.Errorf("invalid or unsupported %s", field)
 	}
+	switch r.ServiceTier {
+	case "":
+	case "unspecified":
+		result.ServiceTier = "auto"
+	case "standard":
+		result.ServiceTier = "standard_only"
+	case "flex", "priority":
+		result.ServiceTier = r.ServiceTier
+	default:
+		return fail("serviceTier")
+	}
+	result.Store = r.Store
 	if strings.TrimSpace(model) == "" || len(r.Contents) == 0 || len(r.Contents) > 10000 {
 		return fail("contents")
 	}

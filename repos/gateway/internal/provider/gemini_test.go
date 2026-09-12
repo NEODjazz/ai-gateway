@@ -403,20 +403,23 @@ func TestGeminiServiceTierMapping(t *testing.T) {
 	}
 }
 
-func TestGeminiForwardsDisabledProviderStorage(t *testing.T) {
-	var received geminiRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
-			t.Error(err)
-			return
-		}
-		_, _ = fmt.Fprint(w, `{"candidates":[{"index":0,"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
-	}))
-	defer server.Close()
-	store := false
-	request := openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{Store: &store}}
-	if _, err := NewGemini(server.URL, "", false).ChatCompletions(t.Context(), request); err != nil || received.Store == nil || *received.Store {
-		t.Fatalf("store=false was not forwarded: request=%+v err=%v", received, err)
+func TestGeminiForwardsProviderStorageControl(t *testing.T) {
+	for _, store := range []bool{false, true} {
+		t.Run(fmt.Sprint(store), func(t *testing.T) {
+			var received geminiRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+					t.Error(err)
+					return
+				}
+				_, _ = fmt.Fprint(w, `{"candidates":[{"index":0,"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
+			}))
+			defer server.Close()
+			request := openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{Store: &store}}
+			if _, err := NewGemini(server.URL, "", false).ChatCompletions(t.Context(), request); err != nil || received.Store == nil || *received.Store != store {
+				t.Fatalf("store=%t was not forwarded: request=%+v err=%v", store, received, err)
+			}
+		})
 	}
 }
 
@@ -433,15 +436,6 @@ func TestGeminiRejectsAudioResponseModality(t *testing.T) {
 	var failure *Error
 	if _, err := geminiChatRequest(request); !errors.As(err, &failure) || failure.Param != "modalities" || failure.UpstreamCode != "unsupported_parameter" {
 		t.Fatalf("audio modality was not rejected explicitly: %v", err)
-	}
-}
-
-func TestGeminiRejectsEnabledProviderStorage(t *testing.T) {
-	store := true
-	request := openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{Store: &store}}
-	var failure *Error
-	if _, err := geminiChatRequest(request); !errors.As(err, &failure) || failure.Param != "store" || failure.UpstreamCode != "unsupported_parameter" {
-		t.Fatalf("store=true was not rejected explicitly: %v", err)
 	}
 }
 

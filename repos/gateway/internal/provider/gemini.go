@@ -281,9 +281,6 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	default:
 		return result, geminiInvalid("service_tier")
 	}
-	if options.Store != nil && *options.Store {
-		return result, geminiInvalid("store")
-	}
 	if search := options.WebSearchOptions; search != nil {
 		if search.SearchContextSize != "" || search.UserLocation != nil || search.MaxUses != nil {
 			return result, geminiInvalid("web_search_options")

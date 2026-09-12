@@ -1182,6 +1182,11 @@ Chat pipeline for authorization, model/tool ACL, quotas, content policy and bill
 The GenerateContent converter maps native system/contents, inline user
 images, function declarations and results, tool choice, output limits,
 temperature/top-p/seed, stop sequences and JSON output configuration to Chat.
+Top-level `serviceTier` accepts `unspecified`, `standard`, `flex` or `priority`
+and `usageMetadata.serviceTier` reports the effective provider tier in JSON and
+SSE. Top-level `store` is forwarded exactly, including an explicit `false`.
+`store=true` bypasses exact and semantic response caches so every accepted
+request reaches the provider and its storage side effect is not skipped.
 Native Schema types are normalized to JSON Schema for the supported subset;
 unknown native schema fields require using parametersJsonSchema or
 responseJsonSchema instead. Multiple candidates and unsupported native fields

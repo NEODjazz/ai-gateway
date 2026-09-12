@@ -596,3 +596,14 @@ func TestChatMetadataAndStoreScopeCaches(t *testing.T) {
 		})
 	}
 }
+
+func TestStoredChatBypassesResponseCaches(t *testing.T) {
+	store := true
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{Store: &store}}}
+	if key := providerCacheKey("chat", request); key != "" {
+		t.Fatalf("stored chat exact cache key=%q", key)
+	}
+	if scope, text, ok := semanticRequest(request, Endpoint{Name: "test"}); ok || scope != "" || text != "" {
+		t.Fatalf("stored chat semantic cache request=(%q, %q, %t)", scope, text, ok)
+	}
+}

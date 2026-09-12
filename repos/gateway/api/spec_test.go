@@ -31,6 +31,23 @@ func TestOpenAPIDocumentIsValid(t *testing.T) {
 	loadDocument(t)
 }
 
+func TestOpenAPIGenerateContentServiceControls(t *testing.T) {
+	document := loadDocument(t)
+	request := document.Components.Schemas["GenerateContentRequest"].Value
+	if request == nil || request.Properties["store"] == nil || request.Properties["serviceTier"] == nil {
+		t.Fatal("GenerateContentRequest is missing native service controls")
+	}
+	tiers := request.Properties["serviceTier"].Value.Enum
+	if len(tiers) != 4 || tiers[0] != "unspecified" || tiers[1] != "standard" || tiers[2] != "flex" || tiers[3] != "priority" {
+		t.Fatalf("GenerateContent service tiers=%v", tiers)
+	}
+	response := document.Components.Schemas["GenerateContentResponse"].Value
+	usage := response.Properties["usageMetadata"].Value
+	if usage == nil || usage.Properties["serviceTier"] == nil {
+		t.Fatal("GenerateContent usage is missing the effective service tier")
+	}
+}
+
 func TestOpenAPIProviderProfilesExposeModelSpecificChatPolicy(t *testing.T) {
 	document := loadDocument(t)
 	profile := document.Components.Schemas["ProviderCapabilityProfile"].Value

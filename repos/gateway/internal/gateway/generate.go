@@ -102,6 +102,7 @@ type generateWriter struct {
 	buffer             bytes.Buffer
 	started, terminal  bool
 	id, model, reason  string
+	serviceTier        string
 	usage              openai.Usage
 	tools              [128]*openai.ToolCall
 	toolNames          [128]strings.Builder
@@ -171,7 +172,7 @@ func generateReason(reason string) (string, error) {
 		return "", errors.New("unsupported finish reason")
 	}
 }
-func generateUsage(usage openai.Usage) (map[string]int, error) {
+func generateUsage(usage openai.Usage, serviceTier string) (map[string]any, error) {
 	thoughts, cached := 0, 0
 	if usage.CompletionTokensDetails != nil {
 		thoughts = usage.CompletionTokensDetails.ReasoningTokens
@@ -182,7 +183,19 @@ func generateUsage(usage openai.Usage) (map[string]int, error) {
 	if usage.PromptTokens < 0 || usage.CompletionTokens < 0 || usage.TotalTokens < 0 || thoughts < 0 || thoughts > usage.CompletionTokens || cached < 0 || cached > usage.PromptTokens || usage.PromptTokens > math.MaxInt-usage.CompletionTokens || usage.TotalTokens < usage.PromptTokens+usage.CompletionTokens {
 		return nil, errors.New("invalid usage")
 	}
-	return map[string]int{"promptTokenCount": usage.PromptTokens, "candidatesTokenCount": usage.CompletionTokens - thoughts, "thoughtsTokenCount": thoughts, "cachedContentTokenCount": cached, "totalTokenCount": usage.TotalTokens}, nil
+	result := map[string]any{"promptTokenCount": usage.PromptTokens, "candidatesTokenCount": usage.CompletionTokens - thoughts, "thoughtsTokenCount": thoughts, "cachedContentTokenCount": cached, "totalTokenCount": usage.TotalTokens}
+	switch serviceTier {
+	case "":
+	case "auto", "default":
+		result["serviceTier"] = "unspecified"
+	case "standard", "standard_only":
+		result["serviceTier"] = "standard"
+	case "flex", "priority":
+		result["serviceTier"] = serviceTier
+	default:
+		return nil, errors.New("invalid service tier")
+	}
+	return result, nil
 }
 func generateParts(message openai.Message) ([]any, error) {
 	parts := []any{}
@@ -259,7 +272,7 @@ func generateParts(message openai.Message) ([]any, error) {
 	}
 	return parts, nil
 }
-func generateEnvelope(id, model string, parts []any, reason string, usage map[string]int, grounding ...json.RawMessage) map[string]any {
+func generateEnvelope(id, model string, parts []any, reason string, usage map[string]any, grounding ...json.RawMessage) map[string]any {
 	candidate := map[string]any{"index": 0}
 	if len(parts) > 0 {
 		candidate["content"] = map[string]any{"role": "model", "parts": parts}
@@ -299,7 +312,7 @@ func (w *generateWriter) chunk(payload string) error {
 		for _, signature := range w.partSignatures {
 			parts = append(parts, map[string]any{"text": "", "thoughtSignature": signature.Signature})
 		}
-		usage, err := generateUsage(w.usage)
+		usage, err := generateUsage(w.usage, w.serviceTier)
 		if err != nil {
 			return err
 		}
@@ -318,8 +331,9 @@ func (w *generateWriter) chunk(payload string) error {
 			Reason    string          `json:"finish_reason"`
 			Grounding json.RawMessage `json:"gemini_grounding_metadata"`
 		} `json:"choices"`
-		Usage *openai.Usage   `json:"usage"`
-		Error json.RawMessage `json:"error"`
+		Usage       *openai.Usage   `json:"usage"`
+		ServiceTier string          `json:"service_tier"`
+		Error       json.RawMessage `json:"error"`
 	}
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 		return err
@@ -335,10 +349,16 @@ func (w *generateWriter) chunk(payload string) error {
 		w.model = chunk.Model
 	}
 	if chunk.Usage != nil {
-		if _, err := generateUsage(*chunk.Usage); err != nil {
+		if _, err := generateUsage(*chunk.Usage, chunk.ServiceTier); err != nil {
 			return err
 		}
 		w.usage = *chunk.Usage
+	}
+	if chunk.ServiceTier != "" {
+		if w.serviceTier != "" && w.serviceTier != chunk.ServiceTier {
+			return errors.New("service tier changed")
+		}
+		w.serviceTier = chunk.ServiceTier
 	}
 	if len(chunk.Choices) > 1 {
 		return errors.New("multiple choices are unsupported")
@@ -414,11 +434,12 @@ func (w *generateWriter) chunk(payload string) error {
 	return nil
 }
 func (w *generateWriter) chatStreamResult(response openai.ChatCompletionResponse) {
-	if _, err := generateUsage(response.Usage); err != nil {
+	if _, err := generateUsage(response.Usage, response.ServiceTier); err != nil {
 		w.err = err
 		return
 	}
 	w.usage = response.Usage
+	w.serviceTier = response.ServiceTier
 	if response.ID != "" {
 		w.id = response.ID
 	}
@@ -456,7 +477,7 @@ func (w *generateWriter) chatResult(response openai.ChatCompletionResponse, stre
 			w.err = err
 			return
 		}
-		usage, err := generateUsage(response.Usage)
+		usage, err := generateUsage(response.Usage, response.ServiceTier)
 		if err != nil {
 			w.err = err
 			return
@@ -524,14 +545,14 @@ func (w *generateWriter) finish() {
 	}
 	var parts []any
 	var reason string
-	var usage map[string]int
+	var usage map[string]any
 	if err == nil && len(response.Choices) == 1 && response.Choices[0].Index == 0 {
 		parts, err = generateParts(response.Choices[0].Message)
 		if err == nil {
 			reason, err = generateReason(response.Choices[0].FinishReason)
 		}
 		if err == nil {
-			usage, err = generateUsage(response.Usage)
+			usage, err = generateUsage(response.Usage, response.ServiceTier)
 		}
 	} else {
 		err = errors.New("invalid provider response")
