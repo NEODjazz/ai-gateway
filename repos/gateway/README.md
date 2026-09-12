@@ -43,6 +43,7 @@ permission examples, see [MCP integration](../../docs/mcp.md).
 - `GET /admin/v1/policy-attachments`
 - `PUT /admin/v1/policy-attachments/{id}`
 - `DELETE /admin/v1/policy-attachments/{id}`
+- `GET /admin/v1/anonymizer/rules`
 
 A2A 1.0 direct discovery and synchronous or durable asynchronous `SendMessage` are available for
 enabled agent profiles that do not reference an instruction template. The
@@ -115,17 +116,26 @@ contracts. Dynamic identities remain placeholders and unknown paths are labeled
 `unmatched`, keeping observability complete without unbounded tenant labels.
 
 Guardrail policy definitions remain independent from their request scopes.
-Policy attachments can apply an enabled DLP/AV policy globally or to the
-intersection of configured team, virtual-key ID/alias, public model, and key-tag
-patterns. Matching policies are combined with deployment guardrails and fail
-closed if a required scanner is unavailable.
+Besides DLP and AV, a policy can select `disabled`, `basic`, `strict`, or
+`custom` anonymization. Strict wins during composition, basic/custom rule sets
+are merged, and disabled applies only when no matching policy requires masking.
+Without an explicit profile the safe default is strict. The UI loads the actual
+configured rule inventory from `GET /admin/v1/anonymizer/rules` for custom
+profiles.
+
+Policy attachments can apply controls globally or to the intersection of
+configured organization, team, user, virtual-key ID/alias, public model,
+provider, deployment, and key-tag patterns. Provider and deployment dimensions
+are evaluated for each concrete route attempt, so fallback deployments receive
+their own effective policy. Matching policies are combined with deployment
+guardrails and fail closed if a required scanner is unavailable.
 Policies can explicitly require provider-output DLP. The gateway scans the
 bounded textual response projection before delivery and routes streaming
 requests through its buffered fallback so rejected or unscanned content is not
 sent in partial events.
 `POST /admin/v1/policy-attachments/resolve` performs a metadata-only dry
 resolution with the exact runtime matcher. The Policies workspace uses it to
-show matched attachments, cumulative input/output DLP and AV requirements, and fail-closed
+show matched attachments, cumulative input/output DLP, AV and anonymization requirements, and fail-closed
 missing/disabled-policy issues without invoking a provider or scanner. Its
 attachment editor supports configured values plus exact or trailing-asterisk
 patterns and displays the AND-across-dimensions scope semantics before save.
@@ -138,7 +148,9 @@ team ID preselected. The attachment remains an independently persisted runtime
 resource, so policy assignment never requires a cross-service key/team update.
 The Guardrails UI presents these gateway-native policies as one workflow: joined
 deployment/attachment coverage, create/edit, detail inspection, policy-filtered
-monitoring and bounded multi-policy dry-run comparison. The gateway keeps scanner endpoints and credentials in
+monitoring and bounded multi-policy dry-run comparison with an anonymized
+preview. Request outcome logs expose only the effective profile/rule names and
+replacement count. The gateway keeps scanner endpoints and credentials in
 the independently operated DLP/AV services and stores no executable guardrail
 code in its control plane.
 

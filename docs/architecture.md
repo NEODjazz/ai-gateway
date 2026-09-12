@@ -347,18 +347,26 @@ marker и `av_enabled=true`. Поддерживаются только inline ba
 файл, 16 MiB decoded total и 24 MiB на JSON body.
 
 Проверки могут задаваться на provider endpoint через `dlp_enabled`/`av_enabled`
-либо через durable policy attachment. Attachment сопоставляет запрос по team,
-opaque key ID или alias, public model и key tags; все заполненные измерения
-должны совпасть, trailing `*` означает prefix wildcard. Совпавшие policies
-объединяются с endpoint policy операцией OR. Поэтому scoped policy нельзя
-обойти failover-ом на endpoint без локального guardrail. Отсутствующая,
+и `guardrail_policy` либо через durable policy attachment. Attachment
+сопоставляет запрос по organization, team, user, opaque key ID или alias,
+public model, provider, deployment и key tags; все заполненные измерения должны
+совпасть, trailing `*` означает prefix wildcard. Identity/model/tag scopes
+вычисляются до routing, а provider/deployment scopes — для каждой конкретной
+попытки. Поэтому fallback не наследует policy другого endpoint.
+
+Анонимизация является частью той же policy. Поддержаны режимы `disabled`,
+`basic`, `strict` и `custom`; strict имеет приоритет, выбранные наборы правил
+объединяются. При отсутствии явного режима используется strict. Effective
+policy входит в cache fingerprint, поэтому результаты разных профилей не
+разделяют cache entry. Отсутствующая,
 disabled или недоступная обязательная policy блокирует запрос.
 
 `POST /admin/v1/policy-attachments/resolve` использует тот же
 `MatchingPolicyAttachments` и тот же guardrail controller, что inference path.
-Он принимает только metadata context (`team_id`, opaque key ID/alias, model и
-tags), не запускает provider или scanner и возвращает matched attachments,
-effective policies/modules и fail-closed issues. Policies UI использует этот
+Он принимает только metadata context (organization/team/user, opaque key
+ID/alias, model, provider, deployment и tags), не запускает provider или
+scanner и возвращает matched attachments,
+effective policies/modules/anonymization и fail-closed issues. Policies UI использует этот
 endpoint как simulator. Create/edit form допускает только поддерживаемый runtime
 wildcard — trailing `*` — и явно показывает, что dimensions соединяются AND, а
 значения внутри dimension — OR. Карточка virtual key использует этот же resolver
@@ -375,11 +383,11 @@ UI управления guardrails отражает эту границу отв
 прямыми deployment references и scoped attachments, поддерживает create/edit и
 metadata-only detail view. Compliance comparison ограничен восемью enabled
 policies и выполняет независимый bounded dry-run для каждой: это позволяет
-сравнить решения и частичные ошибки, не сохраняя и не возвращая submitted text
-или raw scanner response. Фильтры Guardrail Monitor сериализуются в URL, поэтому
+сравнить решения, anonymized preview и частичные ошибки, не сохраняя и не
+возвращая исходный submitted text или raw scanner response. Фильтры Guardrail Monitor сериализуются в URL, поэтому
 переход из policy details воспроизводимо открывает соответствующий report.
 Gateway policy definition — это независимый
-DLP/AV selector, attachments дают композицию scope, а executable scanner config
+selector DLP/AV/anonymization, attachments дают композицию scope, а executable scanner config
 и credentials остаются за границей control plane.
 
 ## Данные и хранилища

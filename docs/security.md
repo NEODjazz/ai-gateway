@@ -44,17 +44,29 @@ gateway восстанавливает request-local placeholders в успеш�
 anonymizer; наличие исходного значения в клиентском ответе само по себе не
 означает, что оно было отправлено provider.
 
-Policy attachment может ограничивать DLP/AV по team, opaque key ID/alias,
-public model и tags. Dimensions соединяются AND, значения внутри dimension —
-OR, поддержан только trailing `*`. Policies primary и всех допустимых fallback
-targets объединяются консервативно. Missing/disabled required policy, content
-rejection и AV failure для binary request закрывают запрос. Realtime input audio
+Guardrail policy также задаёт профиль анонимизации: `disabled`, `basic`,
+`strict` или `custom`. `custom` содержит явный набор имён правил, доступных через
+`GET /admin/v1/anonymizer/rules`. Если совпало несколько policies, `strict`
+имеет приоритет, наборы `basic`/`custom` объединяются, а `disabled` действует
+только при отсутствии профиля, который требует masking. При отсутствии явного
+профиля применяется безопасный `strict` default.
+
+Policy attachment может ограничивать эти controls по organization, team, user,
+opaque key ID/alias, public model, provider, deployment и tags. Dimensions
+соединяются AND, значения внутри dimension — OR, поддержан только trailing `*`.
+Provider/deployment scopes повторно вычисляются для каждой попытки, поэтому
+fallback получает собственную effective policy. Missing/disabled required
+policy, content rejection и AV failure для binary request закрывают запрос.
+Realtime input audio
 проходит AV до помещения decoded-byte count в session buffer и до отправки
 события провайдеру; raw audio не сохраняется в gateway state.
 
 Guardrail Monitor сохраняет только bounded metadata: request ID, policy,
 module, source, outcome, duration и timestamp. Submitted text и raw scanner
-response не сохраняются.
+response не сохраняются. Request outcome logging может содержать только режим,
+имена профилей и правил и число замен; исходные и replacement-значения туда не
+попадают. Compliance playground возвращает только anonymized preview и число
+замен, оставляя `content_stored=false`.
 
 ## MCP
 

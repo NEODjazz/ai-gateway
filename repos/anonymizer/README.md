@@ -11,11 +11,18 @@ go run ./cmd/anonymizer
 ## Endpoints
 
 - `GET /healthz`
+- `GET /rules`
 - `POST /anonymize`
 
 The endpoint accepts only maskable content (`messages`, Responses API `input`
 and `instructions`, or rerank `query` and `documents`) plus `request_id`. It does not receive bearer credentials or
 user identity.
+
+`POST /anonymize` may include a request-scoped `rules` array. When omitted, the
+service uses every rule enabled by `ANONYMIZER_RULES`. Unknown names fail the
+request instead of silently weakening masking. `GET /rules` exposes the active
+rule names for the gateway management UI; it does not expose patterns or
+replacement values.
 
 ## Rules
 
