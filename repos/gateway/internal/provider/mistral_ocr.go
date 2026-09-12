@@ -14,12 +14,19 @@ import (
 
 func (Mistral) SupportsOCR() bool { return true }
 
-func (p Mistral) OCR(ctx context.Context, request openai.OCRRequest) (openai.OCRResponse, error) {
+func (Mistral) ValidateOCRParameters(request openai.OCRRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.OCRResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
 	if request.Document.Type == "file" {
-		return openai.OCRResponse{}, &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New("OCR file reference was not resolved")}
+		return &Error{Class: FailureClientRequest, Provider: "mistral", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New("OCR file reference was not resolved")}
+	}
+	return nil
+}
+
+func (p Mistral) OCR(ctx context.Context, request openai.OCRRequest) (openai.OCRResponse, error) {
+	if err := p.ValidateOCRParameters(request); err != nil {
+		return openai.OCRResponse{}, err
 	}
 	payload, err := json.Marshal(struct {
 		Model                       string                 `json:"model"`

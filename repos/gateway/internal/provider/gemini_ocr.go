@@ -86,6 +86,11 @@ func (g Gemini) OCR(ctx context.Context, request openai.OCRRequest) (openai.OCRR
 	return result, nil
 }
 
+func (Gemini) ValidateOCRParameters(request openai.OCRRequest) error {
+	_, _, err := validateGeminiOCRRequest(request)
+	return err
+}
+
 func validateGeminiOCRRequest(request openai.OCRRequest) (openai.ImageAttachment, []int, error) {
 	if message := request.Validate(); message != "" {
 		return openai.ImageAttachment{}, nil, &Error{Class: FailureClientRequest, Provider: "gemini", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}

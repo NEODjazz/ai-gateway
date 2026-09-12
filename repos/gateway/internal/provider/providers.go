@@ -44,6 +44,7 @@ type ProviderCapabilityProfile struct {
 	AudioTranscriptionParameters ProviderAudioTranscriptionParameterPolicy `json:"audio_transcription_parameters"`
 	AudioTranslationParameters   ProviderAudioTranslationParameterPolicy   `json:"audio_translation_parameters"`
 	AudioSpeechParameters        ProviderAudioSpeechParameterPolicy        `json:"audio_speech_parameters"`
+	OCRParameters                ProviderOCRParameterPolicy                `json:"ocr_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -110,6 +111,11 @@ type ProviderAudioTranslationParameterPolicy struct {
 
 type ProviderAudioSpeechParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
+}
+
+type ProviderOCRParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
+	DocumentForms    []string `json:"document_forms"`
 }
 
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai", "opensandbox"}
@@ -375,9 +381,61 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			AudioTranscriptionParameters: managedProviderAudioTranscriptionParameterPolicy(client, slicesContain(operations, "audio_transcription")),
 			AudioTranslationParameters:   managedProviderAudioTranslationParameterPolicy(client, slicesContain(operations, "audio_translation")),
 			AudioSpeechParameters:        managedProviderAudioSpeechParameterPolicy(client, slicesContain(operations, "audio_speech")),
+			OCRParameters:                managedProviderOCRParameterPolicy(client, slicesContain(operations, "ocr")),
 		})
 	}
 	return profiles
+}
+
+func managedProviderOCRParameterPolicy(client Client, supported bool) ProviderOCRParameterPolicy {
+	policy := ProviderOCRParameterPolicy{SupportedOptions: []string{}, DocumentForms: []string{}}
+	validator, ok := client.(interface {
+		ValidateOCRParameters(openai.OCRRequest) error
+	})
+	if !supported || !ok {
+		return policy
+	}
+	for _, probe := range []struct {
+		name     string
+		document openai.OCRDocument
+	}{
+		{"https_document", openai.OCRDocument{Type: "document_url", DocumentURL: "https://example.test/document.pdf"}},
+		{"inline_document", openai.OCRDocument{Type: "document_url", DocumentURL: "data:application/pdf;base64,JVBERi0xLjcKcGFnZQ=="}},
+		{"https_image", openai.OCRDocument{Type: "image_url", ImageURL: "https://example.test/image.png"}},
+		{"inline_image", openai.OCRDocument{Type: "image_url", ImageURL: "data:image/png;base64,iVBORw0KGgo="}},
+	} {
+		if validator.ValidateOCRParameters(openai.OCRRequest{Model: "model", Document: probe.document}) == nil {
+			policy.DocumentForms = append(policy.DocumentForms, probe.name)
+		}
+	}
+	baseline := openai.OCRRequest{Model: "model", Document: openai.OCRDocument{Type: "document_url", DocumentURL: "data:application/pdf;base64,JVBERi0xLjcKcGFnZQ=="}}
+	for _, probe := range []struct {
+		name  string
+		apply func(*openai.OCRRequest)
+	}{
+		{"pages", func(r *openai.OCRRequest) { r.Pages = []int{0} }},
+		{"include_image_base64", func(r *openai.OCRRequest) { value := true; r.IncludeImageBase64 = &value }},
+		{"image_limit", func(r *openai.OCRRequest) { value := 1; r.ImageLimit = &value }},
+		{"image_min_size", func(r *openai.OCRRequest) { value := 1; r.ImageMinSize = &value }},
+		{"table_format", func(r *openai.OCRRequest) { r.TableFormat = "markdown" }},
+		{"extract_header", func(r *openai.OCRRequest) { value := true; r.ExtractHeader = &value }},
+		{"extract_footer", func(r *openai.OCRRequest) { value := true; r.ExtractFooter = &value }},
+		{"include_blocks", func(r *openai.OCRRequest) { value := true; r.IncludeBlocks = &value }},
+		{"confidence_scores_granularity", func(r *openai.OCRRequest) { r.ConfidenceScoresGranularity = "word" }},
+		{"document_annotation_format", func(r *openai.OCRRequest) { r.DocumentAnnotationFormat = &openai.ResponseFormat{Type: "json_object"} }},
+		{"document_annotation_prompt", func(r *openai.OCRRequest) {
+			r.DocumentAnnotationFormat = &openai.ResponseFormat{Type: "json_object"}
+			r.DocumentAnnotationPrompt = "extract"
+		}},
+		{"bbox_annotation_format", func(r *openai.OCRRequest) { r.BBoxAnnotationFormat = &openai.ResponseFormat{Type: "json_object"} }},
+	} {
+		request := baseline
+		probe.apply(&request)
+		if validator.ValidateOCRParameters(request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	return policy
 }
 
 func managedProviderAudioSpeechParameterPolicy(client Client, supported bool) ProviderAudioSpeechParameterPolicy {

@@ -639,6 +639,21 @@ func TestManagedProviderCapabilityProfilesExposeValidatedAudioSpeechOptions(t *t
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeValidatedOCROptions(t *testing.T) {
+	allOptions := []string{"pages", "include_image_base64", "image_limit", "image_min_size", "table_format", "extract_header", "extract_footer", "include_blocks", "confidence_scores_granularity", "document_annotation_format", "document_annotation_prompt", "bbox_annotation_format"}
+	allForms := []string{"https_document", "inline_document", "https_image", "inline_image"}
+	expected := map[string]ProviderOCRParameterPolicy{
+		"mistral": {SupportedOptions: allOptions, DocumentForms: allForms},
+		"gemini":  {SupportedOptions: []string{"pages", "table_format"}, DocumentForms: []string{"inline_document", "inline_image"}},
+	}
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		want, listed := expected[profile.Type]
+		if slices.Contains(profile.Operations, "ocr") != listed || !slices.Equal(profile.OCRParameters.SupportedOptions, want.SupportedOptions) || !slices.Equal(profile.OCRParameters.DocumentForms, want.DocumentForms) {
+			t.Errorf("%s OCR parameters=%+v operation=%v", profile.Type, profile.OCRParameters, slices.Contains(profile.Operations, "ocr"))
+		}
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
