@@ -207,8 +207,11 @@ WAV/MP3/MPEG/AIFF/AAC/OGG/Opus/FLAC/M4A/WebM input в GenerateContent
 transcription config. Language hints, custom vocabulary, prompt guidance,
 temperature и проверенный
 `mode=VERBATIM|SMART` отображаются явно;
-provider token usage проходит общий exact settlement. Structured timestamps,
-diarization, chunking и known-speaker режимы отклоняются до upstream.
+provider token usage проходит общий exact settlement. `timestamp_granularities=[word]`
+передается как word timestamps и возвращается в `verbose_json`; `diarized_json`
+включает speaker diarization и возвращает bounded segments. Некорректные offsets,
+отсутствующие annotations и несовместимые сочетания с SMART или vocabulary
+отклоняются. Chunking и known-speaker режимы отклоняются до upstream.
 
 Ответ ограничен 64 MiB, содержит ровно запрошенное число результатов и для
 каждого результата допускает ровно один источник: HTTP(S) URL без credentials

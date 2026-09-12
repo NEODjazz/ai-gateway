@@ -720,3 +720,9 @@ Helm revision 431 completed successfully, and pod
 `ai-gateway-gateway-79d9f68ff4-rc9rq` became Ready with zero restarts. The live
 endpoint served OpenAPI 0.1.331 with the expanded format list. A signature-valid
 AAC multipart request reached authentication and returned 401.
+
+Native Gemini transcription now maps word timestamps and speaker diarization
+to the public bounded words and segments structures. Requested annotations are
+mandatory in the provider response; offsets, word ranges and speaker labels are
+validated before billing settlement. SMART mode and custom vocabulary conflicts
+fail before network execution, and capability discovery now reports timestamps.
