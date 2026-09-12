@@ -1047,3 +1047,14 @@ token counting and response usage. Valid `us` generation and `global`
 token-count requests passed structural validation and reached authentication;
 an unsupported geography returned 400 on both endpoints. These smoke checks
 used no credential and performed no external inference.
+
+Source `0f00b98` adds bounded native Messages context editing for tool-result and
+thinking-block clearing. Strict request validation bounds thresholds and tool
+lists, enforces strategy order and rejects unknown fields. Capability routing
+isolates the native adapter, both response caches are bypassed, generation and
+durable batches preserve the policy, and token counting returns provider-reported
+post-edit and original context sizes. JSON and SSE responses accept only
+nonnegative applied-edit counters for strategies requested by the client. TPM
+admission remains conservative over the submitted context, while ordinary
+provider usage drives settlement. Full Go tests, race tests, vet and build
+passed; all 166 UI tests, type checking and production bundle build passed.

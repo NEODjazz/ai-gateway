@@ -264,6 +264,13 @@ advertise the capability. Generation, token counting and durable batches preserv
 the value. The provider-reported value must match the request in JSON and SSE;
 response caches are bypassed. `us` applies the provider's 1.1 token-price
 multiplier before budget reserve and uses the same pinned prices at settlement.
+Messages context editing accepts bounded `clear_tool_uses_20250919` and
+`clear_thinking_20251015` strategies. Unknown fields, duplicate strategies,
+invalid ordering and unbounded thresholds fail before inference. Generation,
+token counting and durable batches preserve the configuration; JSON/SSE returns
+validated applied-edit statistics, and token counting also returns the original
+context size. Routing requires `context_management`, and response caches are
+bypassed because the provider may rewrite the effective prompt.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.

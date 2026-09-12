@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.352
+  version: 0.1.353
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -932,6 +932,12 @@ paths:
                 additionalProperties: false
                 properties:
                   input_tokens: {type: integer, minimum: 0}
+                  context_management:
+                    type: object
+                    additionalProperties: false
+                    required: [original_input_tokens]
+                    properties:
+                      original_input_tokens: {type: integer, minimum: 0, description: Context size before server-side edits; always greater than or equal to input_tokens.}
         default:
           description: Native Messages error
           content:
@@ -6886,6 +6892,65 @@ components:
             thoughtsTokenCount: {type: integer, minimum: 0}
             cachedContentTokenCount: {type: integer, minimum: 0}
             totalTokenCount: {type: integer, minimum: 0}
+    MessagesContextManagement:
+      type: object
+      additionalProperties: false
+      required: [edits]
+      properties:
+        edits:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          description: When both strategies are present, clear_thinking must be first.
+          items:
+            oneOf:
+              - type: object
+                additionalProperties: false
+                required: [type]
+                properties:
+                  type: {type: string, const: clear_tool_uses_20250919}
+                  trigger: {$ref: '#/components/schemas/MessagesContextLimit'}
+                  keep:
+                    type: object
+                    additionalProperties: false
+                    required: [type, value]
+                    properties:
+                      type: {type: string, const: tool_uses}
+                      value: {type: integer, minimum: 1, maximum: 10000000}
+                  clear_at_least:
+                    type: object
+                    additionalProperties: false
+                    required: [type, value]
+                    properties:
+                      type: {type: string, const: input_tokens}
+                      value: {type: integer, minimum: 1, maximum: 10000000}
+                  clear_tool_inputs:
+                    oneOf:
+                      - {type: boolean}
+                      - {type: array, maxItems: 64, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128}}
+                  exclude_tools: {type: array, maxItems: 64, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128}}
+              - type: object
+                additionalProperties: false
+                required: [type]
+                properties:
+                  type: {type: string, const: clear_thinking_20251015}
+                  keep:
+                    oneOf:
+                      - {type: string, const: all}
+                      - type: object
+                        additionalProperties: false
+                        required: [type, value]
+                        properties:
+                          type: {type: string, const: thinking_turns}
+                          value: {type: integer, minimum: 1, maximum: 10000000}
+    MessagesContextLimit:
+      type: object
+      additionalProperties: false
+      required: [type, value]
+      properties:
+        type: {type: string, enum: [input_tokens, tool_uses]}
+        value: {type: integer, minimum: 1, maximum: 10000000}
     MessageTokenCountRequest:
       type: object
       additionalProperties: false
@@ -6901,6 +6966,7 @@ components:
         container: {$ref: '#/components/schemas/MessagesRequest/properties/container'}
         cache_control: {$ref: '#/components/schemas/MessagesRequest/properties/cache_control'}
         inference_geo: {$ref: '#/components/schemas/MessagesRequest/properties/inference_geo'}
+        context_management: {$ref: '#/components/schemas/MessagesRequest/properties/context_management'}
     MessagesToolsetMemberConfig:
       type: object
       additionalProperties: false
@@ -6926,6 +6992,9 @@ components:
           type: string
           enum: [global, us]
           description: Native inference processing geography. Requires an inference_geo-capable deployment. Responses must report the requested value; response caches are bypassed. US-only processing uses the provider's 1.1 price multiplier for token reserve and settlement.
+        context_management:
+          allOf: [{$ref: '#/components/schemas/MessagesContextManagement'}]
+          description: Native server-side tool-result and thinking-block editing. Requires context_management capability, bypasses response caches, and is preserved by token counting and durable batches.
         stop_sequences:
           type: array
           maxItems: 4
@@ -7310,6 +7379,30 @@ components:
               required: [thinking_tokens]
               properties:
                 thinking_tokens: {type: integer, minimum: 0}
+        context_management:
+          type: object
+          additionalProperties: false
+          required: [applied_edits]
+          properties:
+            applied_edits:
+              type: array
+              maxItems: 2
+              items:
+                oneOf:
+                  - type: object
+                    additionalProperties: false
+                    required: [type, cleared_input_tokens, cleared_tool_uses]
+                    properties:
+                      type: {type: string, const: clear_tool_uses_20250919}
+                      cleared_input_tokens: {type: integer, minimum: 0}
+                      cleared_tool_uses: {type: integer, minimum: 0}
+                  - type: object
+                    additionalProperties: false
+                    required: [type, cleared_input_tokens, cleared_thinking_turns]
+                    properties:
+                      type: {type: string, const: clear_thinking_20251015}
+                      cleared_input_tokens: {type: integer, minimum: 0}
+                      cleared_thinking_turns: {type: integer, minimum: 0}
     AdminSession:
       type: object
       additionalProperties: false
@@ -7355,7 +7448,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -9773,7 +9866,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

@@ -741,6 +741,20 @@ the resulting price snapshot is reused at settlement. RPM and TPM limits remain
 shared between geography values. Model-version eligibility is enforced by the
 upstream, whose terminal validation error is returned without incompatible
 adapter fallback.
+`context_management.edits` supports server-side `clear_tool_uses_20250919` and
+`clear_thinking_20251015`. A request contains one or both strategies; when both
+are present, thinking clearing must be first. Trigger, keep and minimum-clearing
+thresholds are positive and bounded, tool-name lists are unique and bounded,
+and unknown fields fail before routing. Native generation, token counting and
+durable Messages batches preserve the configuration and automatically enable
+the required provider feature. JSON and SSE responses retain only validated
+applied-edit counters for strategies present in the request. Token counting
+returns `context_management.original_input_tokens` when reported, and rejects a
+value smaller than the post-edit count. The router requires an explicit
+`context_management` capability and bypasses exact and semantic response caches
+because the effective prompt may differ from the submitted history. TPM admission
+remains conservative over the complete submitted context; billing settles from
+the ordinary provider-reported usage after editing.
 The provider-assigned `standard`, `priority` or `batch` service tier is retained
 in JSON and SSE usage. Unknown reported tiers fail the response instead of being
 accepted as trusted accounting metadata. Provider-reported `output_tokens_details.thinking_tokens` is retained in JSON,

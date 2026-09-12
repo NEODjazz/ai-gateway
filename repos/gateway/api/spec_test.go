@@ -106,6 +106,26 @@ func TestOpenAPIMessagesAdvertisesInferenceGeography(t *testing.T) {
 	}
 }
 
+func TestOpenAPIMessagesAdvertisesContextManagement(t *testing.T) {
+	document := loadDocument(t)
+	messages := document.Components.Schemas["MessagesRequest"].Value
+	if messages == nil || messages.Properties["context_management"] == nil {
+		t.Fatal("MessagesRequest is missing context_management")
+	}
+	count := document.Components.Schemas["MessageTokenCountRequest"].Value
+	if count == nil || count.Properties["context_management"] == nil {
+		t.Fatal("MessageTokenCountRequest is missing context_management")
+	}
+	response := document.Components.Schemas["MessagesResponse"].Value
+	if response == nil || response.Properties["context_management"] == nil {
+		t.Fatal("MessagesResponse is missing context_management")
+	}
+	context := document.Components.Schemas["MessagesContextManagement"].Value
+	if context == nil || context.Properties["edits"] == nil || context.Properties["edits"].Value == nil || context.Properties["edits"].Value.MinItems != 1 || context.Properties["edits"].Value.MaxItems == nil || *context.Properties["edits"].Value.MaxItems != 2 {
+		t.Fatalf("MessagesContextManagement edits bounds are incomplete: %#v", context)
+	}
+}
+
 func TestOpenAPIRoutesMatchGatewayRouter(t *testing.T) {
 	document := loadDocument(t)
 	want := map[string]bool{}
