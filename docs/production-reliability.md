@@ -1204,3 +1204,12 @@ and reads at most 16 MiB. MIME and PDF signature validation complete before DLP,
 TPM, billing or provider execution. Token counting uses the same path without
 generation billing, and durable batch creation stores immutable resolved bytes.
 Focused regressions and the full Go tests, race tests, vet and build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-349ad01` with image ID
+`sha256:def754146d86e745a6f53e7219bd2c7789f039159a4b86b3cc04b01527c715da`.
+Gateway Helm revision 462 completed successfully, and pod
+`ai-gateway-gateway-6458658895-h9xqm` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.361 exposes the bounded HTTPS URL source. A valid
+URL document passed structural validation and reached authentication; an HTTP
+loopback URL returned 400 before authentication or network access. These smoke
+checks used no credential and performed no external inference.
