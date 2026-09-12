@@ -40,7 +40,7 @@ availability is not inferred from these tests.
 | Realtime | Authenticated text-event WebSocket sessions for compatible deployments with bounded event/session lifecycle, effective input policy, per-response quotas and billing, cancellation settlement, and optional bounded output scanning | Native provider Realtime protocols, audio events, WebRTC and SIP when required |
 | Videos | Compatible-provider create/list/retrieve/delete/content/remix lifecycle, deployment pinning, durable credential-and-user ownership, bounded artifacts, compensation on partial failure and exact duration billing | Native provider adapters, cancellation where the upstream protocol supports it and additional artifact pricing dimensions |
 | OCR | Authenticated `/v1/ocr` for bounded HTTPS, inline PDF/image input and owner-scoped durable file references; zero-based page selection, annotation options, DLP/AV projection, native Mistral routing and schema-constrained native Gemini inline PDF/image routing, bounded response validation, retries and exact processed-page settlement | Additional native provider adapters and advanced Gemini extraction controls |
-| Moderation | Text batches and text/image input through the shared authentication, policy, routing, retry, observability and billing lifecycle; compatible and native Mistral provider adapters | Additional native provider protocols and credentialed image conformance tests |
+| Moderation | Text batches and text/image input through the shared authentication, policy, routing, retry, observability and billing lifecycle; compatible and native Mistral provider adapters; capability profiles expose accepted input forms and metadata support | Additional native provider protocols and credentialed image conformance tests |
 | Apply guardrail | Authenticated public execution with attached-policy authorization, access groups, RPM/TPM, fail-closed durable audit, bounded DLP/AV scans and metadata-only monitoring | Additional scanner protocols when justified by configured policy needs |
 | Batches | Durable JSONL jobs for Chat, Responses, text completions, embeddings and moderation; owned input/output/error files, bounded asynchronous workers, per-item execution IDs, policy snapshots, quotas, cancellation, expiry and idempotent settlement | Additional batchable endpoint families and provider-native batch transports when required |
 | Fine tuning | Compatible-provider create/list/get/cancel/pause/resume/events/checkpoints lifecycle, owned training files and jobs, deployment pinning, persistence compensation, training-token reserve/settlement and owned model deletion | Additional native training providers and asynchronous final-cost reconciliation where providers expose final trained-token usage |
@@ -71,7 +71,7 @@ availability is not inferred from these tests.
 | Model tokenization | Context estimate including tool schemas; native Anthropic, Gemini and Bedrock counter APIs | Exact model tokenizers/counters with versioned provenance |
 | Catalog synchronization | Versioned catalog and hot update; xAI discovery atomically merges the separately published text and embedding catalogs | Validated upstream sync for additional providers, rollback and price provenance |
 | Arbitrary passthrough | Not implemented | Explicit route allowlists, identity isolation and accounting |
-| Parameter policy | Strict unknown-field decoding; native adapter rejection; generation control validation; machine-readable per-adapter Chat, Completions, Responses, Embeddings and Rerank support, including accepted values and input/document/prompt forms, all derived from runtime validators and locked by profile regressions | Model-specific overrides and equivalent matrices for other API families |
+| Parameter policy | Strict unknown-field decoding; native adapter rejection; generation control validation; machine-readable per-adapter Chat, Completions, Responses, Embeddings, Rerank and Moderation support, including accepted values and input/document/prompt forms, all derived from runtime validators and locked by profile regressions | Model-specific overrides and equivalent matrices for other API families |
 | Provider and deployment quotas | Atomic fixed-window RPM/TPM across inference, token-count, shadow and owned response lifecycle calls; provider totals shared by all linked deployments; bounded memory mode and shared Redis counters; quota-aware fallback | Additional quota dimensions only when backed by an upstream contract |
 
 ## Completed increments
@@ -111,6 +111,8 @@ availability is not inferred from these tests.
 - `d71eade`: legacy Completions is an explicit managed operation with
   validator-derived prompt-form and generation-control profiles for every
   implementing adapter.
+- `15e7e0f`: Moderation profiles distinguish compatible multimodal input from
+  native Mistral text input and advertise metadata support explicitly.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control
