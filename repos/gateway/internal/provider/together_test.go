@@ -173,6 +173,50 @@ func TestTogetherMapsMaxCompletionTokensToNativeField(t *testing.T) {
 	}
 }
 
+func TestTogetherNormalizesAndValidatesFinishReasons(t *testing.T) {
+	for _, field := range []string{"message", "delta"} {
+		t.Run(field, func(t *testing.T) {
+			payload := fmt.Sprintf(`{"choices":[{"%s":{"role":"assistant","content":"answer"},"finish_reason":"eos"}]}`, field)
+			normalized, err := normalizeTogetherChatPayload([]byte(payload), field)
+			if err != nil || !strings.Contains(string(normalized), `"finish_reason":"stop"`) || strings.Contains(string(normalized), `"finish_reason":"eos"`) {
+				t.Fatalf("normalized=%s err=%v", normalized, err)
+			}
+			for _, reason := range []string{"stop", "length", "tool_calls", "function_call"} {
+				payload = fmt.Sprintf(`{"choices":[{"%s":{"role":"assistant","content":"answer"},"finish_reason":%q}]}`, field, reason)
+				if _, err := normalizeTogetherChatPayload([]byte(payload), field); err != nil {
+					t.Fatalf("reason=%s err=%v", reason, err)
+				}
+			}
+			payload = fmt.Sprintf(`{"choices":[{"%s":{"role":"assistant","content":"answer"},"finish_reason":"unknown"}]}`, field)
+			if _, err := normalizeTogetherChatPayload([]byte(payload), field); err == nil {
+				t.Fatal("unknown finish reason accepted")
+			}
+		})
+	}
+	if _, err := normalizeTogetherChatPayload([]byte(`{"choices":[{"message":{"role":"assistant","content":"answer"},"finish_reason":null}]}`), "message"); err == nil {
+		t.Fatal("missing JSON finish reason accepted")
+	}
+	if _, err := normalizeTogetherChatPayload([]byte(`{"choices":[{"delta":{"role":"assistant","content":"answer"},"finish_reason":null}]}`), "delta"); err != nil {
+		t.Fatalf("pending stream finish reason rejected: %v", err)
+	}
+}
+
+func TestTogetherStreamNormalizesEOSBeforeWrite(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"answer\"},\"finish_reason\":\"eos\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	var chunks []string
+	response, err := NewTogether(server.URL, "key", true).StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "question"}}, Stream: true}, func(payload string) error {
+		chunks = append(chunks, payload)
+		return nil
+	})
+	if err != nil || response.Choices[0].FinishReason != "stop" || len(chunks) != 1 || !strings.Contains(chunks[0], `"finish_reason":"stop"`) {
+		t.Fatalf("response=%+v chunks=%v err=%v", response, chunks, err)
+	}
+}
+
 func TestTogetherRejectsInvalidSamplingControlsBeforeHTTP(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))

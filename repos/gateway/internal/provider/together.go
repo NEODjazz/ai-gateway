@@ -272,6 +272,9 @@ func normalizeTogetherChatPayload(payload []byte, messageField string) ([]byte, 
 		}
 	}
 	for _, choice := range choices {
+		if err := normalizeTogetherFinishReason(choice, messageField == "delta"); err != nil {
+			return nil, err
+		}
 		if err := rejectTogetherTopLogprobs(choice["top_logprobs"]); err != nil {
 			return nil, err
 		}
@@ -316,6 +319,28 @@ func normalizeTogetherChatPayload(payload []byte, messageField string) ([]byte, 
 	}
 	envelope["choices"], _ = json.Marshal(choices)
 	return json.Marshal(envelope)
+}
+
+func normalizeTogetherFinishReason(choice map[string]json.RawMessage, allowPending bool) error {
+	raw := bytes.TrimSpace(choice["finish_reason"])
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		if allowPending {
+			return nil
+		}
+		return errors.New("provider omitted Together finish reason")
+	}
+	var reason string
+	if json.Unmarshal(raw, &reason) != nil {
+		return errors.New("provider returned invalid Together finish reason")
+	}
+	switch reason {
+	case "eos":
+		choice["finish_reason"] = json.RawMessage(`"stop"`)
+	case "stop", "length", "tool_calls", "function_call":
+	default:
+		return errors.New("provider returned unsupported Together finish reason")
+	}
+	return nil
 }
 
 func togetherLegacyChoiceLogprobs(object map[string]json.RawMessage) (openai.ChoiceLogprobs, error) {
