@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -604,6 +605,25 @@ func TestGeminiInlineAudioPreservesPartOrder(t *testing.T) {
 	}
 	if len(parts) != 3 || parts[0].Text != "before" || parts[1].InlineData == nil || parts[1].InlineData.MIMEType != "audio/wav" || parts[2].Text != "after" {
 		t.Fatalf("audio content order lost: %+v", parts)
+	}
+}
+
+func TestGeminiMapsAdditionalInlineAudioFormats(t *testing.T) {
+	tests := []struct {
+		format, mediaType string
+		data              []byte
+	}{
+		{"flac", "audio/flac", []byte("fLaCpayload")},
+		{"ogg", "audio/ogg", []byte("OggSpayload")},
+		{"webm", "audio/webm", []byte("\x1a\x45\xdf\xa3payload")},
+		{"m4a", "audio/mp4", []byte("\x00\x00\x00\x18ftypisom")},
+	}
+	for _, test := range tests {
+		encoded := base64.StdEncoding.EncodeToString(test.data)
+		parts, err := geminiMessageParts([]any{map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": encoded, "format": test.format}}})
+		if err != nil || len(parts) != 1 || parts[0].InlineData == nil || parts[0].InlineData.MIMEType != test.mediaType || parts[0].InlineData.Data != encoded {
+			t.Fatalf("format=%s parts=%+v err=%v", test.format, parts, err)
+		}
 	}
 }
 

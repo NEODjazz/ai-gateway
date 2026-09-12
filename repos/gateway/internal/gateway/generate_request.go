@@ -281,6 +281,14 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 					format, filename = "wav", "input.wav"
 				case "audio/mpeg":
 					format, filename = "mp3", "input.mp3"
+				case "audio/flac":
+					format, filename = "flac", "input.flac"
+				case "audio/ogg":
+					format, filename = "ogg", "input.ogg"
+				case "audio/webm":
+					format, filename = "webm", "input.webm"
+				case "audio/mp4":
+					format, filename = "m4a", "input.m4a"
 				default:
 					return fail("inlineData.mimeType")
 				}

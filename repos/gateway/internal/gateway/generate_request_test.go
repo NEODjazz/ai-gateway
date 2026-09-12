@@ -107,6 +107,38 @@ func TestGenerateRequestMapsInlineAudio(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsAdditionalInlineAudioFormats(t *testing.T) {
+	tests := []struct {
+		mediaType string
+		data      []byte
+	}{
+		{"audio/flac", []byte("fLaCpayload")},
+		{"audio/ogg", []byte("OggSpayload")},
+		{"audio/webm", []byte("\x1a\x45\xdf\xa3payload")},
+		{"audio/mp4", []byte("\x00\x00\x00\x18ftypisom")},
+	}
+	for _, test := range tests {
+		t.Run(test.mediaType, func(t *testing.T) {
+			var native generateRequest
+			raw := `{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"` + test.mediaType + `","data":"` + base64.StdEncoding.EncodeToString(test.data) + `"}}]}]}`
+			if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+				t.Fatal(err)
+			}
+			chat, err := native.chat("model", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attachments, err := openai.ChatAudioAttachments(chat.Messages)
+			if err != nil || len(attachments) != 1 || attachments[0].MediaType != test.mediaType {
+				t.Fatalf("attachments=%+v err=%v", attachments, err)
+			}
+			if chat.NativeInputTokens == 0 && openai.ChatInputTokens(chat) == 0 {
+				t.Fatal("audio omitted from token estimate")
+			}
+		})
+	}
+}
+
 func TestGenerateRequestMapsInlinePDF(t *testing.T) {
 	data := base64.StdEncoding.EncodeToString([]byte("%PDF-1.7\ncontent"))
 	var native generateRequest

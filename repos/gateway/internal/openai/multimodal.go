@@ -73,6 +73,14 @@ func ResponseAudioAttachments(input any) ([]AudioAttachment, error) {
 					mediaType, filename = "audio/wav", "input.wav"
 				case "mp3":
 					mediaType, filename = "audio/mpeg", "input.mp3"
+				case "flac":
+					mediaType, filename = "audio/flac", "input.flac"
+				case "ogg":
+					mediaType, filename = "audio/ogg", "input.ogg"
+				case "webm":
+					mediaType, filename = "audio/webm", "input.webm"
+				case "m4a":
+					mediaType, filename = "audio/mp4", "input.m4a"
 				}
 				attachment := AudioAttachment{Filename: filename, MediaType: mediaType, Data: data}
 				if !dataOK || !formatOK || ValidateAudioAttachment(attachment) != nil || len(attachments) >= MaxResponseAudioAttachments {

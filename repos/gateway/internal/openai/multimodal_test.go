@@ -40,12 +40,26 @@ func TestImageAttachmentsRejectsNonUserChatImage(t *testing.T) {
 }
 
 func TestResponseAudioAttachmentsValidateFormatSignatureAndBounds(t *testing.T) {
-	wav := base64.StdEncoding.EncodeToString([]byte("RIFF\x00\x00\x00\x00WAVE"))
-	input := []any{map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": wav, "format": "wav"}}}
-	attachments, err := ResponseAudioAttachments(input)
-	if err != nil || len(attachments) != 1 || attachments[0].MediaType != "audio/wav" || attachments[0].Data != wav {
-		t.Fatalf("attachments=%+v err=%v", attachments, err)
+	formats := []struct {
+		format, mediaType string
+		data              []byte
+	}{
+		{"wav", "audio/wav", []byte("RIFF\x00\x00\x00\x00WAVE")},
+		{"mp3", "audio/mpeg", []byte("ID3payload")},
+		{"flac", "audio/flac", []byte("fLaCpayload")},
+		{"ogg", "audio/ogg", []byte("OggSpayload")},
+		{"webm", "audio/webm", []byte("\x1a\x45\xdf\xa3payload")},
+		{"m4a", "audio/mp4", []byte("\x00\x00\x00\x18ftypisom")},
 	}
+	for _, format := range formats {
+		encoded := base64.StdEncoding.EncodeToString(format.data)
+		input := []any{map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": encoded, "format": format.format}}}
+		attachments, err := ResponseAudioAttachments(input)
+		if err != nil || len(attachments) != 1 || attachments[0].MediaType != format.mediaType || attachments[0].Data != encoded {
+			t.Fatalf("format=%s attachments=%+v err=%v", format.format, attachments, err)
+		}
+	}
+	wav := base64.StdEncoding.EncodeToString([]byte("RIFF\x00\x00\x00\x00WAVE"))
 	for _, invalid := range []any{
 		[]any{map[string]any{"type": "input_audio", "input_audio": "bad"}},
 		[]any{map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "%%%", "format": "wav"}}},
