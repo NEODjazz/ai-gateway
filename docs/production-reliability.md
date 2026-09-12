@@ -399,21 +399,25 @@ trust relationship and provider availability remain deployment responsibilities.
 
 ## Chat and SCIM contract rollout (2026-09-12)
 
-Source `7db68b2` includes SCIM base discovery and server-side sorting, additive
+Source `b21bfb9` includes SCIM base discovery and server-side sorting, additive
 user-role PATCH semantics, optional Group attribute removal, and the `default`
-Chat reasoning effort. Each behavior change passed its focused regressions and a
-full gateway `go test -race ./...`; gateway vet and build also passed.
+Chat reasoning effort with adapter-specific capability reporting. Each behavior
+change passed its focused regressions and a full gateway `go test -race ./...`;
+gateway vet and build also passed.
 
 - Rancher Desktop reported Moby 29.1.3 with Kubernetes 1.36.3 enabled. The
-  unchanged Dockerfile built `ai-gateway-gateway:gaps-7db68b2` successfully.
-- Helm release `ai-gateway` revision 396 completed successfully using the
+  unchanged Dockerfile built `ai-gateway-gateway:gaps-b21bfb9` successfully.
+- Helm release `ai-gateway` revision 397 completed successfully using the
   existing stored values with only `image.tag` overridden.
-- Gateway pod `ai-gateway-gateway-6bd7b7856-lhbbp` became Ready with zero
-  restarts and ran `ai-gateway-gateway:gaps-7db68b2`.
+- Gateway pod `ai-gateway-gateway-85c877cf45-7khr8` became Ready with zero
+  restarts and ran `ai-gateway-gateway:gaps-b21bfb9`.
 - In-pod loopback checks returned 204 for readiness and 200 with
   `application/scim+json` for `/scim/v2`; discovery returned both User and Group
   resource types. A Chat request using `reasoning_effort=default` passed request
   validation and reached routing/provider execution.
+- The live provider-capability endpoint advertised `default` for OpenAI, Azure
+  OpenAI, Groq and OpenRouter adapters while preserving the documented native
+  Mistral range through `xhigh`.
 
 The host ingress did not accept a connection on port 80 during this rollout, so
 application checks used the pod loopback endpoint. The Chat smoke request used a
