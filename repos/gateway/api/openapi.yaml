@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.344
+  version: 0.1.345
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -7058,6 +7058,56 @@ components:
                       key: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
                       hold_key: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
                       wait: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                  cache_control:
+                    type: object
+                    additionalProperties: false
+                    required: [type]
+                    description: Cannot be combined with a deferred toolset.
+                    properties:
+                      type: {type: string, const: ephemeral}
+                      ttl: {type: string, enum: [5m, 1h]}
+              - type: object
+                additionalProperties: false
+                required: [type]
+                properties:
+                  type: {type: string, const: browser_toolset_20260801}
+                  allowed_callers: {type: array, maxItems: 1, uniqueItems: true, items: {type: string, const: direct}}
+                  configs:
+                    type: object
+                    additionalProperties: false
+                    description: Per-member controls. The four diagnostic, scripting and upload members default to disabled; other omitted members remain enabled. At least one member must remain enabled, and every enabled member must resolve to the same defer_loading value.
+                    properties:
+                      navigate: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      screenshot: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      zoom: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      left_click: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      right_click: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      middle_click: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      double_click: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      triple_click: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      hover: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      left_click_drag: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      left_mouse_down: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      left_mouse_up: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      mouse_move: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      scroll: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      scroll_to: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      type: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      key: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      hold_key: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      wait: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      read_page: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      find: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      get_page_text: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      form_input: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      file_upload: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      read_console: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      read_network: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      javascript_exec: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      new_tab: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      list_tabs: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      switch_tab: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
+                      close_tab: {$ref: '#/components/schemas/MessagesToolsetMemberConfig'}
                   cache_control:
                     type: object
                     additionalProperties: false

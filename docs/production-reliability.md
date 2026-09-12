@@ -909,3 +909,13 @@ Gateway Helm revision 444 completed successfully, and pod
 same image digest. Its live endpoint served OpenAPI 0.1.344 with the current
 computer toolset and all 17 fixed member configs. A structurally valid request
 with a disabled `zoom` member reached authentication and returned 401.
+
+Source `261b4d3` adds the current browser client toolset with all 31 fixed
+members, provider-specific capability routing, namespaced action authorization,
+conservative context reserve, native token counting and response-cache
+exclusion. The four high-risk or optional executor actions remain disabled by
+default. Browser continuation validates bounded tab inventories, active-tab
+consistency, tab-open and download events, state-only tab-management results,
+capture images and error isolation. Browser and computer members with the same
+name remain distinct through request history and JSON/SSE output. Full Go test,
+race, vet and build checks and all 166 UI tests completed successfully.

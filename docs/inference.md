@@ -787,6 +787,21 @@ requests bypass response caches, and the gateway reserves 4,590 native input
 tokens for the full definition in TPM and budget admission while native token
 counting forwards the exact toolset entry upstream.
 
+The `browser_toolset_20260801` entry enables 27 browser actions by default.
+`file_upload`, `read_console`, `read_network` and `javascript_exec` remain
+disabled unless explicitly enabled in `configs`; every enabled member must use
+the same deferred-loading setting. Authorization evaluates enabled actions as
+`browser:<member>`, independently from computer actions with the same name, and
+routing requires `browser_toolset` on a native Anthropic deployment. The
+gateway validates bounded text and image results plus `browser_state`: at most
+100 unique tabs, exactly one active tab in a non-empty inventory, at most 200
+state changes, safe rendered strings, valid tab-open and download events, and
+the exact state-only result required by tab-management actions. Error results
+cannot carry browser state. Native history, JSON/SSE output, batches and token
+counting retain `toolset_name: "browser"`. Response caches are bypassed. TPM
+and budget admission reserve 6,670 input tokens for the default definition and
+7,550 when any opt-in member is enabled; exact provider usage settles billing.
+
 Regressions cover request/response conversion, native and fallback SSE, stream
 failure, model/tool authorization, TPM, unknown input, response-size bounds and
 reported usage reaching the accounting stage through Router. No live paid

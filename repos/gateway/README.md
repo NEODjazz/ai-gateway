@@ -228,6 +228,14 @@ cache control. Tool ACLs use `computer:<member>` identities. Calls and results
 must round-trip `toolset_name: computer`; text, image and error results remain
 provider-native, and the gateway reserves the full toolset context before TPM
 and budget checks.
+The current browser client toolset (`browser_toolset_20260801`) exposes 27
+members by default and four opt-in members: `file_upload`, `read_console`,
+`read_network` and `javascript_exec`. Tool ACLs use `browser:<member>`
+identities. The gateway keeps browser and computer actions distinct, validates
+tab inventories and download state changes, preserves native continuation, and
+requires the explicit `browser_toolset` deployment capability. Browser toolset
+requests bypass response caches and reserve the provider definition overhead
+before TPM and budget admission.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.
