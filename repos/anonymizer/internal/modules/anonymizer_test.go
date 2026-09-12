@@ -83,6 +83,96 @@ func TestConfiguredRuleCanMaskCaptureGroupOnly(t *testing.T) {
 	}
 }
 
+func TestConfiguredRuleCanExcludeValues(t *testing.T) {
+	module, err := NewAnonymizerModuleFromConfig(true, []RuleConfig{
+		{Name: "code_word", Placeholder: "{{CODE_WORD}}", Pattern: `(?i)кодовое\s+слово\s+(\S+)`, CaptureGroup: 1, ExcludeValues: []string{"подошло"}},
+	}, "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "кодовое слово Ромашка; кодовое слово ПОДОШЛО"}}}}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if got := openai.ContentText(req.Request.Messages[0].Content); got != "кодовое слово {{CODE_WORD_1}} кодовое слово ПОДОШЛО" {
+		t.Fatalf("unexpected anonymized content: %q", got)
+	}
+}
+
+func TestConfiguredRuleRejectsEmptyExcludedValue(t *testing.T) {
+	_, err := NewAnonymizerModuleFromConfig(true, []RuleConfig{
+		{Name: "code_word", Placeholder: "{{CODE_WORD}}", Pattern: `(\S+)`, CaptureGroup: 1, ExcludeValues: []string{" "}},
+	}, "all")
+	if err == nil {
+		t.Fatal("expected empty excluded value to be rejected")
+	}
+}
+
+func TestConfiguredRuleUsesUnicodeWordBoundaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   RuleConfig
+		input    string
+		expected string
+	}{
+		{
+			name: "dialog code word",
+			config: RuleConfig{Name: "dialog_code_word", Placeholder: "{{DIALOG_KW_MASK}}", CaptureGroup: 1,
+				Pattern: `(?is)(?:назовите|скажите|ваше)?\s*(?:кодовое|секретное|ключевое)\s+слово[.?:\s]{0,4}(?:клиент:\s*)?(.{1,100}?)(?:\s+(?:\d{2}:\d{2}:\d{2}\s+оператор:\s+)?(?:кодовое\s+слово\s+)?(?:подошло|верно|подходит|принято)(?:$|[^\p{L}\p{N}_]))`},
+			input:    "Назовите кодовое слово. Клиент: ромашка 12:34:56 Оператор: кодовое слово подошло.",
+			expected: "Назовите кодовое слово. Клиент: {{DIALOG_KW_MASK_1}} 12:34:56 Оператор: кодовое слово подошло.",
+		},
+		{
+			name: "password",
+			config: RuleConfig{Name: "password", Placeholder: "{{PASSWORD}}", CaptureGroup: 1,
+				Pattern: `(?i)(?:^|[^\p{L}\p{N}_])(?:password|passwd|pwd|пароль)\s*[:=]\s*["']?([^"'\s,;]{6,})["']?`},
+			input:    "Пароль: secret123;",
+			expected: "Пароль: {{PASSWORD_1}};",
+		},
+		{
+			name: "single Cyrillic person",
+			config: RuleConfig{Name: "person_context", Placeholder: "{{PERSON_NAME}}", CaptureGroup: 1,
+				Pattern: `(?i)(?:^|[^\p{L}\p{N}_])(?:клиент|сотрудник|пользователь)\s+([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+){0,2})(?:$|[^\p{L}\p{N}_])`},
+			input:    "Клиент Иван.",
+			expected: "Клиент {{PERSON_NAME_1}}.",
+		},
+		{
+			name: "Cyrillic month date",
+			config: RuleConfig{Name: "date", Placeholder: "{{DATE}}", CaptureGroup: 1,
+				Pattern: `(?i)(?:^|[^\p{L}\p{N}_])((?:0[1-9]|[12][0-9]|3[01])[- ./](?:0[1-9]|1[0-2])[- ./]\d{2,4}|\d{4}[- ./](?:0[1-9]|1[0-2])[- ./](?:0[1-9]|[12][0-9]|3[01])|(?:0?[1-9]|[12][0-9]|3[01])\s+(?:янв(?:аря)?|февр(?:аля)?|мар(?:та)?|апр(?:еля)?|мая|июн(?:я)?|июл(?:я)?|авг(?:уста)?|сент(?:ября)?|окт(?:ября)?|нояб(?:ря)?|дек(?:абря)?)(?:\s+\d{2,4}(?:г\.?|\s+года?)?)?)(?:$|[^\p{L}\p{N}_])`},
+			input:    "Дата 15 сентября.",
+			expected: "Дата {{DATE_1}}.",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			module, err := NewAnonymizerModuleFromConfig(true, []RuleConfig{test.config}, "all")
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: test.input}}}}
+			if err := module.Handle(context.Background(), &req); err != nil {
+				t.Fatal(err)
+			}
+			if got := openai.ContentText(req.Request.Messages[0].Content); got != test.expected {
+				t.Fatalf("content=%q want=%q", got, test.expected)
+			}
+		})
+	}
+}
+
+func TestAnonymizerMasksRussianPasswordLabel(t *testing.T) {
+	module := NewAnonymizerModule(true, RuleSecret)
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "Пароль: secret123;"}}}}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if got := openai.ContentText(req.Request.Messages[0].Content); got != "Пароль: {{SECRET_1}};" {
+		t.Fatalf("unexpected anonymized content: %q", got)
+	}
+}
+
 func TestAnonymizerMasksSensitiveData(t *testing.T) {
 	module := NewAnonymizerModule(true, "all")
 	req := RequestContext{

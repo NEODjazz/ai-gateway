@@ -11,11 +11,12 @@ import (
 const RuleValidatorLuhn = "luhn"
 
 type RuleConfig struct {
-	Name         string `json:"name"`
-	Placeholder  string `json:"placeholder"`
-	Pattern      string `json:"pattern"`
-	Validator    string `json:"validator,omitempty"`
-	CaptureGroup int    `json:"capture_group,omitempty"`
+	Name          string   `json:"name"`
+	Placeholder   string   `json:"placeholder"`
+	Pattern       string   `json:"pattern"`
+	Validator     string   `json:"validator,omitempty"`
+	CaptureGroup  int      `json:"capture_group,omitempty"`
+	ExcludeValues []string `json:"exclude_values,omitempty"`
 }
 
 type RulesConfig struct {
@@ -83,6 +84,23 @@ func buildConfiguredRules(config []RuleConfig, enabled []string) ([]AnonymizerRu
 			shouldMask = isLikelyBankCard
 		default:
 			return nil, fmt.Errorf("anonymizer rule %q uses unsupported validator %q", item.Name, item.Validator)
+		}
+		if len(item.ExcludeValues) > 0 {
+			excluded := make(map[string]bool, len(item.ExcludeValues))
+			for _, value := range item.ExcludeValues {
+				value = strings.ToLower(strings.TrimSpace(value))
+				if value == "" {
+					return nil, fmt.Errorf("anonymizer rule %q has an empty excluded value", item.Name)
+				}
+				excluded[value] = true
+			}
+			validator := shouldMask
+			shouldMask = func(value string) bool {
+				if validator != nil && !validator(value) {
+					return false
+				}
+				return !excluded[strings.ToLower(strings.TrimSpace(value))]
+			}
 		}
 
 		if !disabled && (len(selected) == 0 || selected["all"] || selected[item.Name]) {

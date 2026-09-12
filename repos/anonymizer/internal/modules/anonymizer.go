@@ -277,9 +277,10 @@ func defaultRuleConfig() []RuleConfig {
 			Pattern:     `[А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+){1,2}`,
 		},
 		{
-			Name:        RuleSecret,
-			Placeholder: "{{SECRET}}",
-			Pattern:     `(?i)\b(?:password|passwd|pwd|пароль)\s*[:=]\s*["']?[^"'\s,;]{6,}["']?`,
+			Name:         RuleSecret,
+			Placeholder:  "{{SECRET}}",
+			Pattern:      `(?i)(?:^|[^\p{L}\p{N}_])(?:password|passwd|pwd|пароль)\s*[:=]\s*["']?([^"'\s,;]{6,})["']?`,
+			CaptureGroup: 1,
 		},
 	}
 }
