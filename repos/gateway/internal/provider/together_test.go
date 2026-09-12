@@ -93,7 +93,7 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 		if !slices.Equal(profile.Operations, []string{"chat", "completions", "embeddings", "rerank", "image_generation", "audio_transcription", "audio_translation", "audio_speech", "stream"}) || !slices.Equal(profile.Capabilities, []string{"chat", "completions", "embeddings", "rerank", "image_generation", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "vision"}) || len(profile.AuthTypes) != 0 {
 			t.Fatalf("profile=%+v", profile)
 		}
-		if slices.Contains(profile.ChatParameters.SupportedOptions, "store") || slices.Contains(profile.ChatParameters.SupportedOptions, "metadata") || slices.Contains(profile.ChatParameters.SupportedOptions, "service_tier") || slices.Contains(profile.ChatParameters.SupportedOptions, "prediction") || slices.Contains(profile.ChatParameters.SupportedOptions, "logprobs") || slices.Contains(profile.ChatParameters.SupportedOptions, "logit_bias") || len(profile.ChatParameters.Logprobs) != 0 {
+		if slices.Contains(profile.ChatParameters.SupportedOptions, "store") || slices.Contains(profile.ChatParameters.SupportedOptions, "metadata") || slices.Contains(profile.ChatParameters.SupportedOptions, "service_tier") || slices.Contains(profile.ChatParameters.SupportedOptions, "prediction") || !slices.Contains(profile.ChatParameters.SupportedOptions, "logprobs") || slices.Contains(profile.ChatParameters.SupportedOptions, "top_logprobs") || slices.Contains(profile.ChatParameters.SupportedOptions, "logit_bias") || !slices.Equal(profile.ChatParameters.Logprobs, []string{"false", "true"}) {
 			t.Fatalf("ignored options advertised: %+v", profile.ChatParameters)
 		}
 		wantModels := []ProviderChatModelParameterPolicy{
@@ -109,6 +109,126 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 		return
 	}
 	t.Fatal("Together capability profile is missing")
+}
+
+func TestTogetherLogprobsJSONContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body["logprobs"] != float64(0) || body["top_logprobs"] != nil {
+			t.Fatalf("body=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","created":1,"model":"model","choices":[{"index":0,"message":{"role":"assistant","content":"answer"},"finish_reason":"stop","logprobs":{"token_ids":[42],"tokens":["answer"],"token_logprobs":[-0.25],"top_logprobs":{}}}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+	}))
+	defer server.Close()
+	enabled := true
+	response, err := NewTogether(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "question"}}, ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &enabled}})
+	if err != nil || response.Choices[0].Logprobs == nil || len(response.Choices[0].Logprobs.Content) != 1 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+	item := response.Choices[0].Logprobs.Content[0]
+	if item.Token != "answer" || item.Logprob != -0.25 || !slices.Equal(item.Bytes, []int{97, 110, 115, 119, 101, 114}) || len(item.TopLogprobs) != 0 {
+		t.Fatalf("logprob=%+v", item)
+	}
+}
+
+func TestTogetherLogprobsSSEContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body["logprobs"] != float64(0) || body["top_logprobs"] != nil {
+			t.Fatalf("body=%#v", body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"an\",\"token_id\":10},\"logprobs\":-0.1,\"finish_reason\":null}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"swer\",\"token_id\":11},\"logprobs\":-0.2,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":2,\"total_tokens\":4}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+	enabled := true
+	chunks := []string{}
+	response, err := NewTogether(server.URL, "key", true).StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "question"}}, Stream: true, ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &enabled}}, func(payload string) error {
+		chunks = append(chunks, payload)
+		return nil
+	})
+	if err != nil || openai.ContentText(response.Choices[0].Message.Content) != "answer" || response.Choices[0].Logprobs == nil || len(response.Choices[0].Logprobs.Content) != 2 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+	for _, payload := range chunks {
+		if strings.Contains(payload, `"logprobs":-`) || !strings.Contains(payload, `"logprobs":{"content"`) {
+			t.Fatalf("native logprobs were not normalized: %s", payload)
+		}
+	}
+}
+
+func TestTogetherLogprobsFalseIsOmitted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body["logprobs"] != nil || body["top_logprobs"] != nil {
+			t.Fatalf("body=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","created":1,"model":"model","choices":[{"index":0,"message":{"role":"assistant","content":"answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+	}))
+	defer server.Close()
+	disabled := false
+	if _, err := NewTogether(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "question"}}, ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &disabled}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTogetherLogprobsRejectUnsupportedOrMalformedContracts(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	enabled := true
+	top := 1
+	if _, err := NewTogether(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "question"}}, ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &enabled, TopLogprobs: &top}}); err == nil || calls != 0 {
+		t.Fatalf("top_logprobs accepted or reached upstream: err=%v calls=%d", err, calls)
+	}
+	for name, payload := range map[string]string{
+		"different lengths": `{"choices":[{"message":{"content":"a"},"logprobs":{"tokens":["a"],"token_logprobs":[]}}]}`,
+		"positive":          `{"choices":[{"message":{"content":"a"},"logprobs":{"tokens":["a"],"token_logprobs":[0.1]}}]}`,
+		"invalid id":        `{"choices":[{"message":{"content":"a"},"logprobs":{"token_ids":[-1],"tokens":["a"],"token_logprobs":[-0.1]}}]}`,
+		"ambiguous top":     `{"choices":[{"message":{"content":"a"},"logprobs":{"tokens":["a"],"token_logprobs":[-0.1],"top_logprobs":{"b":-1}}}]}`,
+		"stream no token":   `{"choices":[{"delta":{"role":"assistant"},"logprobs":-0.1}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			field := "message"
+			if name == "stream no token" {
+				field = "delta"
+			}
+			if _, err := normalizeTogetherChatPayload([]byte(payload), field); err == nil {
+				t.Fatal("malformed logprobs accepted")
+			}
+		})
+	}
+}
+
+func TestTogetherRequestedLogprobsCannotDisappear(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","created":1,"model":"model","choices":[{"index":0,"message":{"role":"assistant","content":"answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+	}))
+	defer server.Close()
+	enabled := true
+	if _, err := NewTogether(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "question"}}, ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &enabled}}); err == nil {
+		t.Fatal("missing requested logprobs accepted")
+	}
+}
+
+func TestTogetherRequestedStreamLogprobsFailBeforeMissingChunkIsWritten(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\",\"token_id\":1},\"logprobs\":-0.1,\"finish_reason\":null}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" missing\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":2,\"total_tokens\":4}}\n\n")
+	}))
+	defer server.Close()
+	enabled := true
+	writes := 0
+	_, err := NewTogether(server.URL, "key", true).StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "question"}}, Stream: true, ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &enabled}}, func(string) error {
+		writes++
+		return nil
+	})
+	if err == nil || writes != 1 {
+		t.Fatalf("err=%v writes=%d", err, writes)
+	}
 }
 
 func TestTogetherReasoningEffortAndReasoningAliasJSON(t *testing.T) {

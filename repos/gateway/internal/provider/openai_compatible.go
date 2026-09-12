@@ -23,6 +23,7 @@ type openAICompatibleChatRequest struct {
 	Model               string                         `json:"model"`
 	Messages            []openai.Message               `json:"messages"`
 	messagesOverride    any                            `json:"-"`
+	nativeLogprobs      *int                           `json:"-"`
 	Functions           []openai.FunctionDefinition    `json:"functions,omitempty"`
 	FunctionCall        *openai.LegacyFunctionChoice   `json:"function_call,omitempty"`
 	Tools               []openai.Tool                  `json:"tools,omitempty"`
@@ -49,18 +50,24 @@ type deepSeekThinking struct {
 func (r openAICompatibleChatRequest) MarshalJSON() ([]byte, error) {
 	type wire openAICompatibleChatRequest
 	payload, err := json.Marshal(wire(r))
-	if err != nil || r.messagesOverride == nil {
+	if err != nil || r.messagesOverride == nil && r.nativeLogprobs == nil {
 		return payload, err
 	}
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &object); err != nil {
 		return nil, err
 	}
-	messages, err := json.Marshal(r.messagesOverride)
-	if err != nil {
-		return nil, err
+	if r.messagesOverride != nil {
+		messages, err := json.Marshal(r.messagesOverride)
+		if err != nil {
+			return nil, err
+		}
+		object["messages"] = messages
 	}
-	object["messages"] = messages
+	if r.nativeLogprobs != nil {
+		object["logprobs"], _ = json.Marshal(*r.nativeLogprobs)
+		delete(object, "top_logprobs")
+	}
 	return json.Marshal(object)
 }
 
@@ -208,6 +215,15 @@ func (p OpenAICompatible) mapChatParameters(request *openAICompatibleChatRequest
 		request.UserID = request.User
 		request.User = ""
 		request.Thinking = &deepSeekThinking{Type: "disabled"}
+	case "together":
+		if request.Logprobs != nil {
+			if *request.Logprobs {
+				value := 0
+				request.nativeLogprobs = &value
+			}
+			request.Logprobs = nil
+			request.TopLogprobs = nil
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"strconv"
@@ -181,8 +182,8 @@ func (t Together) ValidateChatParameters(request openai.ChatCompletionRequest) e
 		parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""}, parameterCheck{"web_search_options", request.WebSearchOptions != nil},
 		parameterCheck{"web_fetch_options", request.WebFetchOptions != nil}, parameterCheck{"safe_prompt", request.SafePrompt != nil},
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"top_a", request.TopA != nil},
-		parameterCheck{"repetition_penalty", request.RepetitionPenalty != nil}, parameterCheck{"logprobs", request.Logprobs != nil},
-		parameterCheck{"top_logprobs", request.TopLogprobs != nil}, parameterCheck{"logit_bias", request.LogitBias != nil},
+		parameterCheck{"repetition_penalty", request.RepetitionPenalty != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
+		parameterCheck{"logit_bias", request.LogitBias != nil},
 	); err != nil {
 		return err
 	}
@@ -219,7 +220,7 @@ func decodeTogetherChatCompletionResponse(reader io.Reader, target *openai.ChatC
 	if len(payload) > maxChatCompletionResponseBytes {
 		return errors.New("chat completion response exceeds limit")
 	}
-	normalized, err := normalizeChatReasoningAliasPayload("Together", payload, "message")
+	normalized, err := normalizeTogetherChatPayload(payload, "message")
 	if err != nil {
 		return err
 	}
@@ -227,22 +228,203 @@ func decodeTogetherChatCompletionResponse(reader io.Reader, target *openai.ChatC
 }
 
 func normalizeTogetherChatStreamPayload(payload string) (string, error) {
-	normalized, err := normalizeChatReasoningAliasPayload("Together", []byte(payload), "delta")
+	return normalizeTogetherChatStreamPayloadRequired(payload, false)
+}
+
+func normalizeTogetherChatStreamPayloadRequired(payload string, requireLogprobs bool) (string, error) {
+	normalized, err := normalizeTogetherChatPayload([]byte(payload), "delta")
+	if err != nil || !requireLogprobs {
+		return string(normalized), err
+	}
+	var envelope struct {
+		Choices []struct {
+			Delta struct {
+				Content string `json:"content"`
+			} `json:"delta"`
+			Logprobs *openai.ChoiceLogprobs `json:"logprobs"`
+		} `json:"choices"`
+	}
+	if json.Unmarshal(normalized, &envelope) != nil {
+		return "", errors.New("provider returned invalid Together stream logprobs")
+	}
+	for _, choice := range envelope.Choices {
+		if choice.Delta.Content != "" && (choice.Logprobs == nil || len(choice.Logprobs.Content) == 0) {
+			return "", errors.New("provider omitted requested Together stream logprobs")
+		}
+	}
 	return string(normalized), err
+}
+
+const maxTogetherLogprobTokens = 1 << 20
+
+func normalizeTogetherChatPayload(payload []byte, messageField string) ([]byte, error) {
+	normalized, err := normalizeChatReasoningAliasPayload("Together", payload, messageField)
+	if err != nil {
+		return nil, err
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(normalized, &envelope); err != nil {
+		return nil, err
+	}
+	var choices []map[string]json.RawMessage
+	if raw := envelope["choices"]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &choices); err != nil {
+			return nil, err
+		}
+	}
+	for _, choice := range choices {
+		if err := rejectTogetherTopLogprobs(choice["top_logprobs"]); err != nil {
+			return nil, err
+		}
+		raw := choice["logprobs"]
+		if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			continue
+		}
+		var object map[string]json.RawMessage
+		if json.Unmarshal(raw, &object) == nil {
+			if object["content"] != nil || object["refusal"] != nil {
+				continue
+			}
+			converted, err := togetherLegacyChoiceLogprobs(object)
+			if err != nil {
+				return nil, err
+			}
+			choice["logprobs"], _ = json.Marshal(converted)
+			continue
+		}
+		if messageField != "delta" {
+			return nil, errors.New("provider returned invalid Together logprobs")
+		}
+		var probability float64
+		if json.Unmarshal(raw, &probability) != nil || !validTogetherLogprob(probability) {
+			return nil, errors.New("provider returned invalid Together stream logprob")
+		}
+		var delta map[string]json.RawMessage
+		if json.Unmarshal(choice[messageField], &delta) != nil {
+			return nil, errors.New("provider returned Together stream logprob without a delta")
+		}
+		var token string
+		if json.Unmarshal(delta["content"], &token) != nil || token == "" {
+			return nil, errors.New("provider returned Together stream logprob without token text")
+		}
+		if rawID := delta["token_id"]; len(rawID) > 0 {
+			var tokenID int64
+			if json.Unmarshal(rawID, &tokenID) != nil || tokenID < 0 {
+				return nil, errors.New("provider returned invalid Together stream token ID")
+			}
+		}
+		choice["logprobs"], _ = json.Marshal(openai.ChoiceLogprobs{Content: []openai.TokenLogprob{{Token: token, Logprob: probability, Bytes: tokenBytes(token), TopLogprobs: []openai.TopLogprob{}}}})
+	}
+	envelope["choices"], _ = json.Marshal(choices)
+	return json.Marshal(envelope)
+}
+
+func togetherLegacyChoiceLogprobs(object map[string]json.RawMessage) (openai.ChoiceLogprobs, error) {
+	var tokens []*string
+	var probabilities []*float64
+	var tokenIDs []*int64
+	if json.Unmarshal(object["tokens"], &tokens) != nil || json.Unmarshal(object["token_logprobs"], &probabilities) != nil || len(tokens) == 0 || len(tokens) != len(probabilities) || len(tokens) > maxTogetherLogprobTokens {
+		return openai.ChoiceLogprobs{}, errors.New("provider returned inconsistent Together logprobs")
+	}
+	if raw := object["token_ids"]; len(raw) > 0 {
+		if json.Unmarshal(raw, &tokenIDs) != nil || len(tokenIDs) != len(tokens) {
+			return openai.ChoiceLogprobs{}, errors.New("provider returned inconsistent Together token IDs")
+		}
+	}
+	if err := rejectTogetherTopLogprobs(object["top_logprobs"]); err != nil {
+		return openai.ChoiceLogprobs{}, err
+	}
+	result := openai.ChoiceLogprobs{Content: make([]openai.TokenLogprob, len(tokens))}
+	for index := range tokens {
+		if tokens[index] == nil || *tokens[index] == "" || probabilities[index] == nil || !validTogetherLogprob(*probabilities[index]) {
+			return openai.ChoiceLogprobs{}, errors.New("provider returned invalid Together logprob token")
+		}
+		if len(tokenIDs) > 0 && tokenIDs[index] != nil && *tokenIDs[index] < 0 {
+			return openai.ChoiceLogprobs{}, errors.New("provider returned invalid Together token ID")
+		}
+		result.Content[index] = openai.TokenLogprob{Token: *tokens[index], Logprob: *probabilities[index], Bytes: tokenBytes(*tokens[index]), TopLogprobs: []openai.TopLogprob{}}
+	}
+	return result, nil
+}
+
+func rejectTogetherTopLogprobs(raw json.RawMessage) error {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil
+	}
+	var values map[string]float64
+	if json.Unmarshal(raw, &values) == nil && len(values) == 0 {
+		return nil
+	}
+	return errors.New("provider returned positional-ambiguous Together top logprobs")
+}
+
+func validTogetherLogprob(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value <= 0
+}
+
+func validateTogetherRequestedLogprobs(request openai.ChatCompletionRequest, response openai.ChatCompletionResponse) error {
+	if request.Logprobs == nil || !*request.Logprobs {
+		return nil
+	}
+	for _, choice := range response.Choices {
+		text := openai.ContentText(choice.Message.Content)
+		if text == "" {
+			continue
+		}
+		if choice.Logprobs == nil || len(choice.Logprobs.Content) == 0 || len(choice.Logprobs.Content) > maxTogetherLogprobTokens {
+			return errors.New("provider omitted requested Together logprobs")
+		}
+		var rebuilt strings.Builder
+		for _, token := range choice.Logprobs.Content {
+			if token.Token == "" || !validTogetherLogprob(token.Logprob) || len(token.TopLogprobs) != 0 {
+				return errors.New("provider returned invalid Together logprobs")
+			}
+			wantBytes := tokenBytes(token.Token)
+			if len(token.Bytes) != len(wantBytes) {
+				return errors.New("provider returned invalid Together logprob bytes")
+			}
+			for index := range wantBytes {
+				if token.Bytes[index] != wantBytes[index] {
+					return errors.New("provider returned invalid Together logprob bytes")
+				}
+			}
+			rebuilt.WriteString(token.Token)
+		}
+		if rebuilt.String() != text {
+			return errors.New("provider returned Together logprobs inconsistent with output text")
+		}
+	}
+	return nil
 }
 
 func (t Together) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	if err := t.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	return t.compatible.chatCompletions(ctx, request, decodeTogetherChatCompletionResponse, normalizeTogetherChatStreamPayload)
+	normalizeStream := normalizeTogetherChatStreamPayload
+	if request.Logprobs != nil && *request.Logprobs {
+		normalizeStream = func(payload string) (string, error) { return normalizeTogetherChatStreamPayloadRequired(payload, true) }
+	}
+	response, err := t.compatible.chatCompletions(ctx, request, decodeTogetherChatCompletionResponse, normalizeStream)
+	if err == nil {
+		err = validateTogetherRequestedLogprobs(request, response)
+	}
+	return response, err
 }
 
 func (t Together) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	if err := t.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	return t.compatible.streamChatCompletions(ctx, request, write, normalizeTogetherChatStreamPayload)
+	normalizeStream := normalizeTogetherChatStreamPayload
+	if request.Logprobs != nil && *request.Logprobs {
+		normalizeStream = func(payload string) (string, error) { return normalizeTogetherChatStreamPayloadRequired(payload, true) }
+	}
+	response, err := t.compatible.streamChatCompletions(ctx, request, write, normalizeStream)
+	if err == nil {
+		err = validateTogetherRequestedLogprobs(request, response)
+	}
+	return response, err
 }
 
 func (Together) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {
