@@ -746,3 +746,17 @@ Rancher Desktop built `ai-gateway-gateway:gaps-f8c62a8` with image ID
 Helm revision 432 completed successfully, and pod
 `ai-gateway-gateway-59ddf4b965-xzhl6` became Ready with zero restarts. Its live
 endpoint served OpenAPI 0.1.332.
+
+Source `3bfad0f` adds Audio Transcription and Audio Translation to durable JSONL
+batch execution. Inline base64 audio remains signature-validated and bounded by
+the 4 MiB line limit; streaming is rejected before queueing. Each item retains an
+independent execution ID, applies TPM admission and returns exact token or duration
+usage through the normal provider settlement lifecycle.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-3bfad0f` with image ID
+`sha256:130d962774bf5a58a6a74182e405b351ffb0c48f8dfe4274b93c23f9dc5662af`.
+Helm revision 434 completed successfully, and pod
+`ai-gateway-gateway-865f6d4dd5-5fwfw` became Ready with zero restarts. Its live
+endpoint served OpenAPI 0.1.334 with both audio batch endpoints. An unauthenticated
+request using `/v1/audio/transcriptions` reached authentication with 401, while an
+unknown audio batch endpoint was rejected by request validation with 400.
