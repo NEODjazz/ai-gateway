@@ -224,6 +224,11 @@ func (p OpenAICompatible) mapChatParameters(request *openAICompatibleChatRequest
 		request.UserID = request.User
 		request.User = ""
 		request.Thinking = &deepSeekThinking{Type: "disabled"}
+	case "nvidia-nim":
+		if request.MaxCompletionTokens != nil {
+			request.MaxTokens = request.MaxCompletionTokens
+			request.MaxCompletionTokens = nil
+		}
 	case "together":
 		if request.MaxCompletionTokens != nil {
 			request.MaxTokens = request.MaxCompletionTokens

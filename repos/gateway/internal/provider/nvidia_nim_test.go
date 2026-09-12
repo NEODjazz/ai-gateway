@@ -182,6 +182,40 @@ func TestNVIDIANIMReasoningEffortPolicyAndWireContract(t *testing.T) {
 	}
 }
 
+func TestNVIDIANIMMapsMaxCompletionTokensToNativeField(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				decodeErr := json.NewDecoder(r.Body).Decode(&body)
+				gotStream, _ := body["stream"].(bool)
+				if decodeErr != nil || body["max_tokens"] != float64(64) || body["max_completion_tokens"] != nil || gotStream != stream {
+					t.Fatalf("body=%#v err=%v", body, decodeErr)
+				}
+				if stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = fmt.Fprint(w, "data: {\"id\":\"chat\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"answer\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\ndata: [DONE]\n\n")
+					return
+				}
+				_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","created":1,"model":"model","choices":[{"index":0,"message":{"role":"assistant","content":"answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+			}))
+			defer server.Close()
+			limit := 64
+			client := NewNVIDIANIM(server.URL, "key", true)
+			request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "question"}}, MaxCompletionTokens: &limit, Stream: stream}
+			var err error
+			if stream {
+				_, err = client.StreamChatCompletions(t.Context(), request, func(string) error { return nil })
+			} else {
+				_, err = client.ChatCompletions(t.Context(), request)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestNVIDIANIMNormalizesReasoningUsageInJSONAndSSE(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
