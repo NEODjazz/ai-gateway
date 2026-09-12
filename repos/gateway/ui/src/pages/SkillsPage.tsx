@@ -21,6 +21,8 @@ type Skill = {
 };
 
 type SkillList = { data?: Skill[]; has_more?: boolean };
+type SkillVersion = { id: string; type: "skill_version"; skill_id: string; name?: string; description?: string; created_at?: string };
+type SkillVersionList = { data?: SkillVersion[]; has_more?: boolean };
 
 function CreateSkillForm({ onClose, onCreate }: { onClose: () => void; onCreate: (files: File[], displayName: string) => Promise<void> }) {
   const [files, setFiles] = useState<File[]>([]);
@@ -61,6 +63,48 @@ function UpdateSkillForm({ skill, onClose, onUpdate }: { skill: Skill; onClose: 
   </form></ModalFrame>;
 }
 
+function SkillVersions({ skill, onClose }: { skill: Skill; onClose: () => void }) {
+  const { client } = useAuth();
+  const [versions, setVersions] = useState<SkillVersion[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const requestGeneration = useRef(0);
+  const load = useCallback(async () => {
+    const generation = ++requestGeneration.current;
+    setLoading(true); setError("");
+    try { const payload = await client.request<SkillVersionList>(`/v1/skills/${encodeURIComponent(skill.id)}/versions?limit=1000`); if (generation === requestGeneration.current) { setVersions(payload.data || []); setHasMore(Boolean(payload.has_more)); } }
+    catch (cause) { if (generation === requestGeneration.current) setError(cause instanceof Error ? cause.message : "Could not load skill versions"); }
+    finally { if (generation === requestGeneration.current) setLoading(false); }
+  }, [client, skill.id]);
+  useEffect(() => { void load(); return () => { requestGeneration.current++; }; }, [load]);
+  async function create() {
+    if (!files.length) { setError("Select one or more skill version files."); return; }
+    setBusy(true); setError("");
+    try { const form = new FormData(); for (const file of files) form.append("files", file); await client.requestForm(`/v1/skills/${encodeURIComponent(skill.id)}/versions`, form, { method: "POST" }); setFiles([]); await load(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create skill version"); }
+    finally { setBusy(false); }
+  }
+  async function remove(version: SkillVersion) {
+    if (!window.confirm(`Delete version ${version.id}?`)) return;
+    setBusy(true); setError("");
+    try { await client.request(`/v1/skills/${encodeURIComponent(skill.id)}/versions/${encodeURIComponent(version.id)}`, { method: "DELETE" }); await load(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not delete skill version"); }
+    finally { setBusy(false); }
+  }
+  async function download(version: SkillVersion) {
+    try { const response = await client.download(`/v1/skills/${encodeURIComponent(skill.id)}/versions/${encodeURIComponent(version.id)}/content`); const url = URL.createObjectURL(response.body); const link = document.createElement("a"); link.href = url; link.download = `${skill.id}-${version.id}.zip`; link.click(); URL.revokeObjectURL(url); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not download skill version"); }
+  }
+  const mutable = skill.source.type === "custom";
+  return <ModalFrame label={`Versions for ${skill.display_name || skill.id}`} onClose={onClose}><section className="modal key-form-modal"><div className="modal-heading"><div><h2>Skill versions</h2><span className="muted">{skill.display_name || skill.id}</span></div><ModalCloseButton label="Close skill versions" onClick={onClose} /></div>
+    {error && <ErrorState message={error} retry={() => void load()} />}{loading && !versions.length ? <LoadingState /> : <><div className="table-card"><div className="table-scroll"><table><thead><tr><th>Version</th><th>Name</th><th>Created</th><th>Actions</th></tr></thead><tbody>{versions.map((version) => <tr key={version.id}><td><code>{version.id}</code></td><td>{version.name || "—"}</td><td>{version.created_at || "—"}</td><td><button className="secondary" onClick={() => void download(version)}>Download</button>{mutable && <button className="danger" disabled={busy} onClick={() => void remove(version)}>Delete</button>}</td></tr>)}</tbody></table></div></div>{!versions.length && <p className="muted">No versions returned.</p>}{hasMore && <p className="muted" role="status">Additional versions are available beyond the 1,000 loaded rows.</p>}</>}
+    {mutable && <div className="key-toolbar"><div><GatewayFileButton label="Skill version files" multiple onChange={(event) => setFiles(Array.from(event.target.files || []))}>Select version files</GatewayFileButton>{files.length > 0 && <span className="muted"> {files.map((file) => file.name).join(", ")}</span>}</div><button disabled={busy || !files.length} onClick={() => void create()}>{busy ? "Uploading…" : "Create version"}</button></div>}
+  </section></ModalFrame>;
+}
+
 export function SkillsPage() {
   const { client } = useAuth();
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -69,6 +113,7 @@ export function SkillsPage() {
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Skill>();
+  const [versionsFor, setVersionsFor] = useState<Skill>();
   const requestGeneration = useRef(0);
   const load = useCallback(async () => {
     const generation = ++requestGeneration.current;
@@ -110,7 +155,7 @@ export function SkillsPage() {
   return <><PageHeader eyebrow="AI Hub" title="Skills" description="Owner-isolated provider skill packages and shared read-only skills." />{error && <ErrorState message={error} retry={() => void load()} />}
     <div className="usage-stats-grid"><StatCard label="Loaded" value={skills.length} /><StatCard label="Custom" value={custom} /><StatCard label="Shared" value={skills.length - custom} /><StatCard label="More available" value={hasMore ? "Yes" : "No"} /></div>
     {hasMore && <section className="notice-card" role="status"><h2>Additional skills are available</h2><p>The provider returned more than the 1,000 rows loaded in this view.</p></section>}
-    <ManagedDataTable rows={rows} columns={[{ key: "id", label: "Skill" }, { key: "name", label: "Name" }, { key: "source", label: "Source" }, { key: "version", label: "Latest version" }, { key: "updated_at", label: "Updated" }]} primaryAction={<button onClick={() => setCreating(true)}>Create skill</button>} onRefresh={load} searchPlaceholder="Search skills" actions={(row) => { const skill = row._skill as Skill; const mutable = skill.source.type === "custom"; return <ActionsMenu label={`Actions for skill ${skill.id}`} items={[{ label: "Download", onSelect: () => download(skill) }, { label: "Set default version", onSelect: () => setEditing(skill), disabled: !mutable }, { label: "Delete", onSelect: () => remove(skill), disabled: !mutable, tone: "danger" }]} />; }} />
-    {creating && <CreateSkillForm onClose={() => setCreating(false)} onCreate={create} />}{editing && <UpdateSkillForm skill={editing} onClose={() => setEditing(undefined)} onUpdate={(version) => update(editing, version)} />}
+    <ManagedDataTable rows={rows} columns={[{ key: "id", label: "Skill" }, { key: "name", label: "Name" }, { key: "source", label: "Source" }, { key: "version", label: "Latest version" }, { key: "updated_at", label: "Updated" }]} primaryAction={<button onClick={() => setCreating(true)}>Create skill</button>} onRefresh={load} searchPlaceholder="Search skills" actions={(row) => { const skill = row._skill as Skill; const mutable = skill.source.type === "custom"; return <ActionsMenu label={`Actions for skill ${skill.id}`} items={[{ label: "Manage versions", onSelect: () => setVersionsFor(skill) }, { label: "Download", onSelect: () => download(skill) }, { label: "Set default version", onSelect: () => setEditing(skill), disabled: !mutable }, { label: "Delete", onSelect: () => remove(skill), disabled: !mutable, tone: "danger" }]} />; }} />
+    {creating && <CreateSkillForm onClose={() => setCreating(false)} onCreate={create} />}{editing && <UpdateSkillForm skill={editing} onClose={() => setEditing(undefined)} onUpdate={(version) => update(editing, version)} />}{versionsFor && <SkillVersions skill={versionsFor} onClose={() => setVersionsFor(undefined)} />}
   </>;
 }

@@ -91,4 +91,32 @@ describe("SkillsPage", () => {
     await waitFor(() => expect(screen.queryByText("Stale")).not.toBeInTheDocument());
     expect(screen.getByText("Newest")).toBeInTheDocument();
   });
+
+  it("manages custom skill versions through owner-checked routes", async () => {
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    const version = { id: "v1", type: "skill_version", skill_id: "skill_custom", name: "Initial" };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input);
+      if (path === "/v1/skills?limit=1000") return json({ data: [custom], has_more: false });
+      if (path === "/v1/skills/skill_custom/versions?limit=1000") return json({ data: [version], has_more: false });
+      if (path === "/v1/skills/skill_custom/versions" && options?.method === "POST") return json(version);
+      if (path === "/v1/skills/skill_custom/versions/v1" && options?.method === "DELETE") return json({ id: "v1", deleted: true });
+      return json({ error: { message: "Unexpected request" } }, 500);
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<AuthProvider><SkillsPage /></AuthProvider>);
+    await screen.findByText("Release checks");
+    await userEvent.click(screen.getByRole("button", { name: "Actions for skill skill_custom" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Manage versions" }));
+    const dialog = await screen.findByRole("dialog", { name: "Versions for Release checks" });
+    expect(within(dialog).getByText("Initial")).toBeInTheDocument();
+    await userEvent.upload(within(dialog).getByLabelText("Skill version files"), [new File(["version"], "SKILL.md"), new File(["notes"], "README.md")]);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create version" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => path === "/v1/skills/skill_custom/versions" && options?.method === "POST")).toBe(true));
+    const upload = fetchMock.mock.calls.find(([path, options]) => path === "/v1/skills/skill_custom/versions" && options?.method === "POST");
+    expect(upload?.[1]?.body).toBeInstanceOf(FormData);
+    expect((upload?.[1]?.body as FormData).getAll("files")).toHaveLength(2);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => path === "/v1/skills/skill_custom/versions/v1" && options?.method === "DELETE")).toBe(true));
+  });
 });
