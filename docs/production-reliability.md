@@ -1410,3 +1410,12 @@ Gateway Helm revision 472 completed successfully, and pod
 `ai-gateway-gateway-97bd8bdcd-977kt` became Ready with zero restarts and the
 same image ID. Live health returned 204, OpenAPI remained at 0.1.368, and an
 invalid Realtime smoke credential returned 401 before deployment selection.
+
+Source `8f4e9c3` gives Azure Realtime its native WebSocket URL and authentication
+contract. GA sessions use `/openai/v1/realtime` with a model deployment query;
+versioned preview sessions use `/openai/realtime` with deployment and API-version
+queries. The handshake uses the configured `api-key`, an explicit Entra bearer
+token or the existing refreshable ambient managed-identity chain. Missing API-key
+credentials fail before dial. Protocol regressions cover both URL variants, all
+three credential sources and the unchanged generic Realtime handshake. The full
+Go suite, full race suite, vet and build passed.

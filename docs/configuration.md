@@ -56,7 +56,7 @@ OpenAPI, а не в этом документе.
 `openai-compatible`, `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`. Capability задаётся явно для
 ограниченных endpoints. Используемые значения: `chat`, `responses`,
 `embeddings`, `rerank`, `stream`, `tools`, `structured_output`, `mcp`, `vision`,
-`web_search`, `audio`.
+`web_search`, `realtime`, `audio`, `audio_input`.
 Capability names are exact and cannot be duplicated; deployment mutations reject
 unknown or misspelled values.
 Route выбирает endpoint только при наличии capabilities, выведенных из запроса. Moderation deployments должны явно указывать capability `moderation`; она не выводится из совместимого URL автоматически.
@@ -110,6 +110,11 @@ identity. Другие неизвестные host suffix не меняют iden
 user-assigned managed identity. Разрешены только loopback и link-local identity
 endpoints; redirects и некорректные/просроченные ответы отклоняются. Временный
 access token кэшируется и обновляется до истечения срока.
+Azure Realtime использует GA URL `/openai/v1/realtime?model=...`, когда
+`api_version` пуст, и preview URL
+`/openai/realtime?api-version=...&deployment=...`, когда версия задана.
+WebSocket handshake применяет тот же `api-key` либо Entra credential chain;
+отсутствующий API key и пустой Entra token отклоняются до сетевого dial.
 
 Для `gemini` режим `auth_type=api_key` использует write-only credential и header
 `x-goog-api-key`. Режим `auth_type=gcp_adc` не требует привязанного credential:

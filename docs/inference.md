@@ -354,7 +354,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | Type | Особенности |
 | --- | --- |
 | `openai`, `openai-compatible`, `openrouter` | OpenAI wire format, including bounded compatible `reasoning_content` passthrough |
-| `azure-openai` | Native Azure OpenAI URL, API version, API key, static Entra token, AKS workload federation or refreshable ambient managed identity |
+| `azure-openai` | Native Azure OpenAI HTTP and Realtime WebSocket URLs, API version, API key, static Entra token, AKS workload federation or refreshable ambient managed identity |
 | `anthropic` | Преобразование chat/tools/vision в native Messages API |
 | `ollama` | Native chat/stream/embeddings и provider completions JSON/SSE для строкового prompt; native `top_k`, `min_p`, log probabilities и reasoning history/output |
 | `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output, text embeddings, audio transcription/translation and schema-constrained OCR; Interactions text-to-speech; API key or GCP workload identity |
@@ -581,6 +581,11 @@ Provider audio deltas проверяются как strict base64 до пере�
 `response.done.usage` заменяет резерв при billing commit и сохраняет cached,
 text и audio token details. WebSocket event ограничен 20 MiB плюс 64 KiB JSON
 overhead, pending responses — 16, conversation items — 1024, а сессия — 30 минут.
+Azure deployment с пустым `api_version` подключается к native GA
+`/openai/v1/realtime?model=...`; versioned deployment использует preview
+`/openai/realtime?api-version=...&deployment=...`. Handshake передаёт только
+настроенный `api-key` либо Entra bearer token, включая ambient managed identity.
+Отсутствующий API key закрывает запрос до WebSocket dial.
 
 `n` принимает от 1 до 128 choices для OpenAI-compatible adapter. TPM и budget
 reserve умножают per-choice output limit (включая default reserve) на `n` с
@@ -2007,7 +2012,7 @@ gateway returns `503 response_ownership_unavailable` and retains the binding; a
 retry treats upstream 404 as the desired deleted state and retries atomic cleanup.
 Once cleanup succeeds, later requests return `404 response_not_found` without an
 upstream call. Deletion does not open a generation billing lifecycle.
-Provider type `azure-openai` добавляет `/openai/v1` к resource-root URL и сохраняет явно настроенный path, включая `/openai/deployments/{deployment}` для versioned data plane. Непустой `api_version` передается ровно один раз как query parameter `api-version` во всех inference и resource operations. `auth_type=api_key` использует header `api-key`; `auth_type=entra` использует статический bearer token из write-only credential vault либо, при отсутствии credential, AKS projected-token federation, App Service/Container Apps managed identity или VM IMDS. Provider endpoints с официальным Azure US Government suffix автоматически используют `login.microsoftonline.us` и `cognitiveservices.azure.us`; остальные endpoints используют public-cloud authority и audience. Временные tokens обновляются до истечения срока, параллельные refresh объединяются. Redirects запрещены, чтобы credential не мог перейти на другой origin. Discovery использует тот же authentication contract; для versioned deployment path оно выполняется через resource-level `/openai/models`.
+Provider type `azure-openai` добавляет `/openai/v1` к resource-root URL и сохраняет явно настроенный path, включая `/openai/deployments/{deployment}` для versioned data plane. Непустой `api_version` передается ровно один раз как query parameter `api-version` во всех versioned HTTP operations. Realtime независимо строит native GA или preview WebSocket URL и не смешивает параметры этих контрактов. `auth_type=api_key` использует header `api-key`; `auth_type=entra` использует статический bearer token из write-only credential vault либо, при отсутствии credential, AKS projected-token federation, App Service/Container Apps managed identity или VM IMDS. Provider endpoints с официальным Azure US Government suffix автоматически используют `login.microsoftonline.us` и `cognitiveservices.azure.us`; остальные endpoints используют public-cloud authority и audience. Временные tokens обновляются до истечения срока, параллельные refresh объединяются. Redirects запрещены, чтобы credential не мог перейти на другой origin. Discovery использует тот же authentication contract; для versioned deployment path оно выполняется через resource-level `/openai/models`.
 
 ## Vector stores
 
