@@ -48,6 +48,9 @@ func (n NVIDIANIM) ValidateChatParameters(request openai.ChatCompletionRequest) 
 		if request.Temperature != nil && *request.Temperature > 1 {
 			return &Error{Class: FailureClientRequest, Provider: "nvidia-nim", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "temperature", Err: errors.New("temperature must be at most 1 for this NVIDIA NIM model")}
 		}
+		if request.Seed != nil && *request.Seed < 0 {
+			return &Error{Class: FailureClientRequest, Provider: "nvidia-nim", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "seed", Err: errors.New("seed must be nonnegative for this NVIDIA NIM model")}
+		}
 	}
 	if request.ReasoningEffort != "" {
 		allowed := map[string]bool{}

@@ -269,6 +269,30 @@ func TestNVIDIANIMRejectsNemotronTemperatureBeforeHTTP(t *testing.T) {
 	}
 }
 
+func TestNVIDIANIMRejectsNegativeNemotronSeedBeforeHTTP(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	client := NewNVIDIANIM(server.URL, "key", false)
+	for _, model := range []string{"nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b"} {
+		invalid := int64(-1)
+		request := openai.ChatCompletionRequest{Model: model, Messages: []openai.Message{{Role: "user", Content: "question"}}, Seed: &invalid}
+		_, err := client.ChatCompletions(t.Context(), request)
+		var failure *Error
+		if !errors.As(err, &failure) || failure.Param != "seed" || failure.UpstreamCode != "invalid_request" || calls != 0 {
+			t.Fatalf("model=%s calls=%d err=%v", model, calls, err)
+		}
+	}
+	valid := int64(0)
+	if err := client.ValidateChatParameters(openai.ChatCompletionRequest{Model: "nvidia/nemotron-3-super-120b-a12b", Seed: &valid}); err != nil {
+		t.Fatalf("boundary seed rejected: %v", err)
+	}
+	other := int64(-1)
+	if err := client.ValidateChatParameters(openai.ChatCompletionRequest{Model: "model", Seed: &other}); err != nil {
+		t.Fatalf("unrelated model policy changed: %v", err)
+	}
+}
+
 func TestNVIDIANIMRejectsDeepSeekReasoningHistoryBeforeHTTP(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
