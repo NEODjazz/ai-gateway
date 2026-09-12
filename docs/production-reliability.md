@@ -1482,3 +1482,26 @@ same image ID. Live health returned 204, OpenAPI reported 0.1.371, the deployed
 capability endpoint exposed the exact Chat/stream, tools, structured-output and
 parameter policy, and an unauthenticated Models request returned 401. No
 provider credential or external inference was used by the smoke checks.
+
+Source `a70579c` adds a bounded `nvidia-nim` adapter for the documented NIM LLM
+runtime APIs. It supports Chat Completions, streaming, legacy Completions,
+Responses, Embeddings and model discovery, with optional bearer credentials for
+hosted endpoints. Function tools, structured output and model-dependent image,
+audio and video input remain explicit deployment capabilities. Keeping the
+compatible client private prevents unrelated compatible image, audio, video and
+resource lifecycle APIs from leaking into the managed profile. Local protocol
+regressions cover all five upstream paths, bearer propagation, exact usage,
+sorted discovery, the bounded capability profile and preflight parameter
+rejection. The full Go suite, full race suite, vet, build, UI typecheck, UI
+production build and all 167 UI tests passed. Contract commit `83d1f26`
+publishes the provider in OpenAPI 0.1.372.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-83d1f26` with image ID
+`sha256:676f4b802a57f5a0b1a36a4e9db8f7f89b5855fa536a4197ff25c5c2b80ddc59`.
+Gateway Helm revision 477 completed successfully, and pod
+`ai-gateway-gateway-74ddbc59dc-6gn48` became Ready with zero restarts and the
+same image ID. In-pod health succeeded, OpenAPI reported 0.1.372, the deployed
+capability endpoint exposed only Chat, Completions, Responses, Embeddings,
+streaming, tools, structured output and model-dependent multimodal input, and an
+unauthenticated Models request returned 401. No provider credential or external
+inference was used by the smoke checks.
