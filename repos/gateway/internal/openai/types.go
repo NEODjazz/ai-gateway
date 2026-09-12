@@ -20,6 +20,10 @@ type ChatCompletionRequest struct {
 	GeminiSafetySettings []GeminiSafetySetting `json:"-"`
 	// GeminiCodeExecution enables the native server-side code execution tool.
 	GeminiCodeExecution bool `json:"-"`
+	// AnthropicSkills contains validated native Messages skill references.
+	AnthropicSkills []AnthropicSkillReference `json:"-"`
+	// AnthropicCodeExecution enables the native managed code execution tool.
+	AnthropicCodeExecution bool `json:"-"`
 	// Bedrock native controls cannot be supplied through the public Chat wire shape.
 	BedrockServiceTier                       string                  `json:"-"`
 	BedrockPerformanceLatency                string                  `json:"-"`
@@ -45,6 +49,12 @@ type ChatCompletionRequest struct {
 	TopP                *float64              `json:"top_p,omitempty"`
 	Stop                any                   `json:"stop,omitempty"`
 	Seed                *int64                `json:"seed,omitempty"`
+}
+
+type AnthropicSkillReference struct {
+	Type    string `json:"type"`
+	SkillID string `json:"skill_id"`
+	Version string `json:"version,omitempty"`
 }
 
 type GeminiSafetySetting struct {
@@ -351,6 +361,9 @@ type JSONSchemaFormat struct {
 }
 
 type ChatCompletionResponse struct {
+	// NativeContainer preserves a validated provider container descriptor for
+	// protocol adapters that expose managed execution state.
+	NativeContainer   json.RawMessage   `json:"-"`
 	ID                string            `json:"id"`
 	Object            string            `json:"object"`
 	Created           int64             `json:"created,omitempty"`
@@ -423,6 +436,8 @@ type Usage struct {
 	// SearchRequests is internal provider usage used for billing. It is not part
 	// of the OpenAI-compatible response payload.
 	SearchRequests          int                     `json:"-"`
+	ToolRequests            int                     `json:"-"`
+	ToolRequestsReported    bool                    `json:"-"`
 	ProviderCostUSDTicks    *int64                  `json:"-"`
 	PromptTokens            int                     `json:"prompt_tokens"`
 	CompletionTokens        int                     `json:"completion_tokens"`

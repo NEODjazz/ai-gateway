@@ -149,6 +149,8 @@ func messagesStop(reason string) (string, error) {
 		return "tool_use", nil
 	case "content_filter":
 		return "refusal", nil
+	case "pause_turn":
+		return "pause_turn", nil
 	default:
 		return "", errors.New("unsupported completion finish reason")
 	}
@@ -234,7 +236,7 @@ func validateNativeMessageBlock(block map[string]any) error {
 		if _, ok := block["input"].(map[string]any); !ok {
 			return errors.New("native tool input must be an object")
 		}
-	case "web_search_tool_result", "web_fetch_tool_result":
+	case "web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result", "bash_code_execution_tool_result", "text_editor_code_execution_tool_result":
 		if !stringField("tool_use_id") || block["content"] == nil {
 			return errors.New("native tool result requires tool_use_id and content")
 		}
@@ -271,7 +273,13 @@ func (w *messagesWriter) streamResult(response openai.ChatCompletionResponse) er
 	}
 	startUsage := messagesUsage(response.Usage, response.ServiceTier)
 	startUsage["output_tokens"] = 0
-	if err := w.event("message_start", map[string]any{"message": map[string]any{"id": response.ID, "type": "message", "role": "assistant", "model": response.Model, "content": []any{}, "stop_reason": nil, "stop_sequence": nil, "usage": startUsage}}); err != nil {
+	message := map[string]any{"id": response.ID, "type": "message", "role": "assistant", "model": response.Model, "content": []any{}, "stop_reason": nil, "stop_sequence": nil, "usage": startUsage}
+	if container, err := messagesNativeContainer(response.NativeContainer); err != nil {
+		return err
+	} else if container != nil {
+		message["container"] = container
+	}
+	if err := w.event("message_start", map[string]any{"message": message}); err != nil {
 		return err
 	}
 	for index, value := range content {
@@ -596,7 +604,40 @@ func messagesResponsePayload(response openai.ChatCompletionResponse) (map[string
 	if response.Choices[0].StopSequence != nil {
 		reason = "stop_sequence"
 	}
-	return map[string]any{"id": response.ID, "type": "message", "role": "assistant", "model": response.Model, "content": content, "stop_reason": reason, "stop_sequence": response.Choices[0].StopSequence, "usage": messagesUsage(response.Usage, response.ServiceTier)}, nil
+	payload := map[string]any{"id": response.ID, "type": "message", "role": "assistant", "model": response.Model, "content": content, "stop_reason": reason, "stop_sequence": response.Choices[0].StopSequence, "usage": messagesUsage(response.Usage, response.ServiceTier)}
+	if container, err := messagesNativeContainer(response.NativeContainer); err != nil {
+		return nil, err
+	} else if container != nil {
+		payload["container"] = container
+	}
+	return payload, nil
+}
+
+func messagesNativeContainer(raw json.RawMessage) (map[string]any, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	if len(raw) > 64<<10 {
+		return nil, errors.New("invalid native container")
+	}
+	var container struct {
+		ID        string                           `json:"id"`
+		ExpiresAt string                           `json:"expires_at,omitempty"`
+		Skills    []openai.AnthropicSkillReference `json:"skills,omitempty"`
+	}
+	if decodeMessagesValue(raw, &container) != nil || !validSkillID(container.ID) || len(container.ID) > 128 || len(container.Skills) > 20 {
+		return nil, errors.New("invalid native container")
+	}
+	for _, skill := range container.Skills {
+		if (skill.Type != "anthropic" && skill.Type != "custom") || !validSkillID(skill.SkillID) || len(skill.SkillID) > 64 || !validSkillID(skill.Version) || len(skill.Version) > 64 {
+			return nil, errors.New("invalid native container")
+		}
+	}
+	var result map[string]any
+	if json.Unmarshal(raw, &result) != nil {
+		return nil, errors.New("invalid native container")
+	}
+	return result, nil
 }
 
 func validMessagesUsage(usage openai.Usage) bool {

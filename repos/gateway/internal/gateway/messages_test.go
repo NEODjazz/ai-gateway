@@ -200,6 +200,9 @@ func TestMessagesRejectsUnsupportedInputBeforeInference(t *testing.T) {
 		`{"model":"m","max_tokens":10,"metadata":{"user_id":"` + strings.Repeat("я", 513) + `"},"messages":[{"role":"user","content":"hi"}]}`,
 		`{"model":"m","max_tokens":10,"output_config":{"effort":"minimal"},"messages":[{"role":"user","content":"hi"}]}`,
 		`{"model":"m","max_tokens":10,"output_config":{"format":{"type":"json_schema"}},"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"container":{"id":"container_1","skills":[{"type":"anthropic","skill_id":"xlsx"}]},"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"container":{"skills":[{"type":"custom","skill_id":"bad/id"}]},"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"container":{"skills":[{"type":"anthropic","skill_id":"xlsx"},{"type":"anthropic","skill_id":"xlsx"}]},"messages":[{"role":"user","content":"hi"}]}`,
 	} {
 		upstream := &fallbackChatProvider{}
 		handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))

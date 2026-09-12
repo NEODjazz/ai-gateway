@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 	"ai-gateway-gateway/internal/skillstate"
 )
@@ -351,6 +353,53 @@ func validSkillID(value string) bool {
 	return true
 }
 func skillOwnerKey(req modules.RequestContext) string { return fileOwnerKey(req) }
+
+func skillExecutionIdentifiers(skills []openai.AnthropicSkillReference) []string {
+	identifiers := make([]string, 0, len(skills))
+	for _, skill := range skills {
+		identifiers = append(identifiers, "skill:"+skill.SkillID)
+	}
+	return identifiers
+}
+
+func (h Handler) bindSkillExecution(ctx context.Context, req *modules.RequestContext) error {
+	if len(req.Request.AnthropicSkills) == 0 {
+		return nil
+	}
+	var endpoint string
+	for _, skill := range req.Request.AnthropicSkills {
+		if skill.Type != "custom" {
+			continue
+		}
+		if h.skills == nil {
+			return skillstate.ErrUnavailable
+		}
+		ownership, err := h.skills.ResolveSkill(ctx, skillOwnerKey(*req), skill.SkillID)
+		if err != nil {
+			return err
+		}
+		if endpoint != "" && endpoint != ownership.EndpointID {
+			return skillstate.ErrConflict
+		}
+		endpoint = ownership.EndpointID
+	}
+	if endpoint != "" {
+		req.Request.Provider = endpoint
+	}
+	return nil
+}
+
+func writeSkillExecutionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, skillstate.ErrNotFound):
+		writeError(w, http.StatusNotFound, "skill_not_found", "custom skill not found")
+	case errors.Is(err, skillstate.ErrConflict):
+		writeError(w, http.StatusBadRequest, "invalid_request", "custom skills must belong to one deployment")
+	default:
+		writeError(w, http.StatusServiceUnavailable, "skill_storage_unavailable", "skill ownership storage is unavailable")
+	}
+}
+
 func writeSkillOwnershipError(w http.ResponseWriter, err error) {
 	if errors.Is(err, skillstate.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "skill_not_found", "skill not found")

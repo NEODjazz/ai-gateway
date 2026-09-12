@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 	"ai-gateway-gateway/internal/skillstate"
 )
@@ -60,6 +62,56 @@ func (s *memorySkillStore) DeleteSkill(_ context.Context, owner, id string) erro
 	}
 	delete(s.items, id)
 	return nil
+}
+
+func TestMessagesExecutesOwnedCustomSkillOnBoundDeployment(t *testing.T) {
+	owner := skillOwnerKey(modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"})
+	store := &memorySkillStore{items: map[string]skillstate.Ownership{
+		"skill_owned": {SkillID: "skill_owned", OwnerKey: owner, EndpointID: "skills-endpoint"},
+	}}
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{
+		ID: "msg-skill", Model: "model", NativeContainer: json.RawMessage(`{"id":"container_1","expires_at":"2026-09-12T14:00:00Z","skills":[{"type":"custom","skill_id":"skill_owned","version":"v1"}]}`),
+		Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "done"}, FinishReason: "stop"}},
+		Usage:   openai.Usage{PromptTokens: 9, CompletionTokens: 2, TotalTokens: 11},
+	}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"skill:skill_owned", "code_execution"}}}}), upstream).WithSkillStore(store))
+
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"container":{"skills":[{"type":"custom","skill_id":"skill_owned","version":"v1"}]},"tools":[{"type":"code_execution_20250825","name":"code_execution"}],"messages":[{"role":"user","content":"run it"}]}`, "gateway-test-key")
+	if response.Code != http.StatusOK || upstream.calls != 1 {
+		t.Fatalf("status=%d body=%s calls=%d", response.Code, response.Body.String(), upstream.calls)
+	}
+	request := upstream.request.Request
+	if request.Provider != "skills-endpoint" || len(request.AnthropicSkills) != 1 || request.AnthropicSkills[0].Version != "v1" || request.NativeInputTokens == 0 {
+		t.Fatalf("skill request was not bound and accounted: %+v", request)
+	}
+	if !strings.Contains(response.Body.String(), `"container":{"expires_at":"2026-09-12T14:00:00Z","id":"container_1"`) || !strings.Contains(response.Body.String(), `"skill_id":"skill_owned"`) {
+		t.Fatalf("native container was not preserved: %s", response.Body.String())
+	}
+}
+
+func TestMessagesSkillExecutionFailsClosed(t *testing.T) {
+	owner := skillOwnerKey(modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"})
+	store := &memorySkillStore{items: map[string]skillstate.Ownership{
+		"skill_a": {SkillID: "skill_a", OwnerKey: owner, EndpointID: "endpoint-a"},
+		"skill_b": {SkillID: "skill_b", OwnerKey: owner, EndpointID: "endpoint-b"},
+	}}
+	for _, test := range []struct {
+		name, skills, grants string
+		status               int
+	}{
+		{name: "foreign", skills: `[{"type":"custom","skill_id":"foreign"}]`, grants: "*", status: http.StatusNotFound},
+		{name: "different deployments", skills: `[{"type":"custom","skill_id":"skill_a"},{"type":"custom","skill_id":"skill_b"}]`, grants: "*", status: http.StatusBadRequest},
+		{name: "tool policy", skills: `[{"type":"custom","skill_id":"skill_a"}]`, grants: "skill:other", status: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &fallbackChatProvider{}
+			handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{test.grants}}}}), upstream).WithSkillStore(store))
+			response := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"container":{"skills":`+test.skills+`},"tools":[{"type":"code_execution_20250825","name":"code_execution"}],"messages":[{"role":"user","content":"run"}]}`, "gateway-test-key")
+			if response.Code != test.status || upstream.calls != 0 {
+				t.Fatalf("status=%d body=%s calls=%d", response.Code, response.Body.String(), upstream.calls)
+			}
+		})
+	}
 }
 
 type skillGatewayProvider struct {

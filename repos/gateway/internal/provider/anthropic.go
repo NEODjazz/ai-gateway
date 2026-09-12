@@ -40,6 +40,12 @@ type anthropicRequest struct {
 	ServiceTier   string                 `json:"service_tier,omitempty"`
 	Metadata      *anthropicMetadata     `json:"metadata,omitempty"`
 	OutputConfig  *anthropicOutputConfig `json:"output_config,omitempty"`
+	Container     *anthropicContainer    `json:"container,omitempty"`
+}
+
+type anthropicContainer struct {
+	ID     string                           `json:"id,omitempty"`
+	Skills []openai.AnthropicSkillReference `json:"skills,omitempty"`
 }
 
 type anthropicMetadata struct {
@@ -100,6 +106,7 @@ type anthropicResponse struct {
 	StopReason   string             `json:"stop_reason"`
 	StopSequence *string            `json:"stop_sequence"`
 	Usage        anthropicUsage     `json:"usage"`
+	Container    json.RawMessage    `json:"container,omitempty"`
 }
 
 type anthropicContent struct {
@@ -150,8 +157,9 @@ type anthropicUsage struct {
 }
 
 type anthropicServerToolUsage struct {
-	WebSearchRequests int `json:"web_search_requests"`
-	WebFetchRequests  int `json:"web_fetch_requests"`
+	WebSearchRequests     int `json:"web_search_requests"`
+	WebFetchRequests      int `json:"web_fetch_requests"`
+	CodeExecutionRequests int `json:"code_execution_requests"`
 }
 
 type anthropicOutputTokenDetails struct {
@@ -186,7 +194,7 @@ func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompl
 	if err := validateAnthropicUsage(response.Usage); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	if err := validateAnthropicRequestedToolUsage(response.Usage, request.WebSearchOptions, request.WebFetchOptions); err != nil {
+	if err := validateAnthropicRequestedToolUsage(response.Usage, request.WebSearchOptions, request.WebFetchOptions, request.AnthropicCodeExecution); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 	if err := validateAnthropicFetchContent(response.Content, request.WebFetchOptions); err != nil {
@@ -199,6 +207,7 @@ func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompl
 		return openai.ChatCompletionResponse{}, err
 	}
 	converted := anthropicToChatCompletion(response, request.Model)
+	converted.Usage.ToolRequestsReported = request.AnthropicCodeExecution
 	if err := openai.ValidateReasoningBlocks(converted.Choices[0].Message.Reasoning); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
@@ -225,7 +234,7 @@ func (p Anthropic) StreamChatCompletions(ctx context.Context, request openai.Cha
 	}
 	defer resp.Body.Close()
 
-	return streamAnthropicChat(resp.Body, request.Model, anthropicUsesStructuredTool(request.ResponseFormat), request.WebSearchOptions, request.WebFetchOptions, write)
+	return streamAnthropicChat(resp.Body, request.Model, anthropicUsesStructuredTool(request.ResponseFormat), request.WebSearchOptions, request.WebFetchOptions, request.AnthropicCodeExecution, write)
 }
 
 func (p Anthropic) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
@@ -280,6 +289,9 @@ func (p Anthropic) doMessages(ctx context.Context, request anthropicRequest, tar
 		return err
 	}
 	p.setHeaders(httpReq)
+	if request.Container != nil && len(request.Container.Skills) > 0 {
+		httpReq.Header.Set("Anthropic-Beta", "skills-2025-10-02")
+	}
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -304,6 +316,9 @@ func (p Anthropic) doMessagesStream(ctx context.Context, request anthropicReques
 		return nil, err
 	}
 	p.setHeaders(httpReq)
+	if request.Container != nil && len(request.Container.Skills) > 0 {
+		httpReq.Header.Set("Anthropic-Beta", "skills-2025-10-02")
+	}
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -332,6 +347,9 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 	}
 	if request.WebFetchOptions != nil {
 		tools = append(tools, anthropicWebFetchTool(request.WebFetchOptions))
+	}
+	if request.AnthropicCodeExecution {
+		tools = append(tools, anthropicTool{Type: "code_execution_20250825", Name: "code_execution"})
 	}
 	var outputConfig *anthropicOutputConfig
 	if request.ResponseFormat != nil && request.ResponseFormat.Type == "json_schema" {
@@ -362,6 +380,10 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		metadata = &anthropicMetadata{UserID: userID}
 	}
 	stop, _ := openai.StopSequences(request.Stop)
+	var container *anthropicContainer
+	if len(request.AnthropicSkills) > 0 {
+		container = &anthropicContainer{Skills: append([]openai.AnthropicSkillReference(nil), request.AnthropicSkills...)}
+	}
 	return anthropicRequest{
 		StopSequences: stop,
 		Model:         request.Model,
@@ -376,6 +398,7 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		ServiceTier:   request.ServiceTier,
 		Metadata:      metadata,
 		OutputConfig:  outputConfig,
+		Container:     container,
 	}
 }
 
@@ -734,10 +757,11 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 	toolCalls := anthropicToolCalls(response)
 	inputTokens := anthropicInputTokens(response.Usage)
 	return openai.ChatCompletionResponse{
-		ID:          response.ID,
-		Object:      "chat.completion",
-		Model:       model,
-		ServiceTier: response.Usage.ServiceTier,
+		NativeContainer: append(json.RawMessage(nil), response.Container...),
+		ID:              response.ID,
+		Object:          "chat.completion",
+		Model:           model,
+		ServiceTier:     response.Usage.ServiceTier,
 		Choices: []openai.Choice{
 			{
 				Index:        0,
@@ -748,6 +772,7 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 		},
 		Usage: openai.Usage{
 			SearchRequests:   anthropicSearchRequests(response.Usage),
+			ToolRequests:     anthropicCodeExecutionRequests(response.Usage),
 			PromptTokens:     inputTokens,
 			CompletionTokens: response.Usage.OutputTokens,
 			TotalTokens:      inputTokens + response.Usage.OutputTokens,
@@ -763,7 +788,7 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 func anthropicNativeMessageContent(content []anthropicContent) []json.RawMessage {
 	native := false
 	for _, block := range content {
-		if block.Type == "server_tool_use" || block.Type == "web_search_tool_result" || block.Type == "web_fetch_tool_result" {
+		if anthropicNativeServerBlock(block.Type) {
 			native = true
 			break
 		}
@@ -787,7 +812,7 @@ func anthropicNativeMessageContent(content []anthropicContent) []json.RawMessage
 func validateAnthropicNativeMessageContent(content []anthropicContent) error {
 	native := false
 	for _, block := range content {
-		if block.Type == "server_tool_use" || block.Type == "web_search_tool_result" || block.Type == "web_fetch_tool_result" {
+		if anthropicNativeServerBlock(block.Type) {
 			native = true
 		}
 	}
@@ -800,7 +825,7 @@ func validateAnthropicNativeMessageContent(content []anthropicContent) error {
 	total := 0
 	for _, block := range content {
 		switch block.Type {
-		case "text", "thinking", "redacted_thinking", "tool_use", "server_tool_use", "web_search_tool_result", "web_fetch_tool_result":
+		case "text", "thinking", "redacted_thinking", "tool_use", "server_tool_use", "web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result", "bash_code_execution_tool_result", "text_editor_code_execution_tool_result":
 		default:
 			return errors.New("Anthropic returned unsupported native content")
 		}
@@ -811,6 +836,22 @@ func validateAnthropicNativeMessageContent(content []anthropicContent) error {
 		total += len(encoded)
 	}
 	return nil
+}
+
+func anthropicNativeServerBlock(kind string) bool {
+	switch kind {
+	case "server_tool_use", "web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result", "bash_code_execution_tool_result", "text_editor_code_execution_tool_result":
+		return true
+	default:
+		return false
+	}
+}
+
+func anthropicCodeExecutionRequests(usage anthropicUsage) int {
+	if usage.ServerToolUse == nil || usage.ServerToolUse.CodeExecutionRequests < 0 {
+		return 0
+	}
+	return usage.ServerToolUse.CodeExecutionRequests
 }
 
 func anthropicContentJSON(block anthropicContent) ([]byte, error) {
@@ -853,13 +894,16 @@ func validateAnthropicUsage(usage anthropicUsage) error {
 	if usage.ServerToolUse != nil && (usage.ServerToolUse.WebFetchRequests < 0 || usage.ServerToolUse.WebFetchRequests > openai.WebFetchMaxUses) {
 		return errors.New("invalid Anthropic server tool usage")
 	}
+	if usage.ServerToolUse != nil && (usage.ServerToolUse.CodeExecutionRequests < 0 || usage.ServerToolUse.CodeExecutionRequests > 1_000_000) {
+		return errors.New("invalid Anthropic server tool usage")
+	}
 	if usage.ServiceTier != "" && usage.ServiceTier != "standard" && usage.ServiceTier != "priority" && usage.ServiceTier != "batch" {
 		return errors.New("invalid Anthropic service tier")
 	}
 	return nil
 }
 
-func validateAnthropicRequestedToolUsage(usage anthropicUsage, search *openai.ChatWebSearchOptions, fetch *openai.ChatWebFetchOptions) error {
+func validateAnthropicRequestedToolUsage(usage anthropicUsage, search *openai.ChatWebSearchOptions, fetch *openai.ChatWebFetchOptions, codeExecution bool) error {
 	searchLimit := openai.WebSearchMaxUses
 	if search != nil && search.MaxUses != nil {
 		searchLimit = *search.MaxUses
@@ -870,6 +914,9 @@ func validateAnthropicRequestedToolUsage(usage anthropicUsage, search *openai.Ch
 	}
 	if anthropicSearchRequests(usage) > searchLimit || (usage.ServerToolUse != nil && usage.ServerToolUse.WebFetchRequests > fetchLimit) {
 		return errors.New("Anthropic exceeded requested server tool usage")
+	}
+	if !codeExecution && anthropicCodeExecutionRequests(usage) > 0 {
+		return errors.New("Anthropic reported unrequested code execution usage")
 	}
 	return nil
 }
@@ -1060,15 +1107,18 @@ func anthropicFinishReason(reason string) string {
 		return "tool_calls"
 	case "refusal":
 		return "content_filter"
+	case "pause_turn":
+		return "pause_turn"
 	default:
 		return "stop"
 	}
 }
 
-func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, webSearch *openai.ChatWebSearchOptions, webFetch *openai.ChatWebFetchOptions, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, webSearch *openai.ChatWebSearchOptions, webFetch *openai.ChatWebFetchOptions, codeExecution bool, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	response := openai.ChatCompletionResponse{
 		Object: "chat.completion",
 		Model:  fallbackModel,
+		Usage:  openai.Usage{ToolRequestsReported: codeExecution},
 		Choices: []openai.Choice{
 			{Index: 0, Message: openai.Message{Role: "assistant"}, FinishReason: "stop"},
 		},
@@ -1091,15 +1141,17 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			if err := validateAnthropicUsage(streamEvent.Message.Usage); err != nil {
 				return err
 			}
-			if err := validateAnthropicRequestedToolUsage(streamEvent.Message.Usage, webSearch, webFetch); err != nil {
+			if err := validateAnthropicRequestedToolUsage(streamEvent.Message.Usage, webSearch, webFetch, codeExecution); err != nil {
 				return err
 			}
 			response.ID = streamEvent.Message.ID
+			response.NativeContainer = append(json.RawMessage(nil), streamEvent.Message.Container...)
 			if streamEvent.Message.Model != "" {
 				response.Model = streamEvent.Message.Model
 			}
 			response.Usage.PromptTokens = anthropicInputTokens(streamEvent.Message.Usage)
 			response.Usage.SearchRequests = anthropicSearchRequests(streamEvent.Message.Usage)
+			response.Usage.ToolRequests = anthropicCodeExecutionRequests(streamEvent.Message.Usage)
 			response.Usage.PromptTokensDetails = &openai.PromptTokenDetails{CachedTokens: streamEvent.Message.Usage.CacheReadInputTokens, CacheWriteTokens: streamEvent.Message.Usage.CacheCreationInputTokens}
 			response.ServiceTier = streamEvent.Message.Usage.ServiceTier
 			if response.ServiceTier != "" {
@@ -1187,7 +1239,7 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			if err := validateAnthropicUsage(streamEvent.Usage); err != nil {
 				return err
 			}
-			if err := validateAnthropicRequestedToolUsage(streamEvent.Usage, webSearch, webFetch); err != nil {
+			if err := validateAnthropicRequestedToolUsage(streamEvent.Usage, webSearch, webFetch, codeExecution); err != nil {
 				return err
 			}
 			if streamEvent.Usage.OutputTokens != 0 {
@@ -1199,6 +1251,7 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			}
 			if streamEvent.Usage.ServerToolUse != nil {
 				response.Usage.SearchRequests = anthropicSearchRequests(streamEvent.Usage)
+				response.Usage.ToolRequests = anthropicCodeExecutionRequests(streamEvent.Usage)
 			}
 			if streamEvent.Usage.ServiceTier != "" {
 				if response.ServiceTier != "" && response.ServiceTier != streamEvent.Usage.ServiceTier {

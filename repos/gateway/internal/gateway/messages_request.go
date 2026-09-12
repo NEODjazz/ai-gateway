@@ -26,6 +26,11 @@ type messagesRequest struct {
 	TopP          *float64              `json:"top_p,omitempty"`
 	Stream        bool                  `json:"stream,omitempty"`
 	StopSequences []string              `json:"stop_sequences,omitempty"`
+	Container     *messagesContainer    `json:"container,omitempty"`
+}
+type messagesContainer struct {
+	ID     string                           `json:"id,omitempty"`
+	Skills []openai.AnthropicSkillReference `json:"skills,omitempty"`
 }
 type messagesMetadata struct {
 	UserID string `json:"user_id,omitempty"`
@@ -86,6 +91,30 @@ func (request messagesRequest) chat() (openai.ChatCompletionRequest, error) {
 
 func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatCompletionRequest, error) {
 	result := openai.ChatCompletionRequest{Model: request.Model, MaxTokens: &request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP, Stream: request.Stream}
+	if request.Container != nil {
+		if request.Stream {
+			return result, errors.New("streaming with container.skills is not supported")
+		}
+		if request.Container.ID != "" {
+			return result, errors.New("container.id reuse is not supported")
+		}
+		if len(request.Container.Skills) == 0 || len(request.Container.Skills) > 20 {
+			return result, errors.New("container.skills must contain 1–20 skills")
+		}
+		seen := make(map[string]struct{}, len(request.Container.Skills))
+		for _, skill := range request.Container.Skills {
+			if (skill.Type != "anthropic" && skill.Type != "custom") || !validSkillID(skill.SkillID) || len(skill.SkillID) > 64 || (skill.Version != "" && (!validSkillID(skill.Version) || len(skill.Version) > 64)) {
+				return result, errors.New("container.skills contains an invalid skill reference")
+			}
+			key := skill.Type + "\x00" + skill.SkillID
+			if _, duplicate := seen[key]; duplicate {
+				return result, errors.New("container.skills contains a duplicate skill reference")
+			}
+			seen[key] = struct{}{}
+		}
+		result.AnthropicSkills = append([]openai.AnthropicSkillReference(nil), request.Container.Skills...)
+		result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(request.Container))
+	}
 	switch request.ServiceTier {
 	case "", "auto", "standard_only":
 		result.ServiceTier = request.ServiceTier
@@ -295,6 +324,12 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 	searchTool, fetchTool := false, false
 	for _, tool := range request.Tools {
 		switch tool.Type {
+		case "code_execution_20250825":
+			if result.AnthropicCodeExecution || tool.Name != "code_execution" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || tool.MaxUses != nil || tool.UserLocation != nil || len(tool.AllowedDomains) > 0 || tool.MaxContentTokens != 0 || tool.Citations != nil {
+				return result, errors.New("invalid or duplicate code execution tool")
+			}
+			result.AnthropicCodeExecution = true
+			continue
 		case "web_search_20250305":
 			if searchTool || tool.Name != "web_search" || tool.InputSchema != nil || tool.Description != "" || tool.CacheControl != nil || len(tool.AllowedDomains) > 0 || tool.MaxContentTokens != 0 || tool.Citations != nil {
 				return result, errors.New("invalid or duplicate web search tool")
@@ -325,6 +360,9 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 			}
 		}
 		result.Tools = append(result.Tools, openai.Tool{Type: "function", Function: openai.FunctionDefinition{Name: tool.Name, Description: tool.Description, Parameters: tool.InputSchema, PromptCacheBreakpoint: breakpoint}})
+	}
+	if len(result.AnthropicSkills) > 0 && !result.AnthropicCodeExecution {
+		return result, errors.New("container.skills requires the code_execution_20250825 tool")
 	}
 	if message := result.ChatGenerationOptions.Validate(); message != "" {
 		return result, errors.New(message)

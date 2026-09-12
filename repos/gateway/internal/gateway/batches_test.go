@@ -481,6 +481,14 @@ func TestBatchMessagesRejectsStreaming(t *testing.T) {
 	}
 }
 
+func TestBatchMessagesIncludesSkillExecutionInToolPolicy(t *testing.T) {
+	body := []byte(`{"model":"message-model","max_tokens":32,"container":{"skills":[{"type":"custom","skill_id":"skill_owned","version":"v1"}]},"tools":[{"type":"code_execution_20250825","name":"code_execution"}],"messages":[{"role":"user","content":"hello"}]}`)
+	_, model, tools, err := validateBatchBody("/v1/messages", body)
+	if err != nil || model != "message-model" || len(tools) != 2 || tools[0] != "skill:skill_owned" || tools[1] != "code_execution" {
+		t.Fatalf("model=%q tools=%v err=%v", model, tools, err)
+	}
+}
+
 func TestBatchLifecycleExecutesRerankWithSharedValidation(t *testing.T) {
 	store := newMemoryBatchStore()
 	files := &memoryFileStore{files: map[string]filestate.File{}}

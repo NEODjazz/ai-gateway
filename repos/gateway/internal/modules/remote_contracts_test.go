@@ -396,6 +396,18 @@ func TestRemoteBillingReservesAndCommitsProviderSearchUsage(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingReservesAndCommitsCodeExecutionUsage(t *testing.T) {
+	req := sensitiveContext()
+	req.Request.AnthropicCodeExecution = true
+	if reserved := billingRequest(&req); reserved.ToolRequests != 1 {
+		t.Fatalf("code execution reserve=%+v", reserved)
+	}
+	req.Response = &openai.ChatCompletionResponse{Usage: openai.Usage{ToolRequests: 3, ToolRequestsReported: true}}
+	if committed := billingRequest(&req); committed.ToolRequests != 3 {
+		t.Fatalf("code execution commit=%+v", committed)
+	}
+}
+
 func TestRemoteBillingMarksFallbackTokenCountAsEstimated(t *testing.T) {
 	req := sensitiveContext()
 	req.Metadata = map[string]string{}

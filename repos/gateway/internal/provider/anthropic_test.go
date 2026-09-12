@@ -27,6 +27,42 @@ func TestAnthropicMapsMaxCompletionTokensToMaxTokens(t *testing.T) {
 	}
 }
 
+func TestAnthropicSkillExecutionWireContract(t *testing.T) {
+	var upstream anthropicRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Anthropic-Beta") != "skills-2025-10-02" {
+			t.Fatalf("missing Skills beta header: %v", r.Header)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude","content":[{"type":"server_tool_use","id":"srvtoolu_1","name":"code_execution","input":{"code":"print(1)"}},{"type":"code_execution_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"code_execution_result","stdout":"1","stderr":"","return_code":0,"content":[]}}],"stop_reason":"pause_turn","usage":{"input_tokens":4,"output_tokens":1,"server_tool_use":{"code_execution_requests":1}},"container":{"id":"container_1","expires_at":"2026-09-12T14:00:00Z","skills":[{"type":"custom","skill_id":"skill_1","version":"v1"}]}}`))
+	}))
+	defer server.Close()
+
+	maxTokens := 20
+	client := NewAnthropic(server.URL, "key", false)
+	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "claude", MaxTokens: &maxTokens, Messages: []openai.Message{{Role: "user", Content: "run"}},
+		AnthropicSkills: []openai.AnthropicSkillReference{{Type: "custom", SkillID: "skill_1", Version: "v1"}}, AnthropicCodeExecution: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upstream.Container == nil || len(upstream.Container.Skills) != 1 || upstream.Container.Skills[0].SkillID != "skill_1" {
+		t.Fatalf("skill container was not forwarded: %+v", upstream.Container)
+	}
+	if !strings.Contains(string(response.NativeContainer), `"id":"container_1"`) {
+		t.Fatalf("container response was not preserved: %s", response.NativeContainer)
+	}
+	if response.Usage.ToolRequests != 1 || response.Choices[0].FinishReason != "pause_turn" || len(response.Choices[0].Message.NativeContent) != 2 {
+		t.Fatalf("native execution result was not preserved: %+v", response)
+	}
+	if !hasCapability(requiredChatCapabilities(openai.ChatCompletionRequest{AnthropicSkills: upstream.Container.Skills}, false), "skills") {
+		t.Fatal("skill execution did not require the skills capability")
+	}
+}
+
 func TestAnthropicMapsAssistantPrefillWithoutWireExtension(t *testing.T) {
 	prefix := true
 	request := openai.ChatCompletionRequest{Model: "claude", Messages: []openai.Message{
@@ -237,11 +273,11 @@ func TestAnthropicRejectsInvalidWebFetchUsage(t *testing.T) {
 func TestAnthropicRejectsUsageAboveRequestedServerToolLimit(t *testing.T) {
 	searchLimit, fetchLimit := 1, 2
 	usage := anthropicUsage{ServerToolUse: &anthropicServerToolUsage{WebSearchRequests: 2}}
-	if err := validateAnthropicRequestedToolUsage(usage, &openai.ChatWebSearchOptions{MaxUses: &searchLimit}, nil); err == nil {
+	if err := validateAnthropicRequestedToolUsage(usage, &openai.ChatWebSearchOptions{MaxUses: &searchLimit}, nil, false); err == nil {
 		t.Fatal("search usage above requested limit accepted")
 	}
 	usage.ServerToolUse = &anthropicServerToolUsage{WebFetchRequests: 3}
-	if err := validateAnthropicRequestedToolUsage(usage, nil, &openai.ChatWebFetchOptions{MaxUses: &fetchLimit}); err == nil {
+	if err := validateAnthropicRequestedToolUsage(usage, nil, &openai.ChatWebFetchOptions{MaxUses: &fetchLimit}, false); err == nil {
 		t.Fatal("fetch usage above requested limit accepted")
 	}
 }

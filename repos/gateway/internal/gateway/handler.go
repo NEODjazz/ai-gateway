@@ -332,12 +332,21 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		return
 	}
 	request = reqCtx.Request
+	if err := h.bindSkillExecution(r.Context(), &reqCtx); err != nil {
+		writeSkillExecutionError(w, err)
+		return
+	}
+	request = reqCtx.Request
 	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	toolIdentifiers, validTools := chatToolIdentifiers(request.Tools, request.Functions)
+	toolIdentifiers = append(toolIdentifiers, skillExecutionIdentifiers(request.AnthropicSkills)...)
 	if request.GeminiCodeExecution {
+		toolIdentifiers = append(toolIdentifiers, "code_execution")
+	}
+	if request.AnthropicCodeExecution {
 		toolIdentifiers = append(toolIdentifiers, "code_execution")
 	}
 	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) {

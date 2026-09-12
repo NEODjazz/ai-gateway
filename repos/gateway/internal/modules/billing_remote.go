@@ -243,6 +243,9 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.SearchRequests = openai.WebSearchMaxUses
 		request.SearchRequestsEstimated = true
 	}
+	if req.Request.AnthropicCodeExecution {
+		request.ToolRequests = 1
+	}
 	if req.CompletionRequest != nil {
 		request.Provider = req.CompletionRequest.Provider
 		request.Model = req.CompletionRequest.Model
@@ -361,6 +364,9 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.UpstreamModel = req.Response.Model
 		request.UsageEstimated = request.TotalTokens == 0
 		request.SearchRequests = req.Response.Usage.SearchRequests
+		if req.Response.Usage.ToolRequestsReported {
+			request.ToolRequests = req.Response.Usage.ToolRequests
+		}
 		request.ProviderCostUSDTicks = trustedProviderCost(req, req.Response.Usage.ProviderCostUSDTicks)
 		request.SearchRequestsEstimated = false
 		if details := req.Response.Usage.PromptTokensDetails; details != nil {
@@ -383,6 +389,9 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.TotalTokens = req.CompletionResponse.Usage.TotalTokens
 		request.UpstreamModel = req.CompletionResponse.Model
 		request.ProviderCostUSDTicks = trustedProviderCost(req, req.CompletionResponse.Usage.ProviderCostUSDTicks)
+		if req.CompletionResponse.Usage.ToolRequestsReported {
+			request.ToolRequests = req.CompletionResponse.Usage.ToolRequests
+		}
 		request.UsageEstimated = request.TotalTokens == 0
 		if details := req.CompletionResponse.Usage.PromptTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)

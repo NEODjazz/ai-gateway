@@ -3019,6 +3019,9 @@ func (r Router) rememberResponseAffinity(ctx context.Context, req modules.Reques
 
 func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool) []string {
 	required := []string{"chat"}
+	if len(request.AnthropicSkills) > 0 {
+		required = append(required, "skills")
+	}
 	if len(request.GeminiSafetySettings) > 0 {
 		required = append(required, "gemini_safety_settings")
 	}
@@ -3029,6 +3032,9 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 		required = append(required, "stream")
 	}
 	if len(request.Tools) > 0 || openai.ChatRequiresFunctionCapability(request) {
+		required = append(required, "tools")
+	}
+	if request.AnthropicCodeExecution {
 		required = append(required, "tools")
 	}
 	if request.ResponseFormat != nil {

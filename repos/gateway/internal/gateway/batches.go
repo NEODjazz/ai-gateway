@@ -274,6 +274,10 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		if !valid {
 			return nil, "", nil, errors.New("tools contain an invalid function name")
 		}
+		tools = append(tools, skillExecutionIdentifiers(chat.AnthropicSkills)...)
+		if chat.AnthropicCodeExecution {
+			tools = append(tools, "code_execution")
+		}
 		normalized = request
 	case "/v1/completions":
 		var request openai.CompletionRequest
@@ -744,6 +748,9 @@ func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestCont
 		}
 		req.Request = chat
 		req.Metadata["gateway.api_type"] = "messages"
+		if err := h.bindSkillExecution(ctx, req); err != nil {
+			return 0, nil, err
+		}
 		if !h.allowBatchRate(ctx, *req, estimateChatTokens(chat)) {
 			return 0, nil, errBatchRateLimited
 		}
