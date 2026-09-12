@@ -42,7 +42,7 @@ func TestSkillsTransportRejectsUnlistedShapes(t *testing.T) {
 		{Method: http.MethodPut, Path: "skills"},
 		{Method: http.MethodGet, Path: "models"},
 		{Method: http.MethodGet, Path: "skills/../models"},
-		{Method: http.MethodPost, Path: "skills/skill_a"},
+		{Method: http.MethodPost, Path: "skills/skill_a/content"},
 		{Method: http.MethodDelete, Path: "skills/skill_a/versions"},
 		{Method: http.MethodGet, Path: "skills/skill_a/versions/v1/archive"},
 		{Method: http.MethodGet, Path: "skills", Body: make([]byte, MaxSkillRequestBytes+1)},
@@ -50,6 +50,43 @@ func TestSkillsTransportRejectsUnlistedShapes(t *testing.T) {
 	for _, request := range requests {
 		if _, err := client.ExecuteSkillRequest(context.Background(), request); err == nil {
 			t.Fatalf("invalid request accepted: %+v", request)
+		}
+	}
+}
+
+func TestAnthropicSkillUpdateAndContentTransport(t *testing.T) {
+	requests := make(chan *http.Request, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch r.Method {
+		case http.MethodPost:
+			if string(body) != `{"default_version":"v2"}` || r.Header.Get("Content-Type") != "application/json" {
+				t.Fatalf("update body=%q content-type=%q", body, r.Header.Get("Content-Type"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"skill_a","source":{"type":"custom"}}`))
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/zip")
+			_, _ = w.Write([]byte("archive"))
+		}
+	}))
+	defer server.Close()
+	client := NewAnthropic(server.URL, "secret", false)
+	if _, err := client.ExecuteSkillRequest(t.Context(), SkillRequest{Method: http.MethodPost, Path: "skills/skill_a", ContentType: "application/json", Body: []byte(`{"default_version":"v2"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.ExecuteSkillRequest(t.Context(), SkillRequest{Method: http.MethodGet, Path: "skills/skill_a/content"})
+	if err != nil || response.ContentType != "application/zip" || string(response.Body) != "archive" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+	for range 2 {
+		request := <-requests
+		if request.URL.Path != "/v1/skills/skill_a" && request.URL.Path != "/v1/skills/skill_a/content" {
+			t.Fatalf("path=%q", request.URL.Path)
 		}
 	}
 }

@@ -41,6 +41,10 @@ func (h Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) GetSkill(w http.ResponseWriter, r *http.Request)    { h.serveSkillResource(w, r, "") }
 func (h Handler) DeleteSkill(w http.ResponseWriter, r *http.Request) { h.serveSkillResource(w, r, "") }
+func (h Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) { h.serveSkillUpdate(w, r) }
+func (h Handler) GetSkillContent(w http.ResponseWriter, r *http.Request) {
+	h.serveSkillResource(w, r, "content")
+}
 func (h Handler) CreateSkillVersion(w http.ResponseWriter, r *http.Request) {
 	h.serveSkillResource(w, r, "versions")
 }
@@ -154,6 +158,59 @@ func (h Handler) serveSkillResource(w http.ResponseWriter, r *http.Request, suff
 			writeSkillOwnershipError(w, err)
 			return
 		}
+	}
+	h.writeSkillResponse(w, response)
+}
+
+type skillUpdateRequest struct {
+	DefaultVersion string `json:"default_version"`
+}
+
+func (h Handler) serveSkillUpdate(w http.ResponseWriter, r *http.Request) {
+	req, skills, ok := h.authorizeSkillOperation(w, r)
+	if !ok {
+		return
+	}
+	if !validSkillQuery(w, r, false) {
+		return
+	}
+	id := r.PathValue("id")
+	if !validSkillID(id) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "skill ID is invalid")
+		return
+	}
+	ownership, err := h.skills.ResolveSkill(r.Context(), skillOwnerKey(req), id)
+	if err != nil {
+		writeSkillOwnershipError(w, err)
+		return
+	}
+	var update skillUpdateRequest
+	if !decodeInferenceRequest(w, r, &update) {
+		return
+	}
+	if !validSkillID(update.DefaultVersion) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "default_version is invalid")
+		return
+	}
+	payload, err := json.Marshal(update)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not encode skill update")
+		return
+	}
+	response, _, err := skills.ExecuteSkillRequest(r.Context(), req, ownership.EndpointID, provider.SkillRequest{
+		Method:      http.MethodPost,
+		Path:        "skills/" + id,
+		ContentType: "application/json",
+		Body:        payload,
+	})
+	if err != nil {
+		writeProviderFailure(w, err)
+		return
+	}
+	identity, valid := decodeSkillIdentity(response.Body)
+	if !valid || identity.ID != id || identity.Source.Type != "custom" {
+		writeError(w, http.StatusBadGateway, "provider_failed", "provider returned an invalid custom skill")
+		return
 	}
 	h.writeSkillResponse(w, response)
 }

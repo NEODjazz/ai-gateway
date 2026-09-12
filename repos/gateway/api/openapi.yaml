@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.280
+  version: 0.1.281
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1900,12 +1900,33 @@ paths:
       responses:
         '200': {description: Owned custom or shared read-only skill, content: {application/json: {schema: {$ref: '#/components/schemas/Skill'}}}}
         default: {description: Gateway or provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    post:
+      operationId: updateSkill
+      tags: [Skills]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SkillUpdateRequest'}
+      responses:
+        '200': {description: Updated owned custom skill, content: {application/json: {schema: {$ref: '#/components/schemas/Skill'}}}}
+        default: {description: Gateway or provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
     delete:
       operationId: deleteSkill
       tags: [Skills]
       security: [{bearerAuth: []}]
       responses:
         '200': {description: Deleted owned custom skill}
+        default: {description: Gateway or provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/skills/{id}/content:
+    parameters: [{$ref: '#/components/parameters/SkillID'}]
+    get:
+      operationId: getSkillContent
+      tags: [Skills]
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Bounded current skill archive, content: {application/octet-stream: {schema: {type: string, format: binary}}}}
         default: {description: Gateway or provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /v1/skills/{id}/versions:
     parameters: [{$ref: '#/components/parameters/SkillID'}]
@@ -4956,6 +4977,12 @@ components:
           type: object
           required: [type]
           properties: {type: {type: string, enum: [custom, anthropic, anthropic_example, plugin]}}
+    SkillUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [default_version]
+      properties:
+        default_version: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
     SkillVersion:
       type: object
       required: [id, type, skill_id]

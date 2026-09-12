@@ -79,10 +79,75 @@ func (p *skillGatewayProvider) ExecuteSkillRequest(_ context.Context, _ modules.
 	if strings.Contains(request.Path, "skill_foreign") {
 		body = `{"id":"skill_foreign","source":{"type":"custom"},"type":"skill"}`
 	}
+	if request.Method == http.MethodGet && strings.HasSuffix(request.Path, "/content") {
+		return provider.SkillResponse{StatusCode: http.StatusOK, ContentType: "application/zip", Body: []byte("archive")}, "skills-endpoint", nil
+	}
 	if request.Method == http.MethodDelete {
 		body = `{"id":"skill_owned","type":"skill_deleted"}`
 	}
 	return provider.SkillResponse{StatusCode: http.StatusOK, ContentType: "application/json", Body: []byte(body)}, "skills-endpoint", nil
+}
+
+func TestSkillUpdateAndContentUseOwnedEndpoint(t *testing.T) {
+	owner := skillOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	store := &memorySkillStore{items: map[string]skillstate.Ownership{
+		"skill_owned": {SkillID: "skill_owned", OwnerKey: owner, EndpointID: "skills-endpoint"},
+	}}
+	upstream := &skillGatewayProvider{chatProvider: &chatProvider{}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), upstream).WithSkillStore(store))
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/skills/skill_owned", strings.NewReader(`{"default_version":"v2"}`))
+	request.Header.Set("Authorization", "Bearer key")
+	request.Header.Set("Content-Type", "application/json")
+	updated := httptest.NewRecorder()
+	handler.ServeHTTP(updated, request)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body.String())
+	}
+	last := upstream.calls[len(upstream.calls)-1]
+	if last.Method != http.MethodPost || last.Path != "skills/skill_owned" || last.ContentType != "application/json" || string(last.Body) != `{"default_version":"v2"}` {
+		t.Fatalf("update transport=%+v", last)
+	}
+
+	content := authorizedSkillRequest(handler, http.MethodGet, "/v1/skills/skill_owned/content", "")
+	if content.Code != http.StatusOK || content.Header().Get("Content-Type") != "application/zip" || content.Body.String() != "archive" {
+		t.Fatalf("content status=%d headers=%v body=%q", content.Code, content.Header(), content.Body.String())
+	}
+	last = upstream.calls[len(upstream.calls)-1]
+	if last.Method != http.MethodGet || last.Path != "skills/skill_owned/content" {
+		t.Fatalf("content transport=%+v", last)
+	}
+}
+
+func TestSkillUpdateRejectsForeignAndInvalidRequests(t *testing.T) {
+	owner := skillOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	store := &memorySkillStore{items: map[string]skillstate.Ownership{
+		"skill_owned": {SkillID: "skill_owned", OwnerKey: owner, EndpointID: "skills-endpoint"},
+	}}
+	upstream := &skillGatewayProvider{chatProvider: &chatProvider{}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), upstream).WithSkillStore(store))
+
+	for _, test := range []struct {
+		path string
+		body string
+		want int
+	}{
+		{path: "/v1/skills/skill_foreign", body: `{"default_version":"v2"}`, want: http.StatusNotFound},
+		{path: "/v1/skills/skill_owned", body: `{"default_version":"bad/version"}`, want: http.StatusBadRequest},
+		{path: "/v1/skills/skill_owned", body: `{"default_version":"v2","unknown":true}`, want: http.StatusBadRequest},
+	} {
+		request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.body))
+		request.Header.Set("Authorization", "Bearer key")
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != test.want {
+			t.Fatalf("path=%s status=%d body=%s", test.path, response.Code, response.Body.String())
+		}
+	}
+	if len(upstream.calls) != 0 {
+		t.Fatalf("provider called for rejected updates: %+v", upstream.calls)
+	}
 }
 
 func TestSkillsCreateListIsolationAndDelete(t *testing.T) {

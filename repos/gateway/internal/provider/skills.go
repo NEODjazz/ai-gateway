@@ -97,9 +97,9 @@ func validSkillTransportRequest(request SkillRequest) bool {
 	isVersions := len(parts) >= 3 && parts[2] == "versions"
 	switch request.Method {
 	case http.MethodGet:
-		return len(parts) <= 2 || isVersions && (len(parts) == 3 || len(parts) == 4 || len(parts) == 5 && parts[4] == "content")
+		return len(parts) <= 2 || len(parts) == 3 && parts[2] == "content" || isVersions && (len(parts) == 3 || len(parts) == 4 || len(parts) == 5 && parts[4] == "content")
 	case http.MethodPost:
-		return len(parts) == 1 || isVersions && len(parts) == 3
+		return len(parts) <= 2 || isVersions && len(parts) == 3
 	case http.MethodDelete:
 		return len(parts) == 2 || isVersions && len(parts) == 4
 	default:
