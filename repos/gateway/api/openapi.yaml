@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.361
+  version: 0.1.362
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -7048,6 +7048,28 @@ components:
                 type: {type: string, const: url}
                 url: {type: string, format: uri, pattern: '^https://', maxLength: 2048, description: "Public HTTPS URL returning application/pdf. Credentials, fragments and redirects are rejected."}
       description: Inline, owner-scoped stored or public HTTPS PDF/plain-text input. At most five documents are accepted per request. PDF input has a 16 MiB decoded aggregate limit, requires file_input capability and enters attachment policy scanning. Plain text has a 262144-character per-document and 1048576-character aggregate limit and requires document_text capability. File and URL references are resolved after authentication and before content policy, TPM and billing admission. URL fetches use public-address DNS enforcement, TLS 1.2 or newer, no environment proxy, no redirects, a 15-second timeout and bounded response reads. Durable batches snapshot resolved content during creation and retain the 4 MiB resolved-line limit. All forms bypass response caches and are preserved by generation and native token counting. Optional title and context enter DLP and anonymization, token accounting and capability routing. Optional citations are preserved across the same paths and require document_citations capability. Within one request, citations must be enabled for every document or omitted from every document.
+    MessagesImageBlock:
+      type: object
+      additionalProperties: false
+      required: [type, source]
+      properties:
+        type: {type: string, const: image}
+        source:
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [type, media_type, data]
+              properties:
+                type: {type: string, const: base64}
+                media_type: {type: string, enum: [image/jpeg, image/png, image/gif, image/webp]}
+                data: {type: string, format: byte}
+            - type: object
+              additionalProperties: false
+              required: [type, url]
+              properties:
+                type: {type: string, const: url}
+                url: {type: string, format: uri, pattern: '^https://', maxLength: 2048, description: "Public HTTPS image URL. Credentials, fragments and redirects are rejected."}
+      description: Base64 or public HTTPS JPEG, PNG, GIF or WebP user image. At most eight images and 16 MiB decoded bytes are accepted per request, with an 8 MiB per-image limit and signature validation. URL images are fetched after authentication through the bounded public-address transport and converted to inline data before policy, accounting and provider execution. Durable batches snapshot fetched bytes during creation.
     MessagesRequest:
       type: object
       additionalProperties: false
@@ -7166,7 +7188,7 @@ components:
                   - type: array
                     minItems: 1
                     items: {type: object}
-                    description: Supports text, image, inline base64 PDF or plain-text document, tool_use, tool_result, thinking, redacted_thinking and bounded native server-tool or client-toolset continuation blocks. Documents follow MessagesDocumentBlock and are accepted only in user messages. Ordinary tool_result blocks follow MessagesToolResultBlock; is_error=true requires tool_result_error capability and bypasses semantic response caching. Client-toolset calls and results retain their required toolset_name. Thinking history is accepted only for assistant messages and routed only to an adapter with an explicit signed-reasoning contract.
+                    description: Supports text, bounded base64 or HTTPS URL image, inline, stored or URL PDF/plain-text document, tool_use, tool_result, thinking, redacted_thinking and bounded native server-tool or client-toolset continuation blocks. Images follow MessagesImageBlock and documents follow MessagesDocumentBlock; both are accepted only in user messages. Ordinary tool_result blocks follow MessagesToolResultBlock; is_error=true requires tool_result_error capability and bypasses semantic response caching. Client-toolset calls and results retain their required toolset_name. Thinking history is accepted only for assistant messages and routed only to an adapter with an explicit signed-reasoning contract.
         tools:
           type: array
           items:

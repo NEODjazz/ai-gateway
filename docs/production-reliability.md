@@ -1213,3 +1213,12 @@ same digest. Live OpenAPI 0.1.361 exposes the bounded HTTPS URL source. A valid
 URL document passed structural validation and reached authentication; an HTTP
 loopback URL returned 400 before authentication or network access. These smoke
 checks used no credential and performed no external inference.
+
+Source `bf1a213` adds bounded HTTPS URL images to native Messages generation,
+token counting and durable batches. Fetching occurs after authentication through
+the public-address transport without forwarding client credentials. JPEG, PNG,
+GIF and WebP responses are bounded to 8 MiB each and 16 MiB per request, checked
+against their declared MIME signature and converted to inline input before
+policy, TPM, cache isolation, routing and billing. Batch creation snapshots the
+resolved bytes. Focused regressions and the full Go tests, race tests, vet and
+build passed.

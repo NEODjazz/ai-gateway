@@ -173,6 +173,22 @@ func TestOpenAPIMessagesAdvertisesBoundedDocuments(t *testing.T) {
 	}
 }
 
+func TestOpenAPIMessagesAdvertisesBoundedURLImages(t *testing.T) {
+	document := loadDocument(t)
+	block := document.Components.Schemas["MessagesImageBlock"].Value
+	if block == nil || block.Properties["source"] == nil || block.Properties["source"].Value == nil {
+		t.Fatalf("MessagesImageBlock is incomplete: %#v", block)
+	}
+	source := block.Properties["source"].Value
+	if len(source.OneOf) != 2 || source.OneOf[0].Value == nil || source.OneOf[1].Value == nil {
+		t.Fatalf("MessagesImageBlock source is incomplete: %#v", source)
+	}
+	remote := source.OneOf[1].Value
+	if remote.Properties["type"] == nil || remote.Properties["type"].Value == nil || remote.Properties["type"].Value.Const != "url" || remote.Properties["url"] == nil || remote.Properties["url"].Value == nil || remote.Properties["url"].Value.Pattern != "^https://" || remote.Properties["url"].Value.MaxLength == nil || *remote.Properties["url"].Value.MaxLength != 2048 {
+		t.Fatalf("MessagesImageBlock URL source is incomplete: %#v", remote)
+	}
+}
+
 func TestOpenAPIRoutesMatchGatewayRouter(t *testing.T) {
 	document := loadDocument(t)
 	want := map[string]bool{}
