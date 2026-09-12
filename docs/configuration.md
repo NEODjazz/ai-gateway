@@ -53,7 +53,8 @@ OpenAPI, а не в этом документе.
 общий предел для всех ссылающихся deployments; оба scope применяются атомарно.
 
 Поддерживаемые static adapter types: `demo`, `ollama`, `openai`,
-`openai-compatible`, `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`, `cerebras`, `nvidia-nim`. Capability задаётся явно для
+`openai-compatible`, `openrouter`, `azure-openai`, `anthropic`, `gemini`,
+`cohere`, `mistral`, `cerebras`, `nvidia-nim`, `together`. Capability задаётся явно для
 ограниченных endpoints. Используемые значения: `chat`, `responses`,
 `embeddings`, `rerank`, `stream`, `tools`, `structured_output`, `mcp`, `vision`,
 `web_search`, `realtime`, `audio`, `audio_input`.
@@ -82,7 +83,8 @@ Deployment — до Model Group. UI использует выбор из уже 
 принимает их IDs и возвращает `409` при удалении используемого ресурса. Managed
 Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`,
-`voyage`, `bedrock`, `groq`, `deepseek`, `cerebras`, `nvidia-nim` и `xai`.
+`voyage`, `bedrock`, `groq`, `deepseek`, `cerebras`, `nvidia-nim`, `together` и
+`xai`.
 
 `cerebras` использует bearer credential, обнаруживает модели через `/v1/models`
 и поддерживает Chat Completions с streaming, function tools, JSON Schema output,
@@ -98,6 +100,12 @@ Embeddings и `/v1/models` discovery. Входящий Messages-запрос с�
 policy, quota, retry и billing lifecycle, но отправляется в native endpoint.
 Function tools, structured output и model-dependent image, audio и video input
 доступны только через явно выбранные deployment capabilities.
+
+`together` использует bearer credential и публикует только подтвержденные
+Chat Completions, streaming, legacy Completions, Embeddings и `/v1/models`.
+Tools, structured output и vision задаются deployment capabilities. Responses
+не публикуется, а параметры, которые upstream принимает без применения,
+отклоняются до отправки запроса.
 
 `GET /admin/v1/provider-capabilities` возвращает для каждого типа отдельно
 реально реализованные операции адаптера, допустимые capabilities deployment,
