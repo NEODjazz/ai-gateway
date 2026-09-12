@@ -92,9 +92,11 @@ Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 
 `nvidia-nim` поддерживает self-hosted endpoints без upstream credential и
 hosted endpoints с bearer credential. Профиль публикует Chat Completions,
-legacy Completions, Responses create/stream, Embeddings и `/v1/models`
-discovery. Function tools, structured output и model-dependent image, audio и
-video input доступны только через явно выбранные deployment capabilities.
+native Messages и count-tokens, legacy Completions, Responses create/stream,
+Embeddings и `/v1/models` discovery. Входящий Messages-запрос сохраняет общий
+policy, quota, retry и billing lifecycle, но отправляется в native endpoint.
+Function tools, structured output и model-dependent image, audio и video input
+доступны только через явно выбранные deployment capabilities.
 
 `GET /admin/v1/provider-capabilities` возвращает для каждого типа отдельно
 реально реализованные операции адаптера, допустимые capabilities deployment,
