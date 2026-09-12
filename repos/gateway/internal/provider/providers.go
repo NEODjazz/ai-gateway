@@ -33,6 +33,7 @@ type ProviderCapabilityProfile struct {
 	AuthTypes                    []string                                  `json:"auth_types"`
 	ChatParameters               ProviderChatParameterPolicy               `json:"chat_parameters"`
 	ResponseParameters           ProviderResponseParameterPolicy           `json:"response_parameters"`
+	InteractionParameters        ProviderInteractionParameterPolicy        `json:"interaction_parameters"`
 	EmbeddingParameters          ProviderEmbeddingParameterPolicy          `json:"embedding_parameters"`
 	RerankParameters             ProviderRerankParameterPolicy             `json:"rerank_parameters"`
 	CompletionParameters         ProviderCompletionParameterPolicy         `json:"completion_parameters"`
@@ -62,6 +63,12 @@ type ProviderResponseParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 	ReasoningEffort  []string `json:"reasoning_effort"`
 	ServiceTier      []string `json:"service_tier"`
+}
+
+type ProviderInteractionParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
+	InputForms       []string `json:"input_forms"`
+	ThinkingLevels   []string `json:"thinking_levels"`
 }
 
 type ProviderEmbeddingParameterPolicy struct {
@@ -394,6 +401,7 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			AuthTypes:                    managedProviderAuthTypes(providerType),
 			ChatParameters:               managedProviderChatParameterPolicy(client, slicesContain(operations, "chat")),
 			ResponseParameters:           managedProviderResponseParameterPolicy(client, slicesContain(operations, "responses")),
+			InteractionParameters:        managedProviderInteractionParameterPolicy(client, slicesContain(operations, "interactions")),
 			EmbeddingParameters:          managedProviderEmbeddingParameterPolicy(client, slicesContain(operations, "embeddings")),
 			RerankParameters:             managedProviderRerankParameterPolicy(client, slicesContain(operations, "rerank")),
 			CompletionParameters:         managedProviderCompletionParameterPolicy(client, slicesContain(operations, "completions")),
@@ -413,6 +421,68 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 		})
 	}
 	return profiles
+}
+
+func managedProviderInteractionParameterPolicy(client Client, supported bool) ProviderInteractionParameterPolicy {
+	policy := ProviderInteractionParameterPolicy{SupportedOptions: []string{}, InputForms: []string{}, ThinkingLevels: []string{}}
+	validator, ok := client.(interface {
+		ValidateInteractionParameters(openai.InteractionRequest) error
+	})
+	if !supported || !ok {
+		return policy
+	}
+	baseline := openai.InteractionRequest{Model: "model", Input: "hello"}
+	for _, probe := range []struct {
+		name  string
+		apply func(*openai.InteractionRequest)
+	}{
+		{"agent", func(r *openai.InteractionRequest) { r.Model, r.Agent = "", "agent" }},
+		{"environment", func(r *openai.InteractionRequest) {
+			r.Model, r.Agent, r.Environment, r.PreviousInteractionID = "", "agent", "env_existing", "interaction_previous"
+		}},
+		{"system_instruction", func(r *openai.InteractionRequest) { r.SystemInstruction = "be concise" }},
+		{"tools", func(r *openai.InteractionRequest) {
+			r.Tools = []openai.ResponseTool{{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}}}
+		}},
+		{"response_format", func(r *openai.InteractionRequest) {
+			r.ResponseFormat = map[string]any{"type": "json_schema", "name": "answer", "schema": map[string]any{"type": "object"}}
+		}},
+		{"response_mime_type", func(r *openai.InteractionRequest) { r.ResponseMIMEType = "application/json" }},
+		{"previous_interaction_id", func(r *openai.InteractionRequest) { r.PreviousInteractionID = "interaction_previous" }},
+		{"store", func(r *openai.InteractionRequest) { value := true; r.Store = &value }},
+		{"stream", func(r *openai.InteractionRequest) { r.Stream = true }},
+		{"background", func(r *openai.InteractionRequest) { r.Background = true }},
+		{"generation_config.max_output_tokens", func(r *openai.InteractionRequest) { value := 8; r.GenerationConfig.MaxOutputTokens = &value }},
+		{"generation_config.temperature", func(r *openai.InteractionRequest) { value := 0.5; r.GenerationConfig.Temperature = &value }},
+		{"generation_config.top_p", func(r *openai.InteractionRequest) { value := 0.8; r.GenerationConfig.TopP = &value }},
+		{"generation_config.seed", func(r *openai.InteractionRequest) { value := int64(7); r.GenerationConfig.Seed = &value }},
+		{"generation_config.stop_sequences", func(r *openai.InteractionRequest) { r.GenerationConfig.StopSequences = []string{"END"} }},
+		{"generation_config.thinking_level", func(r *openai.InteractionRequest) { r.GenerationConfig.ThinkingLevel = "high" }},
+	} {
+		request := baseline
+		probe.apply(&request)
+		if validator.ValidateInteractionParameters(request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	for _, input := range []struct {
+		name  string
+		value any
+	}{{"string", "hello"}, {"steps", []any{"hello"}}} {
+		request := baseline
+		request.Input = input.value
+		if validator.ValidateInteractionParameters(request) == nil {
+			policy.InputForms = append(policy.InputForms, input.name)
+		}
+	}
+	for _, level := range []string{"minimal", "low", "medium", "high"} {
+		request := baseline
+		request.GenerationConfig.ThinkingLevel = level
+		if validator.ValidateInteractionParameters(request) == nil {
+			policy.ThinkingLevels = append(policy.ThinkingLevels, level)
+		}
+	}
+	return policy
 }
 
 func managedProviderContainerCreateParameterPolicy(client Client, operations []string) ProviderContainerCreateParameterPolicy {

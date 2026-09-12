@@ -15,17 +15,24 @@ import (
 )
 
 func (g Gemini) Interactions(ctx context.Context, request openai.InteractionRequest) (openai.InteractionResponse, error) {
-	if _, message := request.NativeResponseRequest(); message != "" || request.Stream {
+	if err := g.ValidateInteractionParameters(request); err != nil || request.Stream {
 		return openai.InteractionResponse{}, geminiInvalid("interactions")
 	}
 	return g.doInteraction(ctx, request, false, nil)
 }
 
 func (g Gemini) StreamInteractions(ctx context.Context, request openai.InteractionRequest, write ResponseStreamWriter) (openai.InteractionResponse, error) {
-	if _, message := request.NativeResponseRequest(); message != "" || !request.Stream || request.Background || write == nil {
+	if err := g.ValidateInteractionParameters(request); err != nil || !request.Stream || request.Background || write == nil {
 		return openai.InteractionResponse{}, geminiInvalid("interactions stream")
 	}
 	return g.doInteraction(ctx, request, true, write)
+}
+
+func (Gemini) ValidateInteractionParameters(request openai.InteractionRequest) error {
+	if _, message := request.NativeResponseRequest(); message != "" {
+		return geminiInvalid("interactions")
+	}
+	return nil
 }
 
 func (g Gemini) doInteraction(ctx context.Context, request openai.InteractionRequest, stream bool, write ResponseStreamWriter) (openai.InteractionResponse, error) {

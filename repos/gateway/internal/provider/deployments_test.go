@@ -453,6 +453,27 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedResponseOptions(t *t
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeValidatedInteractionOptions(t *testing.T) {
+	wantOptions := []string{
+		"agent", "environment", "system_instruction", "tools", "response_format", "response_mime_type", "previous_interaction_id", "store", "stream", "background",
+		"generation_config.max_output_tokens", "generation_config.temperature", "generation_config.top_p", "generation_config.seed", "generation_config.stop_sequences", "generation_config.thinking_level",
+	}
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		listed := profile.Type == "gemini"
+		wantInputs, wantLevels := []string(nil), []string(nil)
+		options := []string(nil)
+		if listed {
+			options = wantOptions
+			wantInputs = []string{"string", "steps"}
+			wantLevels = []string{"minimal", "low", "medium", "high"}
+		}
+		got := profile.InteractionParameters
+		if slices.Contains(profile.Operations, "interactions") != listed || !slices.Equal(got.SupportedOptions, options) || !slices.Equal(got.InputForms, wantInputs) || !slices.Equal(got.ThinkingLevels, wantLevels) {
+			t.Errorf("%s interaction parameters=%+v operation=%v", profile.Type, got, slices.Contains(profile.Operations, "interactions"))
+		}
+	}
+}
+
 func TestManagedProviderCapabilityProfilesExposeValidatedEmbeddingAndRerankOptions(t *testing.T) {
 	profiles := ManagedProviderCapabilityProfiles()
 	byType := make(map[string]ProviderCapabilityProfile, len(profiles))
