@@ -449,3 +449,10 @@ profiles. Rancher Desktop built `ai-gateway-gateway:gaps-2e5d04c`; Helm revision
 401 completed successfully, and pod `ai-gateway-gateway-6f8f5dd8-9skzf` became
 Ready with zero restarts. The live admin endpoint returned the expected distinct
 input and option profiles for Demo, OpenRouter, Cohere and Voyage.
+
+Source `d71eade` makes legacy Completions an explicit managed operation and
+publishes validator-derived prompt forms and controls. Rancher Desktop built
+`ai-gateway-gateway:gaps-d71eade`; Helm revision 402 completed successfully, and
+pod `ai-gateway-gateway-59c4dbcf88-4zpqm` became Ready with zero restarts. The
+live endpoint confirmed string-only Ollama and Mistral profiles and all four
+prompt forms for the OpenAI adapter.
