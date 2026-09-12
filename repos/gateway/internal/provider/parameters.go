@@ -175,7 +175,7 @@ func (Ollama) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error
 
 func (Demo) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
 	input, err := openai.InspectEmbeddingInput(request.Input)
-	return rejectParameters("demo", parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"output_dtype", request.OutputDType != ""}, parameterCheck{"input", err != nil || input.Tokenized()}, parameterCheck{"input_type", request.InputType != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"})
+	return rejectParameters("demo", parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"output_dtype", request.OutputDType != ""}, parameterCheck{"input", err != nil || input.Tokenized()}, parameterCheck{"input_type", request.InputType != ""}, parameterCheck{"encoding_format", request.EncodingFormat != "" && request.EncodingFormat != "float"}, parameterCheck{"user", request.User != ""})
 }
 
 func (p OpenAICompatible) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {

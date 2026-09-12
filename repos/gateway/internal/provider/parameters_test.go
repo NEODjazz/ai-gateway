@@ -280,6 +280,8 @@ func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
 		_, err := NewOllama("http://unused.invalid", false).Embeddings(context.Background(), tc.request)
 		assertUnsupportedParameter(t, err, tc.field)
 	}
+	_, err = (Demo{}).Embeddings(context.Background(), openai.EmbeddingRequest{Model: "embed", Input: "text", User: "customer"})
+	assertUnsupportedParameter(t, err, "user")
 }
 
 func TestOtherEmbeddingAdaptersRejectMistralMetadata(t *testing.T) {
