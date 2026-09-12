@@ -223,6 +223,8 @@ availability is not inferred from these tests.
   ceiling for both public limit names on the two Nemotron 3 model IDs.
 - `7cb05d7`: Native NVIDIA NIM Chat rejects replay of DeepSeek V4 Pro 0813
   reasoning traces in assistant history before provider execution.
+- `21685e3`: Native NVIDIA NIM Chat enforces the documented maximum temperature
+  of 1 for the two Nemotron 3 model IDs.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control

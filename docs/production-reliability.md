@@ -1902,3 +1902,14 @@ image. Live liveness and readiness returned 204, the served OpenAPI reported
 0.1.392, and an unauthenticated request carrying `max_completion_tokens`
 returned 401 before deployment selection. No provider credential or external
 inference was used by the smoke checks.
+
+Source `21685e3` enforces the documented maximum temperature of 1 for both
+Nemotron 3 model IDs before provider HTTP. The boundary value remains valid and
+other NIM model policies are unchanged. Focused provider/API tests, OpenAPI
+validation, vet, build, the full Go suite and the full race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:nvidia-temperature-21685e3` with image
+ID `sha256:517de0b55f597f4a1e7b67f65082de2b232586de310ba84a7f85105728e1ca11`.
+Gateway Helm revision 500 completed successfully. Pod
+`ai-gateway-gateway-75fb6844b6-w5h2n` became Ready with zero restarts. Live
+liveness and readiness returned 204 and OpenAPI 0.1.395 was served.
