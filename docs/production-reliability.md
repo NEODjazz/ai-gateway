@@ -474,3 +474,12 @@ Rancher Desktop built `ai-gateway-gateway:gaps-45c98a9`; Helm revision 405
 completed successfully, and pod `ai-gateway-gateway-56c5fb65bb-l49vp` became
 Ready with zero restarts. The live endpoint confirmed distinct full compatible,
 OpenRouter, Gemini and xAI generation-control sets.
+
+Source `2a8e50a` adds execution-validator-derived Image Edit profiles, including
+mask support and the maximum accepted image count. Rancher Desktop built
+`ai-gateway-gateway:gaps-2a8e50a`; Helm revision 406 completed successfully, and
+pod `ai-gateway-gateway-7d66b5b84f-wsm2x` became Ready with zero restarts. The
+live endpoint confirmed full compatible/Azure controls with masks and eight
+images, OpenRouter's reduced eight-image set, Gemini's `n` and
+`response_format` controls with eight images, and xAI's three controls with a
+five-image limit.
