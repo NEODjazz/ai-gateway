@@ -800,3 +800,20 @@ Helm revision 437 completed successfully, and pod
 `ai-gateway-gateway-5498c4b48c-v6hjz` became Ready with zero restarts. Its live
 endpoint served OpenAPI 0.1.337. A structurally valid native skill request through
 the local ingress reached authentication and returned 401.
+
+Source `aaaa437` adds durable native skill container reuse. Provider-issued
+container IDs are stored with credential-and-user ownership, deployment affinity
+and provider-reported expiry. Unknown, foreign and expired continuations fail
+before provider execution; successful continuations remain on the original
+deployment. Stateful skill requests bypass response caches, and expired bindings
+are removed in bounded batches during writes. Regression coverage includes wire
+forwarding, owner isolation, invalid provider responses, collision handling,
+expiry and cleanup on a real PostgreSQL database.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-aaaa437` with image ID
+`sha256:c1760c5b44cfc61f386c1b20e5f547dff8116e591bfbe8c04d25413605e7d23f`.
+PostgreSQL Helm revision 30 applied migration 033 and exposed the new execution
+binding table. Gateway Helm revision 438 completed successfully, and pod
+`ai-gateway-gateway-59cfc97cbf-dhltt` became Ready with zero restarts. Its live
+endpoint served OpenAPI 0.1.338. A structurally valid container continuation
+request through the local ingress reached authentication and returned 401.
