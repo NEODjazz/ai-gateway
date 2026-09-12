@@ -1167,3 +1167,13 @@ native generation and token counting, durable batches and explicit
 `document_text` capability routing. Exact and semantic response caches are
 bypassed. Full Go tests, race tests, vet and build passed, along with all 166 UI
 tests, UI type checking and the production UI build.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-c0ab758` with image ID
+`sha256:450e29b1fdfac2cce30efd3b4bb9b952b0d8f9c3a3779a18a4ad7dd1feb6f1fd`.
+Gateway Helm revision 460 completed successfully, and pod
+`ai-gateway-gateway-5f65684d75-9vh6z` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.359 exposes the PDF/plain-text source variants and
+the `document_text` capability. A valid text document with title, context and
+citations passed structural validation and reached authentication; a
+whitespace-only document returned 400 before authentication. These smoke checks
+used no credential and performed no external inference.
