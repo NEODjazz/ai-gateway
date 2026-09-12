@@ -832,3 +832,19 @@ Gateway Helm revision 439 completed successfully, and pod
 `ai-gateway-gateway-56f97d58d6-w8xmh` became Ready with zero restarts. Its live
 endpoint served OpenAPI 0.1.339. A structurally valid skill-aware token-count
 request through the local ingress reached authentication and returned 401.
+
+Source `e372710` adds native regex and BM25 tool search to Messages. Deferred
+function schemas require the native server tool, explicit deployment capability
+and tool authorization. Native continuation blocks remain bounded and contribute
+to TPM reserve, while exact and semantic caches are disabled. Provider responses
+cannot introduce an unrequested tool-search execution. Regression coverage checks
+request validation, ACLs, capability routing, provider wire conversion, response
+validation, cache exclusion and ordered continuation round trips.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-e372710` with image ID
+`sha256:b5171dcef2aa050ee76174b57d18e70ca5fd0f52584f7de1f1cced270714628b`.
+Gateway Helm revision 440 completed successfully, and pod
+`ai-gateway-gateway-84cd8886db-99jn4` became Ready with zero restarts. Its live
+endpoint served OpenAPI 0.1.340 with both tool-search variants and the
+`tool_search` capability. A structurally valid tool-search request through the
+local ingress reached authentication and returned 401.
