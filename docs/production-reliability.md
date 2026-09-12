@@ -1296,3 +1296,16 @@ same digest. Live OpenAPI 0.1.365 exposes the bounded owner-scoped `fileData`
 contract. A valid reference shape reached authentication and returned 401 for
 an invalid smoke key; an external URI returned 400 before authentication or
 storage access. These smoke checks performed no external inference.
+
+Source `038e643` adds write-only bearer credentials for registered MCP servers.
+Create and update responses expose only `credential_configured`; omission
+preserves the stored value, a new value rotates it and an empty value clears it.
+Durable admin state seals credentials with a purpose-specific AEAD key and the
+server ID as associated data. The runtime clears the client gateway credential
+after authentication and supplies only the registered server credential to the
+bounded HTTPS client, which applies it to initialization, notification, tool
+discovery and tool calls while refusing redirects and non-public addresses.
+The UI supports create, rotate, preserve and explicit clear without reading a
+stored secret. Focused regressions, all 167 UI tests, UI typecheck/build, the
+full Go suite, full race suite, vet and build passed. OpenAPI 0.1.366 documents
+the write-only input and read-only configured state.

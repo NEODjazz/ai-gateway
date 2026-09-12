@@ -53,7 +53,10 @@ response не сохраняются.
 Tool grants проверяются до provider pipeline. Для Chat Completions MCP обычно
 исполняет клиент; gateway видит лишь function tools. В Responses connector
 definition передаётся upstream provider, который выполняет transport. Gateway
-не подставляет Virtual Key в connector headers и не является MCP proxy.
+не подставляет Virtual Key в connector headers. Для собственных discovery и
+tool-call routes gateway может использовать отдельный server bearer credential:
+он хранится в durable admin state только в AEAD ciphertext, не возвращается API
+и отправляется без redirects только настроенному public HTTPS endpoint.
 
 Полная модель разрешений и ограничения: [MCP](mcp.md).
 

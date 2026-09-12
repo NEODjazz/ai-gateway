@@ -12,8 +12,8 @@ Streamable HTTP client. Прямой `POST /v1/mcp/servers/{id}/tools/{tool}` в
 | --- | --- | --- | --- |
 | OpenCode через `/v1/chat/completions` | Описания `type: function`, затем сообщения с результатами | OpenCode, со своими MCP credentials | `tools`, плюс `stream` для streaming |
 | Remote MCP через `/v1/responses` | `type: mcp` с label, URL и настройками коннектора | Upstream provider модели | Явная `mcp`, плюс `stream` для streaming |
-| Gateway discovery | ID включенного MCP Server и optional cursor | Gateway выполняет `initialize` и `tools/list` без credentials | Не зависит от model route |
-| Gateway tool call | ID включенного MCP Server, имя tool и JSON arguments | Gateway выполняет `initialize` и один `tools/call` без credentials | Не зависит от model route |
+| Gateway discovery | ID включенного MCP Server и optional cursor | Gateway выполняет `initialize` и `tools/list` с опциональным server bearer credential | Не зависит от model route |
+| Gateway tool call | ID включенного MCP Server, имя tool и JSON arguments | Gateway выполняет `initialize` и один `tools/call` с опциональным server bearer credential | Не зависит от model route |
 
 В первом сценарии клиент получает список инструментов у своего MCP-сервера,
 передаёт их описания модели через gateway, получает `tool_calls`, выполняет
@@ -82,6 +82,7 @@ API ограничивает число и длину строк, но не пр
   "label": "weather-prod",
   "server_url": "https://mcp.example.test",
   "transport": "streamable-http",
+  "bearer_token": "server-scoped-secret",
   "tools": ["mcp:weather-prod@https://mcp.example.test"],
   "enabled": true
 }
@@ -128,7 +129,19 @@ API ограничивает число и длину строк, но не пр
 
 ## Credentials, аудит и эксплуатация
 
-Реестр не хранит credentials, headers или secrets. В Responses клиент может
+Для gateway discovery и прямого tool call административный API принимает
+опциональный write-only `bearer_token`. Поле можно не указывать при обновлении,
+чтобы сохранить credential, передать новое значение для ротации или передать
+пустую строку для удаления. Ответы возвращают только
+`credential_configured`. Credential шифруется отдельным AEAD-ключом внутри
+durable admin-state snapshot; server ID входит в associated data, plaintext не
+попадает в snapshot, API response или audit. Gateway передаёт его как
+`Authorization: Bearer` только настроенному HTTPS endpoint во всех запросах
+протокола. Redirects запрещены, а адрес проверяется на public IP при каждом DNS
+resolve. Virtual Key клиента после authentication очищается и не используется
+как server credential.
+
+В Responses клиент может
 передать scoped `headers` внутри коннектора: они отправляются выбранному
 провайдеру вместе с определением MCP. Bearer Virtual Key gateway не подставляет
 в них автоматически. В клиентском сценарии credentials принадлежат клиенту.
@@ -163,11 +176,12 @@ result или сам idempotency key. Успешный protocol result учит�
 закрывает billing через cancel и сохраняется для безопасного replay.
 
 Bounded Streamable HTTP client выполняет initialize negotiation, поддерживает
-JSON и SSE ответы на POST,
-передает protocol/session headers, ограничивает request/response/tool pages и
+JSON и SSE ответы на POST, передает server bearer credential и
+protocol/session headers, ограничивает request/response/tool pages и
 отклоняет private, loopback и link-local адреса при каждом DNS resolve. Реестр
-не хранит credentials, поэтому discovery и прямое выполнение работают только с
-серверами, которым они не нужны.
+не возвращает credential после сохранения. Текущий runtime создаёт protocol
+client на каждый внешний gateway request; reuse долгоживущих MCP sessions пока
+не реализован.
 
 ## Проверка реализации
 
