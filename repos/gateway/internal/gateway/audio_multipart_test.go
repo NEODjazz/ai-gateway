@@ -79,6 +79,30 @@ func TestAudioTranslationUsesAuthenticatedPipeline(t *testing.T) {
 	}
 }
 
+func TestAudioMultipartAcceptsSignatureValidatedFormats(t *testing.T) {
+	formats := []struct {
+		filename, mediaType string
+		data                []byte
+	}{
+		{"sample.aif", "audio/aiff", []byte("FORM\x00\x00\x00\x00AIFFpayload")},
+		{"sample.aiff", "audio/aiff", []byte("FORM\x00\x00\x00\x00AIFCpayload")},
+		{"sample.aac", "audio/aac", []byte("\xff\xf1\x50\x80\x00\x1f\xfc")},
+		{"sample.opus", "audio/opus", []byte("OggSpayload")},
+		{"sample.m4a", "audio/m4a", []byte("\x00\x00\x00\x18ftypisom")},
+	}
+	for _, format := range formats {
+		t.Run(format.filename, func(t *testing.T) {
+			mediaType, err := audioMediaType(format.filename, "application/octet-stream", format.data)
+			if err != nil || mediaType != format.mediaType {
+				t.Fatalf("media type=%q err=%v", mediaType, err)
+			}
+		})
+	}
+	if _, err := audioMediaType("sample.aac", "audio/wav", []byte("\xff\xf1\x50\x80\x00\x1f\xfc")); err == nil {
+		t.Fatal("explicit mismatched MIME type was accepted")
+	}
+}
+
 func TestAudioTranscriptionRejectsMalformedMultipartBeforeProvider(t *testing.T) {
 	for _, test := range []struct {
 		name     string

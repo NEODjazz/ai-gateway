@@ -34,6 +34,49 @@ func TestGeminiAudioTranscriptionContract(t *testing.T) {
 	}
 }
 
+func TestGeminiAudioInputFormatsAreCanonicalized(t *testing.T) {
+	formats := []struct {
+		input, output string
+	}{
+		{"audio/aiff", "audio/aiff"},
+		{"audio/x-aiff", "audio/aiff"},
+		{"audio/aac", "audio/aac"},
+		{"audio/opus", "audio/opus"},
+		{"audio/m4a", "audio/m4a"},
+		{"audio/x-m4a", "audio/m4a"},
+		{"audio/mp4", "audio/m4a"},
+		{"video/mp4", "audio/m4a"},
+		{"video/webm", "audio/webm"},
+	}
+	for _, format := range formats {
+		t.Run(format.input, func(t *testing.T) {
+			got, ok := geminiAudioInputMIMEType(format.input)
+			if !ok || got != format.output {
+				t.Fatalf("MIME type=%q supported=%v", got, ok)
+			}
+		})
+	}
+	if _, ok := geminiAudioInputMIMEType("audio/l16"); ok {
+		t.Fatal("raw audio accepted without sample metadata")
+	}
+}
+
+func TestGeminiAudioTranscriptionSendsCanonicalM4A(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body geminiRequest
+		if json.NewDecoder(r.Body).Decode(&body) != nil || len(body.Contents) != 1 || len(body.Contents[0].Parts) != 2 || body.Contents[0].Parts[1].InlineData == nil || body.Contents[0].Parts[1].InlineData.MIMEType != "audio/m4a" {
+			t.Fatalf("body=%+v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"text":"hello"}]}}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`)
+	}))
+	defer server.Close()
+	attachment := openai.AudioAttachment{Filename: "sample.m4a", MediaType: "audio/mp4", Data: "AAAAGGZ0eXBpc29t"}
+	response, err := NewGemini(server.URL, "secret", false).TranscribeAudio(t.Context(), openai.AudioTranscriptionRequest{Model: "model", File: attachment})
+	if err != nil || response.Usage == nil || response.Usage.TotalTokens != 3 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
 func TestGeminiAudioTranscriptionRejectsUnsupportedParametersBeforeNetwork(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))

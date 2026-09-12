@@ -20,6 +20,7 @@ func (g Gemini) TranscribeAudio(ctx context.Context, request openai.AudioTranscr
 	if err := g.ValidateAudioTranscriptionParameters(request); err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}
+	mediaType, _ := geminiAudioInputMIMEType(request.File.MediaType)
 	languages := append([]string(nil), request.Languages...)
 	if len(languages) == 0 && request.Language != "" {
 		languages = []string{request.Language}
@@ -29,7 +30,7 @@ func (g Gemini) TranscribeAudio(ctx context.Context, request openai.AudioTranscr
 		prompt += " Context and spelling guidance: " + request.Prompt
 	}
 	body := geminiRequest{
-		Contents:   []geminiContent{{Parts: []geminiPart{{Text: prompt}, {InlineData: &geminiInlineData{MIMEType: request.File.MediaType, Data: request.File.Data}}}}},
+		Contents:   []geminiContent{{Parts: []geminiPart{{Text: prompt}, {InlineData: &geminiInlineData{MIMEType: mediaType, Data: request.File.Data}}}}},
 		Generation: geminiGeneration{Temperature: request.Temperature, ResponseMIMEType: "text/plain", AudioTranscription: &geminiAudioTranscriptionConfig{LanguageCodes: languages, CustomVocabulary: append([]string(nil), request.Keywords...), Mode: request.Mode}},
 	}
 	return g.generateAudioText(ctx, request, body)
@@ -43,12 +44,13 @@ func (g Gemini) TranslateAudio(ctx context.Context, request openai.AudioTranscri
 	if err := g.ValidateAudioTranslationParameters(request); err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}
+	mediaType, _ := geminiAudioInputMIMEType(request.File.MediaType)
 	prompt := "Translate all speech in the audio into English. Return only the translated text."
 	if request.Prompt != "" {
 		prompt += " Context and spelling guidance: " + request.Prompt
 	}
 	body := geminiRequest{
-		Contents:   []geminiContent{{Parts: []geminiPart{{Text: prompt}, {InlineData: &geminiInlineData{MIMEType: request.File.MediaType, Data: request.File.Data}}}}},
+		Contents:   []geminiContent{{Parts: []geminiPart{{Text: prompt}, {InlineData: &geminiInlineData{MIMEType: mediaType, Data: request.File.Data}}}}},
 		Generation: geminiGeneration{Temperature: request.Temperature, ResponseMIMEType: "text/plain"},
 	}
 	return g.generateAudioText(ctx, request, body)
@@ -94,7 +96,7 @@ func validateGeminiAudioTranslationRequest(request openai.AudioTranscriptionRequ
 	if message := request.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "gemini", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
-	if !oneOfOrEmptyImageValue(request.File.MediaType, "audio/wav", "audio/mpeg", "audio/mp3", "audio/ogg", "audio/flac", "audio/webm") {
+	if _, ok := geminiAudioInputMIMEType(request.File.MediaType); !ok {
 		return geminiInvalid("file")
 	}
 	return rejectParameters("gemini",
@@ -116,7 +118,7 @@ func validateGeminiAudioTranscriptionRequest(request openai.AudioTranscriptionRe
 	if message := request.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "gemini", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
-	if !oneOfOrEmptyImageValue(request.File.MediaType, "audio/wav", "audio/mpeg", "audio/mp3", "audio/ogg", "audio/flac", "audio/webm") {
+	if _, ok := geminiAudioInputMIMEType(request.File.MediaType); !ok {
 		return geminiInvalid("file")
 	}
 	return rejectParameters("gemini",
@@ -128,6 +130,33 @@ func validateGeminiAudioTranscriptionRequest(request openai.AudioTranscriptionRe
 		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},
 		parameterCheck{"stream", request.Stream},
 	)
+}
+
+func geminiAudioInputMIMEType(mediaType string) (string, bool) {
+	switch strings.ToLower(mediaType) {
+	case "audio/wav", "audio/wave", "audio/x-wav":
+		return "audio/wav", true
+	case "audio/mp3":
+		return "audio/mp3", true
+	case "audio/mpeg":
+		return "audio/mpeg", true
+	case "audio/aiff", "audio/x-aiff":
+		return "audio/aiff", true
+	case "audio/aac":
+		return "audio/aac", true
+	case "audio/ogg":
+		return "audio/ogg", true
+	case "audio/flac":
+		return "audio/flac", true
+	case "audio/opus":
+		return "audio/opus", true
+	case "audio/m4a", "audio/x-m4a", "audio/mp4", "video/mp4":
+		return "audio/m4a", true
+	case "audio/webm", "video/webm":
+		return "audio/webm", true
+	default:
+		return "", false
+	}
 }
 
 func decodeGeminiAudioTextResponse(reader io.Reader) (openai.AudioTranscriptionResponse, error) {

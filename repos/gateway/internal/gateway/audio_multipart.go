@@ -182,19 +182,33 @@ func audioMediaType(filename, contentType string, data []byte) (string, error) {
 	unspecified := err != nil || mediaType == "" || mediaType == "application/octet-stream"
 	if unspecified {
 		mediaType = http.DetectContentType(data)
-		unspecified = mediaType == "application/octet-stream"
 	}
 	extensionTypes := map[string][]string{
-		".wav": {"audio/wav", "audio/wave", "audio/x-wav"}, ".flac": {"audio/flac"}, ".ogg": {"audio/ogg"},
+		".wav": {"audio/wav", "audio/wave", "audio/x-wav"}, ".flac": {"audio/flac"}, ".ogg": {"audio/ogg"}, ".opus": {"audio/opus"},
+		".aif": {"audio/aiff", "audio/x-aiff"}, ".aiff": {"audio/aiff", "audio/x-aiff"}, ".aac": {"audio/aac"},
 		".webm": {"audio/webm", "video/webm"}, ".mp3": {"audio/mpeg", "audio/mp3"}, ".mpeg": {"audio/mpeg"},
-		".mpga": {"audio/mpeg"}, ".mp4": {"audio/mp4", "video/mp4"}, ".m4a": {"audio/mp4", "audio/x-m4a"},
+		".mpga": {"audio/mpeg"}, ".mp4": {"audio/mp4", "video/mp4"}, ".m4a": {"audio/m4a", "audio/mp4", "audio/x-m4a"},
 	}
 	allowed := extensionTypes[strings.ToLower(filepath.Ext(filename))]
 	for _, candidate := range allowed {
 		attachment := openai.AudioAttachment{Filename: filename, MediaType: candidate, Data: base64.StdEncoding.EncodeToString(data)}
-		if (unspecified || candidate == strings.ToLower(mediaType)) && openai.ValidateAudioAttachment(attachment) == nil {
+		if (unspecified || audioDetectedTypeMatches(candidate, mediaType)) && openai.ValidateAudioAttachment(attachment) == nil {
 			return candidate, nil
 		}
 	}
 	return "", openai.ErrInvalidAudio
+}
+
+func audioDetectedTypeMatches(candidate, detected string) bool {
+	candidate, detected = strings.ToLower(candidate), strings.ToLower(detected)
+	if candidate == detected {
+		return true
+	}
+	if detected == "application/ogg" {
+		return candidate == "audio/ogg" || candidate == "audio/opus"
+	}
+	if detected == "video/mp4" {
+		return candidate == "audio/m4a" || candidate == "audio/mp4"
+	}
+	return false
 }
