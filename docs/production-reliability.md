@@ -679,3 +679,9 @@ Helm revision 428 completed successfully, and pod
 OpenAPI contract reported version 0.1.328, and an unauthenticated native
 GenerateContent request containing `codeExecution` reached authentication and
 returned the native 401 error envelope.
+
+Native GenerateContent inline audio now accepts the signature-verifiable WAV,
+MP3/MPEG, AIFF, AAC, OGG/Opus, FLAC, M4A and WebM containers. Every format passes
+the same decoded-size limit, container signature check, AV projection, TPM reserve,
+`audio_input` routing requirement and response-cache exclusion. Regression tests
+cover decoding into the shared attachment model and the native provider mapping.

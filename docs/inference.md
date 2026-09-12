@@ -846,11 +846,14 @@ provider runtime executes the generated Python; the gateway does not run that co
 Cached content, other grounding/server tools, file parts and other audio formats
 remain unsupported.
 
-GenerateContent also accepts inline WAV (`audio/wav`) and MP3 (`audio/mpeg`)
-parts in user content. Audio is size- and signature-validated, projected to
-configured AV scanners, included in the conservative TPM reserve, routed only to
-deployments with `audio_input`, and excluded from exact and semantic response
-caches. Other inline audio formats and provider file references remain unsupported.
+GenerateContent accepts inline WAV, MP3/MPEG, AIFF, AAC, OGG/Opus, FLAC, M4A
+and WebM audio parts in user content. Audio is size- and container-signature
+validated, projected to configured AV scanners, included in the conservative TPM
+reserve, routed only to deployments with `audio_input`, and excluded from exact
+and semantic response caches. Raw L16, A-law and mu-law remain unsupported because
+the native part has no sample-rate/channel fields from which the gateway could
+validate and account for headerless bytes. Provider file references remain
+unsupported.
 
 
 ### Native GenerateContent token counting
