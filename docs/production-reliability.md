@@ -1564,3 +1564,24 @@ with zero restarts and the same image ID. In-pod health succeeded, OpenAPI
 reported 0.1.375, and the live capability profile exposed only the bounded
 operations and parameter set. No provider credential or external inference was
 used by the smoke checks.
+
+Source `029e7ac` adds native Together Rerank through `/v1/rerank`. Text and
+object documents, `top_n` and `return_documents` are preserved, while
+unsupported controls fail before HTTP. Provider usage is mandatory, non-negative
+and internally consistent before exact billing settlement; responses are bounded
+to 8 MiB and reject trailing JSON. Protocol regressions cover bearer propagation,
+object documents, capability isolation, invalid or missing usage, trailing data
+and oversized responses. Focused protocol and race tests, the full Go suite,
+full race suite, vet and build passed. Contract commit `ba2c7ba` publishes the
+operation and parameter matrix in OpenAPI 0.1.376.
+
+Rancher Desktop built `ai-gateway-gateway:together-rerank-ba2c7ba` with image ID
+`sha256:eaa81c76e86704949db6664802ec6b5844c7ec2ff3026244dda86d9d7e6f3106`.
+Gateway Helm revision 482 completed successfully; its manifest differs from
+revision 481 only by the top-level image tag. Pod
+`ai-gateway-gateway-58cb86b88b-z25jl` became Ready with zero restarts and the
+same image ID. Live liveness and readiness returned 204, OpenAPI reported
+0.1.376, and the Together capability profile exposed Rerank with only `top_n`,
+`return_documents`, text documents and object documents. An unauthenticated
+Rerank request returned 401 before deployment selection. No provider credential
+or external inference was used by the smoke checks.
