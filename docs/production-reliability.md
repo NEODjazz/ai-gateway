@@ -1608,3 +1608,29 @@ language, response format and binary stream-format controls while keeping SSE
 disabled. An unauthenticated speech request returned 401 before deployment
 selection. No provider credential or external inference was used by the smoke
 checks.
+
+Source `51ead49` adds native Together Audio Transcription through multipart
+`/v1/audio/transcriptions`. WAV, FLAC, OGG/Opus, MP3, M4A/MP4 and WebM inputs
+must expose a locally verifiable positive duration of at most four hours before
+upstream execution. The bounded JSON response receives that exact duration and
+duration usage before shared settlement. Parameters whose meaning cannot be
+preserved, streaming, AAC without a reliable duration parser and diarization
+without public speaker IDs fail before HTTP. Protocol regressions cover the
+multipart body, bearer propagation, word and segment output, every rejected
+option, response bounds, maximum duration, unsupported audio and exact Router
+reserve/settlement. Focused protocol and race tests, the full Go suite, full race
+suite, vet and build passed. Contract commit `7dd4316` publishes the operation
+and parameter matrix in OpenAPI 0.1.378.
+
+Rancher Desktop built `ai-gateway-gateway:together-transcription-7dd4316` with
+image ID
+`sha256:3801e77354524289b135ac0b93329c1862130cbf9734dbc4a4d42a4af8ca95b7`.
+Gateway Helm revision 484 completed successfully; its manifest differs from
+revision 483 only by the top-level image tag. Pod
+`ai-gateway-gateway-58b9444664-mc79q` became Ready with zero restarts and the
+same image ID. Live liveness and readiness returned 204, OpenAPI reported
+0.1.378, and the Together capability profile exposed Audio Transcription with
+language, response format, temperature and timestamp controls. An
+unauthenticated multipart request containing a valid WAV returned 401 before
+deployment selection. No provider credential or external inference was used by
+the smoke checks.
