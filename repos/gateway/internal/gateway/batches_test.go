@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -241,6 +242,8 @@ type batchProvider struct {
 	executions []string
 	speech     modules.RequestContext
 	speechData []byte
+	audio      modules.RequestContext
+	audioOp    string
 	compact    modules.RequestContext
 	ocr        modules.RequestContext
 }
@@ -298,6 +301,26 @@ func (p *batchProvider) GenerateSpeech(_ context.Context, req modules.RequestCon
 	p.mu.Unlock()
 	usage := openai.AudioSpeechUsage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}
 	return openai.AudioSpeechResponse{Data: data, ContentType: "audio/mpeg", Model: req.AudioSpeechRequest.Model, Usage: &usage}, nil
+}
+
+func (p *batchProvider) TranscribeAudio(_ context.Context, req modules.RequestContext) (openai.AudioTranscriptionResponse, error) {
+	p.mu.Lock()
+	p.executions = append(p.executions, req.RequestID)
+	p.audio = req
+	p.audioOp = "transcription"
+	p.mu.Unlock()
+	usage := openai.AudioTranscriptionUsage{InputTokens: 4, OutputTokens: 2, TotalTokens: 6}
+	return openai.AudioTranscriptionResponse{Text: "transcribed", Usage: &usage}, nil
+}
+
+func (p *batchProvider) TranslateAudio(_ context.Context, req modules.RequestContext) (openai.AudioTranscriptionResponse, error) {
+	p.mu.Lock()
+	p.executions = append(p.executions, req.RequestID)
+	p.audio = req
+	p.audioOp = "translation"
+	p.mu.Unlock()
+	usage := openai.AudioTranscriptionUsage{InputTokens: 5, OutputTokens: 3, TotalTokens: 8}
+	return openai.AudioTranscriptionResponse{Text: "translated", Usage: &usage}, nil
 }
 
 func (p *batchProvider) CompactResponse(_ context.Context, req modules.RequestContext) (openai.CompactedResponse, error) {
@@ -565,6 +588,83 @@ func TestBatchLifecycleExecutesAudioSpeechWithBoundedJSONOutput(t *testing.T) {
 	runtime.mu.Unlock()
 	if speechRequest.AudioSpeechRequest == nil || speechRequest.InputCharacters != 8 || speechRequest.RequestID == "" || reservedTokens != openai.AudioSpeechReserveTokens(*speechRequest.AudioSpeechRequest) {
 		t.Fatalf("request=%+v characters=%d TPM=%d", speechRequest.AudioSpeechRequest, speechRequest.InputCharacters, reservedTokens)
+	}
+}
+
+func TestBatchLifecycleExecutesAudioTranscriptionAndTranslation(t *testing.T) {
+	audio := openai.AudioAttachment{
+		Filename:  "sample.wav",
+		MediaType: "audio/wav",
+		Data:      base64.StdEncoding.EncodeToString([]byte("RIFF\x04\x00\x00\x00WAVE")),
+	}
+	for _, test := range []struct {
+		name     string
+		endpoint string
+		wantText string
+		wantOp   string
+		wantType string
+	}{
+		{name: "transcription", endpoint: "/v1/audio/transcriptions", wantText: "transcribed", wantOp: "transcription", wantType: "batch"},
+		{name: "translation", endpoint: "/v1/audio/translations", wantText: "translated", wantOp: "translation", wantType: "audio_translation"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := newMemoryBatchStore()
+			files := &memoryFileStore{files: map[string]filestate.File{}}
+			runtime := &batchProvider{models: []string{"audio-model"}}
+			rates := &embeddingTokenRateStore{}
+			owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+			requestBody, err := json.Marshal(openai.AudioTranscriptionRequest{Model: "audio-model", File: audio, ResponseFormat: "json"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			line, err := json.Marshal(openai.BatchRequestLine{CustomID: test.name, Method: http.MethodPost, URL: test.endpoint, Body: requestBody})
+			if err != nil {
+				t.Fatal(err)
+			}
+			line = append(line, '\n')
+			files.files["file_audio"] = filestate.File{ID: "file_audio", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(line)), Content: line}
+			h := NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), runtime, rates).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
+			routes := Routes(h)
+			createBody, _ := json.Marshal(openai.BatchCreateRequest{InputFileID: "file_audio", Endpoint: test.endpoint, CompletionWindow: openai.BatchCompletionWindow})
+			create := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(string(createBody)))
+			create.Header.Set("Authorization", "Bearer key")
+			createdResponse := httptest.NewRecorder()
+			routes.ServeHTTP(createdResponse, create)
+			var created openai.Batch
+			if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil || createdResponse.Code != http.StatusOK {
+				t.Fatalf("create status=%d body=%s err=%v", createdResponse.Code, createdResponse.Body.String(), err)
+			}
+			if processed, err := h.ProcessBatchItems(t.Context()); err != nil || processed != 1 {
+				t.Fatalf("processed=%d err=%v", processed, err)
+			}
+			reservedTokens := rates.tokens
+			done := authorizedFileRequest(t, routes, http.MethodGet, "/v1/batches/"+created.ID)
+			var batch openai.Batch
+			if err := json.Unmarshal(done.Body.Bytes(), &batch); err != nil || done.Code != http.StatusOK || batch.RequestCounts.Completed != 1 {
+				t.Fatalf("status=%d batch=%+v err=%v", done.Code, batch, err)
+			}
+			output, err := files.Get(t.Context(), owner, batch.OutputFileID, true)
+			if err != nil || !strings.Contains(string(output.Content), `"text":"`+test.wantText+`"`) || !strings.Contains(string(output.Content), `"total_tokens":`) {
+				t.Fatalf("output=%s err=%v", output.Content, err)
+			}
+			runtime.mu.Lock()
+			audioRequest, operation := runtime.audio, runtime.audioOp
+			runtime.mu.Unlock()
+			wantTokens := openai.AudioTranscriptionReserveTokens(openai.AudioTranscriptionRequest{Model: "audio-model", File: audio, ResponseFormat: "json"})
+			if audioRequest.AudioTranscriptionRequest == nil || audioRequest.RequestID == "" || audioRequest.Metadata["gateway.api_type"] != test.wantType || operation != test.wantOp || reservedTokens != wantTokens {
+				t.Fatalf("request=%+v metadata=%v operation=%q TPM=%d want=%d", audioRequest.AudioTranscriptionRequest, audioRequest.Metadata, operation, reservedTokens, wantTokens)
+			}
+		})
+	}
+}
+
+func TestBatchAudioTranscriptionRejectsStreaming(t *testing.T) {
+	audio := base64.StdEncoding.EncodeToString([]byte("RIFF\x04\x00\x00\x00WAVE"))
+	for _, endpoint := range []string{"/v1/audio/transcriptions", "/v1/audio/translations"} {
+		body := []byte(`{"model":"audio","file":{"filename":"sample.wav","media_type":"audio/wav","data_base64":"` + audio + `"},"stream":true}`)
+		if _, _, _, err := validateBatchBody(endpoint, body); err == nil || !strings.Contains(err.Error(), "not supported in batches") {
+			t.Fatalf("endpoint=%s err=%v", endpoint, err)
+		}
 	}
 }
 

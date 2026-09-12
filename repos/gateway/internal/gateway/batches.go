@@ -396,6 +396,19 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		}
 		model = request.Model
 		normalized = request
+	case "/v1/audio/transcriptions", "/v1/audio/translations":
+		var request openai.AudioTranscriptionRequest
+		if err := decodeStrictJSON(body, &request); err != nil {
+			return nil, "", nil, err
+		}
+		if message := request.Validate(); message != "" {
+			return nil, "", nil, errors.New(message)
+		}
+		if request.Stream {
+			return nil, "", nil, errors.New("streaming audio is not supported in batches")
+		}
+		model = request.Model
+		normalized = request
 	case "/v1/ocr":
 		var request openai.OCRRequest
 		if err := decodeStrictJSON(body, &request); err != nil {
@@ -840,6 +853,36 @@ func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestCont
 		}
 		response, err := client.GenerateSpeech(ctx, *req)
 		payload, _ := json.Marshal(openai.BatchAudioSpeechResponse{Data: response.Data, ContentType: response.ContentType, Model: response.Model, Usage: response.Usage})
+		return http.StatusOK, payload, err
+	case "/v1/audio/transcriptions", "/v1/audio/translations":
+		var value openai.AudioTranscriptionRequest
+		if err := json.Unmarshal(body, &value); err != nil {
+			return 0, nil, err
+		}
+		req.AudioTranscriptionRequest = &value
+		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model}
+		if endpoint == "/v1/audio/translations" {
+			req.Metadata["gateway.api_type"] = "audio_translation"
+		}
+		if !h.allowBatchRate(ctx, *req, estimateAudioTranscriptionTokens(value)) {
+			return 0, nil, errBatchRateLimited
+		}
+		var response openai.AudioTranscriptionResponse
+		var err error
+		if endpoint == "/v1/audio/translations" {
+			client, ok := h.provider.(provider.AudioTranslationProvider)
+			if !ok {
+				return 0, nil, errors.New("audio translation unsupported")
+			}
+			response, err = client.TranslateAudio(ctx, *req)
+		} else {
+			client, ok := h.provider.(provider.AudioTranscriptionProvider)
+			if !ok {
+				return 0, nil, errors.New("audio transcription unsupported")
+			}
+			response, err = client.TranscribeAudio(ctx, *req)
+		}
+		payload, _ := json.Marshal(response)
 		return http.StatusOK, payload, err
 	case "/v1/ocr":
 		var value openai.OCRRequest
