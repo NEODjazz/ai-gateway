@@ -241,6 +241,7 @@ type batchProvider struct {
 	executions []string
 	speech     modules.RequestContext
 	speechData []byte
+	compact    modules.RequestContext
 }
 
 func (p *batchProvider) ChatCompletions(_ context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
@@ -296,6 +297,17 @@ func (p *batchProvider) GenerateSpeech(_ context.Context, req modules.RequestCon
 	p.mu.Unlock()
 	usage := openai.AudioSpeechUsage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}
 	return openai.AudioSpeechResponse{Data: data, ContentType: "audio/mpeg", Model: req.AudioSpeechRequest.Model, Usage: &usage}, nil
+}
+
+func (p *batchProvider) CompactResponse(_ context.Context, req modules.RequestContext) (openai.CompactedResponse, error) {
+	p.mu.Lock()
+	p.executions = append(p.executions, req.RequestID)
+	p.compact = req
+	p.mu.Unlock()
+	return openai.CompactedResponse{
+		ID: "cmp_" + req.RequestID, Object: "response.compaction", Output: []json.RawMessage{json.RawMessage(`{"type":"compaction","encrypted_content":"opaque"}`)},
+		Usage: openai.ResponseUsage{InputTokens: 8, OutputTokens: 2, TotalTokens: 10},
+	}, nil
 }
 
 func TestBatchLifecycleExecutesMixedModelsWithDistinctBillingIDs(t *testing.T) {
@@ -384,6 +396,56 @@ func TestBatchLifecycleExecutesRerankWithSharedValidation(t *testing.T) {
 	output, err := files.Get(t.Context(), owner, batch.OutputFileID, true)
 	if err != nil || !strings.Contains(string(output.Content), `"id":"rerank_`) || !strings.Contains(string(output.Content), `"index":1`) {
 		t.Fatalf("output=%s err=%v", output.Content, err)
+	}
+}
+
+func TestBatchLifecycleExecutesResponseCompactionWithSharedAccounting(t *testing.T) {
+	store := newMemoryBatchStore()
+	files := &memoryFileStore{files: map[string]filestate.File{}}
+	runtime := &batchProvider{models: []string{"compact-model"}}
+	rates := &embeddingTokenRateStore{}
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	payload := []byte("{\"custom_id\":\"compact\",\"method\":\"POST\",\"url\":\"/v1/responses/compact\",\"body\":{\"model\":\"compact-model\",\"input\":[{\"role\":\"user\",\"content\":\"hello\"}],\"instructions\":\"shorten\"}}\n")
+	files.files["file_compact"] = filestate.File{ID: "file_compact", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(payload)), Content: payload}
+	h := NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), runtime, rates).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
+	routes := Routes(h)
+	request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_compact","endpoint":"/v1/responses/compact","completion_window":"24h"}`))
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	routes.ServeHTTP(response, request)
+	var created openai.Batch
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s err=%v", response.Code, response.Body.String(), err)
+	}
+	if processed, err := h.ProcessBatchItems(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	reservedTokens := rates.tokens
+	done := authorizedFileRequest(t, routes, http.MethodGet, "/v1/batches/"+created.ID)
+	var batch openai.Batch
+	if err := json.Unmarshal(done.Body.Bytes(), &batch); err != nil || batch.RequestCounts.Completed != 1 || batch.OutputFileID == "" {
+		t.Fatalf("status=%d batch=%+v err=%v", done.Code, batch, err)
+	}
+	output, err := files.Get(t.Context(), owner, batch.OutputFileID, true)
+	if err != nil || !strings.Contains(string(output.Content), `"object":"response.compaction"`) || !strings.Contains(string(output.Content), `"total_tokens":10`) {
+		t.Fatalf("output=%s err=%v", output.Content, err)
+	}
+	runtime.mu.Lock()
+	compactRequest := runtime.compact
+	runtime.mu.Unlock()
+	if compactRequest.ResponseRequest == nil || compactRequest.RequestID == "" || compactRequest.Metadata["gateway.api_type"] != "batch" || reservedTokens != estimateResponseCompactTokens(openai.ResponseCompactRequest{Model: "compact-model", Input: []any{map[string]any{"role": "user", "content": "hello"}}, Instructions: "shorten"}) {
+		t.Fatalf("request=%+v metadata=%v TPM=%d", compactRequest.ResponseRequest, compactRequest.Metadata, reservedTokens)
+	}
+}
+
+func TestBatchRejectsInvalidResponseCompaction(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"compact-model","input":[],"instructions":"shorten"}`,
+		`{"model":"compact-model","input":"hello","stream":true}`,
+	} {
+		if _, _, _, err := validateBatchBody("/v1/responses/compact", []byte(body)); err == nil {
+			t.Fatalf("invalid compact request accepted: %s", body)
+		}
 	}
 }
 

@@ -278,6 +278,16 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 			return nil, "", nil, errors.New("tools contain an invalid function name")
 		}
 		normalized = request
+	case "/v1/responses/compact":
+		var request openai.ResponseCompactRequest
+		if err := decodeStrictJSON(body, &request); err != nil {
+			return nil, "", nil, err
+		}
+		if message := validateResponseCompactRequest(request); message != "" {
+			return nil, "", nil, errors.New(message)
+		}
+		model = request.Model
+		normalized = request
 	case "/v1/embeddings":
 		var request openai.EmbeddingRequest
 		if err := decodeStrictJSON(body, &request); err != nil {
@@ -651,6 +661,24 @@ func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestCont
 			return 0, nil, errBatchRateLimited
 		}
 		response, err := h.provider.Responses(ctx, *req)
+		payload, _ := json.Marshal(response)
+		return http.StatusOK, payload, err
+	case "/v1/responses/compact":
+		var value openai.ResponseCompactRequest
+		if err := json.Unmarshal(body, &value); err != nil {
+			return 0, nil, err
+		}
+		responseRequest := openai.ResponseRequest{Provider: value.Provider, Model: value.Model, Input: value.Input, Instructions: value.Instructions}
+		req.ResponseRequest = &responseRequest
+		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model, Messages: responseMessages(responseRequest)}
+		if !h.allowBatchRate(ctx, *req, estimateResponseCompactTokens(value)) {
+			return 0, nil, errBatchRateLimited
+		}
+		client, ok := h.provider.(provider.ResponseCompactProvider)
+		if !ok {
+			return 0, nil, provider.ErrResponseCompactionUnsupported
+		}
+		response, err := client.CompactResponse(ctx, *req)
 		payload, _ := json.Marshal(response)
 		return http.StatusOK, payload, err
 	case "/v1/completions":

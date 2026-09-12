@@ -25,7 +25,7 @@ func (r BatchCreateRequest) Validate() string {
 		return "input_file_id is required"
 	}
 	switch r.Endpoint {
-	case "/v1/responses", "/v1/chat/completions", "/v1/embeddings", "/v1/completions", "/v1/moderations", "/v1/rerank", "/v1/search", "/v1/images/generations", "/v1/audio/speech":
+	case "/v1/responses", "/v1/responses/compact", "/v1/chat/completions", "/v1/embeddings", "/v1/completions", "/v1/moderations", "/v1/rerank", "/v1/search", "/v1/images/generations", "/v1/audio/speech":
 	default:
 		return "endpoint is not supported"
 	}
