@@ -1019,3 +1019,11 @@ routing requires the explicit `prompt_cache` capability, and native generation,
 token counting and durable batches preserve the TTL. Exact response-cache keys
 include the control and semantic caching is disabled. Full Go test, race, vet
 and build checks completed successfully.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-6835f2c` with image ID
+`sha256:4e95108197620440cb861ad21fad225ed49b3e216ef9f73e6f5227f2ed92506e`.
+Gateway Helm revision 452 completed successfully, and pod
+`ai-gateway-gateway-559945f6f8-cc46b` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.351 exposes the bounded top-level cache control.
+A valid one-hour control reached authentication; an unsupported 30-minute TTL
+failed request validation with a 400 response.
