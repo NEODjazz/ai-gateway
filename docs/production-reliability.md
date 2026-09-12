@@ -848,3 +848,19 @@ Gateway Helm revision 440 completed successfully, and pod
 endpoint served OpenAPI 0.1.340 with both tool-search variants and the
 `tool_search` capability. A structurally valid tool-search request through the
 local ingress reached authentication and returned 401.
+
+Source `c9d9dee` adds the current dynamic-filtering web-search and web-fetch
+variants to Messages. Version-gated caller, domain, cache-bypass and response
+inclusion controls are validated before provider execution. Native flat search
+location fields are forwarded correctly while the former nested shape remains
+accepted for compatibility. Web search, web fetch and code execution definitions
+now contribute to TPM and budget reserve. Full test, race, vet and build checks
+completed successfully.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-c9d9dee` with image ID
+`sha256:8910b8af6074176f525616d053782dd2f6bcdd148fefe5a1455bf69b5efb13e5`.
+Gateway Helm revision 441 completed successfully, and pod
+`ai-gateway-gateway-5b549c96c4-59k4r` became Ready with zero restarts. Its live
+endpoint served OpenAPI 0.1.341 with all supported web-tool versions. A valid
+20260318 web-search request using flat location fields reached authentication and
+returned 401.
