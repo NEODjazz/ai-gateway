@@ -3,8 +3,9 @@
 Gateway реализует реестр MCP, разрешения на инструменты, безопасное discovery
 через `GET /v1/mcp/servers/{id}/tools` и passthrough remote MCP connectors через
 Responses API. Discovery выполняет `initialize` и `tools/list` через bounded
-Streamable HTTP client. Прямой `POST /v1/mcp/servers/{id}/tools/{tool}` выполняет
-`tools/call` с обязательной идемпотентностью. Запуска stdio-процессов в gateway нет.
+Streamable HTTP или legacy HTTP+SSE client согласно transport записи сервера.
+Прямой `POST /v1/mcp/servers/{id}/tools/{tool}` выполняет `tools/call` с
+обязательной идемпотентностью. Запуска stdio-процессов в gateway нет.
 
 ## Два сценария
 
@@ -176,16 +177,21 @@ result или сам idempotency key. Успешный protocol result учит�
 закрывает billing через cancel и сохраняется для безопасного replay.
 
 Bounded Streamable HTTP client выполняет initialize negotiation, поддерживает
-JSON и SSE ответы на POST, передает server bearer credential и
-protocol/session headers, ограничивает request/response/tool pages и
-отклоняет private, loopback и link-local адреса при каждом DNS resolve. Реестр
-не возвращает credential после сохранения. Успешный protocol client и его MCP
-session переиспользуются между gateway requests в пределах одного процесса.
+JSON и SSE ответы на POST и передает protocol/session headers. Legacy SSE
+transport открывает долгоживущий `text/event-stream`, требует первым событием
+same-origin message endpoint и отправляет JSON-RPC сообщения отдельными HTTPS
+POST с ответом 202. Оба transport передают server bearer credential, запрещают
+redirects, проверяют public IP при каждом DNS resolve и ограничивают request,
+response, SSE event и tool pages. Реестр не возвращает credential после
+сохранения. Успешный protocol client и его MCP session переиспользуются между
+gateway requests в пределах одного процесса.
 Pool ограничен 64 записями, применяет sliding TTL 10 минут и LRU eviction.
-Ключ включает SHA-256 от endpoint и server credential, поэтому ротация или
-удаление credential не переиспользует прежнюю session. Transport или protocol
-failure немедленно инвалидирует запись, чтобы следующий запрос выполнил новое
-`initialize`. Pool локален для replica; межрепличного session sharing нет.
+Ключ включает SHA-256 от transport, endpoint и server credential, поэтому
+смена transport, ротация или удаление credential не переиспользуют прежнюю
+session. Transport или protocol failure немедленно инвалидирует и закрывает
+запись; TTL expiry и LRU eviction также закрывают долгоживущий SSE stream.
+Следующий запрос выполняет новое `initialize`. Pool локален для replica;
+межрепличного session sharing нет.
 
 ## Проверка реализации
 
@@ -197,7 +203,8 @@ failure немедленно инвалидирует запись, чтобы �
 - [Passthrough adapter](../repos/gateway/internal/provider/openai_compatible.go).
 - [Swagger / OpenAPI](../repos/gateway/api/openapi.yaml).
 
-Из `repos/gateway` запустите `go test ./api ./internal/gateway ./internal/provider`.
+Из `repos/gateway` запустите
+`go test ./api ./internal/gateway ./internal/mcpclient ./internal/provider`.
 Проверки покрывают API-контракты, ACL, состояние toolsets, безопасные metadata,
 зависимости удаления и routing. Они не подтверждают доступность внешнего MCP
 или поддержку remote MCP конкретным провайдером — это отдельный интеграционный

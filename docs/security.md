@@ -57,6 +57,10 @@ definition передаётся upstream provider, который выполня
 tool-call routes gateway может использовать отдельный server bearer credential:
 он хранится в durable admin state только в AEAD ciphertext, не возвращается API
 и отправляется без redirects только настроенному public HTTPS endpoint.
+Streamable HTTP и legacy HTTP+SSE используют один credential scope. Для legacy
+SSE объявленный message endpoint обязан оставаться на исходном HTTPS origin;
+размер каждого события ограничен, а stream закрывается при invalidation,
+истечении TTL и eviction из runtime pool.
 
 Полная модель разрешений и ограничения: [MCP](mcp.md).
 

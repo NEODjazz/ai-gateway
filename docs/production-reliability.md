@@ -1338,3 +1338,14 @@ same digest. Live OpenAPI remained at 0.1.366 because the session pool changes
 no public schema. An MCP discovery request with an invalid smoke key returned
 401 before registry or upstream access. No credential was stored and no
 external MCP call or model inference was performed.
+
+Source `98c1527` adds bounded legacy MCP HTTP+SSE execution for registered
+servers. The client requires the first event to declare a same-origin HTTPS
+message endpoint, posts JSON-RPC messages with the registered server credential,
+requires HTTP 202 acceptance and receives correlated responses on the long-lived
+event stream. Per-line and aggregate event limits prevent multiline SSE growth.
+The runtime pool key now includes transport; invalidation, TTL expiry and LRU
+eviction close long-lived clients outside the cache mutex. Regressions cover
+initialize/list/call, credential headers, unsafe endpoint rejection, event
+bounds, transport selection and client closure. OpenAPI 0.1.367, focused tests,
+the full Go suite, full race suite, vet and build passed.

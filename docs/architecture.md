@@ -175,14 +175,16 @@ label и URL; wildcard или пустой список grants разрешаю�
 MCP routing требует
 одновременно явной capability `mcp` и adapter, который реализует MCP
 passthrough; legacy empty capabilities не считаются opt-in.
-MCP Servers хранят HTTPS metadata без credentials и строки разрешений,
-а Toolsets группируют имена функций и connector grants для повторного назначения.
+MCP Servers хранят HTTPS metadata, зашифрованный write-only server bearer
+credential и строки разрешений, а Toolsets группируют имена функций и connector
+grants для повторного назначения.
 API проверяет формат URL, размеры и непустоту строк, но не обнаруживает
 инструменты и не подтверждает принадлежность grants указанному server URL.
 `expand=references` строит impact по связанным toolsets, Access Groups и полной
 пагинированной выборке non-revoked virtual keys. Delete выполняется fail-closed: сервер с
-зависимым toolset и toolset с любым назначением не удаляются. Gateway не делает
-отдельный health/discovery вызов к MCP URL и не реализует MCP proxy endpoint.
+зависимым toolset и toolset с любым назначением не удаляются. Публичные gateway
+routes выполняют policy-filtered discovery и идемпотентный tool call через
+Streamable HTTP либо legacy HTTP+SSE; отдельного health endpoint для MCP нет.
 В Chat Completions инструменты выполняет клиент (например OpenCode), который
 сам подключается к MCP. В Responses API adapter передаёт connector definition
 провайдеру модели, а MCP transport выполняет upstream provider. Переданные
