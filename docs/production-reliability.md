@@ -647,3 +647,11 @@ references are resolved and signature-validated before queueing, and the resolve
 inline document is processed by the usual OCR content-policy and provider lifecycle.
 The regressions cover cross-owner denial, page reservation, TPM admission,
 independent execution identity and usage-bearing output.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-d567cba` with image ID
+`sha256:5091fe684e51d6da065a01a786ac13178c0cdcd2be348ab18285c40be4f9dca6`.
+Helm revision 427 completed successfully, and pod
+`ai-gateway-gateway-55555ccbf9-kzm9v` became Ready with zero restarts. The live
+OpenAPI 0.1.327 contract lists `/v1/ocr` in the accepted batch endpoints. An
+unauthenticated request using that endpoint reached authentication with 401,
+while an unknown OCR batch endpoint failed request validation with 400.
