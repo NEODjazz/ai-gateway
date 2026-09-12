@@ -1,7 +1,12 @@
 package provider
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 
 	"ai-gateway-gateway/internal/openai"
@@ -91,4 +96,72 @@ func (t Together) Embeddings(ctx context.Context, request openai.EmbeddingReques
 		return openai.EmbeddingResponse{}, err
 	}
 	return t.compatible.Embeddings(ctx, request)
+}
+
+func (Together) ValidateRerankParameters(request openai.RerankRequest) error {
+	return rejectParameters("together",
+		parameterCheck{"rank_fields", len(request.RankFields) > 0},
+		parameterCheck{"max_chunks_per_doc", request.MaxChunksPerDoc != nil},
+		parameterCheck{"max_tokens_per_doc", request.MaxTokensPerDoc != nil},
+	)
+}
+
+func (t Together) Rerank(ctx context.Context, request openai.RerankRequest) (openai.RerankResponse, error) {
+	if err := t.ValidateRerankParameters(request); err != nil {
+		return openai.RerankResponse{}, err
+	}
+	body, err := json.Marshal(openAICompatibleRerankRequest{Model: request.Model, Query: request.Query, Documents: request.Documents, TopN: request.TopN, ReturnDocuments: request.ReturnDocuments})
+	if err != nil {
+		return openai.RerankResponse{}, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(t.compatible.baseURL, "rerank"), bytes.NewReader(body))
+	if err != nil {
+		return openai.RerankResponse{}, err
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	if t.compatible.apiKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+t.compatible.apiKey)
+	}
+	response, err := t.compatible.client.Do(httpRequest)
+	if err != nil {
+		return openai.RerankResponse{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return openai.RerankResponse{}, responseStatusError("together", response)
+	}
+	var wire struct {
+		ID      string                `json:"id"`
+		Results []openai.RerankResult `json:"results"`
+		Usage   *struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	payload, err := io.ReadAll(io.LimitReader(response.Body, (8<<20)+1))
+	if err != nil {
+		return openai.RerankResponse{}, err
+	}
+	if len(payload) > 8<<20 {
+		return openai.RerankResponse{}, errors.New("together rerank response exceeds 8 MiB")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	if err := decoder.Decode(&wire); err != nil {
+		return openai.RerankResponse{}, err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return openai.RerankResponse{}, errors.New("invalid trailing rerank response data")
+	}
+	if wire.Usage == nil || wire.Usage.PromptTokens < 0 || wire.Usage.CompletionTokens < 0 || wire.Usage.TotalTokens != wire.Usage.PromptTokens+wire.Usage.CompletionTokens {
+		return openai.RerankResponse{}, errors.New("invalid together rerank usage")
+	}
+	return openai.RerankResponse{
+		ID:      wire.ID,
+		Results: wire.Results,
+		Meta: &openai.RerankResponseMeta{Tokens: &openai.RerankTokens{
+			InputTokens:  wire.Usage.PromptTokens,
+			OutputTokens: wire.Usage.CompletionTokens,
+		}},
+	}, nil
 }

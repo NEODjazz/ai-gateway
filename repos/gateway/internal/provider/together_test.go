@@ -35,6 +35,8 @@ func TestTogetherInferenceContracts(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"id":"completion","object":"text_completion","model":"model","choices":[{"index":0,"text":"ok","finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
 		case "/v1/embeddings":
 			_, _ = fmt.Fprint(w, `{"object":"list","model":"model","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}],"usage":{"prompt_tokens":2,"total_tokens":2}}`)
+		case "/v1/rerank":
+			_, _ = fmt.Fprint(w, `{"id":"rerank","results":[{"index":0,"relevance_score":0.9}],"usage":{"prompt_tokens":7,"completion_tokens":0,"total_tokens":7}}`)
 		case "/v1/models":
 			_, _ = fmt.Fprint(w, `{"object":"list","data":[{"id":"model-b"},{"id":"model-a"}]}`)
 		default:
@@ -56,6 +58,11 @@ func TestTogetherInferenceContracts(t *testing.T) {
 	if err != nil || embedding.Usage.TotalTokens != 2 || len(embedding.Data) != 1 {
 		t.Fatalf("embedding=%+v err=%v", embedding, err)
 	}
+	topN := 1
+	reranked, err := client.Rerank(t.Context(), openai.RerankRequest{Model: "model", Query: "query", Documents: []any{"document"}, TopN: &topN})
+	if err != nil || len(reranked.Results) != 1 || reranked.Meta == nil || reranked.Meta.Tokens == nil || reranked.Meta.Tokens.InputTokens != 7 {
+		t.Fatalf("rerank=%+v err=%v", reranked, err)
+	}
 	router := New(Config{CredentialEncryptionKey: []byte("together-provider-test-key")}).(*Router)
 	if _, err := router.CreateProvider(ManagedProvider{ID: "together", Type: "together", BaseURL: server.URL, Enabled: true}); err != nil {
 		t.Fatal(err)
@@ -67,7 +74,7 @@ func TestTogetherInferenceContracts(t *testing.T) {
 	if err != nil || len(models) != 2 || models[0].ID != "model-a" || models[1].ID != "model-b" {
 		t.Fatalf("models=%+v err=%v", models, err)
 	}
-	for _, path := range []string{"/v1/chat/completions", "/v1/completions", "/v1/embeddings", "/v1/models"} {
+	for _, path := range []string{"/v1/chat/completions", "/v1/completions", "/v1/embeddings", "/v1/rerank", "/v1/models"} {
 		if seen[path] != 1 {
 			t.Fatalf("path %s called %d times", path, seen[path])
 		}
@@ -79,7 +86,7 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 		if profile.Type != "together" {
 			continue
 		}
-		if !slices.Equal(profile.Operations, []string{"chat", "completions", "embeddings", "stream"}) || !slices.Equal(profile.Capabilities, []string{"chat", "completions", "embeddings", "stream", "tools", "structured_output", "vision"}) || len(profile.AuthTypes) != 0 {
+		if !slices.Equal(profile.Operations, []string{"chat", "completions", "embeddings", "rerank", "stream"}) || !slices.Equal(profile.Capabilities, []string{"chat", "completions", "embeddings", "rerank", "stream", "tools", "structured_output", "vision"}) || len(profile.AuthTypes) != 0 {
 			t.Fatalf("profile=%+v", profile)
 		}
 		if slices.Contains(profile.ChatParameters.SupportedOptions, "store") || slices.Contains(profile.ChatParameters.SupportedOptions, "metadata") || slices.Contains(profile.ChatParameters.SupportedOptions, "service_tier") || slices.Contains(profile.ChatParameters.SupportedOptions, "prediction") || slices.Contains(profile.ChatParameters.SupportedOptions, "logprobs") || slices.Contains(profile.ChatParameters.SupportedOptions, "logit_bias") || len(profile.ChatParameters.Logprobs) != 0 {
@@ -98,5 +105,93 @@ func TestTogetherRejectsIgnoredParameterBeforeHTTP(t *testing.T) {
 	_, err := NewTogether(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{Store: &store}})
 	if err == nil || !strings.Contains(err.Error(), "store") || called {
 		t.Fatalf("err=%v called=%v", err, called)
+	}
+}
+
+func TestTogetherRejectsUnsupportedRerankParameterBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+
+	_, err := NewTogether(server.URL, "key", false).Rerank(t.Context(), openai.RerankRequest{
+		Model:      "model",
+		Query:      "query",
+		Documents:  []any{"document"},
+		RankFields: []string{"title"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "rank_fields") || called {
+		t.Fatalf("err=%v called=%v", err, called)
+	}
+}
+
+func TestTogetherRerankRequiresExactUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "missing", body: `{"id":"rerank","results":[]}`},
+		{name: "negative", body: `{"id":"rerank","results":[],"usage":{"prompt_tokens":-1,"completion_tokens":0,"total_tokens":-1}}`},
+		{name: "inconsistent total", body: `{"id":"rerank","results":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":2}}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprint(w, test.body)
+			}))
+			defer server.Close()
+
+			_, err := NewTogether(server.URL, "key", false).Rerank(t.Context(), openai.RerankRequest{Model: "model", Query: "query", Documents: []any{"document"}})
+			if err == nil || !strings.Contains(err.Error(), "usage") {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
+func TestTogetherRerankAcceptsObjectDocuments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Documents []map[string]any `json:"documents"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Documents) != 1 || body.Documents[0]["title"] != "document" {
+			t.Fatalf("documents=%#v", body.Documents)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"rerank","results":[{"index":0,"relevance_score":0.9,"document":{"title":"document"}}],"usage":{"prompt_tokens":4,"completion_tokens":0,"total_tokens":4}}`)
+	}))
+	defer server.Close()
+
+	response, err := NewTogether(server.URL, "key", false).Rerank(t.Context(), openai.RerankRequest{
+		Model:     "model",
+		Query:     "query",
+		Documents: []any{map[string]any{"title": "document"}},
+	})
+	if err != nil || len(response.Results) != 1 || response.Results[0].Document == nil {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestTogetherRerankRejectsTrailingAndOversizedResponses(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "trailing", body: `{"id":"rerank","results":[],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}} {}`},
+		{name: "oversized", body: strings.Repeat(" ", (8<<20)+1)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprint(w, test.body)
+			}))
+			defer server.Close()
+
+			_, err := NewTogether(server.URL, "key", false).Rerank(t.Context(), openai.RerankRequest{Model: "model", Query: "query", Documents: []any{"document"}})
+			if err == nil {
+				t.Fatal("invalid response accepted")
+			}
+		})
 	}
 }
