@@ -546,3 +546,10 @@ profiles. Rancher Desktop built `ai-gateway-gateway:gaps-dd59d54`; Helm revision
 became Ready with zero restarts. The live endpoint confirmed compatible create
 durations, sizes and image URL references, the narrower native xAI size set,
 and xAI extension durations.
+
+Source `10ab0de` adds execution-validator-derived native Interactions profiles.
+Rancher Desktop built `ai-gateway-gateway:gaps-10ab0de`; Helm revision 416
+completed successfully, and pod `ai-gateway-gateway-69c86f89b-v2lw5` became
+Ready with zero restarts. The live endpoint confirmed Gemini string/step input,
+agent and environment lifecycle controls, streaming/background flags, structured
+output, bounded generation controls and all four accepted thinking levels.
