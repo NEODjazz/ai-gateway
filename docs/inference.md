@@ -696,11 +696,14 @@ Compatibility is partial. Unsupported top-level fields and block fields fail
 with a native invalid_request_error. Thinking blocks are accepted only in
 assistant history, must precede text/tool blocks, retain their provider signature,
 and have a 1 MiB aggregate payload limit. Adapters without an explicit reasoning
-block contract reject them before upstream execution. User messages accept
-base64 PDF `document` blocks with PDF signature validation, a five-document and
-16 MiB decoded aggregate limit, attachment policy projection, conservative TPM
-reserve, response-cache exclusion and `file_input` capability routing. Native
-generation, token counting and durable Messages batches preserve these blocks.
+block contract reject them before upstream execution. User messages accept up
+to five base64 PDF or UTF-8 plain-text `document` blocks. PDFs have signature
+validation, a 16 MiB decoded aggregate limit, attachment policy projection and
+`file_input` capability routing. Plain text is limited to 262,144 Unicode
+characters per document and 1,048,576 characters per request and requires
+`document_text`. Both forms enter DLP and anonymization, conservative TPM and
+billing admission, response-cache exclusion, native generation, token counting
+and durable Messages batches.
 A document may request native citations with `citations: {"enabled": true}`.
 The setting is preserved by generation, token counting and durable Messages
 batches, requires the explicit `document_citations` deployment capability,

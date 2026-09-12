@@ -1158,3 +1158,12 @@ validation and reached authentication; a whitespace-only title returned 400
 before authentication. The image also contains cumulative native capability
 discovery from source `93cdfc8`. These smoke checks used no credential and
 performed no external inference.
+
+Source `175793a` adds bounded inline plain-text documents to native Messages.
+Each document is limited to 262,144 Unicode characters and the request aggregate
+to 1,048,576 characters, with the existing five-document limit shared across
+PDF and text input. Text enters DLP and anonymization, TPM and budget reserve,
+native generation and token counting, durable batches and explicit
+`document_text` capability routing. Exact and semantic response caches are
+bypassed. Full Go tests, race tests, vet and build passed, along with all 166 UI
+tests, UI type checking and the production UI build.

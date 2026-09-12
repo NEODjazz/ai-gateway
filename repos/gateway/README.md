@@ -276,11 +276,13 @@ generation, token counting and durable batches. Routing requires
 `tool_result_error` so another adapter cannot silently reinterpret a failed tool
 execution. Exact cache identity includes the flag and semantic cache reuse is
 disabled for failed results.
-Messages user content accepts up to five inline base64 PDF `document` blocks
-with a 16 MiB decoded aggregate limit. PDF signature validation, attachment
-policy scanning, TPM and billing admission, cache exclusion and `file_input`
-capability routing are shared with the existing inline-file pipeline. Native
-token counting and durable Messages batches preserve the documents. A document
+Messages user content accepts up to five inline base64 PDF or UTF-8 plain-text
+`document` blocks. PDF input has a 16 MiB decoded aggregate limit, signature
+validation, attachment policy scanning and `file_input` capability routing.
+Plain text is limited to 262,144 Unicode characters per document and 1,048,576
+characters per request and requires `document_text`. Both forms enter DLP and
+anonymization, TPM and billing admission, bypass response caches, and survive
+native token counting and durable Messages batches. A document
 may set `citations: {"enabled": true}`; routing then also requires
 `document_citations`. The setting is forwarded by generation, token counting
 and durable batches, participates in exact-cache identity and disables semantic

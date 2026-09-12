@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.358
+  version: 0.1.359
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -7020,14 +7020,22 @@ components:
             enabled: {type: boolean, const: true}
           description: Enables native citations for this document. Requires the document_citations deployment capability; omission leaves citations disabled.
         source:
-          type: object
-          additionalProperties: false
-          required: [type, media_type, data]
-          properties:
-            type: {type: string, const: base64}
-            media_type: {type: string, const: application/pdf}
-            data: {type: string, format: byte, description: Base64 PDF bytes. Decoded content must start with the PDF signature.}
-      description: Inline user PDF input. At most five documents and 16 MiB of decoded PDF data are accepted per request. Requires file_input capability and enters attachment policy scanning, TPM reserve and cache isolation. Optional title and context enter DLP and anonymization, token accounting and cache isolation, and require document_metadata capability. Optional citations are preserved by generation, token counting and durable batches, require document_citations capability, participate in exact-cache identity and bypass semantic cache reuse. Within one request, citations must be enabled for every document or omitted from every document.
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [type, media_type, data]
+              properties:
+                type: {type: string, const: base64}
+                media_type: {type: string, const: application/pdf}
+                data: {type: string, format: byte, description: Base64 PDF bytes. Decoded content must start with the PDF signature.}
+            - type: object
+              additionalProperties: false
+              required: [type, media_type, data]
+              properties:
+                type: {type: string, const: text}
+                media_type: {type: string, const: text/plain}
+                data: {type: string, minLength: 1, maxLength: 262144, description: Inline UTF-8 plain text. Whitespace-only data is rejected.}
+      description: Inline user PDF or plain-text input. At most five documents are accepted per request. PDF input has a 16 MiB decoded aggregate limit, requires file_input capability and enters attachment policy scanning. Plain text has a 262144-character per-document and 1048576-character aggregate limit and requires document_text capability. Both forms enter content policy, TPM and billing admission, bypass response caches and are preserved by generation, native token counting and durable batches. Optional title and context enter DLP and anonymization, token accounting and capability routing. Optional citations are preserved across the same paths and require document_citations capability. Within one request, citations must be enabled for every document or omitted from every document.
     MessagesRequest:
       type: object
       additionalProperties: false
@@ -7146,7 +7154,7 @@ components:
                   - type: array
                     minItems: 1
                     items: {type: object}
-                    description: Supports text, image, inline base64 PDF document, tool_use, tool_result, thinking, redacted_thinking and bounded native server-tool or client-toolset continuation blocks. Documents follow MessagesDocumentBlock and are accepted only in user messages. Ordinary tool_result blocks follow MessagesToolResultBlock; is_error=true requires tool_result_error capability and bypasses semantic response caching. Client-toolset calls and results retain their required toolset_name. Thinking history is accepted only for assistant messages and routed only to an adapter with an explicit signed-reasoning contract.
+                    description: Supports text, image, inline base64 PDF or plain-text document, tool_use, tool_result, thinking, redacted_thinking and bounded native server-tool or client-toolset continuation blocks. Documents follow MessagesDocumentBlock and are accepted only in user messages. Ordinary tool_result blocks follow MessagesToolResultBlock; is_error=true requires tool_result_error capability and bypasses semantic response caching. Client-toolset calls and results retain their required toolset_name. Thinking history is accepted only for assistant messages and routed only to an adapter with an explicit signed-reasoning contract.
         tools:
           type: array
           items:
@@ -7503,7 +7511,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -9921,7 +9929,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

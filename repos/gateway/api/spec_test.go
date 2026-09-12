@@ -137,15 +137,23 @@ func TestOpenAPIMessagesAdvertisesFailedToolResults(t *testing.T) {
 	}
 }
 
-func TestOpenAPIMessagesAdvertisesBoundedPDFDocuments(t *testing.T) {
+func TestOpenAPIMessagesAdvertisesBoundedDocuments(t *testing.T) {
 	document := loadDocument(t)
 	block := document.Components.Schemas["MessagesDocumentBlock"].Value
 	if block == nil || block.Properties["source"] == nil || block.Properties["source"].Value == nil || block.Properties["citations"] == nil || block.Properties["citations"].Value == nil || block.Properties["title"] == nil || block.Properties["context"] == nil {
 		t.Fatalf("MessagesDocumentBlock is incomplete: %#v", block)
 	}
 	source := block.Properties["source"].Value
-	if source.Properties["data"] == nil || source.Properties["media_type"] == nil || source.Properties["media_type"].Value == nil || source.Properties["media_type"].Value.Const != "application/pdf" {
+	if len(source.OneOf) != 2 || source.OneOf[0].Value == nil || source.OneOf[1].Value == nil {
 		t.Fatalf("MessagesDocumentBlock source is incomplete: %#v", source)
+	}
+	pdf, text := source.OneOf[0].Value, source.OneOf[1].Value
+	if pdf.Properties["data"] == nil || pdf.Properties["media_type"] == nil || pdf.Properties["media_type"].Value == nil || pdf.Properties["media_type"].Value.Const != "application/pdf" {
+		t.Fatalf("MessagesDocumentBlock PDF source is incomplete: %#v", pdf)
+	}
+	textData := text.Properties["data"].Value
+	if text.Properties["media_type"] == nil || text.Properties["media_type"].Value == nil || text.Properties["media_type"].Value.Const != "text/plain" || textData == nil || textData.MinLength != 1 || textData.MaxLength == nil || *textData.MaxLength != 262144 {
+		t.Fatalf("MessagesDocumentBlock text source is incomplete: %#v", text)
 	}
 	citations := block.Properties["citations"].Value
 	if citations.Properties["enabled"] == nil || citations.Properties["enabled"].Value == nil || citations.Properties["enabled"].Value.Const != true {
