@@ -42,6 +42,7 @@ func (Together) SupportsAudioTranscription() bool { return true }
 func (Together) SupportsAudioTranscriptionStreaming() bool {
 	return false
 }
+func (Together) SupportsAudioTranslation() bool { return true }
 
 func (t Together) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := rejectParameters("together",
@@ -176,6 +177,10 @@ func (Together) ReserveAudioMilliseconds(request openai.AudioTranscriptionReques
 	}
 }
 
+func (t Together) ReserveTranslationAudioMilliseconds(request openai.AudioTranscriptionRequest) (int, error) {
+	return t.ReserveAudioMilliseconds(request)
+}
+
 func togetherBoundedAudioDuration(duration int, err error) (int, error) {
 	if err != nil || duration <= 0 || duration > togetherMaxAudioMilliseconds {
 		return 0, errors.New("together transcription duration is invalid or exceeds four hours")
@@ -211,9 +216,46 @@ func (t Together) TranscribeAudio(ctx context.Context, request openai.AudioTrans
 	if err != nil {
 		return openai.AudioTranscriptionResponse{}, &Error{Class: FailureClientRequest, Provider: "together", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_audio", Param: "file", Err: err}
 	}
+	return t.sendAudioRequest(ctx, request, "audio/transcriptions", duration, true)
+}
+
+func (Together) ValidateAudioTranslationParameters(request openai.AudioTranscriptionRequest) error {
+	if message := request.Validate(); message != "" {
+		return &Error{Class: FailureClientRequest, Provider: "together", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	return rejectParameters("together",
+		parameterCheck{"language", request.Language != ""},
+		parameterCheck{"timestamp_granularities", len(request.TimestampGranularities) > 0},
+		parameterCheck{"response_format", request.ResponseFormat == "diarized_json"},
+		parameterCheck{"include", len(request.Include) > 0},
+		parameterCheck{"languages", len(request.Languages) > 0},
+		parameterCheck{"keywords", len(request.Keywords) > 0},
+		parameterCheck{"mode", request.Mode != ""},
+		parameterCheck{"chunking_strategy", request.ChunkingStrategy != nil},
+		parameterCheck{"known_speaker_names", len(request.KnownSpeakerNames) > 0},
+		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},
+		parameterCheck{"stream", request.Stream},
+	)
+}
+
+func (t Together) TranslateAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
+	if err := t.ValidateAudioTranslationParameters(request); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	duration, err := t.ReserveTranslationAudioMilliseconds(request)
+	if err != nil {
+		return openai.AudioTranscriptionResponse{}, &Error{Class: FailureClientRequest, Provider: "together", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_audio", Param: "file", Err: err}
+	}
+	return t.sendAudioRequest(ctx, request, "audio/translations", duration, false)
+}
+
+func (t Together) sendAudioRequest(ctx context.Context, request openai.AudioTranscriptionRequest, path string, duration int, includeTranscriptionOptions bool) (openai.AudioTranscriptionResponse, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	fields := map[string]string{"model": request.Model, "language": request.Language, "response_format": request.ResponseFormat}
+	fields := map[string]string{"model": request.Model, "prompt": request.Prompt, "response_format": request.ResponseFormat}
+	if includeTranscriptionOptions {
+		fields["language"] = request.Language
+	}
 	if request.Temperature != nil {
 		fields["temperature"] = strconv.FormatFloat(*request.Temperature, 'g', -1, 64)
 	}
@@ -224,9 +266,11 @@ func (t Together) TranscribeAudio(ctx context.Context, request openai.AudioTrans
 			}
 		}
 	}
-	for _, value := range request.TimestampGranularities {
-		if err := writer.WriteField("timestamp_granularities[]", value); err != nil {
-			return openai.AudioTranscriptionResponse{}, err
+	if includeTranscriptionOptions {
+		for _, value := range request.TimestampGranularities {
+			if err := writer.WriteField("timestamp_granularities[]", value); err != nil {
+				return openai.AudioTranscriptionResponse{}, err
+			}
 		}
 	}
 	if err := writeAudioPart(writer, request.File); err != nil {
@@ -235,7 +279,7 @@ func (t Together) TranscribeAudio(ctx context.Context, request openai.AudioTrans
 	if err := writer.Close(); err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(t.compatible.baseURL, "audio/transcriptions"), &body)
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(t.compatible.baseURL, path), &body)
 	if err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}
@@ -251,17 +295,17 @@ func (t Together) TranscribeAudio(ctx context.Context, request openai.AudioTrans
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return openai.AudioTranscriptionResponse{}, responseStatusError("together", response)
 	}
-	return decodeTogetherAudioTranscription(response.Body, duration)
+	return decodeTogetherAudioResponse(response.Body, duration)
 }
 
-func decodeTogetherAudioTranscription(reader io.Reader, duration int) (openai.AudioTranscriptionResponse, error) {
+func decodeTogetherAudioResponse(reader io.Reader, duration int) (openai.AudioTranscriptionResponse, error) {
 	payload, err := io.ReadAll(io.LimitReader(reader, maxAudioTranscriptionResponseBytes+1))
 	if err != nil || len(payload) > maxAudioTranscriptionResponseBytes {
-		return openai.AudioTranscriptionResponse{}, errors.New("together transcription response exceeds limit")
+		return openai.AudioTranscriptionResponse{}, errors.New("together audio response exceeds limit")
 	}
 	var response *openai.AudioTranscriptionResponse
 	if err := json.Unmarshal(payload, &response); err != nil || response == nil {
-		return openai.AudioTranscriptionResponse{}, errors.New("together transcription response must be an object")
+		return openai.AudioTranscriptionResponse{}, errors.New("together audio response must be an object")
 	}
 	response.Duration = float64(duration) / 1000
 	response.Usage = &openai.AudioTranscriptionUsage{Type: "duration", InputAudioMilliseconds: duration}

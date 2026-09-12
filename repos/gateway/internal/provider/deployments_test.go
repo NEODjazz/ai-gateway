@@ -682,9 +682,10 @@ func TestManagedProviderCapabilityProfilesExposeValidatedAudioTranscriptionOptio
 func TestManagedProviderCapabilityProfilesExposeValidatedAudioTranslationOptions(t *testing.T) {
 	expected := map[string][]string{
 		"openai": {"prompt", "response_format", "temperature"}, "openai-compatible": {"prompt", "response_format", "temperature"}, "azure-openai": {"prompt", "response_format", "temperature"},
-		"gemini":  {"language", "prompt", "response_format", "temperature"},
-		"mistral": {"prompt", "response_format", "temperature"},
-		"groq":    {"language", "prompt", "response_format", "temperature"},
+		"gemini":   {"language", "prompt", "response_format", "temperature"},
+		"mistral":  {"prompt", "response_format", "temperature"},
+		"groq":     {"language", "prompt", "response_format", "temperature"},
+		"together": {"prompt", "response_format", "temperature"},
 	}
 	for _, profile := range ManagedProviderCapabilityProfiles() {
 		want, listed := expected[profile.Type]
