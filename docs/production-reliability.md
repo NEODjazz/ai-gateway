@@ -504,3 +504,10 @@ Rancher Desktop built `ai-gateway-gateway:gaps-88e7732`; Helm revision 409
 completed successfully, and pod `ai-gateway-gateway-78c4d5dfc9-cw242` became
 Ready with zero restarts. The live endpoint confirmed the compatible/Azure and
 Mistral option set plus the native Gemini and Groq language-aware sets.
+
+Source `fd6cf98` adds execution-validator-derived Text-to-Speech profiles for
+all eight implementing adapter types. Rancher Desktop built
+`ai-gateway-gateway:gaps-fd6cf98`; Helm revision 410 completed successfully, and
+pod `ai-gateway-gateway-774bf574ff-b4mxz` became Ready with zero restarts. The
+live endpoint returned the exact regression-locked control sets for compatible,
+Azure, OpenRouter, Gemini, Mistral, Groq and xAI transports.
