@@ -1768,6 +1768,18 @@ Gateway Helm revision 498 completed successfully. Pod
 `ai-gateway-gateway-5d459c568f-knkdk` became Ready with zero restarts. Live
 liveness and readiness returned 204 and the served OpenAPI reported 0.1.393.
 
+Source `7cb05d7` prevents replay of `reasoning_content` in NVIDIA NIM DeepSeek
+V4 Pro 0813 assistant history. The response trace remains observable, while an
+attempt to send it back fails before provider HTTP. Focused provider/API tests,
+OpenAPI validation, vet, build, the full Go suite and the full race suite passed.
+OpenAPI 0.1.394 identifies the deployed contract.
+
+Rancher Desktop built `ai-gateway-gateway:nvidia-history-7cb05d7` with image ID
+`sha256:c0bd2015176eb3a291b8857e8f69069cdc62588cf2a0297e023f3be288809919`.
+Gateway Helm revision 499 completed successfully. Pod
+`ai-gateway-gateway-7987b99f64-d28jb` became Ready with zero restarts. Live
+liveness and readiness returned 204 and the served OpenAPI reported 0.1.394.
+
 Source `40ebc1b` enables the native Together Chat sampling controls already
 present in the public request contract. `min_p`, `top_k`,
 `repetition_penalty` and integer `logit_bias` now pass through after shared

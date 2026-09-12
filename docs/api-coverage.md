@@ -221,6 +221,8 @@ availability is not inferred from these tests.
   provider's native `max_tokens` field in JSON and SSE.
 - `b5505d3`: Native NVIDIA NIM Chat enforces the documented 32,768-token output
   ceiling for both public limit names on the two Nemotron 3 model IDs.
+- `7cb05d7`: Native NVIDIA NIM Chat rejects replay of DeepSeek V4 Pro 0813
+  reasoning traces in assistant history before provider execution.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control
