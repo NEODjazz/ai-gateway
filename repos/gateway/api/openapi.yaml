@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.349
+  version: 0.1.350
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -6917,14 +6917,7 @@ components:
           maxItems: 4
           items: {type: string, minLength: 1}
           description: Requires an adapter reporting exact matched stops; currently native Anthropic
-        background: {type: boolean, default: false, description: Requires store=true and stream=false. Settlement continues from durable storage after restart.}
         stream: {type: boolean, default: false}
-        stream_options:
-          type: object
-          additionalProperties: false
-          properties:
-            include_usage: {type: boolean, description: Emit a final usage chunk to the client; upstream usage collection remains enabled for billing.}
-            include_obfuscation: {type: boolean, default: true, description: Add random padding to streaming delta events to reduce payload-size side channels.}
         temperature: {type: number, minimum: 0, maximum: 1, description: Must be omitted or equal to 1 when adaptive or enabled thinking is requested.}
         top_p: {type: number, minimum: 0, maximum: 1}
         top_k: {type: integer, minimum: 0, maximum: 1000000, description: Deprecated native sampling control. Availability depends on the selected upstream model.}

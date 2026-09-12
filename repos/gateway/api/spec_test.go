@@ -63,6 +63,19 @@ func TestOpenAPIZeroOutputBelongsToMessagesRequest(t *testing.T) {
 	}
 }
 
+func TestOpenAPIMessagesDoesNotAdvertiseUnsupportedLifecycleFields(t *testing.T) {
+	document := loadDocument(t)
+	messages := document.Components.Schemas["MessagesRequest"].Value
+	if messages == nil {
+		t.Fatal("MessagesRequest is missing")
+	}
+	for _, field := range []string{"background", "stream_options"} {
+		if messages.Properties[field] != nil {
+			t.Errorf("MessagesRequest unexpectedly advertises unsupported field %q", field)
+		}
+	}
+}
+
 func TestOpenAPIRoutesMatchGatewayRouter(t *testing.T) {
 	document := loadDocument(t)
 	want := map[string]bool{}

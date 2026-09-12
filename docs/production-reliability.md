@@ -999,3 +999,9 @@ same digest. Live OpenAPI 0.1.349 documents the Messages zero-output contract.
 A versioned `max_tokens: 0` Messages request passed structural validation and
 reached authentication, while a negative Messages value and an explicit zero
 Chat limit failed validation with 400 responses.
+
+OpenAPI 0.1.350 removes `background` and `stream_options` from Messages because
+the strict request decoder does not implement either field. A schema regression
+prevents these unsupported lifecycle controls from being advertised again;
+background Messages and client-controlled stream options remain explicit API
+coverage gaps.
