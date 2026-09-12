@@ -490,3 +490,11 @@ completed successfully, and pod `ai-gateway-gateway-654f9bb784-5sp2z` became
 Ready with zero restarts. The live endpoint confirmed `n`, `response_format`,
 `size` and `user` for compatible/Azure adapters and the reduced `n` plus
 `response_format` set for Gemini.
+
+Source `20af6e7` adds execution-validator-derived Audio Transcription profiles
+for all eight implementing adapter types while retaining duration reserve in the
+execution path. Rancher Desktop built `ai-gateway-gateway:gaps-20af6e7`; Helm
+revision 408 completed successfully, and pod
+`ai-gateway-gateway-7d894dcd4-fv42m` became Ready with zero restarts. The live
+endpoint returned the exact regression-locked option sets for compatible/Azure,
+OpenRouter, Gemini, Mistral, Groq and xAI transports.
