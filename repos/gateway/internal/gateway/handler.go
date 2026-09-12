@@ -1497,6 +1497,10 @@ func (h Handler) handleAudio(w http.ResponseWriter, r *http.Request, translation
 	if !ok {
 		return
 	}
+	if translation && request.Stream {
+		writeError(w, http.StatusBadRequest, "invalid_request", "stream is not supported for audio translations")
+		return
+	}
 	apiType := "audio_transcription"
 	if translation {
 		apiType = "audio_translation"
@@ -1543,6 +1547,52 @@ func (h Handler) handleAudio(w http.ResponseWriter, r *http.Request, translation
 			writeError(w, http.StatusBadGateway, "provider_failed", "audio transcription is not supported by the configured provider")
 			return
 		}
+		if request.Stream {
+			streamStarted := false
+			writeStreamPayload := func(payload string) error {
+				if !streamStarted {
+					writeStreamHeaders(w)
+					w.WriteHeader(http.StatusOK)
+					streamStarted = true
+				}
+				return writeSSEPayload(w, payload)
+			}
+			if streamingProvider, supported := h.provider.(provider.StreamingAudioTranscriptionProvider); supported {
+				if streamResponse, streamed, streamErr := streamingProvider.StreamTranscribeAudio(r.Context(), reqCtx, writeStreamPayload); streamed {
+					if streamErr != nil {
+						if streamStarted {
+							_ = writeStreamPayload(errorStreamPayload(streamErr))
+							return
+						}
+						writeProviderFailure(w, streamErr)
+						return
+					}
+					if sink, ok := w.(interface {
+						audioTranscriptionStreamResult(openai.AudioTranscriptionResponse)
+					}); ok {
+						sink.audioTranscriptionStreamResult(streamResponse)
+					}
+					return
+				} else if streamErr != nil {
+					writeProviderFailure(w, streamErr)
+					return
+				}
+			}
+			request.Stream = false
+			reqCtx.AudioTranscriptionRequest = &request
+			response, err = audioProvider.TranscribeAudio(r.Context(), reqCtx)
+			if err != nil {
+				writeProviderFailure(w, err)
+				return
+			}
+			payload, err := audioTranscriptionDonePayload(response)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
+				return
+			}
+			_ = writeStreamPayload(payload)
+			return
+		}
 		response, err = audioProvider.TranscribeAudio(r.Context(), reqCtx)
 	}
 	if err != nil {
@@ -1550,6 +1600,20 @@ func (h Handler) handleAudio(w http.ResponseWriter, r *http.Request, translation
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func audioTranscriptionDonePayload(response openai.AudioTranscriptionResponse) (string, error) {
+	if message := response.Validate(); message != "" {
+		return "", errors.New(message)
+	}
+	payload, err := json.Marshal(map[string]any{
+		"type": "transcript.text.done", "text": response.Text,
+		"languages": response.Languages, "logprobs": response.Logprobs, "usage": response.Usage,
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(payload), nil
 }
 
 func (h Handler) GenerateSpeech(w http.ResponseWriter, r *http.Request) {

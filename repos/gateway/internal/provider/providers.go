@@ -779,6 +779,13 @@ func managedProviderAudioTranscriptionParameterPolicy(client Client, supported b
 			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
 		}
 	}
+	if streaming, ok := client.(interface{ SupportsAudioTranscriptionStreaming() bool }); ok && streaming.SupportsAudioTranscriptionStreaming() {
+		request := baseline
+		request.Stream = true
+		if validator.ValidateAudioTranscriptionParameters(request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, "stream")
+		}
+	}
 	return policy
 }
 

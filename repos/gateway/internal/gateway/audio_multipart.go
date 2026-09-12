@@ -135,6 +135,11 @@ func setAudioScalarField(request *openai.AudioTranscriptionRequest, name, value 
 			return false
 		}
 		request.ChunkingStrategy = parsed
+	case "stream":
+		if value != "true" && value != "false" {
+			return false
+		}
+		request.Stream = value == "true"
 	default:
 		return false
 	}

@@ -612,8 +612,9 @@ func TestManagedProviderCapabilityProfilesExposeValidatedImageVariationOptions(t
 
 func TestManagedProviderCapabilityProfilesExposeValidatedAudioTranscriptionOptions(t *testing.T) {
 	all := []string{"language", "prompt", "response_format", "temperature", "timestamp_granularities", "include", "languages", "keywords", "chunking_strategy", "known_speakers"}
+	streaming := append(append([]string(nil), all...), "stream")
 	expected := map[string][]string{
-		"openai": all, "openai-compatible": all, "azure-openai": all,
+		"openai": streaming, "openai-compatible": streaming, "azure-openai": streaming,
 		"openrouter": {"language", "prompt", "response_format", "temperature", "timestamp_granularities"},
 		"gemini":     {"language", "prompt", "response_format", "temperature", "languages", "keywords"},
 		"mistral":    {"language", "response_format", "temperature", "timestamp_granularities", "keywords"},

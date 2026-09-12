@@ -106,6 +106,7 @@ func (p OpenRouter) ValidateAudioTranscriptionParameters(request openai.AudioTra
 		parameterCheck{"keywords", len(request.Keywords) > 0}, parameterCheck{"chunking_strategy", request.ChunkingStrategy != nil},
 		parameterCheck{"known_speaker_names", len(request.KnownSpeakerNames) > 0},
 		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},
+		parameterCheck{"stream", request.Stream},
 	)
 }
 

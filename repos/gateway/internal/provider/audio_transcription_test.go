@@ -72,6 +72,81 @@ func TestOpenAICompatibleAudioTranscriptionContract(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleAudioTranscriptionStreamContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(openai.MaxInferenceBodyBytes); err != nil {
+			t.Fatal(err)
+		}
+		if r.FormValue("model") != "audio" || r.FormValue("stream") != "true" || r.FormValue("include[]") != "logprobs" {
+			t.Fatalf("form=%v", r.MultipartForm.Value)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"transcript.text.delta\",\"delta\":\"hel\"}\n\ndata: {\"type\":\"transcript.text.delta\",\"delta\":\"lo\"}\n\ndata: {\"type\":\"transcript.text.done\",\"text\":\"hello\",\"usage\":{\"type\":\"tokens\",\"input_tokens\":3,\"output_tokens\":1,\"total_tokens\":4}}\n\n")
+	}))
+	defer server.Close()
+	request := openai.AudioTranscriptionRequest{Model: "audio", File: transcriptionAttachment(), Include: []string{"logprobs"}, Stream: true}
+	var events []string
+	response, err := NewOpenAICompatible(server.URL, "", true).StreamTranscribeAudio(t.Context(), request, func(payload string) error {
+		events = append(events, payload)
+		return nil
+	})
+	if err != nil || response.Text != "hello" || response.Usage == nil || response.Usage.TotalTokens != 4 || len(events) != 3 {
+		t.Fatalf("response=%+v events=%v err=%v", response, events, err)
+	}
+}
+
+func TestAudioTranscriptionStreamRejectsInvalidLifecycle(t *testing.T) {
+	request := openai.AudioTranscriptionRequest{Model: "audio", File: transcriptionAttachment(), Stream: true}
+	for name, body := range map[string]string{
+		"missing done":       "data: {\"type\":\"transcript.text.delta\",\"delta\":\"hello\"}\n\n",
+		"inconsistent done":  "data: {\"type\":\"transcript.text.delta\",\"delta\":\"hello\"}\n\ndata: {\"type\":\"transcript.text.done\",\"text\":\"other\",\"usage\":{\"type\":\"tokens\",\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}\n\n",
+		"invalid usage":      "data: {\"type\":\"transcript.text.delta\",\"delta\":\"hello\"}\n\ndata: {\"type\":\"transcript.text.done\",\"text\":\"hello\",\"usage\":{\"type\":\"tokens\",\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":3}}\n\n",
+		"unexpected segment": "data: {\"type\":\"transcript.text.segment\",\"id\":1,\"speaker\":\"A\",\"text\":\"hello\",\"start\":0,\"end\":1}\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := streamAudioTranscription(strings.NewReader(body), request, func(string) error { return nil }); err == nil {
+				t.Fatal("invalid stream accepted")
+			}
+		})
+	}
+}
+
+func TestRouterAudioTranscriptionStreamSettlesUsageAndStopsFallbackAfterData(t *testing.T) {
+	secondCalls := 0
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"transcript.text.delta\",\"delta\":\"hello\"}\n\ndata: {\"type\":\"transcript.text.done\",\"text\":\"hello\",\"usage\":{\"type\":\"tokens\",\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":3}}\n\n")
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"transcript.text.delta\",\"delta\":\"ok\"}\n\ndata: {\"type\":\"transcript.text.done\",\"text\":\"ok\",\"usage\":{\"type\":\"tokens\",\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}\n\n")
+	}))
+	defer second.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{
+		{Name: "first", Type: "openai-compatible", BaseURL: first.URL, Stream: true, Models: []string{"audio"}, Capabilities: []string{"audio_transcription"}, Priority: 1},
+		{Name: "second", Type: "openai-compatible", BaseURL: second.URL, Stream: true, Models: []string{"audio"}, Capabilities: []string{"audio_transcription"}, Priority: 2},
+	}}).(*Router)
+	request := openai.AudioTranscriptionRequest{Model: "audio", File: transcriptionAttachment(), Stream: true}
+	_, streamed, err := router.StreamTranscribeAudio(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "audio"}, AudioTranscriptionRequest: &request}, func(string) error { return nil })
+	if err == nil || !streamed || secondCalls != 0 {
+		t.Fatalf("streamed=%v second_calls=%d err=%v", streamed, secondCalls, err)
+	}
+
+	recorder := &transcriptionLifecycleRecorder{}
+	success := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"transcript.text.delta\",\"delta\":\"ok\"}\n\ndata: {\"type\":\"transcript.text.done\",\"text\":\"ok\",\"usage\":{\"type\":\"tokens\",\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}\n\n")
+	}))
+	defer success.Close()
+	router = New(Config{Modules: modules.NewPipeline([]modules.Module{recorder}), Endpoints: []config.ProviderEndpointConfig{{Name: "success", Type: "openai-compatible", BaseURL: success.URL, Stream: true, Models: []string{"audio"}, Capabilities: []string{"audio_transcription"}}}}).(*Router)
+	response, streamed, err := router.StreamTranscribeAudio(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "audio"}, AudioTranscriptionRequest: &request}, func(string) error { return nil })
+	if err != nil || !streamed || response.Usage == nil || recorder.settledTokens != 5 {
+		t.Fatalf("response=%+v streamed=%v recorder=%+v err=%v", response, streamed, recorder, err)
+	}
+}
+
 func TestAzureAudioTranscriptionContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/openai/v1/audio/transcriptions" || r.URL.Query().Get("api-version") != "2025-04-01-preview" || r.Header.Get("api-key") != "secret" || r.Header.Get("Authorization") != "" {

@@ -47,6 +47,7 @@ type AudioTranscriptionRequest struct {
 	ChunkingStrategy       *AudioChunkingStrategy `json:"chunking_strategy,omitempty"`
 	KnownSpeakerNames      []string               `json:"known_speaker_names,omitempty"`
 	KnownSpeakerReferences []AudioAttachment      `json:"known_speaker_references,omitempty"`
+	Stream                 bool                   `json:"stream,omitempty"`
 }
 
 type AudioChunkingStrategy struct {

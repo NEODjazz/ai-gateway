@@ -76,7 +76,7 @@ func TestMistralAudioTranscriptionRejectsUnsupportedParametersAndFormats(t *test
 	}
 }
 
-type transcriptionLifecycleRecorder struct{ reserved, settled int }
+type transcriptionLifecycleRecorder struct{ reserved, settled, settledTokens int }
 
 func (*transcriptionLifecycleRecorder) Name() string   { return "transcription-recorder" }
 func (*transcriptionLifecycleRecorder) Required() bool { return true }
@@ -87,6 +87,9 @@ func (m *transcriptionLifecycleRecorder) Handle(_ context.Context, req *modules.
 func (*transcriptionLifecycleRecorder) PostResponseEnabled() bool { return true }
 func (m *transcriptionLifecycleRecorder) HandlePostResponse(_ context.Context, req *modules.RequestContext) error {
 	m.settled = req.InputAudioMilliseconds
+	if req.AudioTranscriptionResponse != nil && req.AudioTranscriptionResponse.Usage != nil {
+		m.settledTokens = req.AudioTranscriptionResponse.Usage.TotalTokens
+	}
 	return nil
 }
 

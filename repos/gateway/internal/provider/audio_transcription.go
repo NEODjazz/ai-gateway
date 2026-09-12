@@ -12,14 +12,16 @@ import (
 	"net/textproto"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"ai-gateway-gateway/internal/openai"
 )
 
 const maxAudioTranscriptionResponseBytes = 8 << 20
 
-func (OpenAICompatible) SupportsAudioTranscription() bool { return true }
-func (OpenAICompatible) SupportsAudioTranslation() bool   { return true }
+func (OpenAICompatible) SupportsAudioTranscription() bool            { return true }
+func (OpenAICompatible) SupportsAudioTranslation() bool              { return true }
+func (p OpenAICompatible) SupportsAudioTranscriptionStreaming() bool { return p.upstreamStream }
 
 func (p OpenAICompatible) ReserveTranslationAudioMilliseconds(request openai.AudioTranscriptionRequest) (int, error) {
 	data, err := base64.StdEncoding.DecodeString(request.File.Data)
@@ -63,6 +65,7 @@ func (p OpenAICompatible) ValidateAudioTranslationParameters(request openai.Audi
 		parameterCheck{"known_speaker_names", len(request.KnownSpeakerNames) > 0},
 		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},
 		parameterCheck{"response_format", request.ResponseFormat == "diarized_json"},
+		parameterCheck{"stream", request.Stream},
 	)
 }
 
@@ -143,6 +146,9 @@ func (p OpenAICompatible) TranscribeAudio(ctx context.Context, request openai.Au
 	if err := p.ValidateAudioTranscriptionParameters(request); err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}
+	if request.Stream {
+		return openai.AudioTranscriptionResponse{}, ErrStreamingUnsupported
+	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	fields := map[string]string{"model": request.Model, "language": request.Language, "prompt": request.Prompt, "response_format": request.ResponseFormat}
@@ -218,6 +224,81 @@ func (p OpenAICompatible) TranscribeAudio(ctx context.Context, request openai.Au
 		return openai.AudioTranscriptionResponse{}, responseStatusError(p.providerName(), response)
 	}
 	return decodeAudioTranscriptionResponse(response.Body)
+}
+
+func (p OpenAICompatible) StreamTranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest, write AudioTranscriptionStreamWriter) (openai.AudioTranscriptionResponse, error) {
+	if err := p.ValidateAudioTranscriptionParameters(request); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	if !p.upstreamStream {
+		return openai.AudioTranscriptionResponse{}, ErrStreamingUnsupported
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	fields := map[string]string{"model": request.Model, "language": request.Language, "prompt": request.Prompt, "response_format": request.ResponseFormat, "stream": "true"}
+	if request.Temperature != nil {
+		fields["temperature"] = strconv.FormatFloat(*request.Temperature, 'g', -1, 64)
+	}
+	for name, value := range fields {
+		if value != "" {
+			if err := writer.WriteField(name, value); err != nil {
+				return openai.AudioTranscriptionResponse{}, err
+			}
+		}
+	}
+	for name, values := range map[string][]string{
+		"timestamp_granularities[]": request.TimestampGranularities,
+		"include[]":                 request.Include,
+		"languages[]":               request.Languages,
+		"keywords[]":                request.Keywords,
+		"known_speaker_names[]":     request.KnownSpeakerNames,
+	} {
+		for _, value := range values {
+			if err := writer.WriteField(name, value); err != nil {
+				return openai.AudioTranscriptionResponse{}, err
+			}
+		}
+	}
+	for _, reference := range request.KnownSpeakerReferences {
+		if err := writer.WriteField("known_speaker_references[]", reference.DataURL()); err != nil {
+			return openai.AudioTranscriptionResponse{}, err
+		}
+	}
+	if request.ChunkingStrategy != nil {
+		value, err := request.ChunkingStrategy.MultipartValue()
+		if err != nil {
+			return openai.AudioTranscriptionResponse{}, err
+		}
+		if err := writer.WriteField("chunking_strategy", value); err != nil {
+			return openai.AudioTranscriptionResponse{}, err
+		}
+	}
+	if err := writeAudioPart(writer, request.File); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	if err := writer.Close(); err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(p.baseURL, "audio/transcriptions"), &body)
+	if err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+	if p.apiKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	response, err := p.client.Do(httpRequest)
+	if err != nil {
+		return openai.AudioTranscriptionResponse{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return openai.AudioTranscriptionResponse{}, responseStatusError(p.providerName(), response)
+	}
+	if mediaType := response.Header.Get("Content-Type"); !strings.HasPrefix(strings.ToLower(mediaType), "text/event-stream") {
+		return openai.AudioTranscriptionResponse{}, errors.New("provider returned a non-SSE transcription stream")
+	}
+	return streamAudioTranscription(&responseStreamReader{source: response.Body, remaining: maxAudioTranscriptionResponseBytes}, request, write)
 }
 
 func writeAudioPart(writer *multipart.Writer, attachment openai.AudioAttachment) error {

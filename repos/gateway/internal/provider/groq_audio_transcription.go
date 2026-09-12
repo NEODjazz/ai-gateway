@@ -110,6 +110,7 @@ func (g Groq) ValidateAudioTranscriptionParameters(request openai.AudioTranscrip
 		parameterCheck{"known_speaker_names", len(request.KnownSpeakerNames) > 0},
 		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},
 		parameterCheck{"response_format", request.ResponseFormat == "diarized_json"},
+		parameterCheck{"stream", request.Stream},
 	); err != nil {
 		return err
 	}
