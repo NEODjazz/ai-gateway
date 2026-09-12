@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.273
+  version: 0.1.274
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1592,6 +1592,31 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/VectorStoreSearchResultPage'}
+        default:
+          description: Authentication, ownership, content policy, model authorization, quota, provider, validation, or storage failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/rag/query:
+    post:
+      operationId: queryRAG
+      tags: [Inference]
+      summary: Answer a Chat request with owner-scoped vector-store context
+      description: Performs bounded semantic retrieval from one vector store owned by the authenticated credential and user, optionally reranks the retrieved excerpts, and injects them as untrusted JSON reference data into a Chat Completion request. Retrieval, reranking, and generation each enforce model authorization, content policy, RPM/TPM admission, routing, and an independent billing lifecycle. All Chat Completion request parameters are accepted alongside retrieval_config and rerank. Sync and SSE streaming responses use the Chat Completions wire contract.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RAGQueryRequest'}
+      responses:
+        '200':
+          description: Chat Completion response or SSE stream
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChatCompletionResponse'}
+            text/event-stream:
+              schema: {type: string}
         default:
           description: Authentication, ownership, content policy, model authorization, quota, provider, validation, or storage failure
           content:
@@ -5336,6 +5361,51 @@ components:
           minItems: 1
           maxItems: 100
           items: {$ref: '#/components/schemas/VectorStoreSearchContent'}
+    RAGQueryRequest:
+      type: object
+      required: [model, messages, retrieval_config]
+      description: A ChatCompletionRequest with required retrieval_config and optional rerank fields. The gateway accepts the complete documented Chat Completion parameter set and rejects unknown fields.
+      properties:
+        provider: {type: string}
+        model: {type: string, minLength: 1}
+        messages:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/Message'}
+        retrieval_config: {$ref: '#/components/schemas/RAGRetrievalConfig'}
+        rerank: {$ref: '#/components/schemas/RAGRerankConfig'}
+        stream: {type: boolean, default: false}
+        stream_options:
+          type: object
+          additionalProperties: false
+          required: [include_usage]
+          properties:
+            include_usage: {type: boolean}
+            include_obfuscation: {type: boolean}
+      additionalProperties: true
+    RAGRetrievalConfig:
+      type: object
+      additionalProperties: false
+      required: [vector_store_id]
+      properties:
+        vector_store_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+        model: {type: string, minLength: 1, description: Authorized embedding model. Defaults to the generation model.}
+        provider: {type: string}
+        top_k: {type: integer, minimum: 1, maximum: 20, default: 10}
+        filters: {$ref: '#/components/schemas/VectorStoreSearchFilters'}
+    RAGRerankConfig:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+        model: {type: string, minLength: 1, description: Required when enabled is true.}
+        provider: {type: string}
+        top_n: {type: integer, minimum: 1, maximum: 20, description: Defaults to the smaller of 5 and the number of retrieved excerpts.}
+      if:
+        properties: {enabled: {const: true}}
+      then:
+        required: [model]
     VectorStoreSearchRequest:
       type: object
       additionalProperties: false

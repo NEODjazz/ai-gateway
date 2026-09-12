@@ -83,11 +83,6 @@ func (h Handler) SearchVectorStore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "max_num_results must be between 1 and 50")
 		return
 	}
-	filter, err := parseVectorSearchFilter(input.Filters)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
-	}
 	if h.vectorStores == nil || h.files == nil {
 		writeError(w, http.StatusServiceUnavailable, "vector_store_search_unavailable", "vector store search is unavailable")
 		return
@@ -109,14 +104,30 @@ func (h Handler) SearchVectorStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	owner := fileOwnerKey(reqCtx)
+	results, ok := h.executeVectorStoreSearch(w, r, reqCtx, owner, storeID, input)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"object": "vector_store.search_results.page", "search_query": []string{input.Query},
+		"data": results, "has_more": false, "next_page": nil,
+	})
+}
+
+func (h Handler) executeVectorStoreSearch(w http.ResponseWriter, r *http.Request, reqCtx modules.RequestContext, owner, storeID string, input vectorStoreSearchRequest) ([]vectorSearchResult, bool) {
+	filter, err := parseVectorSearchFilter(input.Filters)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return nil, false
+	}
 	if _, err := h.vectorStores.GetVectorStore(r.Context(), owner, storeID); err != nil {
 		writeVectorStoreError(w, err)
-		return
+		return nil, false
 	}
 	chunks, err := h.loadVectorSearchChunks(r, owner, storeID, filter)
 	if err != nil {
 		writeVectorSearchError(w, err)
-		return
+		return nil, false
 	}
 	texts := make([]string, 1, len(chunks)+1)
 	texts[0] = input.Query
@@ -128,34 +139,31 @@ func (h Handler) SearchVectorStore(w http.ResponseWriter, r *http.Request) {
 	reqCtx.Request = openai.ChatCompletionRequest{Provider: input.Provider, Model: input.Model}
 	if err := h.pipeline.RunAfterAuthentication(r.Context(), &reqCtx); err != nil {
 		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
-		return
+		return nil, false
 	}
 	if reqCtx.EmbeddingRequest == nil {
 		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
-		return
+		return nil, false
 	}
 	if !h.authorizeRateLimit(w, r.Context(), reqCtx, estimateEmbeddingTokens(*reqCtx.EmbeddingRequest)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, input.Model) {
-		return
+		return nil, false
 	}
 	embedder, ok := h.provider.(provider.EmbeddingProvider)
 	if !ok {
 		writeError(w, http.StatusBadGateway, "provider_failed", "embeddings are not supported by the configured provider")
-		return
+		return nil, false
 	}
 	response, err := embedder.Embeddings(r.Context(), reqCtx)
 	if err != nil {
 		writeProviderFailure(w, err)
-		return
+		return nil, false
 	}
 	results, ok := rankVectorSearchResults(response, chunks, input.MaxNumResults)
 	if !ok {
 		writeError(w, http.StatusBadGateway, "provider_failed", "embedding response is invalid")
-		return
+		return nil, false
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"object": "vector_store.search_results.page", "search_query": []string{input.Query},
-		"data": results, "has_more": false, "next_page": nil,
-	})
+	return results, true
 }
 
 func (h Handler) loadVectorSearchChunks(r *http.Request, owner, storeID string, filter vectorSearchFilter) ([]vectorSearchChunk, error) {

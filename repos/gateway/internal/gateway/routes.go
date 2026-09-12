@@ -115,6 +115,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/v1/vector_stores/{id}/file_batches/{batch_id}/cancel"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CancelVectorStoreFileBatch) }},
 	{RouteContract{http.MethodGet, "/v1/vector_stores/{id}/file_batches/{batch_id}/files"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListVectorStoreFileBatchFiles) }},
 	{RouteContract{http.MethodPost, "/v1/vector_stores/{id}/search"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SearchVectorStore) }},
+	{RouteContract{http.MethodPost, "/v1/rag/query"}, func(h Handler) http.Handler { return http.HandlerFunc(h.RAGQuery) }},
 	{RouteContract{http.MethodPost, "/v1/skills"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateSkill) }},
 	{RouteContract{http.MethodGet, "/v1/skills"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListSkills) }},
 	{RouteContract{http.MethodGet, "/v1/skills/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetSkill) }},
