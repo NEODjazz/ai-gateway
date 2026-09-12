@@ -80,7 +80,7 @@ func (h Handler) SCIMServiceProviderConfig(w http.ResponseWriter, r *http.Reques
 		"bulk":                  map[string]any{"supported": false, "maxOperations": 0, "maxPayloadSize": 0},
 		"filter":                map[string]any{"supported": true, "maxResults": 500},
 		"changePassword":        map[string]bool{"supported": false},
-		"sort":                  map[string]bool{"supported": false},
+		"sort":                  map[string]bool{"supported": true},
 		"etag":                  map[string]bool{"supported": false},
 		"authenticationSchemes": []map[string]string{{"type": "oauthbearertoken", "name": "Bearer token", "description": "Gateway administrator bearer credential"}},
 	})
@@ -174,6 +174,10 @@ func (h Handler) ListSCIMUsers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	sortBy, sortOrder, ok := scimSort(w, r, "userName", "displayName", "externalId")
+	if !ok {
+		return
+	}
 	var users []DirectoryUser
 	var total int
 	var err error
@@ -192,7 +196,7 @@ func (h Handler) ListSCIMUsers(w http.ResponseWriter, r *http.Request) {
 		if limit == 0 {
 			limit = 1
 		}
-		users, total, err = h.directory.ListUsers(r.Context(), managementAudit(req), "", start-1, limit, false)
+		users, total, err = h.directory.ListUsers(r.Context(), managementAudit(req), "", start-1, limit, false, sortBy, sortOrder)
 	}
 	if err != nil {
 		writeSCIMDirectoryFailure(w, err)
@@ -558,6 +562,37 @@ func scimPagination(w http.ResponseWriter, r *http.Request) (int, int, bool) {
 		}
 	}
 	return start, count, true
+}
+
+func scimSort(w http.ResponseWriter, r *http.Request, attributes ...string) (string, string, bool) {
+	sortBy := strings.TrimSpace(r.URL.Query().Get("sortBy"))
+	sortOrder := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sortOrder")))
+	if sortBy == "" {
+		if sortOrder != "" {
+			writeSCIMError(w, http.StatusBadRequest, "invalidValue", "sortOrder requires sortBy")
+			return "", "", false
+		}
+		return "", "", true
+	}
+	matched := ""
+	for _, attribute := range attributes {
+		if strings.EqualFold(sortBy, attribute) {
+			matched = attribute
+			break
+		}
+	}
+	if matched == "" {
+		writeSCIMError(w, http.StatusBadRequest, "invalidValue", "unsupported sortBy attribute")
+		return "", "", false
+	}
+	if sortOrder == "" {
+		sortOrder = "ascending"
+	}
+	if sortOrder != "ascending" && sortOrder != "descending" {
+		writeSCIMError(w, http.StatusBadRequest, "invalidValue", "sortOrder must be ascending or descending")
+		return "", "", false
+	}
+	return matched, sortOrder, true
 }
 
 func scimListResponse(resources []any, total, start, items int) map[string]any {

@@ -15,6 +15,8 @@ type directoryClientStub struct {
 	teamFilter  string
 	userOffset  int
 	userLimit   int
+	userSortBy  string
+	userOrder   string
 	putTeam     string
 	memberTeam  string
 	memberUser  string
@@ -26,10 +28,12 @@ type directoryClientStub struct {
 	group       *DirectoryGroup
 	groupAttr   string
 	groupValue  string
+	teamSortBy  string
+	teamOrder   string
 }
 
-func (c *directoryClientStub) ListUsers(_ context.Context, _ ManagementAudit, _ string, offset, limit int, includeDeleted bool) ([]DirectoryUser, int, error) {
-	c.userOffset, c.userLimit = offset, limit
+func (c *directoryClientStub) ListUsers(_ context.Context, _ ManagementAudit, _ string, offset, limit int, includeDeleted bool, sortBy, sortOrder string) ([]DirectoryUser, int, error) {
+	c.userOffset, c.userLimit, c.userSortBy, c.userOrder = offset, limit, sortBy, sortOrder
 	if c.user != nil {
 		if c.user.DeletedAt != nil && !includeDeleted {
 			return nil, 0, nil
@@ -68,8 +72,8 @@ func (c *directoryClientStub) PutUser(_ context.Context, _ ManagementAudit, id s
 	c.user = &user
 	return user, nil
 }
-func (c *directoryClientStub) ListTeams(_ context.Context, _ ManagementAudit, teamID string, _, _ int, includeDeleted bool) ([]DirectoryTeam, int, error) {
-	c.teamFilter = teamID
+func (c *directoryClientStub) ListTeams(_ context.Context, _ ManagementAudit, teamID string, _, _ int, includeDeleted bool, sortBy, sortOrder string) ([]DirectoryTeam, int, error) {
+	c.teamFilter, c.teamSortBy, c.teamOrder = teamID, sortBy, sortOrder
 	if c.group != nil {
 		if c.group.Team.DeletedAt != nil && !includeDeleted {
 			return nil, 0, nil

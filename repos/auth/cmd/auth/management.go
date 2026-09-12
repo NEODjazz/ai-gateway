@@ -237,7 +237,7 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 			}
 			includeDeleted = parsed
 		}
-		users, total, err := module.ListDirectoryUsers(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted)
+		users, total, err := module.ListDirectoryUsers(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted, r.URL.Query().Get("sort_by"), r.URL.Query().Get("sort_order"))
 		if err != nil {
 			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
 			return
@@ -354,7 +354,7 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 			}
 			includeDeleted = parsed
 		}
-		teams, total, err := module.ListDirectoryTeams(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted)
+		teams, total, err := module.ListDirectoryTeams(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted, r.URL.Query().Get("sort_by"), r.URL.Query().Get("sort_order"))
 		if err != nil {
 			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
 			return

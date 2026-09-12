@@ -58,7 +58,7 @@ func TestSCIMDiscoveryAndPaginationAreTruthful(t *testing.T) {
 
 	config := httptest.NewRecorder()
 	router.ServeHTTP(config, httptest.NewRequest(http.MethodGet, "/scim/v2/ServiceProviderConfig", nil))
-	if config.Code != http.StatusOK || !strings.Contains(config.Body.String(), `"filter":{"maxResults":500,"supported":true}`) || !strings.Contains(config.Body.String(), `"patch":{"supported":true}`) {
+	if config.Code != http.StatusOK || !strings.Contains(config.Body.String(), `"filter":{"maxResults":500,"supported":true}`) || !strings.Contains(config.Body.String(), `"patch":{"supported":true}`) || !strings.Contains(config.Body.String(), `"sort":{"supported":true}`) {
 		t.Fatalf("config status=%d body=%s", config.Code, config.Body.String())
 	}
 	resourceType := httptest.NewRecorder()
@@ -78,8 +78,8 @@ func TestSCIMDiscoveryAndPaginationAreTruthful(t *testing.T) {
 	}
 
 	list := httptest.NewRecorder()
-	router.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/scim/v2/Users?startIndex=4&count=2", nil))
-	if list.Code != http.StatusOK || client.userOffset != 3 || client.userLimit != 2 || !strings.Contains(list.Body.String(), `"totalResults":7`) || !strings.Contains(list.Body.String(), `"startIndex":4`) {
+	router.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/scim/v2/Users?startIndex=4&count=2&sortBy=userName&sortOrder=descending", nil))
+	if list.Code != http.StatusOK || client.userOffset != 3 || client.userLimit != 2 || client.userSortBy != "userName" || client.userOrder != "descending" || !strings.Contains(list.Body.String(), `"totalResults":7`) || !strings.Contains(list.Body.String(), `"startIndex":4`) {
 		t.Fatalf("list status=%d offset=%d limit=%d body=%s", list.Code, client.userOffset, client.userLimit, list.Body.String())
 	}
 
@@ -100,6 +100,11 @@ func TestSCIMDiscoveryAndPaginationAreTruthful(t *testing.T) {
 	router.ServeHTTP(invalid, httptest.NewRequest(http.MethodGet, "/scim/v2/Users?startIndex=0", nil))
 	if invalid.Code != http.StatusBadRequest || invalid.Header().Get("Content-Type") != "application/scim+json" {
 		t.Fatalf("invalid status=%d headers=%v body=%s", invalid.Code, invalid.Header(), invalid.Body.String())
+	}
+	invalidSort := httptest.NewRecorder()
+	router.ServeHTTP(invalidSort, httptest.NewRequest(http.MethodGet, "/scim/v2/Users?sortBy=groups", nil))
+	if invalidSort.Code != http.StatusBadRequest || !strings.Contains(invalidSort.Body.String(), `"scimType":"invalidValue"`) {
+		t.Fatalf("invalid sort status=%d body=%s", invalidSort.Code, invalidSort.Body.String())
 	}
 }
 

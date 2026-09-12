@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.293
+  version: 0.1.294
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -147,6 +147,8 @@ paths:
         - {name: startIndex, in: query, schema: {type: integer, minimum: 1, default: 1}}
         - {name: count, in: query, schema: {type: integer, minimum: 0, maximum: 500, default: 100}}
         - {name: filter, in: query, description: Supports exact userName eq and externalId eq expressions, schema: {type: string, maxLength: 1024}}
+        - {name: sortBy, in: query, schema: {type: string, enum: [userName, displayName, externalId]}}
+        - {name: sortOrder, in: query, schema: {type: string, enum: [ascending, descending], default: ascending}}
       responses:
         '200': {description: User page, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMUserList'}}}}
         '400': {description: Invalid pagination, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
@@ -213,6 +215,8 @@ paths:
         - {name: startIndex, in: query, schema: {type: integer, minimum: 1, default: 1}}
         - {name: count, in: query, schema: {type: integer, minimum: 0, maximum: 500, default: 100}}
         - {name: filter, in: query, description: Supports exact displayName eq and externalId eq expressions, schema: {type: string, maxLength: 1024}}
+        - {name: sortBy, in: query, schema: {type: string, enum: [displayName, externalId]}}
+        - {name: sortOrder, in: query, schema: {type: string, enum: [ascending, descending], default: ascending}}
       responses:
         '200': {description: Group page, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMGroupList'}}}}
         '400': {description: Invalid pagination or filter, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}

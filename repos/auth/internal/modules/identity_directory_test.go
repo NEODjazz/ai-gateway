@@ -2,8 +2,19 @@ package modules
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
+
+func TestDirectoryOrderUsesOnlyAllowlistedColumns(t *testing.T) {
+	order, err := directoryOrder("u", "displayName", "descending", map[string]string{"displayName": "u.name"})
+	if err != nil || order != "lower(u.name) DESC,u.id DESC" {
+		t.Fatalf("order=%q err=%v", order, err)
+	}
+	if _, err := directoryOrder("u", "name; DROP TABLE users", "ascending", map[string]string{"displayName": "u.name"}); !errors.Is(err, ErrInvalidDirectoryEntry) {
+		t.Fatalf("unsafe sort accepted: %v", err)
+	}
+}
 
 type membershipTestStore struct {
 	managementStore

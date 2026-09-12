@@ -51,15 +51,40 @@ var (
 	ErrDirectoryNotFound     = errors.New("identity directory entry not found")
 )
 
-func (m AuthModule) ListDirectoryUsers(ctx context.Context, teamID string, offset, limit int, includeDeleted bool) ([]DirectoryUser, int, error) {
+func validDirectorySort(sortBy, sortOrder string, attributes ...string) bool {
+	if sortBy == "" {
+		return sortOrder == ""
+	}
+	if sortOrder != "ascending" && sortOrder != "descending" {
+		return false
+	}
+	return oneOf(sortBy, attributes...)
+}
+
+func directoryOrder(alias, sortBy, sortOrder string, columns map[string]string) (string, error) {
+	if sortBy == "" && sortOrder == "" {
+		return alias + ".created_at DESC," + alias + ".id", nil
+	}
+	column, ok := columns[sortBy]
+	if !ok || (sortOrder != "ascending" && sortOrder != "descending") {
+		return "", ErrInvalidDirectoryEntry
+	}
+	direction := "ASC"
+	if sortOrder == "descending" {
+		direction = "DESC"
+	}
+	return "lower(" + column + ") " + direction + "," + alias + ".id " + direction, nil
+}
+
+func (m AuthModule) ListDirectoryUsers(ctx context.Context, teamID string, offset, limit int, includeDeleted bool, sortBy, sortOrder string) ([]DirectoryUser, int, error) {
 	store, err := m.directoryStore()
 	if err != nil {
 		return nil, 0, err
 	}
-	if offset < 0 || limit < 1 || limit > 500 || len(teamID) > 256 {
+	if offset < 0 || limit < 1 || limit > 500 || len(teamID) > 256 || !validDirectorySort(sortBy, sortOrder, "userName", "displayName", "externalId") {
 		return nil, 0, ErrInvalidDirectoryEntry
 	}
-	return store.ListUsers(ctx, strings.TrimSpace(teamID), offset, limit, includeDeleted)
+	return store.ListUsers(ctx, strings.TrimSpace(teamID), offset, limit, includeDeleted, sortBy, sortOrder)
 }
 
 func (m AuthModule) PutDirectoryUser(ctx context.Context, user DirectoryUser) (DirectoryUser, error) {
@@ -126,15 +151,15 @@ func (m AuthModule) DeleteDirectoryUser(ctx context.Context, id string) (Directo
 	return store.DeleteUser(ctx, id)
 }
 
-func (m AuthModule) ListDirectoryTeams(ctx context.Context, teamID string, offset, limit int, includeDeleted bool) ([]DirectoryTeam, int, error) {
+func (m AuthModule) ListDirectoryTeams(ctx context.Context, teamID string, offset, limit int, includeDeleted bool, sortBy, sortOrder string) ([]DirectoryTeam, int, error) {
 	store, err := m.directoryStore()
 	if err != nil {
 		return nil, 0, err
 	}
-	if offset < 0 || limit < 1 || limit > 500 || len(teamID) > 256 {
+	if offset < 0 || limit < 1 || limit > 500 || len(teamID) > 256 || !validDirectorySort(sortBy, sortOrder, "displayName", "externalId") {
 		return nil, 0, ErrInvalidDirectoryEntry
 	}
-	return store.ListTeams(ctx, strings.TrimSpace(teamID), offset, limit, includeDeleted)
+	return store.ListTeams(ctx, strings.TrimSpace(teamID), offset, limit, includeDeleted, sortBy, sortOrder)
 }
 
 func (m AuthModule) PutDirectoryTeam(ctx context.Context, team DirectoryTeam) (DirectoryTeam, error) {
@@ -206,13 +231,13 @@ func (m AuthModule) teamMembershipStore() (teamMembershipStore, error) {
 }
 
 type identityDirectoryStore interface {
-	ListUsers(context.Context, string, int, int, bool) ([]DirectoryUser, int, error)
+	ListUsers(context.Context, string, int, int, bool, string, string) ([]DirectoryUser, int, error)
 	GetUser(context.Context, string) (DirectoryUser, error)
 	FindUser(context.Context, string, string) (DirectoryUser, bool, error)
 	DeleteUser(context.Context, string) (DirectoryUser, error)
 	CreateUser(context.Context, DirectoryUser) (DirectoryUser, error)
 	PutUser(context.Context, DirectoryUser) (DirectoryUser, error)
-	ListTeams(context.Context, string, int, int, bool) ([]DirectoryTeam, int, error)
+	ListTeams(context.Context, string, int, int, bool, string, string) ([]DirectoryTeam, int, error)
 	PutTeam(context.Context, DirectoryTeam) (DirectoryTeam, error)
 	PutMembership(context.Context, TeamMembership) (TeamMembership, error)
 }
@@ -242,12 +267,16 @@ func validDirectoryID(value string) bool {
 
 func validDirectoryStatus(value string) bool { return value == "active" || value == "disabled" }
 
-func (s *PostgresVirtualKeyStore) ListUsers(ctx context.Context, teamID string, offset, limit int, includeDeleted bool) ([]DirectoryUser, int, error) {
-	rows, err := s.pool.Query(ctx, `SELECT u.id,u.external_id,COALESCE(u.email,''),u.name,u.status,u.roles,
+func (s *PostgresVirtualKeyStore) ListUsers(ctx context.Context, teamID string, offset, limit int, includeDeleted bool, sortBy, sortOrder string) ([]DirectoryUser, int, error) {
+	order, err := directoryOrder("u", sortBy, sortOrder, map[string]string{"userName": "COALESCE(u.email,'')", "displayName": "u.name", "externalId": "u.external_id"})
+	if err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.pool.Query(ctx, fmt.Sprintf(`SELECT u.id,u.external_id,COALESCE(u.email,''),u.name,u.status,u.roles,
 		COALESCE(array_agg(m.team_id ORDER BY m.team_id) FILTER (WHERE m.team_id IS NOT NULL),'{}'),u.created_at,u.updated_at,u.scim_deleted_at
 		FROM users u LEFT JOIN auth_team_memberships m ON m.user_id=u.id
 		WHERE ($1='' OR m.team_id=$1) AND ($4 OR u.scim_deleted_at IS NULL) GROUP BY u.id,u.external_id,u.email,u.name,u.status,u.roles,u.created_at,u.updated_at,u.scim_deleted_at
-		ORDER BY u.created_at DESC,u.id OFFSET $2 LIMIT $3`, teamID, offset, limit, includeDeleted)
+		ORDER BY %s OFFSET $2 LIMIT $3`, order), teamID, offset, limit, includeDeleted)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list directory users: %w", err)
 	}
@@ -359,11 +388,15 @@ func (s *PostgresVirtualKeyStore) PutUser(ctx context.Context, user DirectoryUse
 	return user, err
 }
 
-func (s *PostgresVirtualKeyStore) ListTeams(ctx context.Context, teamID string, offset, limit int, includeDeleted bool) ([]DirectoryTeam, int, error) {
-	rows, err := s.pool.Query(ctx, `SELECT t.id,t.external_id,t.name,t.description,t.status,
+func (s *PostgresVirtualKeyStore) ListTeams(ctx context.Context, teamID string, offset, limit int, includeDeleted bool, sortBy, sortOrder string) ([]DirectoryTeam, int, error) {
+	order, err := directoryOrder("t", sortBy, sortOrder, map[string]string{"displayName": "t.name", "externalId": "t.external_id"})
+	if err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.pool.Query(ctx, fmt.Sprintf(`SELECT t.id,t.external_id,t.name,t.description,t.status,
 		COALESCE(array_agg(m.user_id ORDER BY m.user_id) FILTER (WHERE m.user_id IS NOT NULL),'{}'),t.created_at,t.updated_at,t.scim_deleted_at FROM auth_teams t
 		LEFT JOIN auth_team_memberships m ON m.team_id=t.id WHERE ($1='' OR t.id=$1) AND ($4 OR t.scim_deleted_at IS NULL)
-		GROUP BY t.id ORDER BY t.created_at DESC,t.id OFFSET $2 LIMIT $3`, teamID, offset, limit, includeDeleted)
+		GROUP BY t.id ORDER BY %s OFFSET $2 LIMIT $3`, order), teamID, offset, limit, includeDeleted)
 	if err != nil {
 		return nil, 0, err
 	}

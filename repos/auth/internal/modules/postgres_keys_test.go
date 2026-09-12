@@ -106,6 +106,10 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	if err != nil || provisionedGroup.MemberCount != 2 || len(members) != 2 {
 		t.Fatalf("create provisioned group failed: group=%+v members=%v err=%v", provisionedGroup, members, err)
 	}
+	sortedUsers, sortedTotal, err := store.ListUsers(ctx, provisionedGroupID, 0, 10, false, "userName", "descending")
+	if err != nil || sortedTotal != 2 || len(sortedUsers) != 2 || sortedUsers[0].ID != scimUserID || sortedUsers[1].ID != directoryUserID {
+		t.Fatalf("sorted users=%+v total=%d err=%v", sortedUsers, sortedTotal, err)
+	}
 	if _, err := store.PutMembership(ctx, TeamMembership{TeamID: provisionedGroupID, UserID: directoryUserID, Roles: []string{"team_admin"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -135,19 +139,19 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	if err != nil || len(loadedMembers) != 1 || loadedMembers[0] != directoryUserID {
 		t.Fatalf("deleted user membership remained: group=%+v members=%v err=%v", loadedGroup, loadedMembers, err)
 	}
-	users, totalUsers, err := store.ListUsers(ctx, directoryTeamID, 0, 10, true)
+	users, totalUsers, err := store.ListUsers(ctx, directoryTeamID, 0, 10, true, "", "")
 	if err != nil || totalUsers != 1 || len(users) != 1 || users[0].ID != directoryUserID || len(users[0].TeamIDs) != 1 {
 		t.Fatalf("scoped users=%+v total=%d err=%v", users, totalUsers, err)
 	}
-	users, totalUsers, err = store.ListUsers(ctx, directoryTeamID, 1, 10, true)
+	users, totalUsers, err = store.ListUsers(ctx, directoryTeamID, 1, 10, true, "", "")
 	if err != nil || totalUsers != 1 || len(users) != 0 {
 		t.Fatalf("scoped user page=%+v total=%d err=%v", users, totalUsers, err)
 	}
-	teams, totalTeams, err := store.ListTeams(ctx, directoryTeamID, 0, 10, true)
+	teams, totalTeams, err := store.ListTeams(ctx, directoryTeamID, 0, 10, true, "", "")
 	if err != nil || totalTeams != 1 || len(teams) != 1 || teams[0].MemberCount != 1 {
 		t.Fatalf("scoped teams=%+v total=%d err=%v", teams, totalTeams, err)
 	}
-	teams, totalTeams, err = store.ListTeams(ctx, directoryTeamID, 1, 10, true)
+	teams, totalTeams, err = store.ListTeams(ctx, directoryTeamID, 1, 10, true, "", "")
 	if err != nil || totalTeams != 1 || len(teams) != 0 {
 		t.Fatalf("scoped team page=%+v total=%d err=%v", teams, totalTeams, err)
 	}

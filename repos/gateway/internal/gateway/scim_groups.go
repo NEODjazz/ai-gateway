@@ -52,6 +52,10 @@ func (h Handler) ListSCIMGroups(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	sortBy, sortOrder, ok := scimSort(w, r, "displayName", "externalId")
+	if !ok {
+		return
+	}
 	var teams []DirectoryTeam
 	var total int
 	var err error
@@ -75,7 +79,7 @@ func (h Handler) ListSCIMGroups(w http.ResponseWriter, r *http.Request) {
 		if limit == 0 {
 			limit = 1
 		}
-		teams, total, err = h.directory.ListTeams(r.Context(), managementAudit(req), "", start-1, limit, false)
+		teams, total, err = h.directory.ListTeams(r.Context(), managementAudit(req), "", start-1, limit, false, sortBy, sortOrder)
 	}
 	if err != nil {
 		writeSCIMGroupFailure(w, err)

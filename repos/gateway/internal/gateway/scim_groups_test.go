@@ -34,8 +34,8 @@ func TestSCIMGroupLifecycle(t *testing.T) {
 	}
 
 	list := httptest.NewRecorder()
-	router.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/scim/v2/Groups?startIndex=1&count=10", nil))
-	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"totalResults":1`) || !strings.Contains(list.Body.String(), `"value":"user-2"`) {
+	router.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/scim/v2/Groups?startIndex=1&count=10&sortBy=displayName", nil))
+	if list.Code != http.StatusOK || client.teamSortBy != "displayName" || client.teamOrder != "ascending" || !strings.Contains(list.Body.String(), `"totalResults":1`) || !strings.Contains(list.Body.String(), `"value":"user-2"`) {
 		t.Fatalf("list status=%d body=%s", list.Code, list.Body.String())
 	}
 	filtered := httptest.NewRecorder()

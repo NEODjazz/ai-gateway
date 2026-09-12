@@ -52,13 +52,13 @@ type DirectoryGroup struct {
 }
 
 type IdentityDirectoryClient interface {
-	ListUsers(context.Context, ManagementAudit, string, int, int, bool) ([]DirectoryUser, int, error)
+	ListUsers(context.Context, ManagementAudit, string, int, int, bool, string, string) ([]DirectoryUser, int, error)
 	GetUser(context.Context, ManagementAudit, string) (DirectoryUser, error)
 	FindUser(context.Context, ManagementAudit, string, string) (DirectoryUser, bool, error)
 	CreateUser(context.Context, ManagementAudit, DirectoryUser) (DirectoryUser, error)
 	DeleteUser(context.Context, ManagementAudit, string) (DirectoryUser, error)
 	PutUser(context.Context, ManagementAudit, string, DirectoryUser) (DirectoryUser, error)
-	ListTeams(context.Context, ManagementAudit, string, int, int, bool) ([]DirectoryTeam, int, error)
+	ListTeams(context.Context, ManagementAudit, string, int, int, bool, string, string) ([]DirectoryTeam, int, error)
 	PutTeam(context.Context, ManagementAudit, string, DirectoryTeam) (DirectoryTeam, error)
 	PutMembership(context.Context, ManagementAudit, string, string, TeamMembership) (TeamMembership, error)
 	ListMemberships(context.Context, ManagementAudit, string, int) ([]TeamMembership, error)
@@ -73,10 +73,14 @@ func (h Handler) WithIdentityDirectory(client IdentityDirectoryClient) Handler {
 	return h
 }
 
-func (c *RemoteManagementClient) ListUsers(ctx context.Context, audit ManagementAudit, teamID string, offset, limit int, includeDeleted bool) ([]DirectoryUser, int, error) {
+func (c *RemoteManagementClient) ListUsers(ctx context.Context, audit ManagementAudit, teamID string, offset, limit int, includeDeleted bool, sortBy, sortOrder string) ([]DirectoryUser, int, error) {
 	q := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}, "include_deleted": {strconv.FormatBool(includeDeleted)}}
 	if teamID != "" {
 		q.Set("team_id", teamID)
+	}
+	if sortBy != "" {
+		q.Set("sort_by", sortBy)
+		q.Set("sort_order", sortOrder)
 	}
 	result, err := managementCall[struct{}, struct {
 		Data  []DirectoryUser `json:"data"`
@@ -105,10 +109,14 @@ func (c *RemoteManagementClient) DeleteUser(ctx context.Context, audit Managemen
 func (c *RemoteManagementClient) PutUser(ctx context.Context, audit ManagementAudit, id string, user DirectoryUser) (DirectoryUser, error) {
 	return managementCall[DirectoryUser, DirectoryUser](ctx, c, http.MethodPut, "/internal/v1/users/"+url.PathEscape(id), audit, user)
 }
-func (c *RemoteManagementClient) ListTeams(ctx context.Context, audit ManagementAudit, teamID string, offset, limit int, includeDeleted bool) ([]DirectoryTeam, int, error) {
+func (c *RemoteManagementClient) ListTeams(ctx context.Context, audit ManagementAudit, teamID string, offset, limit int, includeDeleted bool, sortBy, sortOrder string) ([]DirectoryTeam, int, error) {
 	q := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}, "include_deleted": {strconv.FormatBool(includeDeleted)}}
 	if teamID != "" {
 		q.Set("team_id", teamID)
+	}
+	if sortBy != "" {
+		q.Set("sort_by", sortBy)
+		q.Set("sort_order", sortOrder)
 	}
 	result, err := managementCall[struct{}, struct {
 		Data  []DirectoryTeam `json:"data"`
@@ -166,7 +174,7 @@ func (h Handler) ListDirectoryUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	teamID := directoryScope(req, r.URL.Query().Get("team_id"))
-	users, total, err := h.directory.ListUsers(r.Context(), managementAudit(req), teamID, offset, limit, true)
+	users, total, err := h.directory.ListUsers(r.Context(), managementAudit(req), teamID, offset, limit, true, "", "")
 	if err != nil {
 		writeDirectoryFailure(w, err)
 		return
@@ -187,7 +195,7 @@ func (h Handler) ListDirectoryTeams(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	teamID := directoryScope(req, r.URL.Query().Get("team_id"))
-	teams, total, err := h.directory.ListTeams(r.Context(), managementAudit(req), teamID, offset, limit, true)
+	teams, total, err := h.directory.ListTeams(r.Context(), managementAudit(req), teamID, offset, limit, true, "", "")
 	if err != nil {
 		writeDirectoryFailure(w, err)
 		return

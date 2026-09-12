@@ -216,7 +216,8 @@ it through the normal auth pipeline before creating the browser session.
 
 SCIM 2.0 user and group provisioning is available under `/scim/v2`. Discovery
 exposes the implemented resources, exact `startIndex`/`count` pagination,
-supported exact-match filters, and the supported PATCH surface.
+server-side allowlisted sorting, supported exact-match filters, and the
+supported PATCH surface.
 Provisioning requires a gateway bearer credential with the global `admin` role;
 create, replace, patch, and delete operations use the durable identity directory
 and fail closed when audit recording is unavailable. Group writes synchronize
