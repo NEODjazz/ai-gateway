@@ -604,8 +604,10 @@ are limited to 32 MiB and the accumulated SSE wire payload to 64 MiB.
 Discovery follows native pagination with a 30-second overall deadline, a maximum
 of 100 pages/10,000 scanned models and repeated-token detection. Only models
 advertising `generateContent`, `embedContent` or `batchEmbedContents` are offered.
-Native Responses, advanced inbound GenerateContent options and Interactions remain
-separate gaps.
+Native Responses use their own adapter contract. Advanced inbound GenerateContent
+options remain separate gaps. Native Interactions supports model and agent execution,
+streaming, durable background processing, stored lifecycle operations and owner-bound
+reuse of provider-created agent environments.
 Unsupported generation controls, parallel tool control and strict function
 schemas fail explicitly; seed/output limits must fit the native integer range.
 
@@ -800,8 +802,8 @@ complete JSON objects. Frame and tool accumulation have separate 32 MiB limits.
 Stream failures emit a redacted native error without a successful finish reason.
 
 Regression tests cover conversion, JSON/SSE, authorization, quotas, native usage
-and billing, bounded stream accumulation and disconnects. Advanced safety, grounding,
-thought output, file/audio parts and Interactions remain unsupported.
+and billing, bounded stream accumulation and disconnects. Native safety settings,
+cached content, grounding/server tools and file/audio parts remain unsupported.
 
 
 ### Native GenerateContent token counting
