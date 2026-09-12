@@ -1807,3 +1807,23 @@ same image. Live liveness and readiness returned 204, the served OpenAPI
 reported 0.1.387, and an unauthenticated Chat request returned 401 before
 deployment selection. No provider credential or external inference was used by
 the smoke checks.
+
+Source `9caf413` adds model-specific Together hybrid reasoning controls. For
+nine documented hybrid model IDs, public `reasoning_effort=none` maps to native
+`reasoning.enabled=false`; the current DeepSeek V4 Pro ID additionally accepts
+`high` and `max`. Adjustable GPT-OSS and the prior versioned DeepSeek policies
+remain distinct. Reasoning output and unchanged assistant history use the
+native alias only for the explicit model list, and the capability profile
+publishes the exact per-model values. Focused provider tests, vet, build, the
+full Go suite and the full race suite passed. OpenAPI 0.1.388 identifies the
+deployed contract revision.
+
+Rancher Desktop built
+`ai-gateway-gateway:together-hybrid-reasoning-9caf413` with image ID
+`sha256:a91b98cb925425277d1d75fd33485bf0684700196e0b7644cc07a1d72045f3b0`.
+Gateway Helm revision 494 completed successfully. Pod
+`ai-gateway-gateway-96595fd5f-ttjcc` became Ready with zero restarts and the
+same image. Live liveness and readiness returned 204, the served OpenAPI
+reported 0.1.388, and an unauthenticated hybrid-reasoning request returned 401
+before deployment selection. No provider credential or external inference was
+used by the smoke checks.

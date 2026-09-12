@@ -100,16 +100,19 @@ JSON, and require non-negative provider token usage whose total exactly matches
 its input and output components. Missing or inconsistent usage fails the request
 before billing settlement can use an estimate.
 
-Together Chat preserves native reasoning output in both JSON and SSE. For
-`openai/gpt-oss-20b`, `openai/gpt-oss-120b`, and
-`deepseek-ai/DeepSeek-V4-Pro-0813`, the adapter maps the provider's `reasoning`
-field to the public `reasoning_content` field and maps unchanged assistant
-reasoning history back to the native field. Conflicting aliases, non-string or
-oversized reasoning fail before a response is accepted. The two GPT-OSS models
-accept `reasoning_effort` values `low`, `medium`, and `high`; DeepSeek V4 Pro
-0813 accepts `high` and `max`. Other model/value combinations fail before HTTP.
-The provider capability response reports these exact model overrides separately
-from its provider-wide Chat parameter policy.
+Together Chat preserves native reasoning output in both JSON and SSE. The
+adapter maps the provider's `reasoning` field to public `reasoning_content` and
+maps unchanged assistant history back to the native field for the exact models
+listed in its capability profile. Conflicting aliases, non-string or oversized
+reasoning fail before a response is accepted. The two GPT-OSS models accept
+`reasoning_effort` values `low`, `medium`, and `high`; the versioned DeepSeek V4
+Pro 0813 ID accepts `high` and `max`. The current
+`deepseek-ai/DeepSeek-V4-Pro` accepts `none`, `high`, and `max`.
+`reasoning_effort=none` maps to native `reasoning.enabled=false` for that model
+and the documented GLM 5/5.1, Kimi K2.5/K2.6, Qwen 3.5/3.6 and Cogito v2.1
+hybrid IDs. Other model/value combinations fail before HTTP. The provider
+capability response reports these exact model overrides separately from its
+provider-wide Chat parameter policy.
 
 Together Chat accepts public `logprobs=true` and maps it to the provider's
 integer `logprobs=0` control. Bounded JSON token arrays and numeric SSE

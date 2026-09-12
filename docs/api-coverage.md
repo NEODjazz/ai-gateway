@@ -20,7 +20,7 @@ availability is not inferred from these tests.
 | Family | Current implementation | Remaining work |
 | --- | --- | --- |
 | Models | Authenticated list and single-model retrieval filtered by credential, access-group and tag policy; hidden and absent models share the same not-found response | Provider-side deletion is intentionally outside the gateway control plane |
-| Chat completions | JSON, tools, structured output, vision input, SSE, generation controls, bounded multi-choice with aggregate reserve; native Cohere v2 text, structured JSON/SSE, generation controls and JSON/SSE function tools/history; native Anthropic web search with citations and actual search usage, domain-allowlisted web fetch with citations, content limits and cache exclusion, and model-specific deprecated top-k sampling; native Together preserves reasoning output/history aliases, exposes exact model-specific reasoning-effort values, normalizes selected-token log probabilities and finish reasons in JSON/SSE, forwards validated sampling controls and maps both public output-token-limit names to its native field | Additional controls and model-specific policy |
+| Chat completions | JSON, tools, structured output, vision input, SSE, generation controls, bounded multi-choice with aggregate reserve; native Cohere v2 text, structured JSON/SSE, generation controls and JSON/SSE function tools/history; native Anthropic web search with citations and actual search usage, domain-allowlisted web fetch with citations, content limits and cache exclusion, and model-specific deprecated top-k sampling; native Together preserves reasoning output/history aliases, exposes exact adjustable-effort and hybrid-disable policies by model, normalizes selected-token log probabilities and finish reasons in JSON/SSE, forwards validated sampling controls and maps both public output-token-limit names to its native field | Additional controls and model-specific policy |
 | Responses | Create, indexed SSE assembly, scoped deployment affinity, function tools, MCP passthrough, bounded inline PDF input with explicit deployment capability and scanner projection, stateless reasoning history, native input-token count, owned retrieve/delete/cancel/input-items, durable background settlement, generation options and metadata | Remaining provider-specific parameters and counters |
 | Response compaction | Native compact contract, bounded opaque output, model authorization and usage settlement | Additional provider-native compact request options as demand is confirmed |
 | Embeddings | String/list and bounded token-ID input, exact token-ID accounting, float/base64 output, compatible adapters and native Gemini, Ollama, Cohere v2 and Voyage adapters | Additional provider compatibility |
@@ -206,6 +206,9 @@ availability is not inferred from these tests.
 - `7765869`: Native Together Chat maps the provider's `eos` terminal reason to
   public `stop`, preserves the other documented reasons and rejects malformed,
   missing or unknown terminal values in JSON and SSE.
+- `9caf413`: Native Together Chat maps public `reasoning_effort=none` to the
+  native disable object for nine exact hybrid model IDs, adds the current
+  DeepSeek V4 Pro effort policy and preserves reasoning history for each model.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control
