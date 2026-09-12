@@ -45,11 +45,13 @@ func (h Handler) UpdateGuardrailPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Description string `json:"description,omitempty"`
-		DLP         bool   `json:"dlp"`
-		OutputDLP   bool   `json:"output_dlp"`
-		AV          bool   `json:"av"`
-		Enabled     bool   `json:"enabled"`
+		Description        string   `json:"description,omitempty"`
+		DLP                bool     `json:"dlp"`
+		OutputDLP          bool     `json:"output_dlp"`
+		AV                 bool     `json:"av"`
+		Anonymization      string   `json:"anonymization,omitempty"`
+		AnonymizationRules []string `json:"anonymization_rules,omitempty"`
+		Enabled            bool     `json:"enabled"`
 	}
 	if !decodeGuardrailJSON(w, r, &input) {
 		return
@@ -61,7 +63,7 @@ func (h Handler) UpdateGuardrailPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
 	}
-	policy := provider.GuardrailPolicy{Description: input.Description, DLP: input.DLP, OutputDLP: input.OutputDLP, AV: input.AV, Enabled: input.Enabled}
+	policy := provider.GuardrailPolicy{Description: input.Description, DLP: input.DLP, OutputDLP: input.OutputDLP, AV: input.AV, Anonymization: input.Anonymization, AnonymizationRules: input.AnonymizationRules, Enabled: input.Enabled}
 	var saved provider.GuardrailPolicy
 	var err error
 	if durable, ok := h.provider.(provider.DurableGuardrailController); ok {

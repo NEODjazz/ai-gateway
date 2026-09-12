@@ -9,12 +9,14 @@ import (
 )
 
 type GuardrailPolicy struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	DLP         bool   `json:"dlp"`
-	OutputDLP   bool   `json:"output_dlp"`
-	AV          bool   `json:"av"`
-	Enabled     bool   `json:"enabled"`
+	Name               string   `json:"name"`
+	Description        string   `json:"description,omitempty"`
+	DLP                bool     `json:"dlp"`
+	OutputDLP          bool     `json:"output_dlp"`
+	AV                 bool     `json:"av"`
+	Anonymization      string   `json:"anonymization,omitempty"`
+	AnonymizationRules []string `json:"anonymization_rules,omitempty"`
+	Enabled            bool     `json:"enabled"`
 }
 type guardrailRegistry struct {
 	current atomic.Pointer[map[string]GuardrailPolicy]
@@ -41,7 +43,7 @@ func (r *Router) ListGuardrailPolicies() []GuardrailPolicy {
 	}
 	result := make([]GuardrailPolicy, 0, len(*current))
 	for _, policy := range *current {
-		result = append(result, policy)
+		result = append(result, cloneGuardrailPolicy(policy))
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
@@ -55,7 +57,7 @@ func (r *Router) GetGuardrailPolicy(name string) (GuardrailPolicy, bool) {
 		return GuardrailPolicy{}, false
 	}
 	policy, ok := (*current)[name]
-	return policy, ok
+	return cloneGuardrailPolicy(policy), ok
 }
 func (r *Router) UpdateGuardrailPolicy(name string, policy GuardrailPolicy) (GuardrailPolicy, error) {
 	policy, err := normalizeGuardrailPolicy(name, policy)
@@ -70,12 +72,17 @@ func (r *Router) UpdateGuardrailPolicy(name string, policy GuardrailPolicy) (Gua
 	next := map[string]GuardrailPolicy{}
 	if current != nil {
 		for key, value := range *current {
-			next[key] = value
+			next[key] = cloneGuardrailPolicy(value)
 		}
 	}
-	next[name] = policy
+	next[name] = cloneGuardrailPolicy(policy)
 	r.guardrails.current.Store(&next)
-	return policy, nil
+	return cloneGuardrailPolicy(policy), nil
+}
+
+func cloneGuardrailPolicy(policy GuardrailPolicy) GuardrailPolicy {
+	policy.AnonymizationRules = append([]string(nil), policy.AnonymizationRules...)
+	return policy
 }
 
 func (r *Router) UpdateGuardrailPolicyDurable(ctx context.Context, name string, policy GuardrailPolicy) (GuardrailPolicy, error) {
@@ -97,7 +104,9 @@ func (r *Router) UpdateGuardrailPolicyDurable(ctx context.Context, name string, 
 func normalizeGuardrailPolicy(name string, policy GuardrailPolicy) (GuardrailPolicy, error) {
 	name = strings.TrimSpace(name)
 	policy.Description = strings.TrimSpace(policy.Description)
-	if name == "" || len(name) > 128 || len(policy.Description) > 1024 || (!policy.DLP && !policy.AV) || (policy.OutputDLP && !policy.DLP) {
+	policy.Anonymization = strings.ToLower(strings.TrimSpace(policy.Anonymization))
+	policy.AnonymizationRules = normalizedAnonymizationRules(policy.AnonymizationRules)
+	if name == "" || len(name) > 128 || len(policy.Description) > 1024 || (!policy.DLP && !policy.AV && policy.Anonymization == "") || (policy.OutputDLP && !policy.DLP) || !validAnonymizationPolicy(policy) {
 		return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
 	}
 	for _, value := range name {
@@ -107,4 +116,81 @@ func normalizeGuardrailPolicy(name string, policy GuardrailPolicy) (GuardrailPol
 	}
 	policy.Name = name
 	return policy, nil
+}
+
+func validAnonymizationPolicy(policy GuardrailPolicy) bool {
+	switch policy.Anonymization {
+	case "":
+		return len(policy.AnonymizationRules) == 0
+	case "disabled", "basic", "strict":
+		return len(policy.AnonymizationRules) == 0
+	case "custom":
+		return len(policy.AnonymizationRules) > 0
+	default:
+		return false
+	}
+}
+
+func normalizedAnonymizationRules(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || len(value) > 128 {
+			continue
+		}
+		if _, found := seen[value]; found {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+type AnonymizationSetting struct {
+	Profile string
+	Mode    string
+	Rules   []string
+}
+
+var BasicAnonymizationRules = []string{
+	"address_ru", "api_key", "bank_card", "domain_user", "email", "inn_context",
+	"jwt", "passport_ru_context", "password", "person_context", "phone", "private_key",
+	"security_key", "social_login", "user_id",
+}
+
+// ResolveAnonymization composes every matching profile. Strict wins over
+// selected rule sets, and disabled applies only when no enabled profile asks
+// for anonymization. With no explicit profile the safe default is strict.
+func ResolveAnonymization(settings ...AnonymizationSetting) (mode string, rules, profiles []string) {
+	explicit := false
+	strict := false
+	selected := make([]string, 0)
+	for _, setting := range settings {
+		setting.Mode = strings.ToLower(strings.TrimSpace(setting.Mode))
+		if setting.Mode == "" {
+			continue
+		}
+		explicit = true
+		profiles = append(profiles, strings.Split(setting.Profile, ",")...)
+		switch setting.Mode {
+		case "strict":
+			strict = true
+		case "basic":
+			selected = append(selected, BasicAnonymizationRules...)
+		case "custom":
+			selected = append(selected, setting.Rules...)
+		}
+	}
+	profiles = normalizedAnonymizationRules(profiles)
+	if strict || !explicit {
+		return "strict", nil, profiles
+	}
+	rules = normalizedAnonymizationRules(selected)
+	if len(rules) != 0 {
+		return "custom", rules, profiles
+	}
+	return "disabled", nil, profiles
 }

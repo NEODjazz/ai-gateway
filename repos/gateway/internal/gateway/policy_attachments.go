@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/provider"
 )
 
 type PolicyResolutionRequest struct {
@@ -18,14 +19,16 @@ type PolicyResolutionRequest struct {
 }
 
 type ResolvedPolicyAttachment struct {
-	ID           string   `json:"id"`
-	PolicyName   string   `json:"policy_name"`
-	Scope        string   `json:"scope"`
-	MatchedVia   []string `json:"matched_via"`
-	PolicyStatus string   `json:"policy_status"`
-	DLP          bool     `json:"dlp"`
-	OutputDLP    bool     `json:"output_dlp"`
-	AV           bool     `json:"av"`
+	ID                 string   `json:"id"`
+	PolicyName         string   `json:"policy_name"`
+	Scope              string   `json:"scope"`
+	MatchedVia         []string `json:"matched_via"`
+	PolicyStatus       string   `json:"policy_status"`
+	DLP                bool     `json:"dlp"`
+	OutputDLP          bool     `json:"output_dlp"`
+	AV                 bool     `json:"av"`
+	Anonymization      string   `json:"anonymization,omitempty"`
+	AnonymizationRules []string `json:"anonymization_rules,omitempty"`
 }
 
 type PolicyResolutionIssue struct {
@@ -35,13 +38,16 @@ type PolicyResolutionIssue struct {
 }
 
 type PolicyResolutionResponse struct {
-	MatchedAttachments []ResolvedPolicyAttachment `json:"matched_attachments"`
-	EffectivePolicies  []string                   `json:"effective_policies"`
-	DLP                bool                       `json:"dlp"`
-	OutputDLP          bool                       `json:"output_dlp"`
-	AV                 bool                       `json:"av"`
-	Enforceable        bool                       `json:"enforceable"`
-	Issues             []PolicyResolutionIssue    `json:"issues"`
+	MatchedAttachments    []ResolvedPolicyAttachment `json:"matched_attachments"`
+	EffectivePolicies     []string                   `json:"effective_policies"`
+	DLP                   bool                       `json:"dlp"`
+	OutputDLP             bool                       `json:"output_dlp"`
+	AV                    bool                       `json:"av"`
+	Anonymization         string                     `json:"anonymization,omitempty"`
+	AnonymizationRules    []string                   `json:"anonymization_rules,omitempty"`
+	AnonymizationProfiles []string                   `json:"anonymization_profiles,omitempty"`
+	Enforceable           bool                       `json:"enforceable"`
+	Issues                []PolicyResolutionIssue    `json:"issues"`
 }
 
 func (h Handler) ResolvePolicyAttachments(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +84,7 @@ func (h Handler) resolvePolicyAttachmentSet(attachments []PolicyAttachment, cont
 	}
 	controller, controllerAvailable := h.guardrailController()
 	seen := make(map[string]struct{}, len(attachments))
+	anonymizationSettings := make([]provider.AnonymizationSetting, 0, len(attachments))
 	for _, attachment := range attachments {
 		resolved := ResolvedPolicyAttachment{ID: attachment.ID, PolicyName: attachment.PolicyName, Scope: attachment.Scope, MatchedVia: policyAttachmentMatchDimensions(attachment, context)}
 		if !controllerAvailable {
@@ -95,14 +102,19 @@ func (h Handler) resolvePolicyAttachmentSet(attachments []PolicyAttachment, cont
 		} else if !policy.Enabled {
 			resolved.PolicyStatus = "disabled"
 			resolved.DLP, resolved.OutputDLP, resolved.AV = policy.DLP, policy.OutputDLP, policy.AV
+			resolved.Anonymization, resolved.AnonymizationRules = policy.Anonymization, append([]string(nil), policy.AnonymizationRules...)
 			result.Enforceable = false
 			result.Issues = append(result.Issues, PolicyResolutionIssue{AttachmentID: attachment.ID, PolicyName: attachment.PolicyName, Code: "policy_disabled"})
 		} else {
 			resolved.PolicyStatus = "enabled"
 			resolved.DLP, resolved.OutputDLP, resolved.AV = policy.DLP, policy.OutputDLP, policy.AV
+			resolved.Anonymization, resolved.AnonymizationRules = policy.Anonymization, append([]string(nil), policy.AnonymizationRules...)
 			result.DLP = result.DLP || policy.DLP
 			result.OutputDLP = result.OutputDLP || policy.OutputDLP
 			result.AV = result.AV || policy.AV
+			if policy.Anonymization != "" {
+				anonymizationSettings = append(anonymizationSettings, provider.AnonymizationSetting{Profile: policy.Name, Mode: policy.Anonymization, Rules: policy.AnonymizationRules})
+			}
 			if _, duplicate := seen[policy.Name]; !duplicate {
 				seen[policy.Name] = struct{}{}
 				result.EffectivePolicies = append(result.EffectivePolicies, policy.Name)
@@ -111,6 +123,9 @@ func (h Handler) resolvePolicyAttachmentSet(attachments []PolicyAttachment, cont
 		result.MatchedAttachments = append(result.MatchedAttachments, resolved)
 	}
 	sort.Strings(result.EffectivePolicies)
+	if len(anonymizationSettings) != 0 {
+		result.Anonymization, result.AnonymizationRules, result.AnonymizationProfiles = provider.ResolveAnonymization(anonymizationSettings...)
+	}
 	return result
 }
 
@@ -161,5 +176,10 @@ func (h Handler) applyPolicyAttachmentsForModels(w http.ResponseWriter, req *mod
 	req.Metadata["policy.modules.dlp.enabled"] = strconv.FormatBool(resolution.DLP)
 	req.Metadata["policy.modules.dlp.output_enabled"] = strconv.FormatBool(resolution.OutputDLP)
 	req.Metadata["policy.modules.av.enabled"] = strconv.FormatBool(resolution.AV)
+	if resolution.Anonymization != "" {
+		req.Metadata["policy.modules.anonymizer.mode"] = resolution.Anonymization
+		req.Metadata["policy.modules.anonymizer.rules"] = strings.Join(resolution.AnonymizationRules, ",")
+		req.Metadata["policy.modules.anonymizer.profiles"] = strings.Join(resolution.AnonymizationProfiles, ",")
+	}
 	return true
 }

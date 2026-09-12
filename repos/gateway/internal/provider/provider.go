@@ -407,6 +407,8 @@ type Endpoint struct {
 	DLPEnabled            bool
 	OutputDLPEnabled      bool
 	AVEnabled             bool
+	Anonymization         string
+	AnonymizationRules    []string
 	MaxRetries            int
 	RetryPolicy           map[string]int
 	CooldownAfterFailures int
@@ -485,6 +487,8 @@ func NewWithError(cfg Config) (Provider, error) {
 		dlpEnabled := endpoint.DLPEnabled
 		outputDLPEnabled := false
 		avEnabled := endpoint.AVEnabled
+		anonymization := ""
+		var anonymizationRules []string
 		policyValid := true
 		if endpoint.GuardrailPolicy != "" {
 			policy, found := cfg.GuardrailPolicies[endpoint.GuardrailPolicy]
@@ -493,6 +497,8 @@ func NewWithError(cfg Config) (Provider, error) {
 				dlpEnabled = policy.DLP
 				outputDLPEnabled = policy.OutputDLP && policy.DLP
 				avEnabled = policy.AV
+				anonymization = policy.Anonymization
+				anonymizationRules = append([]string(nil), policy.AnonymizationRules...)
 			}
 		}
 		mirrorPercentage := endpoint.MirrorPercentage
@@ -512,6 +518,8 @@ func NewWithError(cfg Config) (Provider, error) {
 			DLPEnabled:            dlpEnabled,
 			OutputDLPEnabled:      outputDLPEnabled,
 			AVEnabled:             avEnabled,
+			Anonymization:         anonymization,
+			AnonymizationRules:    anonymizationRules,
 			MaxRetries:            endpoint.MaxRetries,
 			CooldownAfterFailures: endpoint.CooldownAfterFailures,
 			Cooldown:              time.Duration(endpoint.CooldownSeconds) * time.Second,
@@ -612,7 +620,7 @@ func NewWithError(cfg Config) (Provider, error) {
 	router.modelGroups.current.Store(&emptyModelGroups)
 	initialGuardrails := make(map[string]GuardrailPolicy, len(cfg.GuardrailPolicies))
 	for name, policy := range cfg.GuardrailPolicies {
-		initialGuardrails[name] = GuardrailPolicy{Name: name, DLP: policy.DLP, OutputDLP: policy.OutputDLP && policy.DLP, AV: policy.AV, Enabled: true}
+		initialGuardrails[name] = GuardrailPolicy{Name: name, DLP: policy.DLP, OutputDLP: policy.OutputDLP && policy.DLP, AV: policy.AV, Anonymization: policy.Anonymization, AnonymizationRules: append([]string(nil), policy.AnonymizationRules...), Enabled: true}
 	}
 	router.guardrails = &guardrailRegistry{}
 	router.guardrails.current.Store(&initialGuardrails)
@@ -2288,6 +2296,13 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 	for key, value := range providerMetadata(endpoint) {
 		attemptCtx.Metadata[key] = value
 	}
+	mode, rules, profiles := ResolveAnonymization(
+		AnonymizationSetting{Profile: endpoint.GuardrailPolicy, Mode: endpoint.Anonymization, Rules: endpoint.AnonymizationRules},
+		AnonymizationSetting{Profile: attemptCtx.Metadata["policy.modules.anonymizer.profiles"], Mode: attemptCtx.Metadata["policy.modules.anonymizer.mode"], Rules: splitMetadataList(attemptCtx.Metadata["policy.modules.anonymizer.rules"])},
+	)
+	attemptCtx.Metadata["provider.modules.anonymizer.mode"] = mode
+	attemptCtx.Metadata["provider.modules.anonymizer.rules"] = strings.Join(rules, ",")
+	attemptCtx.Metadata["provider.modules.anonymizer.profiles"] = strings.Join(profiles, ",")
 	if attemptCtx.Metadata["policy.modules.dlp.enabled"] == "true" {
 		attemptCtx.Metadata["provider.modules.dlp.enabled"] = "true"
 	}
@@ -2456,6 +2471,13 @@ func combinePolicyNames(values ...string) string {
 	}
 	sort.Strings(names)
 	return strings.Join(names, ",")
+}
+
+func splitMetadataList(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return strings.Split(value, ",")
 }
 
 func providerMetadata(endpoint Endpoint) map[string]string {

@@ -159,9 +159,11 @@ type ProviderConfig struct {
 }
 
 type GuardrailPolicyConfig struct {
-	DLP       bool `json:"dlp"`
-	OutputDLP bool `json:"output_dlp,omitempty"`
-	AV        bool `json:"av"`
+	DLP                bool     `json:"dlp"`
+	OutputDLP          bool     `json:"output_dlp,omitempty"`
+	AV                 bool     `json:"av"`
+	Anonymization      string   `json:"anonymization,omitempty"`
+	AnonymizationRules []string `json:"anonymization_rules,omitempty"`
 }
 
 type ProviderEndpointConfig struct {

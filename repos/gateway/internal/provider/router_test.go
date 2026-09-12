@@ -1401,6 +1401,23 @@ func TestProviderAttemptContextCombinesAttachedAndDeploymentGuardrails(t *testin
 	}
 }
 
+func TestProviderAttemptContextCombinesAnonymizationProfiles(t *testing.T) {
+	req := modules.RequestContext{Metadata: map[string]string{
+		"policy.modules.anonymizer.mode":     "custom",
+		"policy.modules.anonymizer.rules":    "phone,email",
+		"policy.modules.anonymizer.profiles": "customer-pii",
+	}}
+	attempt := providerAttemptContext(req, Endpoint{Name: "local", ProviderID: "ollama", Type: "ollama", GuardrailPolicy: "local-disabled", Anonymization: "disabled"})
+	if attempt.Metadata["provider.modules.anonymizer.mode"] != "custom" || attempt.Metadata["provider.modules.anonymizer.rules"] != "email,phone" || attempt.Metadata["provider.modules.anonymizer.profiles"] != "customer-pii,local-disabled" {
+		t.Fatalf("profiles were not composed: %+v", attempt.Metadata)
+	}
+
+	attempt = providerAttemptContext(modules.RequestContext{}, Endpoint{Name: "local", ProviderID: "ollama", Type: "ollama", GuardrailPolicy: "local-disabled", Anonymization: "disabled"})
+	if attempt.Metadata["provider.modules.anonymizer.mode"] != "disabled" {
+		t.Fatalf("explicit deployment exclusion was ignored: %+v", attempt.Metadata)
+	}
+}
+
 func TestGuardrailUnavailableIsTerminalAcrossFallbacks(t *testing.T) {
 	if !terminalModuleError(errors.Join(errors.New("scanner failed"), modules.ErrGuardrailUnavailable)) {
 		t.Fatal("required guardrail unavailability must not fall through to another endpoint")

@@ -10670,6 +10670,8 @@ components:
         dlp: {type: boolean}
         output_dlp: {type: boolean, description: Scan textual provider output before returning it. Native streams are buffered through the non-streaming path when enabled.}
         av: {type: boolean}
+        anonymization: {type: string, enum: [disabled, basic, strict, custom], description: Per-request anonymization profile. Omit to leave the safe global default unchanged.}
+        anonymization_rules: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128}, description: Required only for custom anonymization.}
         enabled: {type: boolean}
     GuardrailApplyRequest:
       type: object
@@ -10739,6 +10741,8 @@ components:
         dlp: {type: boolean}
         output_dlp: {type: boolean}
         av: {type: boolean}
+        anonymization: {type: string, enum: [disabled, custom, strict]}
+        anonymization_rules: {type: array, uniqueItems: true, items: {type: string}}
     PolicyResolutionIssue:
       type: object
       required: [attachment_id, policy_name, code]
@@ -10755,6 +10759,9 @@ components:
         dlp: {type: boolean}
         output_dlp: {type: boolean}
         av: {type: boolean}
+        anonymization: {type: string, enum: [disabled, custom, strict]}
+        anonymization_rules: {type: array, uniqueItems: true, items: {type: string}}
+        anonymization_profiles: {type: array, uniqueItems: true, items: {type: string}}
         enforceable: {type: boolean}
         issues: {type: array, items: {$ref: '#/components/schemas/PolicyResolutionIssue'}}
     TagDefinitionInput:

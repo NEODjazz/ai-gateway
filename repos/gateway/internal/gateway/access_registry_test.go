@@ -202,7 +202,7 @@ func TestTagRestrictionsFilterModelDiscovery(t *testing.T) {
 }
 
 func TestPolicyAttachmentsAdminAPIAndRequestEvaluation(t *testing.T) {
-	runtime := provider.New(provider.Config{GuardrailPolicies: map[string]config.GuardrailPolicyConfig{"strict": {DLP: true, OutputDLP: true}}})
+	runtime := provider.New(provider.Config{GuardrailPolicies: map[string]config.GuardrailPolicyConfig{"strict": {DLP: true, OutputDLP: true, Anonymization: "custom", AnonymizationRules: []string{"phone", "email"}}}})
 	registry := NewAccessRegistry()
 	audit := &recordingAuditClient{}
 	handler := NewHandler(modulesPipeline("admin"), runtime).WithAccessRegistry(registry).WithAudit(audit)
@@ -220,6 +220,9 @@ func TestPolicyAttachmentsAdminAPIAndRequestEvaluation(t *testing.T) {
 	}
 	if req.Metadata["policy.guardrail.required"] != "true" || req.Metadata["policy.modules.dlp.enabled"] != "true" || req.Metadata["policy.modules.dlp.output_enabled"] != "true" || req.Metadata["policy.guardrail.names"] != "strict" {
 		t.Fatalf("policy was not materialized into request metadata: %+v", req.Metadata)
+	}
+	if req.Metadata["policy.modules.anonymizer.mode"] != "custom" || req.Metadata["policy.modules.anonymizer.rules"] != "email,phone" || req.Metadata["policy.modules.anonymizer.profiles"] != "strict" {
+		t.Fatalf("anonymization policy was not materialized: %+v", req.Metadata)
 	}
 
 	list := httptest.NewRecorder()

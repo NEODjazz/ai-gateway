@@ -271,6 +271,8 @@ func (r Router) runtimeEndpoints() []Endpoint {
 			endpoint.Priority = deployment.Priority
 			endpoint.Weight = deployment.Weight
 			endpoint.GuardrailPolicy = deployment.GuardrailPolicy
+			endpoint.Anonymization = ""
+			endpoint.AnonymizationRules = nil
 		}
 		if endpoint.GuardrailPolicy != "" && r.guardrails != nil {
 			policies := r.guardrails.current.Load()
@@ -283,6 +285,8 @@ func (r Router) runtimeEndpoints() []Endpoint {
 				endpoint.DLPEnabled = policy.DLP
 				endpoint.OutputDLPEnabled = policy.OutputDLP && policy.DLP
 				endpoint.AVEnabled = policy.AV
+				endpoint.Anonymization = policy.Anonymization
+				endpoint.AnonymizationRules = append([]string(nil), policy.AnonymizationRules...)
 			}
 		}
 		result = append(result, endpoint)
