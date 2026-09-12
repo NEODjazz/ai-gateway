@@ -61,6 +61,21 @@ func TestSCIMDiscoveryAndPaginationAreTruthful(t *testing.T) {
 	if config.Code != http.StatusOK || !strings.Contains(config.Body.String(), `"filter":{"maxResults":500,"supported":true}`) || !strings.Contains(config.Body.String(), `"patch":{"supported":true}`) {
 		t.Fatalf("config status=%d body=%s", config.Code, config.Body.String())
 	}
+	resourceType := httptest.NewRecorder()
+	router.ServeHTTP(resourceType, httptest.NewRequest(http.MethodGet, "/scim/v2/ResourceTypes/Group", nil))
+	if resourceType.Code != http.StatusOK || !strings.Contains(resourceType.Body.String(), `"endpoint":"/Groups"`) || resourceType.Header().Get("Content-Type") != "application/scim+json" {
+		t.Fatalf("resource type status=%d body=%s", resourceType.Code, resourceType.Body.String())
+	}
+	schema := httptest.NewRecorder()
+	router.ServeHTTP(schema, httptest.NewRequest(http.MethodGet, "/scim/v2/Schemas/"+scimUserSchema, nil))
+	if schema.Code != http.StatusOK || !strings.Contains(schema.Body.String(), `"id":"`+scimUserSchema+`"`) || !strings.Contains(schema.Body.String(), `"name":"groups"`) {
+		t.Fatalf("schema status=%d body=%s", schema.Code, schema.Body.String())
+	}
+	missing := httptest.NewRecorder()
+	router.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/scim/v2/ResourceTypes/Device", nil))
+	if missing.Code != http.StatusNotFound || !strings.Contains(missing.Body.String(), `"status":"404"`) {
+		t.Fatalf("missing resource type status=%d body=%s", missing.Code, missing.Body.String())
+	}
 
 	list := httptest.NewRecorder()
 	router.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/scim/v2/Users?startIndex=4&count=2", nil))

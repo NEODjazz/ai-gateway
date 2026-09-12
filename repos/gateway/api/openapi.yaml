@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.289
+  version: 0.1.290
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -111,6 +111,15 @@ paths:
         '200': {description: Supported resource types, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMListResponse'}}}}
         '401': {description: Invalid bearer credential, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
         '403': {description: Global administrator role required, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+  /scim/v2/ResourceTypes/{id}:
+    get:
+      operationId: getSCIMResourceType
+      tags: [SCIM]
+      summary: Get a supported provisioning resource type
+      parameters: [{name: id, in: path, required: true, schema: {type: string, enum: [User, Group]}}]
+      responses:
+        '200': {description: Supported resource type, content: {application/scim+json: {schema: {type: object, additionalProperties: true}}}}
+        '404': {description: Resource type not found, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
   /scim/v2/Schemas:
     get:
       operationId: listSCIMSchemas
@@ -120,6 +129,15 @@ paths:
         '200': {description: Supported schemas, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMListResponse'}}}}
         '401': {description: Invalid bearer credential, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
         '403': {description: Global administrator role required, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+  /scim/v2/Schemas/{id}:
+    get:
+      operationId: getSCIMSchema
+      tags: [SCIM]
+      summary: Get a supported provisioning schema
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Supported schema, content: {application/scim+json: {schema: {type: object, additionalProperties: true}}}}
+        '404': {description: Schema not found, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
   /scim/v2/Users:
     get:
       operationId: listSCIMUsers

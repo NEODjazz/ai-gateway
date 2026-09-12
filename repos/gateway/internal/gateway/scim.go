@@ -87,33 +87,75 @@ func (h Handler) SCIMResourceTypes(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.authorizeSCIM(w, r); !ok {
 		return
 	}
-	resource := map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ResourceType"}, "id": "User", "name": "User", "endpoint": "/Users", "schema": scimUserSchema}
-	group := map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ResourceType"}, "id": "Group", "name": "Group", "endpoint": "/Groups", "schema": scimGroupSchema}
+	resource, group := scimResourceType("User"), scimResourceType("Group")
 	writeSCIMJSON(w, http.StatusOK, scimListResponse([]any{resource, group}, 2, 1, 2))
+}
+
+func (h Handler) SCIMResourceType(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeSCIM(w, r); !ok {
+		return
+	}
+	resource := scimResourceType(r.PathValue("id"))
+	if resource == nil {
+		writeSCIMError(w, http.StatusNotFound, "", "resource type not found")
+		return
+	}
+	writeSCIMJSON(w, http.StatusOK, resource)
+}
+
+func scimResourceType(id string) map[string]any {
+	schema, endpoint := scimUserSchema, "/Users"
+	if id == "Group" {
+		schema, endpoint = scimGroupSchema, "/Groups"
+	} else if id != "User" {
+		return nil
+	}
+	return map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ResourceType"}, "id": id, "name": id, "endpoint": endpoint, "schema": schema}
 }
 
 func (h Handler) SCIMSchemas(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.authorizeSCIM(w, r); !ok {
 		return
 	}
-	userSchema := map[string]any{
-		"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:Schema"}, "id": scimUserSchema, "name": "User", "description": "Gateway directory user",
-		"attributes": []map[string]any{
-			{"name": "userName", "type": "string", "multiValued": false, "required": true, "mutability": "readWrite", "returned": "default", "uniqueness": "server"},
-			{"name": "displayName", "type": "string", "multiValued": false, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none"},
-			{"name": "active", "type": "boolean", "multiValued": false, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none"},
-			{"name": "roles", "type": "complex", "multiValued": true, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none", "subAttributes": []map[string]any{{"name": "value", "type": "string", "multiValued": false, "required": true, "mutability": "readWrite", "returned": "default", "uniqueness": "none"}}},
-			{"name": "groups", "type": "complex", "multiValued": true, "required": false, "mutability": "readOnly", "returned": "default", "uniqueness": "none", "subAttributes": []map[string]any{{"name": "value", "type": "string", "multiValued": false, "required": true, "mutability": "readOnly", "returned": "default", "uniqueness": "none"}, {"name": "$ref", "type": "reference", "referenceTypes": []string{"Group"}, "multiValued": false, "required": false, "mutability": "readOnly", "returned": "default", "uniqueness": "none"}}},
-		},
-	}
-	groupSchema := map[string]any{
-		"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:Schema"}, "id": scimGroupSchema, "name": "Group", "description": "Gateway directory group",
-		"attributes": []map[string]any{
-			{"name": "displayName", "type": "string", "multiValued": false, "required": true, "mutability": "readWrite", "returned": "default", "uniqueness": "server"},
-			{"name": "members", "type": "complex", "multiValued": true, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none", "subAttributes": []map[string]any{{"name": "value", "type": "string", "multiValued": false, "required": true, "mutability": "immutable", "returned": "default", "uniqueness": "none"}, {"name": "$ref", "type": "reference", "referenceTypes": []string{"User"}, "multiValued": false, "required": false, "mutability": "readOnly", "returned": "default", "uniqueness": "none"}}},
-		},
-	}
+	userSchema, groupSchema := scimSchema(scimUserSchema), scimSchema(scimGroupSchema)
 	writeSCIMJSON(w, http.StatusOK, scimListResponse([]any{userSchema, groupSchema}, 2, 1, 2))
+}
+
+func (h Handler) SCIMSchema(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeSCIM(w, r); !ok {
+		return
+	}
+	schema := scimSchema(r.PathValue("id"))
+	if schema == nil {
+		writeSCIMError(w, http.StatusNotFound, "", "schema not found")
+		return
+	}
+	writeSCIMJSON(w, http.StatusOK, schema)
+}
+
+func scimSchema(id string) map[string]any {
+	if id == scimUserSchema {
+		return map[string]any{
+			"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:Schema"}, "id": scimUserSchema, "name": "User", "description": "Gateway directory user",
+			"attributes": []map[string]any{
+				{"name": "userName", "type": "string", "multiValued": false, "required": true, "mutability": "readWrite", "returned": "default", "uniqueness": "server"},
+				{"name": "displayName", "type": "string", "multiValued": false, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none"},
+				{"name": "active", "type": "boolean", "multiValued": false, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none"},
+				{"name": "roles", "type": "complex", "multiValued": true, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none", "subAttributes": []map[string]any{{"name": "value", "type": "string", "multiValued": false, "required": true, "mutability": "readWrite", "returned": "default", "uniqueness": "none"}}},
+				{"name": "groups", "type": "complex", "multiValued": true, "required": false, "mutability": "readOnly", "returned": "default", "uniqueness": "none", "subAttributes": []map[string]any{{"name": "value", "type": "string", "multiValued": false, "required": true, "mutability": "readOnly", "returned": "default", "uniqueness": "none"}, {"name": "$ref", "type": "reference", "referenceTypes": []string{"Group"}, "multiValued": false, "required": false, "mutability": "readOnly", "returned": "default", "uniqueness": "none"}}},
+			},
+		}
+	}
+	if id == scimGroupSchema {
+		return map[string]any{
+			"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:Schema"}, "id": scimGroupSchema, "name": "Group", "description": "Gateway directory group",
+			"attributes": []map[string]any{
+				{"name": "displayName", "type": "string", "multiValued": false, "required": true, "mutability": "readWrite", "returned": "default", "uniqueness": "server"},
+				{"name": "members", "type": "complex", "multiValued": true, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none", "subAttributes": []map[string]any{{"name": "value", "type": "string", "multiValued": false, "required": true, "mutability": "immutable", "returned": "default", "uniqueness": "none"}, {"name": "$ref", "type": "reference", "referenceTypes": []string{"User"}, "multiValued": false, "required": false, "mutability": "readOnly", "returned": "default", "uniqueness": "none"}}},
+			},
+		}
+	}
+	return nil
 }
 
 func (h Handler) ListSCIMUsers(w http.ResponseWriter, r *http.Request) {
