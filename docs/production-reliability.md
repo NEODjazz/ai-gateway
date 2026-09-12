@@ -1525,3 +1525,19 @@ with zero restarts and the same image ID. In-pod health succeeded, OpenAPI
 reported 0.1.373, the deployed NVIDIA NIM profile included `count_tokens`, and
 an unauthenticated Models request returned 401. No provider credential or
 external inference was used by the smoke checks.
+
+Source `f1a39a9` exposes NVIDIA NIM Responses retrieve and cancel transports.
+The public lifecycle continues to require the durable owner record and the
+original deployment identity before any provider call. Protocol regressions
+cover methods, paths, bearer propagation, empty cancellation bodies, response
+IDs, status and exact usage. The focused protocol and race tests, full Go suite,
+full race suite, vet and build passed. Contract commit `716a829` documents the
+lifecycle and publishes OpenAPI 0.1.374.
+
+Rancher Desktop built `ai-gateway-gateway:nim-lifecycle-716a829` with image ID
+`sha256:9a4e6886dcb4182792a0d473f2fa276faacd1a050035329003f48e8a0905a77e`.
+Gateway Helm revision 479 completed successfully; only the top-level image tag
+changed from revision 478. Pod `ai-gateway-gateway-d6d7ddd9f-2t7vz` became Ready
+with zero restarts and the same image ID. In-pod health succeeded, OpenAPI
+reported 0.1.374, and an unauthenticated response retrieval returned 401. No
+provider credential or external inference was used by the smoke checks.
