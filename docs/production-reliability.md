@@ -1419,3 +1419,11 @@ token or the existing refreshable ambient managed-identity chain. Missing API-ke
 credentials fail before dial. Protocol regressions cover both URL variants, all
 three credential sources and the unchanged generic Realtime handshake. The full
 Go suite, full race suite, vet and build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-1c894af` with image ID
+`sha256:c1a4c01d1d3567d9cc4555f2ed6f25a0903c804f7c0d56a249176c8df02bccc9`.
+Gateway Helm revision 473 completed successfully, and pod
+`ai-gateway-gateway-559496bfdf-8h5kc` became Ready with zero restarts and the
+same image ID. Live health returned 204 and OpenAPI remained at 0.1.368. An
+invalid Realtime smoke credential returned 401 before deployment selection.
+No cloud credential or external inference was used by the smoke checks.
