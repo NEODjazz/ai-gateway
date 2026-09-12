@@ -483,3 +483,10 @@ live endpoint confirmed full compatible/Azure controls with masks and eight
 images, OpenRouter's reduced eight-image set, Gemini's `n` and
 `response_format` controls with eight images, and xAI's three controls with a
 five-image limit.
+
+Source `3d0a599` adds execution-validator-derived Image Variation profiles.
+Rancher Desktop built `ai-gateway-gateway:gaps-3d0a599`; Helm revision 407
+completed successfully, and pod `ai-gateway-gateway-654f9bb784-5sp2z` became
+Ready with zero restarts. The live endpoint confirmed `n`, `response_format`,
+`size` and `user` for compatible/Azure adapters and the reduced `n` plus
+`response_format` set for Gemini.
