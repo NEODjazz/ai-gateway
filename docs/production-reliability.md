@@ -760,3 +760,15 @@ Helm revision 434 completed successfully, and pod
 endpoint served OpenAPI 0.1.334 with both audio batch endpoints. An unauthenticated
 request using `/v1/audio/transcriptions` reached authentication with 401, while an
 unknown audio batch endpoint was rejected by request validation with 400.
+
+Source `4c8938c` adds Image Edit and Image Variation to durable JSONL batch
+execution. Structured inline images pass the shared signature and size checks,
+provider content policy, TPM admission and exact token settlement. Streaming edit
+requests are rejected before queueing, and the 4 MiB line limit bounds each item.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-4c8938c` with image ID
+`sha256:4102049c961b8e6a377b133654f95f6308a0b58609d577419e57825fcb6fe0d4`.
+Helm revision 435 completed successfully, and pod
+`ai-gateway-gateway-776b6f897-ndnrx` became Ready with zero restarts. Its live
+endpoint served OpenAPI 0.1.335 with both image batch endpoints, and an
+unauthenticated `/v1/images/edits` batch request reached authentication with 401.
