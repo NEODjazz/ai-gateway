@@ -34,6 +34,11 @@ func (NVIDIANIM) SupportsAudioInput() bool       { return true }
 func (NVIDIANIM) SupportsVideoInput() bool       { return true }
 
 func (n NVIDIANIM) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if request.Model == "nvidia/nemotron-3-super-120b-a12b" || request.Model == "nvidia/nemotron-3-ultra-550b-a55b" {
+		if request.MaxTokens != nil && (*request.MaxTokens < 1 || *request.MaxTokens > 32768) || request.MaxCompletionTokens != nil && (*request.MaxCompletionTokens < 1 || *request.MaxCompletionTokens > 32768) {
+			return &Error{Class: FailureClientRequest, Provider: "nvidia-nim", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "max_tokens", Err: errors.New("max_tokens must be between 1 and 32768 for this NVIDIA NIM model")}
+		}
+	}
 	if request.ReasoningEffort != "" {
 		allowed := map[string]bool{}
 		switch request.Model {

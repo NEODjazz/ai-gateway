@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -213,6 +214,34 @@ func TestNVIDIANIMMapsMaxCompletionTokensToNativeField(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestNVIDIANIMRejectsNemotronOutputLimitBeforeHTTP(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	client := NewNVIDIANIM(server.URL, "key", false)
+	for _, model := range []string{"nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b"} {
+		for _, modern := range []bool{false, true} {
+			limit := 32769
+			request := openai.ChatCompletionRequest{Model: model, Messages: []openai.Message{{Role: "user", Content: "question"}}}
+			if modern {
+				request.MaxCompletionTokens = &limit
+			} else {
+				request.MaxTokens = &limit
+			}
+			_, err := client.ChatCompletions(t.Context(), request)
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Param != "max_tokens" || failure.UpstreamCode != "invalid_request" || calls != 0 {
+				t.Fatalf("model=%s modern=%t calls=%d err=%v", model, modern, calls, err)
+			}
+		}
+	}
+	for _, limit := range []int{1, 32768} {
+		if err := client.ValidateChatParameters(openai.ChatCompletionRequest{Model: "nvidia/nemotron-3-super-120b-a12b", MaxCompletionTokens: &limit}); err != nil {
+			t.Fatalf("limit=%d err=%v", limit, err)
+		}
 	}
 }
 
