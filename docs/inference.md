@@ -770,10 +770,13 @@ native conversion, cache isolation and rejection before accounting modules.
 
 `TokenCountClient` is an optional adapter interface. Anthropic uses native
 `/v1/messages/count_tokens` for model context, system instructions, text/inline
-images, function schemas, function-call history/results and tool choice. The
-counter wire request contains no generation limit or streaming flag. Unsupported
-context parts and parameters fail before HTTP. Results retain the provider model
-and source; errors never fall back silently to the local context estimate.
+images, function schemas, function-call history/results, tool choice and native
+skill execution context. Skill references, the managed code-execution tool and
+an optional reusable container ID are sent through the native counter with the
+required provider capability header. The counter wire request contains no
+generation limit or streaming flag. Unsupported context parts and parameters fail
+before HTTP. Results retain the provider model and source; errors never fall back
+silently to the local context estimate.
 
 The adapter enforces a 30-second context deadline, the inference body limit and
 a 64 KiB response limit. Redirects are refused to protect the provider API key;
@@ -781,9 +784,13 @@ missing, negative, fractional or overflowing counts are errors. Caller
 cancellation is propagated. The counter is not a replacement for reserve estimates.
 
 `POST /v1/messages/count_tokens` exposes the counter with the same native auth
-headers as Messages. It accepts model, messages, system, tools and tool_choice;
-generation parameters are rejected. Partial assistant/tool-use history is allowed
-for counting. Advanced block types remain unsupported.
+headers as Messages. It accepts model, messages, system, tools, tool_choice,
+output_config and the same bounded `container.skills` shape as message creation;
+generation parameters are rejected. Custom skills and reusable container IDs are
+resolved using the authenticated credential+user owner key, pin counting to the
+same deployment, and pass `skill:<id>` plus `code_execution` tool ACLs. Partial
+assistant/tool-use history is allowed for counting. Advanced block types remain
+unsupported.
 
 The endpoint applies gateway auth, model/tool ACL, access groups and shared
 RPM/input TPM admission. TPM uses the local input estimate before contacting the

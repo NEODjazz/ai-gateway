@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.338
+  version: 0.1.339
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -904,6 +904,8 @@ paths:
       summary: Count context tokens using a native provider counter
       description: |
         Applies authorization, tool ACL, input TPM/RPM and pre-inference policy.
+        Native skill and managed code-execution context is owner-checked, included
+        in the provider count, and pinned to the skill or container deployment.
         Does not generate output or open a billing lifecycle. Currently requires
         native Anthropic, Gemini or Bedrock. No automatic retry, mirror or response cache is used.
       security:
@@ -6895,6 +6897,7 @@ components:
         tools: {$ref: '#/components/schemas/MessagesRequest/properties/tools'}
         tool_choice: {$ref: '#/components/schemas/MessagesRequest/properties/tool_choice'}
         output_config: {$ref: '#/components/schemas/MessagesRequest/properties/output_config'}
+        container: {$ref: '#/components/schemas/MessagesRequest/properties/container'}
     MessagesRequest:
       type: object
       additionalProperties: false
