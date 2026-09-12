@@ -70,14 +70,15 @@ Concurrent subscriptions, stream duration and polling frequency are limited by
 `A2A_SUBSCRIPTION_LIMIT`, `A2A_SUBSCRIPTION_DURATION_SECONDS` and
 `A2A_SUBSCRIPTION_POLL_MILLISECONDS`.
 
-The Batches API accepts owner-scoped JSONL Files for Chat Completions, Responses,
-Response Compaction, Completions, Embeddings, Rerank, Search, Image Generation,
+The Batches API accepts owner-scoped JSONL Files for Chat Completions, Messages,
+Responses, Response Compaction, Completions, Embeddings, Rerank, Search, Image Generation,
 Image Edit, Image Variation, Audio Transcription, Audio Translation, Text-to-Speech,
 OCR and Moderations. Every line is validated and authorized before the batch is
 queued. Image operations use structured inline base64 inputs and reject streaming
 edits. Transcription and translation use structured inline base64 audio and reject
 streaming. All inputs are bounded by the 4 MiB JSONL line limit. OCR file references
 are resolved to immutable owner-scoped content snapshots before jobs are persisted.
+Messages items use the native request and response envelopes and reject streaming.
 Durable per-item jobs reuse the normal routing, content-policy, rate-limit and billing
 path with independent execution IDs, including mixed-model files. Binary speech output
 uses a bounded JSON body with base64 `data`, `content_type`, `model` and optional

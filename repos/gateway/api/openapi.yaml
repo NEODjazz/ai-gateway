@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.335
+  version: 0.1.336
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1268,7 +1268,7 @@ paths:
       operationId: createBatch
       tags: [Batches]
       summary: Create a durable asynchronous inference batch
-      description: Validates an owner-scoped JSONL file with purpose=batch, authorizes every model and tool before accepting it, and atomically persists the Batch, its items and durable jobs. Each item executes through the normal routing, guardrail, rate-limit and billing pipeline with an independent execution ID. Image edit and variation items use bounded inline base64 images; streaming edits are rejected. Audio transcription and translation items use bounded inline base64 audio, reject streaming and preserve exact token or duration usage. Each JSONL line is limited to 4 MiB. Mixed-model files are supported. Completed and failed lines are stored as owner-scoped Files resources.
+      description: Validates an owner-scoped JSONL file with purpose=batch, authorizes every model and tool before accepting it, and atomically persists the Batch, its items and durable jobs. Each item executes through the normal routing, guardrail, rate-limit and billing pipeline with an independent execution ID. Messages items use the native request and response envelopes and reject streaming. Image edit and variation items use bounded inline base64 images; streaming edits are rejected. Audio transcription and translation items use bounded inline base64 audio, reject streaming and preserve exact token or duration usage. Each JSONL line is limited to 4 MiB. Mixed-model files are supported. Completed and failed lines are stored as owner-scoped Files resources.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -5635,8 +5635,8 @@ components:
         input_file_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
         endpoint:
           type: string
-          description: Image edit and variation requests contain structured inline base64 images; edit stream=true is rejected. Audio transcription and translation requests contain a structured inline base64 file and reject stream=true. For /v1/audio/speech, each JSONL response body contains base64 data, content_type, model and optional usage; stream_format=sse is rejected.
-          enum: [/v1/responses, /v1/responses/compact, /v1/chat/completions, /v1/embeddings, /v1/completions, /v1/moderations, /v1/rerank, /v1/search, /v1/images/generations, /v1/images/edits, /v1/images/variations, /v1/audio/transcriptions, /v1/audio/translations, /v1/audio/speech, /v1/ocr]
+          description: Messages requests use the native JSON contract and reject stream=true. Image edit and variation requests contain structured inline base64 images; edit stream=true is rejected. Audio transcription and translation requests contain a structured inline base64 file and reject stream=true. For /v1/audio/speech, each JSONL response body contains base64 data, content_type, model and optional usage; stream_format=sse is rejected.
+          enum: [/v1/responses, /v1/responses/compact, /v1/chat/completions, /v1/messages, /v1/embeddings, /v1/completions, /v1/moderations, /v1/rerank, /v1/search, /v1/images/generations, /v1/images/edits, /v1/images/variations, /v1/audio/transcriptions, /v1/audio/translations, /v1/audio/speech, /v1/ocr]
         completion_window: {type: string, const: 24h}
         metadata:
           type: object
