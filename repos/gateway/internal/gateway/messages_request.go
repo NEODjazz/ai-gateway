@@ -448,7 +448,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 					textDocumentRunes += runes
 					document = map[string]any{"type": "input_document", "text": block.Source.Data}
 				case block.Source.Type == "file" && block.Source.FileID != "" && block.Source.MediaType == "" && block.Source.Data == "":
-					if len(block.Source.FileID) > 128 || !strings.HasPrefix(block.Source.FileID, "file_") {
+					if !validFileToken(block.Source.FileID, 128) || !strings.HasPrefix(block.Source.FileID, "file_") {
 						return result, errors.New("document file_id is invalid")
 					}
 					document = map[string]any{"type": "input_file_reference", "file_id": block.Source.FileID}
