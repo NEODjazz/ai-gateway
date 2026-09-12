@@ -267,20 +267,30 @@ func applySCIMGroupPatch(group *scimGroup, operation scimPatchOperation) error {
 	lowerPath := strings.ToLower(path)
 	if op == "remove" {
 		match := scimMemberPathPattern.FindStringSubmatch(path)
-		if len(match) != 2 {
+		if len(match) == 2 {
+			value, err := strconv.Unquote(match[1])
+			if err != nil {
+				return errors.New("invalid member filter")
+			}
+			members := group.Members[:0]
+			for _, member := range group.Members {
+				if member.Value != value {
+					members = append(members, member)
+				}
+			}
+			group.Members = members
+			return nil
+		}
+		switch lowerPath {
+		case "externalid":
+			group.ExternalID = ""
+		case "members":
+			group.Members = nil
+		case "displayname":
+			return errors.New("displayName is required")
+		default:
 			return fmt.Errorf("remove path %q is not supported", path)
 		}
-		value, err := strconv.Unquote(match[1])
-		if err != nil {
-			return errors.New("invalid member filter")
-		}
-		members := group.Members[:0]
-		for _, member := range group.Members {
-			if member.Value != value {
-				members = append(members, member)
-			}
-		}
-		group.Members = members
 		return nil
 	}
 	if op != "add" && op != "replace" {

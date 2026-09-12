@@ -66,3 +66,25 @@ func TestSCIMGroupPatchRejectsUnsupportedMemberFilter(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestSCIMGroupPatchRemovesOptionalAttributes(t *testing.T) {
+	client := &directoryClientStub{group: &DirectoryGroup{Team: DirectoryTeam{ID: "group-1", ExternalID: "department-7", Name: "Platform", Status: "active"}, Members: []string{"user-1", "user-2"}}}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithIdentityDirectory(client)
+	body := `{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"remove","path":"externalId"},{"op":"remove","path":"members"}]}`
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/scim/v2/Groups/group-1", strings.NewReader(body)))
+	if response.Code != http.StatusOK || client.group == nil || client.group.Team.ExternalID != "" || len(client.group.Members) != 0 {
+		t.Fatalf("status=%d group=%+v body=%s", response.Code, client.group, response.Body.String())
+	}
+}
+
+func TestSCIMGroupPatchCannotRemoveDisplayName(t *testing.T) {
+	client := &directoryClientStub{group: &DirectoryGroup{Team: DirectoryTeam{ID: "group-1", Name: "Platform", Status: "active"}}}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{"admin"}}}), modelsProvider{}).WithIdentityDirectory(client)
+	body := `{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"remove","path":"displayName"}]}`
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/scim/v2/Groups/group-1", strings.NewReader(body)))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"scimType":"invalidValue"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
