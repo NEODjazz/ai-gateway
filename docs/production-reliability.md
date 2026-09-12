@@ -539,3 +539,10 @@ effective `container_files` capability. Rancher Desktop built
 pod `ai-gateway-gateway-66b64cbfb5-lmw4x` became Ready with zero restarts. The
 live endpoint confirmed expiration, memory, network-policy and initial-file
 controls for OpenAI and compatible adapters.
+
+Source `dd59d54` adds validator-derived values to Video creation and extension
+profiles. Rancher Desktop built `ai-gateway-gateway:gaps-dd59d54`; Helm revision
+415 completed successfully, and pod `ai-gateway-gateway-d85f85c86-7h2hd`
+became Ready with zero restarts. The live endpoint confirmed compatible create
+durations, sizes and image URL references, the narrower native xAI size set,
+and xAI extension durations.
