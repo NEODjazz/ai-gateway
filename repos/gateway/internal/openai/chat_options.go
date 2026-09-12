@@ -170,7 +170,7 @@ func (o ChatGenerationOptions) Validate() string {
 		}
 	}
 	switch o.ReasoningEffort {
-	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
+	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max", "default":
 	default:
 		return "unsupported reasoning_effort value"
 	}

@@ -36,6 +36,22 @@ func TestManagedOpenAIServiceTierIsValidatedAndForwarded(t *testing.T) {
 	}
 }
 
+func TestManagedOpenAIDefaultReasoningEffortIsForwarded(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body["reasoning_effort"] != "default" {
+			t.Fatalf("reasoning effort was not forwarded: %+v", body)
+		}
+		_, _ = w.Write([]byte(`{"id":"chat","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+	client := providerFor(config.ProviderEndpointConfig{Type: "openai", BaseURL: server.URL})
+	request := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "test"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "default"}}
+	if _, err := client.ChatCompletions(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestChatReasoningContentSupportIsExplicit(t *testing.T) {
 	request := openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "assistant", ReasoningContent: "plan"}}}
 	unsupported := []struct {

@@ -46,6 +46,7 @@ func TestChatGenerationOptionValidation(t *testing.T) {
 		{`{"safety_identifier":"` + strings.Repeat("я", 64) + `"}`, true},
 		{`{"safety_identifier":"` + strings.Repeat("я", 65) + `"}`, false},
 		{`{"safety_identifier":"` + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" + `"}`, false},
+		{`{"reasoning_effort":"default"}`, true},
 		{`{"reasoning_effort":"unexpected"}`, false},
 		{`{"logprobs":true,"top_logprobs":21}`, false},
 		{`{"logprobs":true,"top_logprobs":-1}`, false},
