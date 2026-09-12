@@ -953,3 +953,13 @@ same policy through the public native token-count endpoint. Generation, token
 counting and durable batches therefore use the same validated provider context.
 Full Go test, race, vet and build checks and all 166 UI tests completed
 successfully.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-5e132c4` with image ID
+`sha256:c3c46a713cacb8e0ba790eedc354d66e20c750d61c0fa12f8dcfa7c8b00964ab`.
+Gateway Helm revision 447 completed successfully, and pod
+`ai-gateway-gateway-758664b478-mwslm` became Ready with zero restarts and the
+same image digest. Its live endpoint served OpenAPI 0.1.347 with all three
+thinking modes and their constraints. A valid adaptive generation request and
+a manual-budget token-count request passed structural validation and reached
+authentication. An enabled budget equal to `max_tokens` failed before
+authentication with the documented 400 response.
