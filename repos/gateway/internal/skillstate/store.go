@@ -18,6 +18,20 @@ type Ownership struct {
 	CreatedAt  time.Time
 }
 
+type Execution struct {
+	ContainerID string
+	OwnerKey    string
+	EndpointID  string
+	ExpiresAt   time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type ExecutionStore interface {
+	SaveSkillExecution(context.Context, Execution) error
+	ResolveSkillExecution(context.Context, string, string) (Execution, error)
+}
+
 type Store interface {
 	ClaimSkill(context.Context, Ownership) (Ownership, error)
 	ResolveSkill(context.Context, string, string) (Ownership, error)

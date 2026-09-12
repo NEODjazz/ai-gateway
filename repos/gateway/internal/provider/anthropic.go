@@ -382,7 +382,7 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 	stop, _ := openai.StopSequences(request.Stop)
 	var container *anthropicContainer
 	if len(request.AnthropicSkills) > 0 {
-		container = &anthropicContainer{Skills: append([]openai.AnthropicSkillReference(nil), request.AnthropicSkills...)}
+		container = &anthropicContainer{ID: request.AnthropicContainerID, Skills: append([]openai.AnthropicSkillReference(nil), request.AnthropicSkills...)}
 	}
 	return anthropicRequest{
 		StopSequences: stop,

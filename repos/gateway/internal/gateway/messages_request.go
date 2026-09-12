@@ -95,8 +95,8 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		if request.Stream {
 			return result, errors.New("streaming with container.skills is not supported")
 		}
-		if request.Container.ID != "" {
-			return result, errors.New("container.id reuse is not supported")
+		if request.Container.ID != "" && (!validSkillID(request.Container.ID) || len(request.Container.ID) > 128) {
+			return result, errors.New("container.id is invalid")
 		}
 		if len(request.Container.Skills) == 0 || len(request.Container.Skills) > 20 {
 			return result, errors.New("container.skills must contain 1–20 skills")
@@ -113,6 +113,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 			seen[key] = struct{}{}
 		}
 		result.AnthropicSkills = append([]openai.AnthropicSkillReference(nil), request.Container.Skills...)
+		result.AnthropicContainerID = request.Container.ID
 		result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(request.Container))
 	}
 	switch request.ServiceTier {

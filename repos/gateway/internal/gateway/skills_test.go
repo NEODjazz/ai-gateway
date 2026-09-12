@@ -18,8 +18,32 @@ import (
 )
 
 type memorySkillStore struct {
-	mu    sync.Mutex
-	items map[string]skillstate.Ownership
+	mu         sync.Mutex
+	items      map[string]skillstate.Ownership
+	executions map[string]skillstate.Execution
+}
+
+func (s *memorySkillStore) SaveSkillExecution(_ context.Context, execution skillstate.Execution) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.executions == nil {
+		s.executions = map[string]skillstate.Execution{}
+	}
+	if current, found := s.executions[execution.ContainerID]; found && (current.OwnerKey != execution.OwnerKey || current.EndpointID != execution.EndpointID) {
+		return skillstate.ErrConflict
+	}
+	s.executions[execution.ContainerID] = execution
+	return nil
+}
+
+func (s *memorySkillStore) ResolveSkillExecution(_ context.Context, owner, id string) (skillstate.Execution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	execution, found := s.executions[id]
+	if !found || execution.OwnerKey != owner || !execution.ExpiresAt.After(time.Now().UTC()) {
+		return skillstate.Execution{}, skillstate.ErrNotFound
+	}
+	return execution, nil
 }
 
 func (s *memorySkillStore) ClaimSkill(_ context.Context, item skillstate.Ownership) (skillstate.Ownership, error) {
@@ -70,7 +94,7 @@ func TestMessagesExecutesOwnedCustomSkillOnBoundDeployment(t *testing.T) {
 		"skill_owned": {SkillID: "skill_owned", OwnerKey: owner, EndpointID: "skills-endpoint"},
 	}}
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{
-		ID: "msg-skill", Model: "model", NativeContainer: json.RawMessage(`{"id":"container_1","expires_at":"2026-09-12T14:00:00Z","skills":[{"type":"custom","skill_id":"skill_owned","version":"v1"}]}`),
+		ID: "msg-skill", Model: "model", NativeContainer: json.RawMessage(`{"id":"container_1","expires_at":"2099-09-12T14:00:00Z","skills":[{"type":"custom","skill_id":"skill_owned","version":"v1"}]}`),
 		Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "done"}, FinishReason: "stop"}},
 		Usage:   openai.Usage{PromptTokens: 9, CompletionTokens: 2, TotalTokens: 11},
 	}}
@@ -84,8 +108,15 @@ func TestMessagesExecutesOwnedCustomSkillOnBoundDeployment(t *testing.T) {
 	if request.Provider != "skills-endpoint" || len(request.AnthropicSkills) != 1 || request.AnthropicSkills[0].Version != "v1" || request.NativeInputTokens == 0 {
 		t.Fatalf("skill request was not bound and accounted: %+v", request)
 	}
-	if !strings.Contains(response.Body.String(), `"container":{"expires_at":"2026-09-12T14:00:00Z","id":"container_1"`) || !strings.Contains(response.Body.String(), `"skill_id":"skill_owned"`) {
+	if !strings.Contains(response.Body.String(), `"container":{"expires_at":"2099-09-12T14:00:00Z","id":"container_1"`) || !strings.Contains(response.Body.String(), `"skill_id":"skill_owned"`) {
 		t.Fatalf("native container was not preserved: %s", response.Body.String())
+	}
+	continued := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"container":{"id":"container_1","skills":[{"type":"custom","skill_id":"skill_owned","version":"v1"}]},"tools":[{"type":"code_execution_20250825","name":"code_execution"}],"messages":[{"role":"user","content":"continue"}]}`, "gateway-test-key")
+	if continued.Code != http.StatusOK || upstream.calls != 2 || upstream.request.Request.AnthropicContainerID != "container_1" || upstream.request.Request.Provider != "skills-endpoint" {
+		t.Fatalf("continuation status=%d body=%s calls=%d request=%+v", continued.Code, continued.Body.String(), upstream.calls, upstream.request.Request)
+	}
+	if _, err := store.ResolveSkillExecution(t.Context(), "other-owner", "container_1"); !errors.Is(err, skillstate.ErrNotFound) {
+		t.Fatalf("cross-owner continuation resolution=%v", err)
 	}
 }
 
@@ -111,6 +142,27 @@ func TestMessagesSkillExecutionFailsClosed(t *testing.T) {
 				t.Fatalf("status=%d body=%s calls=%d", response.Code, response.Body.String(), upstream.calls)
 			}
 		})
+	}
+}
+
+func TestMessagesSkillExecutionRejectsUnknownContainerAndInvalidProviderContainer(t *testing.T) {
+	owner := skillOwnerKey(modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"})
+	store := &memorySkillStore{items: map[string]skillstate.Ownership{
+		"skill_owned": {SkillID: "skill_owned", OwnerKey: owner, EndpointID: "endpoint-a"},
+	}}
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{
+		ID: "msg-skill", NativeContainer: json.RawMessage(`{"id":"container_new"}`),
+		Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "done"}, FinishReason: "stop"}},
+	}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"*"}}}}), upstream).WithSkillStore(store))
+
+	unknown := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"container":{"id":"container_unknown","skills":[{"type":"custom","skill_id":"skill_owned"}]},"tools":[{"type":"code_execution_20250825","name":"code_execution"}],"messages":[{"role":"user","content":"continue"}]}`, "gateway-test-key")
+	if unknown.Code != http.StatusNotFound || upstream.calls != 0 {
+		t.Fatalf("unknown container status=%d body=%s calls=%d", unknown.Code, unknown.Body.String(), upstream.calls)
+	}
+	invalid := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"container":{"skills":[{"type":"custom","skill_id":"skill_owned"}]},"tools":[{"type":"code_execution_20250825","name":"code_execution"}],"messages":[{"role":"user","content":"run"}]}`, "gateway-test-key")
+	if invalid.Code != http.StatusBadGateway || !strings.Contains(invalid.Body.String(), `"type":"error"`) || upstream.calls != 1 {
+		t.Fatalf("invalid provider container status=%d body=%s calls=%d", invalid.Code, invalid.Body.String(), upstream.calls)
 	}
 }
 

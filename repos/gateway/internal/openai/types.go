@@ -21,7 +21,8 @@ type ChatCompletionRequest struct {
 	// GeminiCodeExecution enables the native server-side code execution tool.
 	GeminiCodeExecution bool `json:"-"`
 	// AnthropicSkills contains validated native Messages skill references.
-	AnthropicSkills []AnthropicSkillReference `json:"-"`
+	AnthropicSkills      []AnthropicSkillReference `json:"-"`
+	AnthropicContainerID string                    `json:"-"`
 	// AnthropicCodeExecution enables the native managed code execution tool.
 	AnthropicCodeExecution bool `json:"-"`
 	// Bedrock native controls cannot be supplied through the public Chat wire shape.
@@ -364,6 +365,7 @@ type ChatCompletionResponse struct {
 	// NativeContainer preserves a validated provider container descriptor for
 	// protocol adapters that expose managed execution state.
 	NativeContainer   json.RawMessage   `json:"-"`
+	ProviderEndpoint  string            `json:"-"`
 	ID                string            `json:"id"`
 	Object            string            `json:"object"`
 	Created           int64             `json:"created,omitempty"`

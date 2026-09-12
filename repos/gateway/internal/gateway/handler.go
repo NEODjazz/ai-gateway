@@ -410,6 +410,10 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		writeProviderFailure(w, err)
 		return
 	}
+	if err := h.recordSkillExecution(r.Context(), reqCtx, response); err != nil {
+		writeSkillExecutionError(w, err)
+		return
+	}
 	if sink, ok := w.(interface {
 		chatResult(openai.ChatCompletionResponse, bool)
 	}); ok {

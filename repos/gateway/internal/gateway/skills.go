@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
@@ -367,6 +368,17 @@ func (h Handler) bindSkillExecution(ctx context.Context, req *modules.RequestCon
 		return nil
 	}
 	var endpoint string
+	if req.Request.AnthropicContainerID != "" {
+		store, ok := h.skills.(skillstate.ExecutionStore)
+		if !ok {
+			return skillstate.ErrUnavailable
+		}
+		execution, err := store.ResolveSkillExecution(ctx, skillOwnerKey(*req), req.Request.AnthropicContainerID)
+		if err != nil {
+			return err
+		}
+		endpoint = execution.EndpointID
+	}
 	for _, skill := range req.Request.AnthropicSkills {
 		if skill.Type != "custom" {
 			continue
@@ -389,12 +401,39 @@ func (h Handler) bindSkillExecution(ctx context.Context, req *modules.RequestCon
 	return nil
 }
 
+func (h Handler) recordSkillExecution(ctx context.Context, req modules.RequestContext, response openai.ChatCompletionResponse) error {
+	if len(req.Request.AnthropicSkills) == 0 {
+		return nil
+	}
+	store, ok := h.skills.(skillstate.ExecutionStore)
+	if !ok {
+		return skillstate.ErrUnavailable
+	}
+	container, err := messagesNativeContainer(response.NativeContainer)
+	if err != nil || container == nil {
+		return skillstate.ErrInvalid
+	}
+	id, _ := container["id"].(string)
+	expires, _ := container["expires_at"].(string)
+	expiresAt, err := time.Parse(time.RFC3339Nano, expires)
+	if err != nil || !expiresAt.After(time.Now().UTC()) {
+		return skillstate.ErrInvalid
+	}
+	endpoint := response.ProviderEndpoint
+	if endpoint == "" {
+		endpoint = req.Request.Provider
+	}
+	return store.SaveSkillExecution(ctx, skillstate.Execution{ContainerID: id, OwnerKey: skillOwnerKey(req), EndpointID: endpoint, ExpiresAt: expiresAt})
+}
+
 func writeSkillExecutionError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, skillstate.ErrNotFound):
 		writeError(w, http.StatusNotFound, "skill_not_found", "custom skill not found")
 	case errors.Is(err, skillstate.ErrConflict):
 		writeError(w, http.StatusBadRequest, "invalid_request", "custom skills must belong to one deployment")
+	case errors.Is(err, skillstate.ErrInvalid):
+		writeError(w, http.StatusBadGateway, "provider_failed", "provider returned an invalid skill execution container")
 	default:
 		writeError(w, http.StatusServiceUnavailable, "skill_storage_unavailable", "skill ownership storage is unavailable")
 	}

@@ -5,6 +5,20 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  033_gateway_skill_executions.sql: |
+    CREATE TABLE IF NOT EXISTS gateway_skill_executions (
+        container_id TEXT PRIMARY KEY,
+        owner_key TEXT NOT NULL,
+        endpoint_id TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (length(container_id) BETWEEN 1 AND 128),
+        CHECK (length(owner_key) BETWEEN 1 AND 256),
+        CHECK (length(endpoint_id) BETWEEN 1 AND 128)
+    );
+    CREATE INDEX IF NOT EXISTS gateway_skill_executions_owner_expiry_idx
+        ON gateway_skill_executions (owner_key, expires_at, container_id);
   032_gateway_containers.sql: |
     CREATE TABLE IF NOT EXISTS gateway_containers (
         container_id TEXT NOT NULL,

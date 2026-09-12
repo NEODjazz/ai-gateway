@@ -44,12 +44,12 @@ func TestAnthropicSkillExecutionWireContract(t *testing.T) {
 	client := NewAnthropic(server.URL, "key", false)
 	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
 		Model: "claude", MaxTokens: &maxTokens, Messages: []openai.Message{{Role: "user", Content: "run"}},
-		AnthropicSkills: []openai.AnthropicSkillReference{{Type: "custom", SkillID: "skill_1", Version: "v1"}}, AnthropicCodeExecution: true,
+		AnthropicSkills: []openai.AnthropicSkillReference{{Type: "custom", SkillID: "skill_1", Version: "v1"}}, AnthropicContainerID: "container_previous", AnthropicCodeExecution: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if upstream.Container == nil || len(upstream.Container.Skills) != 1 || upstream.Container.Skills[0].SkillID != "skill_1" {
+	if upstream.Container == nil || upstream.Container.ID != "container_previous" || len(upstream.Container.Skills) != 1 || upstream.Container.Skills[0].SkillID != "skill_1" {
 		t.Fatalf("skill container was not forwarded: %+v", upstream.Container)
 	}
 	if !strings.Contains(string(response.NativeContainer), `"id":"container_1"`) {

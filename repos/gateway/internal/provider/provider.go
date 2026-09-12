@@ -753,6 +753,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 		setAttemptMetadata(&attemptCtx, started, err)
 		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
+			response.ProviderEndpoint = endpoint.Name
 			attemptCtx.Metadata["provider.cache.status"] = "miss"
 			var cachePayload []byte
 			if !chatResponseHasNativeContent(response) {

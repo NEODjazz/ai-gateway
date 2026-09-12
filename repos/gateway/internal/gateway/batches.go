@@ -758,6 +758,9 @@ func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestCont
 		if err != nil {
 			return 0, nil, err
 		}
+		if err := h.recordSkillExecution(ctx, *req, response); err != nil {
+			return 0, nil, err
+		}
 		adapted, err := messagesResponsePayload(response)
 		if err != nil {
 			return 0, nil, err
