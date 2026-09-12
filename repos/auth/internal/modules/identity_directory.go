@@ -25,13 +25,16 @@ type DirectoryUser struct {
 }
 
 type DirectoryTeam struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description,omitempty"`
-	Status      string    `json:"status"`
-	MemberCount int       `json:"member_count"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string     `json:"id"`
+	ExternalID  string     `json:"external_id,omitempty"`
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	Status      string     `json:"status"`
+	MemberCount int        `json:"member_count"`
+	MemberIDs   []string   `json:"member_ids,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
 }
 
 type TeamMembership struct {
@@ -111,7 +114,19 @@ func (m AuthModule) FindDirectoryUser(ctx context.Context, attribute, value stri
 	return store.FindUser(ctx, attribute, value)
 }
 
-func (m AuthModule) ListDirectoryTeams(ctx context.Context, teamID string, offset, limit int) ([]DirectoryTeam, int, error) {
+func (m AuthModule) DeleteDirectoryUser(ctx context.Context, id string) (DirectoryUser, error) {
+	store, err := m.directoryStore()
+	if err != nil {
+		return DirectoryUser{}, err
+	}
+	id = strings.TrimSpace(id)
+	if !validDirectoryID(id) {
+		return DirectoryUser{}, ErrInvalidDirectoryEntry
+	}
+	return store.DeleteUser(ctx, id)
+}
+
+func (m AuthModule) ListDirectoryTeams(ctx context.Context, teamID string, offset, limit int, includeDeleted bool) ([]DirectoryTeam, int, error) {
 	store, err := m.directoryStore()
 	if err != nil {
 		return nil, 0, err
@@ -119,7 +134,7 @@ func (m AuthModule) ListDirectoryTeams(ctx context.Context, teamID string, offse
 	if offset < 0 || limit < 1 || limit > 500 || len(teamID) > 256 {
 		return nil, 0, ErrInvalidDirectoryEntry
 	}
-	return store.ListTeams(ctx, strings.TrimSpace(teamID), offset, limit)
+	return store.ListTeams(ctx, strings.TrimSpace(teamID), offset, limit, includeDeleted)
 }
 
 func (m AuthModule) PutDirectoryTeam(ctx context.Context, team DirectoryTeam) (DirectoryTeam, error) {
@@ -127,11 +142,15 @@ func (m AuthModule) PutDirectoryTeam(ctx context.Context, team DirectoryTeam) (D
 	if err != nil {
 		return DirectoryTeam{}, err
 	}
-	team.ID, team.Name, team.Description = strings.TrimSpace(team.ID), strings.TrimSpace(team.Name), strings.TrimSpace(team.Description)
-	if !validDirectoryID(team.ID) || team.Name == "" || len(team.Name) > 256 || len(team.Description) > 1024 || !validDirectoryStatus(team.Status) {
+	team.ID, team.ExternalID, team.Name, team.Description = strings.TrimSpace(team.ID), strings.TrimSpace(team.ExternalID), strings.TrimSpace(team.Name), strings.TrimSpace(team.Description)
+	if !validDirectoryID(team.ID) || len(team.ExternalID) > 256 || team.Name == "" || len(team.Name) > 256 || len(team.Description) > 1024 || !validDirectoryStatus(team.Status) {
 		return DirectoryTeam{}, ErrInvalidDirectoryEntry
 	}
-	return store.PutTeam(ctx, team)
+	saved, err := store.PutTeam(ctx, team)
+	if isUniqueViolation(err) {
+		return DirectoryTeam{}, ErrDirectoryConflict
+	}
+	return saved, err
 }
 
 func (m AuthModule) PutTeamMembership(ctx context.Context, membership TeamMembership) (TeamMembership, error) {
@@ -190,9 +209,10 @@ type identityDirectoryStore interface {
 	ListUsers(context.Context, string, int, int, bool) ([]DirectoryUser, int, error)
 	GetUser(context.Context, string) (DirectoryUser, error)
 	FindUser(context.Context, string, string) (DirectoryUser, bool, error)
+	DeleteUser(context.Context, string) (DirectoryUser, error)
 	CreateUser(context.Context, DirectoryUser) (DirectoryUser, error)
 	PutUser(context.Context, DirectoryUser) (DirectoryUser, error)
-	ListTeams(context.Context, string, int, int) ([]DirectoryTeam, int, error)
+	ListTeams(context.Context, string, int, int, bool) ([]DirectoryTeam, int, error)
 	PutTeam(context.Context, DirectoryTeam) (DirectoryTeam, error)
 	PutMembership(context.Context, TeamMembership) (TeamMembership, error)
 }
@@ -279,6 +299,31 @@ func (s *PostgresVirtualKeyStore) FindUser(ctx context.Context, attribute, value
 	return user, err == nil, err
 }
 
+func (s *PostgresVirtualKeyStore) DeleteUser(ctx context.Context, id string) (DirectoryUser, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return DirectoryUser{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var user DirectoryUser
+	err = tx.QueryRow(ctx, `UPDATE users SET status='disabled',scim_deleted_at=now(),updated_at=now() WHERE id=$1 AND scim_deleted_at IS NULL
+		RETURNING id,external_id,COALESCE(email,''),name,status,roles,created_at,updated_at,scim_deleted_at`, id).
+		Scan(&user.ID, &user.ExternalID, &user.Email, &user.Name, &user.Status, &user.Roles, &user.CreatedAt, &user.UpdatedAt, &user.DeletedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DirectoryUser{}, ErrDirectoryNotFound
+	}
+	if err != nil {
+		return DirectoryUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM auth_team_memberships WHERE user_id=$1`, id); err != nil {
+		return DirectoryUser{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return DirectoryUser{}, err
+	}
+	return user, nil
+}
+
 func (s *PostgresVirtualKeyStore) CreateUser(ctx context.Context, user DirectoryUser) (DirectoryUser, error) {
 	err := s.pool.QueryRow(ctx, `INSERT INTO users(id,external_id,email,name,status,roles,scim_deleted_at) VALUES($1,$2,NULLIF($3,''),$4,$5,$6,$7)
 		ON CONFLICT DO NOTHING RETURNING id,external_id,COALESCE(email,''),name,status,roles,created_at,updated_at,scim_deleted_at`, user.ID, user.ExternalID, user.Email, user.Name, user.Status, nonNilStrings(user.Roles), user.DeletedAt).
@@ -301,10 +346,11 @@ func (s *PostgresVirtualKeyStore) PutUser(ctx context.Context, user DirectoryUse
 	return user, err
 }
 
-func (s *PostgresVirtualKeyStore) ListTeams(ctx context.Context, teamID string, offset, limit int) ([]DirectoryTeam, int, error) {
-	rows, err := s.pool.Query(ctx, `SELECT t.id,t.name,t.description,t.status,count(m.user_id),t.created_at,t.updated_at FROM auth_teams t
-		LEFT JOIN auth_team_memberships m ON m.team_id=t.id WHERE ($1='' OR t.id=$1)
-		GROUP BY t.id ORDER BY t.created_at DESC,t.id OFFSET $2 LIMIT $3`, teamID, offset, limit)
+func (s *PostgresVirtualKeyStore) ListTeams(ctx context.Context, teamID string, offset, limit int, includeDeleted bool) ([]DirectoryTeam, int, error) {
+	rows, err := s.pool.Query(ctx, `SELECT t.id,t.external_id,t.name,t.description,t.status,
+		COALESCE(array_agg(m.user_id ORDER BY m.user_id) FILTER (WHERE m.user_id IS NOT NULL),'{}'),t.created_at,t.updated_at,t.scim_deleted_at FROM auth_teams t
+		LEFT JOIN auth_team_memberships m ON m.team_id=t.id WHERE ($1='' OR t.id=$1) AND ($4 OR t.scim_deleted_at IS NULL)
+		GROUP BY t.id ORDER BY t.created_at DESC,t.id OFFSET $2 LIMIT $3`, teamID, offset, limit, includeDeleted)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -312,25 +358,26 @@ func (s *PostgresVirtualKeyStore) ListTeams(ctx context.Context, teamID string, 
 	result := make([]DirectoryTeam, 0)
 	for rows.Next() {
 		var team DirectoryTeam
-		if err := rows.Scan(&team.ID, &team.Name, &team.Description, &team.Status, &team.MemberCount, &team.CreatedAt, &team.UpdatedAt); err != nil {
+		if err := rows.Scan(&team.ID, &team.ExternalID, &team.Name, &team.Description, &team.Status, &team.MemberIDs, &team.CreatedAt, &team.UpdatedAt, &team.DeletedAt); err != nil {
 			return nil, 0, err
 		}
+		team.MemberCount = len(team.MemberIDs)
 		result = append(result, team)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
 	var total int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM auth_teams WHERE ($1='' OR id=$1)`, teamID).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM auth_teams WHERE ($1='' OR id=$1) AND ($2 OR scim_deleted_at IS NULL)`, teamID, includeDeleted).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count directory teams: %w", err)
 	}
 	return result, total, nil
 }
 
 func (s *PostgresVirtualKeyStore) PutTeam(ctx context.Context, team DirectoryTeam) (DirectoryTeam, error) {
-	err := s.pool.QueryRow(ctx, `INSERT INTO auth_teams(id,name,description,status) VALUES($1,$2,$3,$4)
-		ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,status=EXCLUDED.status,updated_at=now()
-		RETURNING id,name,description,status,created_at,updated_at`, team.ID, team.Name, team.Description, team.Status).Scan(&team.ID, &team.Name, &team.Description, &team.Status, &team.CreatedAt, &team.UpdatedAt)
+	err := s.pool.QueryRow(ctx, `INSERT INTO auth_teams(id,external_id,name,description,status,scim_deleted_at) VALUES($1,$2,$3,$4,$5,$6)
+		ON CONFLICT(id) DO UPDATE SET external_id=EXCLUDED.external_id,name=EXCLUDED.name,description=EXCLUDED.description,status=EXCLUDED.status,scim_deleted_at=EXCLUDED.scim_deleted_at,updated_at=now()
+		RETURNING id,external_id,name,description,status,created_at,updated_at,scim_deleted_at`, team.ID, team.ExternalID, team.Name, team.Description, team.Status, team.DeletedAt).Scan(&team.ID, &team.ExternalID, &team.Name, &team.Description, &team.Status, &team.CreatedAt, &team.UpdatedAt, &team.DeletedAt)
 	return team, err
 }
 

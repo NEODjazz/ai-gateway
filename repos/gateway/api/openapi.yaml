@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.287
+  version: 0.1.288
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -184,6 +184,71 @@ paths:
       responses:
         '204': {description: User deactivated}
         '404': {description: User not found, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+        '503': {description: Identity directory or audit unavailable, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+  /scim/v2/Groups:
+    get:
+      operationId: listSCIMGroups
+      tags: [SCIM]
+      summary: List provisioned groups with exact pagination totals
+      parameters:
+        - {name: startIndex, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: count, in: query, schema: {type: integer, minimum: 0, maximum: 500, default: 100}}
+        - {name: filter, in: query, description: Supports exact displayName eq and externalId eq expressions, schema: {type: string, maxLength: 1024}}
+      responses:
+        '200': {description: Group page, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMGroupList'}}}}
+        '400': {description: Invalid pagination or filter, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+        '401': {description: Invalid bearer credential, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+        '403': {description: Global administrator role required, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+        '503': {description: Identity directory unavailable, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+    post:
+      operationId: createSCIMGroup
+      tags: [SCIM]
+      summary: Provision a group and its members atomically
+      requestBody: {required: true, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMGroupInput'}}}}
+      responses:
+        '201': {description: Group provisioned, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMGroup'}}}}
+        '400': {description: Invalid group resource, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+        '404': {description: Member not found, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+        '409': {description: Group already exists, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+        '503': {description: Identity directory or audit unavailable, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+  /scim/v2/Groups/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 256}}
+    get:
+      operationId: getSCIMGroup
+      tags: [SCIM]
+      summary: Retrieve a provisioned group and members
+      responses:
+        '200': {description: Provisioned group, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMGroup'}}}}
+        '404': {description: Group not found, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+    put:
+      operationId: replaceSCIMGroup
+      tags: [SCIM]
+      summary: Atomically replace a provisioned group and members
+      requestBody: {required: true, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMGroupInput'}}}}
+      responses:
+        '200': {description: Group replaced, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMGroup'}}}}
+        '400': {description: Invalid group resource, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+        '404': {description: Group or member not found, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+        '409': {description: Group conflicts with an existing group, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+        '503': {description: Identity directory or audit unavailable, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+    patch:
+      operationId: patchSCIMGroup
+      tags: [SCIM]
+      summary: Atomically patch group attributes and membership
+      requestBody: {required: true, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMPatchRequest'}}}}
+      responses:
+        '200': {description: Group patched, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMGroup'}}}}
+        '400': {description: Invalid patch operation, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+        '404': {description: Group or member not found, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+        '503': {description: Identity directory or audit unavailable, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
+    delete:
+      operationId: deleteSCIMGroup
+      tags: [SCIM]
+      summary: Delete a provisioned group and remove its memberships atomically
+      responses:
+        '204': {description: Group deleted}
+        '404': {description: Group not found, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
         '503': {description: Identity directory or audit unavailable, content: {application/scim+json: {schema: {$ref: '#/components/schemas/SCIMError'}}}}
   /v1/assistants:
     post:
@@ -8982,6 +9047,42 @@ components:
             created: {type: string, format: date-time}
             lastModified: {type: string, format: date-time}
             location: {type: string}
+    SCIMMember:
+      type: object
+      additionalProperties: false
+      required: [value]
+      properties:
+        value: {type: string, minLength: 1, maxLength: 256}
+        display: {type: string, maxLength: 256}
+        $ref: {type: string}
+    SCIMGroupInput:
+      type: object
+      additionalProperties: false
+      required: [schemas, displayName]
+      properties:
+        schemas: {type: array, minItems: 1, maxItems: 1, items: {type: string, const: 'urn:ietf:params:scim:schemas:core:2.0:Group'}}
+        externalId: {type: string, maxLength: 256}
+        displayName: {type: string, minLength: 1, maxLength: 256}
+        members: {type: array, maxItems: 500, items: {$ref: '#/components/schemas/SCIMMember'}}
+    SCIMGroup:
+      type: object
+      additionalProperties: false
+      required: [schemas, id, displayName, meta]
+      properties:
+        schemas: {type: array, minItems: 1, maxItems: 1, items: {type: string, const: 'urn:ietf:params:scim:schemas:core:2.0:Group'}}
+        id: {type: string, minLength: 1, maxLength: 256}
+        externalId: {type: string, maxLength: 256}
+        displayName: {type: string, minLength: 1, maxLength: 256}
+        members: {type: array, items: {$ref: '#/components/schemas/SCIMMember'}}
+        meta:
+          type: object
+          additionalProperties: false
+          required: [resourceType, created, lastModified, location]
+          properties:
+            resourceType: {type: string, const: Group}
+            created: {type: string, format: date-time}
+            lastModified: {type: string, format: date-time}
+            location: {type: string}
     SCIMListResponse:
       type: object
       required: [schemas, totalResults, startIndex, itemsPerPage, Resources]
@@ -9001,6 +9102,16 @@ components:
         startIndex: {type: integer, minimum: 1}
         itemsPerPage: {type: integer, minimum: 0}
         Resources: {type: array, items: {$ref: '#/components/schemas/SCIMUser'}}
+    SCIMGroupList:
+      type: object
+      additionalProperties: false
+      required: [schemas, totalResults, startIndex, itemsPerPage, Resources]
+      properties:
+        schemas: {type: array, minItems: 1, maxItems: 1, items: {type: string, const: 'urn:ietf:params:scim:api:messages:2.0:ListResponse'}}
+        totalResults: {type: integer, minimum: 0}
+        startIndex: {type: integer, minimum: 1}
+        itemsPerPage: {type: integer, minimum: 0}
+        Resources: {type: array, items: {$ref: '#/components/schemas/SCIMGroup'}}
     SCIMPatchRequest:
       type: object
       additionalProperties: false
@@ -9014,9 +9125,9 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [op, value]
+            required: [op]
             properties:
-              op: {type: string, enum: [add, replace, Add, Replace]}
+              op: {type: string, enum: [add, replace, remove, Add, Replace, Remove]}
               path: {type: string, maxLength: 128}
               value: {}
     SCIMError:
@@ -9044,6 +9155,7 @@ components:
       additionalProperties: false
       required: [name, status]
       properties:
+        external_id: {type: string, maxLength: 256}
         name: {type: string, minLength: 1, maxLength: 256}
         description: {type: string, maxLength: 1024}
         status: {type: string, enum: [active, disabled]}
@@ -9055,8 +9167,10 @@ components:
           properties:
             id: {type: string}
             member_count: {type: integer, minimum: 0}
+            member_ids: {type: array, items: {type: string}}
             created_at: {type: string, format: date-time}
             updated_at: {type: string, format: date-time}
+            deleted_at: {type: string, format: date-time}
     TeamMembershipInput:
       type: object
       additionalProperties: false

@@ -27,13 +27,16 @@ type DirectoryUser struct {
 	DeletedAt  *time.Time `json:"deleted_at,omitempty"`
 }
 type DirectoryTeam struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description,omitempty"`
-	Status      string    `json:"status"`
-	MemberCount int       `json:"member_count"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string     `json:"id"`
+	ExternalID  string     `json:"external_id,omitempty"`
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	Status      string     `json:"status"`
+	MemberCount int        `json:"member_count"`
+	MemberIDs   []string   `json:"member_ids,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
 }
 type TeamMembership struct {
 	TeamID    string    `json:"team_id"`
@@ -43,17 +46,26 @@ type TeamMembership struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type DirectoryGroup struct {
+	Team    DirectoryTeam `json:"team"`
+	Members []string      `json:"members"`
+}
+
 type IdentityDirectoryClient interface {
 	ListUsers(context.Context, ManagementAudit, string, int, int, bool) ([]DirectoryUser, int, error)
 	GetUser(context.Context, ManagementAudit, string) (DirectoryUser, error)
 	FindUser(context.Context, ManagementAudit, string, string) (DirectoryUser, bool, error)
 	CreateUser(context.Context, ManagementAudit, DirectoryUser) (DirectoryUser, error)
+	DeleteUser(context.Context, ManagementAudit, string) (DirectoryUser, error)
 	PutUser(context.Context, ManagementAudit, string, DirectoryUser) (DirectoryUser, error)
-	ListTeams(context.Context, ManagementAudit, string, int, int) ([]DirectoryTeam, int, error)
+	ListTeams(context.Context, ManagementAudit, string, int, int, bool) ([]DirectoryTeam, int, error)
 	PutTeam(context.Context, ManagementAudit, string, DirectoryTeam) (DirectoryTeam, error)
 	PutMembership(context.Context, ManagementAudit, string, string, TeamMembership) (TeamMembership, error)
 	ListMemberships(context.Context, ManagementAudit, string, int) ([]TeamMembership, error)
 	DeleteMembership(context.Context, ManagementAudit, string, string) error
+	GetGroup(context.Context, ManagementAudit, string) (DirectoryGroup, error)
+	FindGroup(context.Context, ManagementAudit, string, string) (DirectoryTeam, bool, error)
+	SaveGroup(context.Context, ManagementAudit, DirectoryGroup, bool) (DirectoryGroup, error)
 }
 
 func (h Handler) WithIdentityDirectory(client IdentityDirectoryClient) Handler {
@@ -87,11 +99,14 @@ func (c *RemoteManagementClient) FindUser(ctx context.Context, audit ManagementA
 func (c *RemoteManagementClient) CreateUser(ctx context.Context, audit ManagementAudit, user DirectoryUser) (DirectoryUser, error) {
 	return managementCall[DirectoryUser, DirectoryUser](ctx, c, http.MethodPost, "/internal/v1/users", audit, user)
 }
+func (c *RemoteManagementClient) DeleteUser(ctx context.Context, audit ManagementAudit, id string) (DirectoryUser, error) {
+	return managementCall[struct{}, DirectoryUser](ctx, c, http.MethodDelete, "/internal/v1/provisioned-users/"+url.PathEscape(id), audit, struct{}{})
+}
 func (c *RemoteManagementClient) PutUser(ctx context.Context, audit ManagementAudit, id string, user DirectoryUser) (DirectoryUser, error) {
 	return managementCall[DirectoryUser, DirectoryUser](ctx, c, http.MethodPut, "/internal/v1/users/"+url.PathEscape(id), audit, user)
 }
-func (c *RemoteManagementClient) ListTeams(ctx context.Context, audit ManagementAudit, teamID string, offset, limit int) ([]DirectoryTeam, int, error) {
-	q := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}
+func (c *RemoteManagementClient) ListTeams(ctx context.Context, audit ManagementAudit, teamID string, offset, limit int, includeDeleted bool) ([]DirectoryTeam, int, error) {
+	q := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}, "include_deleted": {strconv.FormatBool(includeDeleted)}}
 	if teamID != "" {
 		q.Set("team_id", teamID)
 	}
@@ -116,6 +131,25 @@ func (c *RemoteManagementClient) ListMemberships(ctx context.Context, audit Mana
 func (c *RemoteManagementClient) DeleteMembership(ctx context.Context, audit ManagementAudit, teamID, userID string) error {
 	_, err := managementCall[struct{}, struct{}](ctx, c, http.MethodDelete, "/internal/v1/teams/"+url.PathEscape(teamID)+"/members/"+url.PathEscape(userID), audit, struct{}{})
 	return err
+}
+func (c *RemoteManagementClient) GetGroup(ctx context.Context, audit ManagementAudit, id string) (DirectoryGroup, error) {
+	return managementCall[struct{}, DirectoryGroup](ctx, c, http.MethodGet, "/internal/v1/provisioned-groups/"+url.PathEscape(id), audit, struct{}{})
+}
+func (c *RemoteManagementClient) FindGroup(ctx context.Context, audit ManagementAudit, attribute, value string) (DirectoryTeam, bool, error) {
+	query := url.Values{"attribute": {attribute}, "value": {value}}
+	team, err := managementCall[struct{}, DirectoryTeam](ctx, c, http.MethodGet, "/internal/v1/provisioned-groups:lookup?"+query.Encode(), audit, struct{}{})
+	var managementErr *ManagementError
+	if errors.As(err, &managementErr) && managementErr.Status == http.StatusNotFound {
+		return DirectoryTeam{}, false, nil
+	}
+	return team, err == nil, err
+}
+func (c *RemoteManagementClient) SaveGroup(ctx context.Context, audit ManagementAudit, group DirectoryGroup, create bool) (DirectoryGroup, error) {
+	method, path := http.MethodPost, "/internal/v1/provisioned-groups"
+	if !create {
+		method, path = http.MethodPut, "/internal/v1/provisioned-groups/"+url.PathEscape(group.Team.ID)
+	}
+	return managementCall[DirectoryGroup, DirectoryGroup](ctx, c, method, path, audit, group)
 }
 
 func (h Handler) ListDirectoryUsers(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +187,7 @@ func (h Handler) ListDirectoryTeams(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	teamID := directoryScope(req, r.URL.Query().Get("team_id"))
-	teams, total, err := h.directory.ListTeams(r.Context(), managementAudit(req), teamID, offset, limit)
+	teams, total, err := h.directory.ListTeams(r.Context(), managementAudit(req), teamID, offset, limit, true)
 	if err != nil {
 		writeDirectoryFailure(w, err)
 		return

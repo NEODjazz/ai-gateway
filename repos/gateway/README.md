@@ -212,13 +212,15 @@ in an encrypted HttpOnly Strict same-site cookie, caps its lifetime at the
 shorter of the provider expiry and `ADMIN_SSO_SESSION_TTL_SECONDS`, and validates
 it through the normal auth pipeline before creating the browser session.
 
-SCIM 2.0 user provisioning is available under `/scim/v2`. Discovery exposes
-the implemented User resource, exact `startIndex`/`count` pagination, exact
-`userName eq` and `externalId eq` filters, and the supported PATCH surface.
+SCIM 2.0 user and group provisioning is available under `/scim/v2`. Discovery
+exposes the implemented resources, exact `startIndex`/`count` pagination,
+supported exact-match filters, and the supported PATCH surface.
 Provisioning requires a gateway bearer credential with the global `admin` role;
-create, replace, patch, and deactivate operations use the durable identity
-directory and fail closed when audit recording is unavailable. User names and
-non-empty external IDs are unique in PostgreSQL.
+create, replace, patch, and delete operations use the durable identity directory
+and fail closed when audit recording is unavailable. Group writes synchronize
+at most 500 members in one PostgreSQL transaction, including rollback when any
+member is absent. User names, group display names, and non-empty external IDs
+are unique among visible resources.
 
 The Playground uses the same authorized model list and inference endpoints as
 external clients. It supports incremental Chat Completions and Responses SSE,

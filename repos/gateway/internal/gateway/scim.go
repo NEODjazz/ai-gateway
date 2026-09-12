@@ -86,7 +86,8 @@ func (h Handler) SCIMResourceTypes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resource := map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ResourceType"}, "id": "User", "name": "User", "endpoint": "/Users", "schema": scimUserSchema}
-	writeSCIMJSON(w, http.StatusOK, scimListResponse([]any{resource}, 1, 1, 1))
+	group := map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ResourceType"}, "id": "Group", "name": "Group", "endpoint": "/Groups", "schema": scimGroupSchema}
+	writeSCIMJSON(w, http.StatusOK, scimListResponse([]any{resource, group}, 2, 1, 2))
 }
 
 func (h Handler) SCIMSchemas(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +103,14 @@ func (h Handler) SCIMSchemas(w http.ResponseWriter, r *http.Request) {
 			{"name": "roles", "type": "complex", "multiValued": true, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none", "subAttributes": []map[string]any{{"name": "value", "type": "string", "multiValued": false, "required": true, "mutability": "readWrite", "returned": "default", "uniqueness": "none"}}},
 		},
 	}
-	writeSCIMJSON(w, http.StatusOK, scimListResponse([]any{userSchema}, 1, 1, 1))
+	groupSchema := map[string]any{
+		"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:Schema"}, "id": scimGroupSchema, "name": "Group", "description": "Gateway directory group",
+		"attributes": []map[string]any{
+			{"name": "displayName", "type": "string", "multiValued": false, "required": true, "mutability": "readWrite", "returned": "default", "uniqueness": "server"},
+			{"name": "members", "type": "complex", "multiValued": true, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none", "subAttributes": []map[string]any{{"name": "value", "type": "string", "multiValued": false, "required": true, "mutability": "immutable", "returned": "default", "uniqueness": "none"}, {"name": "$ref", "type": "reference", "referenceTypes": []string{"User"}, "multiValued": false, "required": false, "mutability": "readOnly", "returned": "default", "uniqueness": "none"}}},
+		},
+	}
+	writeSCIMJSON(w, http.StatusOK, scimListResponse([]any{userSchema, groupSchema}, 2, 1, 2))
 }
 
 func (h Handler) ListSCIMUsers(w http.ResponseWriter, r *http.Request) {
@@ -285,19 +293,20 @@ func (h Handler) DeleteSCIMUser(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	user, err := h.directory.GetUser(r.Context(), managementAudit(req), r.PathValue("id"))
-	if err != nil {
+	id := r.PathValue("id")
+	audit := managementAudit(req)
+	event := AuditEvent{Action: "scim.user.delete", TargetType: "user", TargetID: id}
+	if !h.auditMutation(r.Context(), audit, event) {
+		writeSCIMError(w, http.StatusServiceUnavailable, "", "audit service is unavailable")
+		return
+	}
+	if _, err := h.directory.DeleteUser(r.Context(), audit, id); err != nil {
+		h.auditOutcome(r.Context(), audit, event, "failed")
 		writeSCIMDirectoryFailure(w, err)
 		return
 	}
-	if user.DeletedAt != nil {
-		writeSCIMError(w, http.StatusNotFound, "", "user not found")
-		return
-	}
-	user.Status = "disabled"
-	now := time.Now().UTC()
-	user.DeletedAt = &now
-	h.putSCIMUser(w, r, req, user, "scim.user.deactivate")
+	h.auditOutcome(r.Context(), audit, event, "succeeded")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h Handler) putSCIMUser(w http.ResponseWriter, r *http.Request, req modules.RequestContext, user DirectoryUser, action string) {
@@ -520,9 +529,13 @@ func writeSCIMJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func newSCIMUserID() (string, bool) {
+	return newSCIMResourceID("usr_")
+}
+
+func newSCIMResourceID(prefix string) (string, bool) {
 	var value [16]byte
 	if _, err := rand.Read(value[:]); err != nil {
 		return "", false
 	}
-	return "usr_" + hex.EncodeToString(value[:]), true
+	return prefix + hex.EncodeToString(value[:]), true
 }

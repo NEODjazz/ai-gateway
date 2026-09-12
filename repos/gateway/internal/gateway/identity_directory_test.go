@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"ai-gateway-gateway/internal/modules"
 )
@@ -22,6 +23,9 @@ type directoryClientStub struct {
 	user        *DirectoryUser
 	findAttr    string
 	findValue   string
+	group       *DirectoryGroup
+	groupAttr   string
+	groupValue  string
 }
 
 func (c *directoryClientStub) ListUsers(_ context.Context, _ ManagementAudit, _ string, offset, limit int, includeDeleted bool) ([]DirectoryUser, int, error) {
@@ -51,13 +55,30 @@ func (c *directoryClientStub) CreateUser(_ context.Context, _ ManagementAudit, u
 	c.user = &user
 	return user, nil
 }
+func (c *directoryClientStub) DeleteUser(_ context.Context, _ ManagementAudit, id string) (DirectoryUser, error) {
+	if c.user == nil || c.user.ID != id {
+		return DirectoryUser{}, &ManagementError{Status: http.StatusNotFound}
+	}
+	now := time.Now().UTC()
+	c.user.Status, c.user.DeletedAt = "disabled", &now
+	return *c.user, nil
+}
 func (c *directoryClientStub) PutUser(_ context.Context, _ ManagementAudit, id string, user DirectoryUser) (DirectoryUser, error) {
 	user.ID = id
 	c.user = &user
 	return user, nil
 }
-func (c *directoryClientStub) ListTeams(_ context.Context, _ ManagementAudit, teamID string, _, _ int) ([]DirectoryTeam, int, error) {
+func (c *directoryClientStub) ListTeams(_ context.Context, _ ManagementAudit, teamID string, _, _ int, includeDeleted bool) ([]DirectoryTeam, int, error) {
 	c.teamFilter = teamID
+	if c.group != nil {
+		if c.group.Team.DeletedAt != nil && !includeDeleted {
+			return nil, 0, nil
+		}
+		team := c.group.Team
+		team.MemberIDs = append([]string(nil), c.group.Members...)
+		team.MemberCount = len(team.MemberIDs)
+		return []DirectoryTeam{team}, 1, nil
+	}
 	return []DirectoryTeam{{ID: "team-a", Name: "Team A", Status: "active"}}, 1, nil
 }
 func (c *directoryClientStub) PutTeam(_ context.Context, _ ManagementAudit, id string, team DirectoryTeam) (DirectoryTeam, error) {
@@ -77,6 +98,23 @@ func (c *directoryClientStub) ListMemberships(_ context.Context, _ ManagementAud
 func (c *directoryClientStub) DeleteMembership(_ context.Context, _ ManagementAudit, teamID, userID string) error {
 	c.deletedTeam, c.deletedUser = teamID, userID
 	return nil
+}
+func (c *directoryClientStub) GetGroup(_ context.Context, _ ManagementAudit, id string) (DirectoryGroup, error) {
+	if c.group != nil && c.group.Team.ID == id {
+		return *c.group, nil
+	}
+	return DirectoryGroup{Team: DirectoryTeam{ID: id, Name: "Group", Status: "active"}}, nil
+}
+func (c *directoryClientStub) FindGroup(_ context.Context, _ ManagementAudit, attribute, value string) (DirectoryTeam, bool, error) {
+	c.groupAttr, c.groupValue = attribute, value
+	if c.group == nil {
+		return DirectoryTeam{}, false, nil
+	}
+	return c.group.Team, true, nil
+}
+func (c *directoryClientStub) SaveGroup(_ context.Context, _ ManagementAudit, group DirectoryGroup, _ bool) (DirectoryGroup, error) {
+	c.group = &group
+	return group, nil
 }
 
 func TestIdentityDirectoryAdminCRUD(t *testing.T) {

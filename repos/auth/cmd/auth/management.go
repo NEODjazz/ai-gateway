@@ -297,6 +297,23 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 		logManagementAction(r, "user.create", saved.ID)
 		writeManagementJSON(w, http.StatusCreated, saved)
 	}))
+	mux.HandleFunc("DELETE /internal/v1/provisioned-users/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		user, err := module.DeleteDirectoryUser(r.Context(), r.PathValue("id"))
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid user", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, modules.ErrDirectoryNotFound) {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		logManagementAction(r, "user.delete", user.ID)
+		writeManagementJSON(w, http.StatusOK, user)
+	}))
 	mux.HandleFunc("PUT /internal/v1/users/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		var user modules.DirectoryUser
 		if !decodeManagementJSON(w, r, &user) {
@@ -328,7 +345,16 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 		if !ok {
 			return
 		}
-		teams, total, err := module.ListDirectoryTeams(r.Context(), r.URL.Query().Get("team_id"), offset, limit)
+		includeDeleted := true
+		if raw := strings.TrimSpace(r.URL.Query().Get("include_deleted")); raw != "" {
+			parsed, parseErr := strconv.ParseBool(raw)
+			if parseErr != nil {
+				http.Error(w, "invalid include_deleted", http.StatusBadRequest)
+				return
+			}
+			includeDeleted = parsed
+		}
+		teams, total, err := module.ListDirectoryTeams(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted)
 		if err != nil {
 			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
 			return
@@ -344,6 +370,10 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 		saved, err := module.PutDirectoryTeam(r.Context(), team)
 		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
 			http.Error(w, "invalid team", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, modules.ErrDirectoryConflict) {
+			http.Error(w, "team already exists", http.StatusConflict)
 			return
 		}
 		if err != nil {
@@ -405,6 +435,83 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 		logManagementAction(r, "team.membership.delete", r.PathValue("id")+":"+r.PathValue("user_id"))
 		w.WriteHeader(http.StatusNoContent)
 	}))
+	mux.HandleFunc("GET /internal/v1/provisioned-groups/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		team, members, err := module.GetDirectoryTeam(r.Context(), r.PathValue("id"))
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid group", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, modules.ErrDirectoryNotFound) {
+			http.Error(w, "group not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, map[string]any{"team": team, "members": members})
+	}))
+	mux.HandleFunc("GET /internal/v1/provisioned-groups:lookup", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		team, found, err := module.FindDirectoryTeam(r.Context(), r.URL.Query().Get("attribute"), r.URL.Query().Get("value"))
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid group lookup", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !found {
+			http.Error(w, "group not found", http.StatusNotFound)
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, team)
+	}))
+	for _, route := range []struct {
+		pattern string
+		create  bool
+	}{
+		{"POST /internal/v1/provisioned-groups", true},
+		{"PUT /internal/v1/provisioned-groups/{id}", false},
+	} {
+		create := route.create
+		mux.HandleFunc(route.pattern, managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+			var payload struct {
+				Team    modules.DirectoryTeam `json:"team"`
+				Members []string              `json:"members"`
+			}
+			if !decodeManagementJSON(w, r, &payload) {
+				return
+			}
+			if !create {
+				payload.Team.ID = r.PathValue("id")
+			}
+			team, members, err := module.SaveDirectoryTeamMembers(r.Context(), payload.Team, payload.Members, create)
+			if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+				http.Error(w, "invalid group", http.StatusBadRequest)
+				return
+			}
+			if errors.Is(err, modules.ErrDirectoryConflict) {
+				http.Error(w, "group already exists", http.StatusConflict)
+				return
+			}
+			if errors.Is(err, modules.ErrDirectoryNotFound) {
+				http.Error(w, "group or member not found", http.StatusNotFound)
+				return
+			}
+			if err != nil {
+				http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			action := "group.replace"
+			status := http.StatusOK
+			if create {
+				action, status = "group.create", http.StatusCreated
+			}
+			logManagementAction(r, action, team.ID)
+			writeManagementJSON(w, status, map[string]any{"team": team, "members": members})
+		}))
+	}
 }
 
 func managementLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
