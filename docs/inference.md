@@ -95,8 +95,13 @@ billing settlement.
 NVIDIA NIM Chat publishes `reasoning_effort` as a model-specific capability.
 `nvidia/nemotron-3-super-120b-a12b` accepts `none`, `low`, and `high`, while
 `nvidia/nemotron-3-ultra-550b-a55b` accepts `none`, `medium`, and `high`. Other
-models and values fail before provider HTTP. The accepted value is forwarded
-unchanged on the compatible Chat wire.
+models and values fail before provider HTTP, except the explicit
+`deepseek-ai/DeepSeek-V4-Pro-0813` override, which accepts `low`, `high`, and
+`max`. The accepted value is forwarded unchanged on the compatible Chat wire.
+NIM's top-level `usage.reasoning_tokens` is normalized to public
+`completion_tokens_details.reasoning_tokens` in JSON and SSE. Negative,
+fractional, null, conflicting or greater-than-completion values fail before the
+response enters billing and observability.
 
 Provider type `together` sends Rerank requests to the native `/v1/rerank`
 endpoint with bearer authentication. It accepts text and object documents,

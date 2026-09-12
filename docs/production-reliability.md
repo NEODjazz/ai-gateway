@@ -1844,3 +1844,21 @@ same image. Live liveness and readiness returned 204 through the ingress IP,
 the served OpenAPI reported 0.1.389, and an unauthenticated Chat request using
 the Ultra reasoning control returned 401 before deployment selection. No
 provider credential or external inference was used by the smoke checks.
+
+Source `0195478` extends the NVIDIA NIM model policy with the exact
+`deepseek-ai/DeepSeek-V4-Pro-0813` reasoning values `low`, `high`, and `max`.
+Source `e888f1f` preserves NIM's top-level reasoning-token counter as public
+completion-token details for JSON and SSE. It rejects null, negative,
+fractional, conflicting and over-total values before downstream accounting.
+Focused provider/API tests, vet, build, the full Go suite and the full race
+suite passed. OpenAPI 0.1.391 identifies the combined deployed contract.
+
+Rancher Desktop built
+`ai-gateway-gateway:nvidia-reasoning-usage-e888f1f` with image ID
+`sha256:5716daf7a79c7d55564405acaaba4650587000571ab3f34f7d81bf7eece415c4`.
+Gateway Helm revision 496 completed successfully. Pod
+`ai-gateway-gateway-748588f86b-rlk8q` became Ready with zero restarts on that
+image. Live liveness and readiness returned 204, the served OpenAPI reported
+0.1.391, and an unauthenticated DeepSeek reasoning request returned 401 before
+deployment selection. No provider credential or external inference was used by
+the smoke checks.

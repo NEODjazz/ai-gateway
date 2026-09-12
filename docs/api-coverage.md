@@ -212,6 +212,11 @@ availability is not inferred from these tests.
 - `c91df49`: Native NVIDIA NIM Chat restricts `reasoning_effort` to the exact
   documented values for Nemotron 3 Super and Ultra. Unknown models no longer
   advertise or accept the parameter through this managed adapter.
+- `0195478`: Native NVIDIA NIM Chat adds the documented DeepSeek V4 Pro 0813
+  `low`, `high`, and `max` reasoning policy as an exact model override.
+- `e888f1f`: Native NVIDIA NIM Chat maps the provider's top-level reasoning
+  token count into public completion-token details for JSON and SSE and rejects
+  malformed or inconsistent counters.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control
