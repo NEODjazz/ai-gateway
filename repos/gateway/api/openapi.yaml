@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.329
+  version: 0.1.330
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -8786,6 +8786,10 @@ components:
           type: array
           maxItems: 100
           items: {type: string, minLength: 1, maxLength: 128}
+        mode:
+          type: string
+          enum: [VERBATIM, SMART]
+          description: Native transcription mode. Capability profiles identify adapters that preserve it; unsupported adapters reject it before provider execution.
         chunking_strategy:
           oneOf:
             - type: string

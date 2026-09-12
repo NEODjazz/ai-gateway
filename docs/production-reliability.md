@@ -692,3 +692,10 @@ Helm revision 429 completed successfully, and pod
 `ai-gateway-gateway-5bbb7db899-jg2qk` became Ready with zero restarts. The pod's
 live endpoint served OpenAPI 0.1.329, and an unauthenticated GenerateContent
 request containing signature-valid AAC reached authentication and returned 401.
+
+Native Gemini transcription accepts `mode=VERBATIM|SMART` through the bounded
+multipart request model. The selected mode contributes to TPM admission, is sent
+in `audioTranscriptionConfig`, and is exposed only in the supporting adapter's
+capability profile. Translation and all other adapters reject the field before
+network execution. Regressions cover validation, multipart decoding, native
+mapping, parameter isolation and capability discovery.

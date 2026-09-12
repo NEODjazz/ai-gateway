@@ -204,7 +204,8 @@ base64 result. Gateway задает нейтральную variation instruction
 
 Native Gemini deployments с capability `audio_transcription` передают проверенный
 WAV/MP3/MPEG/OGG/FLAC/WebM input в GenerateContent transcription config. Language
-hints, custom vocabulary, prompt guidance и temperature отображаются явно;
+hints, custom vocabulary, prompt guidance, temperature и проверенный
+`mode=VERBATIM|SMART` отображаются явно;
 provider token usage проходит общий exact settlement. Structured timestamps,
 diarization, chunking и known-speaker режимы отклоняются до upstream.
 
