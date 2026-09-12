@@ -3481,6 +3481,8 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 		return NewDeepSeek(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "cerebras":
 		return NewCerebras(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
+	case "nvidia-nim":
+		return NewNVIDIANIM(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "xai":
 		return NewXAI(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "opensandbox":

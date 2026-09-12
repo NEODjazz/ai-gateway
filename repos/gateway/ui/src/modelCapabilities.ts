@@ -79,6 +79,8 @@ export function defaultModelCapabilities(providerType: string): string[] {
       return ["chat", "responses", "stream"];
     case "cerebras":
       return ["chat", "stream"];
+    case "nvidia-nim":
+      return ["chat", "completions", "responses", "stream"];
     case "gemini":
       return ["chat", "interactions", "stream"];
     case "xai":
