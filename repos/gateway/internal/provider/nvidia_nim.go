@@ -45,6 +45,9 @@ func (n NVIDIANIM) ValidateChatParameters(request openai.ChatCompletionRequest) 
 		if request.MaxTokens != nil && (*request.MaxTokens < 1 || *request.MaxTokens > 32768) || request.MaxCompletionTokens != nil && (*request.MaxCompletionTokens < 1 || *request.MaxCompletionTokens > 32768) {
 			return &Error{Class: FailureClientRequest, Provider: "nvidia-nim", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "max_tokens", Err: errors.New("max_tokens must be between 1 and 32768 for this NVIDIA NIM model")}
 		}
+		if request.Temperature != nil && *request.Temperature > 1 {
+			return &Error{Class: FailureClientRequest, Provider: "nvidia-nim", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "temperature", Err: errors.New("temperature must be at most 1 for this NVIDIA NIM model")}
+		}
 	}
 	if request.ReasoningEffort != "" {
 		allowed := map[string]bool{}

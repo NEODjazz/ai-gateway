@@ -245,6 +245,30 @@ func TestNVIDIANIMRejectsNemotronOutputLimitBeforeHTTP(t *testing.T) {
 	}
 }
 
+func TestNVIDIANIMRejectsNemotronTemperatureBeforeHTTP(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	client := NewNVIDIANIM(server.URL, "key", false)
+	for _, model := range []string{"nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b"} {
+		invalid := 1.01
+		request := openai.ChatCompletionRequest{Model: model, Messages: []openai.Message{{Role: "user", Content: "question"}}, Temperature: &invalid}
+		_, err := client.ChatCompletions(t.Context(), request)
+		var failure *Error
+		if !errors.As(err, &failure) || failure.Param != "temperature" || failure.UpstreamCode != "invalid_request" || calls != 0 {
+			t.Fatalf("model=%s calls=%d err=%v", model, calls, err)
+		}
+	}
+	valid := 1.0
+	if err := client.ValidateChatParameters(openai.ChatCompletionRequest{Model: "nvidia/nemotron-3-super-120b-a12b", Temperature: &valid}); err != nil {
+		t.Fatalf("boundary temperature rejected: %v", err)
+	}
+	other := 1.5
+	if err := client.ValidateChatParameters(openai.ChatCompletionRequest{Model: "model", Temperature: &other}); err != nil {
+		t.Fatalf("unrelated model policy changed: %v", err)
+	}
+}
+
 func TestNVIDIANIMRejectsDeepSeekReasoningHistoryBeforeHTTP(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
