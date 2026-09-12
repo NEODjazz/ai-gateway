@@ -101,6 +101,15 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 			{Model: "openai/gpt-oss-20b", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"low", "medium", "high"}},
 			{Model: "openai/gpt-oss-120b", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"low", "medium", "high"}},
 			{Model: "deepseek-ai/DeepSeek-V4-Pro-0813", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"high", "max"}},
+			{Model: "deepseek-ai/DeepSeek-V4-Pro", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"none", "high", "max"}},
+			{Model: "zai-org/GLM-5.1", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"none"}},
+			{Model: "zai-org/GLM-5", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"none"}},
+			{Model: "moonshotai/Kimi-K2.6", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"none"}},
+			{Model: "moonshotai/Kimi-K2.5", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"none"}},
+			{Model: "Qwen/Qwen3.6-Plus", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"none"}},
+			{Model: "Qwen/Qwen3.5-397B-A17B", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"none"}},
+			{Model: "Qwen/Qwen3.5-9B", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"none"}},
+			{Model: "deepcogito/cogito-v2-1-671b", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"none"}},
 		}
 		if !slices.EqualFunc(profile.ChatModelParameters, wantModels, func(left, right ProviderChatModelParameterPolicy) bool {
 			return left.Model == right.Model && slices.Equal(left.SupportedOptions, right.SupportedOptions) && slices.Equal(left.ReasoningEffort, right.ReasoningEffort)
@@ -110,6 +119,57 @@ func TestTogetherCapabilityProfileIsBounded(t *testing.T) {
 		return
 	}
 	t.Fatal("Together capability profile is missing")
+}
+
+func TestTogetherHybridReasoningDisableAndHistoryRoundTrip(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		reasoning, _ := body["reasoning"].(map[string]any)
+		messages, _ := body["messages"].([]any)
+		prior, _ := messages[1].(map[string]any)
+		if reasoning["enabled"] != false || body["reasoning_effort"] != nil || prior["reasoning"] != "prior plan" || prior["reasoning_content"] != nil {
+			t.Fatalf("body=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","created":1,"model":"moonshotai/Kimi-K2.5","choices":[{"index":0,"message":{"role":"assistant","reasoning":"new plan","content":"answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`)
+	}))
+	defer server.Close()
+	response, err := NewTogether(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "moonshotai/Kimi-K2.5",
+		Messages: []openai.Message{
+			{Role: "user", Content: "question"},
+			{Role: "assistant", Content: "prior answer", ReasoningContent: "prior plan"},
+			{Role: "user", Content: "continue"},
+		},
+		ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "none"},
+	})
+	if err != nil || response.Choices[0].Message.ReasoningContent != "new plan" || response.Choices[0].Message.Content != "answer" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestTogetherReasoningPolicyMatchesModelKinds(t *testing.T) {
+	client := Together{}
+	for _, test := range []struct {
+		model string
+		value string
+		valid bool
+	}{
+		{"deepseek-ai/DeepSeek-V4-Pro", "none", true},
+		{"deepseek-ai/DeepSeek-V4-Pro", "high", true},
+		{"deepseek-ai/DeepSeek-V4-Pro", "max", true},
+		{"moonshotai/Kimi-K2.5", "none", true},
+		{"moonshotai/Kimi-K2.5", "high", false},
+		{"openai/gpt-oss-120b", "none", false},
+		{"model", "none", false},
+	} {
+		err := client.ValidateChatParameters(openai.ChatCompletionRequest{Model: test.model, Messages: []openai.Message{{Role: "user", Content: "question"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: test.value}})
+		if (err == nil) != test.valid {
+			t.Fatalf("model=%s value=%s valid=%t err=%v", test.model, test.value, test.valid, err)
+		}
+	}
 }
 
 func TestTogetherSamplingControlsRoundTrip(t *testing.T) {

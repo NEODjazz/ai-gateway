@@ -168,6 +168,10 @@ func (t Together) ValidateChatParameters(request openai.ChatCompletionRequest) e
 			allowed = map[string]bool{"low": true, "medium": true, "high": true}
 		case "deepseek-ai/DeepSeek-V4-Pro-0813":
 			allowed = map[string]bool{"high": true, "max": true}
+		case "deepseek-ai/DeepSeek-V4-Pro":
+			allowed = map[string]bool{"none": true, "high": true, "max": true}
+		case "zai-org/GLM-5.1", "zai-org/GLM-5", "moonshotai/Kimi-K2.6", "moonshotai/Kimi-K2.5", "Qwen/Qwen3.6-Plus", "Qwen/Qwen3.5-397B-A17B", "Qwen/Qwen3.5-9B", "deepcogito/cogito-v2-1-671b":
+			allowed = map[string]bool{"none": true}
 		}
 		if !allowed[request.ReasoningEffort] {
 			return &Error{Class: FailureClientRequest, Provider: "together", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "reasoning_effort", Err: errors.New("reasoning_effort is not supported for this Together model or value")}
@@ -190,11 +194,18 @@ func (t Together) ValidateChatParameters(request openai.ChatCompletionRequest) e
 }
 
 func (Together) ManagedChatModelProbes() []string {
-	return []string{"openai/gpt-oss-20b", "openai/gpt-oss-120b", "deepseek-ai/DeepSeek-V4-Pro-0813"}
+	return []string{
+		"openai/gpt-oss-20b", "openai/gpt-oss-120b",
+		"deepseek-ai/DeepSeek-V4-Pro-0813", "deepseek-ai/DeepSeek-V4-Pro",
+		"zai-org/GLM-5.1", "zai-org/GLM-5",
+		"moonshotai/Kimi-K2.6", "moonshotai/Kimi-K2.5",
+		"Qwen/Qwen3.6-Plus", "Qwen/Qwen3.5-397B-A17B", "Qwen/Qwen3.5-9B",
+		"deepcogito/cogito-v2-1-671b",
+	}
 }
 
 func togetherChatMessages(request openai.ChatCompletionRequest) (any, error) {
-	if request.Model != "openai/gpt-oss-20b" && request.Model != "openai/gpt-oss-120b" && request.Model != "deepseek-ai/DeepSeek-V4-Pro-0813" {
+	if !togetherSeparateReasoningModel(request.Model) {
 		return nil, nil
 	}
 	messages := make([]map[string]json.RawMessage, len(request.Messages))
@@ -209,6 +220,20 @@ func togetherChatMessages(request openai.ChatCompletionRequest) (any, error) {
 		}
 	}
 	return messages, nil
+}
+
+func togetherSeparateReasoningModel(model string) bool {
+	switch model {
+	case "openai/gpt-oss-20b", "openai/gpt-oss-120b",
+		"deepseek-ai/DeepSeek-V4-Pro-0813", "deepseek-ai/DeepSeek-V4-Pro",
+		"zai-org/GLM-5.1", "zai-org/GLM-5",
+		"moonshotai/Kimi-K2.6", "moonshotai/Kimi-K2.5",
+		"Qwen/Qwen3.6-Plus", "Qwen/Qwen3.5-397B-A17B", "Qwen/Qwen3.5-9B",
+		"deepcogito/cogito-v2-1-671b":
+		return true
+	default:
+		return false
+	}
 }
 
 func decodeTogetherChatCompletionResponse(reader io.Reader, target *openai.ChatCompletionResponse) error {

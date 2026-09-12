@@ -24,6 +24,7 @@ type openAICompatibleChatRequest struct {
 	Messages            []openai.Message               `json:"messages"`
 	messagesOverride    any                            `json:"-"`
 	nativeLogprobs      *int                           `json:"-"`
+	nativeReasoning     *togetherReasoning             `json:"-"`
 	Functions           []openai.FunctionDefinition    `json:"functions,omitempty"`
 	FunctionCall        *openai.LegacyFunctionChoice   `json:"function_call,omitempty"`
 	Tools               []openai.Tool                  `json:"tools,omitempty"`
@@ -47,10 +48,14 @@ type deepSeekThinking struct {
 	Type string `json:"type"`
 }
 
+type togetherReasoning struct {
+	Enabled bool `json:"enabled"`
+}
+
 func (r openAICompatibleChatRequest) MarshalJSON() ([]byte, error) {
 	type wire openAICompatibleChatRequest
 	payload, err := json.Marshal(wire(r))
-	if err != nil || r.messagesOverride == nil && r.nativeLogprobs == nil {
+	if err != nil || r.messagesOverride == nil && r.nativeLogprobs == nil && r.nativeReasoning == nil {
 		return payload, err
 	}
 	var object map[string]json.RawMessage
@@ -67,6 +72,10 @@ func (r openAICompatibleChatRequest) MarshalJSON() ([]byte, error) {
 	if r.nativeLogprobs != nil {
 		object["logprobs"], _ = json.Marshal(*r.nativeLogprobs)
 		delete(object, "top_logprobs")
+	}
+	if r.nativeReasoning != nil {
+		object["reasoning"], _ = json.Marshal(r.nativeReasoning)
+		delete(object, "reasoning_effort")
 	}
 	return json.Marshal(object)
 }
@@ -227,6 +236,10 @@ func (p OpenAICompatible) mapChatParameters(request *openAICompatibleChatRequest
 			}
 			request.Logprobs = nil
 			request.TopLogprobs = nil
+		}
+		if request.ReasoningEffort == "none" {
+			request.nativeReasoning = &togetherReasoning{Enabled: false}
+			request.ReasoningEffort = ""
 		}
 	}
 }
