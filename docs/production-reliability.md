@@ -663,3 +663,11 @@ not define a streaming request or event lifecycle. The existing regression
 therefore retains the fail-closed rejection of `stream=true` before provider
 execution. The Image Generation row was also corrected after confirming that
 Image Edit streaming had already shipped and was covered by its own regressions.
+
+Native GenerateContent code execution is isolated behind the
+`gemini_code_execution` deployment capability and the `code_execution` tool ACL.
+Requests bypass exact and semantic response caches, execution history contributes
+to TPM admission, and provider-generated code/result parts are bounded to 128 parts
+and 1 MiB before they can be returned or reused. JSON and SSE regressions cover
+native transport, history preservation, routing, authorization and final usage
+settlement.

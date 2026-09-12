@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.327
+  version: 0.1.328
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -6633,25 +6633,34 @@ components:
         tools:
           type: array
           items:
-            type: object
-            additionalProperties: false
-            required: [functionDeclarations]
-            properties:
-              functionDeclarations:
-                type: array
-                minItems: 1
-                maxItems: 128
-                items:
-                  type: object
-                  additionalProperties: false
-                  required: [name]
-                  properties:
-                    name: {type: string, minLength: 1}
-                    description: {type: string}
-                    parameters:
+            oneOf:
+              - type: object
+                additionalProperties: false
+                required: [functionDeclarations]
+                properties:
+                  functionDeclarations:
+                    type: array
+                    minItems: 1
+                    maxItems: 128
+                    items:
                       type: object
-                      description: Native Schema supports nullable, anyOf, size/numeric bounds and pattern (64 levels, 128 alternatives); mutually exclusive with parametersJsonSchema.
-                    parametersJsonSchema: {type: object}
+                      additionalProperties: false
+                      required: [name]
+                      properties:
+                        name: {type: string, minLength: 1}
+                        description: {type: string}
+                        parameters:
+                          type: object
+                          description: Native Schema supports nullable, anyOf, size/numeric bounds and pattern (64 levels, 128 alternatives); mutually exclusive with parametersJsonSchema.
+                        parametersJsonSchema: {type: object}
+              - type: object
+                additionalProperties: false
+                required: [codeExecution]
+                properties:
+                  codeExecution:
+                    type: object
+                    additionalProperties: false
+                    description: Native server-side Python execution included in token counting context.
         toolConfig:
           type: object
           additionalProperties: false
@@ -6723,6 +6732,14 @@ components:
                     type: object
                     additionalProperties: false
                     description: Native server-side Google Search grounding. Requires the web_search deployment capability, bypasses response caches, and bills actual returned search queries.
+              - type: object
+                additionalProperties: false
+                required: [codeExecution]
+                properties:
+                  codeExecution:
+                    type: object
+                    additionalProperties: false
+                    description: Native server-side Python execution. Requires the gemini_code_execution deployment capability and code_execution tool grant, and bypasses response caches.
         toolConfig:
           type: object
           additionalProperties: false
@@ -6783,6 +6800,8 @@ components:
         - required: [inlineData]
         - required: [functionCall]
         - required: [functionResponse]
+        - required: [executableCode]
+        - required: [codeExecutionResult]
       properties:
         text: {type: string}
         thoughtSignature:
@@ -6820,6 +6839,22 @@ components:
             id: {type: string}
             name: {type: string, minLength: 1}
             response: {type: object}
+        executableCode:
+          type: object
+          additionalProperties: false
+          required: [language, code]
+          properties:
+            id: {type: string, maxLength: 128}
+            language: {type: string, enum: [PYTHON]}
+            code: {type: string, minLength: 1}
+        codeExecutionResult:
+          type: object
+          additionalProperties: false
+          required: [outcome]
+          properties:
+            id: {type: string, maxLength: 128}
+            outcome: {type: string, enum: [OUTCOME_OK, OUTCOME_FAILED, OUTCOME_DEADLINE_EXCEEDED]}
+            output: {type: string}
     GenerateContentResponse:
       type: object
       required: [responseId, modelVersion, candidates, usageMetadata]
@@ -7064,7 +7099,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -9478,7 +9513,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

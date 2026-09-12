@@ -837,8 +837,14 @@ requires the `web_search` capability, forwards Gemini Google Search grounding,
 validates and preserves source/support/search-entry metadata, bills the actual
 returned search-query count, and bypasses response caches. Search context, location
 and per-request use controls are rejected because the native tool cannot represent
-them. Cached content, other grounding/server tools, file parts and other audio
-formats remain unsupported.
+them. A native `codeExecution: {}` tool requires the `gemini_code_execution`
+deployment capability and the `code_execution` credential/access-group tool grant.
+It preserves bounded `executableCode` and `codeExecutionResult` parts in JSON and
+SSE, includes returned usage in normal billing, includes supplied execution history
+in TPM estimates and bypasses exact and semantic response caches. Only the native
+provider runtime executes the generated Python; the gateway does not run that code.
+Cached content, other grounding/server tools, file parts and other audio formats
+remain unsupported.
 
 GenerateContent also accepts inline WAV (`audio/wav`) and MP3 (`audio/mpeg`)
 parts in user content. Audio is size- and signature-validated, projected to
