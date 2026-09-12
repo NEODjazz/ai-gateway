@@ -19,9 +19,16 @@ const maxGeneratedImageBytes = 20 << 20
 
 func (OpenAICompatible) SupportsImageGeneration() bool { return true }
 
-func (p OpenAICompatible) GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
+func (p OpenAICompatible) ValidateImageGenerationParameters(request openai.ImageGenerationRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	return nil
+}
+
+func (p OpenAICompatible) GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
+	if err := p.ValidateImageGenerationParameters(request); err != nil {
+		return openai.ImageGenerationResponse{}, err
 	}
 	body, err := json.Marshal(struct {
 		Model             string `json:"model"`

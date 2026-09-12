@@ -27,17 +27,18 @@ type ManagedProvider struct {
 }
 
 type ProviderCapabilityProfile struct {
-	Type                 string                            `json:"type"`
-	Operations           []string                          `json:"operations"`
-	Capabilities         []string                          `json:"capabilities"`
-	AuthTypes            []string                          `json:"auth_types"`
-	ChatParameters       ProviderChatParameterPolicy       `json:"chat_parameters"`
-	ResponseParameters   ProviderResponseParameterPolicy   `json:"response_parameters"`
-	EmbeddingParameters  ProviderEmbeddingParameterPolicy  `json:"embedding_parameters"`
-	RerankParameters     ProviderRerankParameterPolicy     `json:"rerank_parameters"`
-	CompletionParameters ProviderCompletionParameterPolicy `json:"completion_parameters"`
-	ModerationParameters ProviderModerationParameterPolicy `json:"moderation_parameters"`
-	SearchParameters     ProviderSearchParameterPolicy     `json:"search_parameters"`
+	Type                      string                                 `json:"type"`
+	Operations                []string                               `json:"operations"`
+	Capabilities              []string                               `json:"capabilities"`
+	AuthTypes                 []string                               `json:"auth_types"`
+	ChatParameters            ProviderChatParameterPolicy            `json:"chat_parameters"`
+	ResponseParameters        ProviderResponseParameterPolicy        `json:"response_parameters"`
+	EmbeddingParameters       ProviderEmbeddingParameterPolicy       `json:"embedding_parameters"`
+	RerankParameters          ProviderRerankParameterPolicy          `json:"rerank_parameters"`
+	CompletionParameters      ProviderCompletionParameterPolicy      `json:"completion_parameters"`
+	ModerationParameters      ProviderModerationParameterPolicy      `json:"moderation_parameters"`
+	SearchParameters          ProviderSearchParameterPolicy          `json:"search_parameters"`
+	ImageGenerationParameters ProviderImageGenerationParameterPolicy `json:"image_generation_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -79,6 +80,10 @@ type ProviderModerationParameterPolicy struct {
 type ProviderSearchParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 	QueryForms       []string `json:"query_forms"`
+}
+
+type ProviderImageGenerationParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
 }
 
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai", "opensandbox"}
@@ -327,20 +332,56 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			}
 		}
 		profiles = append(profiles, ProviderCapabilityProfile{
-			Type:                 providerType,
-			Operations:           operations,
-			Capabilities:         capabilities,
-			AuthTypes:            managedProviderAuthTypes(providerType),
-			ChatParameters:       managedProviderChatParameterPolicy(client, slicesContain(operations, "chat")),
-			ResponseParameters:   managedProviderResponseParameterPolicy(client, slicesContain(operations, "responses")),
-			EmbeddingParameters:  managedProviderEmbeddingParameterPolicy(client, slicesContain(operations, "embeddings")),
-			RerankParameters:     managedProviderRerankParameterPolicy(client, slicesContain(operations, "rerank")),
-			CompletionParameters: managedProviderCompletionParameterPolicy(client, slicesContain(operations, "completions")),
-			ModerationParameters: managedProviderModerationParameterPolicy(client, slicesContain(operations, "moderation")),
-			SearchParameters:     managedProviderSearchParameterPolicy(client, slicesContain(operations, "search")),
+			Type:                      providerType,
+			Operations:                operations,
+			Capabilities:              capabilities,
+			AuthTypes:                 managedProviderAuthTypes(providerType),
+			ChatParameters:            managedProviderChatParameterPolicy(client, slicesContain(operations, "chat")),
+			ResponseParameters:        managedProviderResponseParameterPolicy(client, slicesContain(operations, "responses")),
+			EmbeddingParameters:       managedProviderEmbeddingParameterPolicy(client, slicesContain(operations, "embeddings")),
+			RerankParameters:          managedProviderRerankParameterPolicy(client, slicesContain(operations, "rerank")),
+			CompletionParameters:      managedProviderCompletionParameterPolicy(client, slicesContain(operations, "completions")),
+			ModerationParameters:      managedProviderModerationParameterPolicy(client, slicesContain(operations, "moderation")),
+			SearchParameters:          managedProviderSearchParameterPolicy(client, slicesContain(operations, "search")),
+			ImageGenerationParameters: managedProviderImageGenerationParameterPolicy(client, slicesContain(operations, "image_generation")),
 		})
 	}
 	return profiles
+}
+
+func managedProviderImageGenerationParameterPolicy(client Client, supported bool) ProviderImageGenerationParameterPolicy {
+	policy := ProviderImageGenerationParameterPolicy{SupportedOptions: []string{}}
+	validator, ok := client.(interface {
+		ValidateImageGenerationParameters(openai.ImageGenerationRequest) error
+	})
+	if !supported || !ok {
+		return policy
+	}
+	baseline := openai.ImageGenerationRequest{Model: "model", Prompt: "prompt"}
+	for _, probe := range []struct {
+		name  string
+		apply func(*openai.ImageGenerationRequest)
+	}{
+		{"n", func(r *openai.ImageGenerationRequest) { value := 1; r.N = &value }},
+		{"quality", func(r *openai.ImageGenerationRequest) { r.Quality = "low" }},
+		{"response_format", func(r *openai.ImageGenerationRequest) { r.ResponseFormat = "b64_json" }},
+		{"size", func(r *openai.ImageGenerationRequest) { r.Size = "1024x1024" }},
+		{"style", func(r *openai.ImageGenerationRequest) { r.Style = "vivid" }},
+		{"user", func(r *openai.ImageGenerationRequest) { r.User = "probe" }},
+		{"background", func(r *openai.ImageGenerationRequest) { r.Background = "transparent" }},
+		{"output_format", func(r *openai.ImageGenerationRequest) { r.OutputFormat = "png" }},
+		{"output_compression", func(r *openai.ImageGenerationRequest) { value := 50; r.OutputCompression = &value }},
+		{"resolution", func(r *openai.ImageGenerationRequest) { r.Resolution = "1K" }},
+		{"aspect_ratio", func(r *openai.ImageGenerationRequest) { r.AspectRatio = "1:1" }},
+		{"seed", func(r *openai.ImageGenerationRequest) { value := int64(1); r.Seed = &value }},
+	} {
+		request := baseline
+		probe.apply(&request)
+		if validator.ValidateImageGenerationParameters(request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	return policy
 }
 
 func managedProviderSearchParameterPolicy(client Client, supported bool) ProviderSearchParameterPolicy {

@@ -115,6 +115,13 @@ func (p OpenRouter) GenerateImage(ctx context.Context, request openai.ImageGener
 	return p.generateImage(ctx, request, nil)
 }
 
+func (OpenRouter) ValidateImageGenerationParameters(request openai.ImageGenerationRequest) error {
+	if message := request.Validate(); message != "" {
+		return &Error{Class: FailureClientRequest, Provider: "openrouter", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	return rejectParameters("openrouter", parameterCheck{"response_format", request.ResponseFormat != ""}, parameterCheck{"style", request.Style != ""})
+}
+
 func (p OpenRouter) EditImage(ctx context.Context, request openai.ImageEditRequest) (openai.ImageGenerationResponse, error) {
 	if message := request.Validate(); message != "" {
 		return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, Provider: "openrouter", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
@@ -141,12 +148,7 @@ type openRouterImageReference struct {
 }
 
 func (p OpenRouter) generateImage(ctx context.Context, request openai.ImageGenerationRequest, references []openRouterImageReference) (openai.ImageGenerationResponse, error) {
-	if message := request.Validate(); message != "" {
-		return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, Provider: "openrouter", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
-	}
-	if err := rejectParameters("openrouter",
-		parameterCheck{"response_format", request.ResponseFormat != ""}, parameterCheck{"style", request.Style != ""},
-	); err != nil {
+	if err := p.ValidateImageGenerationParameters(request); err != nil {
 		return openai.ImageGenerationResponse{}, err
 	}
 	body, err := json.Marshal(struct {

@@ -18,6 +18,10 @@ func (Gemini) SupportsImageGeneration() bool { return true }
 func (Gemini) SupportsImageEdit() bool       { return true }
 func (Gemini) SupportsImageVariation() bool  { return true }
 
+func (Gemini) ValidateImageGenerationParameters(request openai.ImageGenerationRequest) error {
+	return validateGeminiImageRequest(request)
+}
+
 func (g Gemini) GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
 	if err := validateGeminiImageRequest(request); err != nil {
 		return openai.ImageGenerationResponse{}, err

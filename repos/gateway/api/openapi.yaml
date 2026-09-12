@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.305
+  version: 0.1.306
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9307,7 +9307,7 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters]
+      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, cohere, mistral, voyage, bedrock, groq, deepseek, xai, opensandbox]}
         operations:
@@ -9339,6 +9339,8 @@ components:
           $ref: '#/components/schemas/ProviderModerationParameterPolicy'
         search_parameters:
           $ref: '#/components/schemas/ProviderSearchParameterPolicy'
+        image_generation_parameters:
+          $ref: '#/components/schemas/ProviderImageGenerationParameterPolicy'
     ProviderChatParameterPolicy:
       type: object
       additionalProperties: false
@@ -9456,6 +9458,15 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, enum: [text, text_array]}
+    ProviderImageGenerationParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [supported_options]
+      properties:
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [n, quality, response_format, size, style, user, background, output_format, output_compression, resolution, aspect_ratio, seed]}
     ProviderCredentialCreateInput:
       type: object
       additionalProperties: false

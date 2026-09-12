@@ -542,6 +542,23 @@ func TestManagedProviderCapabilityProfilesExposeValidatedSearchOptions(t *testin
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeValidatedImageGenerationOptions(t *testing.T) {
+	all := []string{"n", "quality", "response_format", "size", "style", "user", "background", "output_format", "output_compression", "resolution", "aspect_ratio", "seed"}
+	expected := map[string][]string{
+		"openai": all, "openai-compatible": all, "azure-openai": all,
+		"openrouter": {"n", "quality", "size", "user", "background", "output_format", "output_compression", "resolution", "aspect_ratio", "seed"},
+		"gemini":     {"n", "response_format", "resolution", "aspect_ratio"},
+		"xai":        {"n", "quality", "response_format", "resolution", "aspect_ratio"},
+	}
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		hasOperation := slices.Contains(profile.Operations, "image_generation")
+		want, listed := expected[profile.Type]
+		if hasOperation != listed || !slices.Equal(profile.ImageGenerationParameters.SupportedOptions, want) {
+			t.Errorf("%s image generation parameters=%v operation=%v", profile.Type, profile.ImageGenerationParameters.SupportedOptions, hasOperation)
+		}
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

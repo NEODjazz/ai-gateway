@@ -482,24 +482,7 @@ func (x XAI) GenerateSpeech(ctx context.Context, request openai.AudioSpeechReque
 }
 
 func (x XAI) GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
-	if message := request.Validate(); message != "" {
-		return openai.ImageGenerationResponse{}, xaiParameterError("", message)
-	}
-	if request.Quality != "" && request.Quality != "auto" && request.Quality != "low" && request.Quality != "medium" {
-		return openai.ImageGenerationResponse{}, xaiParameterError("quality", "quality must be auto, low, or medium")
-	}
-	if request.Resolution != "" && request.Resolution != "1K" && request.Resolution != "2K" {
-		return openai.ImageGenerationResponse{}, xaiParameterError("resolution", "resolution must be 1K or 2K")
-	}
-	if err := rejectParameters("xai",
-		parameterCheck{"size", request.Size != ""},
-		parameterCheck{"style", request.Style != ""},
-		parameterCheck{"user", request.User != ""},
-		parameterCheck{"background", request.Background != ""},
-		parameterCheck{"output_format", request.OutputFormat != ""},
-		parameterCheck{"output_compression", request.OutputCompression != nil},
-		parameterCheck{"seed", request.Seed != nil},
-	); err != nil {
+	if err := x.ValidateImageGenerationParameters(request); err != nil {
 		return openai.ImageGenerationResponse{}, err
 	}
 	body, err := json.Marshal(struct {
@@ -515,6 +498,30 @@ func (x XAI) GenerateImage(ctx context.Context, request openai.ImageGenerationRe
 		return openai.ImageGenerationResponse{}, err
 	}
 	return x.compatible.postImageJSON(ctx, "images/generations", body, request, true)
+}
+
+func (XAI) ValidateImageGenerationParameters(request openai.ImageGenerationRequest) error {
+	if message := request.Validate(); message != "" {
+		return xaiParameterError("", message)
+	}
+	if request.Quality != "" && request.Quality != "auto" && request.Quality != "low" && request.Quality != "medium" {
+		return xaiParameterError("quality", "quality must be auto, low, or medium")
+	}
+	if request.Resolution != "" && request.Resolution != "1K" && request.Resolution != "2K" {
+		return xaiParameterError("resolution", "resolution must be 1K or 2K")
+	}
+	if err := rejectParameters("xai",
+		parameterCheck{"size", request.Size != ""},
+		parameterCheck{"style", request.Style != ""},
+		parameterCheck{"user", request.User != ""},
+		parameterCheck{"background", request.Background != ""},
+		parameterCheck{"output_format", request.OutputFormat != ""},
+		parameterCheck{"output_compression", request.OutputCompression != nil},
+		parameterCheck{"seed", request.Seed != nil},
+	); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (x XAI) EditImage(ctx context.Context, request openai.ImageEditRequest) (openai.ImageGenerationResponse, error) {
