@@ -1446,3 +1446,20 @@ Gateway Helm revision 474 completed successfully, and pod
 same image ID. Live health returned 204, OpenAPI reported 0.1.369, and an
 unauthenticated Realtime smoke request returned 401 before deployment selection.
 The smoke checks submitted no audio and performed no external inference.
+
+Source `b1bf823` adds Azure China workload identity selection for official
+`.openai.azure.cn` and `.cognitiveservices.azure.cn` provider endpoints.
+Federated identity uses `login.chinacloudapi.cn` with the China Cognitive
+Services scope, and managed identity requests the matching China resource
+audience. A suffix-boundary regression keeps lookalike external domains on the
+public-cloud defaults. Focused regressions, the full Go suite, full race suite,
+vet and build passed. OpenAPI 0.1.370 publishes the three-cloud identity
+contract.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-1cc7ac8` with image ID
+`sha256:202bee65638f878d616981c9cc70537ce94c6dd3e8524e98e190961429af8bcb`.
+Gateway Helm revision 475 completed successfully, and pod
+`ai-gateway-gateway-54bf8df597-llqrr` became Ready with zero restarts and the
+same image ID. Live health returned 204, OpenAPI reported 0.1.370, and an
+unauthenticated Models request returned 401 before discovery. No Azure
+credential or external provider call was used by the smoke checks.
