@@ -45,6 +45,7 @@ describe("modelCapabilityOptions", () => {
       "bash_tool",
       "text_editor_tool",
       "computer_toolset",
+      "browser_toolset",
       "audio",
       "audio_input",
       "video_input",

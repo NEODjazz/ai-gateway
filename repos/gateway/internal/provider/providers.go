@@ -160,7 +160,7 @@ var managedOperationCapabilities = []string{
 
 var managedFeatureCapabilities = []string{
 	"tools", "structured_output", "mcp", "vision", "web_search", "tool_search", "audio_input", "video_input",
-	"web_fetch", "audio", "prompt_cache", "assistant_prefill", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset",
+	"web_fetch", "audio", "prompt_cache", "assistant_prefill", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset",
 	"background_responses", "background_interactions", "file_input", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution",
 }
 

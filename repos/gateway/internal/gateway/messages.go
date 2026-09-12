@@ -202,7 +202,8 @@ func messagesContent(message openai.Message) ([]any, error) {
 		}
 		block := map[string]any{"type": "tool_use", "id": call.ID, "name": call.Function.Name, "input": input}
 		if call.ToolsetName != "" {
-			if call.ToolsetName != "computer" || !computerToolMembers[call.Function.Name] {
+			members := clientToolsetMembers(call.ToolsetName)
+			if members == nil || !members[call.Function.Name] {
 				return nil, errors.New("invalid client toolset identity")
 			}
 			block["toolset_name"] = call.ToolsetName
@@ -245,7 +246,9 @@ func validateNativeMessageBlock(block map[string]any) error {
 		}
 		if toolset, found := block["toolset_name"]; found {
 			name, _ := block["name"].(string)
-			if toolset != "computer" || !computerToolMembers[name] || typeName != "tool_use" {
+			toolsetName, _ := toolset.(string)
+			members := clientToolsetMembers(toolsetName)
+			if members == nil || !members[name] || typeName != "tool_use" {
 				return errors.New("invalid native client toolset identity")
 			}
 		}
@@ -485,7 +488,8 @@ func (w *messagesWriter) chunk(payload string) error {
 				w.tools[*call.Index] = index
 				block := map[string]any{"type": "tool_use", "id": call.ID, "name": call.Function.Name, "input": map[string]any{}}
 				if call.ToolsetName != "" {
-					if call.ToolsetName != "computer" || !computerToolMembers[call.Function.Name] {
+					members := clientToolsetMembers(call.ToolsetName)
+					if members == nil || !members[call.Function.Name] {
 						return errors.New("invalid client toolset identity")
 					}
 					block["toolset_name"] = call.ToolsetName

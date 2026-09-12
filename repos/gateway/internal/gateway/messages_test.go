@@ -232,6 +232,94 @@ func TestMessagesComputerToolsetDeferredLoadingRequiresToolSearch(t *testing.T) 
 	}
 }
 
+func TestMessagesConvertsBrowserToolsetAndPreservesLifecycle(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call-new", Type: "function", Function: openai.FunctionCall{Name: "read_page", Arguments: `{}`}, ToolsetName: "browser"}}}, FinishReason: "tool_calls"}}, Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 3, TotalTokens: 13}}}
+	body := `{"model":"model","max_tokens":20,"tools":[{"type":"browser_toolset_20260801","configs":{"read_console":{"enabled":true},"hold_key":{"enabled":false}},"allowed_callers":["direct"]}],"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call-old","name":"navigate","toolset_name":"browser","input":{"url":"https://example.com"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-old","toolset_name":"browser","content":[{"type":"text","text":"Navigated"},{"type":"browser_state","tabs":[{"tab_id":"tab-1","title":"Example","url":"https://example.com","active":true}],"state_changes":[{"type":"download_started","download_id":"download-1","url":"https://example.com/file"}]}]}]}]}`
+	response := nativeMessageCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), body, "")
+	request := upstream.request.Request
+	if response.Code != http.StatusOK || upstream.calls != 1 || len(request.AnthropicClientToolsets) != 1 || request.AnthropicClientToolsets[0].Type != "browser_toolset_20260801" || request.NativeInputTokens < 7550 || len(request.Messages) != 2 || len(request.Messages[1].NativeContent) != 1 {
+		t.Fatalf("response=%d body=%s request=%+v", response.Code, response.Body.String(), request)
+	}
+	if !strings.Contains(response.Body.String(), `"toolset_name":"browser"`) || !strings.Contains(response.Body.String(), `"name":"read_page"`) {
+		t.Fatalf("toolset identity lost: %s", response.Body.String())
+	}
+	identifiers := anthropicClientToolsetIdentifiers(request.AnthropicClientToolsets)
+	if len(identifiers) != 27 || slices.Contains(identifiers, "browser:hold_key") || !slices.Contains(identifiers, "browser:read_console") || slices.Contains(identifiers, "browser:file_upload") {
+		t.Fatalf("identifiers=%v", identifiers)
+	}
+}
+
+func TestMessagesBrowserAndComputerToolsetsKeepNamespacedMembers(t *testing.T) {
+	request := messagesRequest{Model: "model", MaxTokens: 10, Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`"work"`)}}, Tools: []messagesTool{{Type: "computer_toolset_20260801"}, {Type: "browser_toolset_20260801"}}}
+	chat, err := request.chat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identifiers := anthropicClientToolsetIdentifiers(chat.AnthropicClientToolsets)
+	if len(identifiers) != 44 || !slices.Contains(identifiers, "computer:screenshot") || !slices.Contains(identifiers, "browser:screenshot") || slices.Contains(identifiers, "browser:javascript_exec") {
+		t.Fatalf("identifiers=%v", identifiers)
+	}
+}
+
+func TestMessagesRejectsInvalidBrowserToolsetsAndResults(t *testing.T) {
+	allDisabled := make([]string, 0, len(browserToolMembers))
+	for name := range browserToolMembers {
+		allDisabled = append(allDisabled, fmt.Sprintf(`%q:{"enabled":false}`, name))
+	}
+	for _, body := range []string{
+		`{"model":"m","max_tokens":10,"tools":[{"type":"browser_toolset_20260801","name":"browser"}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"browser_toolset_20260801","configs":{"unknown":{}}}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"browser_toolset_20260801","configs":{"read_console":{"extra":true}}}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"browser_toolset_20260801","configs":{"read_console":{"enabled":true,"defer_loading":true}}}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"browser_toolset_20260801","allowed_callers":["code_execution_20260521"]}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"browser_toolset_20260801"}],"tool_choice":{"type":"tool","name":"navigate"},"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"browser_toolset_20260801","configs":{` + strings.Join(allDisabled, ",") + `}}],"messages":[{"role":"user","content":"hi"}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"browser_toolset_20260801"}],"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call","name":"new_tab","toolset_name":"browser","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call","toolset_name":"browser","content":"opened"}]}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"browser_toolset_20260801"}],"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call","name":"navigate","toolset_name":"browser","input":{"url":"https://example.com"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call","toolset_name":"browser","is_error":true,"content":[{"type":"text","text":"failed"},{"type":"browser_state","tabs":[]}]}]}]}`,
+		`{"model":"m","max_tokens":10,"tools":[{"type":"browser_toolset_20260801"}],"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call","name":"list_tabs","toolset_name":"browser","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call","toolset_name":"browser","content":[{"type":"browser_state","tabs":[{"tab_id":"a","title":"A","url":"https://a","active":true},{"tab_id":"b","title":"B","url":"https://b","active":true}]}]}]}]}`,
+	} {
+		upstream := &fallbackChatProvider{}
+		response := nativeMessageCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), body, "")
+		if response.Code != http.StatusBadRequest || upstream.calls != 0 {
+			t.Fatalf("response=%d body=%s request=%s", response.Code, response.Body.String(), body)
+		}
+	}
+}
+
+func TestMessagesAcceptsBrowserTabStateAndDeferredDefaults(t *testing.T) {
+	state := json.RawMessage(`[{"type":"browser_state","tabs":[{"tab_id":"tab-1","title":"New","url":"about:blank","active":true}],"state_changes":[{"type":"tab_opened","tab_id":"tab-1"}]}]`)
+	if err := validateBrowserToolResultContent(state, false, "new_tab"); err != nil {
+		t.Fatal(err)
+	}
+	deferred := true
+	configs := make(map[string]messagesToolsetMemberConfig, len(browserToolMembers)-len(browserOptionalToolMembers))
+	for name := range browserToolMembers {
+		if !browserOptionalToolMembers[name] {
+			configs[name] = messagesToolsetMemberConfig{DeferLoading: &deferred}
+		}
+	}
+	request := messagesRequest{Model: "model", MaxTokens: 10, Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`"work"`)}}, Tools: []messagesTool{{Type: "browser_toolset_20260801", Configs: configs}, {Type: "tool_search_tool_regex_20251119", Name: "tool_search_tool_regex"}}}
+	chat, err := request.chat()
+	if err != nil || len(chat.AnthropicClientToolsets) != 1 || !toolsetDeferred(chat.AnthropicClientToolsets[0]) || chat.NativeInputTokens < 6670 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+}
+
+func TestBrowserStateValidationRejectsMalformedRenderedState(t *testing.T) {
+	for _, raw := range []string{
+		`[{"type":"browser_state","tabs":[{"tab_id":"tab\n1","title":"A","url":"https://a","active":true}]}]`,
+		`[{"type":"browser_state","tabs":[{"tab_id":"tab-1","title":"A","url":"https://a"}]}]`,
+		`[{"type":"browser_state","tabs":[],"state_changes":[]}]`,
+		`[{"type":"browser_state","tabs":[],"state_changes":[{"type":"tab_opened","tab_id":"missing"}]}]`,
+		`[{"type":"browser_state","tabs":[],"state_changes":[{"type":"download_completed","download_id":"d","url":"https://a","size_bytes":-1}]}]`,
+		`[{"type":"browser_state","tabs":[],"unknown":true}]`,
+	} {
+		if err := validateBrowserToolResultContent(json.RawMessage(raw), false, "list_tabs"); err == nil {
+			t.Fatalf("malformed browser state accepted: %s", raw)
+		}
+	}
+}
+
 func TestMessagesRejectsInvalidNativeClientTools(t *testing.T) {
 	for _, body := range []string{
 		`{"model":"m","max_tokens":10,"tools":[{"type":"memory_20250818","name":"wrong"}],"messages":[{"role":"user","content":"hi"}]}`,
@@ -337,6 +425,7 @@ func TestMessagesPreservesAccessControls(t *testing.T) {
 		{name: "tool search", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}, body: `{"model":"model","max_tokens":10,"tools":[{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex"}],"messages":[{"role":"user","content":"hi"}]}`, status: 403},
 		{name: "client tool", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}, body: `{"model":"model","max_tokens":10,"tools":[{"type":"bash_20250124","name":"bash"}],"messages":[{"role":"user","content":"hi"}]}`, status: 403},
 		{name: "client toolset", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tools: []string{"computer:screenshot"}}, body: `{"model":"model","max_tokens":10,"tools":[{"type":"computer_toolset_20260801"}],"messages":[{"role":"user","content":"hi"}]}`, status: 403},
+		{name: "browser toolset", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tools: []string{"browser:navigate"}}, body: `{"model":"model","max_tokens":10,"tools":[{"type":"browser_toolset_20260801"}],"messages":[{"role":"user","content":"hi"}]}`, status: 403},
 		{name: "tpm", key: "gateway-test-key", policy: accessPolicyModule{models: []string{"*"}, tpm: 5}, body: `{"model":"model","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`, status: 429},
 	} {
 		t.Run(test.name, func(t *testing.T) {

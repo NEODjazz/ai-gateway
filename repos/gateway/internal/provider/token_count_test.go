@@ -153,6 +153,28 @@ func TestAnthropicCountTokensIncludesNativeClientToolsets(t *testing.T) {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
+
+func TestAnthropicCountTokensIncludesBrowserToolset(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Tools []anthropicTool `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Tools) != 1 || body.Tools[0].Type != "browser_toolset_20260801" || body.Tools[0].Name != "" {
+			t.Errorf("browser toolset context lost: %+v", body.Tools)
+		}
+		_, _ = w.Write([]byte(`{"input_tokens":6670}`))
+	}))
+	defer server.Close()
+	result, err := NewAnthropic(server.URL, "", false).CountTokens(t.Context(), TokenCountRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "count"}}, AnthropicClientToolsets: []openai.AnthropicClientToolset{{Type: "browser_toolset_20260801", Name: "browser"}},
+	})
+	if err != nil || result.InputTokens != 6670 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
 func TestAnthropicCounterRejectsMalformedCounts(t *testing.T) {
 	for _, payload := range []string{`{}`, `{"input_tokens":null}`, `{"input_tokens":-1}`, `{"input_tokens":1.5}`, `{"input_tokens":9223372036854775808}`, `{"input_tokens":1} {}`, strings.Repeat(" ", (64<<10)+1)} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(payload)) }))
