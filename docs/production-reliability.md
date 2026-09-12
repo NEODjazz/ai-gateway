@@ -864,3 +864,16 @@ Gateway Helm revision 441 completed successfully, and pod
 endpoint served OpenAPI 0.1.341 with all supported web-tool versions. A valid
 20260318 web-search request using flat location fields reached authentication and
 returned 401.
+
+Source `b4968ba` preserves the requested native code-execution version through
+Messages generation and token counting. The 20250825, 20260120 and 20260521
+variants share the existing tool ACL, capability routing, cache exclusion,
+bounded result validation and exact provider-reported tool usage settlement.
+Full test, race, vet and build checks completed successfully.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-b4968ba` with image ID
+`sha256:dff41c877752054848aff8a0eb70743075ff299a5d5fc11f5f1836d718e689d0`.
+Gateway Helm revision 442 completed successfully, and pod
+`ai-gateway-gateway-5877d7f96f-p59jb` became Ready with zero restarts. Its live
+endpoint served OpenAPI 0.1.342 with all three code-execution versions. A valid
+20260521 request reached authentication and returned 401.
