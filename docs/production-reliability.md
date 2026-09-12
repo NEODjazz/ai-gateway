@@ -1093,3 +1093,12 @@ pipeline. Requests accept at most five documents and 16 MiB of decoded PDF data,
 validate the container signature, expose the bytes to attachment policy modules,
 reserve conservative input tokens, bypass response caches and require explicit
 `file_input` routing. Full Go tests, race tests, vet and build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-492dd59` with image ID
+`sha256:fd565317dee040b84ffe3c8fdb28271af910098e98f22fac2719b614c60bc0c0`.
+Gateway Helm revision 456 completed successfully, and pod
+`ai-gateway-gateway-66446f9568-874jt` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.355 exposes `MessagesDocumentBlock`. A valid
+base64 PDF request passed structural validation and reached authentication;
+bytes without a PDF signature returned 400 before authentication. These smoke
+checks used no credential and performed no external inference.
