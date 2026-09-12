@@ -76,6 +76,12 @@ rejected before inference. Accepted document text enters the shared Responses
 input policy, token reserve and billing path, and remote URLs are replaced with
 validated inline content before task persistence.
 
+A2A MP4 and WebM video parts use the shared signature-validated video contract.
+Inline and authorized HTTPS inputs have independent count and byte limits, enter
+the AV, model-capability, TPM and billing pipeline, and are persisted only after
+remote URLs have been replaced with validated inline bytes. Remote fetches do not
+forward client authorization headers.
+
 Synchronous vector-store search resolves ownership before reading files and
 allows only bounded UTF-8 text formats with `purpose=assistants`. Query and file
 chunks pass through the configured inference content policy and token admission
