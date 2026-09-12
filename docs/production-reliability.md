@@ -1463,3 +1463,22 @@ Gateway Helm revision 475 completed successfully, and pod
 same image ID. Live health returned 204, OpenAPI reported 0.1.370, and an
 unauthenticated Models request returned 401 before discovery. No Azure
 credential or external provider call was used by the smoke checks.
+
+Source `4f46093` adds the managed `cerebras` provider adapter with bearer
+authentication, `/v1/models` discovery, Chat Completions and streaming, function
+tools, JSON Schema output, explicit parameter validation and exact upstream
+usage. Provider-native reasoning output is bounded and normalized to the public
+`reasoning_content` field for JSON and SSE. Unsupported fields fail before the
+HTTP request. Focused protocol and capability-profile regressions, the full Go
+suite, full race suite, vet, build, UI typecheck, UI production build and all 167
+UI tests passed. Contract commit `a457530` publishes the provider in OpenAPI
+0.1.371 and documents the verified boundary.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-a457530` with image ID
+`sha256:2aef0daec413e92b75e224cee13ac1bbfe582e23271d30a07cce517070e47898`.
+Gateway Helm revision 476 completed successfully, and pod
+`ai-gateway-gateway-6798c5864b-sdhvh` became Ready with zero restarts and the
+same image ID. Live health returned 204, OpenAPI reported 0.1.371, the deployed
+capability endpoint exposed the exact Chat/stream, tools, structured-output and
+parameter policy, and an unauthenticated Models request returned 401. No
+provider credential or external inference was used by the smoke checks.
