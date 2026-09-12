@@ -33,6 +33,7 @@ const maxBillableInputCharacters = 100_000_000
 const maxBillableInputPages = 1_000_000
 const maxBillableInputAudioMilliseconds = 7 * 24 * 60 * 60 * 1000
 const maxBillableVideoSeconds = 24 * 60 * 60
+const maxBillableOutputImages = 10
 const maxBillableToolRequests = 1_000_000
 const maxBillableTrainingTokens = 1_000_000_000
 
@@ -151,6 +152,9 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	if req.VideoSeconds < 0 || req.VideoSeconds > maxBillableVideoSeconds {
 		return errors.New("video_seconds is outside the supported range")
 	}
+	if req.OutputImages < 0 || req.OutputImages > maxBillableOutputImages {
+		return errors.New("output_images is outside the supported range")
+	}
 	if req.ToolRequests < 0 || req.ToolRequests > maxBillableToolRequests {
 		return errors.New("tool_requests is outside the supported range")
 	}
@@ -181,12 +185,14 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	inputPages := req.InputPages
 	inputAudioMilliseconds := req.InputAudioMilliseconds
 	videoSeconds := req.VideoSeconds
+	outputImages := req.OutputImages
 	trainingTokens := req.TrainingTokens
 	if metadata(req, "provider.cache.status") == "hit" {
 		inputCharacters = 0
 		inputPages = 0
 		inputAudioMilliseconds = 0
 		videoSeconds = 0
+		outputImages = 0
 		trainingTokens = 0
 	}
 	if phase == "cancel" {
@@ -214,6 +220,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	req.Metadata["billing.input_pages"] = strconv.Itoa(inputPages)
 	req.Metadata["billing.input_audio_milliseconds"] = strconv.Itoa(inputAudioMilliseconds)
 	req.Metadata["billing.video_seconds"] = strconv.Itoa(videoSeconds)
+	req.Metadata["billing.output_images"] = strconv.Itoa(outputImages)
 	req.Metadata["billing.tool_requests"] = strconv.Itoa(req.ToolRequests)
 	req.Metadata["billing.training_tokens"] = strconv.Itoa(trainingTokens)
 	req.Metadata["billing.search_requests_estimated"] = strconv.FormatBool(req.SearchRequestsEstimated)
@@ -228,7 +235,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 		return errors.New("total token accounting overflow")
 	}
 	eventTotalTokens += trainingTokens
-	event, err := m.event(req, promptTokens, inputTokens, eventOutputTokens, eventTotalTokens, trainingTokens, inputCharacters, inputPages, inputAudioMilliseconds, videoSeconds, usageEstimated)
+	event, err := m.event(req, promptTokens, inputTokens, eventOutputTokens, eventTotalTokens, trainingTokens, inputCharacters, inputPages, inputAudioMilliseconds, videoSeconds, outputImages, usageEstimated)
 	pricingErr := err
 	if pricingErr != nil && phase == "reserve" {
 		return err
@@ -257,7 +264,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 			if err != nil {
 				cancelEvent := event
 				cancelEvent.Phase = "cancel"
-				cancelEvent.InputTokens, cancelEvent.OutputTokens, cancelEvent.TotalTokens, cancelEvent.TrainingTokens, cancelEvent.InputCharacters, cancelEvent.InputPages, cancelEvent.InputAudioMilliseconds, cancelEvent.VideoSeconds, cancelEvent.ToolRequests, cancelEvent.SearchRequests, cancelEvent.Cost = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+				cancelEvent.InputTokens, cancelEvent.OutputTokens, cancelEvent.TotalTokens, cancelEvent.TrainingTokens, cancelEvent.InputCharacters, cancelEvent.InputPages, cancelEvent.InputAudioMilliseconds, cancelEvent.VideoSeconds, cancelEvent.OutputImages, cancelEvent.ToolRequests, cancelEvent.SearchRequests, cancelEvent.Cost = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 				_ = m.policy.Apply(ctx, &cancelEvent)
 				return err
 			}
@@ -270,7 +277,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 			return errors.New("invalid billing phase: " + phase)
 		}
 		if phase == "cancel" {
-			event.InputTokens, event.OutputTokens, event.TotalTokens, event.TrainingTokens, event.InputCharacters, event.InputPages, event.InputAudioMilliseconds, event.VideoSeconds, event.ToolRequests, event.SearchRequests, event.Cost = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+			event.InputTokens, event.OutputTokens, event.TotalTokens, event.TrainingTokens, event.InputCharacters, event.InputPages, event.InputAudioMilliseconds, event.VideoSeconds, event.OutputImages, event.ToolRequests, event.SearchRequests, event.Cost = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 			event.ProviderCostUSDTicks, event.ProviderCostReported = 0, false
 		}
 		created, err := m.durable.Enqueue(ctx, event)
@@ -306,6 +313,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 		event.InputPages = 0
 		event.InputAudioMilliseconds = 0
 		event.VideoSeconds = 0
+		event.OutputImages = 0
 		event.ToolRequests = 0
 		event.Cost = 0
 		event.ProviderCostUSDTicks, event.ProviderCostReported = 0, false
@@ -317,7 +325,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 	return nil
 }
 
-func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens int, outputTokens int, totalTokens int, trainingTokens int, inputCharacters int, inputPages int, inputAudioMilliseconds int, videoSeconds int, usageEstimated bool) (BillingEvent, error) {
+func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens int, outputTokens int, totalTokens int, trainingTokens int, inputCharacters int, inputPages int, inputAudioMilliseconds int, videoSeconds int, outputImages int, usageEstimated bool) (BillingEvent, error) {
 	model := req.Request.Model
 	providerName := req.Request.Provider
 	apiType := req.APIType
@@ -347,7 +355,7 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 	if pricingErr != nil {
 		pricing = PricingSnapshot{Currency: m.pricing.Currency}
 	}
-	cost := pricingCost(inputTokens, outputTokens, trainingTokens, inputCharacters, inputPages, inputAudioMilliseconds, videoSeconds, req.SearchRequests, pricing)
+	cost := pricingCost(inputTokens, outputTokens, trainingTokens, inputCharacters, inputPages, inputAudioMilliseconds, videoSeconds, outputImages, req.SearchRequests, pricing)
 	providerCostTicks := int64(0)
 	providerCostReported := false
 	if req.ProviderCostUSDTicks != nil {
@@ -395,6 +403,7 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		InputPages:              inputPages,
 		InputAudioMilliseconds:  inputAudioMilliseconds,
 		VideoSeconds:            videoSeconds,
+		OutputImages:            outputImages,
 		ToolRequests:            req.ToolRequests,
 		InputTokens:             inputTokens,
 		OutputTokens:            outputTokens,
@@ -418,6 +427,7 @@ func (m BillingModule) event(req *RequestContext, promptTokens int, inputTokens 
 		PageCostPer1K:           pricing.PageCostPer1K,
 		AudioCostPerMinute:      pricing.AudioCostPerMinute,
 		VideoCostPerSecond:      pricing.VideoCostPerSecond,
+		ImageCostPerUnit:        pricing.ImageCostPerUnit,
 		Timestamp:               time.Now().UTC().Format(time.RFC3339),
 	}, pricingErr
 }
@@ -505,10 +515,15 @@ func suppliedPricingSnapshot(req *RequestContext) (PricingSnapshot, bool, error)
 	if raw := metadata(req, "model_catalog.video_cost_per_second"); raw != "" {
 		video, videoErr = strconv.ParseFloat(raw, 64)
 	}
-	if pricingKey == "" || len(currency) != 3 || inputErr != nil || outputErr != nil || trainingErr != nil || searchErr != nil || charactersErr != nil || pagesErr != nil || audioErr != nil || videoErr != nil || input < 0 || output < 0 || training < 0 || search < 0 || characters < 0 || pages < 0 || audio < 0 || video < 0 {
+	image := 0.0
+	imageErr := error(nil)
+	if raw := metadata(req, "model_catalog.image_cost_per_unit"); raw != "" {
+		image, imageErr = strconv.ParseFloat(raw, 64)
+	}
+	if pricingKey == "" || len(currency) != 3 || inputErr != nil || outputErr != nil || trainingErr != nil || searchErr != nil || charactersErr != nil || pagesErr != nil || audioErr != nil || videoErr != nil || imageErr != nil || input < 0 || output < 0 || training < 0 || search < 0 || characters < 0 || pages < 0 || audio < 0 || video < 0 || image < 0 {
 		return PricingSnapshot{}, true, errors.New("invalid supplied pricing snapshot")
 	}
-	return PricingSnapshot{CatalogVersion: version, PricingKey: pricingKey, Currency: currency, InputCostPer1M: input, OutputCostPer1M: output, TrainingCostPer1M: training, SearchCostPer1K: search, CharacterCostPer1M: characters, PageCostPer1K: pages, AudioCostPerMinute: audio, VideoCostPerSecond: video}, true, nil
+	return PricingSnapshot{CatalogVersion: version, PricingKey: pricingKey, Currency: currency, InputCostPer1M: input, OutputCostPer1M: output, TrainingCostPer1M: training, SearchCostPer1K: search, CharacterCostPer1M: characters, PageCostPer1K: pages, AudioCostPerMinute: audio, VideoCostPerSecond: video, ImageCostPerUnit: image}, true, nil
 }
 
 func requestID(req *RequestContext) string {
@@ -645,7 +660,7 @@ func (m BillingModule) handleDurableBudget(ctx context.Context, req *RequestCont
 		created = tag.RowsAffected() == 1
 	} else {
 		if event.Phase == "cancel" {
-			event.InputTokens, event.OutputTokens, event.TotalTokens, event.TrainingTokens, event.InputCharacters, event.InputPages, event.InputAudioMilliseconds, event.VideoSeconds, event.ToolRequests, event.SearchRequests, event.Cost = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+			event.InputTokens, event.OutputTokens, event.TotalTokens, event.TrainingTokens, event.InputCharacters, event.InputPages, event.InputAudioMilliseconds, event.VideoSeconds, event.OutputImages, event.ToolRequests, event.SearchRequests, event.Cost = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 			event.ProviderCostUSDTicks, event.ProviderCostReported = 0, false
 		}
 		created, err = repository.enqueueTx(ctx, tx, *event)

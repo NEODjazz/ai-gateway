@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.380
+  version: 0.1.381
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -7725,6 +7725,7 @@ components:
         page_cost_per_1k: {type: number, minimum: 0, description: "Input page cost per 1,000 processed pages."}
         audio_cost_per_minute: {type: number, minimum: 0, description: "Input audio cost per processed minute."}
         video_cost_per_second: {type: number, minimum: 0, description: "Generated video cost per output second."}
+        image_cost_per_unit: {type: number, minimum: 0, description: "Generated image cost per output image."}
         currency: {type: string, pattern: '^[A-Z]{3}$'}
     ModelCatalog:
       type: object
@@ -7837,7 +7838,7 @@ components:
     UsageAggregate:
       type: object
       additionalProperties: false
-      required: [currency, requests, errors, input_tokens, output_tokens, training_tokens, total_tokens, input_characters, input_pages, input_audio_milliseconds, video_seconds, tool_requests, cache_read_input_tokens, cache_write_input_tokens, search_requests, cost, avg_latency_ms, cache_hits, cost_per_request]
+      required: [currency, requests, errors, input_tokens, output_tokens, training_tokens, total_tokens, input_characters, input_pages, input_audio_milliseconds, video_seconds, output_images, tool_requests, cache_read_input_tokens, cache_write_input_tokens, search_requests, cost, avg_latency_ms, cache_hits, cost_per_request]
       properties:
         date: {type: string, format: date}
         name: {type: string}
@@ -7852,6 +7853,7 @@ components:
         input_pages: {type: integer, minimum: 0, description: Exact number of pages processed by page-priced operations}
         input_audio_milliseconds: {type: integer, minimum: 0, description: Exact input audio duration processed by duration-priced operations}
         video_seconds: {type: integer, minimum: 0, description: Exact generated video duration billed by output second}
+        output_images: {type: integer, minimum: 0, description: Exact number of generated output images}
         tool_requests: {type: integer, minimum: 0, description: External tool calls executed for finalized requests}
         cache_read_input_tokens: {type: integer, minimum: 0, description: Provider-reported input tokens served from its prompt cache}
         cache_write_input_tokens: {type: integer, minimum: 0, description: Provider-reported input tokens written to its prompt cache}
@@ -7882,7 +7884,7 @@ components:
     RequestLog:
       type: object
       additionalProperties: false
-      required: [timestamp, request_id, api_type, phase, status, latency_ms, input_tokens, output_tokens, training_tokens, total_tokens, input_characters, input_pages, input_audio_milliseconds, video_seconds, tool_requests, cache_read_input_tokens, cache_write_input_tokens, search_requests, search_requests_estimated, cost, currency, content_stored]
+      required: [timestamp, request_id, api_type, phase, status, latency_ms, input_tokens, output_tokens, training_tokens, total_tokens, input_characters, input_pages, input_audio_milliseconds, video_seconds, output_images, tool_requests, cache_read_input_tokens, cache_write_input_tokens, search_requests, search_requests_estimated, cost, currency, content_stored]
       properties:
         timestamp: {type: string, format: date-time}
         request_id: {type: string}
@@ -7918,6 +7920,7 @@ components:
         input_pages: {type: integer, minimum: 0}
         input_audio_milliseconds: {type: integer, minimum: 0}
         video_seconds: {type: integer, minimum: 0}
+        output_images: {type: integer, minimum: 0}
         tool_requests: {type: integer, minimum: 0}
         cache_read_input_tokens: {type: integer, minimum: 0}
         cache_write_input_tokens: {type: integer, minimum: 0}
@@ -7938,7 +7941,7 @@ components:
     RequestLogGroup:
       type: object
       additionalProperties: false
-      required: [group_id, requests, errors, models, providers, total_tokens, training_tokens, input_characters, input_pages, input_audio_milliseconds, video_seconds, tool_requests, cache_read_input_tokens, cache_write_input_tokens, search_requests, cache_hits, latency_ms, cost, currency, started_at, ended_at]
+      required: [group_id, requests, errors, models, providers, total_tokens, training_tokens, input_characters, input_pages, input_audio_milliseconds, video_seconds, output_images, tool_requests, cache_read_input_tokens, cache_write_input_tokens, search_requests, cache_hits, latency_ms, cost, currency, started_at, ended_at]
       properties:
         group_id: {type: string}
         requests: {type: integer, minimum: 0}
@@ -7951,6 +7954,7 @@ components:
         input_pages: {type: integer, minimum: 0}
         input_audio_milliseconds: {type: integer, minimum: 0}
         video_seconds: {type: integer, minimum: 0}
+        output_images: {type: integer, minimum: 0}
         tool_requests: {type: integer, minimum: 0}
         cache_read_input_tokens: {type: integer, minimum: 0}
         cache_write_input_tokens: {type: integer, minimum: 0}
@@ -10072,6 +10076,7 @@ components:
         page_cost_per_1k: {type: number, minimum: 0}
         audio_cost_per_minute: {type: number, minimum: 0}
         video_cost_per_second: {type: number, minimum: 0}
+        image_cost_per_unit: {type: number, minimum: 0}
         currency: {type: string}
         deployments: {type: array, items: {type: string}}
         available: {type: boolean}

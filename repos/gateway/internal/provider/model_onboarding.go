@@ -211,7 +211,7 @@ func normalizeOnboardingCatalog(input modelcatalog.Catalog) (modelcatalog.Catalo
 			}
 			seen[capability] = true
 		}
-		if entry.Currency != "" && (len(entry.Currency) != 3 || entry.Currency != strings.ToUpper(entry.Currency)) || (entry.InputCostPer1M > 0 || entry.OutputCostPer1M > 0 || entry.TrainingCostPer1M > 0 || entry.SearchCostPer1K > 0 || entry.CharacterCostPer1M > 0 || entry.PageCostPer1K > 0 || entry.AudioCostPerMinute > 0 || entry.VideoCostPerSecond > 0) && entry.Currency == "" {
+		if entry.Currency != "" && (len(entry.Currency) != 3 || entry.Currency != strings.ToUpper(entry.Currency)) || (entry.InputCostPer1M > 0 || entry.OutputCostPer1M > 0 || entry.TrainingCostPer1M > 0 || entry.SearchCostPer1K > 0 || entry.CharacterCostPer1M > 0 || entry.PageCostPer1K > 0 || entry.AudioCostPerMinute > 0 || entry.VideoCostPerSecond > 0 || entry.ImageCostPerUnit > 0) && entry.Currency == "" {
 			return modelcatalog.Catalog{}, ErrInvalidModelOnboarding
 		}
 	}

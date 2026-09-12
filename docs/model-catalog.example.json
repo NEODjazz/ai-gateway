@@ -16,6 +16,7 @@
       "page_cost_per_1k": 0,
       "audio_cost_per_minute": 0,
       "video_cost_per_second": 0,
+      "image_cost_per_unit": 0,
       "currency": "USD"
     },
     {

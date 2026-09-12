@@ -493,6 +493,22 @@ func TestBillingPricesAndValidatesVideoDuration(t *testing.T) {
 	}
 }
 
+func TestBillingPricesAndValidatesOutputImages(t *testing.T) {
+	module := NewBillingModuleWithSettings(true, Settings{Pricing: PricingConfig{Currency: "USD"}, ModelCatalogJSON: `{"version":"v1","models":[{"provider":"openai","model":"image-1","image_cost_per_unit":0.4,"currency":"USD"}]}`})
+	req := RequestContext{RequestID: "image-units", APIType: "image_generation", OutputImages: 3, Request: openai.ChatCompletionRequest{Provider: "openai", Model: "image-1"}}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.BillingEvent == nil || req.BillingEvent.OutputImages != 3 || req.BillingEvent.ImageCostPerUnit != 0.4 || math.Abs(req.BillingEvent.Cost-1.2) > 1e-12 || req.BillingEvent.TotalTokens != 0 {
+		t.Fatalf("unexpected image billing event: %+v", req.BillingEvent)
+	}
+	for _, count := range []int{-1, maxBillableOutputImages + 1} {
+		if err := module.Handle(context.Background(), &RequestContext{RequestID: "invalid-image-count", OutputImages: count}); err == nil {
+			t.Fatalf("accepted output_images=%d", count)
+		}
+	}
+}
+
 func TestBillingPersistsBoundedToolRequestsWithoutInventingCost(t *testing.T) {
 	repository := &fakeDurableRepository{seen: map[string]bool{}}
 	module := BillingModule{

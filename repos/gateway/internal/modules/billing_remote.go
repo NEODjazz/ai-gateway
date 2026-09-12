@@ -42,6 +42,7 @@ type UsageRequest struct {
 	InputPages              int      `json:"input_pages"`
 	InputAudioMilliseconds  int      `json:"input_audio_milliseconds"`
 	VideoSeconds            int      `json:"video_seconds"`
+	OutputImages            int      `json:"output_images"`
 	ToolRequests            int      `json:"tool_requests"`
 	TrainingTokens          int      `json:"training_tokens"`
 	InputTokens             int      `json:"input_tokens"`
@@ -62,6 +63,7 @@ type UsageRequest struct {
 	PageCostPer1K           string   `json:"page_cost_per_1k,omitempty"`
 	AudioCostPerMinute      string   `json:"audio_cost_per_minute,omitempty"`
 	VideoCostPerSecond      string   `json:"video_cost_per_second,omitempty"`
+	ImageCostPerUnit        string   `json:"image_cost_per_unit,omitempty"`
 	Currency                string   `json:"currency,omitempty"`
 }
 
@@ -161,6 +163,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		InputPages:             req.InputPages,
 		InputAudioMilliseconds: req.InputAudioMilliseconds,
 		VideoSeconds:           req.VideoSeconds,
+		OutputImages:           requestedImageCount(req),
 		ToolRequests:           req.ToolRequests,
 		TrainingTokens:         req.TrainingTokens,
 		CatalogVersion:         metadataValue(req.Metadata, "model_catalog.version"),
@@ -173,6 +176,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		PageCostPer1K:          metadataValue(req.Metadata, "model_catalog.page_cost_per_1k"),
 		AudioCostPerMinute:     metadataValue(req.Metadata, "model_catalog.audio_cost_per_minute"),
 		VideoCostPerSecond:     metadataValue(req.Metadata, "model_catalog.video_cost_per_second"),
+		ImageCostPerUnit:       metadataValue(req.Metadata, "model_catalog.image_cost_per_unit"),
 		Currency:               metadataValue(req.Metadata, "model_catalog.currency"),
 	}
 	request.InputTokens = request.PromptTokensEstimated
@@ -460,6 +464,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 	}
 	if req.ImageGenerationResponse != nil {
 		request.Phase = "commit"
+		request.OutputImages = len(req.ImageGenerationResponse.Data)
 		if usage := req.ImageGenerationResponse.Usage; usage != nil {
 			request.ProviderCostUSDTicks = trustedProviderCost(req, usage.ProviderCostUSDTicks)
 			request.InputTokens = usage.InputTokens
@@ -527,6 +532,24 @@ func billingRequest(req *RequestContext) UsageRequest {
 		}
 	}
 	return request
+}
+
+func requestedImageCount(req *RequestContext) int {
+	var count *int
+	switch {
+	case req.ImageGenerationRequest != nil:
+		count = req.ImageGenerationRequest.N
+	case req.ImageEditRequest != nil:
+		count = req.ImageEditRequest.N
+	case req.ImageVariationRequest != nil:
+		count = req.ImageVariationRequest.N
+	default:
+		return 0
+	}
+	if count == nil {
+		return 1
+	}
+	return *count
 }
 
 func trustedProviderCost(req *RequestContext, ticks *int64) *int64 {

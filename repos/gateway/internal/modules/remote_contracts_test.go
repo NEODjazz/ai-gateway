@@ -199,6 +199,7 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	req.Metadata["model_catalog.page_cost_per_1k"] = "100"
 	req.Metadata["model_catalog.audio_cost_per_minute"] = "0.12"
 	req.Metadata["model_catalog.video_cost_per_second"] = "0.25"
+	req.Metadata["model_catalog.image_cost_per_unit"] = "0.4"
 	req.InputCharacters = 4096
 	req.InputPages = 4
 	req.InputAudioMilliseconds = 90000
@@ -215,7 +216,7 @@ func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	req.Request.Model = "fallback-group"
 	req.Response = &openai.ChatCompletionResponse{Model: "gpt-5.6-luna-2026-07-09", Usage: openai.Usage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11, PromptTokensDetails: &openai.PromptTokenDetails{CachedTokens: 6, CacheCreationTokens: 2}, CompletionTokensDetails: &openai.CompletionTokenDetails{AcceptedPredictionTokens: 2, RejectedPredictionTokens: 1}}}
 	request := billingRequest(&req)
-	if request.CatalogVersion != "runtime-v2" || request.PricingKey != "endpoint/model" || request.InputCostPer1M != "1.5" || request.TrainingCostPer1M != "5" || request.TrainingTokens != 1000 || request.SearchCostPer1K != "10" || request.CharacterCostPer1M != "15" || request.PageCostPer1K != "100" || request.AudioCostPerMinute != "0.12" || request.VideoCostPerSecond != "0.25" || request.InputCharacters != 4096 || request.InputPages != 4 || request.InputAudioMilliseconds != 90000 || request.VideoSeconds != 12 || request.ToolRequests != 3 || request.Currency != "USD" {
+	if request.CatalogVersion != "runtime-v2" || request.PricingKey != "endpoint/model" || request.InputCostPer1M != "1.5" || request.TrainingCostPer1M != "5" || request.TrainingTokens != 1000 || request.SearchCostPer1K != "10" || request.CharacterCostPer1M != "15" || request.PageCostPer1K != "100" || request.AudioCostPerMinute != "0.12" || request.VideoCostPerSecond != "0.25" || request.ImageCostPerUnit != "0.4" || request.InputCharacters != 4096 || request.InputPages != 4 || request.InputAudioMilliseconds != 90000 || request.VideoSeconds != 12 || request.ToolRequests != 3 || request.Currency != "USD" {
 		t.Fatalf("pricing snapshot=%+v", request)
 	}
 	if request.ProviderID != "azure-open-ai" || request.Model != "gpt-5.6-luna" || request.UpstreamModel != "gpt-5.6-luna-2026-07-09" {
@@ -431,12 +432,12 @@ func TestImageGenerationBillingReserveAndSettlement(t *testing.T) {
 		Metadata:               map[string]string{"gateway.api_type": "image_generation"},
 	}
 	reserved := billingRequest(req)
-	if reserved.APIType != "image_generation" || reserved.OutputTokens != 3*openai.DefaultOutputTokenReserve || reserved.TotalTokens != reserved.InputTokens+reserved.OutputTokens {
+	if reserved.APIType != "image_generation" || reserved.OutputImages != 3 || reserved.OutputTokens != 3*openai.DefaultOutputTokenReserve || reserved.TotalTokens != reserved.InputTokens+reserved.OutputTokens {
 		t.Fatalf("reserve=%+v", reserved)
 	}
-	req.ImageGenerationResponse = &openai.ImageGenerationResponse{Usage: &openai.ImageUsage{InputTokens: 7, OutputTokens: 11, TotalTokens: 18}}
+	req.ImageGenerationResponse = &openai.ImageGenerationResponse{Data: []openai.ImageData{{URL: "one"}, {URL: "two"}}, Usage: &openai.ImageUsage{InputTokens: 7, OutputTokens: 11, TotalTokens: 18}}
 	settled := billingRequest(req)
-	if settled.Phase != "commit" || settled.InputTokens != 7 || settled.OutputTokens != 11 || settled.TotalTokens != 18 || settled.UsageEstimated {
+	if settled.Phase != "commit" || settled.OutputImages != 2 || settled.InputTokens != 7 || settled.OutputTokens != 11 || settled.TotalTokens != 18 || settled.UsageEstimated {
 		t.Fatalf("settlement=%+v", settled)
 	}
 	req.ImageGenerationResponse = &openai.ImageGenerationResponse{Usage: &openai.ImageUsage{}}

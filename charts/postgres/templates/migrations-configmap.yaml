@@ -5,6 +5,9 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  018_billing_image_units.sql: |
+    ALTER TABLE billing_budget_reservations
+        ADD COLUMN IF NOT EXISTS image_cost_per_unit numeric(20,10) NOT NULL DEFAULT 0;
   033_gateway_skill_executions.sql: |
     CREATE TABLE IF NOT EXISTS gateway_skill_executions (
         container_id TEXT PRIMARY KEY,

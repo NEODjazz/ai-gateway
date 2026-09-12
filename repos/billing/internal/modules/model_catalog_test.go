@@ -14,7 +14,7 @@ func TestModelCatalogPricingPrecedenceAndAuditFields(t *testing.T) {
 	catalogJSON := `{
 		"version":"2026-08-21.1","unknown_model_policy":"deny","models":[
 			{"provider":"openai","model":"gpt-test","input_cost_per_1m":1,"output_cost_per_1m":2,"currency":"USD"},
-			{"provider":"endpoint-a","model":"gpt-test","input_cost_per_1m":2,"output_cost_per_1m":4,"training_cost_per_1m":5,"search_cost_per_1k":10,"character_cost_per_1m":15,"page_cost_per_1k":100,"audio_cost_per_minute":0.12,"currency":"USD"}
+			{"provider":"endpoint-a","model":"gpt-test","input_cost_per_1m":2,"output_cost_per_1m":4,"training_cost_per_1m":5,"search_cost_per_1k":10,"character_cost_per_1m":15,"page_cost_per_1k":100,"audio_cost_per_minute":0.12,"image_cost_per_unit":0.4,"currency":"USD"}
 		]}`
 	module := NewBillingModuleWithSettings(true, Settings{
 		Pricing: PricingConfig{Currency: "USD"}, ModelCatalogJSON: catalogJSON,
@@ -27,6 +27,7 @@ func TestModelCatalogPricingPrecedenceAndAuditFields(t *testing.T) {
 		InputCharacters:        2000,
 		InputPages:             3,
 		InputAudioMilliseconds: 90000,
+		OutputImages:           2,
 		TrainingTokens:         100000,
 		Metadata: map[string]string{
 			"provider.endpoint.name": "endpoint-a", "provider.endpoint.type": "openai",
@@ -38,7 +39,7 @@ func TestModelCatalogPricingPrecedenceAndAuditFields(t *testing.T) {
 	if req.BillingEvent == nil || req.BillingEvent.CatalogVersion != "2026-08-21.1" || req.BillingEvent.PricingKey != "endpoint-a/gpt-test" {
 		t.Fatalf("missing catalog audit fields: %+v", req.BillingEvent)
 	}
-	if math.Abs(req.BillingEvent.Cost-1.034) > 1e-12 || req.BillingEvent.InputCostPer1M != 2 || req.BillingEvent.OutputCostPer1M != 4 || req.BillingEvent.TrainingCostPer1M != 5 || req.BillingEvent.TrainingTokens != 100000 || req.BillingEvent.TotalTokens != 101500 || req.BillingEvent.SearchCostPer1K != 10 || req.BillingEvent.CharacterCostPer1M != 15 || req.BillingEvent.PageCostPer1K != 100 || req.BillingEvent.AudioCostPerMinute != 0.12 || req.BillingEvent.InputCharacters != 2000 || req.BillingEvent.InputPages != 3 || req.BillingEvent.InputAudioMilliseconds != 90000 {
+	if math.Abs(req.BillingEvent.Cost-1.834) > 1e-12 || req.BillingEvent.InputCostPer1M != 2 || req.BillingEvent.OutputCostPer1M != 4 || req.BillingEvent.TrainingCostPer1M != 5 || req.BillingEvent.TrainingTokens != 100000 || req.BillingEvent.TotalTokens != 101500 || req.BillingEvent.SearchCostPer1K != 10 || req.BillingEvent.CharacterCostPer1M != 15 || req.BillingEvent.PageCostPer1K != 100 || req.BillingEvent.AudioCostPerMinute != 0.12 || req.BillingEvent.ImageCostPerUnit != 0.4 || req.BillingEvent.OutputImages != 2 || req.BillingEvent.InputCharacters != 2000 || req.BillingEvent.InputPages != 3 || req.BillingEvent.InputAudioMilliseconds != 90000 {
 		t.Fatalf("unexpected catalog price: %+v", req.BillingEvent)
 	}
 }
@@ -67,7 +68,7 @@ func (pinnedPricingPolicy) Apply(_ context.Context, event *BillingEvent) error {
 		event.InputCostPer1M = 1
 		event.OutputCostPer1M = 2
 		event.Currency = "USD"
-		event.Cost = pricingCost(event.InputTokens, event.OutputTokens, 0, event.InputCharacters, event.InputPages, 0, 0, event.SearchRequests, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2})
+		event.Cost = pricingCost(event.InputTokens, event.OutputTokens, 0, event.InputCharacters, event.InputPages, 0, 0, 0, event.SearchRequests, PricingSnapshot{InputCostPer1M: 1, OutputCostPer1M: 2})
 	}
 	return nil
 }
@@ -106,6 +107,7 @@ func TestModelCatalogRejectsInvalidEntries(t *testing.T) {
 		`{"version":"v1","models":[{"provider":"p","model":"m","page_cost_per_1k":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m","audio_cost_per_minute":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m","video_cost_per_second":-1}]}`,
+		`{"version":"v1","models":[{"provider":"p","model":"m","image_cost_per_unit":-1}]}`,
 		`{"version":"v1","models":[{"provider":"p","model":"m"},{"provider":"p","model":"m"}]}`,
 	} {
 		if _, err := ParseModelCatalog(raw); err == nil {
@@ -126,12 +128,12 @@ func TestDocumentedModelCatalogExampleMatchesBillingSchema(t *testing.T) {
 }
 
 func TestSuppliedRuntimePricingSnapshotOverridesStaticCatalog(t *testing.T) {
-	req := &RequestContext{Metadata: map[string]string{"model_catalog.version": "runtime-v2", "model_catalog.pricing_key": "endpoint/model", "model_catalog.input_cost_per_1m": "2.5", "model_catalog.output_cost_per_1m": "5", "model_catalog.training_cost_per_1m": "7.5", "model_catalog.search_cost_per_1k": "12", "model_catalog.character_cost_per_1m": "15", "model_catalog.audio_cost_per_minute": "0.12", "model_catalog.video_cost_per_second": "0.25", "model_catalog.currency": "EUR"}}
+	req := &RequestContext{Metadata: map[string]string{"model_catalog.version": "runtime-v2", "model_catalog.pricing_key": "endpoint/model", "model_catalog.input_cost_per_1m": "2.5", "model_catalog.output_cost_per_1m": "5", "model_catalog.training_cost_per_1m": "7.5", "model_catalog.search_cost_per_1k": "12", "model_catalog.character_cost_per_1m": "15", "model_catalog.audio_cost_per_minute": "0.12", "model_catalog.video_cost_per_second": "0.25", "model_catalog.image_cost_per_unit": "0.4", "model_catalog.currency": "EUR"}}
 	pricing, supplied, err := suppliedPricingSnapshot(req)
 	if err != nil || !supplied {
 		t.Fatalf("supplied=%v err=%v", supplied, err)
 	}
-	if pricing.CatalogVersion != "runtime-v2" || pricing.InputCostPer1M != 2.5 || pricing.TrainingCostPer1M != 7.5 || pricing.SearchCostPer1K != 12 || pricing.CharacterCostPer1M != 15 || pricing.AudioCostPerMinute != 0.12 || pricing.VideoCostPerSecond != 0.25 || pricing.Currency != "EUR" {
+	if pricing.CatalogVersion != "runtime-v2" || pricing.InputCostPer1M != 2.5 || pricing.TrainingCostPer1M != 7.5 || pricing.SearchCostPer1K != 12 || pricing.CharacterCostPer1M != 15 || pricing.AudioCostPerMinute != 0.12 || pricing.VideoCostPerSecond != 0.25 || pricing.ImageCostPerUnit != 0.4 || pricing.Currency != "EUR" {
 		t.Fatalf("pricing=%+v", pricing)
 	}
 }

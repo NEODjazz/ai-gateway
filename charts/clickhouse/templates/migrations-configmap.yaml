@@ -5,6 +5,12 @@ metadata:
   labels:
     {{- include "clickhouse.labels" . | nindent 4 }}
 data:
+  017_usage_image_units.sql: |
+    ALTER TABLE ai_gateway.usage_events
+        ADD COLUMN IF NOT EXISTS output_images UInt32 AFTER video_seconds;
+
+    ALTER TABLE ai_gateway.usage_events
+        ADD COLUMN IF NOT EXISTS image_cost_per_unit Float64 AFTER video_cost_per_second;
   016_usage_provider_cost.sql: |
     ALTER TABLE ai_gateway.usage_events
         ADD COLUMN IF NOT EXISTS provider_cost_usd_ticks Int64 AFTER cost;

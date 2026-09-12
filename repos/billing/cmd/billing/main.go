@@ -84,6 +84,7 @@ func run() error {
 			InputPages:              request.InputPages,
 			InputAudioMilliseconds:  request.InputAudioMilliseconds,
 			VideoSeconds:            request.VideoSeconds,
+			OutputImages:            request.OutputImages,
 			ToolRequests:            request.ToolRequests,
 			TrainingTokens:          request.TrainingTokens,
 			CacheReadInputTokens:    request.CacheReadInputTokens,
@@ -128,6 +129,7 @@ func run() error {
 				"model_catalog.page_cost_per_1k":      request.PageCostPer1K,
 				"model_catalog.audio_cost_per_minute": request.AudioCostPerMinute,
 				"model_catalog.video_cost_per_second": request.VideoCostPerSecond,
+				"model_catalog.image_cost_per_unit":   request.ImageCostPerUnit,
 				"model_catalog.currency":              request.Currency,
 				"provider.upstream_model":             request.UpstreamModel,
 			},
@@ -216,6 +218,7 @@ type usageRequest struct {
 	InputPages              int      `json:"input_pages"`
 	InputAudioMilliseconds  int      `json:"input_audio_milliseconds"`
 	VideoSeconds            int      `json:"video_seconds"`
+	OutputImages            int      `json:"output_images"`
 	ToolRequests            int      `json:"tool_requests"`
 	TrainingTokens          int      `json:"training_tokens"`
 	InputTokens             int      `json:"input_tokens"`
@@ -236,6 +239,7 @@ type usageRequest struct {
 	PageCostPer1K           string   `json:"page_cost_per_1k,omitempty"`
 	AudioCostPerMinute      string   `json:"audio_cost_per_minute,omitempty"`
 	VideoCostPerSecond      string   `json:"video_cost_per_second,omitempty"`
+	ImageCostPerUnit        string   `json:"image_cost_per_unit,omitempty"`
 	Currency                string   `json:"currency,omitempty"`
 }
 

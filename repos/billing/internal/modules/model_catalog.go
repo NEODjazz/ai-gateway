@@ -25,6 +25,7 @@ type ModelCatalogEntry struct {
 	PageCostPer1K      float64 `json:"page_cost_per_1k,omitempty"`
 	AudioCostPerMinute float64 `json:"audio_cost_per_minute,omitempty"`
 	VideoCostPerSecond float64 `json:"video_cost_per_second,omitempty"`
+	ImageCostPerUnit   float64 `json:"image_cost_per_unit,omitempty"`
 	Currency           string  `json:"currency,omitempty"`
 }
 
@@ -39,6 +40,7 @@ type PricingSnapshot struct {
 	PageCostPer1K      float64
 	AudioCostPerMinute float64
 	VideoCostPerSecond float64
+	ImageCostPerUnit   float64
 	Currency           string
 }
 
@@ -66,7 +68,7 @@ func ParseModelCatalog(raw string) (ModelCatalog, error) {
 		if entry.Provider == "" || entry.Model == "" {
 			return ModelCatalog{}, fmt.Errorf("model catalog entry %d requires provider and model", index)
 		}
-		if entry.InputCostPer1M < 0 || entry.OutputCostPer1M < 0 || entry.TrainingCostPer1M < 0 || entry.SearchCostPer1K < 0 || entry.CharacterCostPer1M < 0 || entry.PageCostPer1K < 0 || entry.AudioCostPerMinute < 0 || entry.VideoCostPerSecond < 0 {
+		if entry.InputCostPer1M < 0 || entry.OutputCostPer1M < 0 || entry.TrainingCostPer1M < 0 || entry.SearchCostPer1K < 0 || entry.CharacterCostPer1M < 0 || entry.PageCostPer1K < 0 || entry.AudioCostPerMinute < 0 || entry.VideoCostPerSecond < 0 || entry.ImageCostPerUnit < 0 {
 			return ModelCatalog{}, fmt.Errorf("model catalog entry %s/%s contains a negative price", entry.Provider, entry.Model)
 		}
 		key := modelCatalogKey(entry.Provider, entry.Model)
@@ -91,7 +93,7 @@ func (c ModelCatalog) Resolve(endpointName, endpointType, provider, model string
 				}
 				return PricingSnapshot{
 					CatalogVersion: c.Version, PricingKey: candidateProvider + "/" + candidateModel,
-					InputCostPer1M: entry.InputCostPer1M, OutputCostPer1M: entry.OutputCostPer1M, TrainingCostPer1M: entry.TrainingCostPer1M, SearchCostPer1K: entry.SearchCostPer1K, CharacterCostPer1M: entry.CharacterCostPer1M, PageCostPer1K: entry.PageCostPer1K, AudioCostPerMinute: entry.AudioCostPerMinute, VideoCostPerSecond: entry.VideoCostPerSecond, Currency: currency,
+					InputCostPer1M: entry.InputCostPer1M, OutputCostPer1M: entry.OutputCostPer1M, TrainingCostPer1M: entry.TrainingCostPer1M, SearchCostPer1K: entry.SearchCostPer1K, CharacterCostPer1M: entry.CharacterCostPer1M, PageCostPer1K: entry.PageCostPer1K, AudioCostPerMinute: entry.AudioCostPerMinute, VideoCostPerSecond: entry.VideoCostPerSecond, ImageCostPerUnit: entry.ImageCostPerUnit, Currency: currency,
 				}, nil
 			}
 		}
@@ -105,8 +107,8 @@ func (c ModelCatalog) Resolve(endpointName, endpointType, provider, model string
 	}, nil
 }
 
-func pricingCost(inputTokens, outputTokens, trainingTokens, inputCharacters, inputPages, inputAudioMilliseconds, videoSeconds, searchRequests int, pricing PricingSnapshot) float64 {
-	return (float64(inputTokens)/1_000_000)*pricing.InputCostPer1M + (float64(outputTokens)/1_000_000)*pricing.OutputCostPer1M + (float64(trainingTokens)/1_000_000)*pricing.TrainingCostPer1M + (float64(inputCharacters)/1_000_000)*pricing.CharacterCostPer1M + (float64(inputPages)/1_000)*pricing.PageCostPer1K + (float64(inputAudioMilliseconds)/60_000)*pricing.AudioCostPerMinute + float64(videoSeconds)*pricing.VideoCostPerSecond + (float64(searchRequests)/1_000)*pricing.SearchCostPer1K
+func pricingCost(inputTokens, outputTokens, trainingTokens, inputCharacters, inputPages, inputAudioMilliseconds, videoSeconds, outputImages, searchRequests int, pricing PricingSnapshot) float64 {
+	return (float64(inputTokens)/1_000_000)*pricing.InputCostPer1M + (float64(outputTokens)/1_000_000)*pricing.OutputCostPer1M + (float64(trainingTokens)/1_000_000)*pricing.TrainingCostPer1M + (float64(inputCharacters)/1_000_000)*pricing.CharacterCostPer1M + (float64(inputPages)/1_000)*pricing.PageCostPer1K + (float64(inputAudioMilliseconds)/60_000)*pricing.AudioCostPerMinute + float64(videoSeconds)*pricing.VideoCostPerSecond + float64(outputImages)*pricing.ImageCostPerUnit + (float64(searchRequests)/1_000)*pricing.SearchCostPer1K
 }
 
 func modelCatalogKey(provider, model string) string { return provider + "\x00" + model }
