@@ -61,6 +61,7 @@ func (p OpenAICompatible) ValidateAudioTranslationParameters(request openai.Audi
 		parameterCheck{"include", len(request.Include) > 0},
 		parameterCheck{"languages", len(request.Languages) > 0},
 		parameterCheck{"keywords", len(request.Keywords) > 0},
+		parameterCheck{"mode", request.Mode != ""},
 		parameterCheck{"chunking_strategy", request.ChunkingStrategy != nil},
 		parameterCheck{"known_speaker_names", len(request.KnownSpeakerNames) > 0},
 		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},
@@ -139,7 +140,7 @@ func (p OpenAICompatible) ValidateAudioTranscriptionParameters(request openai.Au
 	if message := request.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
-	return nil
+	return rejectParameters(p.providerName(), parameterCheck{"mode", request.Mode != ""})
 }
 
 func (p OpenAICompatible) TranscribeAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {

@@ -356,6 +356,7 @@ func (x XAI) ValidateAudioTranscriptionParameters(request openai.AudioTranscript
 		parameterCheck{"temperature", request.Temperature != nil},
 		parameterCheck{"include", len(request.Include) > 0},
 		parameterCheck{"languages", len(request.Languages) > 0},
+		parameterCheck{"mode", request.Mode != ""},
 		parameterCheck{"chunking_strategy", request.ChunkingStrategy != nil},
 		parameterCheck{"known_speaker_names", len(request.KnownSpeakerNames) > 0},
 		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},

@@ -123,6 +123,8 @@ func setAudioScalarField(request *openai.AudioTranscriptionRequest, name, value 
 		request.Prompt = value
 	case "response_format":
 		request.ResponseFormat = value
+	case "mode":
+		request.Mode = value
 	case "temperature":
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {

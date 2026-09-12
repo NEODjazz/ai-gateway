@@ -30,7 +30,7 @@ func (g Gemini) TranscribeAudio(ctx context.Context, request openai.AudioTranscr
 	}
 	body := geminiRequest{
 		Contents:   []geminiContent{{Parts: []geminiPart{{Text: prompt}, {InlineData: &geminiInlineData{MIMEType: request.File.MediaType, Data: request.File.Data}}}}},
-		Generation: geminiGeneration{Temperature: request.Temperature, ResponseMIMEType: "text/plain", AudioTranscription: &geminiAudioTranscriptionConfig{LanguageCodes: languages, CustomVocabulary: append([]string(nil), request.Keywords...)}},
+		Generation: geminiGeneration{Temperature: request.Temperature, ResponseMIMEType: "text/plain", AudioTranscription: &geminiAudioTranscriptionConfig{LanguageCodes: languages, CustomVocabulary: append([]string(nil), request.Keywords...), Mode: request.Mode}},
 	}
 	return g.generateAudioText(ctx, request, body)
 }
@@ -104,6 +104,7 @@ func validateGeminiAudioTranslationRequest(request openai.AudioTranscriptionRequ
 		parameterCheck{"include", len(request.Include) > 0},
 		parameterCheck{"languages", len(request.Languages) > 0},
 		parameterCheck{"keywords", len(request.Keywords) > 0},
+		parameterCheck{"mode", request.Mode != ""},
 		parameterCheck{"chunking_strategy", request.ChunkingStrategy != nil},
 		parameterCheck{"known_speaker_names", len(request.KnownSpeakerNames) > 0},
 		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},

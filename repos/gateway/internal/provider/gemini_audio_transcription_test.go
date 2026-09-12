@@ -21,14 +21,14 @@ func TestGeminiAudioTranscriptionContract(t *testing.T) {
 			t.Fatalf("request=%s headers=%v body=%+v", r.URL.String(), r.Header, body)
 		}
 		parts, cfg := body.Contents[0].Parts, body.Generation.AudioTranscription
-		if len(parts) != 2 || parts[1].InlineData == nil || parts[1].InlineData.MIMEType != "audio/wav" || cfg == nil || len(cfg.LanguageCodes) != 2 || cfg.LanguageCodes[0] != "en-US" || len(cfg.CustomVocabulary) != 2 || body.Generation.Temperature == nil || *body.Generation.Temperature != 0.2 {
+		if len(parts) != 2 || parts[1].InlineData == nil || parts[1].InlineData.MIMEType != "audio/wav" || cfg == nil || len(cfg.LanguageCodes) != 2 || cfg.LanguageCodes[0] != "en-US" || len(cfg.CustomVocabulary) != 2 || cfg.Mode != "SMART" || body.Generation.Temperature == nil || *body.Generation.Temperature != 0.2 {
 			t.Fatalf("body=%+v", body)
 		}
 		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"thought":true,"text":"internal"},{"text":"hello "},{"text":"world"}]}}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":3,"thoughtsTokenCount":2,"totalTokenCount":17}}`)
 	}))
 	defer server.Close()
 	temperature := 0.2
-	response, err := NewGemini(server.URL, "secret", false).TranscribeAudio(t.Context(), openai.AudioTranscriptionRequest{Model: "models/gemini-transcribe", File: transcriptionAttachment(), Prompt: "Acme product names", ResponseFormat: "json", Temperature: &temperature, Languages: []string{"en-US", "fr"}, Keywords: []string{"Acme", "Codex"}})
+	response, err := NewGemini(server.URL, "secret", false).TranscribeAudio(t.Context(), openai.AudioTranscriptionRequest{Model: "models/gemini-transcribe", File: transcriptionAttachment(), Prompt: "Acme product names", ResponseFormat: "json", Temperature: &temperature, Languages: []string{"en-US", "fr"}, Keywords: []string{"Acme", "Codex"}, Mode: "SMART"})
 	if err != nil || response.Text != "hello world" || response.Usage == nil || response.Usage.InputTokens != 12 || response.Usage.OutputTokens != 5 || response.Usage.TotalTokens != 17 {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
@@ -113,6 +113,7 @@ func TestGeminiAudioTranslationRejectsTranscriptionOnlyParametersBeforeNetwork(t
 		{"language", "language", func(r *openai.AudioTranscriptionRequest) { r.Language = "fr" }},
 		{"languages", "languages", func(r *openai.AudioTranscriptionRequest) { r.Languages = []string{"fr"} }},
 		{"keywords", "keywords", func(r *openai.AudioTranscriptionRequest) { r.Keywords = []string{"Acme"} }},
+		{"mode", "mode", func(r *openai.AudioTranscriptionRequest) { r.Mode = "SMART" }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

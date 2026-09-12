@@ -66,7 +66,7 @@ func (Mistral) ValidateAudioTranscriptionParameters(request openai.AudioTranscri
 	if message := request.Validate(); message != "" {
 		return mistralAudioClientError(message)
 	}
-	if request.Prompt != "" || len(request.Include) > 0 || len(request.Languages) > 0 || request.ChunkingStrategy != nil || len(request.KnownSpeakerNames) > 0 || len(request.KnownSpeakerReferences) > 0 || request.Stream {
+	if request.Prompt != "" || len(request.Include) > 0 || len(request.Languages) > 0 || request.Mode != "" || request.ChunkingStrategy != nil || len(request.KnownSpeakerNames) > 0 || len(request.KnownSpeakerReferences) > 0 || request.Stream {
 		return mistralAudioClientError("unsupported Mistral transcription parameter")
 	}
 	return nil

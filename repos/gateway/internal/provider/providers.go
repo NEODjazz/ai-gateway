@@ -727,6 +727,7 @@ func managedProviderAudioTranslationParameterPolicy(client Client, supported boo
 		{"include", func(r *openai.AudioTranscriptionRequest) { r.Include = []string{"logprobs"} }},
 		{"languages", func(r *openai.AudioTranscriptionRequest) { r.Languages = []string{"en-US"} }},
 		{"keywords", func(r *openai.AudioTranscriptionRequest) { r.Keywords = []string{"term"} }},
+		{"mode", func(r *openai.AudioTranscriptionRequest) { r.Mode = "SMART" }},
 		{"chunking_strategy", func(r *openai.AudioTranscriptionRequest) {
 			r.ChunkingStrategy = &openai.AudioChunkingStrategy{Type: "auto"}
 		}},
@@ -771,6 +772,7 @@ func managedProviderAudioTranscriptionParameterPolicy(client Client, supported b
 		{"include", func(r *openai.AudioTranscriptionRequest) { r.Include = []string{"logprobs"} }},
 		{"languages", func(r *openai.AudioTranscriptionRequest) { r.Languages = []string{"en-US"} }},
 		{"keywords", func(r *openai.AudioTranscriptionRequest) { r.Keywords = []string{"term"} }},
+		{"mode", func(r *openai.AudioTranscriptionRequest) { r.Mode = "SMART" }},
 		{"chunking_strategy", func(r *openai.AudioTranscriptionRequest) {
 			r.ChunkingStrategy = &openai.AudioChunkingStrategy{Type: "auto"}
 		}},

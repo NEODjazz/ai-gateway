@@ -44,7 +44,7 @@ func TestAudioTranscriptionUsesAuthenticatedPipelineAndReservesTPM(t *testing.T)
 	rates := &embeddingTokenRateStore{}
 	handler := Routes(NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"audio-*"}}}), llm, rates))
 	reference := "data:audio/wav;base64," + base64.StdEncoding.EncodeToString([]byte("RIFF....WAVEdata"))
-	body, contentType := audioHTTPBody(t, [][2]string{{"provider", "speech"}, {"model", "audio-model"}, {"prompt", "speaker@example.com"}, {"response_format", "json"}, {"languages[]", "en"}, {"languages[]", "de"}, {"keywords[]", "Acme"}, {"keywords[]", "Jane"}, {"chunking_strategy", `{"type":"server_vad","threshold":0.4}`}, {"known_speaker_names[]", "Jane"}, {"known_speaker_references[]", reference}}, "sample.wav", []byte("RIFF....WAVEdata"))
+	body, contentType := audioHTTPBody(t, [][2]string{{"provider", "speech"}, {"model", "audio-model"}, {"prompt", "speaker@example.com"}, {"response_format", "json"}, {"mode", "SMART"}, {"languages[]", "en"}, {"languages[]", "de"}, {"keywords[]", "Acme"}, {"keywords[]", "Jane"}, {"chunking_strategy", `{"type":"server_vad","threshold":0.4}`}, {"known_speaker_names[]", "Jane"}, {"known_speaker_references[]", reference}}, "sample.wav", []byte("RIFF....WAVEdata"))
 	request := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", body)
 	request.Header.Set("Content-Type", contentType)
 	request.Header.Set("Authorization", "Bearer client-secret")
@@ -56,7 +56,7 @@ func TestAudioTranscriptionUsesAuthenticatedPipelineAndReservesTPM(t *testing.T)
 	if rates.tokens != openai.AudioTranscriptionReserveTokens(*llm.request.AudioTranscriptionRequest) {
 		t.Fatalf("TPM reserve=%d", rates.tokens)
 	}
-	if got := llm.request.AudioTranscriptionRequest; len(got.Languages) != 2 || len(got.Keywords) != 2 || got.ChunkingStrategy == nil || got.ChunkingStrategy.Type != "server_vad" || len(got.KnownSpeakerNames) != 1 || len(got.KnownSpeakerReferences) != 1 {
+	if got := llm.request.AudioTranscriptionRequest; got.Mode != "SMART" || len(got.Languages) != 2 || len(got.Keywords) != 2 || got.ChunkingStrategy == nil || got.ChunkingStrategy.Type != "server_vad" || len(got.KnownSpeakerNames) != 1 || len(got.KnownSpeakerReferences) != 1 {
 		t.Fatalf("request=%+v", got)
 	}
 }

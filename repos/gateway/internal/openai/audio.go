@@ -44,6 +44,7 @@ type AudioTranscriptionRequest struct {
 	Include                []string               `json:"include,omitempty"`
 	Languages              []string               `json:"languages,omitempty"`
 	Keywords               []string               `json:"keywords,omitempty"`
+	Mode                   string                 `json:"mode,omitempty"`
 	ChunkingStrategy       *AudioChunkingStrategy `json:"chunking_strategy,omitempty"`
 	KnownSpeakerNames      []string               `json:"known_speaker_names,omitempty"`
 	KnownSpeakerReferences []AudioAttachment      `json:"known_speaker_references,omitempty"`
@@ -156,6 +157,9 @@ func (r AudioTranscriptionRequest) Validate() string {
 	if keywordRunes > 4096 {
 		return "keywords exceeds its total limit"
 	}
+	if r.Mode != "" && r.Mode != "VERBATIM" && r.Mode != "SMART" {
+		return "mode must be VERBATIM or SMART"
+	}
 	if r.ChunkingStrategy != nil && r.ChunkingStrategy.validate() != "" {
 		return r.ChunkingStrategy.validate()
 	}
@@ -233,6 +237,9 @@ func AudioTranscriptionInputTokens(r AudioTranscriptionRequest) int {
 	contextParts = append(contextParts, r.Prompt)
 	contextParts = append(contextParts, r.Languages...)
 	contextParts = append(contextParts, r.Keywords...)
+	if r.Mode != "" {
+		contextParts = append(contextParts, r.Mode)
+	}
 	contextParts = append(contextParts, r.KnownSpeakerNames...)
 	if r.ChunkingStrategy != nil {
 		if value, marshalErr := r.ChunkingStrategy.MultipartValue(); marshalErr == nil {

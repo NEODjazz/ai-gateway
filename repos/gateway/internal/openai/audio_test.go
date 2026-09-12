@@ -41,6 +41,23 @@ func TestAudioTranscriptionRequestValidationAndReserve(t *testing.T) {
 	}
 }
 
+func TestAudioTranscriptionModeIsValidatedAndAccounted(t *testing.T) {
+	baseline := AudioTranscriptionRequest{Model: "transcribe", File: testAudioAttachment()}
+	smart := baseline
+	smart.Mode = "SMART"
+	if message := smart.Validate(); message != "" {
+		t.Fatal(message)
+	}
+	if AudioTranscriptionInputTokens(smart) <= AudioTranscriptionInputTokens(baseline) {
+		t.Fatal("transcription mode omitted from token estimate")
+	}
+	invalid := baseline
+	invalid.Mode = "smart"
+	if invalid.Validate() == "" {
+		t.Fatal("invalid transcription mode accepted")
+	}
+}
+
 func TestKnownSpeakerReferencesAreBoundedDataAudioURLs(t *testing.T) {
 	reference := testSpeakerReference()
 	if reference.MediaType != "audio/wav" || reference.DataURL() != "data:audio/wav;base64,"+testAudioAttachment().Data {

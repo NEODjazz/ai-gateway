@@ -133,6 +133,7 @@ type geminiGeneration struct {
 type geminiAudioTranscriptionConfig struct {
 	LanguageCodes    []string `json:"languageCodes,omitempty"`
 	CustomVocabulary []string `json:"customVocabulary,omitempty"`
+	Mode             string   `json:"mode,omitempty"`
 }
 type geminiImageConfig struct {
 	AspectRatio string `json:"aspectRatio,omitempty"`
