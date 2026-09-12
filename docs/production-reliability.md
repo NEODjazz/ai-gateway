@@ -1681,3 +1681,22 @@ same image ID. Live liveness and readiness returned 204, and OpenAPI reported
 unauthenticated native Rerank-shaped request returned 401 before deployment
 selection. No NVIDIA NIM credential or external inference was used by the smoke
 checks.
+
+Source `4665503` adds bounded per-output image pricing for Image Generation,
+Edit and Variation. Reserve charges the requested count and commit reconciles
+the validated response count. PostgreSQL reservation snapshots preserve the
+unit price across retries and settlement; ClickHouse persists output count and
+unit price for request logs and usage reports. Unit, UI, full race and required
+PostgreSQL integration tests passed against three isolated databases. OpenAPI
+0.1.381 exposes the catalog and reporting fields.
+
+Rancher Desktop built `ai-gateway-gateway:image-pricing-4665503` with image ID
+`sha256:72b4a7fdb2ef51662e210fda5154fb30c52abcfb995a01ddba8eefa4607c685e`
+and `ai-gateway-billing:image-pricing-4665503` with image ID
+`sha256:d58184ab0adcd9b31de9641eed185e5fc19090c975ffebe7913ee5eb9de34e98`.
+PostgreSQL Helm revision 31 and ClickHouse revision 13 applied the new columns;
+billing revision 33 and gateway revision 487 became Ready with zero restarts.
+Live liveness and readiness returned 204, both schema columns were verified in
+each database, and the served OpenAPI reported 0.1.381. An unauthenticated image
+generation request returned 401 before deployment selection. No provider
+credential or external inference was used by the smoke checks.

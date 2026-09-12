@@ -227,7 +227,10 @@ Provider categories и scores проходят общий validator; отсут�
 `POST /v1/images/generations` выполняется только через deployment и model с
 capability `image_generation`. Gateway проверяет prompt и параметры до policy
 pipeline, учитывает prompt при TPM, резервирует output на каждый запрошенный
-image и запускает обычные admission, retry, failure и billing phases.
+image и запускает обычные admission, retry, failure и billing phases. Каталог
+может задать `image_cost_per_unit`: reserve использует запрошенное `n` (по
+умолчанию один), а commit — число результатов, прошедших проверку ответа.
+Зафиксированная при reserve цена применяется к retry и commit без переоценки.
 Совместимые и Azure deployments используют JSON transport семейства Images.
 Native Gemini deployment преобразует запрос в GenerateContent с image-only
 response modality. Он поддерживает один inline `b64_json` результат, точные
@@ -261,10 +264,10 @@ provider token usage проходит общий exact settlement. `timestamp_gr
 Ответ ограничен 64 MiB, содержит ровно запрошенное число результатов и для
 каждого результата допускает ровно один источник: HTTP(S) URL без credentials
 либо корректный base64 размером до 20 MiB после декодирования. Token usage
-обязателен и должен быть неотрицательным с точной суммой; ответ без usage
-отклоняется, поскольку gateway не может надежно начислить такой вызов. Streaming,
-модели с оплатой только за image остаются отдельными
-контрактами.
+обязателен и должен быть неотрицательным с точной суммой для текущих adapter
+contracts. `image_cost_per_unit` начисляется независимо по фактически
+возвращённым результатам. Streaming остаётся отдельным контрактом и требует
+terminal usage event.
 
 `POST /v1/images/edits` принимает `multipart/form-data` только для deployment и
 model с capability `image_edit`. Допускается до 8 файлов суммарно: одно или
