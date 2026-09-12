@@ -15,6 +15,9 @@ func (r Router) CreateContainer(ctx context.Context, identity modules.RequestCon
 	if input.NetworkPolicy != nil {
 		required = append(required, "container_network")
 	}
+	if len(input.FileIDs) > 0 {
+		required = append(required, "container_files")
+	}
 	for _, endpoint := range r.candidates(ctx, openai.ChatCompletionRequest{Model: input.Model, Provider: input.Provider}, required...) {
 		client, ok := endpoint.Provider.(ContainerClient)
 		if !ok {

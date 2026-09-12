@@ -98,8 +98,9 @@ func (s *memoryContainerStore) DeleteContainerRecord(_ context.Context, owner, i
 
 type gatewayContainerProvider struct {
 	*batchProvider
-	actions      []string
-	createdInput openai.ContainerCreateRequest
+	actions       []string
+	createdInput  openai.ContainerCreateRequest
+	fileCreateErr error
 }
 
 func (p *gatewayContainerProvider) CreateContainer(ctx context.Context, identity modules.RequestContext, input openai.ContainerCreateRequest, admit func(context.Context, *modules.RequestContext) error) (openai.Container, provider.ContainerBinding, error) {
@@ -128,6 +129,9 @@ func (p *gatewayContainerProvider) DeleteContainer(_ context.Context, _ provider
 }
 func (p *gatewayContainerProvider) CreateContainerFile(_ context.Context, _ provider.ContainerBinding, containerID string, upload provider.ContainerFileUpload) (openai.ContainerFile, error) {
 	p.actions = append(p.actions, "file-create")
+	if p.fileCreateErr != nil {
+		return openai.ContainerFile{}, p.fileCreateErr
+	}
 	return openai.ContainerFile{ID: "cfile_1", Object: "container.file", ContainerID: containerID, Path: "/mnt/data/" + upload.Filename, Source: "user", Bytes: int64(len(upload.Content))}, nil
 }
 func (p *gatewayContainerProvider) ListContainerFiles(_ context.Context, _ provider.ContainerBinding, containerID string, _ provider.ContainerFileListOptions) (openai.ContainerFileList, error) {
@@ -238,15 +242,45 @@ func TestContainerCreationCompensatesPersistenceAndBillingFailures(t *testing.T)
 	}
 }
 
-func TestContainerRejectsFilesAndCrossOwnerLookupBeforeProvider(t *testing.T) {
+func TestContainerRejectsUnownedInitialFilesBeforeProvider(t *testing.T) {
 	store := &memoryContainerStore{records: map[string]containerstate.Record{containerKey("another-owner", "cntr_1"): {OwnerKey: "another-owner", Container: openai.Container{ID: "cntr_1"}}}}
 	runtime := &gatewayContainerProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
-	handler := containerTestHandler(store, runtime, nil)
-	files := containerRequest(t, handler, http.MethodPost, "/v1/containers", `{"model":"model-a","name":"analysis","file_ids":["file_1"]}`)
+	files := &memoryFileStore{files: map[string]filestate.File{"file_1": {ID: "file_1", OwnerKey: "another-owner", Filename: "secret.txt", Bytes: 6}}}
+	pipeline := modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}})
+	handler := Routes(NewHandler(pipeline, runtime).WithContainerStore(store).WithFileStore(files, FileRuntimeConfig{MaxBytes: maxGatewayContainerFileBytes, OwnerQuotaBytes: maxGatewayContainerFileBytes}))
+	create := containerRequest(t, handler, http.MethodPost, "/v1/containers", `{"model":"model-a","name":"analysis","file_ids":["file_1"]}`)
 	lookup := containerRequest(t, handler, http.MethodGet, "/v1/containers/cntr_1", "")
 	fileLookup := containerRequest(t, handler, http.MethodGet, "/v1/containers/cntr_1/files", "")
-	if files.Code != http.StatusBadRequest || !strings.Contains(files.Body.String(), "unsupported_parameter") || lookup.Code != http.StatusNotFound || fileLookup.Code != http.StatusNotFound || len(runtime.actions) != 0 {
-		t.Fatalf("files=%d/%s lookup=%d/%s file_lookup=%d/%s actions=%v", files.Code, files.Body.String(), lookup.Code, lookup.Body.String(), fileLookup.Code, fileLookup.Body.String(), runtime.actions)
+	if create.Code != http.StatusNotFound || lookup.Code != http.StatusNotFound || fileLookup.Code != http.StatusNotFound || len(runtime.actions) != 0 {
+		t.Fatalf("files=%d/%s lookup=%d/%s file_lookup=%d/%s actions=%v", create.Code, create.Body.String(), lookup.Code, lookup.Body.String(), fileLookup.Code, fileLookup.Body.String(), runtime.actions)
+	}
+}
+
+func TestContainerCopiesOwnedInitialFilesBeforePersistence(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	containers := &memoryContainerStore{records: map[string]containerstate.Record{}}
+	files := &memoryFileStore{files: map[string]filestate.File{"file_owned": {ID: "file_owned", OwnerKey: owner, Filename: "input.txt", ContentType: "text/plain", Bytes: 5, Content: []byte("hello")}}}
+	runtime := &gatewayContainerProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+	billing := &containerBillingModule{}
+	pipeline := modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}, billing})
+	handler := Routes(NewHandler(pipeline, runtime).WithContainerStore(containers).WithFileStore(files, FileRuntimeConfig{MaxBytes: maxGatewayContainerFileBytes, OwnerQuotaBytes: maxGatewayContainerFileBytes}))
+	response := containerRequest(t, handler, http.MethodPost, "/v1/containers", `{"model":"model-a","name":"analysis","file_ids":["file_owned"]}`)
+	if response.Code != http.StatusOK || strings.Join(runtime.actions, ",") != "create,file-create" || strings.Join(billing.phases, ",") != "reserve,commit" || len(containers.records) != 1 {
+		t.Fatalf("status=%d body=%s actions=%v billing=%v records=%v", response.Code, response.Body.String(), runtime.actions, billing.phases, containers.records)
+	}
+}
+
+func TestContainerInitialFileFailureCompensatesContainerAndBilling(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	containers := &memoryContainerStore{records: map[string]containerstate.Record{}}
+	files := &memoryFileStore{files: map[string]filestate.File{"file_owned": {ID: "file_owned", OwnerKey: owner, Filename: "input.txt", ContentType: "text/plain", Bytes: 5, Content: []byte("hello")}}}
+	runtime := &gatewayContainerProvider{batchProvider: &batchProvider{models: []string{"model-a"}}, fileCreateErr: errors.New("upload failed")}
+	billing := &containerBillingModule{}
+	pipeline := modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}}, billing})
+	handler := Routes(NewHandler(pipeline, runtime).WithContainerStore(containers).WithFileStore(files, FileRuntimeConfig{MaxBytes: maxGatewayContainerFileBytes, OwnerQuotaBytes: maxGatewayContainerFileBytes}))
+	response := containerRequest(t, handler, http.MethodPost, "/v1/containers", `{"model":"model-a","name":"analysis","file_ids":["file_owned"]}`)
+	if response.Code != http.StatusBadGateway || strings.Join(runtime.actions, ",") != "create,file-create,delete" || strings.Join(billing.phases, ",") != "reserve,cancel" || len(containers.records) != 0 {
+		t.Fatalf("status=%d body=%s actions=%v billing=%v records=%v", response.Code, response.Body.String(), runtime.actions, billing.phases, containers.records)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 )
 
 const containerOwnerQuota = 1000
+const maxContainerInitialFiles = 20
 
 func (h Handler) WithContainerStore(store containerstate.Store) Handler {
 	h.containers = store
@@ -43,8 +44,8 @@ func (h Handler) CreateContainer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid container request")
 		return
 	}
-	if len(input.FileIDs) > 0 {
-		writeProviderParameterError(w, http.StatusBadRequest, "unsupported_parameter", "container file references require the container files API", "file_ids")
+	owner := fileOwnerKey(identity)
+	if !h.validateOwnedContainerFiles(w, r, owner, input.FileIDs) {
 		return
 	}
 	if !h.authorizeBatchModel(w, identity, input.Model) {
@@ -53,6 +54,11 @@ func (h Handler) CreateContainer(w http.ResponseWriter, r *http.Request) {
 	runtime, ok := h.provider.(provider.ContainerProvider)
 	if !ok {
 		writeError(w, http.StatusNotImplemented, "unsupported_operation", "containers are not supported")
+		return
+	}
+	fileRuntime, supportsFiles := h.provider.(provider.ContainerFileProvider)
+	if len(input.FileIDs) > 0 && !supportsFiles {
+		writeError(w, http.StatusNotImplemented, "unsupported_operation", "container files are not supported")
 		return
 	}
 	var billingRequest modules.RequestContext
@@ -75,7 +81,27 @@ func (h Handler) CreateContainer(w http.ResponseWriter, r *http.Request) {
 		writeProviderFailure(w, err)
 		return
 	}
-	record := containerstate.Record{OwnerKey: fileOwnerKey(identity), Binding: binding, Container: container}
+	for _, fileID := range input.FileIDs {
+		file, fileErr := h.files.Get(r.Context(), owner, fileID, true)
+		if fileErr != nil {
+			h.compensateContainer(r.Context(), runtime, binding, container.ID, owner, false, &billingRequest, reserved, fileErr)
+			writeFileStoreError(w, fileErr)
+			return
+		}
+		if file.Bytes > maxGatewayContainerFileBytes || int64(len(file.Content)) != file.Bytes {
+			fileErr = errors.New("container source file content is invalid or oversized")
+			h.compensateContainer(r.Context(), runtime, binding, container.ID, owner, false, &billingRequest, reserved, fileErr)
+			writeError(w, http.StatusRequestEntityTooLarge, "file_too_large", "file exceeds the container upload limit")
+			return
+		}
+		_, fileErr = fileRuntime.CreateContainerFile(r.Context(), binding, container.ID, provider.ContainerFileUpload{Filename: file.Filename, ContentType: file.ContentType, Content: file.Content})
+		if fileErr != nil {
+			h.compensateContainer(r.Context(), runtime, binding, container.ID, owner, false, &billingRequest, reserved, fileErr)
+			writeProviderFailure(w, fileErr)
+			return
+		}
+	}
+	record := containerstate.Record{OwnerKey: owner, Binding: binding, Container: container}
 	created, err := h.containers.CreateContainerRecord(r.Context(), record, containerOwnerQuota)
 	if err != nil {
 		h.compensateContainer(r.Context(), runtime, binding, container.ID, record.OwnerKey, false, &billingRequest, reserved, err)
@@ -105,7 +131,42 @@ func validContainerCreateInput(input openai.ContainerCreateRequest) bool {
 	if validateContainerNetworkPolicyInput(input.NetworkPolicy) != nil {
 		return false
 	}
+	if len(input.FileIDs) > maxContainerInitialFiles {
+		return false
+	}
+	seenFiles := make(map[string]struct{}, len(input.FileIDs))
+	for _, fileID := range input.FileIDs {
+		if !validFileToken(fileID, 128) {
+			return false
+		}
+		if _, duplicate := seenFiles[fileID]; duplicate {
+			return false
+		}
+		seenFiles[fileID] = struct{}{}
+	}
 	return input.ExpiresAfter == nil || input.ExpiresAfter.Anchor == "last_active_at" && input.ExpiresAfter.Minutes >= 1 && input.ExpiresAfter.Minutes <= 10080
+}
+
+func (h Handler) validateOwnedContainerFiles(w http.ResponseWriter, r *http.Request, owner string, fileIDs []string) bool {
+	if len(fileIDs) == 0 {
+		return true
+	}
+	if h.files == nil || h.fileConfig.MaxBytes < 1 {
+		writeError(w, http.StatusServiceUnavailable, "file_storage_unavailable", "file storage is unavailable")
+		return false
+	}
+	for _, fileID := range fileIDs {
+		file, err := h.files.Get(r.Context(), owner, fileID, false)
+		if err != nil {
+			writeFileStoreError(w, err)
+			return false
+		}
+		if file.Bytes < 0 || file.Bytes > maxGatewayContainerFileBytes || !validContainerFileName(file.Filename) {
+			writeError(w, http.StatusBadRequest, "invalid_file", "container source file is invalid or oversized")
+			return false
+		}
+	}
+	return true
 }
 
 func validateContainerNetworkPolicyInput(policy *openai.ContainerNetworkPolicyRequest) error {

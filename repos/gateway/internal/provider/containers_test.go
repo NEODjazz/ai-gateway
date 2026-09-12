@@ -83,6 +83,13 @@ func TestContainerRouterRequiresExplicitCapabilityAndPinsDeployment(t *testing.T
 	if _, _, err := newRuntime([]string{"container", "container_network"}).CreateContainer(t.Context(), modules.RequestContext{}, policyInput, nil); err != nil {
 		t.Fatalf("container network policy rejected with explicit capability: %v", err)
 	}
+	fileInput := openai.ContainerCreateRequest{Model: "public-model", Name: "analysis", FileIDs: []string{"file_1"}}
+	if _, _, err := runtime.CreateContainer(t.Context(), modules.RequestContext{}, fileInput, nil); err == nil {
+		t.Fatal("container file copy accepted without explicit capability")
+	}
+	if _, _, err := newRuntime([]string{"container", "container_files"}).CreateContainer(t.Context(), modules.RequestContext{}, fileInput, nil); err != nil {
+		t.Fatalf("container file copy rejected with explicit capability: %v", err)
+	}
 	admitted := false
 	created, binding, err := runtime.CreateContainer(t.Context(), modules.RequestContext{}, openai.ContainerCreateRequest{Model: "public-model", Name: "analysis"}, func(_ context.Context, request *modules.RequestContext) error {
 		admitted = request.Request.Model == "public-model" && request.Metadata["gateway.api_type"] == "container"

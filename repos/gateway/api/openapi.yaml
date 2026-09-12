@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.278
+  version: 0.1.279
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1111,7 +1111,7 @@ paths:
       operationId: createContainer
       tags: [Inference]
       summary: Create an owner-scoped provider container
-      description: Selects a deployment that explicitly enables container operations, reserves billing, creates the upstream resource, stores its owner and exact deployment binding durably, and commits billing before returning. Any failure after upstream creation compensates the upstream resource, local binding, and reservation. file_ids are rejected until owner-checked container file attachment is available.
+      description: Selects a deployment that explicitly enables container operations, validates every file_id against the authenticated owner, reserves billing, creates the upstream resource, copies files through the pinned deployment, stores its owner and exact deployment binding durably, and commits billing before returning. Any failure after upstream creation compensates the upstream resource, local binding, and reservation.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -5106,9 +5106,10 @@ components:
         expires_after: {$ref: '#/components/schemas/ContainerExpiresAfter'}
         file_ids:
           type: array
-          maxItems: 0
-          items: {type: string}
-          description: Reserved for the owner-checked container files API.
+          maxItems: 20
+          uniqueItems: true
+          items: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+          description: Owner-scoped gateway files copied through the selected container deployment.
         memory_limit: {type: string, enum: [1g, 4g, 16g, 64g]}
         network_policy: {$ref: '#/components/schemas/ContainerNetworkPolicyRequest'}
     Container:
