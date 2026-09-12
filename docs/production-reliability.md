@@ -397,21 +397,24 @@ No live cloud role was assumed and no paid provider inference was performed.
 The protocol and signing paths are covered by isolated tests; cloud IAM policy,
 trust relationship and provider availability remain deployment responsibilities.
 
-## Chat and SCIM contract rollout (2026-09-12)
+## Chat, SCIM and parameter contract rollout (2026-09-12)
 
-Source `b15d413` includes SCIM base discovery and server-side sorting, additive
+Source `dd16398` includes SCIM base discovery and server-side sorting, additive
 user-role PATCH semantics, optional Group attribute removal, and the `default`
 Chat reasoning effort with complete adapter-specific `ChatGenerationOptions`
 capability reporting. Native Cohere now rejects `web_fetch_options` instead of
-discarding it. Each behavior change passed its focused regressions and a full
+discarding it. Demo now rejects unsupported Responses parameters instead of
+discarding them, and the provider-capability endpoint exposes validated
+Responses option, reasoning-effort and service-tier matrices for every managed
+provider type. Each behavior change passed its focused regressions and a full
 gateway `go test -race ./...`; gateway vet and build also passed.
 
 - Rancher Desktop reported Moby 29.1.3 with Kubernetes 1.36.3 enabled. The
-  unchanged Dockerfile built `ai-gateway-gateway:gaps-b15d413` successfully.
-- Helm release `ai-gateway` revision 398 completed successfully using the
+  unchanged Dockerfile built `ai-gateway-gateway:gaps-dd16398` successfully.
+- Helm release `ai-gateway` revision 399 completed successfully using the
   existing stored values with only `image.tag` overridden.
-- Gateway pod `ai-gateway-gateway-5648df76b7-g6vrd` became Ready with zero
-  restarts and ran `ai-gateway-gateway:gaps-b15d413`.
+- Gateway pod `ai-gateway-gateway-6b8568565b-swsgg` became Ready with zero
+  restarts and ran `ai-gateway-gateway:gaps-dd16398`.
 - In-pod loopback checks returned 204 for readiness and 200 with
   `application/scim+json` for `/scim/v2`; discovery returned both User and Group
   resource types. A Chat request using `reasoning_effort=default` passed request
@@ -420,6 +423,9 @@ gateway `go test -race ./...`; gateway vet and build also passed.
   OpenAI, Groq and OpenRouter adapters while preserving the documented native
   Mistral range through `xhigh`. It also returned exact supported-option lists
   for all managed Chat adapters; Cohere's list excluded `web_fetch_options`.
+- The live capability endpoint returned an empty Responses option profile for
+  Demo and adapter-specific profiles for OpenAI, Anthropic, Groq and xAI. The
+  served OpenAPI contract reported version 0.1.301.
 
 The host ingress did not accept a connection on port 80 during this rollout, so
 application checks used the pod loopback endpoint. The Chat smoke request used a
