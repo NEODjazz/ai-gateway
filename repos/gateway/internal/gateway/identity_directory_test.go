@@ -24,8 +24,14 @@ type directoryClientStub struct {
 	findValue   string
 }
 
-func (c *directoryClientStub) ListUsers(_ context.Context, _ ManagementAudit, _ string, offset, limit int) ([]DirectoryUser, int, error) {
+func (c *directoryClientStub) ListUsers(_ context.Context, _ ManagementAudit, _ string, offset, limit int, includeDeleted bool) ([]DirectoryUser, int, error) {
 	c.userOffset, c.userLimit = offset, limit
+	if c.user != nil {
+		if c.user.DeletedAt != nil && !includeDeleted {
+			return nil, 0, nil
+		}
+		return []DirectoryUser{*c.user}, 1, nil
+	}
 	return []DirectoryUser{{ID: "user-1", Status: "active"}}, 7, nil
 }
 func (c *directoryClientStub) GetUser(_ context.Context, _ ManagementAudit, id string) (DirectoryUser, error) {

@@ -136,7 +136,7 @@ func (h Handler) ListSCIMUsers(w http.ResponseWriter, r *http.Request) {
 		if limit == 0 {
 			limit = 1
 		}
-		users, total, err = h.directory.ListUsers(r.Context(), managementAudit(req), "", start-1, limit)
+		users, total, err = h.directory.ListUsers(r.Context(), managementAudit(req), "", start-1, limit, false)
 	}
 	if err != nil {
 		writeSCIMDirectoryFailure(w, err)
@@ -180,6 +180,10 @@ func (h Handler) GetSCIMUser(w http.ResponseWriter, r *http.Request) {
 	user, err := h.directory.GetUser(r.Context(), managementAudit(req), r.PathValue("id"))
 	if err != nil {
 		writeSCIMDirectoryFailure(w, err)
+		return
+	}
+	if user.DeletedAt != nil {
+		writeSCIMError(w, http.StatusNotFound, "", "user not found")
 		return
 	}
 	writeSCIMJSON(w, http.StatusOK, scimUserFromDirectory(user))
@@ -228,8 +232,13 @@ func (h Handler) ReplaceSCIMUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if _, err := h.directory.GetUser(r.Context(), managementAudit(req), id); err != nil {
+	current, err := h.directory.GetUser(r.Context(), managementAudit(req), id)
+	if err != nil {
 		writeSCIMDirectoryFailure(w, err)
+		return
+	}
+	if current.DeletedAt != nil {
+		writeSCIMError(w, http.StatusNotFound, "", "user not found")
 		return
 	}
 	h.putSCIMUser(w, r, req, scimUserToDirectory(id, input), "scim.user.replace")
@@ -251,6 +260,10 @@ func (h Handler) PatchSCIMUser(w http.ResponseWriter, r *http.Request) {
 	current, err := h.directory.GetUser(r.Context(), managementAudit(req), r.PathValue("id"))
 	if err != nil {
 		writeSCIMDirectoryFailure(w, err)
+		return
+	}
+	if current.DeletedAt != nil {
+		writeSCIMError(w, http.StatusNotFound, "", "user not found")
 		return
 	}
 	input := scimUserFromDirectory(current)
@@ -277,7 +290,13 @@ func (h Handler) DeleteSCIMUser(w http.ResponseWriter, r *http.Request) {
 		writeSCIMDirectoryFailure(w, err)
 		return
 	}
+	if user.DeletedAt != nil {
+		writeSCIMError(w, http.StatusNotFound, "", "user not found")
+		return
+	}
 	user.Status = "disabled"
+	now := time.Now().UTC()
+	user.DeletedAt = &now
 	h.putSCIMUser(w, r, req, user, "scim.user.deactivate")
 }
 

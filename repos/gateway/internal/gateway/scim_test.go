@@ -38,6 +38,17 @@ func TestSCIMUserLifecycle(t *testing.T) {
 	if remove.Code != http.StatusNoContent || client.user.Status != "disabled" {
 		t.Fatalf("delete status=%d user=%+v body=%s", remove.Code, client.user, remove.Body.String())
 	}
+
+	getDeleted := httptest.NewRecorder()
+	router.ServeHTTP(getDeleted, httptest.NewRequest(http.MethodGet, "/scim/v2/Users/"+created.ID, nil))
+	if getDeleted.Code != http.StatusNotFound {
+		t.Fatalf("deleted get status=%d body=%s", getDeleted.Code, getDeleted.Body.String())
+	}
+	listDeleted := httptest.NewRecorder()
+	router.ServeHTTP(listDeleted, httptest.NewRequest(http.MethodGet, "/scim/v2/Users", nil))
+	if listDeleted.Code != http.StatusOK || !strings.Contains(listDeleted.Body.String(), `"totalResults":0`) {
+		t.Fatalf("deleted list status=%d body=%s", listDeleted.Code, listDeleted.Body.String())
+	}
 }
 
 func TestSCIMDiscoveryAndPaginationAreTruthful(t *testing.T) {

@@ -228,7 +228,16 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 		if !ok {
 			return
 		}
-		users, total, err := module.ListDirectoryUsers(r.Context(), r.URL.Query().Get("team_id"), offset, limit)
+		includeDeleted := true
+		if raw := strings.TrimSpace(r.URL.Query().Get("include_deleted")); raw != "" {
+			parsed, parseErr := strconv.ParseBool(raw)
+			if parseErr != nil {
+				http.Error(w, "invalid include_deleted", http.StatusBadRequest)
+				return
+			}
+			includeDeleted = parsed
+		}
+		users, total, err := module.ListDirectoryUsers(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted)
 		if err != nil {
 			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
 			return

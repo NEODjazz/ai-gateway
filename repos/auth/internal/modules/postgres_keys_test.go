@@ -26,7 +26,7 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql", "005_virtual_key_metadata.sql", "006_identity_directory.sql", "007_organizations.sql", "008_virtual_key_ownership.sql", "009_virtual_key_access_groups.sql", "010_scim_users.sql"} {
+	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql", "005_virtual_key_metadata.sql", "006_identity_directory.sql", "007_organizations.sql", "008_virtual_key_ownership.sql", "009_virtual_key_access_groups.sql", "010_scim_users.sql", "011_scim_user_deletions.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
 			t.Fatal(err)
@@ -80,6 +80,14 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	if _, err := store.CreateUser(ctx, duplicate); !errors.Is(err, ErrDirectoryConflict) {
 		t.Fatalf("expected username uniqueness conflict, got %v", err)
 	}
+	deletedAt := time.Now().UTC()
+	scimUser.Status, scimUser.DeletedAt = "disabled", &deletedAt
+	if scimUser, err = store.PutUser(ctx, scimUser); err != nil || scimUser.DeletedAt == nil {
+		t.Fatalf("soft delete provisioned user failed: user=%+v err=%v", scimUser, err)
+	}
+	if found, ok, err := store.FindUser(ctx, "externalId", scimUser.ExternalID); err != nil || ok {
+		t.Fatalf("deleted provisioned user remained visible: user=%+v found=%v err=%v", found, ok, err)
+	}
 	team, err := store.PutTeam(ctx, DirectoryTeam{ID: directoryTeamID, Name: "Platform", Status: "active"})
 	if err != nil || team.Name != "Platform" {
 		t.Fatalf("put team failed: team=%+v err=%v", team, err)
@@ -87,11 +95,11 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 	if _, err := store.PutMembership(ctx, TeamMembership{TeamID: directoryTeamID, UserID: directoryUserID, Roles: []string{"team_admin"}}); err != nil {
 		t.Fatal(err)
 	}
-	users, totalUsers, err := store.ListUsers(ctx, directoryTeamID, 0, 10)
+	users, totalUsers, err := store.ListUsers(ctx, directoryTeamID, 0, 10, true)
 	if err != nil || totalUsers != 1 || len(users) != 1 || users[0].ID != directoryUserID || len(users[0].TeamIDs) != 1 {
 		t.Fatalf("scoped users=%+v total=%d err=%v", users, totalUsers, err)
 	}
-	users, totalUsers, err = store.ListUsers(ctx, directoryTeamID, 1, 10)
+	users, totalUsers, err = store.ListUsers(ctx, directoryTeamID, 1, 10, true)
 	if err != nil || totalUsers != 1 || len(users) != 0 {
 		t.Fatalf("scoped user page=%+v total=%d err=%v", users, totalUsers, err)
 	}

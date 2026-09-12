@@ -15,15 +15,16 @@ import (
 )
 
 type DirectoryUser struct {
-	ID         string    `json:"id"`
-	ExternalID string    `json:"external_id,omitempty"`
-	Email      string    `json:"email,omitempty"`
-	Name       string    `json:"name,omitempty"`
-	Status     string    `json:"status"`
-	Roles      []string  `json:"roles,omitempty"`
-	TeamIDs    []string  `json:"team_ids,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         string     `json:"id"`
+	ExternalID string     `json:"external_id,omitempty"`
+	Email      string     `json:"email,omitempty"`
+	Name       string     `json:"name,omitempty"`
+	Status     string     `json:"status"`
+	Roles      []string   `json:"roles,omitempty"`
+	TeamIDs    []string   `json:"team_ids,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	DeletedAt  *time.Time `json:"deleted_at,omitempty"`
 }
 type DirectoryTeam struct {
 	ID          string    `json:"id"`
@@ -43,7 +44,7 @@ type TeamMembership struct {
 }
 
 type IdentityDirectoryClient interface {
-	ListUsers(context.Context, ManagementAudit, string, int, int) ([]DirectoryUser, int, error)
+	ListUsers(context.Context, ManagementAudit, string, int, int, bool) ([]DirectoryUser, int, error)
 	GetUser(context.Context, ManagementAudit, string) (DirectoryUser, error)
 	FindUser(context.Context, ManagementAudit, string, string) (DirectoryUser, bool, error)
 	CreateUser(context.Context, ManagementAudit, DirectoryUser) (DirectoryUser, error)
@@ -60,8 +61,8 @@ func (h Handler) WithIdentityDirectory(client IdentityDirectoryClient) Handler {
 	return h
 }
 
-func (c *RemoteManagementClient) ListUsers(ctx context.Context, audit ManagementAudit, teamID string, offset, limit int) ([]DirectoryUser, int, error) {
-	q := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}
+func (c *RemoteManagementClient) ListUsers(ctx context.Context, audit ManagementAudit, teamID string, offset, limit int, includeDeleted bool) ([]DirectoryUser, int, error) {
+	q := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}, "include_deleted": {strconv.FormatBool(includeDeleted)}}
 	if teamID != "" {
 		q.Set("team_id", teamID)
 	}
@@ -131,7 +132,7 @@ func (h Handler) ListDirectoryUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	teamID := directoryScope(req, r.URL.Query().Get("team_id"))
-	users, total, err := h.directory.ListUsers(r.Context(), managementAudit(req), teamID, offset, limit)
+	users, total, err := h.directory.ListUsers(r.Context(), managementAudit(req), teamID, offset, limit, true)
 	if err != nil {
 		writeDirectoryFailure(w, err)
 		return
