@@ -117,6 +117,7 @@ func TestNVIDIANIMCapabilityProfileIsBounded(t *testing.T) {
 		expectedModels := []ProviderChatModelParameterPolicy{
 			{Model: "nvidia/nemotron-3-super-120b-a12b", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"none", "low", "high"}},
 			{Model: "nvidia/nemotron-3-ultra-550b-a55b", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"none", "medium", "high"}},
+			{Model: "deepseek-ai/DeepSeek-V4-Pro-0813", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"low", "high", "max"}},
 		}
 		if !slices.EqualFunc(profile.ChatModelParameters, expectedModels, func(left, right ProviderChatModelParameterPolicy) bool {
 			return left.Model == right.Model && slices.Equal(left.SupportedOptions, right.SupportedOptions) && slices.Equal(left.ReasoningEffort, right.ReasoningEffort)
@@ -142,6 +143,10 @@ func TestNVIDIANIMReasoningEffortPolicyAndWireContract(t *testing.T) {
 		{"nvidia/nemotron-3-ultra-550b-a55b", "medium", true},
 		{"nvidia/nemotron-3-ultra-550b-a55b", "high", true},
 		{"nvidia/nemotron-3-ultra-550b-a55b", "low", false},
+		{"deepseek-ai/DeepSeek-V4-Pro-0813", "low", true},
+		{"deepseek-ai/DeepSeek-V4-Pro-0813", "high", true},
+		{"deepseek-ai/DeepSeek-V4-Pro-0813", "max", true},
+		{"deepseek-ai/DeepSeek-V4-Pro-0813", "medium", false},
 		{"model", "high", false},
 	} {
 		err := (NVIDIANIM{}).ValidateChatParameters(openai.ChatCompletionRequest{

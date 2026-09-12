@@ -41,6 +41,8 @@ func (n NVIDIANIM) ValidateChatParameters(request openai.ChatCompletionRequest) 
 			allowed = map[string]bool{"none": true, "low": true, "high": true}
 		case "nvidia/nemotron-3-ultra-550b-a55b":
 			allowed = map[string]bool{"none": true, "medium": true, "high": true}
+		case "deepseek-ai/DeepSeek-V4-Pro-0813":
+			allowed = map[string]bool{"low": true, "high": true, "max": true}
 		}
 		if !allowed[request.ReasoningEffort] {
 			return &Error{Class: FailureClientRequest, Provider: "nvidia-nim", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "reasoning_effort", Err: errors.New("reasoning_effort is not supported for this NVIDIA NIM model or value")}
@@ -64,7 +66,7 @@ func (n NVIDIANIM) StreamChatCompletions(ctx context.Context, request openai.Cha
 }
 
 func (NVIDIANIM) ManagedChatModelProbes() []string {
-	return []string{"nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b"}
+	return []string{"nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b", "deepseek-ai/DeepSeek-V4-Pro-0813"}
 }
 
 func (n NVIDIANIM) Messages(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
