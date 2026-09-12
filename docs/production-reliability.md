@@ -963,3 +963,10 @@ thinking modes and their constraints. A valid adaptive generation request and
 a manual-budget token-count request passed structural validation and reached
 authentication. An enabled budget equal to `max_tokens` failed before
 authentication with the documented 400 response.
+
+Source `784c591` forwards the bounded native `top_k` sampling control through
+Messages and Chat generation on the Anthropic adapter. The adapter parameter
+profile now advertises the accepted field, while upstream model-specific
+rejection remains explicit and terminal. Existing cache identity, quota reserve,
+retry and billing paths already include the shared generation options. Full Go
+test, race, vet and build checks completed successfully.

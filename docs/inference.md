@@ -697,7 +697,7 @@ with a native invalid_request_error. Thinking blocks are accepted only in
 assistant history, must precede text/tool blocks, retain their provider signature,
 and have a 1 MiB aggregate payload limit. Adapters without an explicit reasoning
 block contract reject them before upstream execution. Documents,
-URL images, top_k, text after tool_use and is_error=true tool results are not supported.
+URL images, text after tool_use and is_error=true tool results are not supported.
 All tool-use history requires matching results. Opaque provider tool metadata
 that cannot be represented in Messages produces an explicit conversion error.
 `metadata.user_id` is limited to 512 Unicode characters and remains request
@@ -712,6 +712,11 @@ The same configuration is forwarded to native token counting and durable batch
 execution. Exact and semantic response caches are bypassed. The existing
 `max_tokens` reserve remains the total output bound, including thinking, and
 provider-reported usage settles the complete output once.
+The deprecated `top_k` sampling control is also forwarded to the native
+Messages adapter for values from 0 through 1,000,000 and is exposed by its
+managed parameter profile. Support remains model-specific: newer models may
+reject any supplied value, and that provider error is returned without fallback
+to an adapter that would discard the field.
 The provider-assigned `standard`, `priority` or `batch` service tier is retained
 in JSON and SSE usage. Unknown reported tiers fail the response instead of being
 accepted as trusted accounting metadata. Provider-reported `output_tokens_details.thinking_tokens` is retained in JSON,

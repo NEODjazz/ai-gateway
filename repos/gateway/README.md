@@ -246,6 +246,10 @@ budgeted modes. Validation enforces the mode-specific fields, the manual budget
 against the total `max_tokens` output limit, and the temperature constraint.
 Generation, token counting and durable batches preserve the policy, routing
 requires the `thinking` deployment capability, and response caches are bypassed.
+Native Messages and Chat requests also preserve the deprecated `top_k` sampling
+control on the Anthropic adapter. The managed provider profile advertises it,
+and model-specific upstream rejection is returned instead of retrying through
+an adapter that cannot preserve the request.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.
