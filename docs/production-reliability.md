@@ -456,3 +456,9 @@ publishes validator-derived prompt forms and controls. Rancher Desktop built
 pod `ai-gateway-gateway-59c4dbcf88-4zpqm` became Ready with zero restarts. The
 live endpoint confirmed string-only Ollama and Mistral profiles and all four
 prompt forms for the OpenAI adapter.
+
+Source `15e7e0f` adds Moderation input and option profiles. Rancher Desktop built
+`ai-gateway-gateway:gaps-15e7e0f`; Helm revision 403 completed successfully, and
+pod `ai-gateway-gateway-587b4d9bb-gj2dm` became Ready with zero restarts. The
+live endpoint confirmed compatible text, text-array and content-part input and
+the native Mistral text-only profile with metadata support.
