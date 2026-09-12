@@ -259,6 +259,11 @@ Messages also accepts top-level ephemeral `cache_control` with a default five
 minute or explicit one-hour TTL. It follows the same four-breakpoint limit as
 block and tool markers, requires the `prompt_cache` deployment capability, and
 is preserved by native token counting and durable Messages batches.
+Messages `inference_geo` accepts `global` or `us` on native deployments that
+advertise the capability. Generation, token counting and durable batches preserve
+the value. The provider-reported value must match the request in JSON and SSE;
+response caches are bypassed. `us` applies the provider's 1.1 token-price
+multiplier before budget reserve and uses the same pinned prices at settlement.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.

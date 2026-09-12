@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.351
+  version: 0.1.352
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -6899,6 +6899,8 @@ components:
         output_config: {$ref: '#/components/schemas/MessagesRequest/properties/output_config'}
         thinking: {$ref: '#/components/schemas/MessagesRequest/properties/thinking'}
         container: {$ref: '#/components/schemas/MessagesRequest/properties/container'}
+        cache_control: {$ref: '#/components/schemas/MessagesRequest/properties/cache_control'}
+        inference_geo: {$ref: '#/components/schemas/MessagesRequest/properties/inference_geo'}
     MessagesToolsetMemberConfig:
       type: object
       additionalProperties: false
@@ -6920,6 +6922,10 @@ components:
             type: {type: string, const: ephemeral}
             ttl: {type: string, enum: [5m, 1h]}
           description: Applies an ephemeral prompt-cache marker to the last cacheable request block and requires the prompt_cache deployment capability.
+        inference_geo:
+          type: string
+          enum: [global, us]
+          description: Native inference processing geography. Requires an inference_geo-capable deployment. Responses must report the requested value; response caches are bypassed. US-only processing uses the provider's 1.1 price multiplier for token reserve and settlement.
         stop_sequences:
           type: array
           maxItems: 4
@@ -7297,6 +7303,7 @@ components:
             cache_read_input_tokens: {type: integer, minimum: 0}
             cache_creation_input_tokens: {type: integer, minimum: 0}
             service_tier: {type: string, enum: [standard, priority, batch], description: Provider-assigned tier when reported.}
+            inference_geo: {type: string, enum: [global, us], description: Provider-reported processing geography when requested.}
             output_tokens_details:
               type: object
               additionalProperties: false
@@ -7348,7 +7355,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -9766,7 +9773,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

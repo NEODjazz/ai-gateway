@@ -730,6 +730,17 @@ It shares the four-breakpoint request limit with system, message, tool and clien
 tool markers. Generation, native token counting and durable Messages batches
 preserve the control, and routing requires `prompt_cache`. The control is part
 of exact response-cache identity, while semantic response caching is disabled.
+`inference_geo` accepts `global` or `us` and routes only to a native deployment
+advertising that capability. Generation, native token counting and durable
+Messages batches preserve the value. JSON and SSE responses must report the
+requested geography; a missing, unknown or changed value fails the response.
+Exact and semantic response caches are bypassed for these requests so a prior
+response cannot cross the requested processing boundary. For `us`, the model
+catalog input and output token prices are multiplied by 1.1 before budget reserve;
+the resulting price snapshot is reused at settlement. RPM and TPM limits remain
+shared between geography values. Model-version eligibility is enforced by the
+upstream, whose terminal validation error is returned without incompatible
+adapter fallback.
 The provider-assigned `standard`, `priority` or `batch` service tier is retained
 in JSON and SSE usage. Unknown reported tiers fail the response instead of being
 accepted as trusted accounting metadata. Provider-reported `output_tokens_details.thinking_tokens` is retained in JSON,

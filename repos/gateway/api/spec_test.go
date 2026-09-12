@@ -88,6 +88,24 @@ func TestOpenAPIMessagesAdvertisesTopLevelCacheControl(t *testing.T) {
 	}
 }
 
+func TestOpenAPIMessagesAdvertisesInferenceGeography(t *testing.T) {
+	document := loadDocument(t)
+	messages := document.Components.Schemas["MessagesRequest"].Value
+	geo := messages.Properties["inference_geo"]
+	if geo == nil || geo.Value == nil || len(geo.Value.Enum) != 2 || geo.Value.Enum[0] != "global" || geo.Value.Enum[1] != "us" {
+		t.Fatalf("MessagesRequest inference_geo enum = %#v", geo)
+	}
+	count := document.Components.Schemas["MessageTokenCountRequest"].Value
+	if count == nil || count.Properties["inference_geo"] == nil || count.Properties["cache_control"] == nil {
+		t.Fatal("MessageTokenCountRequest does not preserve inference_geo and cache_control")
+	}
+	response := document.Components.Schemas["MessagesResponse"].Value
+	usage := response.Properties["usage"].Value
+	if usage == nil || usage.Properties["inference_geo"] == nil {
+		t.Fatal("MessagesResponse usage is missing inference_geo")
+	}
+}
+
 func TestOpenAPIRoutesMatchGatewayRouter(t *testing.T) {
 	document := loadDocument(t)
 	want := map[string]bool{}

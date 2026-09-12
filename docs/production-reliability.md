@@ -1027,3 +1027,13 @@ Gateway Helm revision 452 completed successfully, and pod
 same digest. Live OpenAPI 0.1.351 exposes the bounded top-level cache control.
 A valid one-hour control reached authentication; an unsupported 30-minute TTL
 failed request validation with a 400 response.
+
+Source `99f8e7c` adds native Messages inference geography with explicit
+`global`/`us` validation and capability-isolated routing. Native generation,
+token counting and durable batches preserve the request. JSON and SSE responses
+must report the requested value without changing it. Both response caches are
+bypassed, and US-only inference applies the provider's 1.1 input/output token
+price multiplier before reserve so settlement reuses the same snapshot. The
+token-count contract now also preserves the previously documented top-level
+prompt-cache control. Full Go tests, race tests, vet and build passed; UI tests,
+type checking and the production bundle build passed.
