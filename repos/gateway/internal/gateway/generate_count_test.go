@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
 )
 
@@ -36,6 +38,19 @@ func TestGenerateCountTokensNativeContext(t *testing.T) {
 	response := generateCall(handler, "/v1beta/models/m:countTokens", `{"generateContentRequest":{"model":"models/m","contents":[{"parts":[{"text":"hi"}]}],"systemInstruction":{"parts":[{"text":"system context"}]},"tools":[{"functionDeclarations":[{"name":"weather","parameters":{"type":"OBJECT","properties":{"city":{"type":"STRING"}}}}]}]}}`, "gateway-test-key")
 	if response.Code != 200 || strings.TrimSpace(response.Body.String()) != `{"totalTokens":42}` || calls != 1 || billing.calls != 0 || response.Header().Get("X-Execution-ID") == "" {
 		t.Fatalf("count response: %d %s upstream=%d billing=%d", response.Code, response.Body.String(), calls, billing.calls)
+	}
+}
+
+func TestGenerateCountTokensResolvesOwnedFileData(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	content := []byte("notes")
+	files := &memoryFileStore{files: map[string]filestate.File{"file_text": {ID: "file_text", OwnerKey: owner, Filename: "notes.txt", Purpose: "user_data", ContentType: "text/plain", Bytes: int64(len(content)), Content: content}}}
+	counter := &countProviderSpy{result: provider.TokenCountResult{InputTokens: 7}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), counter).
+		WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 4 << 20}))
+	response := generateCall(handler, "/v1beta/models/m:countTokens", `{"contents":[{"parts":[{"fileData":{"mimeType":"text/plain","fileUri":"file_text"}}]}]}`, "gateway-test-key")
+	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"totalTokens":7}` || counter.calls != 1 || !openai.HasChatTextDocuments(counter.request.Request) || openai.HasChatResolvableReferences(counter.request.Request) {
+		t.Fatalf("status=%d calls=%d request=%+v body=%s", response.Code, counter.calls, counter.request.Request, response.Body.String())
 	}
 }
 func TestGenerateCountTokensValidation(t *testing.T) {

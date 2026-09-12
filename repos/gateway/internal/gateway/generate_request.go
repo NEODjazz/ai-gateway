@@ -59,6 +59,10 @@ type generatePart struct {
 		MIMEType string `json:"mimeType"`
 		Data     string `json:"data"`
 	} `json:"inlineData,omitempty"`
+	FileData *struct {
+		MIMEType string `json:"mimeType"`
+		FileURI  string `json:"fileUri"`
+	} `json:"fileData,omitempty"`
 	Call *struct {
 		ID   string         `json:"id,omitempty"`
 		Name string         `json:"name"`
@@ -171,7 +175,7 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		}
 		parts := []any{}
 		for _, part := range r.System.Parts {
-			if part.Text == nil || part.InlineData != nil || part.Call != nil || part.Result != nil || part.Signature != "" {
+			if part.Text == nil || part.InlineData != nil || part.FileData != nil || part.Call != nil || part.Result != nil || part.Signature != "" {
 				return fail("systemInstruction.parts")
 			}
 			parts = append(parts, map[string]any{"type": "text", "text": *part.Text})
@@ -210,7 +214,7 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		}
 		for partIndex, part := range content.Parts {
 			members := 0
-			for _, present := range []bool{part.Text != nil, part.InlineData != nil, part.Call != nil, part.Result != nil, part.ExecutableCode != nil, part.CodeExecutionResult != nil} {
+			for _, present := range []bool{part.Text != nil, part.InlineData != nil, part.FileData != nil, part.Call != nil, part.Result != nil, part.ExecutableCode != nil, part.CodeExecutionResult != nil} {
 				if present {
 					members++
 				}
@@ -275,33 +279,23 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 					parts = append(parts, video)
 					break
 				}
-				format, filename := "", ""
-				switch part.InlineData.MIMEType {
-				case "audio/wav":
-					format, filename = "wav", "input.wav"
-				case "audio/mpeg", "audio/mp3":
-					format, filename = "mp3", "input.mp3"
-				case "audio/flac":
-					format, filename = "flac", "input.flac"
-				case "audio/ogg":
-					format, filename = "ogg", "input.ogg"
-				case "audio/opus":
-					format, filename = "opus", "input.opus"
-				case "audio/aiff":
-					format, filename = "aiff", "input.aiff"
-				case "audio/aac":
-					format, filename = "aac", "input.aac"
-				case "audio/webm":
-					format, filename = "webm", "input.webm"
-				case "audio/mp4", "audio/m4a":
-					format, filename = "m4a", "input.m4a"
-				default:
+				format, filename := generateAudioFormat(part.InlineData.MIMEType)
+				if format == "" {
 					return fail("inlineData.mimeType")
 				}
 				if err := openai.ValidateAudioAttachment(openai.AudioAttachment{Filename: filename, MediaType: part.InlineData.MIMEType, Data: part.InlineData.Data}); err != nil {
 					return result, err
 				}
 				parts = append(parts, map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": part.InlineData.Data, "format": format}})
+			case part.FileData != nil:
+				if role != "user" || !validFileToken(part.FileData.FileURI, 128) || !strings.HasPrefix(part.FileData.FileURI, "file_") {
+					return fail("fileData")
+				}
+				referenceType := generateFileReferenceType(part.FileData.MIMEType)
+				if referenceType == "" {
+					return fail("fileData.mimeType")
+				}
+				parts = append(parts, map[string]any{"type": referenceType, "file_id": part.FileData.FileURI, "media_type": part.FileData.MIMEType})
 			case part.Call != nil:
 				callIndex++
 				call := part.Call
@@ -465,6 +459,23 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		return result, err
 	}
 	return result, nil
+}
+
+func generateFileReferenceType(mediaType string) string {
+	if supportedA2AImageType(mediaType) {
+		return "input_file_image_reference"
+	}
+	if supportedA2AVideoType(mediaType) {
+		return "input_file_video_reference"
+	}
+	switch mediaType {
+	case "application/pdf", "text/plain":
+		return "input_file_reference"
+	case "audio/wav", "audio/mp3", "audio/mpeg", "audio/aiff", "audio/aac", "audio/ogg", "audio/opus", "audio/flac", "audio/m4a", "audio/webm", "audio/mp4":
+		return "input_file_audio_reference"
+	default:
+		return ""
+	}
 }
 
 func validGenerateBase64(value string) bool {

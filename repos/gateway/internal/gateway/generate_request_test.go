@@ -35,6 +35,42 @@ func TestGenerateRequestConvertsNativeContextAndConfig(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsOwnerScopedFileDataReferences(t *testing.T) {
+	var native generateRequest
+	raw := `{"contents":[{"role":"user","parts":[{"fileData":{"mimeType":"image/png","fileUri":"file_image"}},{"fileData":{"mimeType":"application/pdf","fileUri":"file_pdf"}},{"fileData":{"mimeType":"text/plain","fileUri":"file_text"}},{"fileData":{"mimeType":"audio/wav","fileUri":"file_audio"}},{"fileData":{"mimeType":"video/mp4","fileUri":"file_video"}}]}]}`
+	if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := chat.Messages[0].Content.([]any)
+	want := []string{"input_file_image_reference", "input_file_reference", "input_file_reference", "input_file_audio_reference", "input_file_video_reference"}
+	if len(parts) != len(want) || !openai.HasChatResolvableReferences(chat) {
+		t.Fatalf("parts=%+v", parts)
+	}
+	for index := range want {
+		part := parts[index].(map[string]any)
+		if part["type"] != want[index] || part["file_id"] == "" || part["media_type"] == "" {
+			t.Fatalf("part %d=%+v", index, part)
+		}
+	}
+	for _, invalid := range []string{
+		`{"contents":[{"parts":[{"fileData":{"mimeType":"image/png","fileUri":"https://example.test/image.png"}}]}]}`,
+		`{"contents":[{"parts":[{"fileData":{"mimeType":"application/octet-stream","fileUri":"file_data"}}]}]}`,
+		`{"contents":[{"role":"model","parts":[{"fileData":{"mimeType":"image/png","fileUri":"file_image"}}]}]}`,
+		`{"contents":[{"parts":[{"text":"x","fileData":{"mimeType":"image/png","fileUri":"file_image"}}]}]}`,
+	} {
+		var request generateRequest
+		if decodeMessagesValue(json.RawMessage(invalid), &request) == nil {
+			if _, err := request.chat("model", false); err == nil {
+				t.Fatalf("invalid fileData accepted: %s", invalid)
+			}
+		}
+	}
+}
+
 func TestGenerateRequestMapsGoogleSearchTool(t *testing.T) {
 	var native generateRequest
 	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"parts":[{"text":"latest news"}]}],"tools":[{"googleSearch":{}}]}`), &native); err != nil {

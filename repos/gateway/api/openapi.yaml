@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.364
+  version: 0.1.365
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -791,6 +791,7 @@ paths:
         Uses gateway authorization, model/tool ACL, quotas and content policy.
         Does not generate output or open a billing lifecycle. Query credentials are
         rejected. Requires a native token counter; no estimate fallback is used.
+        Owner-scoped fileData is resolved and validated after authentication.
       security:
         - googleAPIKey: []
         - bearerAuth: []
@@ -832,6 +833,7 @@ paths:
         Uses gateway authorization, model/tool ACL, quotas, content policy and billing.
         Supports one candidate; unsupported fields are rejected. Tool calls are
         buffered until their JSON arguments are complete. Query credentials are rejected.
+        Owner-scoped fileData is resolved and validated after authentication.
       security:
         - googleAPIKey: []
         - bearerAuth: []
@@ -869,6 +871,7 @@ paths:
         Uses gateway authorization, model/tool ACL, quotas, content policy and billing.
         Supports one candidate; unsupported fields are rejected. Tool calls are
         buffered until their JSON arguments are complete. Query credentials are rejected.
+        Owner-scoped fileData is resolved and validated after authentication.
       security:
         - googleAPIKey: []
         - bearerAuth: []
@@ -6959,6 +6962,7 @@ components:
       oneOf:
         - required: [text]
         - required: [inlineData]
+        - required: [fileData]
         - required: [functionCall]
         - required: [functionResponse]
         - required: [executableCode]
@@ -6980,6 +6984,14 @@ components:
             mimeType: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp, audio/wav, audio/mp3, audio/mpeg, audio/aiff, audio/aac, audio/ogg, audio/opus, audio/flac, audio/m4a, audio/webm, video/mp4, video/webm, application/pdf]}
             data: {type: string, format: byte}
           description: Inline images require vision; signature-verifiable audio containers require audio_input; MP4 and WebM video require video_input; PDF requires file_input. All binary parts are bounded, signature-validated and projected to configured AV scanners.
+        fileData:
+          type: object
+          additionalProperties: false
+          required: [mimeType, fileUri]
+          properties:
+            mimeType: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp, audio/wav, audio/mp3, audio/mpeg, audio/aiff, audio/aac, audio/ogg, audio/opus, audio/flac, audio/m4a, audio/webm, audio/mp4, video/mp4, video/webm, application/pdf, text/plain]}
+            fileUri: {type: string, minLength: 6, maxLength: 128, pattern: '^file_[A-Za-z0-9_.-]+$', description: Owner-scoped gateway Files identifier with purpose=user_data.}
+          description: The authenticated credential and user must own the referenced gateway File. The stored MIME type must match mimeType. Resolution and signature validation happen before policy, token counting, routing or billing.
         functionCall:
           type: object
           additionalProperties: false

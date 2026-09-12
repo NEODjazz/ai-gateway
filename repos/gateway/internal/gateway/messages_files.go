@@ -238,11 +238,48 @@ func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity
 				if err != nil {
 					return err
 				}
-				if !supportedA2AImageType(file.ContentType) || file.ContentType == "" || imageBytes > openai.MaxTotalImageBytes-len(file.Content) {
+				if !referenceMediaTypeMatches(object, file.ContentType) || !supportedA2AImageType(file.ContentType) || file.ContentType == "" || imageBytes > openai.MaxTotalImageBytes-len(file.Content) {
 					return errMessagesFileUnavailable
 				}
 				imageBytes += len(file.Content)
 				parts[partIndex] = map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:" + file.ContentType + ";base64," + base64.StdEncoding.EncodeToString(file.Content)}}
+				continue
+			}
+			if object["type"] == "input_file_audio_reference" {
+				fileID, _ := object["file_id"].(string)
+				file, err := h.ownedMessagesFile(ctx, owner, fileID)
+				if err != nil {
+					return err
+				}
+				format, filename := generateAudioFormat(file.ContentType)
+				encoded := base64.StdEncoding.EncodeToString(file.Content)
+				if !referenceMediaTypeMatches(object, file.ContentType) || format == "" || openai.ValidateAudioAttachment(openai.AudioAttachment{Filename: filename, MediaType: file.ContentType, Data: encoded}) != nil {
+					return errMessagesFileUnavailable
+				}
+				parts[partIndex] = map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": encoded, "format": format}}
+				continue
+			}
+			if object["type"] == "input_file_video_reference" {
+				fileID, _ := object["file_id"].(string)
+				file, err := h.ownedMessagesFile(ctx, owner, fileID)
+				if err != nil {
+					return err
+				}
+				format := ""
+				switch file.ContentType {
+				case "video/mp4":
+					format = "mp4"
+				case "video/webm":
+					format = "webm"
+				}
+				video := map[string]any{"type": "input_video", "input_video": map[string]any{"data": base64.StdEncoding.EncodeToString(file.Content), "format": format}}
+				if !referenceMediaTypeMatches(object, file.ContentType) || format == "" {
+					return errMessagesFileUnavailable
+				}
+				if _, err := openai.ChatVideoAttachments([]openai.Message{{Role: "user", Content: []any{video}}}); err != nil {
+					return errMessagesFileUnavailable
+				}
+				parts[partIndex] = video
 				continue
 			}
 			if object["type"] != "input_file_reference" {
@@ -252,6 +289,9 @@ func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity
 			file, err := h.ownedMessagesFile(ctx, owner, fileID)
 			if err != nil {
 				return err
+			}
+			if !referenceMediaTypeMatches(object, file.ContentType) {
+				return errMessagesFileUnavailable
 			}
 			switch file.ContentType {
 			case "application/pdf":
@@ -279,5 +319,41 @@ func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity
 	if _, err := openai.ChatImageAttachments(request.Messages); err != nil {
 		return err
 	}
+	if _, err := openai.ChatAudioAttachments(request.Messages); err != nil {
+		return errMessagesFileUnavailable
+	}
+	if _, err := openai.ChatVideoAttachments(request.Messages); err != nil {
+		return errMessagesFileUnavailable
+	}
 	return nil
+}
+
+func referenceMediaTypeMatches(reference map[string]any, actual string) bool {
+	expected, _ := reference["media_type"].(string)
+	return expected == "" || expected == actual
+}
+
+func generateAudioFormat(mediaType string) (string, string) {
+	switch mediaType {
+	case "audio/wav":
+		return "wav", "input.wav"
+	case "audio/mpeg", "audio/mp3":
+		return "mp3", "input.mp3"
+	case "audio/flac":
+		return "flac", "input.flac"
+	case "audio/ogg":
+		return "ogg", "input.ogg"
+	case "audio/opus":
+		return "opus", "input.opus"
+	case "audio/aiff":
+		return "aiff", "input.aiff"
+	case "audio/aac":
+		return "aac", "input.aac"
+	case "audio/webm":
+		return "webm", "input.webm"
+	case "audio/mp4", "audio/m4a":
+		return "m4a", "input.m4a"
+	default:
+		return "", ""
+	}
 }
