@@ -92,6 +92,12 @@ unique result per passage in descending-logit order and positive provider usage
 where `total_tokens` equals `prompt_tokens`; otherwise the request fails before
 billing settlement.
 
+NVIDIA NIM Chat publishes `reasoning_effort` as a model-specific capability.
+`nvidia/nemotron-3-super-120b-a12b` accepts `none`, `low`, and `high`, while
+`nvidia/nemotron-3-ultra-550b-a55b` accepts `none`, `medium`, and `high`. Other
+models and values fail before provider HTTP. The accepted value is forwarded
+unchanged on the compatible Chat wire.
+
 Provider type `together` sends Rerank requests to the native `/v1/rerank`
 endpoint with bearer authentication. It accepts text and object documents,
 `top_n`, and `return_documents`; unsupported chunking and rank-field controls

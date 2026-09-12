@@ -209,6 +209,9 @@ availability is not inferred from these tests.
 - `9caf413`: Native Together Chat maps public `reasoning_effort=none` to the
   native disable object for nine exact hybrid model IDs, adds the current
   DeepSeek V4 Pro effort policy and preserves reasoning history for each model.
+- `c91df49`: Native NVIDIA NIM Chat restricts `reasoning_effort` to the exact
+  documented values for Nemotron 3 Super and Ultra. Unknown models no longer
+  advertise or accept the parameter through this managed adapter.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new
 implementation commit. Full race tests also passed for the generation-control

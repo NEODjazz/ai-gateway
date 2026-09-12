@@ -1827,3 +1827,20 @@ same image. Live liveness and readiness returned 204, the served OpenAPI
 reported 0.1.388, and an unauthenticated hybrid-reasoning request returned 401
 before deployment selection. No provider credential or external inference was
 used by the smoke checks.
+
+Source `c91df49` bounds NVIDIA NIM Chat reasoning controls by exact model ID.
+Nemotron 3 Super accepts `none`, `low`, and `high`; Nemotron 3 Ultra accepts
+`none`, `medium`, and `high`. Other model/value combinations fail before HTTP,
+and capability discovery reports the two model overrides without advertising a
+provider-wide default. Focused provider/API tests, vet, build, the full Go suite
+and the full race suite passed. OpenAPI 0.1.389 identifies the deployed contract
+revision.
+
+Rancher Desktop built `ai-gateway-gateway:nvidia-reasoning-c91df49` with image
+ID `sha256:0a6986d21354d501b467a9169314c72cd51313953aaed63c9e394ccbe76983ba`.
+Gateway Helm revision 495 completed successfully. Pod
+`ai-gateway-gateway-659bc9b8d4-ljvnv` became Ready with zero restarts and the
+same image. Live liveness and readiness returned 204 through the ingress IP,
+the served OpenAPI reported 0.1.389, and an unauthenticated Chat request using
+the Ultra reasoning control returned 401 before deployment selection. No
+provider credential or external inference was used by the smoke checks.
