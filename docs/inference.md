@@ -701,6 +701,12 @@ base64 PDF `document` blocks with PDF signature validation, a five-document and
 16 MiB decoded aggregate limit, attachment policy projection, conservative TPM
 reserve, response-cache exclusion and `file_input` capability routing. Native
 generation, token counting and durable Messages batches preserve these blocks.
+A document may request native citations with `citations: {"enabled": true}`.
+The setting is preserved by generation, token counting and durable Messages
+batches, requires the explicit `document_citations` deployment capability,
+participates in exact-cache identity and bypasses semantic cache reuse. Omission
+leaves citations disabled; `enabled: false` is rejected to keep the request
+contract unambiguous.
 URL/file-reference documents, URL images and text after tool_use are not supported. Ordinary client
 `tool_result` blocks may set `is_error=true`; the flag is preserved by native
 generation, token counting and durable batches. Such requests require the

@@ -280,7 +280,11 @@ Messages user content accepts up to five inline base64 PDF `document` blocks
 with a 16 MiB decoded aggregate limit. PDF signature validation, attachment
 policy scanning, TPM and billing admission, cache exclusion and `file_input`
 capability routing are shared with the existing inline-file pipeline. Native
-token counting and durable Messages batches preserve the documents.
+token counting and durable Messages batches preserve the documents. A document
+may set `citations: {"enabled": true}`; routing then also requires
+`document_citations`. The setting is forwarded by generation, token counting
+and durable batches, participates in exact-cache identity and disables semantic
+cache reuse. `enabled: false` is rejected; omit `citations` to leave it disabled.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.

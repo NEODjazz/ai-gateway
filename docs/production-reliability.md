@@ -1102,3 +1102,10 @@ same digest. Live OpenAPI 0.1.355 exposes `MessagesDocumentBlock`. A valid
 base64 PDF request passed structural validation and reached authentication;
 bytes without a PDF signature returned 400 before authentication. These smoke
 checks used no credential and performed no external inference.
+
+Source `e737188` adds per-document native citation control to bounded Messages
+PDF input. Generation, token counting and durable batches preserve the setting;
+routing requires `document_citations`, exact-cache keys isolate it, and semantic
+cache reuse is disabled. Requests with `enabled: false` fail validation instead
+of being silently reinterpreted. Full Go tests, race tests, vet and build passed,
+along with all 166 UI tests, UI type checking and the production UI build.
