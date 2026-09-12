@@ -16,13 +16,14 @@ import (
 )
 
 type MCPServer struct {
-	ID          string   `json:"id"`
-	Label       string   `json:"label"`
-	Description string   `json:"description,omitempty"`
-	ServerURL   string   `json:"server_url"`
-	Transport   string   `json:"transport"`
-	Tools       []string `json:"tools,omitempty"`
-	Enabled     bool     `json:"enabled"`
+	ID                   string   `json:"id"`
+	Label                string   `json:"label"`
+	Description          string   `json:"description,omitempty"`
+	ServerURL            string   `json:"server_url"`
+	Transport            string   `json:"transport"`
+	Tools                []string `json:"tools,omitempty"`
+	Enabled              bool     `json:"enabled"`
+	CredentialConfigured bool     `json:"credential_configured"`
 }
 type MCPToolset struct {
 	ID          string   `json:"id"`
@@ -42,8 +43,13 @@ type MCPToolsetReferences struct {
 }
 type MCPRegistry struct {
 	mu       sync.RWMutex
-	servers  map[string]MCPServer
+	servers  map[string]mcpServerEntry
 	toolsets map[string]MCPToolset
+}
+
+type mcpServerEntry struct {
+	server      MCPServer
+	bearerToken string
 }
 
 var (
@@ -53,14 +59,15 @@ var (
 )
 
 func NewMCPRegistry() *MCPRegistry {
-	return &MCPRegistry{servers: map[string]MCPServer{}, toolsets: map[string]MCPToolset{}}
+	return &MCPRegistry{servers: map[string]mcpServerEntry{}, toolsets: map[string]MCPToolset{}}
 }
 func (h Handler) WithMCPRegistry(registry *MCPRegistry) Handler { h.mcp = registry; return h }
 func (r *MCPRegistry) Servers() []MCPServer {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	result := make([]MCPServer, 0, len(r.servers))
-	for _, server := range r.servers {
+	for _, entry := range r.servers {
+		server := entry.server
 		server.Tools = append([]string(nil), server.Tools...)
 		result = append(result, server)
 	}
@@ -70,9 +77,19 @@ func (r *MCPRegistry) Servers() []MCPServer {
 func (r *MCPRegistry) Server(id string) (MCPServer, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	server, ok := r.servers[id]
+	entry, ok := r.servers[id]
+	server := entry.server
 	server.Tools = append([]string(nil), server.Tools...)
 	return server, ok
+}
+
+func (r *MCPRegistry) ServerRuntime(id string) (MCPServer, string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entry, ok := r.servers[id]
+	server := entry.server
+	server.Tools = append([]string(nil), server.Tools...)
+	return server, entry.bearerToken, ok
 }
 
 type MCPRuntimeClient interface {
@@ -80,7 +97,7 @@ type MCPRuntimeClient interface {
 	CallTool(context.Context, string, map[string]any) (mcpclient.CallResult, error)
 }
 
-type MCPRuntimeFactory func(string) (MCPRuntimeClient, error)
+type MCPRuntimeFactory func(string, string) (MCPRuntimeClient, error)
 
 func (h Handler) WithMCPRuntimeFactory(factory MCPRuntimeFactory) Handler {
 	h.mcpRuntime = factory
@@ -102,13 +119,13 @@ func (r *MCPRegistry) Toolsets() []MCPToolset {
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
 }
-func (r *MCPRegistry) PutServer(id string, server MCPServer) (MCPServer, error) {
+func (r *MCPRegistry) PutServer(id string, server MCPServer, bearerToken ...string) (MCPServer, error) {
 	id = strings.TrimSpace(id)
 	server.Label = strings.TrimSpace(server.Label)
 	server.Description = strings.TrimSpace(server.Description)
 	server.Transport = strings.TrimSpace(server.Transport)
 	parsed, err := url.Parse(server.ServerURL)
-	if !validMCPID(id) || server.Label == "" || len(server.Label) > 128 || len(server.Description) > 1024 || err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (server.Transport != "streamable-http" && server.Transport != "sse") || !validMCPTools(server.Tools) {
+	if len(bearerToken) > 1 || !validMCPBearerToken(firstString(bearerToken)) || !validMCPID(id) || server.Label == "" || len(server.Label) > 128 || len(server.Description) > 1024 || err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (server.Transport != "streamable-http" && server.Transport != "sse") || !validMCPTools(server.Tools) {
 		return MCPServer{}, errInvalidMCPRegistryEntry
 	}
 	parsed.Scheme = "https"
@@ -118,9 +135,25 @@ func (r *MCPRegistry) PutServer(id string, server MCPServer) (MCPServer, error) 
 	server.ServerURL = parsed.String()
 	server.Tools = uniqueStrings(server.Tools)
 	r.mu.Lock()
-	r.servers[id] = server
+	secret := firstString(bearerToken)
+	if len(bearerToken) == 0 {
+		secret = r.servers[id].bearerToken
+	}
+	server.CredentialConfigured = secret != ""
+	r.servers[id] = mcpServerEntry{server: server, bearerToken: secret}
 	r.mu.Unlock()
 	return server, nil
+}
+
+func firstString(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+func validMCPBearerToken(value string) bool {
+	return len(value) <= 32768 && strings.TrimSpace(value) == value && !strings.ContainsAny(value, "\r\n")
 }
 func (r *MCPRegistry) PutToolset(id string, toolset MCPToolset) (MCPToolset, error) {
 	id = strings.TrimSpace(id)
@@ -144,14 +177,14 @@ func (r *MCPRegistry) ServerReferences(id string) (MCPServerReferences, bool) {
 }
 
 func (r *MCPRegistry) serverReferencesLocked(id string) (MCPServerReferences, bool) {
-	server, ok := r.servers[id]
+	entry, ok := r.servers[id]
 	if !ok {
 		return MCPServerReferences{}, false
 	}
 	result := MCPServerReferences{ToolsetIDs: []string{}}
 	for toolsetID, toolset := range r.toolsets {
 		for _, identifier := range toolset.Tools {
-			if toolAllowed(identifier, server.Tools) {
+			if toolAllowed(identifier, entry.server.Tools) {
 				result.ToolsetIDs = append(result.ToolsetIDs, toolsetID)
 				break
 			}
@@ -227,7 +260,8 @@ func (r *MCPRegistry) enabledServerAllows(identifier string) bool {
 	if separator := strings.Index(identifier, "#tool:"); separator > 0 {
 		connector = identifier[:separator]
 	}
-	for _, server := range r.servers {
+	for _, entry := range r.servers {
+		server := entry.server
 		if !server.Enabled {
 			continue
 		}
@@ -340,6 +374,7 @@ func (h Handler) UpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 		Transport   string   `json:"transport"`
 		Tools       []string `json:"tools,omitempty"`
 		Enabled     bool     `json:"enabled"`
+		BearerToken *string  `json:"bearer_token,omitempty"`
 	}
 	if !decodeMCPJSON(w, r, &input) {
 		return
@@ -351,7 +386,14 @@ func (h Handler) UpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
 	}
-	saved, err := h.mcp.PutServer(id, MCPServer{Label: input.Label, Description: input.Description, ServerURL: input.ServerURL, Transport: input.Transport, Tools: input.Tools, Enabled: input.Enabled})
+	server := MCPServer{Label: input.Label, Description: input.Description, ServerURL: input.ServerURL, Transport: input.Transport, Tools: input.Tools, Enabled: input.Enabled}
+	var saved MCPServer
+	var err error
+	if input.BearerToken == nil {
+		saved, err = h.mcp.PutServer(id, server)
+	} else {
+		saved, err = h.mcp.PutServer(id, server, *input.BearerToken)
+	}
 	if err != nil {
 		h.auditOutcome(r.Context(), audit, event, "failed")
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid MCP server")

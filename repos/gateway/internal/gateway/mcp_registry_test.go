@@ -81,6 +81,39 @@ func TestMCPRegistryAdminAPIExcludesCredentials(t *testing.T) {
 	}
 }
 
+func TestMCPRegistryAdminCredentialLifecycleNeverReturnsSecret(t *testing.T) {
+	registry := NewMCPRegistry()
+	handler := NewHandler(modulesPipeline("admin"), nil).WithMCPRegistry(registry)
+	router := Routes(handler)
+	call := func(body string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/admin/v1/mcp/servers/weather", strings.NewReader(body)))
+		return response
+	}
+	created := call(`{"label":"Weather","server_url":"https://mcp.example.test","transport":"streamable-http","tools":[],"enabled":true,"bearer_token":"server-secret"}`)
+	if created.Code != http.StatusOK || !strings.Contains(created.Body.String(), `"credential_configured":true`) || strings.Contains(created.Body.String(), "server-secret") {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+	}
+	_, secret, found := registry.ServerRuntime("weather")
+	if !found || secret != "server-secret" {
+		t.Fatalf("stored credential found=%t value=%q", found, secret)
+	}
+	preserved := call(`{"label":"Weather updated","server_url":"https://mcp.example.test","transport":"streamable-http","tools":[],"enabled":true}`)
+	_, secret, _ = registry.ServerRuntime("weather")
+	if preserved.Code != http.StatusOK || secret != "server-secret" {
+		t.Fatalf("preserve status=%d credential=%q", preserved.Code, secret)
+	}
+	cleared := call(`{"label":"Weather updated","server_url":"https://mcp.example.test","transport":"streamable-http","tools":[],"enabled":true,"bearer_token":""}`)
+	_, secret, _ = registry.ServerRuntime("weather")
+	if cleared.Code != http.StatusOK || strings.Contains(cleared.Body.String(), `"credential_configured":true`) || secret != "" {
+		t.Fatalf("clear status=%d body=%s credential=%q", cleared.Code, cleared.Body.String(), secret)
+	}
+	invalid := call("{\"label\":\"Weather\",\"server_url\":\"https://mcp.example.test\",\"transport\":\"streamable-http\",\"enabled\":true,\"bearer_token\":\"line\\nbreak\"}")
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestMCPRegistryReferencesProtectDeletes(t *testing.T) {
 	registry := NewMCPRegistry()
 	if _, err := registry.PutServer("weather", MCPServer{Label: "Weather", ServerURL: "https://mcp.example.test", Transport: "streamable-http", Tools: []string{"mcp:weather@https://mcp.example.test"}, Enabled: true}); err != nil {

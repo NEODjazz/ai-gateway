@@ -28,6 +28,7 @@ const (
 type Client struct {
 	endpoint *url.URL
 	http     *http.Client
+	bearer   string
 	mu       sync.Mutex
 	session  string
 	ready    bool
@@ -65,11 +66,15 @@ type rpcResponse struct {
 }
 
 func New(endpoint string) (*Client, error) {
+	return NewWithBearer(endpoint, "")
+}
+
+func NewWithBearer(endpoint, bearer string) (*Client, error) {
 	parsed, err := url.Parse(strings.TrimSpace(endpoint))
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || len(bearer) > 32768 || strings.TrimSpace(bearer) != bearer || strings.ContainsAny(bearer, "\r\n") {
 		return nil, errors.New("MCP endpoint must be an HTTPS URL without credentials, query, or fragment")
 	}
-	return &Client{endpoint: parsed, http: publichttp.NewClient(30 * time.Second)}, nil
+	return &Client{endpoint: parsed, http: publichttp.NewClient(30 * time.Second), bearer: bearer}, nil
 }
 
 func (c *Client) Initialize(ctx context.Context) error {
@@ -266,6 +271,9 @@ func (c *Client) request(ctx context.Context, payload []byte) (*http.Request, er
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
 	request.Header.Set("MCP-Protocol-Version", ProtocolVersion)
+	if c.bearer != "" {
+		request.Header.Set("Authorization", "Bearer "+c.bearer)
+	}
 	if c.session != "" {
 		request.Header.Set("Mcp-Session-Id", c.session)
 	}

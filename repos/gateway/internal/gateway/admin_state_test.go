@@ -62,7 +62,7 @@ func TestAdminStatePersistsEncryptedAndRestores(t *testing.T) {
 		if _, err := access.PutTag("production", TagDefinition{AllowedModels: []string{"gpt-*"}, Enabled: true}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := mcp.PutServer("server-a", MCPServer{Label: "Server A", ServerURL: "https://mcp.example.test", Transport: "sse", Tools: []string{"mcp:server-a:*"}, Enabled: true}); err != nil {
+		if _, err := mcp.PutServer("server-a", MCPServer{Label: "Server A", ServerURL: "https://mcp.example.test", Transport: "sse", Tools: []string{"mcp:server-a:*"}, Enabled: true}, "mcp-server-secret"); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := agents.PutToolPolicy("policy-a", ToolPolicy{Name: "Policy A", AllowedTools: []string{"search"}, MaxToolCalls: 4, Enabled: true}); err != nil {
@@ -81,10 +81,17 @@ func TestAdminStatePersistsEncryptedAndRestores(t *testing.T) {
 	if strings.Contains(string(controller.payload), "do-not-store-plaintext") {
 		t.Fatal("logging secret was persisted in plaintext")
 	}
+	if strings.Contains(string(controller.payload), "mcp-server-secret") {
+		t.Fatal("MCP credential was persisted in plaintext")
+	}
 
 	_, restoredAccess, restoredMCP, restoredAgents, restoredLogging := newTestAdminRuntime(t, controller)
 	if len(restoredAccess.Projects()) != 1 || len(restoredAccess.PolicyAttachments()) != 1 || len(restoredAccess.Tags()) != 1 || len(restoredMCP.Servers()) != 1 || len(restoredAgents.ToolPolicies()) != 1 {
 		t.Fatalf("state was not restored: projects=%d attachments=%d tags=%d servers=%d policies=%d", len(restoredAccess.Projects()), len(restoredAccess.PolicyAttachments()), len(restoredAccess.Tags()), len(restoredMCP.Servers()), len(restoredAgents.ToolPolicies()))
+	}
+	server, credential, found := restoredMCP.ServerRuntime("server-a")
+	if !found || !server.CredentialConfigured || credential != "mcp-server-secret" {
+		t.Fatalf("restored MCP credential found=%t configured=%t value=%q", found, server.CredentialConfigured, credential)
 	}
 	restoredLogging.mu.RLock()
 	secret := restoredLogging.destinations["logs-a"].secret

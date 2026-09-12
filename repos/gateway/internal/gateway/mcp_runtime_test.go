@@ -98,9 +98,17 @@ func TestMCPRuntimeListsToolsWithACLRateLimitAndBilling(t *testing.T) {
 	client := &fakeMCPRuntimeClient{page: mcpclient.ToolPage{Tools: []mcpclient.Tool{{Name: "forecast", InputSchema: json.RawMessage(`{"type":"object"}`)}}, NextCursor: "next"}}
 	auth := modules.NewPipeline([]modules.Module{mcpRuntimeAuth{tools: []string{"mcp:weather@https://mcp.example.test/v1"}, rpm: 2}})
 	providerModules := modules.NewPipeline([]modules.Module{billing})
-	handler := NewHandler(auth, nil).WithResourceBillingPipeline(providerModules).WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPRuntimeFactory(func(endpoint string) (MCPRuntimeClient, error) {
+	registry := runtimeRegistry(t, "streamable-http")
+	server, _ := registry.Server("weather")
+	if _, err := registry.PutServer("weather", server, "server-secret"); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(auth, nil).WithResourceBillingPipeline(providerModules).WithMCPRegistry(registry).WithMCPRuntimeFactory(func(endpoint, bearerToken string) (MCPRuntimeClient, error) {
 		if endpoint != "https://mcp.example.test/v1" {
 			t.Fatalf("endpoint=%q", endpoint)
+		}
+		if bearerToken != "server-secret" {
+			t.Fatalf("bearer token=%q", bearerToken)
 		}
 		return client, nil
 	})
@@ -134,7 +142,7 @@ func TestMCPRuntimeFailsClosedForPolicyTransportAndUpstream(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			billing := &mcpBillingRecorder{}
 			client := &fakeMCPRuntimeClient{err: test.clientErr}
-			handler := NewHandler(modules.NewPipeline([]modules.Module{test.auth, billing}), nil).WithMCPRegistry(runtimeRegistry(t, test.transport)).WithMCPRuntimeFactory(func(string) (MCPRuntimeClient, error) { return client, nil })
+			handler := NewHandler(modules.NewPipeline([]modules.Module{test.auth, billing}), nil).WithMCPRegistry(runtimeRegistry(t, test.transport)).WithMCPRuntimeFactory(func(string, string) (MCPRuntimeClient, error) { return client, nil })
 			response := httptest.NewRecorder()
 			Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/mcp/servers/weather/tools", nil))
 			if response.Code != test.status || !strings.Contains(response.Body.String(), test.code) || strings.Join(billing.phases, ",") != test.phases {
@@ -150,7 +158,7 @@ func TestMCPRuntimeEnforcesAccessGroupToolIntersection(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &fakeMCPRuntimeClient{}
-	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{accessGroups: []string{"restricted"}}}), nil).WithAccessRegistry(access).WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPRuntimeFactory(func(string) (MCPRuntimeClient, error) { return client, nil })
+	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{accessGroups: []string{"restricted"}}}), nil).WithAccessRegistry(access).WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPRuntimeFactory(func(string, string) (MCPRuntimeClient, error) { return client, nil })
 	response := httptest.NewRecorder()
 	Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/mcp/servers/weather/tools", nil))
 	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "access_group_tool_not_allowed") || client.calls != 0 {
@@ -160,7 +168,7 @@ func TestMCPRuntimeEnforcesAccessGroupToolIntersection(t *testing.T) {
 
 func TestMCPRuntimeConsumesCredentialRPMBeforeDiscovery(t *testing.T) {
 	client := &fakeMCPRuntimeClient{page: mcpclient.ToolPage{Tools: []mcpclient.Tool{}}}
-	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{rpm: 1}}), nil).WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPRuntimeFactory(func(string) (MCPRuntimeClient, error) { return client, nil })
+	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{rpm: 1}}), nil).WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPRuntimeFactory(func(string, string) (MCPRuntimeClient, error) { return client, nil })
 	router := Routes(handler)
 	first := httptest.NewRecorder()
 	router.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/v1/mcp/servers/weather/tools", nil))
@@ -179,7 +187,7 @@ func TestMCPRuntimeFiltersDiscoveryToExplicitToolGrant(t *testing.T) {
 	connector := "mcp:weather@https://mcp.example.test/v1"
 	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{tools: []string{connector + "#tool:forecast"}}}), nil).
 		WithMCPRegistry(runtimeRegistry(t, "streamable-http")).
-		WithMCPRuntimeFactory(func(string) (MCPRuntimeClient, error) { return client, nil })
+		WithMCPRuntimeFactory(func(string, string) (MCPRuntimeClient, error) { return client, nil })
 	response := httptest.NewRecorder()
 	Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/mcp/servers/weather/tools", nil))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"forecast"`) || strings.Contains(response.Body.String(), "delete_city") {
@@ -194,7 +202,7 @@ func TestMCPRuntimeCallsToolOnceAndReplaysDurableResult(t *testing.T) {
 	store := mcpstate.NewMemoryStore(10, time.Hour)
 	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{tools: []string{"mcp:weather@https://mcp.example.test/v1#tool:forecast"}}, billing}), nil).
 		WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPCallStore(store).WithAudit(audit).
-		WithMCPRuntimeFactory(func(string) (MCPRuntimeClient, error) { return client, nil })
+		WithMCPRuntimeFactory(func(string, string) (MCPRuntimeClient, error) { return client, nil })
 	router := Routes(handler)
 	call := func(body string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodPost, "/v1/mcp/servers/weather/tools/forecast", strings.NewReader(body))
@@ -235,7 +243,7 @@ func TestMCPRuntimeCachesUpstreamFailureWithoutReexecution(t *testing.T) {
 	client := &fakeMCPRuntimeClient{callErr: errors.New("connection lost")}
 	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{}, billing}), nil).
 		WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPCallStore(mcpstate.NewMemoryStore(10, time.Hour)).WithAudit(audit).
-		WithMCPRuntimeFactory(func(string) (MCPRuntimeClient, error) { return client, nil })
+		WithMCPRuntimeFactory(func(string, string) (MCPRuntimeClient, error) { return client, nil })
 	router := Routes(handler)
 	for attempt := 0; attempt < 2; attempt++ {
 		request := httptest.NewRequest(http.MethodPost, "/v1/mcp/servers/weather/tools/forecast", strings.NewReader(`{"arguments":{}}`))
@@ -256,7 +264,7 @@ func TestMCPRuntimeFailsClosedBeforeToolCallWhenAuditUnavailable(t *testing.T) {
 	client := &fakeMCPRuntimeClient{callResult: mcpclient.CallResult{Content: []json.RawMessage{json.RawMessage(`{"type":"text","text":"sunny"}`)}}}
 	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{}}), nil).
 		WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPCallStore(mcpstate.NewMemoryStore(10, time.Hour)).WithAudit(audit).
-		WithMCPRuntimeFactory(func(string) (MCPRuntimeClient, error) { return client, nil })
+		WithMCPRuntimeFactory(func(string, string) (MCPRuntimeClient, error) { return client, nil })
 	request := httptest.NewRequest(http.MethodPost, "/v1/mcp/servers/weather/tools/forecast", strings.NewReader(`{"arguments":{}}`))
 	request.Header.Set("Idempotency-Key", "audit-failure")
 	response := httptest.NewRecorder()
@@ -289,7 +297,7 @@ func TestMCPRuntimeRejectsToolOutsideExplicitGrantBeforeSideEffects(t *testing.T
 	client := &fakeMCPRuntimeClient{}
 	handler := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{tools: []string{connector + "#tool:forecast"}}, billing}), nil).
 		WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPCallStore(mcpstate.NewMemoryStore(10, time.Hour)).WithAudit(audit).
-		WithMCPRuntimeFactory(func(string) (MCPRuntimeClient, error) { return client, nil })
+		WithMCPRuntimeFactory(func(string, string) (MCPRuntimeClient, error) { return client, nil })
 	request := httptest.NewRequest(http.MethodPost, "/v1/mcp/servers/weather/tools/delete_city", strings.NewReader(`{"arguments":{}}`))
 	request.Header.Set("Idempotency-Key", "denied-tool")
 	response := httptest.NewRecorder()

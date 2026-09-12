@@ -69,6 +69,39 @@ func TestStreamableHTTPInitializationListAndCall(t *testing.T) {
 	}
 }
 
+func TestBearerCredentialIsSentOnEveryProtocolRequest(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer server-secret" {
+			t.Fatalf("authorization=%q", r.Header.Get("Authorization"))
+		}
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.Method == "initialize" {
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":%q}}`, request.ID, ProtocolVersion)
+			return
+		}
+		if request.Method == "notifications/initialized" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"tools":[]}}`, request.ID)
+	}))
+	defer server.Close()
+	client, err := NewWithBearer(server.URL, "server-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.http = server.Client()
+	if _, err := client.ListTools(t.Context(), ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCallToolRejectsNonObjectContent(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
@@ -104,6 +137,11 @@ func TestClientRejectsUnsafeEndpointsAndAddresses(t *testing.T) {
 	for _, endpoint := range []string{"http://example.com/mcp", "https://user@example.com/mcp", "https://example.com/mcp?token=x", "https://example.com/mcp#fragment"} {
 		if _, err := New(endpoint); err == nil {
 			t.Fatalf("accepted endpoint %q", endpoint)
+		}
+	}
+	for _, bearer := range []string{" leading", "trailing ", "line\nbreak", strings.Repeat("x", 32769)} {
+		if _, err := NewWithBearer("https://example.com/mcp", bearer); err == nil {
+			t.Fatalf("accepted unsafe bearer credential %q", bearer)
 		}
 	}
 	for _, address := range []string{"127.0.0.1", "10.0.0.1", "169.254.1.1", "::1", "fc00::1"} {

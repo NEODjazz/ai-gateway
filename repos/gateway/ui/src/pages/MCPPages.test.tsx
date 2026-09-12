@@ -6,7 +6,7 @@ import { MCPServersPage, MCPToolsetsPage } from "./MCPPages";
 
 const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } }));
 const connector = "mcp:weather@https://mcp.example.test/v1";
-const server = { id: "weather", label: "Weather production", description: "Forecast tools", server_url: "https://mcp.example.test/v1", transport: "streamable-http", tools: [connector], enabled: true };
+const server = { id: "weather", label: "Weather production", description: "Forecast tools", server_url: "https://mcp.example.test/v1", transport: "streamable-http", tools: [connector], enabled: true, credential_configured: true };
 const toolset = { id: "weather-read", name: "Weather read", description: "Read-only weather", tools: [connector], enabled: true };
 
 function renderPage(page: "servers" | "toolsets") {
@@ -28,7 +28,7 @@ describe("MCP management pages", () => {
     renderPage("servers");
     expect(await screen.findByText("Weather production")).toBeInTheDocument();
     expect(within(screen.getByText("Toolset links").closest("article")!).getByText("1")).toBeInTheDocument();
-    expect(screen.getByText(/stores no MCP credentials or request headers/)).toBeInTheDocument();
+    expect(screen.getByText(/encrypted in durable state/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Actions for MCP server weather" }));
     expect(screen.getByRole("menuitem", { name: "Delete" })).toHaveAttribute("aria-disabled", "true");
 
@@ -37,12 +37,42 @@ describe("MCP management pages", () => {
     await userEvent.type(within(form).getByLabelText("MCP server ID"), "finance");
     await userEvent.type(within(form).getByLabelText("MCP server label"), "Finance production");
     await userEvent.type(within(form).getByLabelText("MCP server URL"), "https://finance.example.test/mcp/");
+    await userEvent.type(within(form).getByLabelText("MCP server bearer credential"), "finance-secret");
     expect(within(form).getByText("mcp:finance@https://finance.example.test/mcp")).toBeInTheDocument();
     await userEvent.click(within(form).getByRole("button", { name: "Use suggestion" }));
     await userEvent.click(within(form).getByRole("button", { name: "Create MCP server" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => url === "/admin/v1/mcp/servers/finance" && options?.method === "PUT")).toBe(true));
     const request = fetchMock.mock.calls.find(([url, options]) => url === "/admin/v1/mcp/servers/finance" && options?.method === "PUT");
-    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ label: "Finance production", server_url: "https://finance.example.test/mcp/", tools: ["mcp:finance@https://finance.example.test/mcp"], enabled: true });
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ label: "Finance production", server_url: "https://finance.example.test/mcp/", bearer_token: "finance-secret", tools: ["mcp:finance@https://finance.example.test/mcp"], enabled: true });
+  });
+
+  it("preserves or explicitly clears a stored server credential", async () => {
+	const requests: Record<string, unknown>[] = [];
+	const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+	  const url = String(input);
+	  if (url === "/admin/v1/session") return json({ roles: ["admin"], capabilities: ["admin"] });
+	  if (url === "/admin/v1/mcp/servers?expand=references" && !options?.method) return json({ data: [server], references: {} });
+	  if (url === "/admin/v1/mcp/servers/weather" && options?.method === "PUT") { requests.push(JSON.parse(String(options.body))); return json(server); }
+	  return json({ data: [] });
+	});
+	renderPage("servers");
+	expect(await screen.findByText("Weather production")).toBeInTheDocument();
+	await userEvent.click(screen.getByRole("button", { name: "Actions for MCP server weather" }));
+	await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+	let form = screen.getByRole("dialog", { name: "Edit MCP server" });
+	expect(within(form).getByLabelText("MCP server bearer credential")).toHaveAttribute("placeholder", "Stored credential remains unchanged");
+	await userEvent.click(within(form).getByRole("button", { name: "Save changes" }));
+	await waitFor(() => expect(requests).toHaveLength(1));
+	expect(requests[0]).not.toHaveProperty("bearer_token");
+
+	await userEvent.click(screen.getByRole("button", { name: "Actions for MCP server weather" }));
+	await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+	form = screen.getByRole("dialog", { name: "Edit MCP server" });
+	await userEvent.click(within(form).getByLabelText("Clear MCP server credential"));
+	await userEvent.click(within(form).getByRole("button", { name: "Save changes" }));
+	await waitFor(() => expect(requests).toHaveLength(2));
+	expect(requests[1]).toMatchObject({ bearer_token: "" });
+	expect(fetchMock).toHaveBeenCalled();
   });
 
   it("selects configured connectors and exposes fail-closed assignment impact", async () => {

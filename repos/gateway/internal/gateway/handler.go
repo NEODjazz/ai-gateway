@@ -151,7 +151,9 @@ func NewHandlerWithMetrics(pipeline modules.Pipeline, llmProvider provider.Provi
 	if metrics == nil {
 		metrics = NewMetrics()
 	}
-	return Handler{pipeline: pipeline, provider: llmProvider, rateLimits: rateLimits, metrics: metrics, ready: ready, a2aHTTPClient: publichttp.NewClient(15 * time.Second), mcpRuntime: func(endpoint string) (MCPRuntimeClient, error) { return mcpclient.New(endpoint) }}
+	return Handler{pipeline: pipeline, provider: llmProvider, rateLimits: rateLimits, metrics: metrics, ready: ready, a2aHTTPClient: publichttp.NewClient(15 * time.Second), mcpRuntime: func(endpoint, bearerToken string) (MCPRuntimeClient, error) {
+		return mcpclient.NewWithBearer(endpoint, bearerToken)
+	}}
 }
 
 func (h Handler) Health(w http.ResponseWriter, _ *http.Request) {

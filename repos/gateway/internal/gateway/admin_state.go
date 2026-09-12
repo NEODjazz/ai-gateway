@@ -30,17 +30,24 @@ type encryptedLoggingDestination struct {
 	Ciphertext  []byte             `json:"ciphertext,omitempty"`
 }
 
+type encryptedMCPServerCredential struct {
+	ServerID   string `json:"server_id"`
+	Nonce      []byte `json:"nonce"`
+	Ciphertext []byte `json:"ciphertext"`
+}
+
 type adminStateSnapshot struct {
-	SchemaVersion       int                           `json:"schema_version"`
-	Projects            []Project                     `json:"projects,omitempty"`
-	AccessGroups        []AccessGroup                 `json:"access_groups,omitempty"`
-	PolicyAttachments   []PolicyAttachment            `json:"policy_attachments,omitempty"`
-	Tags                []TagDefinition               `json:"tags,omitempty"`
-	MCPServers          []MCPServer                   `json:"mcp_servers,omitempty"`
-	MCPToolsets         []MCPToolset                  `json:"mcp_toolsets,omitempty"`
-	ToolPolicies        []ToolPolicy                  `json:"tool_policies,omitempty"`
-	AgentProfiles       []AgentProfile                `json:"agent_profiles,omitempty"`
-	LoggingDestinations []encryptedLoggingDestination `json:"logging_destinations,omitempty"`
+	SchemaVersion        int                            `json:"schema_version"`
+	Projects             []Project                      `json:"projects,omitempty"`
+	AccessGroups         []AccessGroup                  `json:"access_groups,omitempty"`
+	PolicyAttachments    []PolicyAttachment             `json:"policy_attachments,omitempty"`
+	Tags                 []TagDefinition                `json:"tags,omitempty"`
+	MCPServers           []MCPServer                    `json:"mcp_servers,omitempty"`
+	MCPServerCredentials []encryptedMCPServerCredential `json:"mcp_server_credentials,omitempty"`
+	MCPToolsets          []MCPToolset                   `json:"mcp_toolsets,omitempty"`
+	ToolPolicies         []ToolPolicy                   `json:"tool_policies,omitempty"`
+	AgentProfiles        []AgentProfile                 `json:"agent_profiles,omitempty"`
+	LoggingDestinations  []encryptedLoggingDestination  `json:"logging_destinations,omitempty"`
 }
 
 type AdminStateRuntime struct {
@@ -48,6 +55,7 @@ type AdminStateRuntime struct {
 	controller AdminStateController
 	revision   int64
 	aead       cipher.AEAD
+	mcpAEAD    cipher.AEAD
 	access     *AccessRegistry
 	mcp        *MCPRegistry
 	agents     *AgentRegistry
@@ -67,7 +75,16 @@ func NewAdminStateRuntime(ctx context.Context, controller AdminStateController, 
 	if err != nil {
 		return nil, err
 	}
-	runtime := &AdminStateRuntime{controller: controller, aead: aead, access: access, mcp: mcp, agents: agents, logging: logging}
+	mcpKey := sha256.Sum256(append([]byte("ai-gateway/admin-state/mcp/v1\x00"), encryptionKey...))
+	mcpBlock, err := aes.NewCipher(mcpKey[:])
+	if err != nil {
+		return nil, err
+	}
+	mcpAEAD, err := cipher.NewGCM(mcpBlock)
+	if err != nil {
+		return nil, err
+	}
+	runtime := &AdminStateRuntime{controller: controller, aead: aead, mcpAEAD: mcpAEAD, access: access, mcp: mcp, agents: agents, logging: logging}
 	if err := runtime.refreshLocked(ctx, true); err != nil {
 		return nil, err
 	}
@@ -158,6 +175,18 @@ func (r *AdminStateRuntime) marshal() (json.RawMessage, error) {
 
 func (r *AdminStateRuntime) snapshot() (adminStateSnapshot, error) {
 	snapshot := adminStateSnapshot{SchemaVersion: adminStateSchemaVersion, Projects: r.access.Projects(), AccessGroups: r.access.Groups(), PolicyAttachments: r.access.PolicyAttachments(), Tags: r.access.Tags(), MCPServers: r.mcp.Servers(), MCPToolsets: r.mcp.Toolsets(), ToolPolicies: r.agents.ToolPolicies(), AgentProfiles: r.agents.AgentProfiles()}
+	for _, server := range snapshot.MCPServers {
+		_, secret, _ := r.mcp.ServerRuntime(server.ID)
+		if secret == "" {
+			continue
+		}
+		item := encryptedMCPServerCredential{ServerID: server.ID, Nonce: make([]byte, r.mcpAEAD.NonceSize())}
+		if _, err := rand.Read(item.Nonce); err != nil {
+			return adminStateSnapshot{}, err
+		}
+		item.Ciphertext = r.mcpAEAD.Seal(nil, item.Nonce, []byte(secret), []byte(server.ID))
+		snapshot.MCPServerCredentials = append(snapshot.MCPServerCredentials, item)
+	}
 	r.logging.mu.RLock()
 	defer r.logging.mu.RUnlock()
 	for _, entry := range r.logging.destinations {
@@ -197,10 +226,32 @@ func (r *AdminStateRuntime) apply(snapshot adminStateSnapshot) error {
 		}
 	}
 	mcp := NewMCPRegistry()
+	mcpCredentials := make(map[string]string, len(snapshot.MCPServerCredentials))
+	for _, item := range snapshot.MCPServerCredentials {
+		if !validMCPID(item.ServerID) || len(item.Nonce) != r.mcpAEAD.NonceSize() || len(item.Ciphertext) == 0 {
+			return errInvalidMCPRegistryEntry
+		}
+		plaintext, err := r.mcpAEAD.Open(nil, item.Nonce, item.Ciphertext, []byte(item.ServerID))
+		if err != nil || !validMCPBearerToken(string(plaintext)) || string(plaintext) == "" {
+			return errInvalidMCPRegistryEntry
+		}
+		if _, exists := mcpCredentials[item.ServerID]; exists {
+			return errInvalidMCPRegistryEntry
+		}
+		mcpCredentials[item.ServerID] = string(plaintext)
+	}
 	for _, item := range snapshot.MCPServers {
-		if _, err := mcp.PutServer(item.ID, item); err != nil {
+		secret, configured := mcpCredentials[item.ID]
+		if item.CredentialConfigured != configured {
+			return errInvalidMCPRegistryEntry
+		}
+		if _, err := mcp.PutServer(item.ID, item, secret); err != nil {
 			return err
 		}
+		delete(mcpCredentials, item.ID)
+	}
+	if len(mcpCredentials) != 0 {
+		return errInvalidMCPRegistryEntry
 	}
 	for _, item := range snapshot.MCPToolsets {
 		if _, err := mcp.PutToolset(item.ID, item); err != nil {

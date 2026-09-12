@@ -54,7 +54,7 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "mcp_unavailable", "MCP runtime is unavailable")
 		return
 	}
-	server, found := h.mcp.Server(serverID)
+	server, bearerToken, found := h.mcp.ServerRuntime(serverID)
 	if !found || !server.Enabled {
 		writeError(w, http.StatusNotFound, "mcp_server_not_found", "MCP server not found")
 		return
@@ -71,7 +71,7 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 		writeMCPBillingFailure(w, err)
 		return
 	}
-	client, err := h.mcpRuntime(server.ServerURL)
+	client, err := h.mcpRuntime(server.ServerURL, bearerToken)
 	if err != nil {
 		req.Metadata["provider.status"] = "error"
 		req.Metadata["provider.failure_class"] = "configuration"
@@ -162,7 +162,7 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
 	}
-	server, found := h.mcp.Server(serverID)
+	server, bearerToken, found := h.mcp.ServerRuntime(serverID)
 	if !found || !server.Enabled {
 		writeError(w, http.StatusNotFound, "mcp_server_not_found", "MCP server not found")
 		return
@@ -215,7 +215,7 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 		writeMCPBillingFailure(w, err)
 		return
 	}
-	client, err := h.mcpRuntime(server.ServerURL)
+	client, err := h.mcpRuntime(server.ServerURL, bearerToken)
 	if err != nil {
 		_ = h.resourceBillingPipeline().RunBillingLifecycle(r.Context(), &req, "cancel", err)
 		_ = h.mcpCalls.Release(r.Context(), scope, key, req.RequestID)

@@ -9,7 +9,7 @@ import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
 import type { Row } from "../components/DataTable";
 
-type MCPServer = { id: string; label: string; description?: string; server_url: string; transport: "streamable-http" | "sse"; tools?: string[]; enabled: boolean };
+type MCPServer = { id: string; label: string; description?: string; server_url: string; transport: "streamable-http" | "sse"; tools?: string[]; enabled: boolean; credential_configured?: boolean; bearer_token?: string };
 type MCPToolset = { id: string; name: string; description?: string; tools: string[]; enabled: boolean };
 type ServerReferences = { toolset_ids: string[] };
 type ToolsetReferences = { access_group_ids: string[]; virtual_key_ids: string[] };
@@ -29,13 +29,19 @@ function MCPServerForm({ initial, onClose, onSave }: { initial?: MCPServer; onCl
   const [draft, setDraft] = useState<MCPServer>(initial ? { ...initial, tools: [...(initial.tools || [])] } : { id: "", label: "", description: "", server_url: "", transport: "streamable-http", tools: [], enabled: true });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [clearCredential, setClearCredential] = useState(false);
   const suggestion = canonicalConnector(draft.id, draft.server_url);
   async function submit(event: FormEvent) {
     event.preventDefault(); setError("");
     if (!draft.id.trim() || !draft.label.trim() || !draft.server_url.trim()) { setError("ID, label and HTTPS URL are required."); return; }
     if (!(draft.tools || []).length) { setError("Add at least one exact or wildcard connector grant."); return; }
     setSaving(true);
-    try { await onSave({ ...draft, id: draft.id.trim(), label: draft.label.trim(), description: draft.description?.trim(), server_url: draft.server_url.trim() }); }
+    try {
+      const saved = { ...draft, id: draft.id.trim(), label: draft.label.trim(), description: draft.description?.trim(), server_url: draft.server_url.trim() };
+      if (clearCredential) saved.bearer_token = "";
+      else if (!saved.bearer_token) delete saved.bearer_token;
+      await onSave(saved);
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save MCP server"); }
     finally { setSaving(false); }
   }
@@ -47,6 +53,8 @@ function MCPServerForm({ initial, onClose, onSave }: { initial?: MCPServer; onCl
       <label><span>Description</span><textarea aria-label="MCP server description" rows={3} value={draft.description || ""} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
       <label><span>HTTPS server URL</span><input aria-label="MCP server URL" required type="url" placeholder="https://mcp.example.com/v1" value={draft.server_url} onChange={(event) => setDraft({ ...draft, server_url: event.target.value })} /></label>
       <label><span>Transport</span><select aria-label="MCP server transport" value={draft.transport} onChange={(event) => setDraft({ ...draft, transport: event.target.value as MCPServer["transport"] })}><option value="streamable-http">Streamable HTTP</option><option value="sse">SSE</option></select></label>
+      <label><span>Server bearer credential</span><input aria-label="MCP server bearer credential" type="password" autoComplete="new-password" placeholder={draft.credential_configured ? "Stored credential remains unchanged" : "Optional"} value={draft.bearer_token || ""} disabled={clearCredential} onChange={(event) => setDraft({ ...draft, bearer_token: event.target.value })} /></label>
+      {initial?.credential_configured && <label className="checkbox-line"><input aria-label="Clear MCP server credential" type="checkbox" checked={clearCredential} onChange={(event) => setClearCredential(event.target.checked)} /> Clear stored bearer credential</label>}
       <ChipMultiSelect label="Connector grants" options={[]} value={draft.tools || []} onChange={(tools) => setDraft({ ...draft, tools })} allowCustom />
       {suggestion && !(draft.tools || []).includes(suggestion) && <div className="mcp-suggestion"><span><strong>Suggested exact grant</strong><code>{suggestion}</code></span><button type="button" className="secondary" onClick={() => setDraft({ ...draft, tools: [...(draft.tools || []), suggestion] })}>Use suggestion</button></div>}
       <label className="checkbox-line"><input aria-label="MCP server enabled" type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /> Enabled</label>
@@ -93,12 +101,12 @@ export function MCPServersPage() {
   useEffect(() => { void load(); }, [load]);
   async function save(server: MCPServer) { const { id, ...body } = server; await client.request(`/admin/v1/mcp/servers/${encodeURIComponent(id)}`, { method: "PUT", body }); setEditing(undefined); await load(); }
   async function remove(server: MCPServer) { if (!window.confirm(`Delete MCP server ${server.label}?`)) return; try { await client.request(`/admin/v1/mcp/servers/${encodeURIComponent(server.id)}`, { method: "DELETE" }); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not delete MCP server"); } }
-  const rows: Row[] = servers.map((server) => ({ id: server.id, label: server.label, server_url: server.server_url, transport: server.transport, connectors: server.tools || [], used_by: references[server.id]?.toolset_ids.length || 0, status: server.enabled ? "Enabled" : "Disabled", _server: server }));
+  const rows: Row[] = servers.map((server) => ({ id: server.id, label: server.label, server_url: server.server_url, transport: server.transport, credential: server.credential_configured ? "Configured" : "None", connectors: server.tools || [], used_by: references[server.id]?.toolset_ids.length || 0, status: server.enabled ? "Enabled" : "Disabled", _server: server }));
   if (loading && !servers.length) return <LoadingState />;
   return <><PageHeader eyebrow="Tool governance" title="MCP servers" description="Approved HTTPS MCP endpoint metadata and connector-level policy grants." />{error && <ErrorState message={error} retry={() => void load()} />}
     <div className="usage-stats-grid"><StatCard label="Servers" value={servers.length} /><StatCard label="Enabled" value={servers.filter((server) => server.enabled).length} /><StatCard label="Connector grants" value={servers.reduce((sum, server) => sum + (server.tools?.length || 0), 0)} /><StatCard label="Toolset links" value={Object.values(references).reduce((sum, item) => sum + item.toolset_ids.length, 0)} /></div>
-    <section className="notice-card mcp-boundary"><h2>Registry boundary</h2><p>The gateway stores no MCP credentials or request headers. Network execution remains provider-mediated; this console manages approved endpoint metadata and policy identifiers, not browser-side OAuth tokens.</p></section>
-    <ManagedDataTable rows={rows} columns={[{ key: "id", label: "Server" }, { key: "label", label: "Label" }, { key: "server_url", label: "HTTPS URL" }, { key: "transport", label: "Transport" }, { key: "connectors", label: "Connector grants" }, { key: "used_by", label: "Toolsets" }, { key: "status", label: "Status", render: (value) => <span className={`status ${value === "Enabled" ? "enabled" : "disabled"}`}>{String(value)}</span> }]} defaultHidden={["transport", "connectors"]} primaryAction={<button onClick={() => setEditing(null)}>Create MCP Server</button>} onRefresh={load} searchPlaceholder="Search MCP servers" actions={(row) => { const server = row._server as MCPServer; return <ActionsMenu label={`Actions for MCP server ${server.id}`} items={[{ label: "Edit", onSelect: () => setEditing(server) }, { label: "Delete", onSelect: () => remove(server), disabled: Number(row.used_by) > 0, tone: "danger" }]} />; }} />
+    <section className="notice-card mcp-boundary"><h2>Credential boundary</h2><p>Optional server bearer credentials are encrypted in durable state and are never returned to the browser. A stored credential is sent only to its configured HTTPS endpoint; client gateway credentials are not forwarded.</p></section>
+    <ManagedDataTable rows={rows} columns={[{ key: "id", label: "Server" }, { key: "label", label: "Label" }, { key: "server_url", label: "HTTPS URL" }, { key: "transport", label: "Transport" }, { key: "credential", label: "Credential" }, { key: "connectors", label: "Connector grants" }, { key: "used_by", label: "Toolsets" }, { key: "status", label: "Status", render: (value) => <span className={`status ${value === "Enabled" ? "enabled" : "disabled"}`}>{String(value)}</span> }]} defaultHidden={["transport", "connectors"]} primaryAction={<button onClick={() => setEditing(null)}>Create MCP Server</button>} onRefresh={load} searchPlaceholder="Search MCP servers" actions={(row) => { const server = row._server as MCPServer; return <ActionsMenu label={`Actions for MCP server ${server.id}`} items={[{ label: "Edit", onSelect: () => setEditing(server) }, { label: "Delete", onSelect: () => remove(server), disabled: Number(row.used_by) > 0, tone: "danger" }]} />; }} />
     {editing !== undefined && <MCPServerForm initial={editing || undefined} onClose={() => setEditing(undefined)} onSave={save} />}
   </>;
 }
