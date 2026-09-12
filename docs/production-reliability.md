@@ -1349,3 +1349,13 @@ eviction close long-lived clients outside the cache mutex. Regressions cover
 initialize/list/call, credential headers, unsafe endpoint rejection, event
 bounds, transport selection and client closure. OpenAPI 0.1.367, focused tests,
 the full Go suite, full race suite, vet and build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-c656c56` with image ID
+`sha256:8494438873ce584c237fa09913621a72cd01869246c39c87d7eec8cf6dba6a75`.
+Gateway Helm revision 469 completed successfully, and pod
+`ai-gateway-gateway-585f6c4767-8wc25` became Ready with zero restarts and the
+same digest. Live health returned 204 and OpenAPI 0.1.367 exposes executable
+Streamable HTTP and legacy HTTP+SSE transports. An MCP discovery request with
+an invalid smoke key returned 401 before registry or upstream access. No
+credential was stored and no external MCP call or model inference was
+performed.
