@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.354
+  version: 0.1.355
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -6996,6 +6996,21 @@ components:
                 properties:
                   type: {type: string, const: text}
                   text: {type: string}
+    MessagesDocumentBlock:
+      type: object
+      additionalProperties: false
+      required: [type, source]
+      properties:
+        type: {type: string, const: document}
+        source:
+          type: object
+          additionalProperties: false
+          required: [type, media_type, data]
+          properties:
+            type: {type: string, const: base64}
+            media_type: {type: string, const: application/pdf}
+            data: {type: string, format: byte, description: Base64 PDF bytes. Decoded content must start with the PDF signature.}
+      description: Inline user PDF input. At most five documents and 16 MiB of decoded PDF data are accepted per request. Requires file_input capability and enters attachment policy scanning, TPM reserve and cache isolation.
     MessagesRequest:
       type: object
       additionalProperties: false
@@ -7114,7 +7129,7 @@ components:
                   - type: array
                     minItems: 1
                     items: {type: object}
-                    description: Supports text, image, tool_use, tool_result, thinking, redacted_thinking and bounded native server-tool or client-toolset continuation blocks. Ordinary tool_result blocks follow MessagesToolResultBlock; is_error=true requires tool_result_error capability and bypasses semantic response caching. Client-toolset calls and results retain their required toolset_name. Thinking history is accepted only for assistant messages and routed only to an adapter with an explicit signed-reasoning contract.
+                    description: Supports text, image, inline base64 PDF document, tool_use, tool_result, thinking, redacted_thinking and bounded native server-tool or client-toolset continuation blocks. Documents follow MessagesDocumentBlock and are accepted only in user messages. Ordinary tool_result blocks follow MessagesToolResultBlock; is_error=true requires tool_result_error capability and bypasses semantic response caching. Client-toolset calls and results retain their required toolset_name. Thinking history is accepted only for assistant messages and routed only to an adapter with an explicit signed-reasoning contract.
         tools:
           type: array
           items:

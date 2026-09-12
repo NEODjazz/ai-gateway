@@ -696,8 +696,12 @@ Compatibility is partial. Unsupported top-level fields and block fields fail
 with a native invalid_request_error. Thinking blocks are accepted only in
 assistant history, must precede text/tool blocks, retain their provider signature,
 and have a 1 MiB aggregate payload limit. Adapters without an explicit reasoning
-block contract reject them before upstream execution. Documents,
-URL images and text after tool_use are not supported. Ordinary client
+block contract reject them before upstream execution. User messages accept
+base64 PDF `document` blocks with PDF signature validation, a five-document and
+16 MiB decoded aggregate limit, attachment policy projection, conservative TPM
+reserve, response-cache exclusion and `file_input` capability routing. Native
+generation, token counting and durable Messages batches preserve these blocks.
+URL/file-reference documents, URL images and text after tool_use are not supported. Ordinary client
 `tool_result` blocks may set `is_error=true`; the flag is preserved by native
 generation, token counting and durable batches. Such requests require the
 `tool_result_error` deployment capability, include the flag in exact-cache

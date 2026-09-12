@@ -276,6 +276,11 @@ generation, token counting and durable batches. Routing requires
 `tool_result_error` so another adapter cannot silently reinterpret a failed tool
 execution. Exact cache identity includes the flag and semantic cache reuse is
 disabled for failed results.
+Messages user content accepts up to five inline base64 PDF `document` blocks
+with a 16 MiB decoded aggregate limit. PDF signature validation, attachment
+policy scanning, TPM and billing admission, cache exclusion and `file_input`
+capability routing are shared with the existing inline-file pipeline. Native
+token counting and durable Messages batches preserve the documents.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.

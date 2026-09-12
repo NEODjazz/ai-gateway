@@ -137,6 +137,18 @@ func TestOpenAPIMessagesAdvertisesFailedToolResults(t *testing.T) {
 	}
 }
 
+func TestOpenAPIMessagesAdvertisesBoundedPDFDocuments(t *testing.T) {
+	document := loadDocument(t)
+	block := document.Components.Schemas["MessagesDocumentBlock"].Value
+	if block == nil || block.Properties["source"] == nil || block.Properties["source"].Value == nil {
+		t.Fatalf("MessagesDocumentBlock is incomplete: %#v", block)
+	}
+	source := block.Properties["source"].Value
+	if source.Properties["data"] == nil || source.Properties["media_type"] == nil || source.Properties["media_type"].Value == nil || source.Properties["media_type"].Value.Const != "application/pdf" {
+		t.Fatalf("MessagesDocumentBlock source is incomplete: %#v", source)
+	}
+}
+
 func TestOpenAPIRoutesMatchGatewayRouter(t *testing.T) {
 	document := loadDocument(t)
 	want := map[string]bool{}

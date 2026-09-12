@@ -1086,3 +1086,10 @@ same digest. Live OpenAPI 0.1.354 exposes the failed tool-result schema and
 capability. A valid `is_error: true` continuation passed structural validation
 and reached authentication; a string-valued flag returned 400. These smoke
 checks used no credential and performed no external inference.
+
+Source `decd6a3` adds inline base64 PDF blocks to native Messages generation,
+token counting and durable batches through the existing bounded file-input
+pipeline. Requests accept at most five documents and 16 MiB of decoded PDF data,
+validate the container signature, expose the bytes to attachment policy modules,
+reserve conservative input tokens, bypass response caches and require explicit
+`file_input` routing. Full Go tests, race tests, vet and build passed.
