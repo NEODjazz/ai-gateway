@@ -1147,3 +1147,14 @@ and isolated by an explicit `document_metadata` capability. Exact cache keys
 include the metadata and semantic cache reuse is disabled. Full Go tests, race
 tests, vet and build passed, along with all 166 UI tests, UI type checking and
 the production UI build.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-35bfb54` with image ID
+`sha256:255dca8b439d0c6c11118fcffa51bada9af65fa7ffc4e15d6cd0092e37170573`.
+Gateway Helm revision 459 completed successfully, and pod
+`ai-gateway-gateway-79d7cdf5db-d2tw7` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.358 exposes bounded document title/context and the
+`document_metadata` capability. A valid metadata request passed structural
+validation and reached authentication; a whitespace-only title returned 400
+before authentication. The image also contains cumulative native capability
+discovery from source `93cdfc8`. These smoke checks used no credential and
+performed no external inference.
