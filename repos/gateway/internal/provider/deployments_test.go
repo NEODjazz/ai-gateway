@@ -607,6 +607,21 @@ func TestManagedProviderCapabilityProfilesExposeValidatedAudioTranscriptionOptio
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeValidatedAudioTranslationOptions(t *testing.T) {
+	expected := map[string][]string{
+		"openai": {"prompt", "response_format", "temperature"}, "openai-compatible": {"prompt", "response_format", "temperature"}, "azure-openai": {"prompt", "response_format", "temperature"},
+		"gemini":  {"language", "prompt", "response_format", "temperature"},
+		"mistral": {"prompt", "response_format", "temperature"},
+		"groq":    {"language", "prompt", "response_format", "temperature"},
+	}
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		want, listed := expected[profile.Type]
+		if slices.Contains(profile.Operations, "audio_translation") != listed || !slices.Equal(profile.AudioTranslationParameters.SupportedOptions, want) {
+			t.Errorf("%s audio translation parameters=%v operation=%v", profile.Type, profile.AudioTranslationParameters.SupportedOptions, slices.Contains(profile.Operations, "audio_translation"))
+		}
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

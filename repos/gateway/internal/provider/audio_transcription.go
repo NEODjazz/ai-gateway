@@ -49,11 +49,11 @@ func (p OpenAICompatible) ReserveTranslationAudioMilliseconds(request openai.Aud
 	return duration, nil
 }
 
-func (p OpenAICompatible) TranslateAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
+func (p OpenAICompatible) ValidateAudioTranslationParameters(request openai.AudioTranscriptionRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.AudioTranscriptionResponse{}, &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
-	if err := rejectParameters(p.providerName(),
+	return rejectParameters(p.providerName(),
 		parameterCheck{"language", request.Language != ""},
 		parameterCheck{"timestamp_granularities", len(request.TimestampGranularities) > 0},
 		parameterCheck{"include", len(request.Include) > 0},
@@ -63,7 +63,11 @@ func (p OpenAICompatible) TranslateAudio(ctx context.Context, request openai.Aud
 		parameterCheck{"known_speaker_names", len(request.KnownSpeakerNames) > 0},
 		parameterCheck{"known_speaker_references", len(request.KnownSpeakerReferences) > 0},
 		parameterCheck{"response_format", request.ResponseFormat == "diarized_json"},
-	); err != nil {
+	)
+}
+
+func (p OpenAICompatible) TranslateAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
+	if err := p.ValidateAudioTranslationParameters(request); err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}
 	duration, err := p.ReserveTranslationAudioMilliseconds(request)

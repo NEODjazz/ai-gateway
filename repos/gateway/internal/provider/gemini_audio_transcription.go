@@ -40,7 +40,7 @@ func (Gemini) ValidateAudioTranscriptionParameters(request openai.AudioTranscrip
 }
 
 func (g Gemini) TranslateAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
-	if err := validateGeminiAudioTranslationRequest(request); err != nil {
+	if err := g.ValidateAudioTranslationParameters(request); err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}
 	prompt := "Translate all speech in the audio into English. Return only the translated text."
@@ -52,6 +52,10 @@ func (g Gemini) TranslateAudio(ctx context.Context, request openai.AudioTranscri
 		Generation: geminiGeneration{Temperature: request.Temperature, ResponseMIMEType: "text/plain"},
 	}
 	return g.generateAudioText(ctx, request, body)
+}
+
+func (Gemini) ValidateAudioTranslationParameters(request openai.AudioTranscriptionRequest) error {
+	return validateGeminiAudioTranslationRequest(request)
 }
 
 func (g Gemini) generateAudioText(ctx context.Context, request openai.AudioTranscriptionRequest, body geminiRequest) (openai.AudioTranscriptionResponse, error) {

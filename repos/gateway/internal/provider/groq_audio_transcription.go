@@ -79,16 +79,23 @@ func (g Groq) TranscribeAudio(ctx context.Context, request openai.AudioTranscrip
 }
 
 func (g Groq) TranslateAudio(ctx context.Context, request openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error) {
-	if err := g.ValidateAudioTranscriptionParameters(request); err != nil {
+	if err := g.ValidateAudioTranslationParameters(request); err != nil {
 		return openai.AudioTranscriptionResponse{}, err
 	}
+	return g.sendAudioRequest(ctx, request, "audio/translations", false)
+}
+
+func (g Groq) ValidateAudioTranslationParameters(request openai.AudioTranscriptionRequest) error {
+	if err := g.ValidateAudioTranscriptionParameters(request); err != nil {
+		return err
+	}
 	if request.Language != "" && request.Language != "en" {
-		return openai.AudioTranscriptionResponse{}, groqAudioClientError("unsupported_parameter", "language", "Groq audio translation only accepts language=en")
+		return groqAudioClientError("unsupported_parameter", "language", "Groq audio translation only accepts language=en")
 	}
 	if len(request.TimestampGranularities) > 0 {
-		return openai.AudioTranscriptionResponse{}, groqAudioClientError("unsupported_parameter", "timestamp_granularities", "Groq audio translation does not support timestamp granularities")
+		return groqAudioClientError("unsupported_parameter", "timestamp_granularities", "Groq audio translation does not support timestamp granularities")
 	}
-	return g.sendAudioRequest(ctx, request, "audio/translations", false)
+	return nil
 }
 
 func (g Groq) ValidateAudioTranscriptionParameters(request openai.AudioTranscriptionRequest) error {
