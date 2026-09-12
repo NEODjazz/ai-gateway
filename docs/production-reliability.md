@@ -1058,3 +1058,14 @@ nonnegative applied-edit counters for strategies requested by the client. TPM
 admission remains conservative over the submitted context, while ordinary
 provider usage drives settlement. Full Go tests, race tests, vet and build
 passed; all 166 UI tests, type checking and production bundle build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-8b15bb3` with image ID
+`sha256:078213cfce3c66d5dfe174c9709d2550043662f4b9670c1d218a60cea0e0fad2`.
+Gateway Helm revision 454 completed successfully, and pod
+`ai-gateway-gateway-5bcfb99c44-8l2fq` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.353 exposes the bounded context-management
+request, response and token-count contracts. Valid generation and token-count
+requests passed structural validation and reached authentication. An empty edit
+list and tool-result clearing placed before thinking clearing returned 400 with
+the documented validation errors. These smoke checks used no credential and
+performed no external inference.
