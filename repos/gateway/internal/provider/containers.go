@@ -24,7 +24,7 @@ type ContainerClient interface {
 
 func (p OpenAICompatible) CreateContainer(ctx context.Context, input openai.ContainerProviderCreateRequest) (openai.Container, error) {
 	var result openai.Container
-	if err := validateContainerCreateRequest(input); err != nil {
+	if err := p.ValidateContainerCreateParameters(input); err != nil {
 		return result, err
 	}
 	err := p.containerJSONRequest(ctx, http.MethodPost, "containers", input, &result)
@@ -32,6 +32,10 @@ func (p OpenAICompatible) CreateContainer(ctx context.Context, input openai.Cont
 		err = validateContainer(result)
 	}
 	return result, err
+}
+
+func (OpenAICompatible) ValidateContainerCreateParameters(input openai.ContainerProviderCreateRequest) error {
+	return validateContainerCreateRequest(input)
 }
 
 func (p OpenAICompatible) RetrieveContainer(ctx context.Context, id string) (openai.Container, error) {

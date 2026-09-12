@@ -47,6 +47,7 @@ type ProviderCapabilityProfile struct {
 	OCRParameters                ProviderOCRParameterPolicy                `json:"ocr_parameters"`
 	VideoCreateParameters        ProviderVideoCreateParameterPolicy        `json:"video_create_parameters"`
 	FineTuningCreateParameters   ProviderFineTuningCreateParameterPolicy   `json:"fine_tuning_create_parameters"`
+	ContainerCreateParameters    ProviderContainerCreateParameterPolicy    `json:"container_create_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -125,6 +126,10 @@ type ProviderVideoCreateParameterPolicy struct {
 }
 
 type ProviderFineTuningCreateParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
+}
+
+type ProviderContainerCreateParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 }
 
@@ -394,9 +399,43 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			OCRParameters:                managedProviderOCRParameterPolicy(client, slicesContain(operations, "ocr")),
 			VideoCreateParameters:        managedProviderVideoCreateParameterPolicy(client, slicesContain(operations, "video")),
 			FineTuningCreateParameters:   managedProviderFineTuningCreateParameterPolicy(client, slicesContain(operations, "fine_tuning")),
+			ContainerCreateParameters:    managedProviderContainerCreateParameterPolicy(client, operations),
 		})
 	}
 	return profiles
+}
+
+func managedProviderContainerCreateParameterPolicy(client Client, operations []string) ProviderContainerCreateParameterPolicy {
+	policy := ProviderContainerCreateParameterPolicy{SupportedOptions: []string{}}
+	validator, ok := client.(interface {
+		ValidateContainerCreateParameters(openai.ContainerProviderCreateRequest) error
+	})
+	if !slicesContain(operations, "container") || !ok {
+		return policy
+	}
+	baseline := openai.ContainerProviderCreateRequest{Name: "container"}
+	for _, probe := range []struct {
+		name  string
+		apply func(*openai.ContainerProviderCreateRequest)
+	}{
+		{"expires_after", func(r *openai.ContainerProviderCreateRequest) {
+			r.ExpiresAfter = &openai.ContainerExpiresAfter{Anchor: "last_active_at", Minutes: 60}
+		}},
+		{"memory_limit", func(r *openai.ContainerProviderCreateRequest) { r.MemoryLimit = "4g" }},
+		{"network_policy", func(r *openai.ContainerProviderCreateRequest) {
+			r.NetworkPolicy = &openai.ContainerNetworkPolicyRequest{Type: "disabled"}
+		}},
+	} {
+		request := baseline
+		probe.apply(&request)
+		if validator.ValidateContainerCreateParameters(request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	if slicesContain(operations, "container_files") {
+		policy.SupportedOptions = append(policy.SupportedOptions, "file_ids")
+	}
+	return policy
 }
 
 func managedProviderFineTuningCreateParameterPolicy(client Client, supported bool) ProviderFineTuningCreateParameterPolicy {

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.314
+  version: 0.1.315
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9307,7 +9307,7 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters, image_edit_parameters, image_variation_parameters, audio_transcription_parameters, audio_translation_parameters, audio_speech_parameters, ocr_parameters, video_create_parameters, fine_tuning_create_parameters]
+      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters, image_edit_parameters, image_variation_parameters, audio_transcription_parameters, audio_translation_parameters, audio_speech_parameters, ocr_parameters, video_create_parameters, fine_tuning_create_parameters, container_create_parameters]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, cohere, mistral, voyage, bedrock, groq, deepseek, xai, opensandbox]}
         operations:
@@ -9357,6 +9357,8 @@ components:
           $ref: '#/components/schemas/ProviderVideoCreateParameterPolicy'
         fine_tuning_create_parameters:
           $ref: '#/components/schemas/ProviderFineTuningCreateParameterPolicy'
+        container_create_parameters:
+          $ref: '#/components/schemas/ProviderContainerCreateParameterPolicy'
     ProviderChatParameterPolicy:
       type: object
       additionalProperties: false
@@ -9560,6 +9562,15 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, enum: [validation_file, suffix, seed, metadata, method]}
+    ProviderContainerCreateParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [supported_options]
+      properties:
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [expires_after, memory_limit, network_policy, file_ids]}
     ProviderCredentialCreateInput:
       type: object
       additionalProperties: false
