@@ -805,8 +805,13 @@ Regression tests cover conversion, JSON/SSE, authorization, quotas, native usage
 and billing, bounded stream accumulation and disconnects. `safetySettings` accepts
 one validated threshold per supported harm category, requires an explicit
 `gemini_safety_settings` deployment capability, contributes to input TPM reserve
-and bypasses exact and semantic response caches. Cached content, grounding/server
-tools and file/audio parts remain unsupported.
+and bypasses exact and semantic response caches. A native `googleSearch: {}` tool
+requires the `web_search` capability, forwards Gemini Google Search grounding,
+validates and preserves source/support/search-entry metadata, bills the actual
+returned search-query count, and bypasses response caches. Search context, location
+and per-request use controls are rejected because the native tool cannot represent
+them. Cached content, other grounding/server tools and file/audio parts remain
+unsupported.
 
 
 ### Native GenerateContent token counting

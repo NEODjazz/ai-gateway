@@ -61,7 +61,8 @@ func (g Gemini) authorize(request *http.Request) error {
 	}
 }
 
-func (Gemini) SupportsVision() bool { return true }
+func (Gemini) SupportsVision() bool    { return true }
+func (Gemini) SupportsWebSearch() bool { return true }
 
 func (Gemini) SupportsResponses() bool { return false }
 
@@ -100,7 +101,8 @@ type geminiFunction struct {
 	Parameters  any    `json:"parametersJsonSchema,omitempty"`
 }
 type geminiTool struct {
-	Functions []geminiFunction `json:"functionDeclarations"`
+	Functions    []geminiFunction `json:"functionDeclarations,omitempty"`
+	GoogleSearch *struct{}        `json:"googleSearch,omitempty"`
 }
 type geminiGeneration struct {
 	MaxOutputTokens    *int                            `json:"maxOutputTokens,omitempty"`
@@ -150,6 +152,7 @@ type geminiResponseCandidate struct {
 	Content        geminiContent         `json:"content"`
 	FinishReason   string                `json:"finishReason"`
 	LogprobsResult *geminiLogprobsResult `json:"logprobsResult"`
+	Grounding      json.RawMessage       `json:"groundingMetadata"`
 }
 type geminiRequest struct {
 	Contents    []geminiContent              `json:"contents"`
@@ -259,6 +262,14 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	if options.Store != nil && *options.Store {
 		return result, geminiInvalid("store")
 	}
+	if search := options.WebSearchOptions; search != nil {
+		if search.SearchContextSize != "" || search.UserLocation != nil || search.MaxUses != nil {
+			return result, geminiInvalid("web_search_options")
+		}
+		if options.N != nil && *options.N != 1 {
+			return result, geminiInvalid("n")
+		}
+	}
 	var responseModalities []string
 	if options.Modalities != nil {
 		if len(options.Modalities) != 1 || options.Modalities[0] != "text" || options.Audio != nil {
@@ -276,6 +287,7 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	options.ServiceTier = ""
 	options.Store = nil
 	options.Modalities = nil
+	options.WebSearchOptions = nil
 	if err := rejectGenerationOptions("gemini", options); err != nil {
 		return result, err
 	}
@@ -443,7 +455,13 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		}
 		result.Tools = []geminiTool{tool}
 	}
+	if request.WebSearchOptions != nil {
+		result.Tools = append(result.Tools, geminiTool{GoogleSearch: &struct{}{}})
+	}
 	if request.ToolChoice != nil {
+		if len(request.Tools) == 0 {
+			return result, geminiInvalid("tool_choice")
+		}
 		config := map[string]any{}
 		switch choice := request.ToolChoice.(type) {
 		case string:
@@ -661,6 +679,7 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 		return result, errors.New("too many Gemini candidates")
 	}
 	seen := map[int]bool{}
+	searchRequests := 0
 	for _, candidate := range body.Candidates {
 		if seen[candidate.Index] {
 			return result, errors.New("duplicate Gemini candidate index")
@@ -725,6 +744,18 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 			}
 		}
 		choice.Message.Content = text.String()
+		annotations, searches, err := geminiGrounding(candidate.Grounding, text.String())
+		if err != nil {
+			return result, err
+		}
+		if searchRequests > openai.WebSearchMaxUses-searches {
+			return result, errors.New("Gemini search usage exceeds limit")
+		}
+		searchRequests += searches
+		choice.Message.Annotations = annotations
+		if len(candidate.Grounding) > 0 {
+			choice.GeminiGroundingMetadata = append(json.RawMessage(nil), candidate.Grounding...)
+		}
 		switch candidate.FinishReason {
 		case "":
 		case "STOP":
@@ -741,7 +772,67 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 		}
 		result.Choices = append(result.Choices, choice)
 	}
+	result.Usage.SearchRequests = searchRequests
 	return result, nil
+}
+
+func geminiGrounding(raw json.RawMessage, text string) ([]openai.ChatAnnotation, int, error) {
+	if len(raw) == 0 {
+		return nil, 0, nil
+	}
+	if len(raw) > 1<<20 {
+		return nil, 0, errors.New("Gemini grounding metadata exceeds limit")
+	}
+	var metadata struct {
+		Chunks []struct {
+			Web *struct {
+				URI   string `json:"uri"`
+				Title string `json:"title"`
+			} `json:"web"`
+		} `json:"groundingChunks"`
+		Supports []struct {
+			Indices []int `json:"groundingChunkIndices"`
+			Segment struct {
+				Start int    `json:"startIndex"`
+				End   int    `json:"endIndex"`
+				Text  string `json:"text"`
+			} `json:"segment"`
+		} `json:"groundingSupports"`
+		Queries []string `json:"webSearchQueries"`
+	}
+	if err := json.Unmarshal(raw, &metadata); err != nil || metadata.Chunks == nil && metadata.Supports == nil && metadata.Queries == nil {
+		return nil, 0, errors.New("invalid Gemini grounding metadata")
+	}
+	if len(metadata.Queries) > openai.WebSearchMaxUses || len(metadata.Chunks) > 128 || len(metadata.Supports) > 128 {
+		return nil, 0, errors.New("Gemini grounding metadata exceeds limit")
+	}
+	for _, query := range metadata.Queries {
+		if strings.TrimSpace(query) == "" || len(query) > 8192 {
+			return nil, 0, errors.New("invalid Gemini search query metadata")
+		}
+	}
+	annotations := make([]openai.ChatAnnotation, 0)
+	for _, support := range metadata.Supports {
+		if support.Segment.Start < 0 || support.Segment.End < support.Segment.Start || support.Segment.End > len(text) || support.Segment.Text != text[support.Segment.Start:support.Segment.End] || len(support.Indices) == 0 {
+			return nil, 0, errors.New("invalid Gemini grounding support")
+		}
+		seenIndices := map[int]bool{}
+		for _, index := range support.Indices {
+			if index < 0 || index >= len(metadata.Chunks) || seenIndices[index] || len(annotations) >= 128 {
+				return nil, 0, errors.New("invalid Gemini grounding support")
+			}
+			seenIndices[index] = true
+			chunk := metadata.Chunks[index]
+			if chunk.Web == nil {
+				return nil, 0, errors.New("unsupported Gemini grounding source")
+			}
+			annotations = append(annotations, openai.ChatAnnotation{Type: "url_citation", URLCitation: &openai.ChatURLCitation{StartIndex: support.Segment.Start, EndIndex: support.Segment.End, Title: chunk.Web.Title, URL: chunk.Web.URI}})
+		}
+	}
+	if err := openai.ValidateChatAnnotations(annotations); err != nil {
+		return nil, 0, err
+	}
+	return annotations, len(metadata.Queries), nil
 }
 
 func validateGeminiReasoning(blocks []openai.ReasoningBlock) error {
@@ -809,6 +900,7 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	defer response.Body.Close()
 	result := openai.ChatCompletionResponse{ID: "chatcmpl-" + rand.Text(), Object: "chat.completion", Model: request.Model}
 	consumed := 0
+	searchRequests := 0
 	err = scanSSEData(response.Body, func(payload string) error {
 		consumed += len(payload)
 		if consumed > 64<<20 {
@@ -827,6 +919,10 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			return err
 		}
 		result.Model = chunk.Model
+		if searchRequests > openai.WebSearchMaxUses-chunk.Usage.SearchRequests {
+			return errors.New("Gemini search usage exceeds limit")
+		}
+		searchRequests += chunk.Usage.SearchRequests
 		if chunk.ServiceTier != "" {
 			if result.ServiceTier != "" && result.ServiceTier != chunk.ServiceTier {
 				return errors.New("Gemini service tier changed during stream")
@@ -842,6 +938,9 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 				result.Choices = append(result.Choices, openai.Choice{Index: len(result.Choices), Message: openai.Message{Role: "assistant"}})
 			}
 			current := &result.Choices[choice.Index]
+			if len(choice.GeminiGroundingMetadata) > 0 {
+				current.GeminiGroundingMetadata = append(json.RawMessage(nil), choice.GeminiGroundingMetadata...)
+			}
 			if choice.Logprobs != nil {
 				if current.Logprobs == nil {
 					current.Logprobs = &openai.ChoiceLogprobs{}
@@ -915,7 +1014,11 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			if choice.FinishReason != "" {
 				finish = choice.FinishReason
 			}
-			choices = append(choices, map[string]any{"index": choice.Index, "delta": choice.Message, "finish_reason": finish, "logprobs": choice.Logprobs})
+			wireChoice := map[string]any{"index": choice.Index, "delta": choice.Message, "finish_reason": finish, "logprobs": choice.Logprobs}
+			if len(choice.GeminiGroundingMetadata) > 0 {
+				wireChoice["gemini_grounding_metadata"] = choice.GeminiGroundingMetadata
+			}
+			choices = append(choices, wireChoice)
 		}
 		event := map[string]any{"id": result.ID, "object": "chat.completion.chunk", "model": result.Model, "choices": choices}
 		if chunk.ServiceTier != "" {
@@ -933,6 +1036,7 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	result.Usage.SearchRequests = searchRequests
 	if len(result.Choices) == 0 {
 		return openai.ChatCompletionResponse{}, errors.New("Gemini stream produced no candidates")
 	}

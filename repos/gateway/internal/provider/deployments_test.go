@@ -245,7 +245,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 	}{
 		{providerType: "ollama", capabilities: []string{"chat", "tools", "structured_output", "vision"}},
 		{providerType: "anthropic", capabilities: []string{"chat", "tools", "structured_output", "vision", "web_search", "web_fetch", "prompt_cache", "assistant_prefill"}},
-		{providerType: "gemini", capabilities: []string{"chat", "gemini_safety_settings", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision"}},
+		{providerType: "gemini", capabilities: []string{"chat", "gemini_safety_settings", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision", "web_search"}},
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
 		{providerType: "bedrock", capabilities: []string{"chat", "tools", "prompt_cache", "bedrock_invoke"}},
 		{providerType: "groq", capabilities: []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}},
@@ -315,6 +315,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	}
 	if !slices.Contains(profilesByType["gemini"].Capabilities, "gemini_safety_settings") {
 		t.Fatalf("Gemini profile is missing native safety settings: %+v", profilesByType["gemini"])
+	}
+	if !slices.Contains(profilesByType["gemini"].Capabilities, "web_search") {
+		t.Fatalf("Gemini profile is missing native Google Search: %+v", profilesByType["gemini"])
 	}
 	if !slices.Contains(profilesByType["gemini"].Operations, "interactions") || slices.Contains(profilesByType["openai"].Operations, "interactions") {
 		t.Fatalf("native interaction profiles are incorrect: gemini=%+v openai=%+v", profilesByType["gemini"], profilesByType["openai"])

@@ -243,13 +243,16 @@ func generateParts(message openai.Message) ([]any, error) {
 	}
 	return parts, nil
 }
-func generateEnvelope(id, model string, parts []any, reason string, usage map[string]int) map[string]any {
+func generateEnvelope(id, model string, parts []any, reason string, usage map[string]int, grounding ...json.RawMessage) map[string]any {
 	candidate := map[string]any{"index": 0}
 	if len(parts) > 0 {
 		candidate["content"] = map[string]any{"role": "model", "parts": parts}
 	}
 	if reason != "" {
 		candidate["finishReason"] = reason
+	}
+	if len(grounding) > 0 && len(grounding[0]) > 0 {
+		candidate["groundingMetadata"] = grounding[0]
 	}
 	result := map[string]any{"responseId": id, "modelVersion": model, "candidates": []any{candidate}}
 	if usage != nil {
@@ -294,9 +297,10 @@ func (w *generateWriter) chunk(payload string) error {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
 		Choices []struct {
-			Index  int            `json:"index"`
-			Delta  openai.Message `json:"delta"`
-			Reason string         `json:"finish_reason"`
+			Index     int             `json:"index"`
+			Delta     openai.Message  `json:"delta"`
+			Reason    string          `json:"finish_reason"`
+			Grounding json.RawMessage `json:"gemini_grounding_metadata"`
 		} `json:"choices"`
 		Usage *openai.Usage   `json:"usage"`
 		Error json.RawMessage `json:"error"`
@@ -334,8 +338,12 @@ func (w *generateWriter) chunk(payload string) error {
 			}
 			w.reason = reason
 		}
-		if text := openai.ContentText(choice.Delta.Content); text != "" {
-			if err := w.event(generateEnvelope(w.id, w.model, []any{map[string]any{"text": text}}, "", nil)); err != nil {
+		if text := openai.ContentText(choice.Delta.Content); text != "" || len(choice.Grounding) > 0 {
+			parts := []any(nil)
+			if text != "" {
+				parts = []any{map[string]any{"text": text}}
+			}
+			if err := w.event(generateEnvelope(w.id, w.model, parts, "", nil, choice.Grounding)); err != nil {
 				return err
 			}
 		}
@@ -432,7 +440,7 @@ func (w *generateWriter) chatResult(response openai.ChatCompletionResponse, stre
 			w.err = err
 			return
 		}
-		if err := w.event(generateEnvelope(response.ID, response.Model, parts, reason, usage)); err != nil {
+		if err := w.event(generateEnvelope(response.ID, response.Model, parts, reason, usage, response.Choices[0].GeminiGroundingMetadata)); err != nil {
 			w.err = err
 			return
 		}
@@ -511,5 +519,5 @@ func (w *generateWriter) finish() {
 		writeJSON(w.destination, 502, generateError(502, "provider response cannot be represented as GenerateContent"))
 		return
 	}
-	writeJSON(w.destination, 200, generateEnvelope(response.ID, response.Model, parts, reason, usage))
+	writeJSON(w.destination, 200, generateEnvelope(response.ID, response.Model, parts, reason, usage, response.Choices[0].GeminiGroundingMetadata))
 }

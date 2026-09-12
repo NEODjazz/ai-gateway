@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -82,6 +83,15 @@ func TestGenerateContentReturnsTextPartSignature(t *testing.T) {
 	}
 }
 
+func TestGenerateContentPreservesGroundingMetadata(t *testing.T) {
+	metadata := json.RawMessage(`{"webSearchQueries":["weather"],"searchEntryPoint":{"renderedContent":"<div>Search</div>"}}`)
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "id", Model: "m", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "answer"}, FinishReason: "stop", GeminiGroundingMetadata: metadata}}, Usage: openai.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2, SearchRequests: 1}}}
+	response := generateCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), "/v1beta/models/m:generateContent", `{"contents":[{"parts":[{"text":"question"}]}],"tools":[{"googleSearch":{}}]}`, "")
+	if response.Code != http.StatusOK || upstream.request.Request.WebSearchOptions == nil || !strings.Contains(response.Body.String(), `"groundingMetadata":{"webSearchQueries":["weather"],"searchEntryPoint"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestGenerateStreamEmitsFinalTextPartSignature(t *testing.T) {
 	native, err := openai.AddGeminiPartSignature(nil, 0, "c2lnbmVk")
 	if err != nil {
@@ -148,14 +158,22 @@ func TestGenerateContentGeminiRoundTripUsageAndBilling(t *testing.T) {
 		if r.URL.Path != "/v1beta/models/gemini-test:streamGenerateContent" || r.Header.Get("x-goog-api-key") != "provider-key" {
 			t.Error("native path/key lost")
 		}
-		_, _ = w.Write([]byte("data: {\"responseId\":\"g-test\",\"modelVersion\":\"gemini-resolved\",\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"hi\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":3,\"totalTokenCount\":15}}\n\n"))
+		var native map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&native); err != nil {
+			t.Error(err)
+		}
+		toolsJSON, _ := json.Marshal(native["tools"])
+		if !strings.Contains(string(toolsJSON), `"googleSearch":{}`) {
+			t.Errorf("Google Search tool lost: %#v", native["tools"])
+		}
+		_, _ = w.Write([]byte("data: {\"responseId\":\"g-test\",\"modelVersion\":\"gemini-resolved\",\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"hi\"}]},\"finishReason\":\"STOP\",\"groundingMetadata\":{\"webSearchQueries\":[\"query\"],\"groundingChunks\":[],\"groundingSupports\":[],\"searchEntryPoint\":{\"renderedContent\":\"widget\"}}}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":3,\"totalTokenCount\":15}}\n\n"))
 	}))
 	defer upstream.Close()
 	billing := &messagesUsageRecorder{}
-	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "native", Type: "gemini", BaseURL: upstream.URL, APIKey: "provider-key", Stream: true, Models: []string{"m"}, ModelAliases: map[string]string{"m": "gemini-test"}}}, Modules: modules.NewPipeline([]modules.Module{billing})})
+	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "native", Type: "gemini", BaseURL: upstream.URL, APIKey: "provider-key", Stream: true, Models: []string{"m"}, ModelAliases: map[string]string{"m": "gemini-test"}, Capabilities: []string{"chat", "stream", "web_search"}}}, Modules: modules.NewPipeline([]modules.Module{billing})})
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"m"}}}}), router))
-	response := generateCall(handler, "/v1beta/models/m:streamGenerateContent?alt=sse", `{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":10}}`, "gateway-test-key")
-	if !strings.Contains(response.Body.String(), `"modelVersion":"gemini-resolved"`) || response.Code != 200 || billing.calls != 1 || billing.usage.TotalTokens != 15 || billing.usage.CompletionTokens != 5 || !strings.Contains(response.Body.String(), `"candidatesTokenCount":2`) || !strings.Contains(response.Body.String(), `"thoughtsTokenCount":3`) {
+	response := generateCall(handler, "/v1beta/models/m:streamGenerateContent?alt=sse", `{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"googleSearch":{}}],"generationConfig":{"maxOutputTokens":10}}`, "gateway-test-key")
+	if !strings.Contains(response.Body.String(), `"modelVersion":"gemini-resolved"`) || response.Code != 200 || billing.calls != 1 || billing.usage.TotalTokens != 15 || billing.usage.CompletionTokens != 5 || billing.usage.SearchRequests != 1 || !strings.Contains(response.Body.String(), `"candidatesTokenCount":2`) || !strings.Contains(response.Body.String(), `"thoughtsTokenCount":3`) || !strings.Contains(response.Body.String(), `"searchEntryPoint":{"renderedContent":"widget"}`) {
 		t.Fatalf("native usage: %d %+v %s", response.Code, billing.usage, response.Body.String())
 	}
 }

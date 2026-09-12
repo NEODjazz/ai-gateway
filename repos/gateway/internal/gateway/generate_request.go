@@ -15,7 +15,8 @@ type generateRequest struct {
 	System   *generateContent             `json:"systemInstruction,omitempty"`
 	Safety   []openai.GeminiSafetySetting `json:"safetySettings,omitempty"`
 	Tools    []struct {
-		Functions []generateFunction `json:"functionDeclarations"`
+		Functions    []generateFunction `json:"functionDeclarations,omitempty"`
+		GoogleSearch *struct{}          `json:"googleSearch,omitempty"`
 	} `json:"tools,omitempty"`
 	ToolConfig *struct {
 		FunctionCalling struct {
@@ -309,8 +310,15 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		flush()
 	}
 	for _, tool := range r.Tools {
-		if len(tool.Functions) == 0 {
-			return fail("functionDeclarations")
+		if (len(tool.Functions) == 0) == (tool.GoogleSearch == nil) {
+			return fail("tools")
+		}
+		if tool.GoogleSearch != nil {
+			if result.WebSearchOptions != nil {
+				return fail("googleSearch")
+			}
+			result.WebSearchOptions = &openai.ChatWebSearchOptions{}
+			continue
 		}
 		for _, function := range tool.Functions {
 			if function.Name == "" {
@@ -337,6 +345,9 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		return fail("functionDeclarations")
 	}
 	if r.ToolConfig != nil {
+		if len(result.Tools) == 0 {
+			return fail("toolConfig")
+		}
 		config := r.ToolConfig.FunctionCalling
 		switch config.Mode {
 		case "AUTO":

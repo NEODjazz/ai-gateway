@@ -73,6 +73,42 @@ func TestGeminiForwardsValidatedSafetySettings(t *testing.T) {
 	}
 }
 
+func TestGeminiGoogleSearchGroundingAndUsage(t *testing.T) {
+	var upstream geminiRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = fmt.Fprint(w, `{"responseId":"grounded","candidates":[{"index":0,"content":{"parts":[{"text":"Paris is sunny."}]},"finishReason":"STOP","groundingMetadata":{"webSearchQueries":["Paris weather"],"groundingChunks":[{"web":{"uri":"https://weather.example/paris","title":"Weather"}}],"groundingSupports":[{"segment":{"startIndex":9,"endIndex":14,"text":"sunny"},"groundingChunkIndices":[0]}],"searchEntryPoint":{"renderedContent":"<div>Search</div>"}}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":3,"totalTokenCount":7}}`)
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "weather"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{}}}
+	response, err := NewGemini(server.URL, "key", false).ChatCompletions(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotation := response.Choices[0].Message.Annotations
+	if len(upstream.Tools) != 1 || upstream.Tools[0].GoogleSearch == nil || response.Usage.SearchRequests != 1 || len(annotation) != 1 || annotation[0].URLCitation.URL != "https://weather.example/paris" || !strings.Contains(string(response.Choices[0].GeminiGroundingMetadata), "searchEntryPoint") {
+		t.Fatalf("upstream=%+v response=%+v", upstream, response)
+	}
+}
+
+func TestGeminiRejectsInvalidGroundingAndUnrepresentableSearchOptions(t *testing.T) {
+	request := openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{SearchContextSize: "high"}}}
+	if err := (Gemini{}).ValidateChatParameters(request); err == nil {
+		t.Fatal("unrepresentable search option accepted")
+	}
+	for _, raw := range []string{
+		`{"webSearchQueries":["q"],"groundingChunks":[{"web":{"uri":"javascript:alert(1)","title":"bad"}}],"groundingSupports":[{"segment":{"startIndex":0,"endIndex":2,"text":"ok"},"groundingChunkIndices":[0]}]}`,
+		`{"webSearchQueries":["q","q","q","q","q","q"]}`,
+		`{"groundingChunks":[],"groundingSupports":[{"segment":{"startIndex":0,"endIndex":3,"text":"wrong"},"groundingChunkIndices":[0]}]}`,
+	} {
+		if _, _, err := geminiGrounding(json.RawMessage(raw), "ok"); err == nil {
+			t.Fatalf("invalid grounding accepted: %s", raw)
+		}
+	}
+}
+
 func TestGeminiPreservesThoughtPartsAndHistory(t *testing.T) {
 	index := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

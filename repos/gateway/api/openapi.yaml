@@ -5896,18 +5896,6 @@ components:
           allOf:
             - {$ref: '#/components/schemas/GenerateContent'}
           description: Text parts only; role must be absent or system.
-        safetySettings:
-          type: array
-          maxItems: 6
-          uniqueItems: true
-          description: Native Gemini per-category blocking thresholds. Requires the gemini_safety_settings deployment capability and bypasses response caches.
-          items:
-            type: object
-            additionalProperties: false
-            required: [category, threshold]
-            properties:
-              category: {type: string, enum: [HARM_CATEGORY_HATE_SPEECH, HARM_CATEGORY_SEXUALLY_EXPLICIT, HARM_CATEGORY_DANGEROUS_CONTENT, HARM_CATEGORY_HARASSMENT, HARM_CATEGORY_CIVIC_INTEGRITY, HARM_CATEGORY_JAILBREAK]}
-              threshold: {type: string, enum: [HARM_BLOCK_THRESHOLD_UNSPECIFIED, BLOCK_LOW_AND_ABOVE, BLOCK_MEDIUM_AND_ABOVE, BLOCK_ONLY_HIGH, BLOCK_NONE, OFF]}
         tools:
           type: array
           items:
@@ -5958,28 +5946,49 @@ components:
           allOf:
             - {$ref: '#/components/schemas/GenerateContent'}
           description: Text parts only; role must be absent or system.
-        tools:
+        safetySettings:
           type: array
+          maxItems: 6
+          uniqueItems: true
+          description: Native Gemini per-category blocking thresholds. Requires the gemini_safety_settings deployment capability and bypasses response caches.
           items:
             type: object
             additionalProperties: false
-            required: [functionDeclarations]
+            required: [category, threshold]
             properties:
-              functionDeclarations:
-                type: array
-                minItems: 1
-                maxItems: 128
-                items:
-                  type: object
-                  additionalProperties: false
-                  required: [name]
-                  properties:
-                    name: {type: string, minLength: 1}
-                    description: {type: string}
-                    parameters:
+              category: {type: string, enum: [HARM_CATEGORY_HATE_SPEECH, HARM_CATEGORY_SEXUALLY_EXPLICIT, HARM_CATEGORY_DANGEROUS_CONTENT, HARM_CATEGORY_HARASSMENT, HARM_CATEGORY_CIVIC_INTEGRITY, HARM_CATEGORY_JAILBREAK]}
+              threshold: {type: string, enum: [HARM_BLOCK_THRESHOLD_UNSPECIFIED, BLOCK_LOW_AND_ABOVE, BLOCK_MEDIUM_AND_ABOVE, BLOCK_ONLY_HIGH, BLOCK_NONE, OFF]}
+        tools:
+          type: array
+          items:
+            oneOf:
+              - type: object
+                additionalProperties: false
+                required: [functionDeclarations]
+                properties:
+                  functionDeclarations:
+                    type: array
+                    minItems: 1
+                    maxItems: 128
+                    items:
                       type: object
-                      description: Native Schema supports nullable, anyOf, size/numeric bounds and pattern (64 levels, 128 alternatives); mutually exclusive with parametersJsonSchema.
-                    parametersJsonSchema: {type: object}
+                      additionalProperties: false
+                      required: [name]
+                      properties:
+                        name: {type: string, minLength: 1}
+                        description: {type: string}
+                        parameters:
+                          type: object
+                          description: Native Schema supports nullable, anyOf, size/numeric bounds and pattern (64 levels, 128 alternatives); mutually exclusive with parametersJsonSchema.
+                        parametersJsonSchema: {type: object}
+              - type: object
+                additionalProperties: false
+                required: [googleSearch]
+                properties:
+                  googleSearch:
+                    type: object
+                    additionalProperties: false
+                    description: Native server-side Google Search grounding. Requires the web_search deployment capability, bypasses response caches, and bills actual returned search queries.
         toolConfig:
           type: object
           additionalProperties: false
@@ -6093,6 +6102,9 @@ components:
               index: {type: integer, enum: [0]}
               content: {$ref: '#/components/schemas/GenerateContent'}
               finishReason: {type: string, enum: [STOP, MAX_TOKENS, SAFETY]}
+              groundingMetadata:
+                type: object
+                description: Bounded provider grounding metadata, including search queries, sources, supports and the native search entry point.
         usageMetadata:
           type: object
           properties:

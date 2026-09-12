@@ -32,6 +32,30 @@ func TestGenerateRequestConvertsNativeContextAndConfig(t *testing.T) {
 		t.Fatal("parts or stop delimiter lost")
 	}
 }
+
+func TestGenerateRequestMapsGoogleSearchTool(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"parts":[{"text":"latest news"}]}],"tools":[{"googleSearch":{}}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || chat.WebSearchOptions == nil || len(chat.Tools) != 0 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	for _, raw := range []string{
+		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"googleSearch":{}},{"googleSearch":{}}]}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"googleSearch":{},"functionDeclarations":[{"name":"f"}]}]}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"googleSearch":{}}],"toolConfig":{"functionCallingConfig":{"mode":"AUTO"}}}`,
+	} {
+		var request generateRequest
+		if err := decodeMessagesValue(json.RawMessage(raw), &request); err != nil {
+			continue
+		}
+		if _, err := request.chat("model", false); err == nil {
+			t.Fatalf("invalid Google Search tool accepted: %s", raw)
+		}
+	}
+}
 func TestGenerateFunctionHistoryRoundTrip(t *testing.T) {
 	var native generateRequest
 	raw := `{"contents":[{"role":"model","parts":[{"functionCall":{"name":"weather","args":{"city":"Paris"}},"thoughtSignature":"opaque"}]},{"role":"user","parts":[{"functionResponse":{"name":"weather","response":{"temperature":18}}}]}]}`

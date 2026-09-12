@@ -389,11 +389,12 @@ type CompletionLogprobs struct {
 }
 
 type Choice struct {
-	StopSequence *string         `json:"stop_sequence,omitempty"`
-	Logprobs     *ChoiceLogprobs `json:"logprobs,omitempty"`
-	Index        int             `json:"index"`
-	Message      Message         `json:"message"`
-	FinishReason string          `json:"finish_reason"`
+	StopSequence            *string         `json:"stop_sequence,omitempty"`
+	Logprobs                *ChoiceLogprobs `json:"logprobs,omitempty"`
+	Index                   int             `json:"index"`
+	Message                 Message         `json:"message"`
+	FinishReason            string          `json:"finish_reason"`
+	GeminiGroundingMetadata json.RawMessage `json:"gemini_grounding_metadata,omitempty"`
 }
 
 type Usage struct {
