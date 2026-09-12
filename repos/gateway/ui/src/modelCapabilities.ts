@@ -50,6 +50,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "tool_result_error", label: "Tool result errors", description: "Preserve failed native client tool results" },
   { value: "document_citations", label: "Document citations", description: "Native citations for inline documents" },
   { value: "document_metadata", label: "Document metadata", description: "Policy-visible title and context for inline documents" },
+  { value: "document_text", label: "Text documents", description: "Native inline plain-text document blocks" },
   { value: "audio", label: "Audio output", description: "Generated audio in chat responses" },
   { value: "audio_input", label: "Audio input", description: "Inline audio input for native multimodal requests" },
   { value: "video_input", label: "Video input", description: "Bounded inline video input for native multimodal requests" },

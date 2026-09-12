@@ -157,6 +157,15 @@ func TestChatDocumentMetadataReachesDLPProjection(t *testing.T) {
 	}
 }
 
+func TestChatTextDocumentReachesDLPProjection(t *testing.T) {
+	request := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{
+		Role: "user", Content: []any{map[string]any{"type": "input_document", "text": "Account user@example.com"}},
+	}}}}
+	if payload := scanPayload(&request); !strings.Contains(payload, "Account user@example.com") {
+		t.Fatalf("plain-text document missing from DLP projection: %q", payload)
+	}
+}
+
 func TestChatVideoProjectsAttachmentToAV(t *testing.T) {
 	request := RequestContext{Request: openai.ChatCompletionRequest{
 		Messages: []openai.Message{

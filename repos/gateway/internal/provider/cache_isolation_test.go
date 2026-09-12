@@ -98,6 +98,16 @@ func TestCacheIsolationIncludesNativeChatState(t *testing.T) {
 	}
 }
 
+func TestPlainTextDocumentsBypassResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: []any{map[string]any{"type": "input_document", "text": "document"}}}}}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache accepted a plain-text document")
+	}
+	if _, _, eligible := semanticRequest(request, Endpoint{Name: "endpoint"}); eligible {
+		t.Fatal("semantic cache accepted a plain-text document")
+	}
+}
+
 func TestBedrockRequestMetadataBypassesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
 		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, BedrockRequestMetadata: map[string]string{"trace": "billing-42"},

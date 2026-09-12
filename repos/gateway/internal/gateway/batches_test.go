@@ -426,7 +426,7 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 	request := messagesRequest{
 		Model: "message-model", MaxTokens: 32,
 		System:   json.RawMessage(`"Be concise"`),
-		Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"},{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"title":"Report","context":"Audited","citations":{"enabled":true}}]`)}},
+		Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"},{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"title":"PDF report","context":"Audited","citations":{"enabled":true}},{"type":"document","source":{"type":"text","media_type":"text/plain","data":"Quarterly revenue is 42."},"title":"Text report","context":"Internal","citations":{"enabled":true}}]`)}},
 	}
 	requestBody, err := json.Marshal(request)
 	if err != nil {
@@ -478,7 +478,7 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 			metadata = message.AnthropicDocumentMetadata
 		}
 	}
-	if providerRequest.RequestID == "" || providerRequest.Metadata["gateway.api_type"] != "messages" || reservedTokens != estimateChatTokens(chat) || attachmentErr != nil || len(attachments) != 1 || len(citations) != 1 || !citations[0] || len(metadata) != 1 || metadata[0].Title != "Report" || metadata[0].Context != "Audited" {
+	if providerRequest.RequestID == "" || providerRequest.Metadata["gateway.api_type"] != "messages" || reservedTokens != estimateChatTokens(chat) || attachmentErr != nil || len(attachments) != 1 || !openai.HasChatTextDocuments(providerRequest.Request) || len(citations) != 2 || !citations[0] || !citations[1] || len(metadata) != 2 || metadata[0].Title != "PDF report" || metadata[1].Title != "Text report" {
 		t.Fatalf("request=%+v metadata=%v TPM=%d want=%d", providerRequest.Request, providerRequest.Metadata, reservedTokens, estimateChatTokens(chat))
 	}
 }

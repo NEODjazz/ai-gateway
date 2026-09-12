@@ -24,6 +24,19 @@ func TestAnonymizerMasksDocumentMetadata(t *testing.T) {
 	}
 }
 
+func TestAnonymizerMasksPlainTextDocument(t *testing.T) {
+	module := NewAnonymizerModule(true, RuleEmail)
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: []any{
+		map[string]any{"type": "input_document", "text": "owner@example.com"},
+	}}}}}
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	if got := openai.ContentText(req.Request.Messages[0].Content); got != "{{EMAIL_1}}" {
+		t.Fatalf("document text was not anonymized: %q", got)
+	}
+}
+
 func TestAnonymizerDoesNotTransformImagePayload(t *testing.T) {
 	image := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("api_key=sk-test-1234567890abcdef"))
 	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: []any{

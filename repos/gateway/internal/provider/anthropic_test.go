@@ -155,6 +155,25 @@ func TestAnthropicPDFDocumentCitationsWireAndCapability(t *testing.T) {
 	}
 }
 
+func TestAnthropicPlainTextDocumentWireAndCapability(t *testing.T) {
+	document := map[string]any{"type": "input_document", "text": "Quarterly revenue is 42."}
+	request := openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: []any{document}, AnthropicDocumentCitations: []bool{true}, AnthropicDocumentMetadata: []openai.DocumentMetadata{{Title: "Report", Context: "Audited"}}}}}
+	_, messages := anthropicMessages(request.Messages)
+	encoded, err := json.Marshal(messages)
+	for _, want := range []string{`"type":"document"`, `"type":"text"`, `"media_type":"text/plain"`, `"data":"Quarterly revenue is 42."`, `"citations":{"enabled":true}`, `"title":"Report"`, `"context":"Audited"`} {
+		if err != nil || !strings.Contains(string(encoded), want) {
+			t.Fatalf("messages=%s missing=%s err=%v", encoded, want, err)
+		}
+	}
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,document_citations,document_metadata,document_text" {
+		t.Fatalf("capabilities=%q", got)
+	}
+	required := requiredChatCapabilities(request, false)
+	if (Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat", "document_citations", "document_metadata"}}).supportsCapabilities(required...) || !(Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat", "document_citations", "document_metadata", "document_text"}}).supportsCapabilities(required...) {
+		t.Fatal("plain-text document routing capability is not enforced")
+	}
+}
+
 func TestNativeMessageCapabilitiesComposeAcrossMessages(t *testing.T) {
 	request := openai.ChatCompletionRequest{Messages: []openai.Message{
 		{Role: "tool", ToolCallID: "tool-1", ToolResultError: true, Content: "failed"},

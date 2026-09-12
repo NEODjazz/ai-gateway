@@ -101,6 +101,27 @@ func TestMessagesPreservesBoundedPDFDocumentMetadata(t *testing.T) {
 	}
 }
 
+func TestMessagesConvertsBoundedPlainTextDocument(t *testing.T) {
+	request := messagesRequest{Model: "model", MaxTokens: 20, Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`[{"type":"document","source":{"type":"text","media_type":"text/plain","data":"Quarterly revenue is 42."},"title":"Report","context":"Audited","citations":{"enabled":true}}]`)}}}
+	chat, err := request.chat()
+	if err != nil || !openai.HasChatTextDocuments(chat) || !strings.Contains(openai.ContentText(chat.Messages[0].Content), "revenue is 42") || len(chat.Messages[0].AnthropicDocumentCitations) != 1 || !chat.Messages[0].AnthropicDocumentCitations[0] || len(chat.Messages[0].AnthropicDocumentMetadata) != 1 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	request.Messages[0].Content = json.RawMessage(`[{"type":"document","source":{"type":"text","media_type":"text/plain","data":" "}}]`)
+	if _, err := request.chat(); err == nil {
+		t.Fatal("empty text document accepted")
+	}
+	blocks := make([]map[string]any, 6)
+	for index := range blocks {
+		blocks[index] = map[string]any{"type": "document", "source": map[string]any{"type": "text", "media_type": "text/plain", "data": "document"}}
+	}
+	encoded, _ := json.Marshal(blocks)
+	request.Messages[0].Content = encoded
+	if _, err := request.chat(); err == nil || !strings.Contains(err.Error(), "five documents") {
+		t.Fatalf("too many text documents accepted: %v", err)
+	}
+}
+
 func TestMessagesAcceptsExplicitZeroMaxTokens(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg-cache", Model: "model", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: ""}, FinishReason: "length"}}, Usage: openai.Usage{PromptTokens: 5, CompletionTokens: 0, TotalTokens: 5}}}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))

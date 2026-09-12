@@ -799,6 +799,20 @@ func anthropicMessageContentWithDocumentOptions(value any, documentCitations []b
 				blocks = append(blocks, block)
 				documentIndex++
 			}
+		case "input_document":
+			text, _ := object["text"].(string)
+			if text != "" {
+				block := anthropicContent{Type: "document", Source: map[string]any{"type": "text", "media_type": "text/plain", "data": text}}
+				if documentIndex < len(documentCitations) && documentCitations[documentIndex] {
+					block.RequestCitations = &anthropicCitations{Enabled: true}
+				}
+				if documentIndex < len(documentMetadata) {
+					block.Title = documentMetadata[documentIndex].Title
+					block.Context = documentMetadata[documentIndex].Context
+				}
+				blocks = append(blocks, block)
+				documentIndex++
+			}
 		default:
 			if text := openai.ContentText(object); text != "" {
 				blocks = append(blocks, anthropicContent{Type: "text", Text: text})

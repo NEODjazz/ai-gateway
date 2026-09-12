@@ -295,7 +295,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		result.Messages = append(result.Messages, openai.Message{Role: "system", Content: content})
 	}
 	knownCalls := map[string]messagesKnownToolCall{}
-	documentCount, citedDocumentCount := 0, 0
+	documentCount, citedDocumentCount, textDocumentRunes := 0, 0, 0
 	for _, message := range request.Messages {
 		if message.Role != "user" && message.Role != "assistant" {
 			return result, errors.New("messages role must be user or assistant")
@@ -422,8 +422,8 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 						Data      string `json:"data"`
 					} `json:"source"`
 				}
-				if err := decodeMessagesValue(raw, &block); err != nil || block.Source.Type != "base64" || block.Source.MediaType != "application/pdf" || message.Role != "user" || block.Citations != nil && !block.Citations.Enabled {
-					return result, errors.New("only base64 user PDF document blocks are supported")
+				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "user" || block.Citations != nil && !block.Citations.Enabled {
+					return result, errors.New("invalid user document block")
 				}
 				if invalidMessagesDocumentMetadata(block.Title, 512) {
 					return result, errors.New("document title must be non-empty and at most 512 characters")
@@ -431,11 +431,25 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 				if invalidMessagesDocumentMetadata(block.Context, 8192) {
 					return result, errors.New("document context must be non-empty and at most 8192 characters")
 				}
-				file := map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64," + block.Source.Data, "filename": "input.pdf"}
-				if _, err := openai.ResponseFileAttachments([]any{file}); err != nil {
-					return result, err
+				var document any
+				switch {
+				case block.Source.Type == "base64" && block.Source.MediaType == "application/pdf":
+					file := map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64," + block.Source.Data, "filename": "input.pdf"}
+					if _, err := openai.ResponseFileAttachments([]any{file}); err != nil {
+						return result, err
+					}
+					document = file
+				case block.Source.Type == "text" && block.Source.MediaType == "text/plain":
+					runes := utf8.RuneCountInString(block.Source.Data)
+					if strings.TrimSpace(block.Source.Data) == "" || runes > 262144 || textDocumentRunes > 1048576-runes {
+						return result, errors.New("text documents must be non-empty, at most 262144 characters each and 1048576 characters in total")
+					}
+					textDocumentRunes += runes
+					document = map[string]any{"type": "input_document", "text": block.Source.Data}
+				default:
+					return result, errors.New("only base64 PDF and inline plain-text user documents are supported")
 				}
-				parts = append(parts, file)
+				parts = append(parts, document)
 				converted.AnthropicDocumentCitations = append(converted.AnthropicDocumentCitations, block.Citations != nil)
 				metadata := openai.DocumentMetadata{}
 				if block.Title != nil {
@@ -446,6 +460,9 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 				}
 				converted.AnthropicDocumentMetadata = append(converted.AnthropicDocumentMetadata, metadata)
 				documentCount++
+				if documentCount > 5 {
+					return result, errors.New("at most five documents are supported")
+				}
 				if block.Citations != nil {
 					citedDocumentCount++
 				}

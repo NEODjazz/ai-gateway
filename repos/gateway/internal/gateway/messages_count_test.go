@@ -148,6 +148,16 @@ func TestCountEndpointPreservesPDFDocument(t *testing.T) {
 		t.Fatalf("status=%d body=%s calls=%d attachments=%+v err=%v", response.Code, response.Body.String(), counter.calls, attachments, err)
 	}
 }
+
+func TestCountEndpointPreservesPlainTextDocument(t *testing.T) {
+	counter := &countProviderSpy{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}}}}), counter))
+	response := countEndpointCall(handler, `{"model":"m","messages":[{"role":"user","content":[{"type":"document","source":{"type":"text","media_type":"text/plain","data":"private@example.com"},"title":"Report","citations":{"enabled":true}}]}]}`, "gateway-test-key")
+	message := counter.request.Request.Messages[0]
+	if response.Code != http.StatusOK || counter.calls != 1 || !openai.HasChatTextDocuments(counter.request.Request) || openai.ContentText(message.Content) != "private@example.com" || len(message.AnthropicDocumentMetadata) != 1 || message.AnthropicDocumentMetadata[0].Title != "Report" || len(message.AnthropicDocumentCitations) != 1 || !message.AnthropicDocumentCitations[0] {
+		t.Fatalf("status=%d body=%s calls=%d request=%+v", response.Code, response.Body.String(), counter.calls, counter.request.Request)
+	}
+}
 func TestCountEndpointEnforcesToolACLAndSharedRPM(t *testing.T) {
 	counter := &countProviderSpy{}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}, rpm: 1}}}), counter))

@@ -53,6 +53,7 @@ describe("modelCapabilityOptions", () => {
       "tool_result_error",
       "document_citations",
       "document_metadata",
+      "document_text",
       "audio",
       "audio_input",
       "video_input",

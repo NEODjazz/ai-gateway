@@ -256,6 +256,9 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if openai.HasChatFileInput(request) {
 		return "", "", false
 	}
+	if openai.HasChatTextDocuments(request) {
+		return "", "", false
+	}
 	if openai.HasChatVideoInput(request) {
 		return "", "", false
 	}
