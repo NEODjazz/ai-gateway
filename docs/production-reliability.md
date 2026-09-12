@@ -699,3 +699,10 @@ in `audioTranscriptionConfig`, and is exposed only in the supporting adapter's
 capability profile. Translation and all other adapters reject the field before
 network execution. Regressions cover validation, multipart decoding, native
 mapping, parameter isolation and capability discovery.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-cc285ee` with image ID
+`sha256:d6262b8a8b80b8fe42d5df05c3040ed93cb986b8e599ec92f55c8dd4b2e38959`.
+Helm revision 430 completed successfully, and pod
+`ai-gateway-gateway-f9b84445b-8t7dq` became Ready with zero restarts. The live
+endpoint served OpenAPI 0.1.330 with both transcription modes. A signature-valid
+WAV multipart request using `mode=SMART` reached authentication and returned 401.
