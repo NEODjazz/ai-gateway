@@ -102,7 +102,14 @@ func validContainerCreateInput(input openai.ContainerCreateRequest) bool {
 	if input.MemoryLimit != "" && input.MemoryLimit != "1g" && input.MemoryLimit != "4g" && input.MemoryLimit != "16g" && input.MemoryLimit != "64g" {
 		return false
 	}
+	if validateContainerNetworkPolicyInput(input.NetworkPolicy) != nil {
+		return false
+	}
 	return input.ExpiresAfter == nil || input.ExpiresAfter.Anchor == "last_active_at" && input.ExpiresAfter.Minutes >= 1 && input.ExpiresAfter.Minutes <= 10080
+}
+
+func validateContainerNetworkPolicyInput(policy *openai.ContainerNetworkPolicyRequest) error {
+	return provider.ValidateContainerNetworkPolicyRequest(policy)
 }
 
 func (h Handler) ListContainers(w http.ResponseWriter, r *http.Request) {

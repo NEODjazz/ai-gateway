@@ -98,7 +98,8 @@ func (s *memoryContainerStore) DeleteContainerRecord(_ context.Context, owner, i
 
 type gatewayContainerProvider struct {
 	*batchProvider
-	actions []string
+	actions      []string
+	createdInput openai.ContainerCreateRequest
 }
 
 func (p *gatewayContainerProvider) CreateContainer(ctx context.Context, identity modules.RequestContext, input openai.ContainerCreateRequest, admit func(context.Context, *modules.RequestContext) error) (openai.Container, provider.ContainerBinding, error) {
@@ -110,7 +111,12 @@ func (p *gatewayContainerProvider) CreateContainer(ctx context.Context, identity
 		}
 	}
 	p.actions = append(p.actions, "create")
-	return openai.Container{ID: "cntr_1", Object: "container", Name: input.Name, Status: "running", MemoryLimit: "1g"}, provider.ContainerBinding{Endpoint: "sandbox", Model: input.Model, Deployment: strings.Repeat("a", 64)}, nil
+	p.createdInput = input
+	responsePolicy := (*openai.ContainerNetworkPolicy)(nil)
+	if input.NetworkPolicy != nil {
+		responsePolicy = &openai.ContainerNetworkPolicy{Type: input.NetworkPolicy.Type, AllowedDomains: append([]string(nil), input.NetworkPolicy.AllowedDomains...)}
+	}
+	return openai.Container{ID: "cntr_1", Object: "container", Name: input.Name, Status: "running", MemoryLimit: "1g", NetworkPolicy: responsePolicy}, provider.ContainerBinding{Endpoint: "sandbox", Model: input.Model, Deployment: strings.Repeat("a", 64)}, nil
 }
 func (p *gatewayContainerProvider) RetrieveContainer(_ context.Context, _ provider.ContainerBinding, id string) (openai.Container, error) {
 	p.actions = append(p.actions, "retrieve")
@@ -198,6 +204,20 @@ func TestContainerOwnedLifecycleAndBilling(t *testing.T) {
 	}
 	if strings.Join(runtime.actions, ",") != "create,retrieve,delete" || len(store.records) != 0 {
 		t.Fatalf("actions=%v records=%v", runtime.actions, store.records)
+	}
+}
+
+func TestContainerNetworkPolicyIsValidatedAndSecretsAreNotReturned(t *testing.T) {
+	store := &memoryContainerStore{records: map[string]containerstate.Record{}}
+	runtime := &gatewayContainerProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}
+	handler := containerTestHandler(store, runtime, nil)
+	response := containerRequest(t, handler, http.MethodPost, "/v1/containers", `{"model":"model-a","name":"analysis","network_policy":{"type":"allowlist","allowed_domains":["api.example.com"],"domain_secrets":[{"domain":"api.example.com","name":"API_TOKEN","value":"secret-value"}]}}`)
+	if response.Code != http.StatusOK || runtime.createdInput.NetworkPolicy == nil || runtime.createdInput.NetworkPolicy.DomainSecrets[0].Value != "secret-value" || strings.Contains(response.Body.String(), "secret-value") {
+		t.Fatalf("status=%d body=%s input=%+v", response.Code, response.Body.String(), runtime.createdInput)
+	}
+	invalid := containerRequest(t, handler, http.MethodPost, "/v1/containers", `{"model":"model-a","name":"analysis","network_policy":{"type":"allowlist","allowed_domains":["https://example.com"]}}`)
+	if invalid.Code != http.StatusBadRequest || len(runtime.actions) != 1 {
+		t.Fatalf("status=%d body=%s actions=%v", invalid.Code, invalid.Body.String(), runtime.actions)
 	}
 }
 

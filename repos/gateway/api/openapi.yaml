@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.277
+  version: 0.1.278
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -5047,6 +5047,54 @@ components:
       properties:
         anchor: {type: string, const: last_active_at}
         minutes: {type: integer, minimum: 1, maximum: 10080}
+    ContainerNetworkDomainSecret:
+      type: object
+      additionalProperties: false
+      required: [domain, name, value]
+      properties:
+        domain: {type: string, minLength: 1, maxLength: 253}
+        name: {type: string, minLength: 1, maxLength: 128}
+        value: {type: string, minLength: 1, maxLength: 8192, format: password, writeOnly: true}
+    ContainerNetworkPolicyDisabled:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: {type: string, const: disabled}
+    ContainerNetworkPolicyAllowlist:
+      type: object
+      additionalProperties: false
+      required: [type, allowed_domains]
+      properties:
+        type: {type: string, const: allowlist}
+        allowed_domains:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items: {type: string, minLength: 3, maxLength: 253}
+        domain_secrets:
+          type: array
+          maxItems: 100
+          items: {$ref: '#/components/schemas/ContainerNetworkDomainSecret'}
+    ContainerNetworkPolicyRequest:
+      oneOf:
+        - {$ref: '#/components/schemas/ContainerNetworkPolicyDisabled'}
+        - {$ref: '#/components/schemas/ContainerNetworkPolicyAllowlist'}
+    ContainerNetworkPolicy:
+      oneOf:
+        - {$ref: '#/components/schemas/ContainerNetworkPolicyDisabled'}
+        - type: object
+          additionalProperties: false
+          required: [type, allowed_domains]
+          properties:
+            type: {type: string, const: allowlist}
+            allowed_domains:
+              type: array
+              minItems: 1
+              maxItems: 100
+              uniqueItems: true
+              items: {type: string, minLength: 3, maxLength: 253}
     ContainerCreateRequest:
       type: object
       additionalProperties: false
@@ -5062,6 +5110,7 @@ components:
           items: {type: string}
           description: Reserved for the owner-checked container files API.
         memory_limit: {type: string, enum: [1g, 4g, 16g, 64g]}
+        network_policy: {$ref: '#/components/schemas/ContainerNetworkPolicyRequest'}
     Container:
       type: object
       required: [id, object, created_at, status, name]
@@ -5074,6 +5123,7 @@ components:
         last_active_at: {type: integer, format: int64, minimum: 0}
         memory_limit: {type: string, maxLength: 16}
         name: {type: string, minLength: 1, maxLength: 256}
+        network_policy: {$ref: '#/components/schemas/ContainerNetworkPolicy'}
     ContainerList:
       type: object
       required: [object, data, has_more]
@@ -6659,7 +6709,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -8785,12 +8835,12 @@ components:
           type: array
           uniqueItems: true
           description: Native operations implemented by the managed adapter. count_tokens is used by the inbound token-count endpoint and is not a deployment capability.
-          items: {type: string, enum: [chat, responses, interactions, count_tokens, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, realtime, stream, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, count_tokens, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, bedrock_invoke]}
         capabilities:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

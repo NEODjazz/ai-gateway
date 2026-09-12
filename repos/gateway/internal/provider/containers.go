@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -63,7 +65,10 @@ func validateContainerCreateRequest(input openai.ContainerProviderCreateRequest)
 	if input.MemoryLimit != "" && input.MemoryLimit != "1g" && input.MemoryLimit != "4g" && input.MemoryLimit != "16g" && input.MemoryLimit != "64g" {
 		return errors.New("invalid container memory limit")
 	}
-	return validateContainerExpiry(input.ExpiresAfter)
+	if err := validateContainerExpiry(input.ExpiresAfter); err != nil {
+		return err
+	}
+	return ValidateContainerNetworkPolicyRequest(input.NetworkPolicy)
 }
 
 func validateContainerExpiry(expiry *openai.ContainerExpiresAfter) error {
@@ -77,10 +82,93 @@ func validateContainerExpiry(expiry *openai.ContainerExpiresAfter) error {
 }
 
 func validateContainer(result openai.Container) error {
-	if !validResponseResourceID(result.ID) || result.Object != "container" || result.CreatedAt < 0 || result.LastActiveAt < 0 || result.Name == "" || len(result.Name) > 256 || result.Status == "" || len(result.Status) > 64 || len(result.MemoryLimit) > 16 || validateContainerExpiry(result.ExpiresAfter) != nil {
+	if !validResponseResourceID(result.ID) || result.Object != "container" || result.CreatedAt < 0 || result.LastActiveAt < 0 || result.Name == "" || len(result.Name) > 256 || result.Status == "" || len(result.Status) > 64 || len(result.MemoryLimit) > 16 || validateContainerExpiry(result.ExpiresAfter) != nil || validateContainerNetworkPolicy(result.NetworkPolicy) != nil {
 		return errors.New("invalid upstream container response")
 	}
 	return nil
+}
+
+func ValidateContainerNetworkPolicyRequest(policy *openai.ContainerNetworkPolicyRequest) error {
+	if policy == nil {
+		return nil
+	}
+	if policy.Type == "disabled" {
+		if len(policy.AllowedDomains) != 0 || len(policy.DomainSecrets) != 0 {
+			return errors.New("disabled container network policy cannot include domains")
+		}
+		return nil
+	}
+	if policy.Type != "allowlist" || len(policy.AllowedDomains) == 0 || len(policy.AllowedDomains) > 100 || len(policy.DomainSecrets) > 100 {
+		return errors.New("invalid container network policy")
+	}
+	allowed := make(map[string]struct{}, len(policy.AllowedDomains))
+	for _, domain := range policy.AllowedDomains {
+		if !validContainerDomain(domain) {
+			return errors.New("invalid container network domain")
+		}
+		key := strings.ToLower(domain)
+		if _, duplicate := allowed[key]; duplicate {
+			return errors.New("duplicate container network domain")
+		}
+		allowed[key] = struct{}{}
+	}
+	secretNames := make(map[string]struct{}, len(policy.DomainSecrets))
+	for _, secret := range policy.DomainSecrets {
+		if _, ok := allowed[strings.ToLower(secret.Domain)]; !ok || !validContainerSecretText(secret.Name, 128) || !validContainerSecretText(secret.Value, 8192) {
+			return errors.New("invalid container network domain secret")
+		}
+		key := strings.ToLower(secret.Domain) + "\x00" + secret.Name
+		if _, duplicate := secretNames[key]; duplicate {
+			return errors.New("duplicate container network domain secret")
+		}
+		secretNames[key] = struct{}{}
+	}
+	return nil
+}
+
+func validateContainerNetworkPolicy(policy *openai.ContainerNetworkPolicy) error {
+	if policy == nil {
+		return nil
+	}
+	request := &openai.ContainerNetworkPolicyRequest{Type: policy.Type, AllowedDomains: policy.AllowedDomains}
+	return ValidateContainerNetworkPolicyRequest(request)
+}
+
+func validContainerDomain(value string) bool {
+	if len(value) == 0 || len(value) > 253 || net.ParseIP(value) != nil || strings.HasSuffix(value, ".") {
+		return false
+	}
+	if strings.HasPrefix(value, "*.") {
+		value = value[2:]
+	}
+	labels := strings.Split(value, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, character := range label {
+			if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '-' {
+				continue
+			}
+			return false
+		}
+	}
+	return true
+}
+
+func validContainerSecretText(value string, maximum int) bool {
+	if value == "" || len(value) > maximum || !utf8.ValidString(value) {
+		return false
+	}
+	for _, character := range value {
+		if character < 0x20 || character == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 func (p OpenAICompatible) containerJSONRequest(ctx context.Context, method, path string, input, output any) error {

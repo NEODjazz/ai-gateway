@@ -11,7 +11,11 @@ import (
 var ErrContainerDeploymentChanged = errors.New("container deployment changed")
 
 func (r Router) CreateContainer(ctx context.Context, identity modules.RequestContext, input openai.ContainerCreateRequest, admit func(context.Context, *modules.RequestContext) error) (openai.Container, ContainerBinding, error) {
-	for _, endpoint := range r.candidates(ctx, openai.ChatCompletionRequest{Model: input.Model, Provider: input.Provider}, "container") {
+	required := []string{"container"}
+	if input.NetworkPolicy != nil {
+		required = append(required, "container_network")
+	}
+	for _, endpoint := range r.candidates(ctx, openai.ChatCompletionRequest{Model: input.Model, Provider: input.Provider}, required...) {
 		client, ok := endpoint.Provider.(ContainerClient)
 		if !ok {
 			continue
@@ -35,7 +39,7 @@ func (r Router) CreateContainer(ctx context.Context, identity modules.RequestCon
 			}
 		}
 		providerCtx, finish := r.startProviderCall(ctx, endpoint, "container.create")
-		container, callErr := client.CreateContainer(providerCtx, openai.ContainerProviderCreateRequest{Name: input.Name, ExpiresAfter: input.ExpiresAfter, MemoryLimit: input.MemoryLimit})
+		container, callErr := client.CreateContainer(providerCtx, openai.ContainerProviderCreateRequest{Name: input.Name, ExpiresAfter: input.ExpiresAfter, MemoryLimit: input.MemoryLimit, NetworkPolicy: input.NetworkPolicy})
 		finish(callErr)
 		release()
 		if callErr != nil {

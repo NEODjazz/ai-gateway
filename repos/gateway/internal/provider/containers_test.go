@@ -14,7 +14,7 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
-const containerFixture = `{"id":"cntr_123","object":"container","created_at":1,"status":"running","expires_after":{"anchor":"last_active_at","minutes":20},"last_active_at":2,"memory_limit":"4g","name":"analysis"}`
+const containerFixture = `{"id":"cntr_123","object":"container","created_at":1,"status":"running","expires_after":{"anchor":"last_active_at","minutes":20},"last_active_at":2,"memory_limit":"4g","name":"analysis","network_policy":{"type":"allowlist","allowed_domains":["api.example.com"]}}`
 
 func TestOpenAICompatibleContainerLifecycle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -25,7 +25,7 @@ func TestOpenAICompatibleContainerLifecycle(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/containers":
 			body, _ := io.ReadAll(r.Body)
 			text := string(body)
-			if !strings.Contains(text, `"name":"analysis"`) || strings.Contains(text, `"model"`) || strings.Contains(text, `"provider"`) {
+			if !strings.Contains(text, `"name":"analysis"`) || !strings.Contains(text, `"network_policy":{"type":"allowlist","allowed_domains":["api.example.com"],"domain_secrets":[{"domain":"api.example.com","name":"API_TOKEN","value":"secret-value"}]}`) || strings.Contains(text, `"model"`) || strings.Contains(text, `"provider"`) {
 				t.Fatalf("body=%s", body)
 			}
 			_, _ = io.WriteString(w, containerFixture)
@@ -40,9 +40,9 @@ func TestOpenAICompatibleContainerLifecycle(t *testing.T) {
 	defer server.Close()
 	client := NewOpenAICompatible(server.URL+"/v1", "secret", false)
 	client.client = server.Client()
-	input := openai.ContainerProviderCreateRequest{Name: "analysis", MemoryLimit: "4g", ExpiresAfter: &openai.ContainerExpiresAfter{Anchor: "last_active_at", Minutes: 20}}
+	input := openai.ContainerProviderCreateRequest{Name: "analysis", MemoryLimit: "4g", ExpiresAfter: &openai.ContainerExpiresAfter{Anchor: "last_active_at", Minutes: 20}, NetworkPolicy: &openai.ContainerNetworkPolicyRequest{Type: "allowlist", AllowedDomains: []string{"api.example.com"}, DomainSecrets: []openai.ContainerNetworkDomainSecret{{Domain: "api.example.com", Name: "API_TOKEN", Value: "secret-value"}}}}
 	created, err := client.CreateContainer(t.Context(), input)
-	if err != nil || created.ID != "cntr_123" {
+	if err != nil || created.ID != "cntr_123" || created.NetworkPolicy == nil || created.NetworkPolicy.AllowedDomains[0] != "api.example.com" {
 		t.Fatalf("created=%+v err=%v", created, err)
 	}
 	if retrieved, err := client.RetrieveContainer(t.Context(), created.ID); err != nil || retrieved.ID != created.ID {
@@ -76,6 +76,13 @@ func TestContainerRouterRequiresExplicitCapabilityAndPinsDeployment(t *testing.T
 		t.Fatal("container route accepted without explicit capability")
 	}
 	runtime := newRuntime([]string{"container"})
+	policyInput := openai.ContainerCreateRequest{Model: "public-model", Name: "analysis", NetworkPolicy: &openai.ContainerNetworkPolicyRequest{Type: "disabled"}}
+	if _, _, err := runtime.CreateContainer(t.Context(), modules.RequestContext{}, policyInput, nil); err == nil {
+		t.Fatal("container network policy accepted without explicit capability")
+	}
+	if _, _, err := newRuntime([]string{"container", "container_network"}).CreateContainer(t.Context(), modules.RequestContext{}, policyInput, nil); err != nil {
+		t.Fatalf("container network policy rejected with explicit capability: %v", err)
+	}
 	admitted := false
 	created, binding, err := runtime.CreateContainer(t.Context(), modules.RequestContext{}, openai.ContainerCreateRequest{Model: "public-model", Name: "analysis"}, func(_ context.Context, request *modules.RequestContext) error {
 		admitted = request.Request.Model == "public-model" && request.Metadata["gateway.api_type"] == "container"
@@ -103,6 +110,31 @@ func TestContainerAdapterRejectsInvalidInputAndResponse(t *testing.T) {
 	client.client = server.Client()
 	if _, err := client.RetrieveContainer(t.Context(), "cntr_1"); err == nil {
 		t.Fatal("invalid response accepted")
+	}
+}
+
+func TestContainerNetworkPolicyValidation(t *testing.T) {
+	valid := []*openai.ContainerNetworkPolicyRequest{
+		{Type: "disabled"},
+		{Type: "allowlist", AllowedDomains: []string{"api.example.com", "*.internal.example.com"}, DomainSecrets: []openai.ContainerNetworkDomainSecret{{Domain: "api.example.com", Name: "API_TOKEN", Value: "value"}}},
+	}
+	for _, policy := range valid {
+		if err := ValidateContainerNetworkPolicyRequest(policy); err != nil {
+			t.Fatalf("valid policy rejected: %+v: %v", policy, err)
+		}
+	}
+	invalid := []*openai.ContainerNetworkPolicyRequest{
+		{Type: "disabled", AllowedDomains: []string{"api.example.com"}},
+		{Type: "allowlist"},
+		{Type: "allowlist", AllowedDomains: []string{"https://example.com"}},
+		{Type: "allowlist", AllowedDomains: []string{"127.0.0.1"}},
+		{Type: "allowlist", AllowedDomains: []string{"api.example.com", "API.EXAMPLE.COM"}},
+		{Type: "allowlist", AllowedDomains: []string{"api.example.com"}, DomainSecrets: []openai.ContainerNetworkDomainSecret{{Domain: "other.example.com", Name: "TOKEN", Value: "value"}}},
+	}
+	for _, policy := range invalid {
+		if err := ValidateContainerNetworkPolicyRequest(policy); err == nil {
+			t.Fatalf("invalid policy accepted: %+v", policy)
+		}
 	}
 }
 

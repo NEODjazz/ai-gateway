@@ -259,7 +259,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}},
 		{providerType: "mistral", capabilities: []string{"chat", "audio_transcription", "audio_speech", "tools", "structured_output", "vision", "assistant_prefill"}},
 		{providerType: "xai", capabilities: []string{"chat", "video", "video_remix", "video_extension"}},
-		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "background_responses", "audio_translation", "fine_tuning", "container", "container_files", "tools", "structured_output", "mcp", "vision", "web_search", "audio", "file_input"}},
+		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "background_responses", "audio_translation", "fine_tuning", "container", "container_files", "container_network", "tools", "structured_output", "mcp", "vision", "web_search", "audio", "file_input"}},
 	}
 	for _, test := range tests {
 		t.Run(test.providerType, func(t *testing.T) {
@@ -283,7 +283,7 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if got := byType["voyage"]; !slices.Equal(got, []string{"embeddings", "rerank"}) {
 		t.Fatalf("voyage operations=%v", got)
 	}
-	for _, operation := range []string{"chat", "responses", "embeddings", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "search", "container", "container_files", "realtime", "stream"} {
+	for _, operation := range []string{"chat", "responses", "embeddings", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "search", "container", "container_files", "container_network", "realtime", "stream"} {
 		if !slices.Contains(byType["openai-compatible"], operation) {
 			t.Fatalf("openai-compatible missing %s: %v", operation, byType["openai-compatible"])
 		}

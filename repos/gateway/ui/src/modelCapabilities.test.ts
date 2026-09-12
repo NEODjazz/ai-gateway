@@ -31,6 +31,7 @@ describe("modelCapabilityOptions", () => {
       "video_extension",
       "container",
       "container_files",
+      "container_network",
       "realtime",
       "stream",
       "tools",

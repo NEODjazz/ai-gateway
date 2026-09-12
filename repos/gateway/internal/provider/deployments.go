@@ -379,6 +379,9 @@ func validDeploymentCapabilities(capabilities []string) bool {
 	if seen["container_files"] && !seen["container"] {
 		return false
 	}
+	if seen["container_network"] && !seen["container"] {
+		return false
+	}
 	return !seen["mcp"] || (seen["responses"] && seen["tools"])
 }
 
@@ -386,7 +389,7 @@ func ValidModelCapability(capability string) bool {
 	switch capability {
 	case "chat", "responses", "interactions", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "background_interactions", "embeddings", "rerank", "moderation",
 		"image_generation", "image_edit", "image_variation",
-		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "realtime",
+		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
 		"web_search", "web_fetch", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke":
 		return true
@@ -544,6 +547,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible")
 	case "container_files":
 		_, ok := endpoint.Provider.(ContainerFileClient)
+		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible")
+	case "container_network":
+		_, ok := endpoint.Provider.(ContainerClient)
 		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible")
 	case "realtime":
 		_, ok := endpoint.Provider.(RealtimeClient)
