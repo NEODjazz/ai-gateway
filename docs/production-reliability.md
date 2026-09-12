@@ -399,25 +399,27 @@ trust relationship and provider availability remain deployment responsibilities.
 
 ## Chat and SCIM contract rollout (2026-09-12)
 
-Source `b21bfb9` includes SCIM base discovery and server-side sorting, additive
+Source `b15d413` includes SCIM base discovery and server-side sorting, additive
 user-role PATCH semantics, optional Group attribute removal, and the `default`
-Chat reasoning effort with adapter-specific capability reporting. Each behavior
-change passed its focused regressions and a full gateway `go test -race ./...`;
-gateway vet and build also passed.
+Chat reasoning effort with complete adapter-specific `ChatGenerationOptions`
+capability reporting. Native Cohere now rejects `web_fetch_options` instead of
+discarding it. Each behavior change passed its focused regressions and a full
+gateway `go test -race ./...`; gateway vet and build also passed.
 
 - Rancher Desktop reported Moby 29.1.3 with Kubernetes 1.36.3 enabled. The
-  unchanged Dockerfile built `ai-gateway-gateway:gaps-b21bfb9` successfully.
-- Helm release `ai-gateway` revision 397 completed successfully using the
+  unchanged Dockerfile built `ai-gateway-gateway:gaps-b15d413` successfully.
+- Helm release `ai-gateway` revision 398 completed successfully using the
   existing stored values with only `image.tag` overridden.
-- Gateway pod `ai-gateway-gateway-85c877cf45-7khr8` became Ready with zero
-  restarts and ran `ai-gateway-gateway:gaps-b21bfb9`.
+- Gateway pod `ai-gateway-gateway-5648df76b7-g6vrd` became Ready with zero
+  restarts and ran `ai-gateway-gateway:gaps-b15d413`.
 - In-pod loopback checks returned 204 for readiness and 200 with
   `application/scim+json` for `/scim/v2`; discovery returned both User and Group
   resource types. A Chat request using `reasoning_effort=default` passed request
   validation and reached routing/provider execution.
 - The live provider-capability endpoint advertised `default` for OpenAI, Azure
   OpenAI, Groq and OpenRouter adapters while preserving the documented native
-  Mistral range through `xhigh`.
+  Mistral range through `xhigh`. It also returned exact supported-option lists
+  for all managed Chat adapters; Cohere's list excluded `web_fetch_options`.
 
 The host ingress did not accept a connection on port 80 during this rollout, so
 application checks used the pod loopback endpoint. The Chat smoke request used a
