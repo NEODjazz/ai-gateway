@@ -772,3 +772,16 @@ Helm revision 435 completed successfully, and pod
 `ai-gateway-gateway-776b6f897-ndnrx` became Ready with zero restarts. Its live
 endpoint served OpenAPI 0.1.335 with both image batch endpoints, and an
 unauthenticated `/v1/images/edits` batch request reached authentication with 401.
+
+Source `b0969ce` adds native Messages requests to durable JSONL batch execution.
+Each item is converted through the same strict request path as `/v1/messages`,
+including tool schemas in TPM admission, then returns a validated native Messages
+response after provider billing settlement. Streaming requests are rejected before
+queueing.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-b0969ce` with image ID
+`sha256:ec04f59d1ddec711673c9933dafcb819b13dc95b0d73ab08c9cafd0d310c1fc6`.
+Helm revision 436 completed successfully, and pod
+`ai-gateway-gateway-85cfbd6db7-lskq9` became Ready with zero restarts. Its live
+endpoint served OpenAPI 0.1.336 with `/v1/messages` in the batch endpoint enum,
+and an unauthenticated request using it reached authentication with 401.
