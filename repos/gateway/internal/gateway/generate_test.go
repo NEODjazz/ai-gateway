@@ -77,6 +77,17 @@ func TestGenerateUsageMapsServiceTier(t *testing.T) {
 	if _, err := generateUsage(usage, "unknown"); err == nil {
 		t.Fatal("invalid service tier was accepted")
 	}
+	usage.PromptTokens = 5
+	usage.ProviderToolInputTokens = 3
+	usage.TotalTokens = 6
+	result, err := generateUsage(usage, "")
+	if err != nil || result["promptTokenCount"] != 2 || result["toolUsePromptTokenCount"] != 3 {
+		t.Fatalf("tool usage=%v err=%v", result, err)
+	}
+	usage.ProviderToolInputTokens = 6
+	if _, err := generateUsage(usage, ""); err == nil {
+		t.Fatal("tool input usage above total prompt usage was accepted")
+	}
 }
 
 func TestGenerateContentResolvesOwnedFileDataAfterAuthentication(t *testing.T) {
@@ -226,14 +237,14 @@ func TestGenerateContentGeminiRoundTripUsageAndBilling(t *testing.T) {
 		if native["serviceTier"] != "priority" || native["store"] != true {
 			t.Errorf("native service controls lost: %#v", native)
 		}
-		_, _ = w.Write([]byte("data: {\"responseId\":\"g-test\",\"modelVersion\":\"gemini-resolved\",\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"hi\"}]},\"finishReason\":\"STOP\",\"groundingMetadata\":{\"webSearchQueries\":[\"query\"],\"groundingChunks\":[],\"groundingSupports\":[],\"searchEntryPoint\":{\"renderedContent\":\"widget\"}}}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":3,\"totalTokenCount\":15,\"serviceTier\":\"priority\"}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"responseId\":\"g-test\",\"modelVersion\":\"gemini-resolved\",\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"hi\"}]},\"finishReason\":\"STOP\",\"groundingMetadata\":{\"webSearchQueries\":[\"query\"],\"groundingChunks\":[],\"groundingSupports\":[],\"searchEntryPoint\":{\"renderedContent\":\"widget\"}}}],\"usageMetadata\":{\"promptTokenCount\":10,\"toolUsePromptTokenCount\":4,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":3,\"totalTokenCount\":19,\"serviceTier\":\"priority\"}}\n\n"))
 	}))
 	defer upstream.Close()
 	billing := &messagesUsageRecorder{}
 	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "native", Type: "gemini", BaseURL: upstream.URL, APIKey: "provider-key", Stream: true, Models: []string{"m"}, ModelAliases: map[string]string{"m": "gemini-test"}, Capabilities: []string{"chat", "stream", "web_search"}}}, Modules: modules.NewPipeline([]modules.Module{billing})})
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"m"}}}}), router))
 	response := generateCall(handler, "/v1beta/models/m:streamGenerateContent?alt=sse", `{"contents":[{"parts":[{"text":"hi"}]}],"serviceTier":"priority","store":true,"tools":[{"googleSearch":{}}],"generationConfig":{"maxOutputTokens":10}}`, "gateway-test-key")
-	if !strings.Contains(response.Body.String(), `"modelVersion":"gemini-resolved"`) || response.Code != 200 || billing.calls != 1 || billing.usage.TotalTokens != 15 || billing.usage.CompletionTokens != 5 || billing.usage.SearchRequests != 1 || !strings.Contains(response.Body.String(), `"candidatesTokenCount":2`) || !strings.Contains(response.Body.String(), `"thoughtsTokenCount":3`) || !strings.Contains(response.Body.String(), `"serviceTier":"priority"`) || !strings.Contains(response.Body.String(), `"searchEntryPoint":{"renderedContent":"widget"}`) {
+	if !strings.Contains(response.Body.String(), `"modelVersion":"gemini-resolved"`) || response.Code != 200 || billing.calls != 1 || billing.usage.PromptTokens != 14 || billing.usage.ProviderToolInputTokens != 4 || billing.usage.TotalTokens != 19 || billing.usage.CompletionTokens != 5 || billing.usage.SearchRequests != 1 || !strings.Contains(response.Body.String(), `"promptTokenCount":10`) || !strings.Contains(response.Body.String(), `"toolUsePromptTokenCount":4`) || !strings.Contains(response.Body.String(), `"candidatesTokenCount":2`) || !strings.Contains(response.Body.String(), `"thoughtsTokenCount":3`) || !strings.Contains(response.Body.String(), `"serviceTier":"priority"`) || !strings.Contains(response.Body.String(), `"searchEntryPoint":{"renderedContent":"widget"}`) {
 		t.Fatalf("native usage: %d %+v %s", response.Code, billing.usage, response.Body.String())
 	}
 }

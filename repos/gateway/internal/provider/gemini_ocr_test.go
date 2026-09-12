@@ -31,7 +31,7 @@ func TestGeminiOCRContract(t *testing.T) {
 		if len(parts) != 2 || parts[0].InlineData == nil || parts[0].InlineData.MIMEType != "image/png" || !strings.Contains(parts[1].Text, "page indices: [0]") || body.Generation.ResponseMIMEType != "application/json" || body.Generation.ResponseJSONSchema == nil {
 			t.Fatalf("body=%+v", body)
 		}
-		_, _ = io.WriteString(w, `{"modelVersion":"gemini-ocr-2026","candidates":[{"content":{"parts":[{"text":"{\"pages\":[{\"index\":0,\"markdown\":\"# Invoice\"}]}"}]}}],"usageMetadata":{"promptTokenCount":258,"candidatesTokenCount":8,"totalTokenCount":266}}`)
+		_, _ = io.WriteString(w, `{"modelVersion":"gemini-ocr-2026","candidates":[{"content":{"parts":[{"text":"{\"pages\":[{\"index\":0,\"markdown\":\"# Invoice\"}]}"}]}}],"usageMetadata":{"promptTokenCount":258,"toolUsePromptTokenCount":4,"candidatesTokenCount":8,"totalTokenCount":270}}`)
 	}))
 	defer server.Close()
 	response, err := NewGemini(server.URL, "secret", false).OCR(t.Context(), openai.OCRRequest{Model: "gemini-ocr", Document: geminiOCRImageDocument(), Pages: []int{0}, TableFormat: "markdown"})

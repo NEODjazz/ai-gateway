@@ -1201,7 +1201,10 @@ objects. Plain text and non-object JSON keep the result wrapper. This changes th
 native wire representation of object-valued tool results to avoid double wrapping.
 
 Responses preserve function-call signatures and report reasoning tokens separately
-from candidate tokens, while billing includes both. The Gemini adapter preserves
+from candidate tokens, while billing includes both. Provider-reported
+`toolUsePromptTokenCount` is added to billable input tokens and preserved as a
+separate native usage field; overflow and totals below the complete declared
+input/output usage fail closed. The Gemini adapter preserves
 upstream modelVersion when provided; otherwise the normalized model name is used.
 SSE emits text incrementally and buffers function calls until their arguments are
 complete JSON objects. Frame and tool accumulation have separate 32 MiB limits.

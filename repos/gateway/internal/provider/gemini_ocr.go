@@ -177,7 +177,7 @@ func decodeGeminiOCRResponse(reader io.ReadCloser, requestModel string, document
 		return openai.OCRResponse{}, errors.New("Gemini returned invalid OCR response")
 	}
 	usage := upstream.Usage
-	if usage.Prompt < 0 || usage.Candidates < 0 || usage.Thoughts < 0 || usage.Total <= 0 || usage.Total < usage.Prompt || usage.Candidates > int(^uint(0)>>1)-usage.Thoughts || usage.Total < usage.Prompt+usage.Candidates+usage.Thoughts {
+	if _, _, validUsage := geminiTokenCounts(usage); !validUsage || usage.Total <= 0 {
 		return openai.OCRResponse{}, errors.New("Gemini returned inconsistent OCR usage")
 	}
 	parts := upstream.Candidates[0].Content.Parts

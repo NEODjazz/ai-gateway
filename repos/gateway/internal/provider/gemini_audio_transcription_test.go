@@ -24,12 +24,12 @@ func TestGeminiAudioTranscriptionContract(t *testing.T) {
 		if len(parts) != 2 || parts[1].InlineData == nil || parts[1].InlineData.MIMEType != "audio/wav" || cfg == nil || len(cfg.LanguageCodes) != 2 || cfg.LanguageCodes[0] != "en-US" || len(cfg.CustomVocabulary) != 2 || cfg.Mode != "SMART" || body.Generation.Temperature == nil || *body.Generation.Temperature != 0.2 {
 			t.Fatalf("body=%+v", body)
 		}
-		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"thought":true,"text":"internal"},{"text":"hello "},{"text":"world"}]}}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":3,"thoughtsTokenCount":2,"totalTokenCount":17}}`)
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"thought":true,"text":"internal"},{"text":"hello "},{"text":"world"}]}}],"usageMetadata":{"promptTokenCount":12,"toolUsePromptTokenCount":4,"candidatesTokenCount":3,"thoughtsTokenCount":2,"totalTokenCount":21}}`)
 	}))
 	defer server.Close()
 	temperature := 0.2
 	response, err := NewGemini(server.URL, "secret", false).TranscribeAudio(t.Context(), openai.AudioTranscriptionRequest{Model: "models/gemini-transcribe", File: transcriptionAttachment(), Prompt: "Acme product names", ResponseFormat: "json", Temperature: &temperature, Languages: []string{"en-US", "fr"}, Keywords: []string{"Acme", "Codex"}, Mode: "SMART"})
-	if err != nil || response.Text != "hello world" || response.Usage == nil || response.Usage.InputTokens != 12 || response.Usage.OutputTokens != 5 || response.Usage.TotalTokens != 17 {
+	if err != nil || response.Text != "hello world" || response.Usage == nil || response.Usage.InputTokens != 16 || response.Usage.OutputTokens != 5 || response.Usage.TotalTokens != 21 {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }

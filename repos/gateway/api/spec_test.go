@@ -43,8 +43,8 @@ func TestOpenAPIGenerateContentServiceControls(t *testing.T) {
 	}
 	response := document.Components.Schemas["GenerateContentResponse"].Value
 	usage := response.Properties["usageMetadata"].Value
-	if usage == nil || usage.Properties["serviceTier"] == nil {
-		t.Fatal("GenerateContent usage is missing the effective service tier")
+	if usage == nil || usage.Properties["serviceTier"] == nil || usage.Properties["toolUsePromptTokenCount"] == nil {
+		t.Fatal("GenerateContent usage is missing native service or tool-token reporting")
 	}
 }
 

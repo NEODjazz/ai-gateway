@@ -180,10 +180,13 @@ func generateUsage(usage openai.Usage, serviceTier string) (map[string]any, erro
 	if usage.PromptTokensDetails != nil {
 		cached = usage.PromptTokensDetails.CachedTokens
 	}
-	if usage.PromptTokens < 0 || usage.CompletionTokens < 0 || usage.TotalTokens < 0 || thoughts < 0 || thoughts > usage.CompletionTokens || cached < 0 || cached > usage.PromptTokens || usage.PromptTokens > math.MaxInt-usage.CompletionTokens || usage.TotalTokens < usage.PromptTokens+usage.CompletionTokens {
+	if usage.PromptTokens < 0 || usage.ProviderToolInputTokens < 0 || usage.ProviderToolInputTokens > usage.PromptTokens || usage.CompletionTokens < 0 || usage.TotalTokens < 0 || thoughts < 0 || thoughts > usage.CompletionTokens || cached < 0 || cached > usage.PromptTokens-usage.ProviderToolInputTokens || usage.PromptTokens > math.MaxInt-usage.CompletionTokens || usage.TotalTokens < usage.PromptTokens+usage.CompletionTokens {
 		return nil, errors.New("invalid usage")
 	}
-	result := map[string]any{"promptTokenCount": usage.PromptTokens, "candidatesTokenCount": usage.CompletionTokens - thoughts, "thoughtsTokenCount": thoughts, "cachedContentTokenCount": cached, "totalTokenCount": usage.TotalTokens}
+	result := map[string]any{"promptTokenCount": usage.PromptTokens - usage.ProviderToolInputTokens, "candidatesTokenCount": usage.CompletionTokens - thoughts, "thoughtsTokenCount": thoughts, "cachedContentTokenCount": cached, "totalTokenCount": usage.TotalTokens}
+	if usage.ProviderToolInputTokens > 0 {
+		result["toolUsePromptTokenCount"] = usage.ProviderToolInputTokens
+	}
 	switch serviceTier {
 	case "":
 	case "auto", "default":

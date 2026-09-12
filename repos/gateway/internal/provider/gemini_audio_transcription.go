@@ -225,7 +225,8 @@ func decodeGeminiAudioTextResponse(reader io.Reader, request openai.AudioTranscr
 		annotationParts = append(annotationParts, annotationText)
 	}
 	usage := upstream.Usage
-	if usage.Prompt < 0 || usage.Total <= 0 || usage.Total < usage.Prompt || usage.Candidates < 0 || usage.Thoughts < 0 || usage.Candidates > int(^uint(0)>>1)-usage.Thoughts || usage.Total < usage.Prompt+usage.Candidates+usage.Thoughts {
+	inputTokens, _, validUsage := geminiTokenCounts(usage)
+	if !validUsage || usage.Total <= 0 {
 		return openai.AudioTranscriptionResponse{}, errors.New("Gemini returned inconsistent audio usage")
 	}
 	if (len(request.TimestampGranularities) > 0 || request.ResponseFormat == "diarized_json") && len(words) == 0 {
@@ -234,7 +235,7 @@ func decodeGeminiAudioTextResponse(reader io.Reader, request openai.AudioTranscr
 	if len(textParts) == 0 {
 		textParts = []string{strings.Join(annotationParts, " ")}
 	}
-	result := openai.AudioTranscriptionResponse{Text: strings.TrimSpace(strings.Join(textParts, "")), Words: words, Segments: segments, Usage: &openai.AudioTranscriptionUsage{Type: "tokens", InputTokens: usage.Prompt, OutputTokens: usage.Total - usage.Prompt, TotalTokens: usage.Total}}
+	result := openai.AudioTranscriptionResponse{Text: strings.TrimSpace(strings.Join(textParts, "")), Words: words, Segments: segments, Usage: &openai.AudioTranscriptionUsage{Type: "tokens", InputTokens: inputTokens, OutputTokens: usage.Total - inputTokens, TotalTokens: usage.Total}}
 	if message := result.Validate(); message != "" {
 		return openai.AudioTranscriptionResponse{}, errors.New(message)
 	}

@@ -30,13 +30,13 @@ func TestGeminiImageGenerationContract(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Contents) != 1 || len(body.Contents[0].Parts) != 1 || body.Contents[0].Parts[0].Text != "draw" || len(body.Generation.ResponseModalities) != 1 || body.Generation.ResponseModalities[0] != "IMAGE" || body.Generation.ImageConfig == nil || body.Generation.ImageConfig.AspectRatio != "16:9" || body.Generation.ImageConfig.ImageSize != "2K" {
 			t.Fatalf("request=%+v err=%v", body, err)
 		}
-		_, _ = fmt.Fprint(w, `{"responseId":"image-id","candidates":[{"index":0,"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":5,"thoughtsTokenCount":2,"totalTokenCount":10}}`)
+		_, _ = fmt.Fprint(w, `{"responseId":"image-id","candidates":[{"index":0,"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"toolUsePromptTokenCount":4,"candidatesTokenCount":5,"thoughtsTokenCount":2,"totalTokenCount":14}}`)
 	}))
 	defer server.Close()
 
 	n := 1
 	response, err := NewGemini(server.URL, "secret", false).GenerateImage(context.Background(), openai.ImageGenerationRequest{Model: "models/gemini-image", Prompt: "draw", N: &n, ResponseFormat: "b64_json", Resolution: "2K", AspectRatio: "16:9"})
-	if err != nil || len(response.Data) != 1 || response.Data[0].B64JSON != "aW1hZ2U=" || response.Data[0].MediaType != "image/png" || response.Usage == nil || response.Usage.InputTokens != 3 || response.Usage.OutputTokens != 7 || response.Usage.TotalTokens != 10 || response.Created <= 0 {
+	if err != nil || len(response.Data) != 1 || response.Data[0].B64JSON != "aW1hZ2U=" || response.Data[0].MediaType != "image/png" || response.Usage == nil || response.Usage.InputTokens != 7 || response.Usage.OutputTokens != 7 || response.Usage.TotalTokens != 14 || response.Created <= 0 {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }
@@ -242,6 +242,8 @@ func TestGeminiImageGenerationRejectsMalformedResponses(t *testing.T) {
 		`{"candidates":[` + validCandidate + `],"usageMetadata":{"promptTokenCount":-1,"totalTokenCount":2}}`,
 		`{"candidates":[` + validCandidate + `],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":-1,"totalTokenCount":2}}`,
 		`{"candidates":[` + validCandidate + `],"usageMetadata":{"promptTokenCount":1,"thoughtsTokenCount":-1,"totalTokenCount":2}}`,
+		`{"candidates":[` + validCandidate + `],"usageMetadata":{"promptTokenCount":1,"toolUsePromptTokenCount":-1,"totalTokenCount":2}}`,
+		`{"candidates":[` + validCandidate + `],"usageMetadata":{"promptTokenCount":1,"toolUsePromptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`,
 		`{"candidates":[` + validCandidate + `],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":2,"thoughtsTokenCount":1,"totalTokenCount":3}}`,
 		`{"candidates":[` + validCandidate + `],"usageMetadata":{"promptTokenCount":1,"cachedContentTokenCount":2,"totalTokenCount":2}}`,
 		`{"candidates":[` + validCandidate + `],"usageMetadata":{"promptTokenCount":1,"totalTokenCount":2}} trailing`,

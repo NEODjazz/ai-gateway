@@ -199,12 +199,28 @@ type geminiResponse struct {
 	} `json:"error"`
 }
 type geminiUsage struct {
-	Prompt      int    `json:"promptTokenCount"`
-	Cached      int    `json:"cachedContentTokenCount"`
-	Candidates  int    `json:"candidatesTokenCount"`
-	Thoughts    int    `json:"thoughtsTokenCount"`
-	Total       int    `json:"totalTokenCount"`
-	ServiceTier string `json:"serviceTier"`
+	Prompt        int    `json:"promptTokenCount"`
+	ToolUsePrompt int    `json:"toolUsePromptTokenCount"`
+	Cached        int    `json:"cachedContentTokenCount"`
+	Candidates    int    `json:"candidatesTokenCount"`
+	Thoughts      int    `json:"thoughtsTokenCount"`
+	Total         int    `json:"totalTokenCount"`
+	ServiceTier   string `json:"serviceTier"`
+}
+
+func geminiTokenCounts(usage *geminiUsage) (input, completion int, valid bool) {
+	if usage == nil || usage.Prompt < 0 || usage.ToolUsePrompt < 0 || usage.Candidates < 0 || usage.Thoughts < 0 || usage.Cached < 0 || usage.Cached > usage.Prompt || usage.Total < 0 {
+		return 0, 0, false
+	}
+	if usage.Prompt > math.MaxInt-usage.ToolUsePrompt || usage.Candidates > math.MaxInt-usage.Thoughts {
+		return 0, 0, false
+	}
+	input = usage.Prompt + usage.ToolUsePrompt
+	completion = usage.Candidates + usage.Thoughts
+	if input > math.MaxInt-completion || usage.Total < input+completion {
+		return 0, 0, false
+	}
+	return input, completion, true
 }
 
 func geminiInvalid(param string) error {
@@ -711,13 +727,11 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 	}
 	if body.Usage != nil {
 		u := body.Usage
-		if u.Prompt < 0 || u.Candidates < 0 || u.Thoughts < 0 || u.Cached < 0 || u.Cached > u.Prompt || u.Candidates > math.MaxInt-u.Thoughts || u.Total < 0 {
-			return result, errors.New("invalid Gemini usage")
-		}
-		if u.Prompt > math.MaxInt-(u.Candidates+u.Thoughts) || u.Total < u.Prompt+u.Candidates+u.Thoughts {
+		inputTokens, completionTokens, valid := geminiTokenCounts(u)
+		if !valid {
 			return result, errors.New("inconsistent Gemini usage")
 		}
-		result.Usage = openai.Usage{PromptTokens: u.Prompt, CompletionTokens: u.Candidates + u.Thoughts, TotalTokens: u.Total}
+		result.Usage = openai.Usage{PromptTokens: inputTokens, CompletionTokens: completionTokens, TotalTokens: u.Total, ProviderToolInputTokens: u.ToolUsePrompt}
 		if u.Thoughts > 0 {
 			result.Usage.CompletionTokensDetails = &openai.CompletionTokenDetails{ReasoningTokens: u.Thoughts}
 		}

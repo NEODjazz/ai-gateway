@@ -33,7 +33,7 @@ func TestGeminiNativeChatAndToolSignatures(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		_, _ = fmt.Fprint(w, `{"responseId":"native-id","candidates":[{"index":0,"content":{"parts":[{"functionCall":{"id":"native-call","name":"weather","args":{"city":"Moscow"}},"thoughtSignature":"opaque-signature"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"cachedContentTokenCount":4,"candidatesTokenCount":2,"thoughtsTokenCount":3,"totalTokenCount":15}}`)
+		_, _ = fmt.Fprint(w, `{"responseId":"native-id","candidates":[{"index":0,"content":{"parts":[{"functionCall":{"id":"native-call","name":"weather","args":{"city":"Moscow"}},"thoughtSignature":"opaque-signature"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"toolUsePromptTokenCount":6,"cachedContentTokenCount":4,"candidatesTokenCount":2,"thoughtsTokenCount":3,"totalTokenCount":21}}`)
 	}))
 	defer server.Close()
 	client := NewGemini(server.URL, "fake-key", true)
@@ -44,7 +44,7 @@ func TestGeminiNativeChatAndToolSignatures(t *testing.T) {
 	if request.System == nil || request.System.Parts[0].Text != "Be concise" || request.Generation.MaxOutputTokens == nil || *request.Generation.MaxOutputTokens != 123 || request.Generation.TopK == nil || *request.Generation.TopK != 40 || request.Generation.FrequencyPenalty == nil || *request.Generation.FrequencyPenalty != 0.2 || request.Generation.PresencePenalty == nil || *request.Generation.PresencePenalty != -0.1 || request.Generation.ThinkingConfig == nil || request.Generation.ThinkingConfig.ThinkingLevel != "medium" || request.Generation.ResponseMIMEType != "application/json" || len(request.Tools) != 1 {
 		t.Fatalf("native mapping incomplete: %+v", request)
 	}
-	if response.Usage.TotalTokens != 15 || response.Usage.CompletionTokens != 5 || response.Usage.PromptTokensDetails.CachedTokens != 4 {
+	if response.Usage.PromptTokens != 16 || response.Usage.ProviderToolInputTokens != 6 || response.Usage.TotalTokens != 21 || response.Usage.CompletionTokens != 5 || response.Usage.PromptTokensDetails.CachedTokens != 4 {
 		t.Fatalf("usage mapped incorrectly: %+v", response.Usage)
 	}
 	if response.Choices[0].FinishReason != "tool_calls" {
@@ -653,7 +653,8 @@ func TestGeminiInlineVideoPreservesPartOrder(t *testing.T) {
 }
 
 func TestGeminiUsageValidation(t *testing.T) {
-	for _, usage := range []geminiUsage{{Prompt: -1}, {Prompt: 1, Cached: 2}, {Prompt: 10, Candidates: 2, Thoughts: 3, Total: 12}} {
+	maxInt := int(^uint(0) >> 1)
+	for _, usage := range []geminiUsage{{Prompt: -1}, {ToolUsePrompt: -1}, {Prompt: 1, Cached: 2}, {Prompt: 10, ToolUsePrompt: 4, Candidates: 2, Thoughts: 3, Total: 18}, {Prompt: maxInt, ToolUsePrompt: 1, Total: maxInt}} {
 		if _, err := geminiToChat(geminiResponse{Usage: &usage}, "test"); err == nil {
 			t.Fatalf("invalid usage accepted: %+v", usage)
 		}

@@ -233,18 +233,15 @@ func decodeGeminiImageResponse(body io.Reader, request openai.ImageGenerationReq
 	if upstream.PromptFeedback.BlockReason != "" {
 		return openai.ImageGenerationResponse{}, &Error{Class: FailureContentPolicy, Provider: "gemini", StatusCode: http.StatusBadRequest, UpstreamCode: "content_policy_violation", Err: errors.New("upstream content policy rejected prompt")}
 	}
-	if len(upstream.Candidates) != 1 || upstream.Usage == nil || upstream.Usage.Prompt < 0 || upstream.Usage.Cached < 0 || upstream.Usage.Cached > upstream.Usage.Prompt || upstream.Usage.Candidates < 0 || upstream.Usage.Thoughts < 0 || upstream.Usage.Candidates > int(^uint(0)>>1)-upstream.Usage.Thoughts || upstream.Usage.Total < 0 {
+	inputTokens, _, validUsage := geminiTokenCounts(upstream.Usage)
+	if len(upstream.Candidates) != 1 || !validUsage {
 		return openai.ImageGenerationResponse{}, errors.New("Gemini returned invalid image candidates or usage")
-	}
-	completionTokens := upstream.Usage.Candidates + upstream.Usage.Thoughts
-	if upstream.Usage.Prompt > int(^uint(0)>>1)-completionTokens || upstream.Usage.Total < upstream.Usage.Prompt+completionTokens {
-		return openai.ImageGenerationResponse{}, errors.New("Gemini returned inconsistent image usage")
 	}
 	result := openai.ImageGenerationResponse{
 		Created: time.Now().Unix(),
 		Usage: &openai.ImageUsage{
-			InputTokens:  upstream.Usage.Prompt,
-			OutputTokens: upstream.Usage.Total - upstream.Usage.Prompt,
+			InputTokens:  inputTokens,
+			OutputTokens: upstream.Usage.Total - inputTokens,
 			TotalTokens:  upstream.Usage.Total,
 		},
 	}

@@ -501,6 +501,8 @@ type Usage struct {
 	SearchRequests          int                     `json:"-"`
 	ToolRequests            int                     `json:"-"`
 	ToolRequestsReported    bool                    `json:"-"`
+	// ProviderToolInputTokens is included in PromptTokens and preserves a native usage split.
+	ProviderToolInputTokens int                     `json:"-"`
 	ProviderCostUSDTicks    *int64                  `json:"-"`
 	InferenceGeo            string                  `json:"-"`
 	PromptTokens            int                     `json:"prompt_tokens"`
