@@ -139,8 +139,15 @@ func providerCacheKey(kind string, req modules.RequestContext) string {
 func chatCacheKeyValue(request openai.ChatCompletionRequest) any {
 	nativeContent := make([][]json.RawMessage, len(request.Messages))
 	var toolResultErrors []bool
+	var documentCitations [][]bool
 	for index := range request.Messages {
 		nativeContent[index] = request.Messages[index].NativeContent
+		if len(request.Messages[index].AnthropicDocumentCitations) > 0 {
+			if documentCitations == nil {
+				documentCitations = make([][]bool, len(request.Messages))
+			}
+			documentCitations[index] = request.Messages[index].AnthropicDocumentCitations
+		}
 		if request.Messages[index].ToolResultError {
 			if toolResultErrors == nil {
 				toolResultErrors = make([]bool, len(request.Messages))
@@ -152,6 +159,7 @@ func chatCacheKeyValue(request openai.ChatCompletionRequest) any {
 		Request                                  openai.ChatCompletionRequest  `json:"request"`
 		NativeContent                            [][]json.RawMessage           `json:"native_content,omitempty"`
 		ToolResultErrors                         []bool                        `json:"tool_result_errors,omitempty"`
+		DocumentCitations                        [][]bool                      `json:"document_citations,omitempty"`
 		NativeInputTokens                        int                           `json:"native_input_tokens,omitempty"`
 		BedrockServiceTier                       string                        `json:"bedrock_service_tier,omitempty"`
 		BedrockPerformanceLatency                string                        `json:"bedrock_performance_latency,omitempty"`
@@ -162,6 +170,7 @@ func chatCacheKeyValue(request openai.ChatCompletionRequest) any {
 		Request:                                  request,
 		NativeContent:                            nativeContent,
 		ToolResultErrors:                         toolResultErrors,
+		DocumentCitations:                        documentCitations,
 		NativeInputTokens:                        request.NativeInputTokens,
 		BedrockServiceTier:                       request.BedrockServiceTier,
 		BedrockPerformanceLatency:                request.BedrockPerformanceLatency,

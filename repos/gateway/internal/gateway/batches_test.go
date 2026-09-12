@@ -426,7 +426,7 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 	request := messagesRequest{
 		Model: "message-model", MaxTokens: 32,
 		System:   json.RawMessage(`"Be concise"`),
-		Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"},{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="}}]`)}},
+		Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"},{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"citations":{"enabled":true}}]`)}},
 	}
 	requestBody, err := json.Marshal(request)
 	if err != nil {
@@ -470,7 +470,14 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 	providerRequest := runtime.chat
 	runtime.mu.Unlock()
 	attachments, attachmentErr := openai.ChatFileAttachments(providerRequest.Request.Messages)
-	if providerRequest.RequestID == "" || providerRequest.Metadata["gateway.api_type"] != "messages" || reservedTokens != estimateChatTokens(chat) || attachmentErr != nil || len(attachments) != 1 {
+	var citations []bool
+	for _, message := range providerRequest.Request.Messages {
+		if len(message.AnthropicDocumentCitations) > 0 {
+			citations = message.AnthropicDocumentCitations
+			break
+		}
+	}
+	if providerRequest.RequestID == "" || providerRequest.Metadata["gateway.api_type"] != "messages" || reservedTokens != estimateChatTokens(chat) || attachmentErr != nil || len(attachments) != 1 || len(citations) != 1 || !citations[0] {
 		t.Fatalf("request=%+v metadata=%v TPM=%d want=%d", providerRequest.Request, providerRequest.Metadata, reservedTokens, estimateChatTokens(chat))
 	}
 }

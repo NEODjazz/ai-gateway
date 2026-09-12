@@ -61,6 +61,9 @@ func TestCacheIsolationIncludesNativeChatState(t *testing.T) {
 			request.Messages[0].NativeContent = []json.RawMessage{json.RawMessage(`{"document":{"name":"A","source":{"bytes":"QQ=="}}}`)}
 		}},
 		{"tool result error", func(request *openai.ChatCompletionRequest) { request.Messages[0].ToolResultError = true }},
+		{"document citations", func(request *openai.ChatCompletionRequest) {
+			request.Messages[0].AnthropicDocumentCitations = []bool{true}
+		}},
 		{"native token reserve", func(request *openai.ChatCompletionRequest) { request.NativeInputTokens = 1 }},
 		{"service tier", func(request *openai.ChatCompletionRequest) { request.BedrockServiceTier = "priority" }},
 		{"performance latency", func(request *openai.ChatCompletionRequest) { request.BedrockPerformanceLatency = "optimized" }},
@@ -81,7 +84,7 @@ func TestCacheIsolationIncludesNativeChatState(t *testing.T) {
 			}
 			baseScope, _, baseEligible := semanticRequest(base, Endpoint{Name: "endpoint"})
 			changedScope, _, changedEligible := semanticRequest(changed, Endpoint{Name: "endpoint"})
-			if variant.name == "native input" || variant.name == "tool result error" || variant.name == "additional model request fields" {
+			if variant.name == "native input" || variant.name == "tool result error" || variant.name == "document citations" || variant.name == "additional model request fields" {
 				if !baseEligible || changedEligible {
 					t.Fatalf("opaque native state semantic eligibility: base=%v changed=%v", baseEligible, changedEligible)
 				}

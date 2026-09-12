@@ -134,22 +134,37 @@ type anthropicResponse struct {
 }
 
 type anthropicContent struct {
-	Type         string                 `json:"type"`
-	Text         string                 `json:"text,omitempty"`
-	Source       any                    `json:"source,omitempty"`
-	ID           string                 `json:"id,omitempty"`
-	Name         string                 `json:"name,omitempty"`
-	ToolsetName  string                 `json:"toolset_name,omitempty"`
-	Input        any                    `json:"input,omitempty"`
-	ToolUseID    string                 `json:"tool_use_id,omitempty"`
-	IsError      bool                   `json:"is_error,omitempty"`
-	Content      any                    `json:"content,omitempty"`
-	Citations    []anthropicCitation    `json:"citations,omitempty"`
-	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
-	Thinking     string                 `json:"thinking,omitempty"`
-	Signature    string                 `json:"signature,omitempty"`
-	Data         string                 `json:"data,omitempty"`
-	Raw          json.RawMessage        `json:"-"`
+	Type             string                 `json:"type"`
+	Text             string                 `json:"text,omitempty"`
+	Source           any                    `json:"source,omitempty"`
+	ID               string                 `json:"id,omitempty"`
+	Name             string                 `json:"name,omitempty"`
+	ToolsetName      string                 `json:"toolset_name,omitempty"`
+	Input            any                    `json:"input,omitempty"`
+	ToolUseID        string                 `json:"tool_use_id,omitempty"`
+	IsError          bool                   `json:"is_error,omitempty"`
+	Content          any                    `json:"content,omitempty"`
+	Citations        []anthropicCitation    `json:"citations,omitempty"`
+	RequestCitations *anthropicCitations    `json:"-"`
+	CacheControl     *anthropicCacheControl `json:"cache_control,omitempty"`
+	Thinking         string                 `json:"thinking,omitempty"`
+	Signature        string                 `json:"signature,omitempty"`
+	Data             string                 `json:"data,omitempty"`
+	Raw              json.RawMessage        `json:"-"`
+}
+
+func (c anthropicContent) MarshalJSON() ([]byte, error) {
+	type content anthropicContent
+	encoded, err := json.Marshal(content(c))
+	if err != nil || c.RequestCitations == nil {
+		return encoded, err
+	}
+	var value map[string]any
+	if err := json.Unmarshal(encoded, &value); err != nil {
+		return nil, err
+	}
+	value["citations"] = c.RequestCitations
+	return json.Marshal(value)
 }
 
 func (c *anthropicContent) UnmarshalJSON(data []byte) error {
@@ -656,7 +671,7 @@ func anthropicMessages(messages []openai.Message) (any, []anthropicMessage) {
 				Type: "tool_result", ToolUseID: message.ToolCallID, IsError: message.ToolResultError, Content: message.Content,
 			}}})
 		default:
-			converted = append(converted, anthropicMessage{Role: "user", Content: anthropicMessageContent(message.Content)})
+			converted = append(converted, anthropicMessage{Role: "user", Content: anthropicMessageContentWithDocumentCitations(message.Content, message.AnthropicDocumentCitations)})
 		}
 	}
 	if len(converted) == 0 {
@@ -728,11 +743,16 @@ func anthropicResponseMessages(input any) ([]anthropicMessage, error) {
 }
 
 func anthropicMessageContent(value any) any {
+	return anthropicMessageContentWithDocumentCitations(value, nil)
+}
+
+func anthropicMessageContentWithDocumentCitations(value any, documentCitations []bool) any {
 	items, ok := value.([]any)
 	if !ok {
 		return openai.ContentText(value)
 	}
 	blocks := make([]anthropicContent, 0, len(items))
+	documentIndex := 0
 	for _, item := range items {
 		object, ok := item.(map[string]any)
 		if !ok {
@@ -764,9 +784,14 @@ func anthropicMessageContent(value any) any {
 		case "input_file":
 			attachments, err := openai.ResponseFileAttachments([]any{object})
 			if err == nil && len(attachments) == 1 {
-				blocks = append(blocks, anthropicContent{Type: "document", Source: map[string]any{
+				block := anthropicContent{Type: "document", Source: map[string]any{
 					"type": "base64", "media_type": attachments[0].MediaType, "data": attachments[0].Data,
-				}})
+				}}
+				if documentIndex < len(documentCitations) && documentCitations[documentIndex] {
+					block.RequestCitations = &anthropicCitations{Enabled: true}
+				}
+				blocks = append(blocks, block)
+				documentIndex++
 			}
 		default:
 			if text := openai.ContentText(object); text != "" {

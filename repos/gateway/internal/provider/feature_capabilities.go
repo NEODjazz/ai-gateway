@@ -33,6 +33,7 @@ func (Anthropic) SupportsInferenceGeo() bool      { return true }
 func (Anthropic) SupportsContextManagement() bool { return true }
 func (Anthropic) SupportsToolResultError() bool   { return true }
 func (Anthropic) SupportsFileInput() bool         { return true }
+func (Anthropic) SupportsDocumentCitations() bool { return true }
 
 func (Gemini) SupportsTools() bool            { return true }
 func (Gemini) SupportsStructuredOutput() bool { return true }

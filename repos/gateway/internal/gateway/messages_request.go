@@ -319,6 +319,9 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 		parts := []any{}
 		flush := func() {
 			if len(parts) > 0 || len(converted.ToolCalls) > 0 || len(converted.Reasoning) > 0 {
+				if !slices.Contains(converted.AnthropicDocumentCitations, true) {
+					converted.AnthropicDocumentCitations = nil
+				}
 				converted.Content = parts
 				result.Messages = append(result.Messages, converted)
 				converted = openai.Message{Role: message.Role}
@@ -401,14 +404,15 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 				parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": data}})
 			case "document":
 				var block struct {
-					Type   string `json:"type"`
-					Source struct {
+					Type      string             `json:"type"`
+					Citations *messagesCitations `json:"citations,omitempty"`
+					Source    struct {
 						Type      string `json:"type"`
 						MediaType string `json:"media_type"`
 						Data      string `json:"data"`
 					} `json:"source"`
 				}
-				if err := decodeMessagesValue(raw, &block); err != nil || block.Source.Type != "base64" || block.Source.MediaType != "application/pdf" || message.Role != "user" {
+				if err := decodeMessagesValue(raw, &block); err != nil || block.Source.Type != "base64" || block.Source.MediaType != "application/pdf" || message.Role != "user" || block.Citations != nil && !block.Citations.Enabled {
 					return result, errors.New("only base64 user PDF document blocks are supported")
 				}
 				file := map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64," + block.Source.Data, "filename": "input.pdf"}
@@ -416,6 +420,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 					return result, err
 				}
 				parts = append(parts, file)
+				converted.AnthropicDocumentCitations = append(converted.AnthropicDocumentCitations, block.Citations != nil)
 			case "tool_use":
 				var block struct {
 					Type  string         `json:"type"`

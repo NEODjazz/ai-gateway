@@ -68,6 +68,18 @@ func TestMessagesConvertsBoundedPDFDocument(t *testing.T) {
 	}
 }
 
+func TestMessagesPreservesPDFDocumentCitations(t *testing.T) {
+	request := messagesRequest{Model: "model", MaxTokens: 20, Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"citations":{"enabled":true}}]`)}}}
+	chat, err := request.chat()
+	if err != nil || len(chat.Messages) != 1 || !slices.Equal(chat.Messages[0].AnthropicDocumentCitations, []bool{true}) {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	request.Messages[0].Content = json.RawMessage(`[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"citations":{"enabled":false}}]`)
+	if _, err := request.chat(); err == nil {
+		t.Fatal("disabled document citations accepted")
+	}
+}
+
 func TestMessagesAcceptsExplicitZeroMaxTokens(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg-cache", Model: "model", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: ""}, FinishReason: "length"}}, Usage: openai.Usage{PromptTokens: 5, CompletionTokens: 0, TotalTokens: 5}}}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))

@@ -131,6 +131,8 @@ type Message struct {
 	// NativeContent is an internal, validated response representation used by
 	// protocol adapters that must preserve provider-native content block order.
 	NativeContent []json.RawMessage `json:"-"`
+	// AnthropicDocumentCitations aligns native citation controls with input_file parts.
+	AnthropicDocumentCitations []bool `json:"-"`
 	// GeminiCodeExecutionParts preserves validated native execution output order.
 	GeminiCodeExecutionParts []GeminiCodeExecutionPart `json:"-"`
 }
