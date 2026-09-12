@@ -713,3 +713,10 @@ the previously supported containers. Generic Ogg and MP4 detector results are
 matched to their explicit file extensions only after container signature
 validation. Native aliases are normalized to documented MIME types before the
 provider call. Raw formats that require sample metadata remain rejected.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-2d6f670` with image ID
+`sha256:18ff761547dbd5eef7cd7789475b285014e4aa03eff47921329a4385a9c9558b`.
+Helm revision 431 completed successfully, and pod
+`ai-gateway-gateway-79d9f68ff4-rc9rq` became Ready with zero restarts. The live
+endpoint served OpenAPI 0.1.331 with the expanded format list. A signature-valid
+AAC multipart request reached authentication and returned 401.
