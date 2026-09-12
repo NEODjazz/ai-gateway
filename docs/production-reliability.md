@@ -1505,3 +1505,23 @@ capability endpoint exposed only Chat, Completions, Responses, Embeddings,
 streaming, tools, structured output and model-dependent multimodal input, and an
 unauthenticated Models request returned 401. No provider credential or external
 inference was used by the smoke checks.
+
+Source `96de24a` routes incoming Messages requests to the native NVIDIA NIM
+Messages endpoint while ordinary Chat Completions remain on their compatible
+endpoint. Native Messages streaming and count-tokens reuse the shared policy,
+admission, retry, health and accounting lifecycle. Exact and semantic cache
+scopes now include the incoming API contract so equivalent Chat and Messages
+payloads cannot reuse results across wire protocols. Regressions cover JSON and
+SSE conversion, bearer propagation, exact provider token counts, router
+selection and cache isolation. The full Go suite, full race suite, vet and build
+passed. Contract commit `657cfc1` publishes the expanded adapter in OpenAPI
+0.1.373.
+
+Rancher Desktop built `ai-gateway-gateway:native-messages-657cfc1` with image ID
+`sha256:f51879fecb23e8a2bd4a6215bb8167a3dadd8866ac284cb2d9df798447eba9cf`.
+Gateway Helm revision 478 completed successfully; only the top-level image tag
+changed from revision 477. Pod `ai-gateway-gateway-6df4745965-4fc9p` became Ready
+with zero restarts and the same image ID. In-pod health succeeded, OpenAPI
+reported 0.1.373, the deployed NVIDIA NIM profile included `count_tokens`, and
+an unauthenticated Models request returned 401. No provider credential or
+external inference was used by the smoke checks.
