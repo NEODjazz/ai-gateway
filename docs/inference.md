@@ -99,6 +99,16 @@ when the public default is used. MP3, WAV and PCM responses are limited to
 validation. Instructions, speed, unsupported formats and SSE fail before HTTP.
 Successful requests settle the exact Unicode character count already recorded
 by the shared audio-speech lifecycle.
+
+Together Audio Transcription uses native multipart `/v1/audio/transcriptions`
+with bearer authentication. It accepts lowercase ISO 639-1 or `auto` language,
+JSON or verbose JSON, temperature, and word/segment timestamps. WAV, FLAC,
+OGG/Opus, MP3, M4A/MP4 and WebM inputs are admitted only when their container
+metadata yields a positive duration of at most four hours. The adapter injects
+that exact duration into a bounded, validated upstream response before shared
+billing settlement. AAC, prompt bias without a model-specific policy,
+diarization that cannot preserve speaker IDs, and batch or streaming controls
+fail before HTTP.
 Requests require one of `search_document`, `search_query`, `classification` or
 `clustering` in `input_type` and accept at most 96 non-empty texts. Token-ID
 input and `user` are rejected before the upstream call. `dimensions` maps to
@@ -382,7 +392,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `deepseek` | Chat/stream and Responses with provider-specific validation and reasoning history passthrough |
 | `cerebras` | Chat/stream with bearer authentication, model discovery, function tools, JSON Schema output, reasoning/logprobs/service-tier validation and normalized reasoning content; unsupported fields fail before upstream execution |
 | `nvidia-nim` | Chat/stream, native Messages/stream and count-tokens, legacy Completions, Responses create/stream/retrieve/cancel and Embeddings with optional bearer authentication and model discovery; stored response lifecycle uses the original deployment ownership binding, Chat and Messages use isolated cache scopes, and model-dependent multimodal input is enabled per deployment |
-| `together` | Chat/stream, legacy Completions, Embeddings, native Rerank, bounded Text-to-Speech and model discovery with bearer authentication; Rerank requires exact provider usage, Text-to-Speech uses exact character settlement, tools, structured output and vision are capability-gated, and unsupported Responses or silently ignored parameters fail before upstream execution |
+| `together` | Chat/stream, legacy Completions, Embeddings, native Rerank, duration-accounted Audio Transcription, bounded Text-to-Speech and model discovery with bearer authentication; Rerank requires exact provider usage, audio uses exact duration or character settlement, tools, structured output and vision are capability-gated, and unsupported Responses or silently ignored parameters fail before upstream execution |
 | `xai` | Chat/stream, Responses and Embeddings with bearer authentication, merged text/embedding model discovery, structured output, vision, web search, response compaction and owned retrieve/input-items/delete lifecycle; priority tier, bounded reasoning/logprobs validation, float/base64 vectors and exact embedding token usage |
 | `demo` | Локальный deterministic fallback для разработки |
 
