@@ -600,3 +600,13 @@ and pod `ai-gateway-gateway-85d76b6c66-wf5jj` became Ready with zero restarts.
 The live OpenAPI 0.1.323 contract exposes the transcription stream flag and all
 three event schemas; live multipart validation rejected streaming Audio
 Translation with `invalid_request` before authentication or provider execution.
+
+Source `6795aff` adds bounded Text-to-Speech SSE streaming with strict base64
+audio delta validation, terminal exact usage, pre-first-event fallback and
+post-response settlement. Rancher Desktop built
+`ai-gateway-gateway:gaps-6795aff`; Helm revision 424 completed successfully,
+and pod `ai-gateway-gateway-646df8f87-g5vx6` became Ready with zero restarts.
+The live OpenAPI 0.1.324 contract exposes both speech event schemas and explicit
+per-adapter `sse_supported`; live requests accepted `stream_format=sse` into the
+authentication lifecycle and rejected an unknown stream format with
+`invalid_request` before authentication or provider execution.
