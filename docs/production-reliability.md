@@ -443,3 +443,9 @@ Rancher Desktop built `ai-gateway-gateway:gaps-70a73d1`. Helm revision 400
 completed successfully with the stored release values, and pod
 `ai-gateway-gateway-5bb6f69d6b-bzhwd` became Ready with zero restarts on that
 image.
+
+Source `2e5d04c` adds validator-derived Embeddings and Rerank capability
+profiles. Rancher Desktop built `ai-gateway-gateway:gaps-2e5d04c`; Helm revision
+401 completed successfully, and pod `ai-gateway-gateway-6f8f5dd8-9skzf` became
+Ready with zero restarts. The live admin endpoint returned the expected distinct
+input and option profiles for Demo, OpenRouter, Cohere and Voyage.
