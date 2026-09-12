@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.279
+  version: 0.1.280
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1102,7 +1102,7 @@ paths:
       parameters:
         - {name: after, in: query, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
-        - {name: order, in: query, schema: {type: string, enum: [desc], default: desc}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
       responses:
         '200': {description: Owner-scoped video page, content: {application/json: {schema: {$ref: '#/components/schemas/VideoList'}}}}
         default: {description: "Authentication, validation, provider, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}

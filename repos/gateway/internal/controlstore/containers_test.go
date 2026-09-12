@@ -44,7 +44,7 @@ func TestPostgresContainerOwnershipLifecycleIntegration(t *testing.T) {
 	if updated, err := store.UpdateContainerRecord(t.Context(), record.OwnerKey, container); err != nil || updated.Container.Status != "expired" {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
-	page, next, err := store.ListContainerRecords(t.Context(), record.OwnerKey, 1, "")
+	page, next, err := store.ListContainerRecords(t.Context(), record.OwnerKey, containerstate.ListOptions{Limit: 1, Order: "desc"})
 	if err != nil || len(page) != 1 || next != "" {
 		t.Fatalf("page=%+v next=%q err=%v", page, next, err)
 	}
@@ -58,13 +58,21 @@ func TestPostgresContainerOwnershipLifecycleIntegration(t *testing.T) {
 	if _, err = store.CreateContainerRecord(t.Context(), pageRecord, 2); err != nil {
 		t.Fatal(err)
 	}
-	firstPage, next, err := store.ListContainerRecords(t.Context(), pageRecord.OwnerKey, 1, "")
+	firstPage, next, err := store.ListContainerRecords(t.Context(), pageRecord.OwnerKey, containerstate.ListOptions{Limit: 1, Order: "desc"})
 	if err != nil || len(firstPage) != 1 || next == "" {
 		t.Fatalf("first page=%+v next=%q err=%v", firstPage, next, err)
 	}
-	secondPage, secondNext, err := store.ListContainerRecords(t.Context(), pageRecord.OwnerKey, 1, next)
+	secondPage, secondNext, err := store.ListContainerRecords(t.Context(), pageRecord.OwnerKey, containerstate.ListOptions{Limit: 1, After: next, Order: "desc"})
 	if err != nil || len(secondPage) != 1 || secondNext != "" || secondPage[0].Container.ID == firstPage[0].Container.ID {
 		t.Fatalf("second page=%+v next=%q err=%v", secondPage, secondNext, err)
+	}
+	ascending, ascendingNext, err := store.ListContainerRecords(t.Context(), pageRecord.OwnerKey, containerstate.ListOptions{Limit: 1, Order: "asc"})
+	if err != nil || len(ascending) != 1 || ascendingNext == "" || ascending[0].Container.ID != secondPage[0].Container.ID {
+		t.Fatalf("ascending page=%+v next=%q err=%v", ascending, ascendingNext, err)
+	}
+	ascendingSecond, ascendingSecondNext, err := store.ListContainerRecords(t.Context(), pageRecord.OwnerKey, containerstate.ListOptions{Limit: 1, After: ascendingNext, Order: "asc"})
+	if err != nil || len(ascendingSecond) != 1 || ascendingSecondNext != "" || ascendingSecond[0].Container.ID != firstPage[0].Container.ID {
+		t.Fatalf("ascending second page=%+v next=%q err=%v", ascendingSecond, ascendingSecondNext, err)
 	}
 	if err = store.DeleteContainerRecord(t.Context(), "owner-c", record.Container.ID); !errors.Is(err, containerstate.ErrNotFound) {
 		t.Fatalf("cross-owner delete err=%v", err)

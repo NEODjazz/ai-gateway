@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -59,7 +60,7 @@ func (s *memoryContainerStore) GetContainerRecord(_ context.Context, owner, id s
 	}
 	return record, nil
 }
-func (s *memoryContainerStore) ListContainerRecords(_ context.Context, owner string, limit int, _ string) ([]containerstate.Record, string, error) {
+func (s *memoryContainerStore) ListContainerRecords(_ context.Context, owner string, options containerstate.ListOptions) ([]containerstate.Record, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := []containerstate.Record{}
@@ -68,8 +69,33 @@ func (s *memoryContainerStore) ListContainerRecords(_ context.Context, owner str
 			result = append(result, record)
 		}
 	}
-	if len(result) > limit {
-		return result[:limit], result[limit-1].Container.ID, nil
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].CreatedAt.Equal(result[j].CreatedAt) {
+			if options.Order == "asc" {
+				return result[i].Container.ID < result[j].Container.ID
+			}
+			return result[i].Container.ID > result[j].Container.ID
+		}
+		if options.Order == "asc" {
+			return result[i].CreatedAt.Before(result[j].CreatedAt)
+		}
+		return result[i].CreatedAt.After(result[j].CreatedAt)
+	})
+	if options.After != "" {
+		found := false
+		for index := range result {
+			if result[index].Container.ID == options.After {
+				result = result[index+1:]
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, "", containerstate.ErrNotFound
+		}
+	}
+	if len(result) > options.Limit {
+		return result[:options.Limit], result[options.Limit-1].Container.ID, nil
 	}
 	return result, "", nil
 }
@@ -208,6 +234,21 @@ func TestContainerOwnedLifecycleAndBilling(t *testing.T) {
 	}
 	if strings.Join(runtime.actions, ",") != "create,retrieve,delete" || len(store.records) != 0 {
 		t.Fatalf("actions=%v records=%v", runtime.actions, store.records)
+	}
+}
+
+func TestContainerListSupportsAscendingCursorPagination(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	base := time.Now()
+	store := &memoryContainerStore{records: map[string]containerstate.Record{
+		containerKey(owner, "cntr_a"): {OwnerKey: owner, Container: openai.Container{ID: "cntr_a"}, CreatedAt: base},
+		containerKey(owner, "cntr_b"): {OwnerKey: owner, Container: openai.Container{ID: "cntr_b"}, CreatedAt: base.Add(time.Second)},
+	}}
+	handler := containerTestHandler(store, &gatewayContainerProvider{batchProvider: &batchProvider{models: []string{"model-a"}}}, nil)
+	first := containerRequest(t, handler, http.MethodGet, "/v1/containers?limit=1&order=asc", "")
+	second := containerRequest(t, handler, http.MethodGet, "/v1/containers?limit=1&order=asc&after=cntr_a", "")
+	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"id":"cntr_a"`) || !strings.Contains(first.Body.String(), `"has_more":true`) || second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"id":"cntr_b"`) || strings.Contains(second.Body.String(), `"has_more":true`) {
+		t.Fatalf("first=%d/%s second=%d/%s", first.Code, first.Body.String(), second.Code, second.Body.String())
 	}
 }
 

@@ -25,10 +25,16 @@ type Record struct {
 	UpdatedAt time.Time
 }
 
+type ListOptions struct {
+	Limit int
+	After string
+	Order string
+}
+
 type Store interface {
 	CreateContainerRecord(context.Context, Record, int) (Record, error)
 	GetContainerRecord(context.Context, string, string) (Record, error)
-	ListContainerRecords(context.Context, string, int, string) ([]Record, string, error)
+	ListContainerRecords(context.Context, string, ListOptions) ([]Record, string, error)
 	UpdateContainerRecord(context.Context, string, openai.Container) (Record, error)
 	DeleteContainerRecord(context.Context, string, string) error
 }

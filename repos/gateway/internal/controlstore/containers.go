@@ -89,18 +89,18 @@ func getContainerRecord(ctx context.Context, q fineTuningQuerier, owner, id stri
 	return record, nil
 }
 
-func (s *PostgresStore) ListContainerRecords(ctx context.Context, owner string, limit int, after string) ([]containerstate.Record, string, error) {
+func (s *PostgresStore) ListContainerRecords(ctx context.Context, owner string, options containerstate.ListOptions) ([]containerstate.Record, string, error) {
 	if s == nil || s.pool == nil {
 		return nil, "", containerstate.ErrUnavailable
 	}
-	if owner == "" || limit < 1 || limit > 100 {
+	if owner == "" || options.Limit < 1 || options.Limit > 100 || options.Order != "asc" && options.Order != "desc" {
 		return nil, "", containerstate.ErrInvalid
 	}
 	var cursor *time.Time
 	var cursorID string
-	if after != "" {
+	if options.After != "" {
 		var created time.Time
-		err := s.pool.QueryRow(ctx, `SELECT created_at,container_id FROM gateway_containers WHERE owner_key=$1 AND container_id=$2`, owner, after).Scan(&created, &cursorID)
+		err := s.pool.QueryRow(ctx, `SELECT created_at,container_id FROM gateway_containers WHERE owner_key=$1 AND container_id=$2`, owner, options.After).Scan(&created, &cursorID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, "", containerstate.ErrNotFound
 		}
@@ -109,12 +109,16 @@ func (s *PostgresStore) ListContainerRecords(ctx context.Context, owner string, 
 		}
 		cursor = &created
 	}
-	rows, err := s.pool.Query(ctx, `SELECT container_id,endpoint,model,deployment,snapshot,created_at,updated_at FROM gateway_containers WHERE owner_key=$1 AND ($2::timestamptz IS NULL OR (created_at,container_id)<($2,$3)) ORDER BY created_at DESC,container_id DESC LIMIT $4`, owner, cursor, cursorID, limit+1)
+	query := `SELECT container_id,endpoint,model,deployment,snapshot,created_at,updated_at FROM gateway_containers WHERE owner_key=$1 AND ($2::timestamptz IS NULL OR (created_at,container_id)<($2,$3)) ORDER BY created_at DESC,container_id DESC LIMIT $4`
+	if options.Order == "asc" {
+		query = `SELECT container_id,endpoint,model,deployment,snapshot,created_at,updated_at FROM gateway_containers WHERE owner_key=$1 AND ($2::timestamptz IS NULL OR (created_at,container_id)>($2,$3)) ORDER BY created_at ASC,container_id ASC LIMIT $4`
+	}
+	rows, err := s.pool.Query(ctx, query, owner, cursor, cursorID, options.Limit+1)
 	if err != nil {
 		return nil, "", err
 	}
 	defer rows.Close()
-	result := make([]containerstate.Record, 0, limit+1)
+	result := make([]containerstate.Record, 0, options.Limit+1)
 	for rows.Next() {
 		var record containerstate.Record
 		var payload []byte
@@ -131,9 +135,9 @@ func (s *PostgresStore) ListContainerRecords(ctx context.Context, owner string, 
 		return nil, "", err
 	}
 	next := ""
-	if len(result) > limit {
-		next = result[limit-1].Container.ID
-		result = result[:limit]
+	if len(result) > options.Limit {
+		next = result[options.Limit-1].Container.ID
+		result = result[:options.Limit]
 	}
 	return result, next, nil
 }

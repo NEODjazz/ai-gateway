@@ -178,11 +178,11 @@ func (h Handler) ListContainers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit, after, ok := containerListOptions(w, r)
+	options, ok := containerListOptions(w, r)
 	if !ok {
 		return
 	}
-	records, next, err := h.containers.ListContainerRecords(r.Context(), owner, limit, after)
+	records, next, err := h.containers.ListContainerRecords(r.Context(), owner, options)
 	if err != nil {
 		writeContainerStoreError(w, err)
 		return
@@ -298,32 +298,35 @@ func (h Handler) containerRecord(w http.ResponseWriter, r *http.Request, owner s
 	return record, true
 }
 
-func containerListOptions(w http.ResponseWriter, r *http.Request) (int, string, bool) {
+func containerListOptions(w http.ResponseWriter, r *http.Request) (containerstate.ListOptions, bool) {
 	q := r.URL.Query()
 	for key, values := range q {
 		if (key != "after" && key != "limit" && key != "order") || len(values) != 1 {
 			writeError(w, http.StatusBadRequest, "invalid_request", "unsupported or repeated query parameter "+key)
-			return 0, "", false
+			return containerstate.ListOptions{}, false
 		}
 	}
-	after, order, limit := q.Get("after"), q.Get("order"), 20
-	if after != "" && !validFileToken(after, 128) {
-		writeError(w, http.StatusBadRequest, "invalid_request", "after is invalid")
-		return 0, "", false
+	options := containerstate.ListOptions{After: q.Get("after"), Limit: 20, Order: q.Get("order")}
+	if options.Order == "" {
+		options.Order = "desc"
 	}
-	if order != "" && order != "desc" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "only descending order is supported")
-		return 0, "", false
+	if options.After != "" && !validFileToken(options.After, 128) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "after is invalid")
+		return containerstate.ListOptions{}, false
+	}
+	if options.Order != "asc" && options.Order != "desc" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "order must be asc or desc")
+		return containerstate.ListOptions{}, false
 	}
 	if raw := q.Get("limit"); raw != "" {
 		value, err := strconv.Atoi(raw)
 		if err != nil || value < 1 || value > 100 {
 			writeError(w, http.StatusBadRequest, "invalid_request", "limit must be between 1 and 100")
-			return 0, "", false
+			return containerstate.ListOptions{}, false
 		}
-		limit = value
+		options.Limit = value
 	}
-	return limit, after, true
+	return options, true
 }
 
 func writeContainerStoreError(w http.ResponseWriter, err error) {
