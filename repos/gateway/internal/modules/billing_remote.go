@@ -198,6 +198,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.APIType = "search"
 	case "ocr":
 		request.APIType = "ocr"
+	case "sandbox":
+		request.APIType = "sandbox"
 	case "mcp_tools_list":
 		request.APIType = "mcp_tools_list"
 	case "mcp_tools_call":
@@ -340,6 +342,17 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.InputPages = req.InputPages
 		request.UsageEstimated = true
 	}
+	if req.SandboxRequest != nil {
+		request.Provider = req.SandboxRequest.Provider
+		request.Model = req.SandboxRequest.Model
+		request.APIType = "sandbox"
+		request.InputTokens = req.SandboxRequest.InputTokens()
+		request.PromptTokensEstimated = request.InputTokens
+		request.OutputTokens = 0
+		request.TotalTokens = request.InputTokens
+		request.InputCharacters = len(req.SandboxRequest.Code)
+		request.UsageEstimated = true
+	}
 	if req.Response != nil {
 		request.Phase = "commit"
 		request.InputTokens = req.Response.Usage.PromptTokens
@@ -353,6 +366,14 @@ func billingRequest(req *RequestContext) UsageRequest {
 		if details := req.Response.Usage.PromptTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
 			request.CacheWriteInputTokens = nonNegative(firstNonZero(details.CacheWriteTokens, details.CacheCreationTokens))
+		}
+		if req.SandboxRequest != nil {
+			request.InputTokens = req.SandboxRequest.InputTokens()
+			request.PromptTokensEstimated = request.InputTokens
+			request.OutputTokens = 0
+			request.TotalTokens = request.InputTokens
+			request.InputCharacters = len(req.SandboxRequest.Code)
+			request.UsageEstimated = true
 		}
 	}
 	if req.CompletionResponse != nil {

@@ -43,6 +43,10 @@ type InteractionProvider interface {
 	Interactions(context.Context, modules.RequestContext, openai.InteractionRequest) (openai.InteractionResponse, error)
 }
 
+type SandboxProvider interface {
+	ExecuteSandbox(context.Context, modules.RequestContext) (openai.SandboxExecutionResult, error)
+}
+
 type InteractionClient interface {
 	Interactions(context.Context, openai.InteractionRequest) (openai.InteractionResponse, error)
 }
@@ -1929,6 +1933,10 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		ocrRequest := *req.OCRRequest
 		attemptCtx.OCRRequest = &ocrRequest
 	}
+	if req.SandboxRequest != nil {
+		sandboxRequest := *req.SandboxRequest
+		attemptCtx.SandboxRequest = &sandboxRequest
+	}
 	attemptCtx.Response = nil
 	attemptCtx.CompletionResponse = nil
 	attemptCtx.ResponsesResponse = nil
@@ -2000,6 +2008,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		if attemptCtx.OCRRequest != nil {
 			attemptCtx.OCRRequest.Model = routingModel
 		}
+		if attemptCtx.SandboxRequest != nil {
+			attemptCtx.SandboxRequest.Model = routingModel
+		}
 		attemptCtx.Metadata["provider.original_model"] = originalModel
 		attemptCtx.Metadata["provider.routed_model"] = routingModel
 		attemptCtx.Metadata["provider.fallback_type"] = endpoint.FallbackType
@@ -2042,6 +2053,9 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 		}
 		if attemptCtx.OCRRequest != nil {
 			attemptCtx.OCRRequest.Model = upstreamModel
+		}
+		if attemptCtx.SandboxRequest != nil {
+			attemptCtx.SandboxRequest.Model = upstreamModel
 		}
 		attemptCtx.Metadata["provider.requested_model"] = requestedModel
 		attemptCtx.Metadata["provider.upstream_model"] = upstreamModel

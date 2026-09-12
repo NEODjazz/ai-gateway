@@ -66,6 +66,7 @@ type RequestContext struct {
 	SearchResponse             *openai.SearchResponse             `json:"search_response,omitempty"`
 	OCRRequest                 *openai.OCRRequest                 `json:"ocr_request,omitempty"`
 	OCRResponse                *openai.OCRResponse                `json:"ocr_response,omitempty"`
+	SandboxRequest             *openai.SandboxExecuteRequest      `json:"sandbox_request,omitempty"`
 	Usage                      *openai.Usage                      `json:"usage,omitempty"`
 	Metadata                   map[string]string                  `json:"metadata,omitempty"`
 	AnonymizationValues        map[string]string                  `json:"anonymization_values,omitempty"`

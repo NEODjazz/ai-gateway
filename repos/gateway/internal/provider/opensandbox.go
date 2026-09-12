@@ -16,32 +16,13 @@ import (
 )
 
 const (
-	defaultSandboxTemplate = "opensandbox/code-interpreter:v1.1.0"
-	defaultSandboxTimeout  = 300
-	maxSandboxOutputBytes  = 10 << 20
-	maxSandboxMetadata     = 1 << 20
-	sandboxExecPort        = 44772
+	maxSandboxOutputBytes = 10 << 20
+	maxSandboxMetadata    = 1 << 20
+	sandboxExecPort       = 44772
 )
 
-type SandboxExecuteRequest struct {
-	Code                string
-	Language            string
-	Template            string
-	TimeoutSeconds      int
-	AllowInternetAccess bool
-}
-
-type SandboxExecutionResult struct {
-	Stdout         string           `json:"stdout"`
-	Stderr         string           `json:"stderr"`
-	Results        []map[string]any `json:"results"`
-	Error          map[string]any   `json:"error,omitempty"`
-	ExecutionCount *int             `json:"execution_count,omitempty"`
-	Object         string           `json:"object"`
-}
-
 type SandboxClient interface {
-	ExecuteSandbox(context.Context, SandboxExecuteRequest) (SandboxExecutionResult, error)
+	ExecuteSandbox(context.Context, openai.SandboxExecuteRequest) (openai.SandboxExecutionResult, error)
 }
 
 type OpenSandbox struct {
@@ -69,9 +50,9 @@ func sandboxUnsupported(operation string) error {
 	return &Error{Class: FailureClientRequest, Provider: "opensandbox", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_operation", Err: fmt.Errorf("%s are not supported by this adapter", operation)}
 }
 
-func (p OpenSandbox) ExecuteSandbox(ctx context.Context, request SandboxExecuteRequest) (result SandboxExecutionResult, err error) {
-	if err = validateSandboxExecuteRequest(request); err != nil {
-		return result, &Error{Class: FailureClientRequest, Provider: "opensandbox", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: err}
+func (p OpenSandbox) ExecuteSandbox(ctx context.Context, request openai.SandboxExecuteRequest) (result openai.SandboxExecutionResult, err error) {
+	if message := request.Validate(); message != "" {
+		return result, &Error{Class: FailureClientRequest, Provider: "opensandbox", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
 	sandboxID, err := p.createSandbox(ctx, request)
 	if err != nil {
@@ -94,19 +75,7 @@ func (p OpenSandbox) ExecuteSandbox(ctx context.Context, request SandboxExecuteR
 	return p.runSandboxCode(ctx, endpoint, headers, request)
 }
 
-func validateSandboxExecuteRequest(request SandboxExecuteRequest) error {
-	if request.Code == "" || len(request.Code) > 1<<20 || request.Language == "" || len(request.Language) > 32 || request.Template == "" || len(request.Template) > 512 || request.TimeoutSeconds < 1 || request.TimeoutSeconds > 900 {
-		return errors.New("invalid sandbox execution request")
-	}
-	for _, value := range []string{request.Language, request.Template} {
-		if strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n\x00") {
-			return errors.New("invalid sandbox execution request")
-		}
-	}
-	return nil
-}
-
-func (p OpenSandbox) createSandbox(ctx context.Context, request SandboxExecuteRequest) (string, error) {
+func (p OpenSandbox) createSandbox(ctx context.Context, request openai.SandboxExecuteRequest) (string, error) {
 	body := map[string]any{
 		"image":          map[string]string{"uri": request.Template},
 		"entrypoint":     []string{"/opt/code-interpreter/code-interpreter.sh"},
@@ -193,34 +162,34 @@ func (p OpenSandbox) validateExecutionEndpoint(raw string) (string, error) {
 	return strings.TrimRight(endpoint.String(), "/"), nil
 }
 
-func (p OpenSandbox) runSandboxCode(ctx context.Context, endpoint string, headers map[string]string, request SandboxExecuteRequest) (SandboxExecutionResult, error) {
+func (p OpenSandbox) runSandboxCode(ctx context.Context, endpoint string, headers map[string]string, request openai.SandboxExecuteRequest) (openai.SandboxExecutionResult, error) {
 	payload, err := json.Marshal(map[string]any{"code": request.Code, "context": map[string]string{"language": request.Language}})
 	if err != nil {
-		return SandboxExecutionResult{}, err
+		return openai.SandboxExecutionResult{}, err
 	}
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/code", bytes.NewReader(payload))
 	if err != nil {
-		return SandboxExecutionResult{}, err
+		return openai.SandboxExecutionResult{}, err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Accept", "text/event-stream")
 	for name, value := range headers {
 		if !validSandboxHeader(name, value) {
-			return SandboxExecutionResult{}, errors.New("sandbox provider returned invalid execution headers")
+			return openai.SandboxExecutionResult{}, errors.New("sandbox provider returned invalid execution headers")
 		}
 		httpRequest.Header.Set(name, value)
 	}
 	response, err := p.client.Do(httpRequest)
 	if err != nil {
-		return SandboxExecutionResult{}, err
+		return openai.SandboxExecutionResult{}, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return SandboxExecutionResult{}, responseStatusError("opensandbox", response)
+		return openai.SandboxExecutionResult{}, responseStatusError("opensandbox", response)
 	}
 	body, err := readSandboxBounded(response.Body, maxSandboxOutputBytes)
 	if err != nil {
-		return SandboxExecutionResult{}, err
+		return openai.SandboxExecutionResult{}, err
 	}
 	return decodeSandboxEvents(body)
 }
@@ -297,8 +266,8 @@ func validSandboxHeader(name, value string) bool {
 	return canonical != "" && canonical != "Cookie" && canonical != "Host" && canonical != "Connection" && canonical != "Transfer-Encoding" && len(value) <= 8192 && !strings.ContainsAny(value, "\r\n")
 }
 
-func decodeSandboxEvents(payload []byte) (SandboxExecutionResult, error) {
-	result := SandboxExecutionResult{Object: "code_execution", Results: []map[string]any{}}
+func decodeSandboxEvents(payload []byte) (openai.SandboxExecutionResult, error) {
+	result := openai.SandboxExecutionResult{Object: "code_execution", Results: []map[string]any{}}
 	for _, line := range bytes.Split(payload, []byte("\n")) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 || bytes.HasPrefix(line, []byte(":")) || bytes.HasPrefix(line, []byte("event:")) || bytes.HasPrefix(line, []byte("id:")) || bytes.HasPrefix(line, []byte("retry:")) {
@@ -339,5 +308,16 @@ func decodeSandboxEvents(payload []byte) (SandboxExecutionResult, error) {
 			}
 		}
 	}
-	return result, nil
+	return result, validateSandboxExecutionResult(result)
+}
+
+func validateSandboxExecutionResult(result openai.SandboxExecutionResult) error {
+	if result.Object != "code_execution" || result.Results == nil {
+		return errors.New("sandbox provider returned an invalid execution result")
+	}
+	payload, err := json.Marshal(result)
+	if err != nil || len(payload) > maxSandboxOutputBytes {
+		return errors.New("sandbox provider returned an invalid execution result")
+	}
+	return nil
 }

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.282
+  version: 0.1.283
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1775,6 +1775,29 @@ paths:
               schema: {$ref: '#/components/schemas/SearchResponse'}
         default:
           description: Gateway or provider error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/sandbox/execute:
+    post:
+      operationId: executeSandboxCode
+      tags: [Inference]
+      summary: Execute code in an ephemeral isolated runtime
+      description: Applies authentication, model and access-group policy, input content controls, RPM/TPM admission, deployment routing, retries, billing settlement and bounded output validation. The native adapter creates a runtime with network access denied by default, waits for readiness, executes one code block, limits the provider response to 10 MiB and attempts deletion with an independent cleanup deadline on every exit path. Execution endpoints outside the configured provider domain are rejected.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SandboxExecuteRequest'}
+      responses:
+        '200':
+          description: Bounded code execution result after runtime cleanup
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SandboxExecutionResult'}
+        default:
+          description: Authentication, policy, quota, routing, provider, cleanup, or validation failure
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -5139,6 +5162,29 @@ components:
           description: Owner-scoped gateway files copied through the selected container deployment.
         memory_limit: {type: string, enum: [1g, 4g, 16g, 64g]}
         network_policy: {$ref: '#/components/schemas/ContainerNetworkPolicyRequest'}
+    SandboxExecuteRequest:
+      type: object
+      additionalProperties: false
+      required: [model, code]
+      properties:
+        provider: {type: string, maxLength: 128}
+        model: {type: string, minLength: 1, maxLength: 256}
+        code: {type: string, minLength: 1, maxLength: 1048576}
+        language: {type: string, minLength: 1, maxLength: 32, default: python}
+        template: {type: string, minLength: 1, maxLength: 512, default: 'opensandbox/code-interpreter:v1.1.0'}
+        timeout_seconds: {type: integer, minimum: 1, maximum: 900, default: 300}
+        allow_internet_access: {type: boolean, default: false}
+    SandboxExecutionResult:
+      type: object
+      additionalProperties: false
+      required: [object, stdout, stderr, results]
+      properties:
+        object: {type: string, const: code_execution}
+        stdout: {type: string}
+        stderr: {type: string}
+        results: {type: array, items: {type: object, additionalProperties: true}}
+        error: {type: object, additionalProperties: true}
+        execution_count: {type: integer, minimum: 0}
     Container:
       type: object
       required: [id, object, created_at, status, name]

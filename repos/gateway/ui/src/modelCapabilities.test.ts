@@ -32,6 +32,7 @@ describe("modelCapabilityOptions", () => {
       "container",
       "container_files",
       "container_network",
+      "sandbox",
       "realtime",
       "stream",
       "tools",
@@ -60,6 +61,7 @@ describe("modelCapabilityOptions", () => {
     expect(defaultModelCapabilities("ollama")).toEqual(["chat", "responses", "embeddings", "stream"]);
     expect(defaultModelCapabilities("anthropic")).toEqual(["chat", "responses", "stream"]);
     expect(defaultModelCapabilities("openrouter")).toEqual(["chat", "responses", "stream"]);
+    expect(defaultModelCapabilities("opensandbox")).toEqual(["sandbox"]);
   });
 
   it("filters operations and features against the adapter profile", () => {

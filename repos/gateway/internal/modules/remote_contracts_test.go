@@ -899,3 +899,30 @@ func TestRemoteBillingEmbeddingsUsesExactTokenIDCount(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRemoteBillingSandboxContractContainsOnlyCounters(t *testing.T) {
+	request := openai.SandboxExecuteRequest{Provider: "runtime", Model: "python", Code: "print('private value')", Language: "python", Template: openai.DefaultSandboxTemplate, TimeoutSeconds: 30}
+	req := sensitiveContext()
+	req.Request = openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model, Messages: []openai.Message{{Role: "user", Content: request.Code}}}
+	req.SandboxRequest = &request
+	req.InputCharacters = len(request.Code)
+	req.Metadata = map[string]string{"gateway.api_type": "sandbox"}
+
+	reserved := billingRequest(&req)
+	if reserved.Phase != "reserve" || reserved.APIType != "sandbox" || reserved.Provider != "runtime" || reserved.Model != "python" || reserved.InputTokens != request.InputTokens() || reserved.OutputTokens != 0 || reserved.TotalTokens != request.InputTokens() || reserved.InputCharacters != len(request.Code) || !reserved.UsageEstimated {
+		t.Fatalf("unexpected sandbox reserve: %+v", reserved)
+	}
+	req.Response = &openai.ChatCompletionResponse{Model: "python-runtime", Usage: openai.Usage{}}
+	committed := billingRequest(&req)
+	if committed.Phase != "commit" || committed.APIType != "sandbox" || committed.UpstreamModel != "python-runtime" || committed.InputTokens != request.InputTokens() || committed.OutputTokens != 0 || committed.TotalTokens != request.InputTokens() || !committed.UsageEstimated {
+		t.Fatalf("unexpected sandbox commit: %+v", committed)
+	}
+
+	encoded, err := json.Marshal(committed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), request.Code) {
+		t.Fatal("billing received sandbox source code")
+	}
+}

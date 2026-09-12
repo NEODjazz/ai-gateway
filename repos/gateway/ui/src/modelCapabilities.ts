@@ -29,6 +29,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "container", label: "Containers", description: "Create and manage provider containers" },
   { value: "container_files", label: "Container files", description: "Upload and manage files in provider containers" },
   { value: "container_network", label: "Container network", description: "Apply provider-enforced container egress policies" },
+  { value: "sandbox", label: "Sandbox", description: "Execute code in an ephemeral isolated runtime" },
   { value: "realtime", label: "Realtime", description: "Bidirectional low-latency sessions" },
   { value: "stream", label: "Stream", description: "Streaming responses" },
   { value: "tools", label: "Tools", description: "Function and tool calling" },
@@ -53,6 +54,8 @@ export function providerModelCapabilityOptions(capabilities?: string[]): ChipOpt
 
 export function defaultModelCapabilities(providerType: string): string[] {
   switch (providerType) {
+    case "opensandbox":
+      return ["sandbox"];
     case "voyage":
       return ["embeddings"];
     case "bedrock":

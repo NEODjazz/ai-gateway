@@ -75,6 +75,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/v1/audio/transcriptions"}, func(h Handler) http.Handler { return http.HandlerFunc(h.TranscribeAudio) }},
 	{RouteContract{http.MethodPost, "/v1/audio/translations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.TranslateAudio) }},
 	{RouteContract{http.MethodPost, "/v1/audio/speech"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GenerateSpeech) }},
+	{RouteContract{http.MethodPost, "/v1/sandbox/execute"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ExecuteSandbox) }},
 	{RouteContract{http.MethodPost, "/v1/files"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateFile) }},
 	{RouteContract{http.MethodGet, "/v1/files"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListFiles) }},
 	{RouteContract{http.MethodGet, "/v1/files/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetFile) }},

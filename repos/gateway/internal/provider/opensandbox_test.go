@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"ai-gateway-gateway/internal/openai"
 )
 
 func TestOpenSandboxExecutesEphemeralLifecycleAndDeletesRuntime(t *testing.T) {
@@ -54,7 +56,7 @@ func TestOpenSandboxExecutesEphemeralLifecycleAndDeletesRuntime(t *testing.T) {
 	defer server.Close()
 
 	client := NewOpenSandbox(server.URL, "secret")
-	result, err := client.ExecuteSandbox(t.Context(), SandboxExecuteRequest{Code: "print(42)", Language: "python", Template: defaultSandboxTemplate, TimeoutSeconds: 20})
+	result, err := client.ExecuteSandbox(t.Context(), openai.SandboxExecuteRequest{Model: "code-interpreter", Code: "print(42)", Language: "python", Template: openai.DefaultSandboxTemplate, TimeoutSeconds: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,14 +88,14 @@ func TestOpenSandboxDeletesRuntimeAfterUnsafeExecutionEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := NewOpenSandbox(server.URL, "").ExecuteSandbox(t.Context(), SandboxExecuteRequest{Code: "x", Language: "python", Template: defaultSandboxTemplate, TimeoutSeconds: 1})
+	_, err := NewOpenSandbox(server.URL, "").ExecuteSandbox(t.Context(), openai.SandboxExecuteRequest{Model: "code-interpreter", Code: "x", Language: "python", Template: openai.DefaultSandboxTemplate, TimeoutSeconds: 1})
 	if err == nil || !strings.Contains(err.Error(), "outside the configured provider domain") || !deleted.Load() {
 		t.Fatalf("err=%v deleted=%v", err, deleted.Load())
 	}
 }
 
 func TestOpenSandboxBoundsOutputAndValidatesInputs(t *testing.T) {
-	if validateSandboxExecuteRequest(SandboxExecuteRequest{}) == nil {
+	if (openai.SandboxExecuteRequest{}).Validate() == "" {
 		t.Fatal("empty request accepted")
 	}
 	if _, err := readSandboxBounded(strings.NewReader(strings.Repeat("x", 11)), 10); err == nil {
