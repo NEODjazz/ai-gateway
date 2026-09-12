@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.275
+  version: 0.1.276
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1106,6 +1106,50 @@ paths:
       responses:
         '200': {description: Owner-scoped video page, content: {application/json: {schema: {$ref: '#/components/schemas/VideoList'}}}}
         default: {description: "Authentication, validation, provider, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/containers:
+    post:
+      operationId: createContainer
+      tags: [Inference]
+      summary: Create an owner-scoped provider container
+      description: Selects a deployment that explicitly enables container operations, reserves billing, creates the upstream resource, stores its owner and exact deployment binding durably, and commits billing before returning. Any failure after upstream creation compensates the upstream resource, local binding, and reservation. file_ids are rejected until owner-checked container file attachment is available.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ContainerCreateRequest'}}}
+      responses:
+        '200': {description: Created container, content: {application/json: {schema: {$ref: '#/components/schemas/Container'}}}}
+        default: {description: "Authentication, validation, authorization, billing, provider, quota, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    get:
+      operationId: listContainers
+      tags: [Inference]
+      summary: List durable container snapshots owned by the authenticated credential and user
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: after, in: query, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {name: order, in: query, schema: {type: string, enum: [desc], default: desc}}
+      responses:
+        '200': {description: Owner-scoped container page, content: {application/json: {schema: {$ref: '#/components/schemas/ContainerList'}}}}
+        default: {description: "Authentication, validation, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/containers/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
+    get:
+      operationId: retrieveContainer
+      tags: [Inference]
+      summary: Refresh an owned container through its pinned deployment
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Current container, content: {application/json: {schema: {$ref: '#/components/schemas/Container'}}}}
+        default: {description: "Authentication, ownership, provider, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    delete:
+      operationId: deleteContainer
+      tags: [Inference]
+      summary: Delete an owned provider container and its durable binding
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Deleted container, content: {application/json: {schema: {$ref: '#/components/schemas/ContainerDeletion'}}}}
+        default: {description: "Authentication, ownership, provider, or storage failure", content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /v1/videos/{id}:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
@@ -4930,6 +4974,56 @@ components:
         id: {type: string}
         object: {type: string, const: video.deleted}
         deleted: {type: boolean, const: true}
+    ContainerExpiresAfter:
+      type: object
+      additionalProperties: false
+      required: [anchor, minutes]
+      properties:
+        anchor: {type: string, const: last_active_at}
+        minutes: {type: integer, minimum: 1, maximum: 10080}
+    ContainerCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [model, name]
+      properties:
+        provider: {type: string, maxLength: 128}
+        model: {type: string, minLength: 1, maxLength: 256}
+        name: {type: string, minLength: 1, maxLength: 256}
+        expires_after: {$ref: '#/components/schemas/ContainerExpiresAfter'}
+        file_ids:
+          type: array
+          maxItems: 0
+          items: {type: string}
+          description: Reserved for the owner-checked container files API.
+        memory_limit: {type: string, enum: [1g, 4g, 16g, 64g]}
+    Container:
+      type: object
+      required: [id, object, created_at, status, last_active_at, memory_limit, name]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 128}
+        object: {type: string, const: container}
+        created_at: {type: integer, format: int64, minimum: 0}
+        status: {type: string, maxLength: 64}
+        expires_after: {$ref: '#/components/schemas/ContainerExpiresAfter'}
+        last_active_at: {type: integer, format: int64, minimum: 0}
+        memory_limit: {type: string, maxLength: 16}
+        name: {type: string, minLength: 1, maxLength: 256}
+    ContainerList:
+      type: object
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Container'}}
+        first_id: {type: string}
+        last_id: {type: string}
+        has_more: {type: boolean}
+    ContainerDeletion:
+      type: object
+      required: [id, object, deleted]
+      properties:
+        id: {type: string}
+        object: {type: string, const: container.deleted}
+        deleted: {type: boolean, const: true}
     FineTuningCreateRequest:
       type: object
       additionalProperties: false
@@ -6466,7 +6560,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -8592,12 +8686,12 @@ components:
           type: array
           uniqueItems: true
           description: Native operations implemented by the managed adapter. count_tokens is used by the inbound token-count endpoint and is not a deployment capability.
-          items: {type: string, enum: [chat, responses, interactions, count_tokens, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, realtime, stream, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, count_tokens, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, realtime, stream, bedrock_invoke]}
         capabilities:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

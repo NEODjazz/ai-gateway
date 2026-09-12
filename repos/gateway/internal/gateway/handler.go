@@ -16,6 +16,7 @@ import (
 	"ai-gateway-gateway/internal/assistantstate"
 	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/batchstate"
+	"ai-gateway-gateway/internal/containerstate"
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/finetunestate"
 	"ai-gateway-gateway/internal/mcpclient"
@@ -67,6 +68,7 @@ type Handler struct {
 	fineTuning        finetunestate.Store
 	fineTuningJobs    asyncstate.Store
 	videos            videostate.Store
+	containers        containerstate.Store
 	videoJobs         asyncstate.Store
 	batchJobs         asyncstate.Store
 	skills            skillstate.Store

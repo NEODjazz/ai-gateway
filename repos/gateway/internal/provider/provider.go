@@ -91,6 +91,18 @@ type VideoBinding struct {
 	Deployment string `json:"deployment"`
 }
 
+type ContainerBinding struct {
+	Endpoint   string `json:"endpoint"`
+	Model      string `json:"model"`
+	Deployment string `json:"deployment"`
+}
+
+type ContainerProvider interface {
+	CreateContainer(context.Context, modules.RequestContext, openai.ContainerCreateRequest, func(context.Context, *modules.RequestContext) error) (openai.Container, ContainerBinding, error)
+	RetrieveContainer(context.Context, ContainerBinding, string) (openai.Container, error)
+	DeleteContainer(context.Context, ContainerBinding, string) (openai.ContainerDeletion, error)
+}
+
 type VideoProvider interface {
 	CreateVideo(context.Context, modules.RequestContext, openai.VideoCreateRequest, func(context.Context, *modules.RequestContext) error) (openai.Video, VideoBinding, error)
 	RetrieveVideo(context.Context, VideoBinding, string) (openai.Video, error)
@@ -2858,6 +2870,11 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 			return false
 		}
 	}
+	if hasCapability(required, "container") {
+		if _, ok := e.Provider.(ContainerClient); !ok || e.Type != "openai" && e.Type != "openai-compatible" {
+			return false
+		}
+	}
 	if hasCapability(required, "realtime") {
 		if _, ok := e.Provider.(RealtimeClient); !ok || e.Type != "openai" && e.Type != "openai-compatible" {
 			return false
@@ -2923,11 +2940,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "interactions") || hasCapability(required, "interaction_agents") || hasCapability(required, "interaction_environment_reuse") || hasCapability(required, "gemini_safety_settings") || hasCapability(required, "background_interactions") || hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "video") || hasCapability(required, "video_remix") || hasCapability(required, "video_extension") || hasCapability(required, "video_input") || hasCapability(required, "realtime") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "audio") || hasCapability(required, "audio_input") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses") || hasCapability(required, "file_input") || hasCapability(required, "bedrock_invoke")
+	return hasCapability(required, "interactions") || hasCapability(required, "interaction_agents") || hasCapability(required, "interaction_environment_reuse") || hasCapability(required, "gemini_safety_settings") || hasCapability(required, "background_interactions") || hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "video") || hasCapability(required, "video_remix") || hasCapability(required, "video_extension") || hasCapability(required, "container") || hasCapability(required, "video_input") || hasCapability(required, "realtime") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "audio") || hasCapability(required, "audio_input") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses") || hasCapability(required, "file_input") || hasCapability(required, "bedrock_invoke")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"interactions", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "background_interactions", "mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "video", "video_remix", "video_extension", "video_input", "realtime", "web_search", "web_fetch", "audio", "audio_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke"} {
+	for _, capability := range []string{"interactions", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "background_interactions", "mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "video", "video_remix", "video_extension", "container", "video_input", "realtime", "web_search", "web_fetch", "audio", "audio_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

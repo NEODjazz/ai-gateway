@@ -5,6 +5,24 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  032_gateway_containers.sql: |
+    CREATE TABLE IF NOT EXISTS gateway_containers (
+        container_id TEXT NOT NULL,
+        owner_key TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        model TEXT NOT NULL,
+        deployment CHAR(64) NOT NULL,
+        snapshot JSONB NOT NULL CHECK (jsonb_typeof(snapshot) = 'object'),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (container_id),
+        CHECK (length(container_id) BETWEEN 1 AND 128),
+        CHECK (length(owner_key) BETWEEN 1 AND 256),
+        CHECK (length(endpoint) BETWEEN 1 AND 128),
+        CHECK (length(model) BETWEEN 1 AND 256)
+    );
+    CREATE INDEX IF NOT EXISTS gateway_containers_owner_created_idx
+        ON gateway_containers (owner_key,created_at DESC,container_id DESC);
   016_provider_cost_precision.sql: |
     ALTER TABLE billing_budget_policies
         ALTER COLUMN max_cost TYPE NUMERIC(20, 10);

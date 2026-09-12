@@ -151,6 +151,7 @@ func main() {
 			WithBatchStore(providerControlStore, providerControlStore).
 			WithFineTuningStore(providerControlStore).
 			WithVideoStore(providerControlStore).
+			WithContainerStore(providerControlStore).
 			WithSkillStore(providerControlStore).
 			WithRAGIngestStore(providerControlStore).
 			WithVectorStore(providerControlStore, gateway.VectorStoreRuntimeConfig{OwnerQuota: cfg.VectorStores.OwnerQuota, FileQuota: cfg.VectorStores.FileQuota, ByteQuota: cfg.VectorStores.ByteQuota})

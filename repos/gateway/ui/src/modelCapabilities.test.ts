@@ -29,6 +29,7 @@ describe("modelCapabilityOptions", () => {
       "video",
       "video_remix",
       "video_extension",
+      "container",
       "realtime",
       "stream",
       "tools",
