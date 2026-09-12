@@ -92,7 +92,8 @@ Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 
 `nvidia-nim` поддерживает self-hosted endpoints без upstream credential и
 hosted endpoints с bearer credential. Профиль публикует Chat Completions,
-native Messages и count-tokens, legacy Completions, Responses create/stream,
+native Messages и count-tokens, legacy Completions, Responses
+create/stream/retrieve/cancel,
 Embeddings и `/v1/models` discovery. Входящий Messages-запрос сохраняет общий
 policy, quota, retry и billing lifecycle, но отправляется в native endpoint.
 Function tools, structured output и model-dependent image, audio и video input
