@@ -532,3 +532,10 @@ Fine-tuning creation. Rancher Desktop built
 pod `ai-gateway-gateway-5cc4bf6857-wbknk` became Ready with zero restarts. The
 live endpoint confirmed validation-file, suffix, seed, metadata and method
 controls for OpenAI and compatible adapters.
+
+Source `7b7dfea` adds Container creation profiles from the adapter validator and
+effective `container_files` capability. Rancher Desktop built
+`ai-gateway-gateway:gaps-7b7dfea`; Helm revision 414 completed successfully, and
+pod `ai-gateway-gateway-66b64cbfb5-lmw4x` became Ready with zero restarts. The
+live endpoint confirmed expiration, memory, network-policy and initial-file
+controls for OpenAI and compatible adapters.
