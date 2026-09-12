@@ -70,6 +70,14 @@ func (m AnonymizerModule) Required() bool {
 	return m.required
 }
 
+func (m AnonymizerModule) RuleNames() []string {
+	names := make([]string, 0, len(m.rules))
+	for _, rule := range m.rules {
+		names = append(names, rule.Name)
+	}
+	return names
+}
+
 func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 	return m.handle(req, m.rules)
 }

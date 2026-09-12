@@ -3926,11 +3926,21 @@ paths:
       operationId: checkCompliance
       tags: [Guardrails]
       summary: Dry-run text through a guardrail policy without calling a model
-      description: Text is projected to selected DLP/AV scanners and is not stored by the gateway or returned in the response.
+      description: Text is projected to selected scanners and the anonymizer. The original text is not stored or returned; the response may include the anonymized preview.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ComplianceCheckInput'}}}}
       responses:
         '200': {description: Compliance decision, content: {application/json: {schema: {$ref: '#/components/schemas/ComplianceCheckResult'}}}}
         '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/anonymizer/rules:
+    get:
+      operationId: listAnonymizerRules
+      tags: [Guardrails]
+      summary: List rules configured in the active anonymizer service
+      responses:
+        '200': {description: Rule inventory, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, uniqueItems: true, items: {type: string}}}}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
@@ -10671,7 +10681,7 @@ components:
         output_dlp: {type: boolean, description: Scan textual provider output before returning it. Native streams are buffered through the non-streaming path when enabled.}
         av: {type: boolean}
         anonymization: {type: string, enum: [disabled, basic, strict, custom], description: Per-request anonymization profile. Omit to leave the safe global default unchanged.}
-        anonymization_rules: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128}, description: Required only for custom anonymization.}
+        anonymization_rules: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$'}, description: Required only for custom anonymization.}
         enabled: {type: boolean}
     GuardrailApplyRequest:
       type: object
@@ -10796,13 +10806,15 @@ components:
     ComplianceCheckResult:
       type: object
       additionalProperties: false
-      required: [request_id, policy, allowed, checks, content_stored]
+      required: [request_id, policy, allowed, checks, content_stored, replacements]
       properties:
         request_id: {type: string}
         policy: {type: string}
         allowed: {type: boolean}
         checks: {type: object, additionalProperties: {type: string, enum: [passed, rejected, unavailable, disabled]}}
         content_stored: {type: boolean, const: false}
+        anonymized_text: {type: string, maxLength: 65536}
+        replacements: {type: integer, minimum: 0}
     GuardrailMonitorSummary:
       type: object
       additionalProperties: false

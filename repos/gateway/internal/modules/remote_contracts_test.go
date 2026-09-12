@@ -94,6 +94,20 @@ func TestRemoteAnonymizerRejectsEmptyEffectiveRules(t *testing.T) {
 	}
 }
 
+func TestRemoteAnonymizerListsConfiguredRules(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/rules" {
+			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []string{"email", "phone"}})
+	}))
+	defer server.Close()
+	rules, err := NewRemoteAnonymizerModule(true, server.URL+"/anonymize").RuleNames(context.Background())
+	if err != nil || strings.Join(rules, ",") != "email,phone" {
+		t.Fatalf("rules=%v err=%v", rules, err)
+	}
+}
+
 func TestRemoteAnonymizerPreservesToolCallContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request AnonymizeRequest

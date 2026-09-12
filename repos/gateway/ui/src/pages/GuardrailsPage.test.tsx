@@ -25,6 +25,7 @@ describe("GuardrailsPage", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === "/admin/v1/guardrail-policies") return json({ data: policies });
+      if (url === "/admin/v1/anonymizer/rules") return json({ data: ["email", "phone"] });
       if (url === "/admin/v1/policy-attachments") return json({ data: [{ id: "global-strict", policy_name: "strict", scope: "*" }] });
       if (url === "/admin/v1/model-deployments") return json({ data: [{ id: "azure-primary", guardrail_policy: "strict", enabled: true, runtime_state: "available" }] });
       if (url === "/admin/v1/guardrail-policies/pii-baseline" && init?.method === "PUT") return json({ name: "pii-baseline", ...JSON.parse(String(init.body)) });
@@ -49,22 +50,27 @@ describe("GuardrailsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Output DLP requires the DLP scanner");
     await userEvent.click(screen.getByLabelText("Run DLP scanner"));
+    await userEvent.selectOptions(screen.getByLabelText("Anonymization profile"), "custom");
+    const ruleSelector = screen.getByRole("combobox", { name: "Custom anonymization rules" });
+    await userEvent.type(ruleSelector, "email{enter}phone");
+    await userEvent.click(screen.getByRole("option", { name: /^phone$/ }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/admin/v1/guardrail-policies/pii-baseline" && init?.method === "PUT")).toBe(true));
     const call = fetchMock.mock.calls.find(([url, init]) => String(url) === "/admin/v1/guardrail-policies/pii-baseline" && init?.method === "PUT")!;
-    expect(JSON.parse(String(call[1]?.body))).toEqual({ description: "PII baseline", dlp: true, output_dlp: true, av: false, enabled: true });
+    expect(JSON.parse(String(call[1]?.body))).toEqual({ description: "PII baseline", dlp: true, output_dlp: true, av: false, anonymization: "custom", anonymization_rules: ["email", "phone"], enabled: true });
   });
 
   it("compares multiple enabled policies and renders only metadata-safe outcomes", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === "/admin/v1/guardrail-policies") return json({ data: policies });
+      if (url === "/admin/v1/anonymizer/rules") return json({ data: ["email", "phone"] });
       if (url === "/admin/v1/policy-attachments") return json({ data: [] });
       if (url === "/admin/v1/model-deployments") return json({ data: [] });
       if (url === "/admin/v1/compliance/check" && init?.method === "POST") {
         const body = JSON.parse(String(init.body));
         if (body.policy === "scanner-down") return json({ request_id: "request-scanner-down", policy: body.policy, allowed: true, checks: { dlp: "unavailable" }, content_stored: false }, 503);
-        return json({ request_id: `request-${body.policy}`, policy: body.policy, allowed: body.policy !== "av-only", checks: body.policy === "strict" ? { dlp: "passed", av: "passed" } : { dlp: "disabled", av: "rejected" }, content_stored: false });
+        return json({ request_id: `request-${body.policy}`, policy: body.policy, allowed: body.policy !== "av-only", checks: body.policy === "strict" ? { dlp: "passed", av: "passed", anonymizer: "passed" } : { dlp: "disabled", av: "rejected", anonymizer: "passed" }, anonymized_text: "{{EMAIL_1}}", replacements: 1, content_stored: false });
       }
       return json({ error: { message: `unexpected ${init?.method || "GET"} ${url}` } }, 500);
     });
@@ -86,6 +92,7 @@ describe("GuardrailsPage", () => {
     expect(within(results).getByText("request-strict")).toBeInTheDocument();
     expect(within(results).getByText("request-av-only")).toBeInTheDocument();
     expect(within(results).getAllByText("No")).toHaveLength(2);
+    expect(within(results).getAllByText("{{EMAIL_1}}")).toHaveLength(2);
     expect(within(results).queryByText(projection)).not.toBeInTheDocument();
     const checks = fetchMock.mock.calls.filter(([url, init]) => String(url) === "/admin/v1/compliance/check" && init?.method === "POST");
     expect(checks.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([{ policy: "strict", text: projection }, { policy: "av-only", text: projection }, { policy: "scanner-down", text: projection }]);

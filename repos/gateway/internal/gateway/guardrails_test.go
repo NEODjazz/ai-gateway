@@ -45,17 +45,22 @@ func TestGuardrailPolicyAndCompliancePlayground(t *testing.T) {
 	dlp := &complianceModule{name: "dlp"}
 	av := &complianceModule{name: "av", reject: true}
 	monitor := NewGuardrailMonitor(10)
-	handler := NewHandler(modulesPipeline("admin"), runtime).WithComplianceModules(NewGuardrailMonitoringModule(dlp, monitor), NewGuardrailMonitoringModule(av, monitor)).WithGuardrailMonitor(monitor)
+	handler := NewHandler(modulesPipeline("admin"), runtime).WithComplianceModules(NewGuardrailMonitoringModule(dlp, monitor), NewGuardrailMonitoringModule(av, monitor)).WithAnonymizerModule(modules.NewAnonymizerModule(true, modules.RuleEmail)).WithGuardrailMonitor(monitor)
 	put := httptest.NewRecorder()
-	Routes(handler).ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/admin/v1/guardrail-policies/strict", strings.NewReader(`{"description":"test","dlp":true,"output_dlp":true,"av":true,"enabled":true}`)))
+	Routes(handler).ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/admin/v1/guardrail-policies/strict", strings.NewReader(`{"description":"test","dlp":true,"output_dlp":true,"av":true,"anonymization":"custom","anonymization_rules":["email"],"enabled":true}`)))
 	if put.Code != http.StatusOK || !strings.Contains(put.Body.String(), `"output_dlp":true`) {
 		t.Fatalf("put status=%d body=%s", put.Code, put.Body.String())
 	}
+	rules := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(rules, httptest.NewRequest(http.MethodGet, "/admin/v1/anonymizer/rules", nil))
+	if rules.Code != http.StatusOK || rules.Body.String() != "{\"data\":[\"email\"]}\n" {
+		t.Fatalf("rules status=%d body=%s", rules.Code, rules.Body.String())
+	}
 	check := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/admin/v1/compliance/check", strings.NewReader(`{"policy":"strict","text":"sensitive fixture"}`))
+	request := httptest.NewRequest(http.MethodPost, "/admin/v1/compliance/check", strings.NewReader(`{"policy":"strict","text":"user@example.com"}`))
 	request.Header.Set("X-Request-ID", "compliance-1")
 	Routes(handler).ServeHTTP(check, request)
-	if check.Code != http.StatusOK || !strings.Contains(check.Body.String(), `"allowed":false`) || !strings.Contains(check.Body.String(), `"content_stored":false`) || strings.Contains(check.Body.String(), "sensitive fixture") || dlp.seen != "sensitive fixture" || av.seen != "sensitive fixture" {
+	if check.Code != http.StatusOK || !strings.Contains(check.Body.String(), `"allowed":false`) || !strings.Contains(check.Body.String(), `"content_stored":false`) || !strings.Contains(check.Body.String(), `"anonymized_text":"{{EMAIL_1}}"`) || !strings.Contains(check.Body.String(), `"replacements":1`) || strings.Contains(check.Body.String(), "user@example.com") || dlp.seen != "user@example.com" || av.seen != "user@example.com" {
 		t.Fatalf("unsafe compliance result: status=%d body=%s dlp=%q av=%q", check.Code, check.Body.String(), dlp.seen, av.seen)
 	}
 	snapshot := monitor.Snapshot(10)
@@ -68,7 +73,7 @@ func TestComplianceUnavailableFailsClosed(t *testing.T) {
 	runtime := provider.New(provider.Config{})
 	_, _ = runtime.(provider.GuardrailController).UpdateGuardrailPolicy("strict", provider.GuardrailPolicy{DLP: true, Enabled: true})
 	broken := &complianceErrorModule{}
-	handler := NewHandler(modulesPipeline("admin"), runtime).WithComplianceModules(broken, &complianceModule{name: "av"})
+	handler := NewHandler(modulesPipeline("admin"), runtime).WithComplianceModules(broken, &complianceModule{name: "av"}).WithAnonymizerModule(modules.NewAnonymizerModule(true, "all"))
 	response := httptest.NewRecorder()
 	Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/admin/v1/compliance/check", strings.NewReader(`{"policy":"strict","text":"fixture"}`)))
 	if response.Code != http.StatusServiceUnavailable {

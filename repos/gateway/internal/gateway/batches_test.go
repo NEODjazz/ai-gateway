@@ -16,6 +16,7 @@ import (
 
 	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/batchstate"
+	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
@@ -27,6 +28,30 @@ type memoryBatchStore struct {
 	batches map[string]batchstate.Batch
 	items   map[string]map[int]batchstate.Item
 	jobs    map[string]asyncstate.Job
+}
+
+func TestBatchIdentityPreservesAnonymizationPolicy(t *testing.T) {
+	runtime := providerpkg.New(providerpkg.Config{GuardrailPolicies: map[string]config.GuardrailPolicyConfig{
+		"batch-pii": {Anonymization: "custom", AnonymizationRules: []string{"email"}},
+	}})
+	registry := NewAccessRegistry()
+	if _, err := registry.PutPolicyAttachment("batch-pii", PolicyAttachment{PolicyName: "batch-pii", Scope: "specific", Tags: []string{"batch"}, Models: []string{"gpt-*"}, Providers: []string{"azure"}}); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(modules.NewPipeline(nil), runtime).WithAccessRegistry(registry)
+	payload := []byte("{\"custom_id\":\"item-1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"gpt-test\",\"messages\":[{\"role\":\"user\",\"content\":\"user@example.com\"}]}}\n")
+	items, err := handler.decodeBatchItems(httptest.NewRecorder(), context.Background(), modules.RequestContext{CredentialID: "key", AllowedModels: []string{"*"}, Tags: []string{"batch"}}, "/v1/chat/completions", payload)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	var identity modules.RequestContext
+	if err := json.Unmarshal(items[0].Identity, &identity); err != nil {
+		t.Fatal(err)
+	}
+	var deferred []providerpkg.EndpointPolicyAttachment
+	if err := json.Unmarshal([]byte(identity.Metadata[providerpkg.EndpointPolicyAttachmentsMetadataKey]), &deferred); err != nil || len(deferred) != 1 || deferred[0].Anonymization != "custom" || strings.Join(deferred[0].Models, ",") != "gpt-*" {
+		t.Fatalf("deferred=%+v err=%v metadata=%+v", deferred, err, identity.Metadata)
+	}
 }
 
 func newMemoryBatchStore() *memoryBatchStore {

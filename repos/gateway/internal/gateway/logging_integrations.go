@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -222,20 +223,24 @@ func (r *LoggingRegistry) send(ctx context.Context, entry loggingDestinationEntr
 }
 
 type LoggingEvent struct {
-	Event        string    `json:"event"`
-	OccurredAt   time.Time `json:"occurred_at"`
-	RequestID    string    `json:"request_id,omitempty"`
-	SessionID    string    `json:"session_id,omitempty"`
-	CredentialID string    `json:"credential_id,omitempty"`
-	UserID       string    `json:"user_id,omitempty"`
-	TeamID       string    `json:"team_id,omitempty"`
-	Model        string    `json:"model,omitempty"`
-	Provider     string    `json:"provider,omitempty"`
-	Endpoint     string    `json:"endpoint,omitempty"`
-	Status       string    `json:"status"`
-	InputTokens  int       `json:"input_tokens,omitempty"`
-	OutputTokens int       `json:"output_tokens,omitempty"`
-	TotalTokens  int       `json:"total_tokens,omitempty"`
+	Event                     string    `json:"event"`
+	OccurredAt                time.Time `json:"occurred_at"`
+	RequestID                 string    `json:"request_id,omitempty"`
+	SessionID                 string    `json:"session_id,omitempty"`
+	CredentialID              string    `json:"credential_id,omitempty"`
+	UserID                    string    `json:"user_id,omitempty"`
+	TeamID                    string    `json:"team_id,omitempty"`
+	Model                     string    `json:"model,omitempty"`
+	Provider                  string    `json:"provider,omitempty"`
+	Endpoint                  string    `json:"endpoint,omitempty"`
+	Status                    string    `json:"status"`
+	InputTokens               int       `json:"input_tokens,omitempty"`
+	OutputTokens              int       `json:"output_tokens,omitempty"`
+	TotalTokens               int       `json:"total_tokens,omitempty"`
+	AnonymizationMode         string    `json:"anonymization_mode,omitempty"`
+	AnonymizationProfiles     string    `json:"anonymization_profiles,omitempty"`
+	AnonymizationRules        string    `json:"anonymization_rules,omitempty"`
+	AnonymizationReplacements int       `json:"anonymization_replacements,omitempty"`
 }
 
 type loggingModule struct{ registry *LoggingRegistry }
@@ -259,6 +264,10 @@ func (m loggingModule) HandleFailure(_ context.Context, req *modules.RequestCont
 func loggingEvent(req *modules.RequestContext, status string) LoggingEvent {
 	event := LoggingEvent{Event: "request_outcome", OccurredAt: time.Now().UTC(), RequestID: req.RequestID, SessionID: req.SessionID, CredentialID: req.CredentialID, UserID: req.UserID, TeamID: req.TeamID, Provider: req.Metadata["provider.id"], Endpoint: req.Metadata["provider.endpoint.name"], Status: status}
 	event.Model = req.Request.Model
+	event.AnonymizationMode = req.Metadata["provider.modules.anonymizer.mode"]
+	event.AnonymizationProfiles = req.Metadata["provider.modules.anonymizer.profiles"]
+	event.AnonymizationRules = req.Metadata["provider.modules.anonymizer.effective_rules"]
+	event.AnonymizationReplacements, _ = strconv.Atoi(req.Metadata["provider.modules.anonymizer.replacements"])
 	if req.ResponseRequest != nil {
 		event.Model = req.ResponseRequest.Model
 	}

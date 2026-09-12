@@ -2296,7 +2296,7 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 	for key, value := range providerMetadata(endpoint) {
 		attemptCtx.Metadata[key] = value
 	}
-	endpointDLP, endpointOutputDLP, endpointAV, endpointAnonymization, endpointPolicies := endpointPolicySettings(attemptCtx.Metadata, endpoint)
+	endpointDLP, endpointOutputDLP, endpointAV, endpointAnonymization, endpointPolicies := endpointPolicySettings(attemptCtx.Metadata, endpoint, attemptCtx.Request.Model)
 	anonymizationSettings := []AnonymizationSetting{
 		AnonymizationSetting{Profile: endpoint.GuardrailPolicy, Mode: endpoint.Anonymization, Rules: endpoint.AnonymizationRules},
 		AnonymizationSetting{Profile: attemptCtx.Metadata["policy.modules.anonymizer.profiles"], Mode: attemptCtx.Metadata["policy.modules.anonymizer.mode"], Rules: splitMetadataList(attemptCtx.Metadata["policy.modules.anonymizer.rules"])},

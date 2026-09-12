@@ -33,6 +33,14 @@ func newHandler(module modules.AnonymizerModule) http.Handler {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("/rules", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": module.RuleNames()})
+	})
 
 	mux.HandleFunc("/anonymize", func(w http.ResponseWriter, r *http.Request) {
 		var request anonymizeRequest

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -21,6 +22,45 @@ func (h Handler) guardrailController() (provider.GuardrailController, bool) {
 func (h Handler) WithComplianceModules(dlp, av modules.Module) Handler {
 	h.dlp, h.av = dlp, av
 	return h
+}
+
+func (h Handler) WithAnonymizerModule(anonymizer modules.Module) Handler {
+	h.anonymizer = anonymizer
+	return h
+}
+
+type anonymizerRuleLister interface {
+	RuleNames(context.Context) ([]string, error)
+}
+
+func (h Handler) ListAnonymizerRules(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeAdmin(w, r); !ok {
+		return
+	}
+	lister, ok := h.anonymizer.(anonymizerRuleLister)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "anonymizer rule inventory is unavailable")
+		return
+	}
+	rules, err := lister.RuleNames(r.Context())
+	if err != nil || len(rules) > 256 {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "anonymizer rule inventory is unavailable")
+		return
+	}
+	seen := make(map[string]struct{}, len(rules))
+	for _, rule := range rules {
+		if !validGuardrailName(rule) {
+			writeError(w, http.StatusServiceUnavailable, "management_unavailable", "anonymizer rule inventory is unavailable")
+			return
+		}
+		if _, duplicate := seen[rule]; duplicate {
+			writeError(w, http.StatusServiceUnavailable, "management_unavailable", "anonymizer rule inventory is unavailable")
+			return
+		}
+		seen[rule] = struct{}{}
+	}
+	sort.Strings(rules)
+	writeJSON(w, http.StatusOK, map[string]any{"data": rules})
 }
 
 func (h Handler) ListGuardrailPolicies(w http.ResponseWriter, r *http.Request) {
@@ -85,11 +125,13 @@ func (h Handler) UpdateGuardrailPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 type complianceResult struct {
-	RequestID     string            `json:"request_id"`
-	Policy        string            `json:"policy"`
-	Allowed       bool              `json:"allowed"`
-	Checks        map[string]string `json:"checks"`
-	ContentStored bool              `json:"content_stored"`
+	RequestID      string            `json:"request_id"`
+	Policy         string            `json:"policy"`
+	Allowed        bool              `json:"allowed"`
+	Checks         map[string]string `json:"checks"`
+	ContentStored  bool              `json:"content_stored"`
+	AnonymizedText string            `json:"anonymized_text,omitempty"`
+	Replacements   int               `json:"replacements"`
 }
 
 type guardrailApplyResult struct {
@@ -162,7 +204,7 @@ func (h Handler) ApplyGuardrail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
 	}
-	checks, allowed, err := h.executeGuardrail(r.Context(), req.RequestID, "guardrail_api", input.Text, policy)
+	checks, allowed, _, _, err := h.executeGuardrail(r.Context(), req.RequestID, "guardrail_api", input.Text, policy, false)
 	event.Details = map[string]any{"allowed": allowed, "checks": checks}
 	event.Outcome = "succeeded"
 	if err != nil {
@@ -214,12 +256,16 @@ func (h Handler) authorizeGuardrailPolicy(w http.ResponseWriter, req modules.Req
 	return false
 }
 
-func (h Handler) executeGuardrail(ctx context.Context, requestID, source, text string, policy provider.GuardrailPolicy) (map[string]string, bool, error) {
+func (h Handler) executeGuardrail(ctx context.Context, requestID, source, text string, policy provider.GuardrailPolicy, previewAnonymization bool) (map[string]string, bool, string, int, error) {
+	anonymization, rules, profiles := provider.ResolveAnonymization(provider.AnonymizationSetting{Profile: policy.Name, Mode: policy.Anonymization, Rules: policy.AnonymizationRules})
 	scan := modules.RequestContext{RequestID: requestID, Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: text}}}, Metadata: map[string]string{
-		"provider.modules.dlp.enabled": strconv.FormatBool(policy.DLP),
-		"provider.modules.av.enabled":  strconv.FormatBool(policy.AV),
-		"provider.guardrail.policy":    policy.Name,
-		"guardrail.monitor.source":     source,
+		"provider.modules.dlp.enabled":         strconv.FormatBool(policy.DLP),
+		"provider.modules.av.enabled":          strconv.FormatBool(policy.AV),
+		"provider.guardrail.policy":            policy.Name,
+		"guardrail.monitor.source":             source,
+		"provider.modules.anonymizer.mode":     anonymization,
+		"provider.modules.anonymizer.rules":    strings.Join(rules, ","),
+		"provider.modules.anonymizer.profiles": strings.Join(profiles, ","),
 	}}
 	checks := map[string]string{}
 	allowed := true
@@ -240,11 +286,27 @@ func (h Handler) executeGuardrail(ctx context.Context, requestID, source, text s
 		}
 		if err != nil {
 			checks[check.name] = "unavailable"
-			return checks, false, err
+			return checks, false, "", 0, err
 		}
 		checks[check.name] = "passed"
 	}
-	return checks, allowed, nil
+	if !previewAnonymization {
+		return checks, allowed, "", 0, nil
+	}
+	if anonymization == "disabled" {
+		checks["anonymizer"] = "disabled"
+		return checks, allowed, "", 0, nil
+	}
+	if h.anonymizer == nil {
+		checks["anonymizer"] = "unavailable"
+		return checks, false, "", 0, errors.New("anonymizer is unavailable")
+	}
+	if err := h.anonymizer.Handle(ctx, &scan); err != nil {
+		checks["anonymizer"] = "unavailable"
+		return checks, false, "", 0, err
+	}
+	checks["anonymizer"] = "passed"
+	return checks, allowed, openai.ContentText(scan.Request.Messages[0].Content), len(scan.AnonymizationValues), nil
 }
 
 func (h Handler) CheckCompliance(w http.ResponseWriter, r *http.Request) {
@@ -253,7 +315,7 @@ func (h Handler) CheckCompliance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	controller, ok := h.guardrailController()
-	if !ok || h.dlp == nil || h.av == nil {
+	if !ok || h.dlp == nil || h.av == nil || h.anonymizer == nil {
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "compliance checks are unavailable")
 		return
 	}
@@ -274,8 +336,8 @@ func (h Handler) CheckCompliance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "guardrail policy is missing or disabled")
 		return
 	}
-	checks, allowed, err := h.executeGuardrail(r.Context(), req.RequestID, "compliance", input.Text, policy)
-	result := complianceResult{RequestID: req.RequestID, Policy: policy.Name, Allowed: allowed, Checks: checks, ContentStored: false}
+	checks, allowed, preview, replacements, err := h.executeGuardrail(r.Context(), req.RequestID, "compliance", input.Text, policy, true)
+	result := complianceResult{RequestID: req.RequestID, Policy: policy.Name, Allowed: allowed, Checks: checks, ContentStored: false, AnonymizedText: preview, Replacements: replacements}
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, result)
 		return

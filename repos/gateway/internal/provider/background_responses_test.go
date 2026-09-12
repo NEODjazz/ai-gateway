@@ -124,6 +124,8 @@ type backgroundLifecycleRecorder struct {
 	pre, post, failure int
 	requestID          string
 	totalTokens        int
+	anonymizationMode  string
+	anonymizationRules string
 }
 
 func (*backgroundLifecycleRecorder) Name() string   { return "billing" }
@@ -137,6 +139,8 @@ func (r *backgroundLifecycleRecorder) HandlePostResponse(_ context.Context, req 
 	r.post++
 	r.requestID = req.RequestID
 	r.totalTokens = req.ResponsesResponse.Usage.TotalTokens
+	r.anonymizationMode = req.Metadata["provider.modules.anonymizer.mode"]
+	r.anonymizationRules = req.Metadata["provider.modules.anonymizer.rules"]
 	return nil
 }
 func (r *backgroundLifecycleRecorder) HandleFailure(context.Context, *modules.RequestContext, error) error {
@@ -147,7 +151,15 @@ func (r *backgroundLifecycleRecorder) HandleFailure(context.Context, *modules.Re
 func TestBackgroundResponseDefersSettlementAndSurvivesRouterRestart(t *testing.T) {
 	store := true
 	request := openai.ResponseRequest{Model: "public-model", Input: "prompt-must-not-be-persisted", Store: &store, Background: true}
-	req := modules.RequestContext{RequestID: "execution-original", CredentialID: "credential", UserID: "user", Request: openai.ChatCompletionRequest{Model: request.Model}, ResponseRequest: &request}
+	req := modules.RequestContext{
+		RequestID: "execution-original", CredentialID: "credential", UserID: "user",
+		Request: openai.ChatCompletionRequest{Model: request.Model}, ResponseRequest: &request,
+		Metadata: map[string]string{
+			"policy.modules.anonymizer.mode":     "custom",
+			"policy.modules.anonymizer.rules":    "email,phone",
+			"policy.modules.anonymizer.profiles": "background-pii",
+		},
+	}
 	jobs := &backgroundJobStore{}
 	ownership := &ownershipTestStore{data: map[string][]byte{}}
 	client := &backgroundResponseClient{retrieve: openai.ResponseResponse{ID: "resp_background", Model: request.Model, Status: "completed", Usage: openai.ResponseUsage{InputTokens: 5, OutputTokens: 2, TotalTokens: 7}}}
@@ -169,7 +181,7 @@ func TestBackgroundResponseDefersSettlementAndSurvivesRouterRestart(t *testing.T
 
 	restarted := router
 	processed, err := restarted.ProcessBackgroundResponses(t.Context())
-	if err != nil || processed != 1 || recorder.post != 1 || recorder.requestID != "execution-original" || recorder.totalTokens != 7 || jobs.job != nil {
+	if err != nil || processed != 1 || recorder.post != 1 || recorder.requestID != "execution-original" || recorder.totalTokens != 7 || recorder.anonymizationMode != "custom" || recorder.anonymizationRules != "email,phone" || jobs.job != nil {
 		t.Fatalf("processed=%d lifecycle=%+v pending=%+v err=%v", processed, recorder, jobs.job, err)
 	}
 	if settled, err := restarted.BackgroundResponseSettled(t.Context(), req, response.ID); err != nil || !settled {

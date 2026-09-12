@@ -2,7 +2,9 @@ package modules
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -45,9 +47,61 @@ func NewRemoteAnonymizerModule(required bool, endpoint string) RemoteAnonymizerM
 func (m RemoteAnonymizerModule) Name() string   { return "anonymizer" }
 func (m RemoteAnonymizerModule) Required() bool { return m.required }
 
+func (m RemoteAnonymizerModule) RuleNames(ctx context.Context) ([]string, error) {
+	endpoint := strings.TrimSuffix(m.endpoint, "/anonymize") + "/rules"
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := m.client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return nil, errors.New("anonymizer rule inventory is unavailable")
+	}
+	var payload struct {
+		Data []string `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if len(payload.Data) > 256 {
+		return nil, errors.New("anonymizer returned too many rules")
+	}
+	seen := make(map[string]struct{}, len(payload.Data))
+	for index, name := range payload.Data {
+		name = strings.TrimSpace(name)
+		if !validAnonymizerRuleName(name) {
+			return nil, errors.New("anonymizer returned an invalid rule name")
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return nil, errors.New("anonymizer returned duplicate rule names")
+		}
+		seen[name] = struct{}{}
+		payload.Data[index] = name
+	}
+	return payload.Data, nil
+}
+
+func validAnonymizerRuleName(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if !(character >= 'a' && character <= 'z') && !(character >= 'A' && character <= 'Z') && !(character >= '0' && character <= '9') && character != '_' && character != '-' && character != '.' {
+			return false
+		}
+	}
+	return true
+}
+
 func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext) error {
 	mode := strings.TrimSpace(req.Metadata["provider.modules.anonymizer.mode"])
 	if mode == "disabled" {
+		recordAnonymizationMetadata(req, "none", 0)
 		return nil
 	}
 	request := AnonymizeRequest{RequestID: req.RequestID, Messages: projectMessages(req.Request.Messages)}
@@ -162,6 +216,11 @@ func (m RemoteAnonymizerModule) Handle(ctx context.Context, req *RequestContext)
 		req.OCRRequest.DocumentAnnotationPrompt = prompt
 	}
 	req.AnonymizationValues = cloneStringMap(response.Replacements)
+	effectiveRules := strings.Join(request.Rules, ",")
+	if effectiveRules == "" {
+		effectiveRules = "all"
+	}
+	recordAnonymizationMetadata(req, effectiveRules, len(req.AnonymizationValues))
 	return nil
 }
 

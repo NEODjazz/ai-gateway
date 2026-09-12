@@ -9,6 +9,8 @@ export type PolicyResolutionAttachment = {
   dlp: boolean;
   output_dlp: boolean;
   av: boolean;
+  anonymization?: string;
+  anonymization_rules?: string[];
 };
 
 export type PolicyResolutionIssue = { attachment_id: string; policy_name: string; code: string };
@@ -19,6 +21,9 @@ export type PolicyResolution = {
   dlp: boolean;
   output_dlp: boolean;
   av: boolean;
+  anonymization?: string;
+  anonymization_rules?: string[];
+  anonymization_profiles?: string[];
   enforceable: boolean;
   issues: PolicyResolutionIssue[];
 };
@@ -29,11 +34,12 @@ export function PolicyResolutionResult({ result }: { result: PolicyResolution })
       <StatCard label="Decision" value={result.enforceable ? "Enforceable" : "Fail closed"} />
       <StatCard label="Matched attachments" value={result.matched_attachments.length.toLocaleString()} />
       <StatCard label="Effective policies" value={result.effective_policies.length.toLocaleString()} />
-      <StatCard label="Modules" value={[result.dlp && "Input DLP", result.output_dlp && "Output DLP", result.av && "AV"].filter(Boolean).join(" + ") || "None"} />
+      <StatCard label="Controls" value={[result.dlp && "Input DLP", result.output_dlp && "Output DLP", result.av && "AV", result.anonymization && `Anonymizer: ${result.anonymization}`].filter(Boolean).join(" + ") || "None"} />
     </div>
     <section className="notice-card">
       <h3>Effective policy set</h3>
       <div className="tag-list">{result.effective_policies.map((policy) => <span className="tag" key={policy}>{policy}</span>)}{!result.effective_policies.length && <span className="muted">No enabled policies</span>}</div>
+      {result.anonymization && <p>Anonymization: <strong>{result.anonymization}</strong>{result.anonymization_rules?.length ? ` · ${result.anonymization_rules.join(", ")}` : ""}</p>}
     </section>
     {result.issues.length > 0 && <section className="notice-card policy-resolution-issues">
       <h3>Fail-closed issues</h3>
@@ -47,7 +53,7 @@ export function PolicyResolutionResult({ result }: { result: PolicyResolution })
             <td>{attachment.id}</td><td>{attachment.policy_name}</td>
             <td><div className="tag-list">{attachment.matched_via.map((item) => <span className="tag" key={item}>{item}</span>)}</div></td>
             <td><span className={`status ${attachment.policy_status === "enabled" ? "enabled" : "error"}`}>{attachment.policy_status}</span></td>
-            <td>{[attachment.dlp && "Input DLP", attachment.output_dlp && "Output DLP", attachment.av && "AV"].filter(Boolean).join(" + ") || "—"}</td>
+            <td>{[attachment.dlp && "Input DLP", attachment.output_dlp && "Output DLP", attachment.av && "AV", attachment.anonymization && `Anonymizer: ${attachment.anonymization}`].filter(Boolean).join(" + ") || "—"}</td>
           </tr>)}</tbody>
         </table>
         {!result.matched_attachments.length && <div className="empty-state"><strong>No attachments matched</strong></div>}

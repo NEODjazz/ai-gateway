@@ -271,14 +271,14 @@ func TestControlPlaneSynchronizesAdminStateAndGuardrails(t *testing.T) {
 	if err != nil || string(restored) != string(payload) {
 		t.Fatalf("admin state did not synchronize: payload=%s err=%v", restored, err)
 	}
-	if _, err := first.UpdateGuardrailPolicyDurable(context.Background(), "strict", GuardrailPolicy{DLP: true, Enabled: true}); err != nil {
+	if _, err := first.UpdateGuardrailPolicyDurable(context.Background(), "strict", GuardrailPolicy{DLP: true, Anonymization: "custom", AnonymizationRules: []string{"phone", "email"}, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := second.AdminState(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	policy, found := second.GetGuardrailPolicy("strict")
-	if !found || !policy.DLP || !policy.Enabled {
+	if !found || !policy.DLP || !policy.Enabled || policy.Anonymization != "custom" || strings.Join(policy.AnonymizationRules, ",") != "email,phone" {
 		t.Fatalf("guardrail did not synchronize: %+v found=%v", policy, found)
 	}
 }

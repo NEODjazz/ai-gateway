@@ -31,6 +31,15 @@ func TestAnonymizeReturnsJSONContentType(t *testing.T) {
 	}
 }
 
+func TestRuleInventoryReflectsConfiguredRules(t *testing.T) {
+	handler := newHandler(modules.NewAnonymizerModule(true, modules.RuleEmail, modules.RulePhone))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/rules", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "{\"data\":[\"email\",\"phone\"]}\n" {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestAnonymizeRerankProjection(t *testing.T) {
 	handler := newHandler(modules.NewAnonymizerModule(true, modules.RuleEmail))
 	request := httptest.NewRequest(http.MethodPost, "/anonymize", strings.NewReader(`{"request_id":"req-rerank","query":"find user@example.com","documents":["contact user@example.com",{"text":"owner@example.com","id":"doc-1"}]}`))

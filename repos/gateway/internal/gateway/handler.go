@@ -44,6 +44,7 @@ type Handler struct {
 	organizations     OrganizationDirectoryClient
 	dlp               modules.Module
 	av                modules.Module
+	anonymizer        modules.Module
 	guardrails        *GuardrailMonitor
 	cacheConfig       CacheRuntimeConfig
 	logging           *LoggingRegistry

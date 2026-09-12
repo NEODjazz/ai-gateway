@@ -37,6 +37,9 @@ func TestAnonymizationPolicyValidationAndComposition(t *testing.T) {
 	if _, err := router.UpdateGuardrailPolicy("bad-strict", GuardrailPolicy{Anonymization: "strict", AnonymizationRules: []string{"email"}, Enabled: true}); err == nil {
 		t.Fatal("strict anonymization with redundant rules was accepted")
 	}
+	if _, err := router.UpdateGuardrailPolicy("bad-rule", GuardrailPolicy{Anonymization: "custom", AnonymizationRules: []string{"email,phone"}, Enabled: true}); err == nil {
+		t.Fatal("unsafe custom rule name was accepted")
+	}
 
 	mode, rules, profiles := ResolveAnonymization(
 		AnonymizationSetting{Profile: "local", Mode: "disabled"},

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"ai-gateway-gateway/internal/openai"
@@ -70,10 +71,19 @@ func (m AnonymizerModule) Required() bool {
 	return m.required
 }
 
+func (m AnonymizerModule) RuleNames(context.Context) ([]string, error) {
+	names := make([]string, 0, len(m.rules))
+	for _, rule := range m.rules {
+		names = append(names, rule.Name)
+	}
+	return names, nil
+}
+
 func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 	rules := m.rules
 	switch mode := strings.TrimSpace(req.Metadata["provider.modules.anonymizer.mode"]); mode {
 	case "disabled":
+		recordAnonymizationMetadata(req, "none", 0)
 		return nil
 	case "", "strict":
 	case "basic", "custom":
@@ -147,7 +157,20 @@ func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 	if req.OCRRequest != nil {
 		req.OCRRequest.DocumentAnnotationPrompt = m.anonymize(req, req.OCRRequest.DocumentAnnotationPrompt)
 	}
+	effectiveRules := req.Metadata["provider.modules.anonymizer.rules"]
+	if effectiveRules == "" {
+		effectiveRules = "all"
+	}
+	recordAnonymizationMetadata(req, effectiveRules, len(req.AnonymizationValues))
 	return nil
+}
+
+func recordAnonymizationMetadata(req *RequestContext, rules string, replacements int) {
+	if req.Metadata == nil {
+		req.Metadata = map[string]string{}
+	}
+	req.Metadata["provider.modules.anonymizer.effective_rules"] = rules
+	req.Metadata["provider.modules.anonymizer.replacements"] = strconv.Itoa(replacements)
 }
 
 func (m AnonymizerModule) anonymize(req *RequestContext, value string) string {

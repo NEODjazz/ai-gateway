@@ -237,6 +237,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/admin/v1/model-groups/{id}/routing-settings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetModelGroupRouting) }},
 	{RouteContract{http.MethodPut, "/admin/v1/model-groups/{id}/routing-settings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateModelGroupRouting) }},
 	{RouteContract{http.MethodGet, "/admin/v1/guardrail-policies"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListGuardrailPolicies) }},
+	{RouteContract{http.MethodGet, "/admin/v1/anonymizer/rules"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListAnonymizerRules) }},
 	{RouteContract{http.MethodPut, "/admin/v1/guardrail-policies/{name}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateGuardrailPolicy) }},
 	{RouteContract{http.MethodGet, "/admin/v1/policy-attachments"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListPolicyAttachments) }},
 	{RouteContract{http.MethodPost, "/admin/v1/policy-attachments/resolve"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ResolvePolicyAttachments) }},

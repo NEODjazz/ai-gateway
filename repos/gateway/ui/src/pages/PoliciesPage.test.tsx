@@ -17,9 +17,13 @@ function renderPage(entry = "/policies") {
 
 function directoryResponse(url: string) {
   if (url === "/admin/v1/guardrail-policies") return json({ data: policies });
+  if (url === "/admin/v1/organizations?limit=500") return json({ data: [{ id: "org-a", name: "Care Org" }] });
   if (url === "/admin/v1/teams?limit=500") return json({ data: [{ id: "care-a", name: "Care A" }] });
+  if (url === "/admin/v1/users?limit=500") return json({ data: [{ id: "doctor-a", name: "Doctor A" }] });
   if (url.startsWith("/admin/v1/keys?")) return json({ data: [{ id: "vk-1", alias: "clinical-prod" }] });
   if (url === "/admin/v1/model-catalog") return json({ models: [{ model: "gpt-5.6", provider: "azure" }] });
+  if (url === "/admin/v1/providers") return json({ data: [{ id: "azure", type: "openai-compatible" }] });
+  if (url === "/admin/v1/model-deployments") return json({ data: [{ id: "azure-primary", provider_id: "azure" }] });
   if (url === "/admin/v1/tags") return json({ data: [{ name: "hipaa", description: "Regulated", enabled: true }] });
   return undefined;
 }
@@ -52,6 +56,8 @@ describe("PoliciesPage", () => {
     await userEvent.selectOptions(within(dialog).getByLabelText("Guardrail policy"), "strict");
     await userEvent.type(within(dialog).getByRole("combobox", { name: "Teams" }), "care-*{enter}");
     await userEvent.type(within(dialog).getByRole("combobox", { name: "Models" }), "gpt-*{enter}");
+    await userEvent.type(within(dialog).getByRole("combobox", { name: "Providers" }), "azure{enter}");
+    await userEvent.type(within(dialog).getByRole("combobox", { name: "Deployments" }), "azure-primary{enter}");
     await userEvent.type(within(dialog).getByRole("combobox", { name: "Tags" }), "hipaa{enter}");
     expect(within(dialog).getByLabelText("Scope impact preview")).toHaveTextContent("every configured dimension");
     expect(within(dialog).getByRole("button", { name: "Remove team care-*" })).toBeInTheDocument();
@@ -63,7 +69,7 @@ describe("PoliciesPage", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Save attachment" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/admin/v1/policy-attachments/clinical-production" && init?.method === "PUT")).toBe(true));
     const save = fetchMock.mock.calls.find(([url, init]) => String(url) === "/admin/v1/policy-attachments/clinical-production" && init?.method === "PUT")!;
-    expect(JSON.parse(String(save[1]?.body))).toEqual({ policy_name: "strict", scope: "specific", teams: ["care-*"], keys: [], models: ["gpt-*"], tags: ["hipaa"] });
+    expect(JSON.parse(String(save[1]?.body))).toEqual({ policy_name: "strict", scope: "specific", teams: ["care-*"], keys: [], models: ["gpt-*"], providers: ["azure"], deployments: ["azure-primary"], tags: ["hipaa"] });
     expect(await screen.findByText("clinical-production")).toBeInTheDocument();
   });
 
@@ -83,9 +89,11 @@ describe("PoliciesPage", () => {
       });
       return json({ error: { message: `unexpected ${init?.method || "GET"} ${url}` } }, 500);
     });
-    renderPage("/policies?view=simulator&team_id=care-a&credential_alias=clinical-prod&model=gpt-5.6&tag=hipaa");
+    renderPage("/policies?view=simulator&organization_id=org-a&team_id=care-a&user_id=doctor-a&credential_alias=clinical-prod&model=gpt-5.6&provider_id=azure&deployment_id=azure-primary&tag=hipaa");
     await screen.findByText("Runtime policy simulator");
     expect(screen.getByLabelText("Team ID")).toHaveValue("care-a");
+    expect(screen.getByLabelText("Organization ID")).toHaveValue("org-a");
+    expect(screen.getByLabelText("User ID")).toHaveValue("doctor-a");
     expect(screen.getByLabelText("Virtual key alias")).toHaveValue("clinical-prod");
     expect(screen.getByLabelText("Model")).toHaveValue("gpt-5.6");
     expect(screen.getByRole("button", { name: "Remove tag hipaa" })).toBeInTheDocument();
@@ -96,7 +104,7 @@ describe("PoliciesPage", () => {
     expect(result).toHaveTextContent("global");
     expect(result).toHaveTextContent("team");
     const call = fetchMock.mock.calls.find(([url, init]) => String(url) === "/admin/v1/policy-attachments/resolve" && init?.method === "POST")!;
-    expect(JSON.parse(String(call[1]?.body))).toEqual({ team_id: "care-a", credential_alias: "clinical-prod", model: "gpt-5.6", tags: ["hipaa"] });
+    expect(JSON.parse(String(call[1]?.body))).toEqual({ organization_id: "org-a", team_id: "care-a", user_id: "doctor-a", credential_alias: "clinical-prod", model: "gpt-5.6", provider_id: "azure", deployment_id: "azure-primary", tags: ["hipaa"] });
   });
 
   it("opens a create form prefilled from an identity workspace", async () => {

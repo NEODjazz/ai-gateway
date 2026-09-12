@@ -32,14 +32,14 @@ func TestLoggingModuleDeliversMetadataOnly(t *testing.T) {
 	module := NewLoggingModule(registry).(interface {
 		HandlePostResponse(context.Context, *modules.RequestContext) error
 	})
-	req := &modules.RequestContext{RequestID: "req-1", SessionID: "session-1", CredentialID: "vk_1", UserID: "user-1", TeamID: "team-1", Request: openai.ChatCompletionRequest{Model: "gpt-test", Messages: []openai.Message{{Role: "user", Content: "sensitive fixture"}}}, Metadata: map[string]string{"provider.id": "azure", "provider.endpoint.name": "primary"}, Usage: &openai.Usage{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5}}
+	req := &modules.RequestContext{RequestID: "req-1", SessionID: "session-1", CredentialID: "vk_1", UserID: "user-1", TeamID: "team-1", Request: openai.ChatCompletionRequest{Model: "gpt-test", Messages: []openai.Message{{Role: "user", Content: "sensitive fixture"}}}, Metadata: map[string]string{"provider.id": "azure", "provider.endpoint.name": "primary", "provider.modules.anonymizer.mode": "custom", "provider.modules.anonymizer.profiles": "customer-pii", "provider.modules.anonymizer.effective_rules": "email,phone", "provider.modules.anonymizer.replacements": "2"}, AnonymizationValues: map[string]string{"{{EMAIL_1}}": "private@example.com"}, Usage: &openai.Usage{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5}}
 	if err := module.HandlePostResponse(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case body := <-received:
 		encoded, _ := json.Marshal(body)
-		if strings.Contains(string(encoded), "sensitive fixture") || body["request_id"] != "req-1" || body["authorization"] != "Bearer destination-secret" || body["status"] != "ok" {
+		if strings.Contains(string(encoded), "sensitive fixture") || strings.Contains(string(encoded), "private@example.com") || body["request_id"] != "req-1" || body["authorization"] != "Bearer destination-secret" || body["status"] != "ok" || body["anonymization_mode"] != "custom" || body["anonymization_profiles"] != "customer-pii" || body["anonymization_rules"] != "email,phone" || body["anonymization_replacements"] != float64(2) {
 			t.Fatalf("unsafe logging payload: %s", encoded)
 		}
 	case <-time.After(2 * time.Second):

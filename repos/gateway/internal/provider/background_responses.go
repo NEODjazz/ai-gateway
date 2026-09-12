@@ -66,7 +66,7 @@ func backgroundResponseOwner(req modules.RequestContext) string {
 func backgroundJobMetadata(metadata map[string]string) map[string]string {
 	result := make(map[string]string)
 	for key, value := range metadata {
-		if key == "gateway.api_type" || strings.HasPrefix(key, "provider.") || strings.HasPrefix(key, "model_catalog.") || strings.HasPrefix(key, "billing.") {
+		if key == "gateway.api_type" || strings.HasPrefix(key, "provider.") || strings.HasPrefix(key, "policy.") || strings.HasPrefix(key, "model_catalog.") || strings.HasPrefix(key, "billing.") {
 			result[key] = value
 		}
 	}

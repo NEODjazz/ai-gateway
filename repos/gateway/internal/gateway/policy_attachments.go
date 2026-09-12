@@ -208,7 +208,7 @@ func (h Handler) applyPolicyAttachmentsForModels(w http.ResponseWriter, req *mod
 		for _, attachment := range deferred {
 			policy, _ := controller.GetGuardrailPolicy(attachment.PolicyName)
 			endpointAttachments = append(endpointAttachments, provider.EndpointPolicyAttachment{
-				PolicyName: attachment.PolicyName, Providers: attachment.Providers, Deployments: attachment.Deployments,
+				PolicyName: attachment.PolicyName, Models: attachment.Models, Providers: attachment.Providers, Deployments: attachment.Deployments,
 				DLP: policy.DLP, OutputDLP: policy.OutputDLP, AV: policy.AV,
 				Anonymization: policy.Anonymization, AnonymizationRules: policy.AnonymizationRules,
 			})

@@ -1420,16 +1420,22 @@ func TestProviderAttemptContextCombinesAnonymizationProfiles(t *testing.T) {
 
 func TestProviderAttemptContextResolvesEndpointScopedProfiles(t *testing.T) {
 	attachments, err := json.Marshal([]EndpointPolicyAttachment{
-		{PolicyName: "azure-strict", Providers: []string{"azure-*"}, Anonymization: "strict", DLP: true},
+		{PolicyName: "azure-strict", Models: []string{"gpt-*"}, Providers: []string{"azure-*"}, Anonymization: "strict", DLP: true},
 		{PolicyName: "local-disabled", Deployments: []string{"local-*"}, Anonymization: "disabled"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := modules.RequestContext{Metadata: map[string]string{EndpointPolicyAttachmentsMetadataKey: string(attachments)}}
+	req := modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "gpt-test"}, Metadata: map[string]string{EndpointPolicyAttachmentsMetadataKey: string(attachments)}}
 	azure := providerAttemptContext(req, Endpoint{Name: "eu-primary", ProviderID: "azure-openai", Type: "openai-compatible"})
 	if azure.Metadata["provider.modules.anonymizer.mode"] != "strict" || azure.Metadata["provider.modules.dlp.enabled"] != "true" || azure.Metadata["provider.guardrail.attached_policies"] != "azure-strict" {
 		t.Fatalf("provider policy did not match: %+v", azure.Metadata)
+	}
+	otherModel := req
+	otherModel.Request.Model = "claude-test"
+	unmatched := providerAttemptContext(otherModel, Endpoint{Name: "eu-primary", ProviderID: "azure-openai", Type: "openai-compatible"})
+	if unmatched.Metadata["provider.guardrail.attached_policies"] != "" || unmatched.Metadata["provider.modules.anonymizer.mode"] != "strict" {
+		t.Fatalf("model-scoped policy leaked to another model: %+v", unmatched.Metadata)
 	}
 	local := providerAttemptContext(req, Endpoint{Name: "local-main", ProviderID: "ollama", Type: "ollama"})
 	if local.Metadata["provider.modules.anonymizer.mode"] != "disabled" || local.Metadata["provider.guardrail.attached_policies"] != "local-disabled" {

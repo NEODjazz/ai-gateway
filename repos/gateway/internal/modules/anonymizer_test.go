@@ -121,6 +121,9 @@ func TestAnonymizerMasksEmbeddingInput(t *testing.T) {
 	if len(req.AnonymizationValues) != 2 {
 		t.Fatalf("unexpected replacements: %+v", req.AnonymizationValues)
 	}
+	if req.Metadata["provider.modules.anonymizer.effective_rules"] != "all" || req.Metadata["provider.modules.anonymizer.replacements"] != "2" {
+		t.Fatalf("anonymization metadata=%+v", req.Metadata)
+	}
 }
 
 func TestAnonymizerMasksImageGenerationPrompt(t *testing.T) {

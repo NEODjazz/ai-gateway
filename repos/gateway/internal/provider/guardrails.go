@@ -38,6 +38,7 @@ const EndpointPolicyAttachmentsMetadataKey = "policy.guardrail.endpoint_attachme
 
 type EndpointPolicyAttachment struct {
 	PolicyName         string   `json:"policy_name"`
+	Models             []string `json:"models,omitempty"`
 	Providers          []string `json:"providers,omitempty"`
 	Deployments        []string `json:"deployments,omitempty"`
 	DLP                bool     `json:"dlp,omitempty"`
@@ -119,6 +120,9 @@ func normalizeGuardrailPolicy(name string, policy GuardrailPolicy) (GuardrailPol
 	name = strings.TrimSpace(name)
 	policy.Description = strings.TrimSpace(policy.Description)
 	policy.Anonymization = strings.ToLower(strings.TrimSpace(policy.Anonymization))
+	if !validAnonymizationRuleNames(policy.AnonymizationRules) {
+		return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
+	}
 	policy.AnonymizationRules = normalizedAnonymizationRules(policy.AnonymizationRules)
 	if name == "" || len(name) > 128 || len(policy.Description) > 1024 || (!policy.DLP && !policy.AV && policy.Anonymization == "") || (policy.OutputDLP && !policy.DLP) || !validAnonymizationPolicy(policy) {
 		return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
@@ -130,6 +134,21 @@ func normalizeGuardrailPolicy(name string, policy GuardrailPolicy) (GuardrailPol
 	}
 	policy.Name = name
 	return policy, nil
+}
+
+func validAnonymizationRuleNames(values []string) bool {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || len(value) > 128 {
+			return false
+		}
+		for _, character := range value {
+			if !(character >= 'a' && character <= 'z') && !(character >= 'A' && character <= 'Z') && !(character >= '0' && character <= '9') && character != '_' && character != '-' && character != '.' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func validAnonymizationPolicy(policy GuardrailPolicy) bool {
@@ -169,10 +188,12 @@ type AnonymizationSetting struct {
 	Rules   []string
 }
 
-var BasicAnonymizationRules = []string{
-	"address_ru", "api_key", "bank_card", "domain_user", "email", "inn_context",
-	"jwt", "passport_ru_context", "password", "person_context", "phone", "private_key",
-	"security_key", "social_login", "user_id",
+func basicAnonymizationRules() []string {
+	return []string{
+		"address_ru", "api_key", "bank_card", "domain_user", "email", "inn_context",
+		"jwt", "passport_ru_context", "password", "person_context", "phone", "private_key",
+		"security_key", "social_login", "user_id",
+	}
 }
 
 // ResolveAnonymization composes every matching profile. Strict wins over
@@ -193,7 +214,7 @@ func ResolveAnonymization(settings ...AnonymizationSetting) (mode string, rules,
 		case "strict":
 			strict = true
 		case "basic":
-			selected = append(selected, BasicAnonymizationRules...)
+			selected = append(selected, basicAnonymizationRules()...)
 		case "custom":
 			selected = append(selected, setting.Rules...)
 		}
@@ -209,7 +230,7 @@ func ResolveAnonymization(settings ...AnonymizationSetting) (mode string, rules,
 	return "disabled", nil, profiles
 }
 
-func endpointPolicySettings(metadata map[string]string, endpoint Endpoint) (dlp, outputDLP, av bool, settings []AnonymizationSetting, names []string) {
+func endpointPolicySettings(metadata map[string]string, endpoint Endpoint, model string) (dlp, outputDLP, av bool, settings []AnonymizationSetting, names []string) {
 	raw := strings.TrimSpace(metadata[EndpointPolicyAttachmentsMetadataKey])
 	if raw == "" {
 		return false, false, false, nil, nil
@@ -219,6 +240,9 @@ func endpointPolicySettings(metadata map[string]string, endpoint Endpoint) (dlp,
 		return false, false, false, nil, nil
 	}
 	for _, attachment := range attachments {
+		if len(attachment.Models) != 0 && !matchesEndpointPolicyPattern(model, attachment.Models) {
+			continue
+		}
 		if len(attachment.Providers) != 0 && !matchesEndpointPolicyPattern(endpoint.ProviderID, attachment.Providers) {
 			continue
 		}
