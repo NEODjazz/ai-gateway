@@ -757,6 +757,11 @@ variants. Native flat search location fields are forwarded directly, while the
 former nested gateway shape remains accepted for existing clients. Every native
 server-tool definition now contributes to TPM and budget reserve.
 
+Managed code execution accepts the 20250825, 20260120 and 20260521 versions.
+The selected version is preserved through generation and native token counting;
+tool authorization, exact provider usage settlement, cache exclusion, bounded
+result validation and skill-container requirements remain identical.
+
 Regressions cover request/response conversion, native and fallback SSE, stream
 failure, model/tool authorization, TPM, unknown input, response-size bounds and
 reported usage reaching the accounting stage through Router. No live paid

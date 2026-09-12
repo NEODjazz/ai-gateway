@@ -214,6 +214,8 @@ caller/domain controls, version-gated cache bypass and response inclusion. Nativ
 flat search location fields are forwarded directly; the earlier nested gateway
 shape remains accepted for compatibility. All server-tool definitions contribute
 to TPM reserve.
+Managed code execution preserves the requested 20250825, 20260120 or 20260521
+tool version through generation and native token counting.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.
