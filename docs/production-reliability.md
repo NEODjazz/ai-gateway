@@ -1119,3 +1119,8 @@ capability. With the required protocol-version header, a PDF request using
 `citations.enabled=true` passed structural validation and reached
 authentication; `enabled=false` returned 400 before authentication. These
 smoke checks used no credential and performed no external inference.
+
+Source `c3ffb67` enforces the provider contract that document citations apply to
+all documents in a request or none. Mixed cited and uncited PDF inputs now fail
+before provider execution. The focused regression test and full Go tests, race
+tests, vet and build passed.

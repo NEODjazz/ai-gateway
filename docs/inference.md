@@ -705,8 +705,9 @@ A document may request native citations with `citations: {"enabled": true}`.
 The setting is preserved by generation, token counting and durable Messages
 batches, requires the explicit `document_citations` deployment capability,
 participates in exact-cache identity and bypasses semantic cache reuse. Omission
-leaves citations disabled; `enabled: false` is rejected to keep the request
-contract unambiguous.
+leaves citations disabled. Citations must be enabled for every document in a
+request or omitted from every document; `enabled: false` and mixed requests are
+rejected before provider execution.
 URL/file-reference documents, URL images and text after tool_use are not supported. Ordinary client
 `tool_result` blocks may set `is_error=true`; the flag is preserved by native
 generation, token counting and durable batches. Such requests require the

@@ -284,7 +284,9 @@ token counting and durable Messages batches preserve the documents. A document
 may set `citations: {"enabled": true}`; routing then also requires
 `document_citations`. The setting is forwarded by generation, token counting
 and durable batches, participates in exact-cache identity and disables semantic
-cache reuse. `enabled: false` is rejected; omit `citations` to leave it disabled.
+cache reuse. When a request has multiple documents, citations must be enabled
+for all of them or omitted from all of them. `enabled: false` and mixed requests
+are rejected before provider execution.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.
