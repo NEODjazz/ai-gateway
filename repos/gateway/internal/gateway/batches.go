@@ -256,6 +256,25 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 			return nil, "", nil, errors.New("tools contain an invalid function name")
 		}
 		normalized = request
+	case "/v1/messages":
+		var request messagesRequest
+		if err := decodeStrictJSON(body, &request); err != nil {
+			return nil, "", nil, err
+		}
+		chat, err := request.chat()
+		if err != nil {
+			return nil, "", nil, err
+		}
+		if request.Stream {
+			return nil, "", nil, errors.New("streaming Messages is not supported in batches")
+		}
+		model = request.Model
+		var valid bool
+		tools, valid = chatToolIdentifiers(chat.Tools, chat.Functions)
+		if !valid {
+			return nil, "", nil, errors.New("tools contain an invalid function name")
+		}
+		normalized = request
 	case "/v1/completions":
 		var request openai.CompletionRequest
 		if err := decodeStrictJSON(body, &request); err != nil {
@@ -714,6 +733,30 @@ func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestCont
 		response, err := h.provider.ChatCompletions(ctx, *req)
 		payload, _ := json.Marshal(response)
 		return http.StatusOK, payload, err
+	case "/v1/messages":
+		var value messagesRequest
+		if err := json.Unmarshal(body, &value); err != nil {
+			return 0, nil, err
+		}
+		chat, err := value.chat()
+		if err != nil {
+			return 0, nil, err
+		}
+		req.Request = chat
+		req.Metadata["gateway.api_type"] = "messages"
+		if !h.allowBatchRate(ctx, *req, estimateChatTokens(chat)) {
+			return 0, nil, errBatchRateLimited
+		}
+		response, err := h.provider.ChatCompletions(ctx, *req)
+		if err != nil {
+			return 0, nil, err
+		}
+		adapted, err := messagesResponsePayload(response)
+		if err != nil {
+			return 0, nil, err
+		}
+		payload, _ := json.Marshal(adapted)
+		return http.StatusOK, payload, nil
 	case "/v1/responses":
 		var value openai.ResponseRequest
 		if err := json.Unmarshal(body, &value); err != nil {

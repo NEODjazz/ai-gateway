@@ -240,6 +240,7 @@ type batchProvider struct {
 	mu         sync.Mutex
 	models     []string
 	executions []string
+	chat       modules.RequestContext
 	speech     modules.RequestContext
 	speechData []byte
 	audio      modules.RequestContext
@@ -253,8 +254,9 @@ type batchProvider struct {
 func (p *batchProvider) ChatCompletions(_ context.Context, req modules.RequestContext) (openai.ChatCompletionResponse, error) {
 	p.mu.Lock()
 	p.executions = append(p.executions, req.RequestID)
+	p.chat = req
 	p.mu.Unlock()
-	return openai.ChatCompletionResponse{ID: "chat_" + req.RequestID, Object: "chat.completion", Model: req.Request.Model, Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "ok"}}}}, nil
+	return openai.ChatCompletionResponse{ID: "chat_" + req.RequestID, Object: "chat.completion", Model: req.Request.Model, Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}}, Usage: openai.Usage{PromptTokens: 3, CompletionTokens: 1, TotalTokens: 4}}, nil
 }
 func (p *batchProvider) StreamChatCompletions(context.Context, modules.RequestContext, providerpkg.ChatCompletionStreamWriter) (openai.ChatCompletionResponse, bool, error) {
 	return openai.ChatCompletionResponse{}, false, nil
@@ -412,6 +414,70 @@ func TestBatchLifecycleExecutesMixedModelsWithDistinctBillingIDs(t *testing.T) {
 	provider.mu.Unlock()
 	if len(executions) != 2 || executions[0] == executions[1] {
 		t.Fatalf("execution IDs=%v", executions)
+	}
+}
+
+func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
+	store := newMemoryBatchStore()
+	files := &memoryFileStore{files: map[string]filestate.File{}}
+	runtime := &batchProvider{models: []string{"message-model"}}
+	rates := &embeddingTokenRateStore{}
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	request := messagesRequest{
+		Model: "message-model", MaxTokens: 32,
+		System:   json.RawMessage(`"Be concise"`),
+		Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`"hello"`)}},
+	}
+	requestBody, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := json.Marshal(openai.BatchRequestLine{CustomID: "message", Method: http.MethodPost, URL: "/v1/messages", Body: requestBody})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line = append(line, '\n')
+	files.files["file_messages"] = filestate.File{ID: "file_messages", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(line)), Content: line}
+	h := NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), runtime, rates).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
+	routes := Routes(h)
+	createBody, _ := json.Marshal(openai.BatchCreateRequest{InputFileID: "file_messages", Endpoint: "/v1/messages", CompletionWindow: openai.BatchCompletionWindow})
+	create := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(string(createBody)))
+	create.Header.Set("Authorization", "Bearer key")
+	createdResponse := httptest.NewRecorder()
+	routes.ServeHTTP(createdResponse, create)
+	var created openai.Batch
+	if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil || createdResponse.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s err=%v", createdResponse.Code, createdResponse.Body.String(), err)
+	}
+	if processed, err := h.ProcessBatchItems(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	reservedTokens := rates.tokens
+	done := authorizedFileRequest(t, routes, http.MethodGet, "/v1/batches/"+created.ID)
+	var batch openai.Batch
+	if err := json.Unmarshal(done.Body.Bytes(), &batch); err != nil || done.Code != http.StatusOK || batch.RequestCounts.Completed != 1 {
+		t.Fatalf("status=%d batch=%+v err=%v", done.Code, batch, err)
+	}
+	output, err := files.Get(t.Context(), owner, batch.OutputFileID, true)
+	if err != nil || !strings.Contains(string(output.Content), `"type":"message"`) || !strings.Contains(string(output.Content), `"stop_reason":"end_turn"`) || !strings.Contains(string(output.Content), `"input_tokens":3`) {
+		t.Fatalf("output=%s err=%v", output.Content, err)
+	}
+	chat, err := request.chat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.mu.Lock()
+	providerRequest := runtime.chat
+	runtime.mu.Unlock()
+	if providerRequest.RequestID == "" || providerRequest.Metadata["gateway.api_type"] != "messages" || reservedTokens != estimateChatTokens(chat) {
+		t.Fatalf("request=%+v metadata=%v TPM=%d want=%d", providerRequest.Request, providerRequest.Metadata, reservedTokens, estimateChatTokens(chat))
+	}
+}
+
+func TestBatchMessagesRejectsStreaming(t *testing.T) {
+	body := []byte(`{"model":"message-model","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	if _, _, _, err := validateBatchBody("/v1/messages", body); err == nil || !strings.Contains(err.Error(), "not supported in batches") {
+		t.Fatalf("err=%v", err)
 	}
 }
 

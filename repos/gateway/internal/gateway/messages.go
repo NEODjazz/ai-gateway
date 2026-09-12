@@ -570,30 +570,33 @@ func (w *messagesWriter) finish() {
 	} else {
 		err = json.Unmarshal(w.buffer.Bytes(), &response)
 	}
-	if !validMessagesUsage(response.Usage) {
-		err = errors.New("invalid message usage")
-	}
-	if !validMessagesServiceTier(response.ServiceTier) {
-		err = errors.New("invalid message service tier")
-	}
-	var content []any
-	var reason string
-	if err == nil && len(response.Choices) == 1 {
-		content, err = messagesContent(response.Choices[0].Message)
-		if err == nil {
-			reason, err = messagesStop(response.Choices[0].FinishReason)
-			if response.Choices[0].StopSequence != nil {
-				reason = "stop_sequence"
-			}
-		}
-	} else {
-		err = errors.New("invalid message response")
+	var payload map[string]any
+	if err == nil {
+		payload, err = messagesResponsePayload(response)
 	}
 	if err != nil {
 		writeJSON(w.destination, 502, map[string]any{"type": "error", "error": map[string]any{"type": "api_error", "message": "provider response cannot be represented as Messages"}})
 		return
 	}
-	writeJSON(w.destination, 200, map[string]any{"id": response.ID, "type": "message", "role": "assistant", "model": response.Model, "content": content, "stop_reason": reason, "stop_sequence": response.Choices[0].StopSequence, "usage": messagesUsage(response.Usage, response.ServiceTier)})
+	writeJSON(w.destination, 200, payload)
+}
+
+func messagesResponsePayload(response openai.ChatCompletionResponse) (map[string]any, error) {
+	if !validMessagesUsage(response.Usage) || !validMessagesServiceTier(response.ServiceTier) || len(response.Choices) != 1 {
+		return nil, errors.New("invalid message response")
+	}
+	content, err := messagesContent(response.Choices[0].Message)
+	if err != nil {
+		return nil, err
+	}
+	reason, err := messagesStop(response.Choices[0].FinishReason)
+	if err != nil {
+		return nil, err
+	}
+	if response.Choices[0].StopSequence != nil {
+		reason = "stop_sequence"
+	}
+	return map[string]any{"id": response.ID, "type": "message", "role": "assistant", "model": response.Model, "content": content, "stop_reason": reason, "stop_sequence": response.Choices[0].StopSequence, "usage": messagesUsage(response.Usage, response.ServiceTier)}, nil
 }
 
 func validMessagesUsage(usage openai.Usage) bool {
