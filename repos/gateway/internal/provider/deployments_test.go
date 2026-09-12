@@ -392,6 +392,37 @@ func TestManagedProviderCapabilityProfilesExposeValidatedChatParameters(t *testi
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeAllValidatedChatOptions(t *testing.T) {
+	profiles := ManagedProviderCapabilityProfiles()
+	byType := make(map[string][]string, len(profiles))
+	for _, profile := range profiles {
+		byType[profile.Type] = profile.ChatParameters.SupportedOptions
+	}
+	compatible := []string{"metadata", "modalities", "audio", "n", "safety_identifier", "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention", "prediction", "user", "verbosity", "web_search_options", "web_fetch_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "min_p", "top_k", "top_a", "repetition_penalty", "logit_bias", "reasoning_effort"}
+	compatibleTiered := append(append([]string(nil), compatible...), "service_tier")
+	expected := map[string][]string{
+		"demo": {}, "voyage": {}, "opensandbox": {},
+		"ollama":            {"logprobs", "top_logprobs", "min_p", "top_k", "reasoning_effort"},
+		"openai":            compatibleTiered,
+		"openai-compatible": compatible,
+		"openrouter":        compatibleTiered,
+		"azure-openai":      compatible,
+		"anthropic":         {"metadata", "web_search_options", "web_fetch_options", "reasoning_effort", "service_tier"},
+		"gemini":            {"modalities", "n", "web_search_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "top_k", "reasoning_effort", "service_tier"},
+		"cohere":            {"logprobs", "frequency_penalty", "presence_penalty", "top_k"},
+		"mistral":           {"metadata", "safe_prompt", "n", "prompt_cache_key", "prompt_mode", "prediction", "frequency_penalty", "presence_penalty", "reasoning_effort"},
+		"bedrock":           {"service_tier"},
+		"groq":              {"user", "reasoning_effort", "service_tier"},
+		"deepseek":          {"user", "logprobs", "top_logprobs"},
+		"xai":               {"n", "prompt_cache_key", "user", "web_search_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "reasoning_effort", "service_tier"},
+	}
+	for providerType, want := range expected {
+		if got, found := byType[providerType]; !found || !slices.Equal(got, want) {
+			t.Errorf("%s supported options=%v want=%v", providerType, got, want)
+		}
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

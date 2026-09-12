@@ -35,9 +35,10 @@ type ProviderCapabilityProfile struct {
 }
 
 type ProviderChatParameterPolicy struct {
-	ReasoningEffort []string `json:"reasoning_effort"`
-	Logprobs        []string `json:"logprobs"`
-	ServiceTier     []string `json:"service_tier"`
+	SupportedOptions []string `json:"supported_options"`
+	ReasoningEffort  []string `json:"reasoning_effort"`
+	Logprobs         []string `json:"logprobs"`
+	ServiceTier      []string `json:"service_tier"`
 }
 
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai", "opensandbox"}
@@ -297,7 +298,7 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 }
 
 func managedProviderChatParameterPolicy(client Client, supportsChat bool) ProviderChatParameterPolicy {
-	policy := ProviderChatParameterPolicy{ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{}}
+	policy := ProviderChatParameterPolicy{SupportedOptions: []string{}, ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{}}
 	if !supportsChat {
 		return policy
 	}
@@ -323,7 +324,72 @@ func managedProviderChatParameterPolicy(client Client, supportsChat bool) Provid
 			policy.ServiceTier = append(policy.ServiceTier, value)
 		}
 	}
+	for _, probe := range managedChatOptionProbes() {
+		request := baseline
+		probe.apply(&request)
+		if validateChatAdapter(client, request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	if len(policy.ReasoningEffort) > 0 {
+		policy.SupportedOptions = append(policy.SupportedOptions, "reasoning_effort")
+	}
+	if len(policy.ServiceTier) > 0 {
+		policy.SupportedOptions = append(policy.SupportedOptions, "service_tier")
+	}
 	return policy
+}
+
+type managedChatOptionProbe struct {
+	name  string
+	apply func(*openai.ChatCompletionRequest)
+}
+
+func managedChatOptionProbes() []managedChatOptionProbe {
+	setBool := func(target func(*openai.ChatCompletionRequest) **bool, value bool) func(*openai.ChatCompletionRequest) {
+		return func(request *openai.ChatCompletionRequest) { *target(request) = &value }
+	}
+	return []managedChatOptionProbe{
+		{name: "metadata", apply: func(request *openai.ChatCompletionRequest) {
+			request.Metadata = map[string]string{"user_id": "profile-probe"}
+		}},
+		{name: "store", apply: setBool(func(request *openai.ChatCompletionRequest) **bool { return &request.Store }, true)},
+		{name: "modalities", apply: func(request *openai.ChatCompletionRequest) { request.Modalities = []string{"text"} }},
+		{name: "audio", apply: func(request *openai.ChatCompletionRequest) {
+			request.Modalities = []string{"audio"}
+			request.Audio = &openai.ChatAudioOptions{Format: "wav", Voice: openai.ChatAudioVoice{Name: "alloy"}}
+		}},
+		{name: "safe_prompt", apply: setBool(func(request *openai.ChatCompletionRequest) **bool { return &request.SafePrompt }, true)},
+		{name: "n", apply: func(request *openai.ChatCompletionRequest) { value := 2; request.N = &value }},
+		{name: "safety_identifier", apply: func(request *openai.ChatCompletionRequest) { request.SafetyIdentifier = "profile-probe" }},
+		{name: "prompt_cache_key", apply: func(request *openai.ChatCompletionRequest) { request.PromptCacheKey = "profile-probe" }},
+		{name: "prompt_cache_options", apply: func(request *openai.ChatCompletionRequest) {
+			request.PromptCacheOptions = &openai.PromptCacheOptions{Mode: "explicit", TTL: "30m"}
+		}},
+		{name: "prompt_cache_retention", apply: func(request *openai.ChatCompletionRequest) { request.PromptCacheRetention = "24h" }},
+		{name: "prompt_mode", apply: func(request *openai.ChatCompletionRequest) { request.PromptMode = "reasoning" }},
+		{name: "prediction", apply: func(request *openai.ChatCompletionRequest) {
+			request.Prediction = &openai.ChatPrediction{Type: "content", Content: "expected"}
+		}},
+		{name: "user", apply: func(request *openai.ChatCompletionRequest) { request.User = "profile-probe" }},
+		{name: "verbosity", apply: func(request *openai.ChatCompletionRequest) { request.Verbosity = "medium" }},
+		{name: "web_search_options", apply: func(request *openai.ChatCompletionRequest) { request.WebSearchOptions = &openai.ChatWebSearchOptions{} }},
+		{name: "web_fetch_options", apply: func(request *openai.ChatCompletionRequest) {
+			request.WebFetchOptions = &openai.ChatWebFetchOptions{AllowedDomains: []string{"example.com"}, MaxContentTokens: 1000}
+		}},
+		{name: "logprobs", apply: setBool(func(request *openai.ChatCompletionRequest) **bool { return &request.Logprobs }, true)},
+		{name: "top_logprobs", apply: func(request *openai.ChatCompletionRequest) {
+			enabled, count := true, 1
+			request.Logprobs, request.TopLogprobs = &enabled, &count
+		}},
+		{name: "frequency_penalty", apply: func(request *openai.ChatCompletionRequest) { value := 0.5; request.FrequencyPenalty = &value }},
+		{name: "presence_penalty", apply: func(request *openai.ChatCompletionRequest) { value := 0.5; request.PresencePenalty = &value }},
+		{name: "min_p", apply: func(request *openai.ChatCompletionRequest) { value := 0.1; request.MinP = &value }},
+		{name: "top_k", apply: func(request *openai.ChatCompletionRequest) { value := 10; request.TopK = &value }},
+		{name: "top_a", apply: func(request *openai.ChatCompletionRequest) { value := 0.1; request.TopA = &value }},
+		{name: "repetition_penalty", apply: func(request *openai.ChatCompletionRequest) { value := 1.1; request.RepetitionPenalty = &value }},
+		{name: "logit_bias", apply: func(request *openai.ChatCompletionRequest) { request.LogitBias = map[string]int{"1": 1} }},
+	}
 }
 
 func slicesContain(values []string, expected string) bool {

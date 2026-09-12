@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.299
+  version: 0.1.300
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9330,13 +9330,17 @@ components:
     ProviderChatParameterPolicy:
       type: object
       additionalProperties: false
-      required: [reasoning_effort, logprobs, service_tier]
-      description: Values accepted by the runtime adapter validator for selected Chat Completions parameters. Empty arrays mean the parameter is rejected. Availability can still depend on the upstream model.
+      required: [supported_options, reasoning_effort, logprobs, service_tier]
+      description: Chat Completions options accepted by the runtime adapter validator. Missing option names and empty value arrays mean the parameter is rejected. Availability can still depend on the upstream model.
       properties:
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [metadata, store, modalities, audio, safe_prompt, n, safety_identifier, prompt_cache_key, prompt_cache_options, prompt_cache_retention, prompt_mode, prediction, user, verbosity, web_search_options, web_fetch_options, logprobs, top_logprobs, frequency_penalty, presence_penalty, min_p, top_k, top_a, repetition_penalty, logit_bias, reasoning_effort, service_tier]}
         reasoning_effort:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [none, minimal, low, medium, high, xhigh, max]}
+          items: {type: string, enum: [none, minimal, low, medium, high, xhigh, max, default]}
         logprobs:
           type: array
           uniqueItems: true
