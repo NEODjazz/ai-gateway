@@ -153,8 +153,8 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 				return result, errors.New("thinking adaptive does not accept budget_tokens")
 			}
 		case "enabled":
-			if thinking.BudgetTokens == nil || *thinking.BudgetTokens < 1024 || *thinking.BudgetTokens >= request.MaxTokens {
-				return result, errors.New("thinking enabled requires budget_tokens of at least 1024 and less than max_tokens")
+			if thinking.BudgetTokens == nil || *thinking.BudgetTokens < 1024 || !allowPartial && *thinking.BudgetTokens >= request.MaxTokens {
+				return result, errors.New("thinking enabled requires budget_tokens of at least 1024 and, for generation, less than max_tokens")
 			}
 		default:
 			return result, errors.New("thinking.type must be adaptive, enabled, or disabled")

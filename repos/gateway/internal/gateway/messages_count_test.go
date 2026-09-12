@@ -139,6 +139,16 @@ func TestCountEndpointEnforcesToolACLAndSharedRPM(t *testing.T) {
 	}
 }
 
+func TestCountEndpointPreservesThinkingConfiguration(t *testing.T) {
+	counter := &countProviderSpy{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}}}}), counter))
+	response := countEndpointCall(handler, `{"model":"m","thinking":{"type":"enabled","budget_tokens":2048,"display":"summarized"},"messages":[{"role":"user","content":"hi"}]}`, "gateway-test-key")
+	thinking := counter.request.Request.AnthropicThinking
+	if response.Code != http.StatusOK || counter.calls != 1 || thinking == nil || thinking.Type != "enabled" || thinking.BudgetTokens == nil || *thinking.BudgetTokens != 2048 || thinking.Display != "summarized" {
+		t.Fatalf("status=%d body=%s calls=%d thinking=%+v", response.Code, response.Body.String(), counter.calls, thinking)
+	}
+}
+
 func TestCountEndpointIncludesOwnedSkillExecutionContext(t *testing.T) {
 	owner := skillOwnerKey(modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"})
 	store := &memorySkillStore{
