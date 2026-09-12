@@ -574,3 +574,12 @@ successfully, and pod `ai-gateway-gateway-6bb85597f4-8r67p` became Ready with
 zero restarts. The live OpenAPI 0.1.320 contract lists
 `/v1/images/generations` in the accepted batch endpoints; the regression covers
 shared validation, model policy, prompt/output reserve and usage-bearing output.
+
+Source `a814059` adds bounded Image Generation SSE streaming with validated
+partial/completed ordering, pre-first-event retry and fallback, and exact final
+usage settlement. Rancher Desktop built `ai-gateway-gateway:gaps-a814059`; Helm
+revision 420 completed successfully, and pod
+`ai-gateway-gateway-745c954bdf-v9rkp` became Ready with zero restarts. The live
+OpenAPI 0.1.321 contract exposes `stream`, `partial_images` and both event
+schemas; live validation rejected `partial_images` without `stream=true` before
+provider execution.
