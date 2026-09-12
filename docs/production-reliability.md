@@ -1773,3 +1773,20 @@ same image. Live liveness and readiness returned 204, the served OpenAPI
 reported 0.1.385, and an unauthenticated Chat request carrying all four
 controls returned 401 before deployment selection. No provider credential or
 external inference was used by the smoke checks.
+
+Source `e384b7d` maps public `max_completion_tokens` to Together's native
+`max_tokens` field in both JSON and SSE execution. The shared request boundary
+continues to reject simultaneous public limit names, and existing TPM and
+billing reserve code reads their common effective value. Protocol regressions
+verify the exact upstream wire shape for both transports. Focused provider
+tests, vet, build, the full Go suite and the full race suite passed. OpenAPI
+0.1.386 documents the provider mapping.
+
+Rancher Desktop built `ai-gateway-gateway:together-token-limit-e384b7d` with
+image ID `sha256:782d901bd07cd2878e9c8c75923e31bd4a52566ea70c81be3c0d2a04208de14b`.
+Gateway Helm revision 492 completed successfully. Pod
+`ai-gateway-gateway-56b898c955-rf7t6` became Ready with zero restarts and the
+same image. Live liveness and readiness returned 204, the served OpenAPI
+reported 0.1.386, and an unauthenticated Chat request carrying
+`max_completion_tokens` returned 401 before deployment selection. No provider
+credential or external inference was used by the smoke checks.

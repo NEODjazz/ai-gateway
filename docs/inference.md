@@ -123,6 +123,10 @@ The same native transport forwards `min_p`, `top_k`, `repetition_penalty` and
 integer `logit_bias`. Shared request validation restricts probabilities and
 candidate counts, requires a positive repetition penalty, and accepts only
 nonnegative numeric token IDs with biases from -100 to 100 before provider HTTP.
+Together exposes only native `max_tokens`, so the adapter maps public
+`max_completion_tokens` to that field for JSON and SSE. The gateway continues
+to reject requests containing both public limit names and uses their common
+effective value for TPM admission and billing reserve.
 
 The same provider type sends bounded Text-to-Speech requests to native
 `/v1/audio/speech`. It preserves model, input, voice and lowercase language or
