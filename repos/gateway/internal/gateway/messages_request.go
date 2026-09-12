@@ -402,6 +402,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 						MediaType string `json:"media_type"`
 						Data      string `json:"data"`
 						URL       string `json:"url"`
+						FileID    string `json:"file_id"`
 					} `json:"source"`
 				}
 				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "user" {
@@ -409,20 +410,25 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 				}
 				var image any
 				switch {
-				case block.Source.Type == "base64" && block.Source.MediaType != "" && block.Source.Data != "" && block.Source.URL == "":
+				case block.Source.Type == "base64" && block.Source.MediaType != "" && block.Source.Data != "" && block.Source.URL == "" && block.Source.FileID == "":
 					data := "data:" + block.Source.MediaType + ";base64," + block.Source.Data
 					if _, err := openai.ParseDataImageURL(data); err != nil {
 						return result, err
 					}
 					image = map[string]any{"type": "image_url", "image_url": map[string]any{"url": data}}
-				case block.Source.Type == "url" && block.Source.URL != "" && block.Source.MediaType == "" && block.Source.Data == "":
+				case block.Source.Type == "url" && block.Source.URL != "" && block.Source.MediaType == "" && block.Source.Data == "" && block.Source.FileID == "":
 					parsed, err := url.Parse(block.Source.URL)
 					if err != nil || len(block.Source.URL) > 2048 || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 						return result, errors.New("image URL must be a valid public HTTPS URL")
 					}
 					image = map[string]any{"type": "input_url_image", "url": block.Source.URL}
+				case block.Source.Type == "file" && block.Source.FileID != "" && block.Source.MediaType == "" && block.Source.Data == "" && block.Source.URL == "":
+					if !validFileToken(block.Source.FileID, 128) || !strings.HasPrefix(block.Source.FileID, "file_") {
+						return result, errors.New("image file_id is invalid")
+					}
+					image = map[string]any{"type": "input_file_image_reference", "file_id": block.Source.FileID}
 				default:
-					return result, errors.New("only base64 and URL user image blocks are supported")
+					return result, errors.New("only base64, URL and stored user image blocks are supported")
 				}
 				imageCount++
 				if imageCount > openai.MaxImageAttachments {

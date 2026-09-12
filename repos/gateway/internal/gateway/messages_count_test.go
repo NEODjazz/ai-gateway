@@ -206,6 +206,22 @@ func TestCountEndpointFetchesURLImageWithoutBilling(t *testing.T) {
 		t.Fatalf("status=%d calls=%d billing=%d images=%+v err=%v body=%s", response.Code, counter.calls, billing.calls, images, err, response.Body.String())
 	}
 }
+
+func TestCountEndpointResolvesOwnedFileImageWithoutBilling(t *testing.T) {
+	counter := &countProviderSpy{result: provider.TokenCountResult{InputTokens: 7}}
+	billing := &lifecycleBillingModule{}
+	identity := modules.RequestContext{CredentialID: "credential", UserID: "user"}
+	image := []byte("\x89PNG\r\n\x1a\nimage")
+	files := &memoryFileStore{files: map[string]filestate.File{"file_image": {
+		ID: "file_image", OwnerKey: fileOwnerKey(identity), Filename: "chart.png", Purpose: "user_data", ContentType: "image/png", Bytes: int64(len(image)), Content: image,
+	}}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: identity.CredentialID, user: identity.UserID}, billing, accessPolicyModule{models: []string{"*"}}}), counter).WithFileStore(files, FileRuntimeConfig{MaxBytes: 32 << 20, OwnerQuotaBytes: 64 << 20}))
+	response := countEndpointCall(handler, `{"model":"m","messages":[{"role":"user","content":[{"type":"image","source":{"type":"file","file_id":"file_image"}}]}]}`, "gateway-test-key")
+	images, err := openai.ChatImageAttachments(counter.request.Request.Messages)
+	if response.Code != http.StatusOK || counter.calls != 1 || billing.calls != 0 || err != nil || len(images) != 1 || !strings.Contains(response.Body.String(), `"input_tokens":7`) {
+		t.Fatalf("status=%d calls=%d billing=%d images=%+v err=%v body=%s", response.Code, counter.calls, billing.calls, images, err, response.Body.String())
+	}
+}
 func TestCountEndpointEnforcesToolACLAndSharedRPM(t *testing.T) {
 	counter := &countProviderSpy{}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}, rpm: 1}}}), counter))

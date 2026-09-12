@@ -22,7 +22,7 @@ var errMessagesRemoteUnavailable = errors.New("remote content is unavailable")
 
 func (h Handler) resolveMessagesRequestDocumentReferences(ctx context.Context, identity modules.RequestContext, request *messagesRequest) error {
 	owner := fileOwnerKey(identity)
-	remoteImageBytes := 0
+	resolvedImageBytes := 0
 	for messageIndex := range request.Messages {
 		content := bytes.TrimSpace(request.Messages[messageIndex].Content)
 		if len(content) == 0 || content[0] != '[' {
@@ -36,13 +36,27 @@ func (h Handler) resolveMessagesRequestDocumentReferences(ctx context.Context, i
 		for _, block := range blocks {
 			if block["type"] == "image" {
 				source, _ := block["source"].(map[string]any)
-				if source["type"] == "url" {
-					remoteURL, _ := source["url"].(string)
-					data, mediaType, err := h.fetchMessagesImage(ctx, remoteURL, openai.MaxTotalImageBytes-remoteImageBytes)
+				if source["type"] == "file" {
+					fileID, _ := source["file_id"].(string)
+					file, err := h.ownedMessagesFile(ctx, owner, fileID)
 					if err != nil {
 						return err
 					}
-					remoteImageBytes += len(data)
+					if !supportedA2AImageType(file.ContentType) || file.ContentType == "" || resolvedImageBytes > openai.MaxTotalImageBytes-len(file.Content) {
+						return errMessagesFileUnavailable
+					}
+					resolvedImageBytes += len(file.Content)
+					block["source"] = map[string]any{"type": "base64", "media_type": file.ContentType, "data": base64.StdEncoding.EncodeToString(file.Content)}
+					changed = true
+					continue
+				}
+				if source["type"] == "url" {
+					remoteURL, _ := source["url"].(string)
+					data, mediaType, err := h.fetchMessagesImage(ctx, remoteURL, openai.MaxTotalImageBytes-resolvedImageBytes)
+					if err != nil {
+						return err
+					}
+					resolvedImageBytes += len(data)
 					block["source"] = map[string]any{"type": "base64", "media_type": mediaType, "data": base64.StdEncoding.EncodeToString(data)}
 					changed = true
 				}
@@ -216,6 +230,19 @@ func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity
 				}
 				imageBytes += len(data)
 				parts[partIndex] = map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(data)}}
+				continue
+			}
+			if object["type"] == "input_file_image_reference" {
+				fileID, _ := object["file_id"].(string)
+				file, err := h.ownedMessagesFile(ctx, owner, fileID)
+				if err != nil {
+					return err
+				}
+				if !supportedA2AImageType(file.ContentType) || file.ContentType == "" || imageBytes > openai.MaxTotalImageBytes-len(file.Content) {
+					return errMessagesFileUnavailable
+				}
+				imageBytes += len(file.Content)
+				parts[partIndex] = map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:" + file.ContentType + ";base64," + base64.StdEncoding.EncodeToString(file.Content)}}
 				continue
 			}
 			if object["type"] != "input_file_reference" {

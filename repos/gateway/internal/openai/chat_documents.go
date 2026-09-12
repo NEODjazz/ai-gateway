@@ -24,7 +24,7 @@ func HasChatFileReferences(request ChatCompletionRequest) bool {
 		}
 		for _, part := range parts {
 			object, ok := part.(map[string]any)
-			if ok && object["type"] == "input_file_reference" {
+			if ok && (object["type"] == "input_file_reference" || object["type"] == "input_file_image_reference") {
 				return true
 			}
 		}

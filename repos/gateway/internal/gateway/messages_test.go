@@ -224,6 +224,26 @@ func TestMessagesFetchesBoundedURLImageAfterAuthentication(t *testing.T) {
 	}
 }
 
+func TestMessagesResolvesOwnedFileImage(t *testing.T) {
+	identity := modules.RequestContext{CredentialID: "credential", UserID: "user"}
+	image := []byte("\x89PNG\r\n\x1a\nimage")
+	files := &memoryFileStore{files: map[string]filestate.File{
+		"file_image": {ID: "file_image", OwnerKey: fileOwnerKey(identity), Filename: "chart.png", Purpose: "user_data", ContentType: "image/png", Bytes: int64(len(image)), Content: image},
+		"file_other": {ID: "file_other", OwnerKey: "other", Filename: "private.png", Purpose: "user_data", ContentType: "image/png", Bytes: int64(len(image)), Content: image},
+	}}
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg-file-image", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "image"}, FinishReason: "stop"}}}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: identity.CredentialID, user: identity.UserID}}), upstream).WithFileStore(files, FileRuntimeConfig{MaxBytes: 32 << 20, OwnerQuotaBytes: 64 << 20}))
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"file","file_id":"file_image"}}]}]}`, "key")
+	images, err := openai.ChatImageAttachments(upstream.request.Request.Messages)
+	if response.Code != http.StatusOK || upstream.calls != 1 || err != nil || len(images) != 1 || images[0].MediaType != "image/png" {
+		t.Fatalf("status=%d calls=%d images=%+v err=%v body=%s", response.Code, upstream.calls, images, err, response.Body.String())
+	}
+	foreign := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"file","file_id":"file_other"}}]}]}`, "key")
+	if foreign.Code != http.StatusBadRequest || upstream.calls != 1 || !strings.Contains(foreign.Body.String(), "document file is unavailable") {
+		t.Fatalf("foreign status=%d calls=%d body=%s", foreign.Code, upstream.calls, foreign.Body.String())
+	}
+}
+
 func TestMessagesAcceptsExplicitZeroMaxTokens(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg-cache", Model: "model", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: ""}, FinishReason: "length"}}, Usage: openai.Usage{PromptTokens: 5, CompletionTokens: 0, TotalTokens: 5}}}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), upstream))

@@ -427,7 +427,7 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 	request := messagesRequest{
 		Model: "message-model", MaxTokens: 32,
 		System:   json.RawMessage(`"Be concise"`),
-		Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`[{"type":"image","source":{"type":"url","url":"https://images.example/chart.png"}},{"type":"text","text":"hello"},{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"title":"PDF report","context":"Audited","citations":{"enabled":true}},{"type":"document","source":{"type":"file","file_id":"file_document"},"title":"Text report","context":"Internal","citations":{"enabled":true}},{"type":"document","source":{"type":"url","url":"https://documents.example/remote.pdf"},"title":"Remote report","citations":{"enabled":true}}]`)}},
+		Messages: []messagesInput{{Role: "user", Content: json.RawMessage(`[{"type":"image","source":{"type":"url","url":"https://images.example/chart.png"}},{"type":"image","source":{"type":"file","file_id":"file_image"}},{"type":"text","text":"hello"},{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjcKY29udGVudA=="},"title":"PDF report","context":"Audited","citations":{"enabled":true}},{"type":"document","source":{"type":"file","file_id":"file_document"},"title":"Text report","context":"Internal","citations":{"enabled":true}},{"type":"document","source":{"type":"url","url":"https://documents.example/remote.pdf"},"title":"Remote report","citations":{"enabled":true}}]`)}},
 	}
 	requestBody, err := json.Marshal(request)
 	if err != nil {
@@ -441,6 +441,8 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 	files.files["file_messages"] = filestate.File{ID: "file_messages", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(line)), Content: line}
 	document := []byte("Quarterly revenue is 42.")
 	files.files["file_document"] = filestate.File{ID: "file_document", OwnerKey: owner, Filename: "report.txt", Purpose: "user_data", ContentType: "text/plain", Bytes: int64(len(document)), Content: document}
+	image := []byte("\x89PNG\r\n\x1a\nimage")
+	files.files["file_image"] = filestate.File{ID: "file_image", OwnerKey: owner, Filename: "chart.png", Purpose: "user_data", ContentType: "image/png", Bytes: int64(len(image)), Content: image}
 	h := NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), runtime, rates).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
 	fetches := 0
 	h.a2aHTTPClient = a2aHTTPDoerFunc(func(request *http.Request) (*http.Response, error) {
@@ -462,6 +464,7 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 	}
 	files.mu.Lock()
 	delete(files.files, "file_document")
+	delete(files.files, "file_image")
 	files.mu.Unlock()
 	h.a2aHTTPClient = a2aHTTPDoerFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("remote document must have been snapshotted")
@@ -492,7 +495,7 @@ func TestBatchLifecycleExecutesMessagesWithNativeResponse(t *testing.T) {
 			metadata = message.AnthropicDocumentMetadata
 		}
 	}
-	if providerRequest.RequestID == "" || providerRequest.Metadata["gateway.api_type"] != "messages" || reservedTokens != estimateChatTokens(providerRequest.Request) || attachmentErr != nil || len(attachments) != 2 || imageErr != nil || len(images) != 1 || !openai.HasChatTextDocuments(providerRequest.Request) || len(citations) != 3 || !citations[0] || !citations[1] || !citations[2] || len(metadata) != 3 || metadata[0].Title != "PDF report" || metadata[1].Title != "Text report" || metadata[2].Title != "Remote report" || fetches != 2 {
+	if providerRequest.RequestID == "" || providerRequest.Metadata["gateway.api_type"] != "messages" || reservedTokens != estimateChatTokens(providerRequest.Request) || attachmentErr != nil || len(attachments) != 2 || imageErr != nil || len(images) != 2 || !openai.HasChatTextDocuments(providerRequest.Request) || len(citations) != 3 || !citations[0] || !citations[1] || !citations[2] || len(metadata) != 3 || metadata[0].Title != "PDF report" || metadata[1].Title != "Text report" || metadata[2].Title != "Remote report" || fetches != 2 {
 		t.Fatalf("request=%+v metadata=%v TPM=%d want=%d", providerRequest.Request, providerRequest.Metadata, reservedTokens, estimateChatTokens(providerRequest.Request))
 	}
 }
