@@ -1287,3 +1287,12 @@ isolation and generation billing; token counting runs the same pre-inference pat
 without opening billing. Regressions cover every supported media family,
 counting, authentication order, foreign ownership and MIME mismatch. Focused and
 OpenAPI tests, the full Go suite, full race suite, vet and build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-c4cbfb1` with image ID
+`sha256:2ee6774cc0b1b4e9b9b5c3daf0b145a3a1a4ba1b7ab8918121415d34ed302fe4`.
+Gateway Helm revision 466 completed successfully, and pod
+`ai-gateway-gateway-797458c56-qxbg5` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.365 exposes the bounded owner-scoped `fileData`
+contract. A valid reference shape reached authentication and returned 401 for
+an invalid smoke key; an external URI returned 400 before authentication or
+storage access. These smoke checks performed no external inference.
