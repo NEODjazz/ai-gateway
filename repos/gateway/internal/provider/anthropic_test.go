@@ -72,6 +72,33 @@ func TestAnthropicInferenceGeoWireUsageAndCapability(t *testing.T) {
 	}
 }
 
+func TestAnthropicContextManagementWireAndCapability(t *testing.T) {
+	request := openai.ChatCompletionRequest{AnthropicContextManagement: json.RawMessage(`{"edits":[{"type":"clear_tool_uses_20250919"}]}`)}
+	converted := anthropicChatRequest(request, false)
+	encoded, err := json.Marshal(converted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"context_management":{"edits"`) || anthropicBetaFeatures(converted) != "context-management-2025-06-27" {
+		t.Fatalf("request=%s beta=%q", encoded, anthropicBetaFeatures(converted))
+	}
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,context_management" {
+		t.Fatalf("capabilities=%q", got)
+	}
+	required := requiredChatCapabilities(request, false)
+	if (Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat"}}).supportsCapabilities(required...) || !(Endpoint{Provider: Anthropic{}, Capabilities: []string{"chat", "context_management"}}).supportsCapabilities(required...) {
+		t.Fatal("context management routing capability is not enforced")
+	}
+	response := anthropicToChatCompletion(anthropicResponse{ContextManagement: json.RawMessage(`{"applied_edits":[]}`)}, "model")
+	if string(response.NativeContextManagement) != `{"applied_edits":[]}` {
+		t.Fatalf("response context=%s", response.NativeContextManagement)
+	}
+	reported := json.RawMessage(`{"applied_edits":[{"type":"clear_tool_uses_20250919"}]}`)
+	if validateAnthropicContextManagement(nil, reported) == nil || validateAnthropicContextManagement(json.RawMessage(`{"edits":[{"type":"clear_thinking_20251015"}]}`), reported) == nil {
+		t.Fatal("unrequested context management result accepted")
+	}
+}
+
 func TestAnthropicThinkingWireAndCapability(t *testing.T) {
 	budget := 2048
 	request := anthropicChatRequest(openai.ChatCompletionRequest{AnthropicThinking: &openai.AnthropicThinkingConfig{Type: "enabled", BudgetTokens: &budget, Display: "summarized"}}, false)

@@ -46,7 +46,7 @@ func (h Handler) countGenerateTokens(output *generateWriter, r *http.Request, mo
 		return
 	}
 	output.copyHeaders()
-	writeJSON(output.destination, 200, map[string]int{"totalTokens": count})
+	writeJSON(output.destination, 200, map[string]int{"totalTokens": count.InputTokens})
 	// The counting response is already in native format, not a Chat response.
 	output.started, output.terminal = true, true
 }

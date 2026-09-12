@@ -62,6 +62,7 @@ type messagesWriter struct {
 	textBlock         *int
 	err               error
 	directResponse    *openai.ChatCompletionResponse
+	contextManagement json.RawMessage
 }
 
 func (w *messagesWriter) Header() http.Header    { return w.headers }
@@ -368,7 +369,15 @@ func (w *messagesWriter) streamResult(response openai.ChatCompletionResponse) er
 			return err
 		}
 	}
-	if err := w.event("message_delta", map[string]any{"delta": map[string]any{"stop_reason": reason, "stop_sequence": response.Choices[0].StopSequence}, "usage": messagesUsage(response.Usage, response.ServiceTier)}); err != nil {
+	delta := map[string]any{"delta": map[string]any{"stop_reason": reason, "stop_sequence": response.Choices[0].StopSequence}, "usage": messagesUsage(response.Usage, response.ServiceTier)}
+	if len(response.NativeContextManagement) > 0 {
+		contextManagement, err := messagesNativeContextManagement(response.NativeContextManagement)
+		if err != nil {
+			return err
+		}
+		delta["context_management"] = contextManagement
+	}
+	if err := w.event("message_delta", delta); err != nil {
 		return err
 	}
 	w.terminal = true
@@ -403,7 +412,15 @@ func (w *messagesWriter) chunk(payload string) error {
 				return err
 			}
 		}
-		if err := w.event("message_delta", map[string]any{"delta": map[string]any{"stop_reason": w.finishReason, "stop_sequence": w.stopSequence}, "usage": messagesUsage(w.usage, w.serviceTier)}); err != nil {
+		delta := map[string]any{"delta": map[string]any{"stop_reason": w.finishReason, "stop_sequence": w.stopSequence}, "usage": messagesUsage(w.usage, w.serviceTier)}
+		if len(w.contextManagement) > 0 {
+			contextManagement, err := messagesNativeContextManagement(w.contextManagement)
+			if err != nil {
+				return err
+			}
+			delta["context_management"] = contextManagement
+		}
+		if err := w.event("message_delta", delta); err != nil {
 			return err
 		}
 		w.terminal = true
@@ -637,6 +654,13 @@ func messagesResponsePayload(response openai.ChatCompletionResponse) (map[string
 	} else if container != nil {
 		payload["container"] = container
 	}
+	if len(response.NativeContextManagement) > 0 {
+		contextManagement, err := messagesNativeContextManagement(response.NativeContextManagement)
+		if err != nil {
+			return nil, err
+		}
+		payload["context_management"] = contextManagement
+	}
 	return payload, nil
 }
 
@@ -690,7 +714,12 @@ func (w *messagesWriter) chatStreamResult(response openai.ChatCompletionResponse
 		w.err = errors.New("invalid message usage")
 		return
 	}
+	if _, err := messagesNativeContextManagement(response.NativeContextManagement); err != nil {
+		w.err = err
+		return
+	}
 	w.usage = response.Usage
+	w.contextManagement = append(w.contextManagement[:0], response.NativeContextManagement...)
 	if len(response.Choices) == 1 && response.Choices[0].StopSequence != nil {
 		w.stopSequence = response.Choices[0].StopSequence
 		w.finishReason = "stop_sequence"

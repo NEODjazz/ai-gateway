@@ -164,6 +164,18 @@ func TestInferenceGeoIsolatedFromResponseCaches(t *testing.T) {
 	}
 }
 
+func TestContextManagementBypassesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{Request: openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, AnthropicContextManagement: json.RawMessage(`{"edits":[{"type":"clear_tool_uses_20250919"}]}`),
+	}}
+	if key := providerCacheKey("chat", request); key != "" {
+		t.Fatalf("exact cache key=%q", key)
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{}); ok {
+		t.Fatal("semantic cache accepted context-managed request")
+	}
+}
+
 func TestSkillExecutionBypassesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
 		Model: "model", Messages: []openai.Message{{Role: "user", Content: "run"}}, AnthropicCodeExecution: true,

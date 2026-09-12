@@ -27,24 +27,25 @@ type Anthropic struct {
 }
 
 type anthropicRequest struct {
-	StopSequences []string               `json:"stop_sequences,omitempty"`
-	Model         string                 `json:"model"`
-	System        any                    `json:"system,omitempty"`
-	Messages      []anthropicMessage     `json:"messages"`
-	Tools         []anthropicTool        `json:"tools,omitempty"`
-	ToolChoice    map[string]any         `json:"tool_choice,omitempty"`
-	MaxTokens     int                    `json:"max_tokens"`
-	Stream        bool                   `json:"stream,omitempty"`
-	Temperature   *float64               `json:"temperature,omitempty"`
-	TopP          *float64               `json:"top_p,omitempty"`
-	TopK          *int                   `json:"top_k,omitempty"`
-	ServiceTier   string                 `json:"service_tier,omitempty"`
-	Metadata      *anthropicMetadata     `json:"metadata,omitempty"`
-	OutputConfig  *anthropicOutputConfig `json:"output_config,omitempty"`
-	Thinking      *anthropicThinking     `json:"thinking,omitempty"`
-	Container     *anthropicContainer    `json:"container,omitempty"`
-	CacheControl  *anthropicCacheControl `json:"cache_control,omitempty"`
-	InferenceGeo  string                 `json:"inference_geo,omitempty"`
+	StopSequences     []string               `json:"stop_sequences,omitempty"`
+	Model             string                 `json:"model"`
+	System            any                    `json:"system,omitempty"`
+	Messages          []anthropicMessage     `json:"messages"`
+	Tools             []anthropicTool        `json:"tools,omitempty"`
+	ToolChoice        map[string]any         `json:"tool_choice,omitempty"`
+	MaxTokens         int                    `json:"max_tokens"`
+	Stream            bool                   `json:"stream,omitempty"`
+	Temperature       *float64               `json:"temperature,omitempty"`
+	TopP              *float64               `json:"top_p,omitempty"`
+	TopK              *int                   `json:"top_k,omitempty"`
+	ServiceTier       string                 `json:"service_tier,omitempty"`
+	Metadata          *anthropicMetadata     `json:"metadata,omitempty"`
+	OutputConfig      *anthropicOutputConfig `json:"output_config,omitempty"`
+	Thinking          *anthropicThinking     `json:"thinking,omitempty"`
+	Container         *anthropicContainer    `json:"container,omitempty"`
+	CacheControl      *anthropicCacheControl `json:"cache_control,omitempty"`
+	InferenceGeo      string                 `json:"inference_geo,omitempty"`
+	ContextManagement json.RawMessage        `json:"context_management,omitempty"`
 }
 
 type anthropicThinking struct {
@@ -120,15 +121,16 @@ type anthropicCacheControl struct {
 }
 
 type anthropicResponse struct {
-	ID           string             `json:"id"`
-	Type         string             `json:"type"`
-	Role         string             `json:"role"`
-	Model        string             `json:"model"`
-	Content      []anthropicContent `json:"content"`
-	StopReason   string             `json:"stop_reason"`
-	StopSequence *string            `json:"stop_sequence"`
-	Usage        anthropicUsage     `json:"usage"`
-	Container    json.RawMessage    `json:"container,omitempty"`
+	ID                string             `json:"id"`
+	Type              string             `json:"type"`
+	Role              string             `json:"role"`
+	Model             string             `json:"model"`
+	Content           []anthropicContent `json:"content"`
+	StopReason        string             `json:"stop_reason"`
+	StopSequence      *string            `json:"stop_sequence"`
+	Usage             anthropicUsage     `json:"usage"`
+	Container         json.RawMessage    `json:"container,omitempty"`
+	ContextManagement json.RawMessage    `json:"context_management,omitempty"`
 }
 
 type anthropicContent struct {
@@ -221,6 +223,9 @@ func (p Anthropic) ChatCompletions(ctx context.Context, request openai.ChatCompl
 	if err := validateAnthropicInferenceGeo(request.AnthropicInferenceGeo, response.Usage.InferenceGeo); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	if err := validateAnthropicContextManagement(request.AnthropicContextManagement, response.ContextManagement); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	if err := validateAnthropicRequestedToolUsage(response.Usage, request.WebSearchOptions, request.WebFetchOptions, request.AnthropicCodeExecution); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
@@ -264,7 +269,7 @@ func (p Anthropic) StreamChatCompletions(ctx context.Context, request openai.Cha
 	}
 	defer resp.Body.Close()
 
-	return streamAnthropicChat(resp.Body, request.Model, anthropicUsesStructuredTool(request.ResponseFormat), request.WebSearchOptions, request.WebFetchOptions, request.AnthropicCodeExecution, request.AnthropicInferenceGeo, write)
+	return streamAnthropicChat(resp.Body, request.Model, anthropicUsesStructuredTool(request.ResponseFormat), request.WebSearchOptions, request.WebFetchOptions, request.AnthropicCodeExecution, request.AnthropicInferenceGeo, request.AnthropicContextManagement, write)
 }
 
 func (p Anthropic) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
@@ -362,9 +367,12 @@ func (p Anthropic) doMessagesStream(ctx context.Context, request anthropicReques
 }
 
 func anthropicBetaFeatures(request anthropicRequest) string {
-	features := make([]string, 0, 2)
+	features := make([]string, 0, 3)
 	if request.Container != nil && len(request.Container.Skills) > 0 {
 		features = append(features, "skills-2025-10-02")
+	}
+	if len(request.ContextManagement) > 0 {
+		features = append(features, "context-management-2025-06-27")
 	}
 	for _, tool := range request.Tools {
 		if strings.HasPrefix(tool.Type, "tool_search_tool_") {
@@ -455,24 +463,25 @@ func anthropicChatRequest(request openai.ChatCompletionRequest, stream bool) ant
 		maxTokens = 0
 	}
 	return anthropicRequest{
-		StopSequences: stop,
-		Model:         request.Model,
-		System:        system,
-		Messages:      messages,
-		Tools:         tools,
-		ToolChoice:    anthropicParallelChoice(toolChoice, request.ParallelToolCalls),
-		MaxTokens:     maxTokens,
-		Stream:        stream,
-		Temperature:   request.Temperature,
-		TopP:          request.TopP,
-		TopK:          request.TopK,
-		ServiceTier:   request.ServiceTier,
-		Metadata:      metadata,
-		OutputConfig:  outputConfig,
-		Thinking:      thinking,
-		Container:     container,
-		CacheControl:  anthropicToolCacheControl(request.AnthropicCacheControl),
-		InferenceGeo:  request.AnthropicInferenceGeo,
+		StopSequences:     stop,
+		Model:             request.Model,
+		System:            system,
+		Messages:          messages,
+		Tools:             tools,
+		ToolChoice:        anthropicParallelChoice(toolChoice, request.ParallelToolCalls),
+		MaxTokens:         maxTokens,
+		Stream:            stream,
+		Temperature:       request.Temperature,
+		TopP:              request.TopP,
+		TopK:              request.TopK,
+		ServiceTier:       request.ServiceTier,
+		Metadata:          metadata,
+		OutputConfig:      outputConfig,
+		Thinking:          thinking,
+		Container:         container,
+		CacheControl:      anthropicToolCacheControl(request.AnthropicCacheControl),
+		InferenceGeo:      request.AnthropicInferenceGeo,
+		ContextManagement: append(json.RawMessage(nil), request.AnthropicContextManagement...),
 	}
 }
 
@@ -857,11 +866,12 @@ func anthropicToChatCompletion(response anthropicResponse, fallbackModel string)
 	toolCalls := anthropicToolCalls(response)
 	inputTokens := anthropicInputTokens(response.Usage)
 	return openai.ChatCompletionResponse{
-		NativeContainer: append(json.RawMessage(nil), response.Container...),
-		ID:              response.ID,
-		Object:          "chat.completion",
-		Model:           model,
-		ServiceTier:     response.Usage.ServiceTier,
+		NativeContainer:         append(json.RawMessage(nil), response.Container...),
+		NativeContextManagement: append(json.RawMessage(nil), response.ContextManagement...),
+		ID:                      response.ID,
+		Object:                  "chat.completion",
+		Model:                   model,
+		ServiceTier:             response.Usage.ServiceTier,
 		Choices: []openai.Choice{
 			{
 				Index:        0,
@@ -1023,6 +1033,38 @@ func validateAnthropicUsage(usage anthropicUsage) error {
 func validateAnthropicInferenceGeo(requested, reported string) error {
 	if requested != "" && reported != requested {
 		return errors.New("Anthropic response inference geo does not match request")
+	}
+	return nil
+}
+
+func validateAnthropicContextManagement(requested, reported json.RawMessage) error {
+	if len(reported) == 0 || string(reported) == "null" {
+		return nil
+	}
+	if len(requested) == 0 {
+		return errors.New("Anthropic returned unrequested context management metadata")
+	}
+	var request struct {
+		Edits []struct {
+			Type string `json:"type"`
+		} `json:"edits"`
+	}
+	var response struct {
+		AppliedEdits []struct {
+			Type string `json:"type"`
+		} `json:"applied_edits"`
+	}
+	if json.Unmarshal(requested, &request) != nil || json.Unmarshal(reported, &response) != nil || len(response.AppliedEdits) > len(request.Edits) {
+		return errors.New("invalid Anthropic context management metadata")
+	}
+	allowed := make(map[string]bool, len(request.Edits))
+	for _, edit := range request.Edits {
+		allowed[edit.Type] = true
+	}
+	for _, edit := range response.AppliedEdits {
+		if !allowed[edit.Type] {
+			return errors.New("Anthropic returned unrequested context management strategy")
+		}
 	}
 	return nil
 }
@@ -1238,7 +1280,7 @@ func anthropicFinishReason(reason string) string {
 	}
 }
 
-func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, webSearch *openai.ChatWebSearchOptions, webFetch *openai.ChatWebFetchOptions, codeExecution bool, inferenceGeo string, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, webSearch *openai.ChatWebSearchOptions, webFetch *openai.ChatWebFetchOptions, codeExecution bool, inferenceGeo string, contextManagement json.RawMessage, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	response := openai.ChatCompletionResponse{
 		Object: "chat.completion",
 		Model:  fallbackModel,
@@ -1364,6 +1406,12 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 				return write(openAIChatToolCallChunkPayload(response.ID, response.Model, toolIndex, delta))
 			}
 		case "message_delta":
+			if len(streamEvent.ContextManagement) > 0 {
+				if err := validateAnthropicContextManagement(contextManagement, streamEvent.ContextManagement); err != nil {
+					return err
+				}
+				response.NativeContextManagement = append(response.NativeContextManagement[:0], streamEvent.ContextManagement...)
+			}
 			if err := validateAnthropicUsage(streamEvent.Usage); err != nil {
 				return err
 			}
@@ -1582,7 +1630,8 @@ type anthropicStreamEvent struct {
 		StopSequence *string           `json:"stop_sequence"`
 		Citation     anthropicCitation `json:"citation"`
 	} `json:"delta"`
-	Usage anthropicUsage `json:"usage"`
+	Usage             anthropicUsage  `json:"usage"`
+	ContextManagement json.RawMessage `json:"context_management,omitempty"`
 }
 
 func anthropicMatchedStop(reason string, sequence *string) *string {

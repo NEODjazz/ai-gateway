@@ -11,16 +11,17 @@ import (
 )
 
 type messagesCountRequest struct {
-	Model        string                `json:"model"`
-	Messages     []messagesInput       `json:"messages"`
-	System       json.RawMessage       `json:"system,omitempty"`
-	Tools        []messagesTool        `json:"tools,omitempty"`
-	ToolChoice   *messagesToolChoice   `json:"tool_choice,omitempty"`
-	OutputConfig *messagesOutputConfig `json:"output_config,omitempty"`
-	Thinking     *messagesThinking     `json:"thinking,omitempty"`
-	Container    *messagesContainer    `json:"container,omitempty"`
-	CacheControl *messagesCacheControl `json:"cache_control,omitempty"`
-	InferenceGeo string                `json:"inference_geo,omitempty"`
+	Model             string                     `json:"model"`
+	Messages          []messagesInput            `json:"messages"`
+	System            json.RawMessage            `json:"system,omitempty"`
+	Tools             []messagesTool             `json:"tools,omitempty"`
+	ToolChoice        *messagesToolChoice        `json:"tool_choice,omitempty"`
+	OutputConfig      *messagesOutputConfig      `json:"output_config,omitempty"`
+	Thinking          *messagesThinking          `json:"thinking,omitempty"`
+	Container         *messagesContainer         `json:"container,omitempty"`
+	CacheControl      *messagesCacheControl      `json:"cache_control,omitempty"`
+	InferenceGeo      string                     `json:"inference_geo,omitempty"`
+	ContextManagement *messagesContextManagement `json:"context_management,omitempty"`
 }
 
 func (h Handler) CountMessageTokens(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +40,7 @@ func (h Handler) CountMessageTokens(w http.ResponseWriter, r *http.Request) {
 	if !decodeInferenceRequest(output, r, &native) {
 		return
 	}
-	request, err := (messagesRequest{Model: native.Model, MaxTokens: 1, Messages: native.Messages, System: native.System, Tools: native.Tools, ToolChoice: native.ToolChoice, OutputConfig: native.OutputConfig, Thinking: native.Thinking, Container: native.Container, CacheControl: native.CacheControl, InferenceGeo: native.InferenceGeo}).chatContext(true)
+	request, err := (messagesRequest{Model: native.Model, MaxTokens: 1, Messages: native.Messages, System: native.System, Tools: native.Tools, ToolChoice: native.ToolChoice, OutputConfig: native.OutputConfig, Thinking: native.Thinking, Container: native.Container, CacheControl: native.CacheControl, InferenceGeo: native.InferenceGeo, ContextManagement: native.ContextManagement}).chatContext(true)
 	if err != nil {
 		writeError(output, 400, "invalid_request", err.Error())
 		return
@@ -58,13 +59,17 @@ func (h Handler) CountMessageTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	output.copyHeaders()
-	writeJSON(w, 200, map[string]int{"input_tokens": count})
+	payload := map[string]any{"input_tokens": count.InputTokens}
+	if count.OriginalInputTokens != nil {
+		payload["context_management"] = map[string]int{"original_input_tokens": *count.OriginalInputTokens}
+	}
+	writeJSON(w, 200, payload)
 	completed = true
 }
 
 // countContextTokens applies the same admission and policy checks to each native
 // counting protocol, without opening a generation billing lifecycle.
-func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, key string) (int, bool) {
+func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, key string) (provider.TokenCountResult, bool) {
 	req := modules.RequestContext{APIKey: key, RequestID: executionID(w), SessionID: sessionID(r), Request: request}
 	if err := h.pipeline.RunTokenCount(r.Context(), &req); err != nil {
 		if errors.Is(err, modules.ErrUnauthorized) {
@@ -72,19 +77,19 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 		} else {
 			writeProviderFailure(w, err)
 		}
-		return 0, false
+		return provider.TokenCountResult{}, false
 	}
 	req.APIKey = ""
 	if !h.prepareAccessGroups(w, &req) {
-		return 0, false
+		return provider.TokenCountResult{}, false
 	}
 	if err := h.bindSkillExecution(r.Context(), &req); err != nil {
 		writeSkillExecutionError(w, err)
-		return 0, false
+		return provider.TokenCountResult{}, false
 	}
 	if _, err := openai.ChatImageAttachments(req.Request.Messages); err != nil {
 		writeError(w, 400, "invalid_image", err.Error())
-		return 0, false
+		return provider.TokenCountResult{}, false
 	}
 	request = req.Request
 	tools, valid := chatToolIdentifiers(request.Tools, nil)
@@ -98,24 +103,24 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 	tools = append(tools, anthropicClientToolIdentifiers(request.AnthropicClientTools)...)
 	tools = append(tools, anthropicClientToolsetIdentifiers(request.AnthropicClientToolsets)...)
 	if !h.authorizeTools(w, req, tools, valid) || !h.authorizeAccess(w, r.Context(), req, request.Model, openai.ChatInputTokens(request)) {
-		return 0, false
+		return provider.TokenCountResult{}, false
 	}
 	if !h.prepareModelFallbacks(w, r.Context(), &req, request.Model) {
-		return 0, false
+		return provider.TokenCountResult{}, false
 	}
 	counter, ok := h.provider.(provider.TokenCountProvider)
 	if !ok {
 		writeError(w, 400, "unsupported_parameter", "count_tokens is not supported")
-		return 0, false
+		return provider.TokenCountResult{}, false
 	}
 	result, err := counter.CountTokens(r.Context(), req)
 	if err != nil {
 		writeProviderFailure(w, err)
-		return 0, false
+		return provider.TokenCountResult{}, false
 	}
 	if result.InputTokens < 0 {
 		writeError(w, 502, "provider_error", "invalid provider token count")
-		return 0, false
+		return provider.TokenCountResult{}, false
 	}
-	return result.InputTokens, true
+	return result, true
 }

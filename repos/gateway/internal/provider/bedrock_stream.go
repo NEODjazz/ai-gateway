@@ -160,7 +160,7 @@ func (b Bedrock) streamInvokeAnthropic(ctx context.Context, request openai.ChatC
 		_ = writer.CloseWithError(err)
 		parserResult <- err
 	}()
-	result, streamErr := streamAnthropicChat(reader, request.Model, false, nil, nil, false, "", write)
+	result, streamErr := streamAnthropicChat(reader, request.Model, false, nil, nil, false, "", nil, write)
 	_ = reader.Close()
 	cancel()
 	_ = response.Body.Close()

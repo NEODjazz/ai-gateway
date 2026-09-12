@@ -37,15 +37,17 @@ type TokenCountRequest struct {
 	AnthropicThinking          *openai.AnthropicThinkingConfig
 	AnthropicCacheControl      *openai.PromptCacheBreakpoint
 	AnthropicInferenceGeo      string
+	AnthropicContextManagement json.RawMessage
 }
 type TokenCountResult struct {
-	InputTokens int
-	Model       string
-	Source      string
+	InputTokens         int
+	OriginalInputTokens *int
+	Model               string
+	Source              string
 }
 
 func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (TokenCountResult, error) {
-	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat, AnthropicSkills: request.AnthropicSkills, AnthropicContainerID: request.AnthropicContainerID, AnthropicCodeExecution: request.AnthropicCodeExecution, AnthropicCodeExecutionType: request.AnthropicCodeExecutionType, AnthropicToolSearch: request.AnthropicToolSearch, AnthropicClientTools: request.AnthropicClientTools, AnthropicClientToolsets: request.AnthropicClientToolsets, AnthropicThinking: request.AnthropicThinking, AnthropicCacheControl: request.AnthropicCacheControl, AnthropicInferenceGeo: request.AnthropicInferenceGeo}
+	chat := openai.ChatCompletionRequest{Model: request.Model, Messages: request.Messages, Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls, ChatGenerationOptions: request.ChatGenerationOptions, ResponseFormat: request.ResponseFormat, AnthropicSkills: request.AnthropicSkills, AnthropicContainerID: request.AnthropicContainerID, AnthropicCodeExecution: request.AnthropicCodeExecution, AnthropicCodeExecutionType: request.AnthropicCodeExecutionType, AnthropicToolSearch: request.AnthropicToolSearch, AnthropicClientTools: request.AnthropicClientTools, AnthropicClientToolsets: request.AnthropicClientToolsets, AnthropicThinking: request.AnthropicThinking, AnthropicCacheControl: request.AnthropicCacheControl, AnthropicInferenceGeo: request.AnthropicInferenceGeo, AnthropicContextManagement: request.AnthropicContextManagement}
 	if err := validateTokenCountRequest(chat); err != nil {
 		return TokenCountResult{}, err
 	}
@@ -54,21 +56,23 @@ func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (
 	}
 	native := anthropicChatRequest(chat, false)
 	body, err := json.Marshal(struct {
-		Model        string                 `json:"model"`
-		System       any                    `json:"system,omitempty"`
-		Messages     []anthropicMessage     `json:"messages"`
-		Tools        []anthropicTool        `json:"tools,omitempty"`
-		ToolChoice   map[string]any         `json:"tool_choice,omitempty"`
-		OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
-		Thinking     *anthropicThinking     `json:"thinking,omitempty"`
-		Container    *anthropicContainer    `json:"container,omitempty"`
-		CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
-		InferenceGeo string                 `json:"inference_geo,omitempty"`
+		Model             string                 `json:"model"`
+		System            any                    `json:"system,omitempty"`
+		Messages          []anthropicMessage     `json:"messages"`
+		Tools             []anthropicTool        `json:"tools,omitempty"`
+		ToolChoice        map[string]any         `json:"tool_choice,omitempty"`
+		OutputConfig      *anthropicOutputConfig `json:"output_config,omitempty"`
+		Thinking          *anthropicThinking     `json:"thinking,omitempty"`
+		Container         *anthropicContainer    `json:"container,omitempty"`
+		CacheControl      *anthropicCacheControl `json:"cache_control,omitempty"`
+		InferenceGeo      string                 `json:"inference_geo,omitempty"`
+		ContextManagement json.RawMessage        `json:"context_management,omitempty"`
 	}{
 		Model: native.Model, System: native.System, Messages: native.Messages,
 		Tools: native.Tools, ToolChoice: native.ToolChoice, OutputConfig: native.OutputConfig,
 		Thinking: native.Thinking, Container: native.Container, CacheControl: native.CacheControl,
-		InferenceGeo: native.InferenceGeo,
+		InferenceGeo:      native.InferenceGeo,
+		ContextManagement: native.ContextManagement,
 	})
 	if err != nil {
 		return TokenCountResult{}, err
@@ -87,8 +91,8 @@ func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (
 		return TokenCountResult{}, err
 	}
 	p.setHeaders(req)
-	if len(request.AnthropicSkills) > 0 {
-		req.Header.Set("anthropic-beta", "skills-2025-10-02")
+	if beta := anthropicBetaFeatures(native); beta != "" {
+		req.Header.Set("anthropic-beta", beta)
 	}
 	client := *p.client
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -108,7 +112,10 @@ func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (
 		return TokenCountResult{}, errors.New("token count response exceeds limit")
 	}
 	var result struct {
-		InputTokens *int `json:"input_tokens"`
+		InputTokens       *int `json:"input_tokens"`
+		ContextManagement *struct {
+			OriginalInputTokens *int `json:"original_input_tokens"`
+		} `json:"context_management,omitempty"`
 	}
 	if err := json.Unmarshal(payload, &result); err != nil {
 		return TokenCountResult{}, err
@@ -116,7 +123,15 @@ func (p Anthropic) CountTokens(ctx context.Context, request TokenCountRequest) (
 	if result.InputTokens == nil || *result.InputTokens < 0 {
 		return TokenCountResult{}, errors.New("invalid provider token count")
 	}
-	return TokenCountResult{InputTokens: *result.InputTokens, Model: request.Model, Source: "anthropic"}, nil
+	var original *int
+	if result.ContextManagement != nil {
+		if result.ContextManagement.OriginalInputTokens == nil || *result.ContextManagement.OriginalInputTokens < *result.InputTokens {
+			return TokenCountResult{}, errors.New("invalid provider context management token count")
+		}
+		value := *result.ContextManagement.OriginalInputTokens
+		original = &value
+	}
+	return TokenCountResult{InputTokens: *result.InputTokens, OriginalInputTokens: original, Model: request.Model, Source: "anthropic"}, nil
 }
 
 func validateTokenCountRequest(request openai.ChatCompletionRequest) error {

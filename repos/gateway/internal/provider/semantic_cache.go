@@ -232,6 +232,9 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if request.AnthropicInferenceGeo != "" {
 		return "", "", false
 	}
+	if len(request.AnthropicContextManagement) > 0 {
+		return "", "", false
+	}
 	if len(request.BedrockRequestMetadata) > 0 {
 		return "", "", false
 	}

@@ -114,12 +114,26 @@ type countProviderSpy struct {
 	chatProvider
 	calls   int
 	request modules.RequestContext
+	result  provider.TokenCountResult
 }
 
 func (p *countProviderSpy) CountTokens(_ context.Context, request modules.RequestContext) (provider.TokenCountResult, error) {
 	p.calls++
 	p.request = request
-	return provider.TokenCountResult{InputTokens: 10}, nil
+	if p.result.InputTokens == 0 {
+		return provider.TokenCountResult{InputTokens: 10}, nil
+	}
+	return p.result, nil
+}
+
+func TestCountEndpointPreservesContextManagement(t *testing.T) {
+	original := 70
+	counter := &countProviderSpy{result: provider.TokenCountResult{InputTokens: 25, OriginalInputTokens: &original}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}}}}), counter))
+	response := countEndpointCall(handler, `{"model":"m","context_management":{"edits":[{"type":"clear_tool_uses_20250919"}]},"messages":[{"role":"user","content":"hi"}]}`, "gateway-test-key")
+	if response.Code != 200 || !strings.Contains(response.Body.String(), `"original_input_tokens":70`) || !strings.Contains(string(counter.request.Request.AnthropicContextManagement), "clear_tool_uses_20250919") {
+		t.Fatalf("status=%d body=%s context=%s", response.Code, response.Body.String(), counter.request.Request.AnthropicContextManagement)
+	}
 }
 func TestCountEndpointEnforcesToolACLAndSharedRPM(t *testing.T) {
 	counter := &countProviderSpy{}

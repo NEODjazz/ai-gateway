@@ -48,6 +48,27 @@ func TestAnthropicTokenCountPreservesOutputConfig(t *testing.T) {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
+
+func TestAnthropicTokenCountPreservesContextManagement(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("anthropic-beta") != "context-management-2025-06-27" {
+			t.Errorf("beta=%q", r.Header.Get("anthropic-beta"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["context_management"] == nil {
+			t.Fatalf("body=%v err=%v", body, err)
+		}
+		_, _ = w.Write([]byte(`{"input_tokens":25,"context_management":{"original_input_tokens":70}}`))
+	}))
+	defer server.Close()
+	result, err := NewAnthropic(server.URL, "", false).CountTokens(context.Background(), TokenCountRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hi"}},
+		AnthropicContextManagement: json.RawMessage(`{"edits":[{"type":"clear_tool_uses_20250919"}]}`),
+	})
+	if err != nil || result.InputTokens != 25 || result.OriginalInputTokens == nil || *result.OriginalInputTokens != 70 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
 func TestAnthropicCountTokensIncludesNativeContext(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages/count_tokens" || r.Method != "POST" || r.Header.Get("x-api-key") != "test-key" || r.Header.Get("anthropic-version") != "2023-06-01" || r.Header.Get("Authorization") != "" {

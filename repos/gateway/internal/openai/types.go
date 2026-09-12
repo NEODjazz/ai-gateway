@@ -40,6 +40,8 @@ type ChatCompletionRequest struct {
 	AnthropicCacheControl *PromptCacheBreakpoint `json:"-"`
 	// AnthropicInferenceGeo pins native Messages inference to an allowed geography.
 	AnthropicInferenceGeo string `json:"-"`
+	// AnthropicContextManagement contains validated native server-side context edits.
+	AnthropicContextManagement json.RawMessage `json:"-"`
 	// Bedrock native controls cannot be supplied through the public Chat wire shape.
 	BedrockServiceTier                       string                  `json:"-"`
 	BedrockPerformanceLatency                string                  `json:"-"`
@@ -411,17 +413,18 @@ type JSONSchemaFormat struct {
 type ChatCompletionResponse struct {
 	// NativeContainer preserves a validated provider container descriptor for
 	// protocol adapters that expose managed execution state.
-	NativeContainer   json.RawMessage   `json:"-"`
-	ProviderEndpoint  string            `json:"-"`
-	ID                string            `json:"id"`
-	Object            string            `json:"object"`
-	Created           int64             `json:"created,omitempty"`
-	Model             string            `json:"model"`
-	Metadata          map[string]string `json:"metadata,omitempty"`
-	ServiceTier       string            `json:"service_tier,omitempty"`
-	SystemFingerprint string            `json:"system_fingerprint,omitempty"`
-	Choices           []Choice          `json:"choices"`
-	Usage             Usage             `json:"usage"`
+	NativeContainer         json.RawMessage   `json:"-"`
+	NativeContextManagement json.RawMessage   `json:"-"`
+	ProviderEndpoint        string            `json:"-"`
+	ID                      string            `json:"id"`
+	Object                  string            `json:"object"`
+	Created                 int64             `json:"created,omitempty"`
+	Model                   string            `json:"model"`
+	Metadata                map[string]string `json:"metadata,omitempty"`
+	ServiceTier             string            `json:"service_tier,omitempty"`
+	SystemFingerprint       string            `json:"system_fingerprint,omitempty"`
+	Choices                 []Choice          `json:"choices"`
+	Usage                   Usage             `json:"usage"`
 }
 
 type CompletionRequest struct {

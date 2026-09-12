@@ -15,24 +15,25 @@ import (
 )
 
 type messagesRequest struct {
-	Model         string                `json:"model"`
-	MaxTokens     int                   `json:"max_tokens"`
-	Messages      []messagesInput       `json:"messages"`
-	System        json.RawMessage       `json:"system,omitempty"`
-	Tools         []messagesTool        `json:"tools,omitempty"`
-	ToolChoice    *messagesToolChoice   `json:"tool_choice,omitempty"`
-	Metadata      *messagesMetadata     `json:"metadata,omitempty"`
-	OutputConfig  *messagesOutputConfig `json:"output_config,omitempty"`
-	Thinking      *messagesThinking     `json:"thinking,omitempty"`
-	ServiceTier   string                `json:"service_tier,omitempty"`
-	Temperature   *float64              `json:"temperature,omitempty"`
-	TopP          *float64              `json:"top_p,omitempty"`
-	TopK          *int                  `json:"top_k,omitempty"`
-	Stream        bool                  `json:"stream,omitempty"`
-	StopSequences []string              `json:"stop_sequences,omitempty"`
-	Container     *messagesContainer    `json:"container,omitempty"`
-	CacheControl  *messagesCacheControl `json:"cache_control,omitempty"`
-	InferenceGeo  string                `json:"inference_geo,omitempty"`
+	Model             string                     `json:"model"`
+	MaxTokens         int                        `json:"max_tokens"`
+	Messages          []messagesInput            `json:"messages"`
+	System            json.RawMessage            `json:"system,omitempty"`
+	Tools             []messagesTool             `json:"tools,omitempty"`
+	ToolChoice        *messagesToolChoice        `json:"tool_choice,omitempty"`
+	Metadata          *messagesMetadata          `json:"metadata,omitempty"`
+	OutputConfig      *messagesOutputConfig      `json:"output_config,omitempty"`
+	Thinking          *messagesThinking          `json:"thinking,omitempty"`
+	ServiceTier       string                     `json:"service_tier,omitempty"`
+	Temperature       *float64                   `json:"temperature,omitempty"`
+	TopP              *float64                   `json:"top_p,omitempty"`
+	TopK              *int                       `json:"top_k,omitempty"`
+	Stream            bool                       `json:"stream,omitempty"`
+	StopSequences     []string                   `json:"stop_sequences,omitempty"`
+	Container         *messagesContainer         `json:"container,omitempty"`
+	CacheControl      *messagesCacheControl      `json:"cache_control,omitempty"`
+	InferenceGeo      string                     `json:"inference_geo,omitempty"`
+	ContextManagement *messagesContextManagement `json:"context_management,omitempty"`
 }
 type messagesThinking struct {
 	Type         string `json:"type"`
@@ -127,6 +128,29 @@ type messagesCacheControl struct {
 	TTL  string `json:"ttl,omitempty"`
 }
 
+type messagesContextManagement struct {
+	Edits []json.RawMessage `json:"edits"`
+}
+
+type messagesContextLimit struct {
+	Type  string `json:"type"`
+	Value int    `json:"value"`
+}
+
+type messagesClearToolUsesEdit struct {
+	Type            string                `json:"type"`
+	Trigger         *messagesContextLimit `json:"trigger,omitempty"`
+	Keep            *messagesContextLimit `json:"keep,omitempty"`
+	ClearAtLeast    *messagesContextLimit `json:"clear_at_least,omitempty"`
+	ClearToolInputs json.RawMessage       `json:"clear_tool_inputs,omitempty"`
+	ExcludeTools    []string              `json:"exclude_tools,omitempty"`
+}
+
+type messagesClearThinkingEdit struct {
+	Type string          `json:"type"`
+	Keep json.RawMessage `json:"keep,omitempty"`
+}
+
 func decodeMessagesValue(raw json.RawMessage, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -160,6 +184,11 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 	default:
 		return result, errors.New("inference_geo must be global or us")
 	}
+	contextManagement, err := validateMessagesContextManagement(request.ContextManagement)
+	if err != nil {
+		return result, err
+	}
+	result.AnthropicContextManagement = contextManagement
 	if thinking := request.Thinking; thinking != nil {
 		switch thinking.Type {
 		case "disabled":
