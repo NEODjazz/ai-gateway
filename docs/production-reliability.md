@@ -567,3 +567,10 @@ successfully, and pod `ai-gateway-gateway-6df7cfd5cf-zw2lj` became Ready with
 zero restarts. The live OpenAPI 0.1.319 contract lists `/v1/search` in the
 accepted batch endpoints; the regression covers multi-query execution through
 shared validation, policy-visible messages, TPM admission and search-unit usage.
+
+Source `59bc7b1` adds Image Generation to durable JSONL batch execution. Rancher
+Desktop built `ai-gateway-gateway:gaps-59bc7b1`; Helm revision 419 completed
+successfully, and pod `ai-gateway-gateway-6bb85597f4-8r67p` became Ready with
+zero restarts. The live OpenAPI 0.1.320 contract lists
+`/v1/images/generations` in the accepted batch endpoints; the regression covers
+shared validation, model policy, prompt/output reserve and usage-bearing output.
