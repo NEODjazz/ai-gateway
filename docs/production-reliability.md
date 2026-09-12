@@ -919,3 +919,11 @@ consistency, tab-open and download events, state-only tab-management results,
 capture images and error isolation. Browser and computer members with the same
 name remain distinct through request history and JSON/SSE output. Full Go test,
 race, vet and build checks and all 166 UI tests completed successfully.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-261b4d3` with image ID
+`sha256:5b31152bec2a109a7c1bb374de2b8699d47d833830096a8d33b735d750539929`.
+Gateway Helm revision 445 completed successfully, and pod
+`ai-gateway-gateway-86969fcbdc-xrfgw` became Ready with zero restarts and the
+same image digest. Its live endpoint served OpenAPI 0.1.345 with the browser
+toolset and representative default and opt-in member configs. A structurally
+valid request enabling `read_console` reached authentication and returned 401.
