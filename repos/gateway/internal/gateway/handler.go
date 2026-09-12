@@ -363,7 +363,7 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 	if !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
-	if stream {
+	if stream && len(reqCtx.Request.AnthropicSkills) == 0 {
 		streamStarted := false
 		includeUsage := request.StreamOptions != nil && request.StreamOptions.IncludeUsage
 		usageDelivered := false

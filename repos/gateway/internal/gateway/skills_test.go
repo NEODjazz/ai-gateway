@@ -120,6 +120,34 @@ func TestMessagesExecutesOwnedCustomSkillOnBoundDeployment(t *testing.T) {
 	}
 }
 
+func TestMessagesStreamsOwnedCustomSkillAfterDurableContainerBinding(t *testing.T) {
+	owner := skillOwnerKey(modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"})
+	store := &memorySkillStore{items: map[string]skillstate.Ownership{
+		"skill_owned": {SkillID: "skill_owned", OwnerKey: owner, EndpointID: "skills-endpoint"},
+	}}
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{
+		ID: "msg-skill-stream", Model: "model", NativeContainer: json.RawMessage(`{"id":"container_stream","expires_at":"2099-09-12T14:00:00Z","skills":[{"type":"custom","skill_id":"skill_owned","version":"v1"}]}`),
+		Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "done"}, FinishReason: "stop"}},
+		Usage:   openai.Usage{PromptTokens: 9, CompletionTokens: 2, TotalTokens: 11},
+	}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"skill:skill_owned", "code_execution"}}}}), upstream).WithSkillStore(store))
+
+	response := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"stream":true,"container":{"skills":[{"type":"custom","skill_id":"skill_owned","version":"v1"}]},"tools":[{"type":"code_execution_20250825","name":"code_execution"}],"messages":[{"role":"user","content":"run it"}]}`, "gateway-test-key")
+	if response.Code != http.StatusOK || upstream.calls != 1 || !strings.Contains(response.Header().Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("status=%d body=%s calls=%d content-type=%s", response.Code, response.Body.String(), upstream.calls, response.Header().Get("Content-Type"))
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `"type":"message_start"`) || !strings.Contains(body, `"container":{"expires_at":"2099-09-12T14:00:00Z","id":"container_stream"`) || !strings.Contains(body, `"type":"message_stop"`) {
+		t.Fatalf("streamed container lifecycle missing: %s", body)
+	}
+	if execution, err := store.ResolveSkillExecution(t.Context(), owner, "container_stream"); err != nil || execution.EndpointID != "skills-endpoint" {
+		t.Fatalf("execution=%+v err=%v", execution, err)
+	}
+	if upstream.request.Request.Stream {
+		t.Fatal("skill stream reached provider before durable container validation")
+	}
+}
+
 func TestMessagesSkillExecutionFailsClosed(t *testing.T) {
 	owner := skillOwnerKey(modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"})
 	store := &memorySkillStore{items: map[string]skillstate.Ownership{
@@ -163,6 +191,10 @@ func TestMessagesSkillExecutionRejectsUnknownContainerAndInvalidProviderContaine
 	invalid := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"container":{"skills":[{"type":"custom","skill_id":"skill_owned"}]},"tools":[{"type":"code_execution_20250825","name":"code_execution"}],"messages":[{"role":"user","content":"run"}]}`, "gateway-test-key")
 	if invalid.Code != http.StatusBadGateway || !strings.Contains(invalid.Body.String(), `"type":"error"`) || upstream.calls != 1 {
 		t.Fatalf("invalid provider container status=%d body=%s calls=%d", invalid.Code, invalid.Body.String(), upstream.calls)
+	}
+	invalidStream := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"stream":true,"container":{"skills":[{"type":"custom","skill_id":"skill_owned"}]},"tools":[{"type":"code_execution_20250825","name":"code_execution"}],"messages":[{"role":"user","content":"run"}]}`, "gateway-test-key")
+	if invalidStream.Code != http.StatusBadGateway || !strings.Contains(invalidStream.Body.String(), `"type":"error"`) || strings.Contains(invalidStream.Header().Get("Content-Type"), "text/event-stream") || upstream.calls != 2 {
+		t.Fatalf("invalid streamed provider container status=%d body=%s calls=%d content-type=%s", invalidStream.Code, invalidStream.Body.String(), upstream.calls, invalidStream.Header().Get("Content-Type"))
 	}
 }
 

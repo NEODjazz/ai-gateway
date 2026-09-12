@@ -137,9 +137,6 @@ func (request messagesRequest) chat() (openai.ChatCompletionRequest, error) {
 func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatCompletionRequest, error) {
 	result := openai.ChatCompletionRequest{Model: request.Model, MaxTokens: &request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP, Stream: request.Stream}
 	if request.Container != nil {
-		if request.Stream {
-			return result, errors.New("streaming with container.skills is not supported")
-		}
 		if request.Container.ID != "" && (!validSkillID(request.Container.ID) || len(request.Container.ID) > 128) {
 			return result, errors.New("container.id is invalid")
 		}
