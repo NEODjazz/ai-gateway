@@ -187,7 +187,7 @@ availability is not inferred from these tests.
 - `59ced07`: Native Together Image Generation maps `n` up to four results,
   supported dimensions, URL/base64 response format, JPEG/PNG output and seed to
   `/v1/images/generations`. It accepts missing token usage only for this
-  explicitly unit-priced adapter, preserves estimated token provenance, and
+  explicitly unit-accounted adapter, preserves estimated token provenance, and
   validates bounded output, exact count, ordered indices, model and object.
 
 Gateway Go 1.25.13 formatting, vet, full tests and build passed before each new

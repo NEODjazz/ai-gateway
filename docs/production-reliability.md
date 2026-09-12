@@ -1700,3 +1700,21 @@ Live liveness and readiness returned 204, both schema columns were verified in
 each database, and the served OpenAPI reported 0.1.381. An unauthenticated image
 generation request returned 401 before deployment selection. No provider
 credential or external inference was used by the smoke checks.
+
+Source `59ced07` adds native Together Image Generation through
+`/v1/images/generations`. The adapter maps a bounded output count from one to
+four, dimensions, URL or base64 response format, JPEG or PNG output and seed.
+It validates the exact ordered output before settlement and permits absent token
+usage only for this explicit unit-accounting path, retaining estimated token
+provenance while billing the validated image count. Provider protocol, router,
+capability-profile, full Go and race tests, vet and build passed. Contract commit
+`9497494` publishes the operation and parameter matrix in OpenAPI 0.1.382.
+
+Rancher Desktop built `ai-gateway-gateway:together-image-9497494` with image ID
+`sha256:51f514e78eb4ac31c0f9ff8a675f3b8ccfd1457cd7a480b0fa14ae69f28cce73`.
+Gateway Helm revision 488 completed successfully. Pod
+`ai-gateway-gateway-5555d79f84-6sh6g` became Ready with zero restarts and the
+same image ID. Live liveness and readiness returned 204, OpenAPI reported
+0.1.382, and an unauthenticated image-generation request returned 401 before
+deployment selection. No provider credential or external inference was used by
+the smoke checks.

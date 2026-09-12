@@ -9303,7 +9303,7 @@ components:
               - required: [url]
         usage:
           type: object
-          description: Provider token usage when reported. Unit-priced native image deployments may omit it; billing then preserves estimated token accounting and settles the validated output-image count.
+          description: Provider token usage when reported. Unit-accounted native image deployments may omit it; billing then preserves estimated token accounting and settles the validated output-image count.
           required: [input_tokens, output_tokens, total_tokens]
           properties:
             input_tokens: {type: integer, minimum: 0}
