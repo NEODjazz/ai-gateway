@@ -239,6 +239,15 @@ native эквивалента, URL output и `n` больше единицы о�
 Gemini `usageMetadata.totalTokenCount` используется для полного settlement,
 включая reasoning и другие учтенные upstream output tokens.
 
+Native Together deployment вызывает `/v1/images/generations`, ограничивает `n`
+диапазоном 1–4 и явно преобразует `size` в `width`/`height`, а `b64_json` — в
+native `base64`. Поддерживаются URL/base64 response, JPEG/PNG output и seed;
+остальные публичные controls отклоняются до HTTP. Ответ обязан содержать точные
+ordered indices, ожидаемые model/object и ровно запрошенное число bounded
+результатов. Так как provider contract не возвращает token usage, token fields
+остаются помечены как estimated, а стоимость рассчитывается по точному числу
+проверенных изображений.
+
 `POST /v1/images/edits` использует тот же общий lifecycle для совместимых,
 Azure и native Gemini deployments. Gemini transport передает prompt и от одного
 до восьми проверенных PNG/JPEG/WebP изображений как inline GenerateContent parts
