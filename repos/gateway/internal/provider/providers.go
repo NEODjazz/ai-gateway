@@ -37,6 +37,7 @@ type ProviderCapabilityProfile struct {
 	RerankParameters     ProviderRerankParameterPolicy     `json:"rerank_parameters"`
 	CompletionParameters ProviderCompletionParameterPolicy `json:"completion_parameters"`
 	ModerationParameters ProviderModerationParameterPolicy `json:"moderation_parameters"`
+	SearchParameters     ProviderSearchParameterPolicy     `json:"search_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -73,6 +74,11 @@ type ProviderCompletionParameterPolicy struct {
 type ProviderModerationParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 	InputForms       []string `json:"input_forms"`
+}
+
+type ProviderSearchParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
+	QueryForms       []string `json:"query_forms"`
 }
 
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai", "opensandbox"}
@@ -331,9 +337,47 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			RerankParameters:     managedProviderRerankParameterPolicy(client, slicesContain(operations, "rerank")),
 			CompletionParameters: managedProviderCompletionParameterPolicy(client, slicesContain(operations, "completions")),
 			ModerationParameters: managedProviderModerationParameterPolicy(client, slicesContain(operations, "moderation")),
+			SearchParameters:     managedProviderSearchParameterPolicy(client, slicesContain(operations, "search")),
 		})
 	}
 	return profiles
+}
+
+func managedProviderSearchParameterPolicy(client Client, supported bool) ProviderSearchParameterPolicy {
+	policy := ProviderSearchParameterPolicy{SupportedOptions: []string{}, QueryForms: []string{}}
+	validator, ok := client.(interface {
+		ValidateSearchParameters(openai.SearchRequest) error
+	})
+	if !supported || !ok {
+		return policy
+	}
+	baseline := openai.SearchRequest{Model: "model", Query: "query"}
+	for _, probe := range []struct {
+		name  string
+		query any
+	}{{"text", "query"}, {"text_array", []string{"one", "two"}}} {
+		request := baseline
+		request.Query = probe.query
+		if validator.ValidateSearchParameters(request) == nil {
+			policy.QueryForms = append(policy.QueryForms, probe.name)
+		}
+	}
+	for _, probe := range []struct {
+		name  string
+		apply func(*openai.SearchRequest)
+	}{
+		{"max_results", func(r *openai.SearchRequest) { value := 10; r.MaxResults = &value }},
+		{"search_domain_filter", func(r *openai.SearchRequest) { r.SearchDomainFilter = []string{"example.test"} }},
+		{"max_tokens_per_page", func(r *openai.SearchRequest) { value := 1024; r.MaxTokensPerPage = &value }},
+		{"country", func(r *openai.SearchRequest) { r.Country = "US" }},
+	} {
+		request := baseline
+		probe.apply(&request)
+		if validator.ValidateSearchParameters(request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	return policy
 }
 
 func managedProviderModerationParameterPolicy(client Client, supported bool) ProviderModerationParameterPolicy {

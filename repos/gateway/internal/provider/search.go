@@ -17,9 +17,16 @@ const maxSearchResponseBytes = 8 << 20
 
 func (OpenAICompatible) SupportsSearch() bool { return true }
 
-func (p OpenAICompatible) Search(ctx context.Context, request openai.SearchRequest) (openai.SearchResponse, error) {
+func (p OpenAICompatible) ValidateSearchParameters(request openai.SearchRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.SearchResponse{}, &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	return nil
+}
+
+func (p OpenAICompatible) Search(ctx context.Context, request openai.SearchRequest) (openai.SearchResponse, error) {
+	if err := p.ValidateSearchParameters(request); err != nil {
+		return openai.SearchResponse{}, err
 	}
 	payload, err := json.Marshal(struct {
 		Query              any      `json:"query"`

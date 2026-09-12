@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.304
+  version: 0.1.305
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9307,7 +9307,7 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters]
+      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, cohere, mistral, voyage, bedrock, groq, deepseek, xai, opensandbox]}
         operations:
@@ -9337,6 +9337,8 @@ components:
           $ref: '#/components/schemas/ProviderCompletionParameterPolicy'
         moderation_parameters:
           $ref: '#/components/schemas/ProviderModerationParameterPolicy'
+        search_parameters:
+          $ref: '#/components/schemas/ProviderSearchParameterPolicy'
     ProviderChatParameterPolicy:
       type: object
       additionalProperties: false
@@ -9441,6 +9443,19 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, enum: [text, text_array, content_parts]}
+    ProviderSearchParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [supported_options, query_forms]
+      properties:
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [max_results, search_domain_filter, max_tokens_per_page, country]}
+        query_forms:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [text, text_array]}
     ProviderCredentialCreateInput:
       type: object
       additionalProperties: false

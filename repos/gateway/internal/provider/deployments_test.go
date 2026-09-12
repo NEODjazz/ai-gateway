@@ -528,6 +528,20 @@ func TestManagedProviderCapabilityProfilesExposeValidatedModerationOptions(t *te
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeValidatedSearchOptions(t *testing.T) {
+	wantOptions := []string{"max_results", "search_domain_filter", "max_tokens_per_page", "country"}
+	wantQueries := []string{"text", "text_array"}
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		hasOperation := slices.Contains(profile.Operations, "search")
+		if hasOperation != (len(profile.SearchParameters.QueryForms) > 0) {
+			t.Errorf("%s search profile does not match operations: %+v", profile.Type, profile.SearchParameters)
+		}
+		if hasOperation && (!slices.Equal(profile.SearchParameters.SupportedOptions, wantOptions) || !slices.Equal(profile.SearchParameters.QueryForms, wantQueries)) {
+			t.Errorf("%s search parameters=%+v", profile.Type, profile.SearchParameters)
+		}
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
