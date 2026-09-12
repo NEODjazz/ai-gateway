@@ -525,23 +525,7 @@ func (XAI) ValidateImageGenerationParameters(request openai.ImageGenerationReque
 }
 
 func (x XAI) EditImage(ctx context.Context, request openai.ImageEditRequest) (openai.ImageGenerationResponse, error) {
-	if message := request.Validate(); message != "" {
-		return openai.ImageGenerationResponse{}, xaiParameterError("", message)
-	}
-	if len(request.Images) > 5 {
-		return openai.ImageGenerationResponse{}, xaiParameterError("images", "xAI image edits accept at most five source images")
-	}
-	if request.Quality != "" && request.Quality != "auto" && request.Quality != "low" && request.Quality != "medium" {
-		return openai.ImageGenerationResponse{}, xaiParameterError("quality", "quality must be auto, low, or medium")
-	}
-	if err := rejectParameters("xai",
-		parameterCheck{"mask", request.Mask != nil},
-		parameterCheck{"size", request.Size != ""},
-		parameterCheck{"user", request.User != ""},
-		parameterCheck{"background", request.Background != ""},
-		parameterCheck{"output_format", request.OutputFormat != ""},
-		parameterCheck{"output_compression", request.OutputCompression != nil},
-	); err != nil {
+	if err := x.ValidateImageEditParameters(request); err != nil {
 		return openai.ImageGenerationResponse{}, err
 	}
 	type source struct {
@@ -571,6 +555,29 @@ func (x XAI) EditImage(ctx context.Context, request openai.ImageEditRequest) (op
 		return openai.ImageGenerationResponse{}, err
 	}
 	return x.compatible.postImageJSON(ctx, "images/edits", payload, request.GenerationRequest(), true)
+}
+
+func (XAI) ValidateImageEditParameters(request openai.ImageEditRequest) error {
+	if message := request.Validate(); message != "" {
+		return xaiParameterError("", message)
+	}
+	if len(request.Images) > 5 {
+		return xaiParameterError("images", "xAI image edits accept at most five source images")
+	}
+	if request.Quality != "" && request.Quality != "auto" && request.Quality != "low" && request.Quality != "medium" {
+		return xaiParameterError("quality", "quality must be auto, low, or medium")
+	}
+	if err := rejectParameters("xai",
+		parameterCheck{"mask", request.Mask != nil},
+		parameterCheck{"size", request.Size != ""},
+		parameterCheck{"user", request.User != ""},
+		parameterCheck{"background", request.Background != ""},
+		parameterCheck{"output_format", request.OutputFormat != ""},
+		parameterCheck{"output_compression", request.OutputCompression != nil},
+	); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (x XAI) ValidateChatParameters(request openai.ChatCompletionRequest) error {

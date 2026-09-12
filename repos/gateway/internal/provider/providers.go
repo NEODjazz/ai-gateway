@@ -39,6 +39,7 @@ type ProviderCapabilityProfile struct {
 	ModerationParameters      ProviderModerationParameterPolicy      `json:"moderation_parameters"`
 	SearchParameters          ProviderSearchParameterPolicy          `json:"search_parameters"`
 	ImageGenerationParameters ProviderImageGenerationParameterPolicy `json:"image_generation_parameters"`
+	ImageEditParameters       ProviderImageEditParameterPolicy       `json:"image_edit_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -84,6 +85,11 @@ type ProviderSearchParameterPolicy struct {
 
 type ProviderImageGenerationParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
+}
+
+type ProviderImageEditParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
+	MaxImages        int      `json:"max_images"`
 }
 
 var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "xai", "opensandbox"}
@@ -344,9 +350,53 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			ModerationParameters:      managedProviderModerationParameterPolicy(client, slicesContain(operations, "moderation")),
 			SearchParameters:          managedProviderSearchParameterPolicy(client, slicesContain(operations, "search")),
 			ImageGenerationParameters: managedProviderImageGenerationParameterPolicy(client, slicesContain(operations, "image_generation")),
+			ImageEditParameters:       managedProviderImageEditParameterPolicy(client, slicesContain(operations, "image_edit")),
 		})
 	}
 	return profiles
+}
+
+func managedProviderImageEditParameterPolicy(client Client, supported bool) ProviderImageEditParameterPolicy {
+	policy := ProviderImageEditParameterPolicy{SupportedOptions: []string{}}
+	validator, ok := client.(interface {
+		ValidateImageEditParameters(openai.ImageEditRequest) error
+	})
+	if !supported || !ok {
+		return policy
+	}
+	image := openai.ImageAttachment{MediaType: "image/png", Data: "iVBORw0KGgpmaXh0dXJl"}
+	baseline := openai.ImageEditRequest{Model: "model", Prompt: "prompt", Images: []openai.ImageAttachment{image}}
+	for count := 1; count <= openai.MaxImageAttachments; count++ {
+		request := baseline
+		request.Images = make([]openai.ImageAttachment, count)
+		for index := range request.Images {
+			request.Images[index] = image
+		}
+		if validator.ValidateImageEditParameters(request) == nil {
+			policy.MaxImages = count
+		}
+	}
+	for _, probe := range []struct {
+		name  string
+		apply func(*openai.ImageEditRequest)
+	}{
+		{"mask", func(r *openai.ImageEditRequest) { mask := image; r.Mask = &mask }},
+		{"n", func(r *openai.ImageEditRequest) { value := 1; r.N = &value }},
+		{"quality", func(r *openai.ImageEditRequest) { r.Quality = "low" }},
+		{"response_format", func(r *openai.ImageEditRequest) { r.ResponseFormat = "b64_json" }},
+		{"size", func(r *openai.ImageEditRequest) { r.Size = "1024x1024" }},
+		{"user", func(r *openai.ImageEditRequest) { r.User = "probe" }},
+		{"background", func(r *openai.ImageEditRequest) { r.Background = "transparent" }},
+		{"output_format", func(r *openai.ImageEditRequest) { r.OutputFormat = "png" }},
+		{"output_compression", func(r *openai.ImageEditRequest) { value := 50; r.OutputCompression = &value }},
+	} {
+		request := baseline
+		probe.apply(&request)
+		if validator.ValidateImageEditParameters(request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	return policy
 }
 
 func managedProviderImageGenerationParameterPolicy(client Client, supported bool) ProviderImageGenerationParameterPolicy {

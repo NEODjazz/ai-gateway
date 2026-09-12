@@ -559,6 +559,22 @@ func TestManagedProviderCapabilityProfilesExposeValidatedImageGenerationOptions(
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeValidatedImageEditOptions(t *testing.T) {
+	all := []string{"mask", "n", "quality", "response_format", "size", "user", "background", "output_format", "output_compression"}
+	expected := map[string]ProviderImageEditParameterPolicy{
+		"openai": {SupportedOptions: all, MaxImages: 8}, "openai-compatible": {SupportedOptions: all, MaxImages: 8}, "azure-openai": {SupportedOptions: all, MaxImages: 8},
+		"openrouter": {SupportedOptions: []string{"n", "quality", "size", "user", "background", "output_format", "output_compression"}, MaxImages: 8},
+		"gemini":     {SupportedOptions: []string{"n", "response_format"}, MaxImages: 8},
+		"xai":        {SupportedOptions: []string{"n", "quality", "response_format"}, MaxImages: 5},
+	}
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		want, listed := expected[profile.Type]
+		if slices.Contains(profile.Operations, "image_edit") != listed || !slices.Equal(profile.ImageEditParameters.SupportedOptions, want.SupportedOptions) || profile.ImageEditParameters.MaxImages != want.MaxImages {
+			t.Errorf("%s image edit parameters=%+v operation=%v", profile.Type, profile.ImageEditParameters, slices.Contains(profile.Operations, "image_edit"))
+		}
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

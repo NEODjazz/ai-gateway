@@ -22,6 +22,10 @@ func (Gemini) ValidateImageGenerationParameters(request openai.ImageGenerationRe
 	return validateGeminiImageRequest(request)
 }
 
+func (Gemini) ValidateImageEditParameters(request openai.ImageEditRequest) error {
+	return validateGeminiImageEditRequest(request)
+}
+
 func (g Gemini) GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
 	if err := validateGeminiImageRequest(request); err != nil {
 		return openai.ImageGenerationResponse{}, err

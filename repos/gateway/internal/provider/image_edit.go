@@ -17,9 +17,16 @@ import (
 
 func (OpenAICompatible) SupportsImageEdit() bool { return true }
 
-func (p OpenAICompatible) EditImage(ctx context.Context, request openai.ImageEditRequest) (openai.ImageGenerationResponse, error) {
+func (p OpenAICompatible) ValidateImageEditParameters(request openai.ImageEditRequest) error {
 	if message := request.Validate(); message != "" {
-		return openai.ImageGenerationResponse{}, &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	return nil
+}
+
+func (p OpenAICompatible) EditImage(ctx context.Context, request openai.ImageEditRequest) (openai.ImageGenerationResponse, error) {
+	if err := p.ValidateImageEditParameters(request); err != nil {
+		return openai.ImageGenerationResponse{}, err
 	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
