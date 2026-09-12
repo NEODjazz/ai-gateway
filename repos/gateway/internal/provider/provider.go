@@ -226,6 +226,14 @@ type ImageGenerationClient interface {
 	GenerateImage(ctx context.Context, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error)
 }
 
+type StreamingImageGenerationProvider interface {
+	StreamGenerateImage(ctx context.Context, req modules.RequestContext, write ImageGenerationStreamWriter) (openai.ImageGenerationResponse, bool, error)
+}
+
+type StreamingImageGenerationClient interface {
+	StreamGenerateImage(ctx context.Context, request openai.ImageGenerationRequest, write ImageGenerationStreamWriter) (openai.ImageGenerationResponse, error)
+}
+
 type ImageEditProvider interface {
 	EditImage(ctx context.Context, req modules.RequestContext) (openai.ImageGenerationResponse, error)
 }
@@ -301,6 +309,7 @@ type VisionClient interface {
 type ChatCompletionStreamWriter func(payload string) error
 type CompletionStreamWriter func(payload string) error
 type ResponseStreamWriter func(event string, payload string) error
+type ImageGenerationStreamWriter func(payload string) error
 
 type StreamingClient interface {
 	StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error)
@@ -1438,6 +1447,137 @@ func (r Router) GenerateImage(ctx context.Context, req modules.RequestContext) (
 	return openai.ImageGenerationResponse{}, joined
 }
 
+func (r Router) StreamGenerateImage(ctx context.Context, req modules.RequestContext, write ImageGenerationStreamWriter) (openai.ImageGenerationResponse, bool, error) {
+	if req.ImageGenerationRequest == nil {
+		return openai.ImageGenerationResponse{}, true, errors.New("missing image generation request")
+	}
+	request := *req.ImageGenerationRequest
+	request.Stream = true
+	if message := request.Validate(); message != "" {
+		return openai.ImageGenerationResponse{}, true, &Error{Class: FailureClientRequest, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
+	}
+	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "image_generation")
+	if len(candidates) == 0 || outputDLPRequired(req, candidates) {
+		return openai.ImageGenerationResponse{}, false, nil
+	}
+	var failures []error
+	var lastAttempt *modules.RequestContext
+	totalRetries, fallbackCount := 0, 0
+	progress := newRouteProgress(candidates)
+	if progress.initialFailure != nil {
+		failures = append(failures, progress.initialFailure)
+		fallbackCount = 1
+	}
+	for index, endpoint := range candidates {
+		client, ok := endpoint.Provider.(StreamingImageGenerationClient)
+		if !ok || !progress.allows(endpoint) {
+			continue
+		}
+		progress.enter(endpoint)
+		attemptCtx := providerAttemptContext(req, endpoint)
+		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
+		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
+			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
+			failures = append(failures, err)
+			progress.fail(err)
+			continue
+		}
+		attemptCtx.ImageGenerationRequest.Stream = true
+		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
+			if terminalModuleError(err) || ctx.Err() != nil {
+				return openai.ImageGenerationResponse{}, false, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
+			}
+			failures = append(failures, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
+			continue
+		}
+		if attemptCtx.ImageGenerationRequest == nil {
+			return openai.ImageGenerationResponse{}, false, fmt.Errorf("%s/%s modules removed image generation request", endpoint.Type, endpoint.Name)
+		}
+		lastAttempt = &attemptCtx
+		started := time.Now()
+		release, err := r.acquireEndpoint(ctx, endpoint, openai.ImageGenerationReserveTokens(*attemptCtx.ImageGenerationRequest))
+		if err != nil {
+			setAttemptMetadata(&attemptCtx, started, err)
+			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
+			failures = append(failures, fmt.Errorf("%s/%s admission failed: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
+			fallbackCount++
+			continue
+		}
+		if err := r.health.permit(ctx, endpoint); err != nil {
+			release()
+			setAttemptMetadata(&attemptCtx, started, err)
+			setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
+			failures = append(failures, fmt.Errorf("%s/%s circuit denied call: %w", endpoint.Type, endpoint.Name, err))
+			progress.fail(err)
+			fallbackCount++
+			continue
+		}
+		var response openai.ImageGenerationResponse
+		streamStarted := false
+		firstTokenLatency := time.Duration(0)
+		for retry := 0; ; retry++ {
+			tracker := newStreamAttemptTracker(started)
+			providerCtx, finish := r.startProviderCall(ctx, endpoint, "image_generation.stream")
+			response, err = client.StreamGenerateImage(providerCtx, *attemptCtx.ImageGenerationRequest, tracker.imageWriter(write))
+			if err == nil {
+				err = validateImageGenerationResponse(response, *attemptCtx.ImageGenerationRequest)
+			}
+			finish(err)
+			streamStarted, firstTokenLatency = tracker.state()
+			if err == nil || errors.Is(err, ErrStreamingUnsupported) || streamStarted || ctx.Err() != nil || retry >= endpointRetryLimit(endpoint, err) || !retrySameEndpointWithPolicy(endpoint, err) {
+				break
+			}
+			if waitErr := r.retry.beforeRetry(ctx, err, retry); waitErr != nil {
+				err = waitErr
+				break
+			}
+			totalRetries++
+		}
+		release()
+		setAttemptMetadata(&attemptCtx, started, err)
+		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
+		if streamStarted {
+			setFirstTokenLatency(&attemptCtx, firstTokenLatency)
+		}
+		if errors.Is(err, ErrStreamingUnsupported) {
+			r.health.success(ctx, endpoint)
+			progress.fail(err)
+			fallbackCount++
+			continue
+		}
+		if err != nil {
+			if ctx.Err() == nil {
+				r.health.failure(ctx, endpoint, err)
+			}
+			wrapped := fmt.Errorf("%s/%s failed: %w", endpoint.Type, endpoint.Name, err)
+			progress.fail(err)
+			if streamStarted || ctx.Err() != nil || !progress.hasNext(candidates[index+1:]) {
+				r.modules.RunFailure(ctx, &attemptCtx, wrapped)
+				return openai.ImageGenerationResponse{}, streamStarted, wrapped
+			}
+			failures = append(failures, wrapped)
+			fallbackCount++
+			continue
+		}
+		r.health.success(ctx, endpoint)
+		attemptCtx.ImageGenerationResponse = &response
+		if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
+			return openai.ImageGenerationResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+		}
+		return response, true, nil
+	}
+	if len(failures) > 0 {
+		joined := errors.Join(failures...)
+		if lastAttempt != nil {
+			r.modules.RunFailure(ctx, lastAttempt, joined)
+		}
+		return openai.ImageGenerationResponse{}, false, joined
+	}
+	return openai.ImageGenerationResponse{}, false, nil
+}
+
 func (r Router) EditImage(ctx context.Context, req modules.RequestContext) (openai.ImageGenerationResponse, error) {
 	if req.ImageEditRequest == nil {
 		return openai.ImageGenerationResponse{}, errors.New("missing image edit request")
@@ -2448,6 +2588,13 @@ func (t *streamAttemptTracker) responseWriter(write ResponseStreamWriter) Respon
 	return func(event, payload string) error {
 		t.beforeWrite()
 		return write(event, payload)
+	}
+}
+
+func (t *streamAttemptTracker) imageWriter(write ImageGenerationStreamWriter) ImageGenerationStreamWriter {
+	return func(payload string) error {
+		t.beforeWrite()
+		return write(payload)
 	}
 }
 

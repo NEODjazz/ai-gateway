@@ -232,6 +232,23 @@ type nativeCompletionStreamProvider struct {
 	streamCalls int
 }
 
+type nativeImageStreamProvider struct {
+	chatProvider
+	streamCalls int
+}
+
+func (p *nativeImageStreamProvider) StreamGenerateImage(_ context.Context, req modules.RequestContext, write provider.ImageGenerationStreamWriter) (openai.ImageGenerationResponse, bool, error) {
+	p.streamCalls++
+	p.request = req
+	if err := write(`{"type":"image_generation.partial_image","b64_json":"cGFydGlhbA==","partial_image_index":0}`); err != nil {
+		return openai.ImageGenerationResponse{}, true, err
+	}
+	if err := write(`{"type":"image_generation.completed","b64_json":"ZmluYWw=","usage":{"input_tokens":2,"output_tokens":5,"total_tokens":7}}`); err != nil {
+		return openai.ImageGenerationResponse{}, true, err
+	}
+	return openai.ImageGenerationResponse{Created: 7, Data: []openai.ImageData{{B64JSON: "ZmluYWw="}}, Usage: &openai.ImageUsage{InputTokens: 2, OutputTokens: 5, TotalTokens: 7}}, true, nil
+}
+
 func (p *nativeCompletionStreamProvider) StreamCompletions(_ context.Context, req modules.RequestContext, write provider.CompletionStreamWriter) (openai.CompletionResponse, bool, error) {
 	p.streamCalls++
 	p.request = req
@@ -622,6 +639,37 @@ func TestImageGenerationRejectsInvalidRequestBeforeProvider(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"image-model","prompt":"","n":11}`)))
 	if response.Code != http.StatusBadRequest || llm.request.ImageGenerationRequest != nil {
 		t.Fatalf("status=%d body=%s context=%+v", response.Code, response.Body.String(), llm.request)
+	}
+}
+
+func TestImageGenerationStreamsThroughAuthenticatedPipeline(t *testing.T) {
+	llm := &nativeImageStreamProvider{}
+	rates := &embeddingTokenRateStore{}
+	handler := Routes(NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"image-*"}}}), llm, rates))
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"image-model","prompt":"draw a circle","stream":true,"partial_images":1}`))
+	request.Header.Set("Authorization", "Bearer client-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "text/event-stream" || llm.streamCalls != 1 || !strings.Contains(body, "image_generation.partial_image") || !strings.Contains(body, "image_generation.completed") || strings.Contains(body, "[DONE]") || llm.request.APIKey != "" {
+		t.Fatalf("status=%d headers=%v body=%s calls=%d context=%+v", response.Code, response.Header(), body, llm.streamCalls, llm.request)
+	}
+}
+
+func TestImageGenerationRejectsInvalidStreamingOptionsBeforeProvider(t *testing.T) {
+	llm := &nativeImageStreamProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline(nil), llm))
+	for _, body := range []string{
+		`{"model":"image-model","prompt":"draw","partial_images":1}`,
+		`{"model":"image-model","prompt":"draw","stream":true,"partial_images":4}`,
+		`{"model":"image-model","prompt":"draw","stream":true,"n":2}`,
+		`{"model":"image-model","prompt":"draw","stream":true,"response_format":"url"}`,
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest || llm.streamCalls != 0 {
+			t.Fatalf("body=%s status=%d response=%s calls=%d", body, response.Code, response.Body.String(), llm.streamCalls)
+		}
 	}
 }
 

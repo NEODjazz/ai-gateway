@@ -345,6 +345,9 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		if message := request.Validate(); message != "" {
 			return nil, "", nil, errors.New(message)
 		}
+		if request.Stream {
+			return nil, "", nil, errors.New("stream is not supported for batch image generation")
+		}
 		model = request.Model
 		normalized = request
 	default:

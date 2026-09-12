@@ -26,6 +26,8 @@ type ImageGenerationRequest struct {
 	Resolution        string `json:"resolution,omitempty"`
 	AspectRatio       string `json:"aspect_ratio,omitempty"`
 	Seed              *int64 `json:"seed,omitempty"`
+	Stream            bool   `json:"stream,omitempty"`
+	PartialImages     *int   `json:"partial_images,omitempty"`
 }
 
 type ImageEditRequest struct {
@@ -166,6 +168,21 @@ func (r ImageGenerationRequest) Validate() string {
 	}
 	if r.OutputCompression != nil && (*r.OutputCompression < 0 || *r.OutputCompression > 100) {
 		return "output_compression must be between 0 and 100"
+	}
+	if r.PartialImages != nil && (*r.PartialImages < 0 || *r.PartialImages > 3) {
+		return "partial_images must be between 0 and 3"
+	}
+	if r.PartialImages != nil && *r.PartialImages > 0 && !r.Stream {
+		return "partial_images requires stream=true"
+	}
+	if r.Stream && r.N != nil && *r.N != 1 {
+		return "streaming image generation requires n=1"
+	}
+	if r.Stream && r.ResponseFormat != "" && r.ResponseFormat != "b64_json" {
+		return "streaming image generation requires response_format=b64_json"
+	}
+	if r.Stream && r.OutputFormat == "svg" {
+		return "streaming image generation does not support output_format=svg"
 	}
 	if !oneOfOrEmpty(r.Quality, "auto", "low", "medium", "high", "xhigh", "max") {
 		return "unsupported quality value"

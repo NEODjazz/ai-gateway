@@ -1269,12 +1269,77 @@ func (h Handler) GenerateImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "provider_failed", "image generation is not supported by the configured provider")
 		return
 	}
+	if request.Stream {
+		streamStarted := false
+		writeStreamPayload := func(payload string) error {
+			if !streamStarted {
+				writeStreamHeaders(w)
+				w.WriteHeader(http.StatusOK)
+				streamStarted = true
+			}
+			return writeSSEPayload(w, payload)
+		}
+		if streamingProvider, supported := h.provider.(provider.StreamingImageGenerationProvider); supported {
+			if response, streamed, err := streamingProvider.StreamGenerateImage(r.Context(), reqCtx, writeStreamPayload); streamed {
+				if err != nil {
+					if streamStarted {
+						_ = writeStreamPayload(errorStreamPayload(err))
+						return
+					}
+					writeProviderFailure(w, err)
+					return
+				}
+				if sink, ok := w.(interface {
+					imageGenerationStreamResult(openai.ImageGenerationResponse)
+				}); ok {
+					sink.imageGenerationStreamResult(response)
+				}
+				return
+			} else if err != nil {
+				writeProviderFailure(w, err)
+				return
+			}
+		}
+		if request.PartialImages != nil && *request.PartialImages > 0 {
+			writeError(w, http.StatusBadGateway, "streaming_unsupported", "partial image streaming is not supported by the selected deployment policy")
+			return
+		}
+		request.Stream = false
+		reqCtx.ImageGenerationRequest = &request
+		response, err := imageProvider.GenerateImage(r.Context(), reqCtx)
+		if err != nil {
+			writeProviderFailure(w, err)
+			return
+		}
+		payload, err := imageGenerationCompletedPayload(response)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
+			return
+		}
+		_ = writeStreamPayload(payload)
+		return
+	}
 	response, err := imageProvider.GenerateImage(r.Context(), reqCtx)
 	if err != nil {
 		writeProviderFailure(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func imageGenerationCompletedPayload(response openai.ImageGenerationResponse) (string, error) {
+	if len(response.Data) != 1 || response.Data[0].B64JSON == "" || response.Usage == nil {
+		return "", errors.New("synthesized image streaming requires one base64 image and exact usage")
+	}
+	payload, err := json.Marshal(map[string]any{
+		"type": "image_generation.completed", "b64_json": response.Data[0].B64JSON,
+		"background": response.Background, "created_at": response.Created, "output_format": response.OutputFormat,
+		"quality": response.Quality, "size": response.Size, "usage": response.Usage,
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(payload), nil
 }
 
 func (h Handler) EditImage(w http.ResponseWriter, r *http.Request) {

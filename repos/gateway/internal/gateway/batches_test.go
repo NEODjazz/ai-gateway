@@ -465,6 +465,13 @@ func TestBatchRejectsInvalidJSONLAndCrossOwnerInput(t *testing.T) {
 	}
 }
 
+func TestBatchRejectsStreamingImageGeneration(t *testing.T) {
+	_, _, _, err := validateBatchBody("/v1/images/generations", []byte(`{"model":"image-model","prompt":"draw","stream":true}`))
+	if err == nil || !strings.Contains(err.Error(), "not supported for batch") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestBatchRejectsInvalidOutputExpiration(t *testing.T) {
 	files := &memoryFileStore{files: map[string]filestate.File{}}
 	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})

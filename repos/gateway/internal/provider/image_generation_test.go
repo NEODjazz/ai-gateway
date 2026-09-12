@@ -6,12 +6,143 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
+
+type imageStreamUsageModule struct{ total int }
+
+func (*imageStreamUsageModule) Name() string              { return "image-stream-usage" }
+func (*imageStreamUsageModule) Required() bool            { return true }
+func (*imageStreamUsageModule) PostResponseEnabled() bool { return true }
+func (*imageStreamUsageModule) Handle(context.Context, *modules.RequestContext) error {
+	return nil
+}
+func (m *imageStreamUsageModule) HandlePostResponse(_ context.Context, req *modules.RequestContext) error {
+	if req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil {
+		m.total = req.ImageGenerationResponse.Usage.TotalTokens
+	}
+	return nil
+}
+
+func TestOpenAICompatibleImageGenerationStreamingContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["stream"] != true || request["partial_images"] != float64(1) || request["resolution"] != "2K" || request["aspect_ratio"] != "16:9" || request["seed"] != float64(42) || request["provider"] != nil {
+			t.Fatalf("request=%#v err=%v", request, err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"cGFydGlhbA==\",\"created_at\":7,\"output_format\":\"png\",\"quality\":\"high\",\"size\":\"1024x1024\",\"partial_image_index\":0}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"image_generation.completed\",\"b64_json\":\"ZmluYWw=\",\"created_at\":8,\"output_format\":\"png\",\"quality\":\"high\",\"size\":\"1024x1024\",\"usage\":{\"input_tokens\":3,\"output_tokens\":5,\"total_tokens\":8}}\n\n"))
+	}))
+	defer server.Close()
+
+	partials := 1
+	seed := int64(42)
+	request := openai.ImageGenerationRequest{Provider: "deployment", Model: "image", Prompt: "draw", Resolution: "2K", AspectRatio: "16:9", Seed: &seed, Stream: true, PartialImages: &partials}
+	var payloads []string
+	response, err := NewOpenAICompatible(server.URL, "", true).StreamGenerateImage(t.Context(), request, func(payload string) error {
+		payloads = append(payloads, payload)
+		return nil
+	})
+	if err != nil || len(payloads) != 2 || response.Created != 8 || response.Usage == nil || response.Usage.TotalTokens != 8 || response.Data[0].B64JSON != "ZmluYWw=" {
+		t.Fatalf("response=%+v payloads=%v err=%v", response, payloads, err)
+	}
+}
+
+func TestOpenAICompatibleImageGenerationStreamRejectsNonSSE(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"type":"image_generation.completed"}`))
+	}))
+	defer server.Close()
+	_, err := NewOpenAICompatible(server.URL, "", true).StreamGenerateImage(t.Context(), openai.ImageGenerationRequest{Model: "image", Prompt: "draw", Stream: true}, func(string) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "non-SSE") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestImageGenerationStreamRejectsMalformedLifecycle(t *testing.T) {
+	partialImages := 1
+	request := openai.ImageGenerationRequest{Model: "image", Prompt: "draw", Stream: true, PartialImages: &partialImages}
+	for name, stream := range map[string]string{
+		"missing completion": "data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"cGFydGlhbA==\",\"partial_image_index\":0}\n\n",
+		"out of order":       "data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"cGFydGlhbA==\",\"partial_image_index\":1}\n\n",
+		"invalid usage":      "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"ZmluYWw=\",\"usage\":{\"input_tokens\":3,\"output_tokens\":5,\"total_tokens\":7}}\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := streamImageGeneration(strings.NewReader(stream), request, func(string) error { return nil }); err == nil {
+				t.Fatal("invalid image stream accepted")
+			}
+		})
+	}
+}
+
+func TestRouterStreamsImageGenerationAndSettlesUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"image_generation.completed\",\"b64_json\":\"ZmluYWw=\",\"created_at\":8,\"output_format\":\"png\",\"usage\":{\"input_tokens\":3,\"output_tokens\":5,\"total_tokens\":8}}\n\n"))
+	}))
+	defer server.Close()
+	usage := &imageStreamUsageModule{}
+	router := New(Config{Modules: modules.NewPipeline([]modules.Module{usage}), Endpoints: []config.ProviderEndpointConfig{{Name: "images", Type: "openai-compatible", BaseURL: server.URL, Stream: true, Models: []string{"image"}, Capabilities: []string{"image_generation"}}}}).(*Router)
+	request := openai.ImageGenerationRequest{Model: "image", Prompt: "draw", Stream: true}
+	writes := 0
+	response, streamed, err := router.StreamGenerateImage(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "image"}, ImageGenerationRequest: &request}, func(string) error { writes++; return nil })
+	if err != nil || !streamed || writes != 1 || response.Usage == nil || response.Usage.TotalTokens != 8 || usage.total != 8 {
+		t.Fatalf("response=%+v streamed=%v writes=%d settled=%d err=%v", response, streamed, writes, usage.total, err)
+	}
+}
+
+func TestRouterImageGenerationStreamFallsBackBeforeFirstEvent(t *testing.T) {
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer first.Close()
+	secondCalls := 0
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"image_generation.completed\",\"b64_json\":\"ZmluYWw=\",\"usage\":{\"input_tokens\":3,\"output_tokens\":5,\"total_tokens\":8}}\n\n"))
+	}))
+	defer second.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{
+		{Name: "first", Type: "openai-compatible", BaseURL: first.URL, Stream: true, Models: []string{"image"}, Capabilities: []string{"image_generation"}, Priority: 1},
+		{Name: "second", Type: "openai-compatible", BaseURL: second.URL, Stream: true, Models: []string{"image"}, Capabilities: []string{"image_generation"}, Priority: 2},
+	}}).(*Router)
+	request := openai.ImageGenerationRequest{Model: "image", Prompt: "draw", Stream: true}
+	_, streamed, err := router.StreamGenerateImage(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "image"}, ImageGenerationRequest: &request}, func(string) error { return nil })
+	if err != nil || !streamed || secondCalls != 1 {
+		t.Fatalf("streamed=%v secondCalls=%d err=%v", streamed, secondCalls, err)
+	}
+}
+
+func TestRouterImageGenerationStreamDoesNotFallbackAfterFirstEvent(t *testing.T) {
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"cGFydGlhbA==\",\"partial_image_index\":0}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"image_generation.completed\",\"b64_json\":\"ZmluYWw=\",\"usage\":{\"input_tokens\":3,\"output_tokens\":5,\"total_tokens\":7}}\n\n"))
+	}))
+	defer first.Close()
+	secondCalls := 0
+	second := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { secondCalls++ }))
+	defer second.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{
+		{Name: "first", Type: "openai-compatible", BaseURL: first.URL, Stream: true, Models: []string{"image"}, Capabilities: []string{"image_generation"}, Priority: 1},
+		{Name: "second", Type: "openai-compatible", BaseURL: second.URL, Stream: true, Models: []string{"image"}, Capabilities: []string{"image_generation"}, Priority: 2},
+	}}).(*Router)
+	partials := 1
+	request := openai.ImageGenerationRequest{Model: "image", Prompt: "draw", Stream: true, PartialImages: &partials}
+	writes := 0
+	_, streamed, err := router.StreamGenerateImage(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "image"}, ImageGenerationRequest: &request}, func(string) error { writes++; return nil })
+	if err == nil || !streamed || writes != 1 || secondCalls != 0 {
+		t.Fatalf("streamed=%v writes=%d secondCalls=%d err=%v", streamed, writes, secondCalls, err)
+	}
+}
 
 func TestOpenAICompatibleImageGenerationContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
