@@ -1978,3 +1978,17 @@ Gateway Helm revision 503 completed successfully. Pod
 `ai-gateway-gateway-59f66ff795-dl6gx` became Ready with zero restarts. Live
 liveness and readiness returned 204, OpenAPI 0.1.397 was served, and an invalid
 native service tier returned 400 before authentication or provider execution.
+
+Source `92be558` includes provider-reported Gemini
+`toolUsePromptTokenCount` in billable input usage while retaining the native
+prompt/tool split in GenerateContent JSON and SSE responses. Shared validation
+rejects negative, overflowing and internally inconsistent tool-token totals for
+Chat, image, audio and OCR GenerateContent consumers. Focused provider,
+gateway, billing and OpenAPI regressions, vet, build, the full Go suite and the
+full race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:gemini-usage-92be558` with image ID
+`sha256:8474edc4331f66c80fb54e1300e2bc79f7ebe93e70d98fc4e722b32307b88a13`.
+Gateway Helm revision 504 completed successfully. Pod
+`ai-gateway-gateway-7f8c649999-tsh69` became Ready with zero restarts. Live
+liveness and readiness returned 204 and OpenAPI 0.1.398 was served.
