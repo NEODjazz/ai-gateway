@@ -466,6 +466,19 @@ func TestGeminiCodeExecutionDisablesResponseCaches(t *testing.T) {
 	}
 }
 
+func TestGeminiURLContextDisablesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "summarize https://example.com"}}, GeminiURLContext: true}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache allowed a URL context request")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed a URL context request")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,url_context" {
+		t.Fatalf("URL context routing requirements=%s", got)
+	}
+}
+
 func TestChatWebFetchDisablesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "read https://example.com"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebFetchOptions: &openai.ChatWebFetchOptions{AllowedDomains: []string{"example.com"}, MaxContentTokens: 1000}}}}
 	if providerCacheKey("chat", request) != "" {

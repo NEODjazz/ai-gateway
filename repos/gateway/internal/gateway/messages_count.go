@@ -114,6 +114,12 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 	request = req.Request
 	tools, valid := chatToolIdentifiers(request.Tools, nil)
 	tools = append(tools, skillExecutionIdentifiers(request.AnthropicSkills)...)
+	if request.GeminiCodeExecution {
+		tools = append(tools, "code_execution")
+	}
+	if request.GeminiURLContext {
+		tools = append(tools, "url_context")
+	}
 	if request.AnthropicCodeExecution {
 		tools = append(tools, "code_execution")
 	}

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.398
+  version: 0.1.399
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -6835,6 +6835,14 @@ components:
                     type: object
                     additionalProperties: false
                     description: Native server-side Python execution included in token counting context.
+              - type: object
+                additionalProperties: false
+                required: [urlContext]
+                properties:
+                  urlContext:
+                    type: object
+                    additionalProperties: false
+                    description: Native server-side URL retrieval included in token counting context. Requires the url_context tool grant.
         toolConfig:
           type: object
           additionalProperties: false
@@ -6921,6 +6929,14 @@ components:
                     type: object
                     additionalProperties: false
                     description: Native server-side Python execution. Requires the gemini_code_execution deployment capability and code_execution tool grant, and bypasses response caches.
+              - type: object
+                additionalProperties: false
+                required: [urlContext]
+                properties:
+                  urlContext:
+                    type: object
+                    additionalProperties: false
+                    description: Native server-side URL retrieval. Requires the url_context deployment capability and tool grant, includes returned tool-input tokens in billing, and bypasses response caches.
         toolConfig:
           type: object
           additionalProperties: false
@@ -7065,6 +7081,21 @@ components:
               groundingMetadata:
                 type: object
                 description: Bounded provider grounding metadata, including search queries, sources, supports and the native search entry point.
+              urlContextMetadata:
+                type: object
+                additionalProperties: false
+                description: Validated provider URL retrieval outcomes. At most 20 entries are returned.
+                properties:
+                  urlMetadata:
+                    type: array
+                    maxItems: 20
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [retrievedUrl, urlRetrievalStatus]
+                      properties:
+                        retrievedUrl: {type: string, format: uri, maxLength: 8192}
+                        urlRetrievalStatus: {type: string, enum: [URL_RETRIEVAL_STATUS_UNSPECIFIED, URL_RETRIEVAL_STATUS_SUCCESS, URL_RETRIEVAL_STATUS_ERROR, URL_RETRIEVAL_STATUS_PAYWALL, URL_RETRIEVAL_STATUS_UNSAFE]}
         usageMetadata:
           type: object
           properties:
@@ -7734,7 +7765,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -10159,7 +10190,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

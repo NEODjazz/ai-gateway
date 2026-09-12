@@ -275,7 +275,7 @@ func generateParts(message openai.Message) ([]any, error) {
 	}
 	return parts, nil
 }
-func generateEnvelope(id, model string, parts []any, reason string, usage map[string]any, grounding ...json.RawMessage) map[string]any {
+func generateEnvelope(id, model string, parts []any, reason string, usage map[string]any, metadata ...json.RawMessage) map[string]any {
 	candidate := map[string]any{"index": 0}
 	if len(parts) > 0 {
 		candidate["content"] = map[string]any{"role": "model", "parts": parts}
@@ -283,8 +283,11 @@ func generateEnvelope(id, model string, parts []any, reason string, usage map[st
 	if reason != "" {
 		candidate["finishReason"] = reason
 	}
-	if len(grounding) > 0 && len(grounding[0]) > 0 {
-		candidate["groundingMetadata"] = grounding[0]
+	if len(metadata) > 0 && len(metadata[0]) > 0 {
+		candidate["groundingMetadata"] = metadata[0]
+	}
+	if len(metadata) > 1 && len(metadata[1]) > 0 {
+		candidate["urlContextMetadata"] = metadata[1]
 	}
 	result := map[string]any{"responseId": id, "modelVersion": model, "candidates": []any{candidate}}
 	if usage != nil {
@@ -329,10 +332,11 @@ func (w *generateWriter) chunk(payload string) error {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
 		Choices []struct {
-			Index     int             `json:"index"`
-			Delta     openai.Message  `json:"delta"`
-			Reason    string          `json:"finish_reason"`
-			Grounding json.RawMessage `json:"gemini_grounding_metadata"`
+			Index      int             `json:"index"`
+			Delta      openai.Message  `json:"delta"`
+			Reason     string          `json:"finish_reason"`
+			Grounding  json.RawMessage `json:"gemini_grounding_metadata"`
+			URLContext json.RawMessage `json:"gemini_url_context_metadata"`
 		} `json:"choices"`
 		Usage       *openai.Usage   `json:"usage"`
 		ServiceTier string          `json:"service_tier"`
@@ -377,12 +381,15 @@ func (w *generateWriter) chunk(payload string) error {
 			}
 			w.reason = reason
 		}
-		if text := openai.ContentText(choice.Delta.Content); text != "" || len(choice.Grounding) > 0 {
+		if err := openai.ValidateGeminiURLContextMetadata(choice.URLContext); err != nil {
+			return err
+		}
+		if text := openai.ContentText(choice.Delta.Content); text != "" || len(choice.Grounding) > 0 || len(choice.URLContext) > 0 {
 			parts := []any(nil)
 			if text != "" {
 				parts = []any{map[string]any{"text": text}}
 			}
-			if err := w.event(generateEnvelope(w.id, w.model, parts, "", nil, choice.Grounding)); err != nil {
+			if err := w.event(generateEnvelope(w.id, w.model, parts, "", nil, choice.Grounding, choice.URLContext)); err != nil {
 				return err
 			}
 		}
@@ -485,7 +492,11 @@ func (w *generateWriter) chatResult(response openai.ChatCompletionResponse, stre
 			w.err = err
 			return
 		}
-		if err := w.event(generateEnvelope(response.ID, response.Model, parts, reason, usage, response.Choices[0].GeminiGroundingMetadata)); err != nil {
+		if err := openai.ValidateGeminiURLContextMetadata(response.Choices[0].GeminiURLContextMetadata); err != nil {
+			w.err = err
+			return
+		}
+		if err := w.event(generateEnvelope(response.ID, response.Model, parts, reason, usage, response.Choices[0].GeminiGroundingMetadata, response.Choices[0].GeminiURLContextMetadata)); err != nil {
 			w.err = err
 			return
 		}
@@ -564,5 +575,9 @@ func (w *generateWriter) finish() {
 		writeJSON(w.destination, 502, generateError(502, "provider response cannot be represented as GenerateContent"))
 		return
 	}
-	writeJSON(w.destination, 200, generateEnvelope(response.ID, response.Model, parts, reason, usage, response.Choices[0].GeminiGroundingMetadata))
+	if err := openai.ValidateGeminiURLContextMetadata(response.Choices[0].GeminiURLContextMetadata); err != nil {
+		writeJSON(w.destination, 502, generateError(502, "provider response cannot be represented as GenerateContent"))
+		return
+	}
+	writeJSON(w.destination, 200, generateEnvelope(response.ID, response.Model, parts, reason, usage, response.Choices[0].GeminiGroundingMetadata, response.Choices[0].GeminiURLContextMetadata))
 }

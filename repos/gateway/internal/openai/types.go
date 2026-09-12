@@ -22,6 +22,8 @@ type ChatCompletionRequest struct {
 	GeminiSafetySettings []GeminiSafetySetting `json:"-"`
 	// GeminiCodeExecution enables the native server-side code execution tool.
 	GeminiCodeExecution bool `json:"-"`
+	// GeminiURLContext enables the native server-side URL retrieval tool.
+	GeminiURLContext bool `json:"-"`
 	// AnthropicSkills contains validated native Messages skill references.
 	AnthropicSkills      []AnthropicSkillReference `json:"-"`
 	AnthropicContainerID string                    `json:"-"`
@@ -487,20 +489,21 @@ type CompletionLogprobs struct {
 }
 
 type Choice struct {
-	StopSequence            *string         `json:"stop_sequence,omitempty"`
-	Logprobs                *ChoiceLogprobs `json:"logprobs,omitempty"`
-	Index                   int             `json:"index"`
-	Message                 Message         `json:"message"`
-	FinishReason            string          `json:"finish_reason"`
-	GeminiGroundingMetadata json.RawMessage `json:"gemini_grounding_metadata,omitempty"`
+	StopSequence             *string         `json:"stop_sequence,omitempty"`
+	Logprobs                 *ChoiceLogprobs `json:"logprobs,omitempty"`
+	Index                    int             `json:"index"`
+	Message                  Message         `json:"message"`
+	FinishReason             string          `json:"finish_reason"`
+	GeminiGroundingMetadata  json.RawMessage `json:"gemini_grounding_metadata,omitempty"`
+	GeminiURLContextMetadata json.RawMessage `json:"gemini_url_context_metadata,omitempty"`
 }
 
 type Usage struct {
 	// SearchRequests is internal provider usage used for billing. It is not part
 	// of the OpenAI-compatible response payload.
-	SearchRequests          int                     `json:"-"`
-	ToolRequests            int                     `json:"-"`
-	ToolRequestsReported    bool                    `json:"-"`
+	SearchRequests       int  `json:"-"`
+	ToolRequests         int  `json:"-"`
+	ToolRequestsReported bool `json:"-"`
 	// ProviderToolInputTokens is included in PromptTokens and preserves a native usage split.
 	ProviderToolInputTokens int                     `json:"-"`
 	ProviderCostUSDTicks    *int64                  `json:"-"`

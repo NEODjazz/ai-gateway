@@ -124,6 +124,33 @@ func TestGenerateRequestMapsCodeExecutionToolAndHistory(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsURLContextTool(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"parts":[{"text":"summarize https://example.com"}]}],"tools":[{"urlContext":{}}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !chat.GeminiURLContext || chat.NativeInputTokens == 0 {
+		t.Fatalf("URL context was not mapped or counted: %+v", chat)
+	}
+	for _, raw := range []string{
+		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"urlContext":{},"googleSearch":{}}]}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"urlContext":{}},{"urlContext":{}}]}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"urlContext":{"unexpected":true}}]}`,
+	} {
+		var request generateRequest
+		if err := decodeMessagesValue(json.RawMessage(raw), &request); err != nil {
+			continue
+		}
+		if _, err := request.chat("model", false); err == nil {
+			t.Fatalf("invalid URL context request accepted: %s", raw)
+		}
+	}
+}
+
 func TestGenerateRequestMapsInlineAudio(t *testing.T) {
 	var native generateRequest
 	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"text":"transcribe"},{"inlineData":{"mimeType":"audio/wav","data":"UklGRgAAAABXQVZF"}}]}]}`), &native); err != nil {

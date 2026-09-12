@@ -229,7 +229,7 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if request.Store != nil && *request.Store {
 		return "", "", false
 	}
-	if request.WebSearchOptions != nil || request.WebFetchOptions != nil || request.GeminiCodeExecution || request.AnthropicCodeExecution || request.AnthropicToolSearch != "" || len(request.AnthropicClientTools) > 0 || len(request.AnthropicClientToolsets) > 0 || request.AnthropicThinking != nil || request.AnthropicContainerID != "" || len(request.AnthropicSkills) > 0 {
+	if request.WebSearchOptions != nil || request.WebFetchOptions != nil || request.GeminiCodeExecution || request.GeminiURLContext || request.AnthropicCodeExecution || request.AnthropicToolSearch != "" || len(request.AnthropicClientTools) > 0 || len(request.AnthropicClientToolsets) > 0 || request.AnthropicThinking != nil || request.AnthropicContainerID != "" || len(request.AnthropicSkills) > 0 {
 		return "", "", false
 	}
 	if request.AnthropicInferenceGeo != "" {

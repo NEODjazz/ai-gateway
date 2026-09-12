@@ -800,7 +800,8 @@ reuse of provider-created agent environments.
 Unsupported generation controls, parallel tool control and strict function
 schemas fail explicitly; seed/output limits must fit the native integer range.
 
-Protocol references: [GenerateContent](https://ai.google.dev/api/generate-content)
+Protocol references: [GenerateContent](https://ai.google.dev/api/generate-content),
+[URL Context](https://ai.google.dev/gemini-api/docs/generate-content/url-context)
 and [tool signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures).
 
 ## Native Anthropic model discovery
@@ -1225,8 +1226,15 @@ It preserves bounded `executableCode` and `codeExecutionResult` parts in JSON an
 SSE, includes returned usage in normal billing, includes supplied execution history
 in TPM estimates and bypasses exact and semantic response caches. Only the native
 provider runtime executes the generated Python; the gateway does not run that code.
-Cached content, other grounding/server tools, file parts and other audio formats
-remain unsupported.
+A native `urlContext: {}` tool requires the `url_context` deployment capability
+and the matching credential/access-group tool grant. It forwards provider-side URL
+retrieval without gateway-side fetching, includes the declaration in the TPM
+estimate, includes reported tool-input tokens in billing and bypasses exact and
+semantic response caches. JSON and SSE preserve at most 20 validated
+`urlContextMetadata.urlMetadata` entries; malformed URLs, unknown retrieval statuses,
+unknown fields and oversized metadata fail closed. Native token counting applies the
+same tool ACL. Cached content, other grounding/server tools, file parts and other
+audio formats remain unsupported.
 
 GenerateContent accepts inline WAV, MP3/MPEG, AIFF, AAC, OGG/Opus, FLAC, M4A
 and WebM audio parts in user content. Audio is size- and container-signature

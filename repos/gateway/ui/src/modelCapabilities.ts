@@ -8,6 +8,8 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "interaction_agents", label: "Interaction agents", description: "Native provider agent interactions" },
   { value: "interaction_environment_reuse", label: "Interaction environment reuse", description: "Reuse an owner-bound native agent environment" },
   { value: "gemini_safety_settings", label: "Gemini safety settings", description: "Native per-category content blocking thresholds" },
+  { value: "gemini_code_execution", label: "Gemini code execution", description: "Native managed code execution tool" },
+  { value: "url_context", label: "URL context", description: "Native retrieval of URLs supplied in the prompt" },
   { value: "background_responses", label: "Background responses", description: "Durable asynchronous Responses execution" },
   { value: "background_interactions", label: "Background interactions", description: "Durable asynchronous native Interactions execution" },
   { value: "embeddings", label: "Embeddings", description: "Vector embeddings" },

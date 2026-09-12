@@ -148,6 +148,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "anthropic", capability: "bedrock_invoke"},
 		{providerType: "openai-compatible", capability: "video_extension"},
 		{providerType: "openai-compatible", capability: "gemini_code_execution"},
+		{providerType: "openai-compatible", capability: "url_context"},
 	}
 	for _, test := range tests {
 		t.Run(test.providerType+"/"+test.capability, func(t *testing.T) {
@@ -157,7 +158,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 			}
 			capabilities := []string{test.capability}
 			switch test.capability {
-			case "stream", "tools", "structured_output", "vision", "web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "bedrock_invoke", "gemini_code_execution":
+			case "stream", "tools", "structured_output", "vision", "web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "bedrock_invoke", "gemini_code_execution", "url_context":
 				capabilities = append([]string{"chat"}, capabilities...)
 			case "background_responses":
 				capabilities = []string{"responses", "background_responses"}
@@ -270,7 +271,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 	}{
 		{providerType: "ollama", capabilities: []string{"chat", "tools", "structured_output", "vision"}},
 		{providerType: "anthropic", capabilities: []string{"chat", "tools", "structured_output", "vision", "web_search", "web_fetch", "tool_search", "prompt_cache", "assistant_prefill", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "file_input"}},
-		{providerType: "gemini", capabilities: []string{"chat", "gemini_safety_settings", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision", "web_search", "audio_input", "video_input", "file_input"}},
+		{providerType: "gemini", capabilities: []string{"chat", "gemini_safety_settings", "gemini_code_execution", "url_context", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision", "web_search", "audio_input", "video_input", "file_input"}},
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
 		{providerType: "bedrock", capabilities: []string{"chat", "tools", "prompt_cache", "bedrock_invoke"}},
 		{providerType: "groq", capabilities: []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}},
@@ -370,6 +371,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	}
 	if !slices.Contains(profilesByType["gemini"].Capabilities, "gemini_code_execution") {
 		t.Fatalf("Gemini profile is missing native code execution: %+v", profilesByType["gemini"])
+	}
+	if !slices.Contains(profilesByType["gemini"].Capabilities, "url_context") {
+		t.Fatalf("Gemini profile is missing native URL context: %+v", profilesByType["gemini"])
 	}
 	if !slices.Contains(profilesByType["gemini"].Capabilities, "audio_input") {
 		t.Fatalf("Gemini profile is missing native inline audio: %+v", profilesByType["gemini"])

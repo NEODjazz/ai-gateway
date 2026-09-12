@@ -1,12 +1,62 @@
 package openai
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/url"
+	"strings"
 )
 
-const MaxGeminiCodeExecutionBytes = 1 << 20
+const (
+	MaxGeminiCodeExecutionBytes  = 1 << 20
+	MaxGeminiURLContextBytes     = 1 << 20
+	MaxGeminiURLContextEntries   = 20
+	MaxGeminiURLContextURLLength = 8192
+)
+
+func ValidateGeminiURLContextMetadata(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if len(raw) > MaxGeminiURLContextBytes {
+		return errors.New("Gemini URL context metadata exceeds size limit")
+	}
+	var metadata struct {
+		URLs []struct {
+			URL    string `json:"retrievedUrl"`
+			Status string `json:"urlRetrievalStatus"`
+		} `json:"urlMetadata"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&metadata); err != nil {
+		return errors.New("invalid Gemini URL context metadata")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("invalid trailing Gemini URL context metadata")
+	}
+	if len(metadata.URLs) > MaxGeminiURLContextEntries {
+		return errors.New("Gemini URL context metadata exceeds entry limit")
+	}
+	for _, item := range metadata.URLs {
+		if len(item.URL) == 0 || len(item.URL) > MaxGeminiURLContextURLLength {
+			return errors.New("invalid Gemini retrieved URL")
+		}
+		parsed, err := url.Parse(item.URL)
+		if err != nil || parsed.Host == "" || parsed.User != nil || (strings.ToLower(parsed.Scheme) != "http" && strings.ToLower(parsed.Scheme) != "https") {
+			return errors.New("invalid Gemini retrieved URL")
+		}
+		switch item.Status {
+		case "URL_RETRIEVAL_STATUS_UNSPECIFIED", "URL_RETRIEVAL_STATUS_SUCCESS", "URL_RETRIEVAL_STATUS_ERROR", "URL_RETRIEVAL_STATUS_PAYWALL", "URL_RETRIEVAL_STATUS_UNSAFE":
+		default:
+			return errors.New("invalid Gemini URL retrieval status")
+		}
+	}
+	return nil
+}
 
 func ValidateGeminiCodeExecutionParts(parts []GeminiCodeExecutionPart) error {
 	if len(parts) > 128 {

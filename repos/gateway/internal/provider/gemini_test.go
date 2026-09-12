@@ -117,6 +117,45 @@ func TestGeminiCodeExecutionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGeminiURLContextRoundTrip(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body geminiRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Tools) != 1 || body.Tools[0].URLContext == nil {
+			t.Fatalf("URL context tool lost: %+v", body.Tools)
+		}
+		_, _ = fmt.Fprint(w, `{"responseId":"urls","candidates":[{"index":0,"content":{"parts":[{"text":"summary"}]},"finishReason":"STOP","urlContextMetadata":{"urlMetadata":[{"retrievedUrl":"https://example.com/report","urlRetrievalStatus":"URL_RETRIEVAL_STATUS_SUCCESS"}]}}],"usageMetadata":{"promptTokenCount":4,"toolUsePromptTokenCount":9,"candidatesTokenCount":2,"totalTokenCount":15}}`)
+	}))
+	defer server.Close()
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "summarize https://example.com/report"}}, GeminiURLContext: true}
+	response, err := NewGemini(server.URL, "key", false).ChatCompletions(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Usage.PromptTokens != 13 || response.Usage.ProviderToolInputTokens != 9 || !strings.Contains(string(response.Choices[0].GeminiURLContextMetadata), `"retrievedUrl":"https://example.com/report"`) {
+		t.Fatalf("URL context response lost: %+v", response)
+	}
+}
+
+func TestGeminiRejectsInvalidURLContextMetadata(t *testing.T) {
+	entries := strings.Repeat(`{"retrievedUrl":"https://example.com","urlRetrievalStatus":"URL_RETRIEVAL_STATUS_SUCCESS"},`, openai.MaxGeminiURLContextEntries+1)
+	entries = strings.TrimSuffix(entries, ",")
+	for _, raw := range []string{
+		`{"urlMetadata":[{"retrievedUrl":"javascript:alert(1)","urlRetrievalStatus":"URL_RETRIEVAL_STATUS_SUCCESS"}]}`,
+		`{"urlMetadata":[{"retrievedUrl":"https://example.com","urlRetrievalStatus":"FUTURE_STATUS"}]}`,
+		`{"urlMetadata":[{"retrievedUrl":"https://example.com","urlRetrievalStatus":"URL_RETRIEVAL_STATUS_SUCCESS","extra":true}]}`,
+		`{"urlMetadata":[` + entries + `]}`,
+		`{"urlMetadata":[]} {}`,
+	} {
+		body := geminiResponse{Candidates: []geminiResponseCandidate{{Index: 0, Content: geminiContent{Parts: []geminiPart{{Text: "answer"}}}, FinishReason: "STOP", URLContext: json.RawMessage(raw)}}}
+		if _, err := geminiToChat(body, "model"); err == nil {
+			t.Fatalf("invalid URL context metadata accepted: %s", raw)
+		}
+	}
+}
+
 func TestGeminiRejectsInvalidGroundingAndUnrepresentableSearchOptions(t *testing.T) {
 	request := openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{SearchContextSize: "high"}}}
 	if err := (Gemini{}).ValidateChatParameters(request); err == nil {

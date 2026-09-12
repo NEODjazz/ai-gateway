@@ -20,6 +20,7 @@ type generateRequest struct {
 		Functions     []generateFunction `json:"functionDeclarations,omitempty"`
 		GoogleSearch  *struct{}          `json:"googleSearch,omitempty"`
 		CodeExecution *struct{}          `json:"codeExecution,omitempty"`
+		URLContext    *struct{}          `json:"urlContext,omitempty"`
 	} `json:"tools,omitempty"`
 	ToolConfig *struct {
 		FunctionCalling struct {
@@ -398,7 +399,7 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 	}
 	for _, tool := range r.Tools {
 		members := 0
-		for _, present := range []bool{len(tool.Functions) > 0, tool.GoogleSearch != nil, tool.CodeExecution != nil} {
+		for _, present := range []bool{len(tool.Functions) > 0, tool.GoogleSearch != nil, tool.CodeExecution != nil, tool.URLContext != nil} {
 			if present {
 				members++
 			}
@@ -411,6 +412,7 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 				return fail("googleSearch")
 			}
 			result.WebSearchOptions = &openai.ChatWebSearchOptions{}
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		}
 		if tool.CodeExecution != nil {
@@ -418,6 +420,15 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 				return fail("codeExecution")
 			}
 			result.GeminiCodeExecution = true
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
+			continue
+		}
+		if tool.URLContext != nil {
+			if result.GeminiURLContext {
+				return fail("urlContext")
+			}
+			result.GeminiURLContext = true
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		}
 		for _, function := range tool.Functions {

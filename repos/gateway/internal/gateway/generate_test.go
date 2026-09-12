@@ -323,6 +323,65 @@ func TestGenerateContentGeminiCodeExecutionStreamAndACL(t *testing.T) {
 		t.Fatalf("code execution settlement: status=%d billing=%d usage=%+v", response.Code, billing.calls, billing.usage)
 	}
 }
+
+func TestGenerateContentGeminiURLContextStreamACLAndBilling(t *testing.T) {
+	denied := &fallbackChatProvider{}
+	deniedHandler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}}}), denied))
+	response := generateCall(deniedHandler, "/v1beta/models/m:generateContent", `{"contents":[{"parts":[{"text":"summarize https://example.com"}]}],"tools":[{"urlContext":{}}]}`, "gateway-test-key")
+	if response.Code != http.StatusForbidden || denied.calls != 0 || !strings.Contains(response.Body.String(), "url_context") {
+		t.Fatalf("URL context ACL bypassed: %d %s calls=%d", response.Code, response.Body.String(), denied.calls)
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(body["tools"])
+		if !strings.Contains(string(encoded), `"urlContext":{}`) {
+			t.Fatalf("native URL context tool lost: %s", encoded)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"responseId\":\"urls\",\"modelVersion\":\"gemini-urls\",\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"summary\"}]},\"finishReason\":\"STOP\",\"urlContextMetadata\":{\"urlMetadata\":[{\"retrievedUrl\":\"https://example.com/report\",\"urlRetrievalStatus\":\"URL_RETRIEVAL_STATUS_SUCCESS\"}]}}],\"usageMetadata\":{\"promptTokenCount\":4,\"toolUsePromptTokenCount\":9,\"candidatesTokenCount\":2,\"totalTokenCount\":15}}\n\n"))
+	}))
+	defer upstream.Close()
+	billing := &messagesUsageRecorder{}
+	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "native", Type: "gemini", BaseURL: upstream.URL, APIKey: "provider-key", Stream: true, Models: []string{"m"}, ModelAliases: map[string]string{"m": "gemini-urls"}, Capabilities: []string{"chat", "stream", "url_context"}}}, Modules: modules.NewPipeline([]modules.Module{billing})})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"m"}, tools: []string{"url_context"}}}}), router))
+	response = generateCall(handler, "/v1beta/models/m:streamGenerateContent?alt=sse", `{"contents":[{"parts":[{"text":"summarize https://example.com/report"}]}],"tools":[{"urlContext":{}}]}`, "gateway-test-key")
+	for _, want := range []string{`"text":"summary"`, `"urlContextMetadata":{"urlMetadata":[{"retrievedUrl":"https://example.com/report","urlRetrievalStatus":"URL_RETRIEVAL_STATUS_SUCCESS"}]}`, `"toolUsePromptTokenCount":9`, `"totalTokenCount":15`} {
+		if !strings.Contains(response.Body.String(), want) {
+			t.Fatalf("missing %s: %d %s", want, response.Code, response.Body.String())
+		}
+	}
+	if response.Code != http.StatusOK || billing.calls != 1 || billing.usage.PromptTokens != 13 || billing.usage.ProviderToolInputTokens != 9 || billing.usage.TotalTokens != 15 {
+		t.Fatalf("URL context settlement: status=%d billing=%d usage=%+v", response.Code, billing.calls, billing.usage)
+	}
+}
+
+func TestGenerateCountTokensEnforcesNativeManagedToolACL(t *testing.T) {
+	for _, test := range []struct {
+		name, tool, grant string
+	}{
+		{name: "code execution", tool: `"codeExecution":{}`, grant: "code_execution"},
+		{name: "URL context", tool: `"urlContext":{}`, grant: "url_context"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			counter := &countProviderSpy{}
+			body := `{"generateContentRequest":{"contents":[{"parts":[{"text":"count"}]}],"tools":[{` + test.tool + `}]}}`
+			denied := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"m"}, tools: []string{"safe"}}}}), counter))
+			response := generateCall(denied, "/v1beta/models/m:countTokens", body, "gateway-test-key")
+			if response.Code != http.StatusForbidden || counter.calls != 0 {
+				t.Fatalf("managed tool count ACL bypassed: status=%d calls=%d body=%s", response.Code, counter.calls, response.Body.String())
+			}
+			allowed := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"m"}, tools: []string{test.grant}}}}), counter))
+			response = generateCall(allowed, "/v1beta/models/m:countTokens", body, "gateway-test-key")
+			if response.Code != http.StatusOK || counter.calls != 1 || counter.request.Request.NativeInputTokens == 0 {
+				t.Fatalf("managed tool count rejected: status=%d calls=%d request=%+v body=%s", response.Code, counter.calls, counter.request.Request, response.Body.String())
+			}
+		})
+	}
+}
 func TestGenerateContentFallbackSSE(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "fallback", Model: "m", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "hello"}, FinishReason: "stop"}}, Usage: openai.Usage{PromptTokens: 2, CompletionTokens: 1, TotalTokens: 3}}}
 	response := generateCall(Routes(NewHandler(modules.NewPipeline(nil), upstream)), "/v1beta/models/m:streamGenerateContent?alt=sse", `{"contents":[{"parts":[{"text":"hi"}]}]}`, "")

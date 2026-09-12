@@ -64,6 +64,7 @@ func (g Gemini) authorize(request *http.Request) error {
 func (Gemini) SupportsVision() bool        { return true }
 func (Gemini) SupportsWebSearch() bool     { return true }
 func (Gemini) SupportsCodeExecution() bool { return true }
+func (Gemini) SupportsURLContext() bool    { return true }
 func (Gemini) SupportsAudioInput() bool    { return true }
 func (Gemini) SupportsFileInput() bool     { return true }
 func (Gemini) SupportsVideoInput() bool    { return true }
@@ -111,6 +112,7 @@ type geminiTool struct {
 	Functions     []geminiFunction `json:"functionDeclarations,omitempty"`
 	GoogleSearch  *struct{}        `json:"googleSearch,omitempty"`
 	CodeExecution *struct{}        `json:"codeExecution,omitempty"`
+	URLContext    *struct{}        `json:"urlContext,omitempty"`
 }
 type geminiGeneration struct {
 	MaxOutputTokens    *int                            `json:"maxOutputTokens,omitempty"`
@@ -175,6 +177,7 @@ type geminiResponseCandidate struct {
 	FinishReason   string                `json:"finishReason"`
 	LogprobsResult *geminiLogprobsResult `json:"logprobsResult"`
 	Grounding      json.RawMessage       `json:"groundingMetadata"`
+	URLContext     json.RawMessage       `json:"urlContextMetadata"`
 }
 type geminiRequest struct {
 	Contents    []geminiContent              `json:"contents"`
@@ -515,6 +518,9 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	if request.GeminiCodeExecution {
 		result.Tools = append(result.Tools, geminiTool{CodeExecution: &struct{}{}})
 	}
+	if request.GeminiURLContext {
+		result.Tools = append(result.Tools, geminiTool{URLContext: &struct{}{}})
+	}
 	if request.ToolChoice != nil {
 		if len(request.Tools) == 0 {
 			return result, geminiInvalid("tool_choice")
@@ -843,6 +849,12 @@ func geminiToChat(body geminiResponse, model string) (openai.ChatCompletionRespo
 		if len(candidate.Grounding) > 0 {
 			choice.GeminiGroundingMetadata = append(json.RawMessage(nil), candidate.Grounding...)
 		}
+		if err := openai.ValidateGeminiURLContextMetadata(candidate.URLContext); err != nil {
+			return result, err
+		}
+		if len(candidate.URLContext) > 0 {
+			choice.GeminiURLContextMetadata = append(json.RawMessage(nil), candidate.URLContext...)
+		}
 		switch candidate.FinishReason {
 		case "":
 		case "STOP":
@@ -1028,6 +1040,9 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			if len(choice.GeminiGroundingMetadata) > 0 {
 				current.GeminiGroundingMetadata = append(json.RawMessage(nil), choice.GeminiGroundingMetadata...)
 			}
+			if len(choice.GeminiURLContextMetadata) > 0 {
+				current.GeminiURLContextMetadata = append(json.RawMessage(nil), choice.GeminiURLContextMetadata...)
+			}
 			if choice.Logprobs != nil {
 				if current.Logprobs == nil {
 					current.Logprobs = &openai.ChoiceLogprobs{}
@@ -1111,6 +1126,9 @@ func (g Gemini) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			wireChoice := map[string]any{"index": choice.Index, "delta": choice.Message, "finish_reason": finish, "logprobs": choice.Logprobs}
 			if len(choice.GeminiGroundingMetadata) > 0 {
 				wireChoice["gemini_grounding_metadata"] = choice.GeminiGroundingMetadata
+			}
+			if len(choice.GeminiURLContextMetadata) > 0 {
+				wireChoice["gemini_url_context_metadata"] = choice.GeminiURLContextMetadata
 			}
 			choices = append(choices, wireChoice)
 		}

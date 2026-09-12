@@ -32,6 +32,25 @@ func TestCatalogCannotExpandDeploymentCapabilities(t *testing.T) {
 		t.Fatal("legacy endpoint lost catalog capability")
 	}
 }
+
+func TestGeminiManagedToolsRequireExplicitEndpointCapabilities(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"v1","models":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := Endpoint{Name: "gemini", Type: "gemini", Provider: Gemini{}}
+	for _, capability := range []string{"gemini_code_execution", "url_context"} {
+		if supportsCatalogCapabilities(catalog, legacy, "model", "chat", capability) {
+			t.Fatalf("legacy endpoint implicitly enabled %s", capability)
+		}
+		explicit := legacy
+		explicit.Capabilities = []string{"chat", capability}
+		if !supportsCatalogCapabilities(catalog, explicit, "model", "chat", capability) {
+			t.Fatalf("explicit endpoint rejected %s", capability)
+		}
+	}
+}
+
 func TestRouterSkipsNativeUnsupportedResponseProtocol(t *testing.T) {
 	nativeCalls, compatibleCalls := 0, 0
 	native := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { nativeCalls++; w.WriteHeader(500) }))
