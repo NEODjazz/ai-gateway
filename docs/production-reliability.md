@@ -1069,3 +1069,11 @@ requests passed structural validation and reached authentication. An empty edit
 list and tool-result clearing placed before thinking clearing returned 400 with
 the documented validation errors. These smoke checks used no credential and
 performed no external inference.
+
+Source `1b24b3a` preserves failed ordinary client tool results through the native
+Messages generation, token-count and durable-batch paths. Routing requires an
+explicit adapter capability, exact cache identity includes the failure flag and
+semantic response caching is disabled. Existing successful tool results keep
+their previous wire shape and exact-cache identity. Full Go tests, race tests,
+vet and build passed; all 166 UI tests, type checking and the production bundle
+build passed.

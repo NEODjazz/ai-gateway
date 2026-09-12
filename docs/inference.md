@@ -697,7 +697,11 @@ with a native invalid_request_error. Thinking blocks are accepted only in
 assistant history, must precede text/tool blocks, retain their provider signature,
 and have a 1 MiB aggregate payload limit. Adapters without an explicit reasoning
 block contract reject them before upstream execution. Documents,
-URL images, text after tool_use and is_error=true tool results are not supported.
+URL images and text after tool_use are not supported. Ordinary client
+`tool_result` blocks may set `is_error=true`; the flag is preserved by native
+generation, token counting and durable batches. Such requests require the
+`tool_result_error` deployment capability, include the flag in exact-cache
+identity and bypass semantic cache reuse.
 All tool-use history requires matching results. Opaque provider tool metadata
 that cannot be represented in Messages produces an explicit conversion error.
 `metadata.user_id` is limited to 512 Unicode characters and remains request

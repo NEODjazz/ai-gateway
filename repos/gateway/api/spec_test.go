@@ -126,6 +126,17 @@ func TestOpenAPIMessagesAdvertisesContextManagement(t *testing.T) {
 	}
 }
 
+func TestOpenAPIMessagesAdvertisesFailedToolResults(t *testing.T) {
+	document := loadDocument(t)
+	block := document.Components.Schemas["MessagesToolResultBlock"].Value
+	if block == nil || block.Properties["is_error"] == nil || block.Properties["content"] == nil {
+		t.Fatalf("MessagesToolResultBlock is incomplete: %#v", block)
+	}
+	if block.Properties["is_error"].Value == nil || block.Properties["is_error"].Value.Type == nil || !block.Properties["is_error"].Value.Type.Is("boolean") {
+		t.Fatalf("MessagesToolResultBlock.is_error is not boolean: %#v", block.Properties["is_error"])
+	}
+}
+
 func TestOpenAPIRoutesMatchGatewayRouter(t *testing.T) {
 	document := loadDocument(t)
 	want := map[string]bool{}

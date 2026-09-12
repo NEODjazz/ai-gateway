@@ -271,6 +271,11 @@ token counting and durable batches preserve the configuration; JSON/SSE returns
 validated applied-edit statistics, and token counting also returns the original
 context size. Routing requires `context_management`, and response caches are
 bypassed because the provider may rewrite the effective prompt.
+Ordinary Messages `tool_result` blocks preserve `is_error: true` through native
+generation, token counting and durable batches. Routing requires
+`tool_result_error` so another adapter cannot silently reinterpret a failed tool
+execution. Exact cache identity includes the flag and semantic cache reuse is
+disabled for failed results.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.
