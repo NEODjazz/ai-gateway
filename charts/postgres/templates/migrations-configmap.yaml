@@ -29,6 +29,16 @@ data:
     ALTER TABLE billing_budget_reservations
         ALTER COLUMN reserved_cost TYPE NUMERIC(20, 10),
         ALTER COLUMN actual_cost TYPE NUMERIC(20, 10);
+  017_deployment_budgets.sql: |
+    ALTER TABLE billing_budget_policies
+        DROP CONSTRAINT IF EXISTS billing_budget_policies_scope_type_check;
+    ALTER TABLE billing_budget_policies
+        ADD CONSTRAINT billing_budget_policies_scope_type_check
+        CHECK (scope_type IN ('global', 'key', 'user', 'team', 'organization', 'model', 'provider', 'deployment', 'tag'));
+    ALTER TABLE billing_budget_reservations
+        ADD COLUMN IF NOT EXISTS deployment_name TEXT NOT NULL DEFAULT '';
+    CREATE INDEX IF NOT EXISTS idx_billing_budget_reservations_deployment
+        ON billing_budget_reservations(deployment_name, created_at, state);
   031_gateway_vector_store_file_batches.sql: |
     CREATE TABLE IF NOT EXISTS gateway_vector_store_file_batches (
         id TEXT PRIMARY KEY,
@@ -644,7 +654,7 @@ data:
         DROP CONSTRAINT IF EXISTS billing_budget_policies_scope_type_check;
     ALTER TABLE billing_budget_policies
         ADD CONSTRAINT billing_budget_policies_scope_type_check
-        CHECK (scope_type IN ('global', 'key', 'user', 'team', 'organization', 'model', 'provider', 'tag'));
+        CHECK (scope_type IN ('global', 'key', 'user', 'team', 'organization', 'model', 'provider', 'deployment', 'tag'));
     ALTER TABLE billing_budget_reservations
         ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
     CREATE INDEX IF NOT EXISTS idx_billing_budget_reservations_tags
@@ -654,7 +664,7 @@ data:
         DROP CONSTRAINT IF EXISTS billing_budget_policies_scope_type_check;
     ALTER TABLE billing_budget_policies
         ADD CONSTRAINT billing_budget_policies_scope_type_check
-        CHECK (scope_type IN ('global', 'key', 'user', 'team', 'organization', 'model', 'provider', 'tag'));
+        CHECK (scope_type IN ('global', 'key', 'user', 'team', 'organization', 'model', 'provider', 'deployment', 'tag'));
     ALTER TABLE billing_budget_reservations
         ADD COLUMN IF NOT EXISTS organization_id TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_billing_budget_reservations_organization

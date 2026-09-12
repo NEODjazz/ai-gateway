@@ -95,7 +95,9 @@ which gateway clears before provider-level processing.
 The Budgets catalog expands current-window summaries in one bounded request.
 Budget rows link to a route-based details workspace that reads the authoritative
 policy and summary endpoints, preserves currency isolation, links identity
-scopes, and returns edits to the configured-target form.
+scopes, and returns edits to the configured-target form. Provider policies can
+cover all of a provider's deployments, while deployment policies use the exact
+runtime deployment ID and move reserved capacity with a pre-execution fallback.
 
 HTTP metric and request-log path labels are derived from the registered route
 contracts. Dynamic identities remain placeholders and unknown paths are labeled

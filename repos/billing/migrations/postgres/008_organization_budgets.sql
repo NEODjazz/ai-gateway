@@ -3,7 +3,7 @@ ALTER TABLE billing_budget_policies
 
 ALTER TABLE billing_budget_policies
     ADD CONSTRAINT billing_budget_policies_scope_type_check
-    CHECK (scope_type IN ('global', 'key', 'user', 'team', 'organization', 'model', 'provider', 'tag'));
+    CHECK (scope_type IN ('global', 'key', 'user', 'team', 'organization', 'model', 'provider', 'deployment', 'tag'));
 
 ALTER TABLE billing_budget_reservations
     ADD COLUMN IF NOT EXISTS organization_id TEXT NOT NULL DEFAULT '';

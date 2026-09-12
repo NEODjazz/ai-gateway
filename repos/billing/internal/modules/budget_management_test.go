@@ -22,6 +22,10 @@ func TestNormalizeBudgetPolicySpec(t *testing.T) {
 	if err != nil || tagSpec.ScopeType != "tag" || tagSpec.ScopeID != "production" {
 		t.Fatalf("tag spec=%+v err=%v", tagSpec, err)
 	}
+	deploymentSpec, err := normalizeBudgetPolicySpec(BudgetPolicySpec{ScopeType: " DEPLOYMENT ", ScopeID: " primary-eu ", Period: "HOUR", MaxCost: &cost})
+	if err != nil || deploymentSpec.ScopeType != "deployment" || deploymentSpec.ScopeID != "primary-eu" {
+		t.Fatalf("deployment spec=%+v err=%v", deploymentSpec, err)
+	}
 }
 
 func TestNormalizeBudgetPolicySpecRejectsInvalidLimits(t *testing.T) {

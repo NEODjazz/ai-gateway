@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.291
+  version: 0.1.292
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -7107,7 +7107,7 @@ components:
       additionalProperties: false
       required: [scope_type, scope_id, period]
       properties:
-        scope_type: {type: string, enum: [global, key, user, team, organization, model, provider, tag]}
+        scope_type: {type: string, enum: [global, key, user, team, organization, model, provider, deployment, tag]}
         scope_id: {type: string, minLength: 1, maxLength: 256}
         period: {type: string, enum: [hour, day, week, month]}
         currency: {type: string, pattern: '^[A-Z]{3}$', default: USD}
@@ -7141,7 +7141,7 @@ components:
       type: object
       additionalProperties: false
       required: [key_id, policies]
-      description: All enabled identity policies that apply simultaneously to a virtual key. Route-, provider-, model-, and request-tag policies are evaluated only at request time.
+      description: All enabled identity policies that apply simultaneously to a virtual key. Deployment-, provider-, model-, and request-tag policies are evaluated only at request time.
       properties:
         key_id: {type: string}
         policies:

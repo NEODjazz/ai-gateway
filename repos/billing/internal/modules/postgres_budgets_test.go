@@ -164,6 +164,44 @@ func TestPostgresBudgetReservationsAreAtomicAndLifecycleAware(t *testing.T) {
 		t.Fatalf("managed provider budget was not enforced across deployments, err=%v", err)
 	}
 
+	deploymentA, deploymentB := "deployment-a-"+suffix, "deployment-b-"+suffix
+	if _, err := pool.Exec(ctx, `INSERT INTO billing_budget_policies(scope_type,scope_id,period,currency,max_tokens) VALUES('deployment',$1,'day','USD',3),('deployment',$2,'day','USD',3)`, deploymentA, deploymentB); err != nil {
+		t.Fatal(err)
+	}
+	deploymentMove := budgetTestEvent("deployment-moving-"+suffix, "deployment-team-"+suffix, 3)
+	deploymentMove.ProviderID = "shared-provider-" + suffix
+	deploymentMove.ProviderEndpointType = "openai-compatible"
+	deploymentMove.ProviderEndpointName = deploymentA
+	if err := checker.Apply(ctx, deploymentMove); err != nil {
+		t.Fatalf("first deployment reservation failed: %v", err)
+	}
+	deploymentMove.ProviderEndpointName = deploymentB
+	if err := checker.Apply(ctx, deploymentMove); err != nil {
+		t.Fatalf("fallback reservation could not move deployments: %v", err)
+	}
+	var storedDeployment string
+	if err := pool.QueryRow(ctx, `SELECT deployment_name FROM billing_budget_reservations WHERE request_id=$1`, deploymentMove.RequestID).Scan(&storedDeployment); err != nil || storedDeployment != deploymentB {
+		t.Fatalf("stored deployment=%q err=%v", storedDeployment, err)
+	}
+	deploymentAReleased := budgetTestEvent("deployment-a-released-"+suffix, "deployment-team-"+suffix, 3)
+	deploymentAReleased.ProviderID = deploymentMove.ProviderID
+	deploymentAReleased.ProviderEndpointType = deploymentMove.ProviderEndpointType
+	deploymentAReleased.ProviderEndpointName = deploymentA
+	if err := checker.Apply(ctx, deploymentAReleased); err != nil {
+		t.Fatalf("old deployment still consumed moved reservation: %v", err)
+	}
+	deploymentBFull := budgetTestEvent("deployment-b-full-"+suffix, "deployment-team-"+suffix, 1)
+	deploymentBFull.ProviderID = deploymentMove.ProviderID
+	deploymentBFull.ProviderEndpointType = deploymentMove.ProviderEndpointType
+	deploymentBFull.ProviderEndpointName = deploymentB
+	if err := checker.Apply(ctx, deploymentBFull); !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("new deployment did not receive moved reservation, err=%v", err)
+	}
+	deploymentSummary, found, err := checker.BudgetSummary(ctx, mustBudgetPolicyID(t, ctx, pool, "deployment", deploymentB), time.Now())
+	if err != nil || !found || deploymentSummary.UsedTokens != 3 {
+		t.Fatalf("deployment summary=%+v found=%v err=%v", deploymentSummary, found, err)
+	}
+
 	costUser := "cost-user-" + suffix
 	if _, err := pool.Exec(ctx, `INSERT INTO billing_budget_policies(scope_type,scope_id,period,currency,max_cost) VALUES('user',$1,'month','USD',0.01)`, costUser); err != nil {
 		t.Fatal(err)
@@ -410,7 +448,7 @@ func TestPostgresBudgetManagementLifecycleAndSummary(t *testing.T) {
 
 func applyBudgetTestMigration(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	for _, name := range []string{"004_budgets.sql", "005_pricing_snapshots.sql", "006_management_audit.sql", "007_tag_budgets.sql", "008_organization_budgets.sql", "010_billing_server_tools.sql", "011_billing_characters.sql", "012_billing_pages.sql", "013_billing_audio_duration.sql", "014_billing_training_tokens.sql", "015_billing_video_duration.sql", "016_provider_cost_precision.sql"} {
+	for _, name := range []string{"004_budgets.sql", "005_pricing_snapshots.sql", "006_management_audit.sql", "007_tag_budgets.sql", "008_organization_budgets.sql", "010_billing_server_tools.sql", "011_billing_characters.sql", "012_billing_pages.sql", "013_billing_audio_duration.sql", "014_billing_training_tokens.sql", "015_billing_video_duration.sql", "016_provider_cost_precision.sql", "017_deployment_budgets.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
 			t.Fatal(err)
@@ -452,12 +490,22 @@ func TestBudgetProviderIdentity(t *testing.T) {
 	}
 
 	legacyReservation := budgetReservation{
-		ProviderName: event.ProviderEndpointName,
-		ProviderType: event.ProviderEndpointType,
-		Model:        "gpt-5.6-luna",
+		ProviderName:   event.ProviderEndpointName,
+		DeploymentName: event.ProviderEndpointName,
+		ProviderType:   event.ProviderEndpointType,
+		Model:          "gpt-5.6-luna",
 	}
 	event.Model = legacyReservation.Model
 	if !samePricingRoute(legacyReservation, event) {
 		t.Fatal("legacy endpoint-name reservation no longer matches its managed provider route")
 	}
+}
+
+func mustBudgetPolicyID(t *testing.T, ctx context.Context, pool *pgxpool.Pool, scopeType, scopeID string) int64 {
+	t.Helper()
+	var id int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM billing_budget_policies WHERE scope_type=$1 AND scope_id=$2 ORDER BY id DESC LIMIT 1`, scopeType, scopeID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }

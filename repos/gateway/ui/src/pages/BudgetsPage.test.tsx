@@ -58,6 +58,27 @@ describe("BudgetsPage", () => {
     expect(JSON.parse(String(create?.[1]?.body))).toEqual({ scope_type: "team", scope_id: "platform", period: "month", currency: "EUR", enabled: true, max_tokens: 5000 });
   });
 
+  it("creates a deployment budget from the configured deployment ID", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const url = String(input);
+      if (url === "/admin/v1/session") return json({ roles: ["admin"], capabilities: ["admin"] });
+      if (url === "/admin/v1/budgets?expand=summaries") return json({ data: [], summaries: {} });
+      if (url === "/admin/v1/model-deployments") return json({ data: [{ id: "primary-eu", provider_id: "provider-a", upstream_model: "model-a", enabled: true }] });
+      if (url === "/admin/v1/budgets" && options?.method === "POST") return json({ ...policy, id: 9 }, 201);
+      return json({ data: [] });
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Create Budget" }));
+    const form = screen.getByRole("dialog", { name: "Create budget" });
+    await userEvent.selectOptions(within(form).getByLabelText("Budget scope type"), "deployment");
+    await userEvent.selectOptions(within(form).getByLabelText("Budget scope"), await within(form).findByRole("option", { name: "primary-eu — provider-a · model-a" }));
+    await userEvent.type(within(form).getByLabelText("Budget maximum tokens"), "5000");
+    await userEvent.click(within(form).getByRole("button", { name: "Create budget" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => url === "/admin/v1/budgets" && options?.method === "POST")).toBe(true));
+    const create = fetchMock.mock.calls.find(([url, options]) => url === "/admin/v1/budgets" && options?.method === "POST");
+    expect(JSON.parse(String(create?.[1]?.body))).toMatchObject({ scope_type: "deployment", scope_id: "primary-eu", max_tokens: 5000 });
+  });
+
   it("edits and disables a policy through the actions menu", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {

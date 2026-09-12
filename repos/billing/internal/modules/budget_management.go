@@ -116,6 +116,7 @@ func (c *PostgresBudgetPolicyChecker) ListBudgetSummaries(ctx context.Context, n
 		       WHEN 'organization' THEN r.organization_id=p.scope_id
 		       WHEN 'model' THEN r.model=p.scope_id
 		       WHEN 'provider' THEN r.provider_name=p.scope_id OR r.provider_type=p.scope_id
+		       WHEN 'deployment' THEN r.deployment_name=p.scope_id
 		       WHEN 'tag' THEN p.scope_id=ANY(r.tags)
 		       ELSE false
 		     END
@@ -390,7 +391,7 @@ func normalizeBudgetPolicySpec(spec BudgetPolicySpec) (BudgetPolicySpec, error) 
 		enabled := true
 		spec.Enabled = &enabled
 	}
-	if !oneOf(spec.ScopeType, "global", "key", "user", "team", "organization", "model", "provider", "tag") || spec.ScopeID == "" {
+	if !oneOf(spec.ScopeType, "global", "key", "user", "team", "organization", "model", "provider", "deployment", "tag") || spec.ScopeID == "" {
 		return spec, errors.New("invalid budget scope")
 	}
 	if spec.ScopeType == "global" && spec.ScopeID != "*" {

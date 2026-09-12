@@ -6,7 +6,7 @@ ALTER TABLE billing_budget_policies
     CHECK (scope_type IN ('global', 'key', 'user', 'team', 'organization', 'model', 'provider', 'deployment', 'tag'));
 
 ALTER TABLE billing_budget_reservations
-    ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
+    ADD COLUMN IF NOT EXISTS deployment_name TEXT NOT NULL DEFAULT '';
 
-CREATE INDEX IF NOT EXISTS idx_billing_budget_reservations_tags
-    ON billing_budget_reservations USING GIN(tags);
+CREATE INDEX IF NOT EXISTS idx_billing_budget_reservations_deployment
+    ON billing_budget_reservations(deployment_name, created_at, state);

@@ -16,7 +16,7 @@ type BudgetList = { data?: BudgetPolicy[]; summaries?: Record<string, BudgetSumm
 type TargetOption = { value: string; label: string };
 type BudgetDraft = { scope_type: string; scope_id: string; period: string; currency: string; max_cost: string; max_tokens: string; enabled: boolean };
 
-const scopeTypes = ["global", "organization", "team", "user", "key", "model", "provider", "tag"];
+const scopeTypes = ["global", "organization", "team", "user", "key", "model", "provider", "deployment", "tag"];
 const periods = ["hour", "day", "week", "month"];
 const emptyDraft: BudgetDraft = { scope_type: "global", scope_id: "*", period: "month", currency: "USD", max_cost: "", max_tokens: "", enabled: true };
 const targetSources: Record<string, { path: string; collection?: string; value?: string; labels: string[] }> = {
@@ -26,6 +26,7 @@ const targetSources: Record<string, { path: string; collection?: string; value?:
   key: { path: "/admin/v1/keys?limit=500", labels: ["alias"] },
   model: { path: "/admin/v1/model-catalog", collection: "models", value: "model", labels: ["provider"] },
   provider: { path: "/admin/v1/providers", labels: ["type", "base_url"] },
+  deployment: { path: "/admin/v1/model-deployments", labels: ["provider_id", "upstream_model"] },
   tag: { path: "/admin/v1/tags", value: "name", labels: ["description"] }
 };
 
